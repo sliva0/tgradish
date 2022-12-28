@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+env/
+dist/
+*.egg-info/
+
+*.mp4
+*.webm
