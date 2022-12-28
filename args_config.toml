@@ -1,0 +1,152 @@
+passes = [
+    ["ffmpeg", {}, "-pass", "1", "-f", "null", "/dev/null"],
+    ["ffmpeg", {}, "-pass", "2", "{output}"]
+]
+
+required_args = [
+    "-i", "{input}",
+    "-y",
+    "-vf", "scale={scale},format=rgba",
+    "-c:v", "libvpx-vp9",
+    "-an", "-sn",
+]
+
+
+# Essential values for script
+
+[values.input]
+description = "input video or image for conversion"
+aliases = ["--input", "-i"]
+
+[values.output]
+description = "output video or image for conversion"
+aliases = ["--output", "-o"]
+
+[values.guess_value]
+description = "value that script will guess"
+aliases = ["--guess-value", "-g"]
+optional = true
+
+[values.guess_iterations]
+description = "number of times script will try to guess optimal value"
+aliases = ["--iterations", "-it"]
+optional = true
+default_value = "5"
+
+[values.guess_min]
+description = "minimum possible value to guess, overrides value from config"
+aliases = ["-min"]
+optional = true
+
+[values.guess_max]
+description = "maximum possible value to guess, overrides value from config"
+aliases = ["-max"]
+optional = true
+
+
+# Optional coding settings
+
+[enums.verbosity]
+description = "verbosity of the ffmpeg output"
+aliases = ["--verbosity", "-v"]
+
+
+[enums.verbosity.options.quiet]
+description = "just progress bar"
+default = true
+args = ["-loglevel", "info", "-v", "warning", "-hide_banner", "-stats"]
+
+[enums.verbosity.options.hide-banner]
+description = "default ffmpeg output without banner"
+args = ["-hide_banner"]
+
+[enums.verbosity.options.verbose]
+description = "default ffmpeg output"
+args = [""]
+
+
+[enums.scaling]
+description = "image scaling method"
+aliases = ["--scaling", "-sc"]
+
+
+[enums.scaling.options.preserve-ratio]
+description = "preserves side to side ratio"
+default = true
+placeholders.scale = "'if(gt(iw,ih),512,-1)':'if(gt(iw,ih),-1,512)'"
+
+[enums.scaling.options.squared]
+description = "rescales image to square"
+placeholders.scale = "512:512"
+
+
+[switches.multithreading]
+description = "enables multithreding, lowers quality"
+aliases = ["--multithreading", "-mt"]
+args = ["-row-mt", "1"]
+
+
+[switches.best_quality]
+description = "slows down a lot, increases quality"
+aliases = ["--best_quality", "-bq"]
+args = ["-deadline", "best"]
+
+
+[switches.loop]
+description = "loops source video/image"
+aliases = ["--loop", "-l"]
+args = ["-loop", "1"]
+
+
+[switches.lossless]
+description = "enables lossless mode"
+aliases = ["--lossless", "-ll"]
+args = ["-lossless", "1"]
+
+
+[values.framerate]
+description = "frames per second"
+aliases = ["--framerate", "-fr"]
+args = ["-r", "{framerate}"]
+optional = true
+guess_params = {min = 1, max = 60, type = "int", scaling = "direct"}
+
+
+[values.length]
+description = "length of the sticker in seconds"
+aliases = ["--length", "-t"]
+args = ["-t", "{length}"]
+optional = true
+guess_params = {min = 0, max = 3, type = "float", scaling = "direct"}
+
+
+[values.crf]
+description = "Constant Rate Factor, bigger - lower quality"
+aliases = ["-crf"]
+args = ["-crf", "{crf}"]
+optional = true
+guess_params = {min = 0, max = 63, type = "int", scaling = "inverse"}
+
+
+[values.bitrate]
+description = "bitrate of the sticker, in kbps"
+aliases = ["--bitrate", "-bt"]
+args = ["-b:v", "{bitrate}k"]
+optional = true
+guess_params = {min = 0, max = 1000, type = "float", scaling = "direct"}
+
+
+[values.maxrate]
+description = "maximum bitrate of the sticker, in kbps"
+aliases = ["--maxrate", "-mxbt"]
+args = ["-maxrate", "{bitrate}k"]
+optional = true
+guess_params = {min = 0, max = 1000, type = "float", scaling = "direct"}
+
+
+[values.minrate]
+description = "minimum bitrate of the sticker, in kbps"
+aliases = ["--minrate", "-mnbt"]
+args = ["-minrate", "{bitrate}k"]
+optional = true
+guess_params = {min = 0, max = 1000, type = "float", scaling = "direct"}
