@@ -15,15 +15,15 @@ required_args = [
 # Essential values for script
 
 [values.input]
-description = "input video or image for conversion"
+description = "input video or image path"
 aliases = ["--input", "-i"]
 
 [values.output]
-description = "output video or image for conversion"
+description = "result videosticker path"
 aliases = ["--output", "-o"]
 
 [values.guess_value]
-description = "value that script will guess"
+description = "name of guessable value which script will guess"
 aliases = ["--guess-value", "-g"]
 optional = true
 default_value = "bitrate"
@@ -88,7 +88,7 @@ args = ["-row-mt", "1"]
 
 
 [switches.best_quality]
-description = "slows down a lot, increases quality"
+description = "slows down conversion a lot, increases quality"
 aliases = ["--best_quality", "-bq"]
 args = ["-deadline", "best"]
 

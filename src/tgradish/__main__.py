@@ -9,8 +9,8 @@ import tomli
 from .converter import CmdConfig, convert_video
 from .spoofer import spoof_file_duration
 
-DEFAULT_CONFIG_PATH = "./default_config.toml"
-CONFIG_PATH = "./config.toml"
+DEFAULT_CONFIG_PATH = Path(__file__).parent / "default_config.toml"
+CONFIG_PATH = Path(__file__).parent / "config.toml"
 
 
 def get_best_invocation_for_this_python() -> str:
