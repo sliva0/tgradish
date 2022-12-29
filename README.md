@@ -16,10 +16,22 @@ python -m tgradish
 ```
 
 
+## Dependencies
+
+For the `tgradish convert` command `ffmpeg` should be installed in PATH,
+but `tgradish spoof` works just fine even without it.
+
+
 ## Usage examples
 
+Converting .mp4 video to videosticker:
 ``` console
-$ ...
+$ python -m tgradish convert -i ~/pig.mp4
+```
+
+Spoofing duration of already correctly encoded videosticker:
+``` console
+$ python -m tgradish spoof ~/pig.webm ~/spoofed_pig.webm
 ```
 
 

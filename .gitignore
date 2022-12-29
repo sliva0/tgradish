@@ -1,9 +1,12 @@
 __pycache__/
 *.py[cod]
 env/
+build/
 dist/
 *.egg-info/
 
+
+src/ffmpeg2pass-0.log
 src/tgradish/config.toml
 
 *.mp4

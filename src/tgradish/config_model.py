@@ -1,5 +1,6 @@
 from collections import Counter, ChainMap
 import itertools
+from pathlib import Path
 from typing import ClassVar, Iterable, TypeVar
 
 import pydantic
@@ -17,6 +18,12 @@ class CmdParams:
     def __init__(self, config: "CmdConfig") -> None:
         self.args: list[str] = config.required_args
         self.placeholders: dict[str, str] = {}
+
+    def set_default_output(self):
+        if "output" not in self.placeholders:
+            output = Path(self.placeholders["input"]).with_suffix(".webm")
+            print(f"Output file defaults to '{output}'.")
+            self.placeholders["output"] = str(output)
 
 
 class CmdFlag(pydantic.BaseModel):
@@ -44,6 +51,9 @@ class CmdFlag(pydantic.BaseModel):
 
 
 class ArgsPlaceholder(pydantic.BaseModel):
+
+    def format(self, **_kwargs):
+        raise NotImplementedError
 
     class Config:
         extra = "forbid"
@@ -102,10 +112,10 @@ class EnumFlag(CmdFlag):
         option.apply(cmd_params)
 
     def print_help(self):
+        print()
         self._print_flags_and_description()
         for option_name, option in self.options.items():
             option.print_help(option_name)
-        print()
 
 
 class SwitchFlag(CmdFlag):
@@ -167,7 +177,7 @@ class ValueFlag(CmdFlag):
 
         cmd_params.args += self.args
         cmd_params.placeholders[flag_name] = flag_args[0]
-    
+
     def print_help(self):
         flags = ", ".join(self.aliases)
         guessable_marker = "(guessable)" if self.guess_params else ""
@@ -199,7 +209,7 @@ class CmdConfig(pydantic.BaseModel):
         if duplicates := get_duplicates_list(flag_name_list):
             raise ValueError(f"Duplicate flag names: {', '.join(duplicates)}.")
 
-        return dict(ChainMap(*flag_dicts))  # type: ignore
+        return dict(ChainMap(*self.flag_dicts))
 
     def map_flag_aliases(self) -> dict[str, CmdFlag]:
         alias_dict = {}
@@ -216,6 +226,7 @@ class CmdConfig(pydantic.BaseModel):
 
     def print_help(self):
         gvalues_list = [i.name for i in self.values.values() if i.guess_params]
+        gvalues_list.append("none")
         guessable_values = "\n\nGuessable values: " + ", ".join(gvalues_list)
 
         section_headers = (
@@ -225,7 +236,7 @@ class CmdConfig(pydantic.BaseModel):
         )
 
         for section, header in zip(self.flag_dicts, section_headers):
-            print(header, end="\n\n")
+            print(f"\n{header}\n")
             for flag in section.values():
                 flag.print_help()
             print()

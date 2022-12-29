@@ -21,6 +21,7 @@ aliases = ["--input", "-i"]
 [values.output]
 description = "result videosticker path"
 aliases = ["--output", "-o"]
+optional = true # defaults to "input" with .webm suffix
 
 [values.guess_value]
 description = "name of guessable value which script will guess"
