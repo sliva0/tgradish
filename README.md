@@ -9,12 +9,6 @@ Simple video converting cli utility specializing in Telegram videostickers with 
 python -m pip install tgradish
 ```
 
-and then usage:
-
-``` console
-python -m tgradish
-```
-
 
 ## Dependencies
 
@@ -26,12 +20,12 @@ but `tgradish spoof` works just fine even without it.
 
 Converting .mp4 video to videosticker:
 ``` console
-$ python -m tgradish convert -i ~/pig.mp4
+$ tgradish convert -i ~/pig.mp4
 ```
 
 Spoofing duration of already correctly encoded videosticker:
 ``` console
-$ python -m tgradish spoof ~/pig.webm ~/spoofed_pig.webm
+$ tgradish spoof ~/pig.webm ~/spoofed_pig.webm
 ```
 
 
