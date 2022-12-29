@@ -26,6 +26,7 @@ aliases = ["--output", "-o"]
 description = "value that script will guess"
 aliases = ["--guess-value", "-g"]
 optional = true
+default_value = "bitrate"
 
 [values.guess_iterations]
 description = "number of times script will try to guess optimal value"
@@ -133,7 +134,7 @@ description = "bitrate of the sticker, in kbps"
 aliases = ["--bitrate", "-bt"]
 args = ["-b:v", "{bitrate}k"]
 optional = true
-guess_params = {min = 0, max = 1000, type = "float", scaling = "direct"}
+guess_params = {min = 0, max = 500, type = "float", scaling = "direct"}
 
 
 [values.maxrate]
@@ -141,7 +142,7 @@ description = "maximum bitrate of the sticker, in kbps"
 aliases = ["--maxrate", "-mxbt"]
 args = ["-maxrate", "{bitrate}k"]
 optional = true
-guess_params = {min = 0, max = 1000, type = "float", scaling = "direct"}
+guess_params = {min = 0, max = 500, type = "float", scaling = "direct"}
 
 
 [values.minrate]
@@ -149,4 +150,4 @@ description = "minimum bitrate of the sticker, in kbps"
 aliases = ["--minrate", "-mnbt"]
 args = ["-minrate", "{bitrate}k"]
 optional = true
-guess_params = {min = 0, max = 1000, type = "float", scaling = "direct"}
+guess_params = {min = 0, max = 500, type = "float", scaling = "direct"}

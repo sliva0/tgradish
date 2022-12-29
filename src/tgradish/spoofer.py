@@ -1,5 +1,4 @@
 import ctypes
-import sys
 
 # must be greater than 0.0, less than 3000.0, the funnier the better
 FUNNY_NUMBER = 420.69
@@ -76,13 +75,12 @@ def spoof_duration(data: bytes) -> bytearray:
 
 
 def spoof_file_duration(source_file, result_file):
+    print(f"Spoofing duration of {source_file}...")
+
     with open(source_file, 'rb') as source:
         data = source.read()
 
     with open(result_file, 'wb') as result:
         result.write(spoof_duration(data))
 
-
-if __name__ == "__main__":
-    source_file, result_file = sys.argv[1:]
-    spoof_file_duration(source_file, result_file)
+    print("Done.")

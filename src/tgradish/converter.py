@@ -1,19 +1,17 @@
 import copy
 from pathlib import Path
 import subprocess
-import sys
 
 import pydantic
-import tomli
 
-from config_model import CmdConfig, CmdParams, ArgsPlaceholder
-import spoofer
+from .config_model import CmdConfig, CmdParams, ArgsPlaceholder
+from . import spoofer
 
 
 class ArgsQueue:
 
-    def __init__(self):
-        self.args: list[str] = sys.argv[:0:-1]
+    def __init__(self, argv):
+        self.args: list[str] = argv[::-1]
 
     def pop_next(self) -> str | None:
         try:
@@ -49,8 +47,9 @@ def run_ffmpeg_commands(config: CmdConfig, cmd_params: CmdParams):
             exit(returncode)
 
 
-def parse_command_args(config: CmdConfig) -> dict[str, list[str]]:
-    args = ArgsQueue()
+def parse_command_args(config: CmdConfig,
+                       argv: list[str]) -> dict[str, list[str]]:
+    args = ArgsQueue(argv)
     alias_dict = config.map_flag_aliases()
 
     flag_args_dict: dict[str, list[str]] = {}
@@ -71,11 +70,9 @@ def parse_command_args(config: CmdConfig) -> dict[str, list[str]]:
     return flag_args_dict
 
 
-def main():
-    toml = tomli.load(open('args_config.toml', "rb"))
-    config = CmdConfig(**toml)
+def convert_video(config: CmdConfig, argv: list[str]):
 
-    flag_args_dict = parse_command_args(config)
+    flag_args_dict = parse_command_args(config, argv)
     cmd_params = CmdParams(config)
 
     for flag_name, flag in config.flag_dict.items():
@@ -85,7 +82,7 @@ def main():
 
     if run_info.guess_value is None:
         run_ffmpeg_commands(config, cmd_params)
-        exit()
+        return
 
     guess_value_flag = config.values.get(run_info.guess_value)
 
@@ -152,14 +149,5 @@ def main():
               " or reducing the quality settings")
         exit(1)
 
-    print(f"Spoofing duration of {best_valid_option}...")
     spoofer.spoof_file_duration(best_valid_option, run_info.output)
-    print("Done.")
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    except (ValueError, pydantic.error_wrappers.ValidationError) as err:
-        print(f"Converter error: {err}")
-        exit(1)
+    
