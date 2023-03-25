@@ -8,6 +8,7 @@ required_args = [
     "-y",
     "-vf", "scale={scale},format=rgba",
     "-c:v", "libvpx-vp9",
+    "-pix_fmt", "yuva420p",
     "-an", "-sn",
 ]
 
