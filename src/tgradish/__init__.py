@@ -56,7 +56,7 @@ def convert_cmd(args: list[str]):
 
     try:
         convert_video(config, args)
-    except (ValueError, pydantic.error_wrappers.ValidationError) as err:
+    except (ValueError, pydantic.ValidationError) as err:
         print(f"Converter error:\n{err}")
         exit(1)
 
