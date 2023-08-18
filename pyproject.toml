@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tgradish"
-version = "1.0.3"
+version = "1.0.4"
 authors = [
   { name="sliva0", email="sliva0mk@gmail.com" },
 ]
