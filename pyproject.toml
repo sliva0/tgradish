@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tgradish"
-version = "1.0.3"
+version = "1.0.4"
 authors = [
   { name="sliva0", email="sliva0mk@gmail.com" },
 ]
@@ -19,8 +19,8 @@ classifiers = [
 ]
 
 dependencies = [
-    "pydantic >= 1.10.2",
-    "tomli >= 2.0.1"
+    "pydantic ~= 2.2.0",
+    "tomli ~= 2.0.1"
 ]
 
 [project.scripts]
