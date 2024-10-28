@@ -5,9 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tgradish"
 version = "1.0.4"
-authors = [
-  { name="sliva0", email="sliva0mk@gmail.com" },
-]
+authors = [{ name = "sliva0", email = "sliva0mk@gmail.com" }]
 description = "Simple video converting cli utility specializing in Telegram videostickers with the ability to bypass the 3 second limit"
 readme = "README.md"
 license = { text = "MIT License" }
@@ -19,8 +17,9 @@ classifiers = [
 ]
 
 dependencies = [
-    "pydantic ~= 2.2.0",
-    "tomli ~= 2.0.1"
+    "pydantic ~= 2.9.2",
+    "tomli ~= 2.0.2",
+    "click ~= 8.1.7",
 ]
 
 [project.scripts]
