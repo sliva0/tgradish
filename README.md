@@ -20,12 +20,12 @@ but `tgradish spoof` works just fine even without it.
 
 Converting .mp4 video to videosticker:
 ``` console
-$ tgradish convert -i ~/pig.mp4
+tgradish convert -i ~/pig.mp4
 ```
 
 Spoofing duration of already correctly encoded videosticker:
 ``` console
-$ tgradish spoof ~/pig.webm ~/spoofed_pig.webm
+tgradish spoof ~/pig.webm ~/spoofed_pig.webm
 ```
 
 
