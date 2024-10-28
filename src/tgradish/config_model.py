@@ -2,6 +2,7 @@ from collections import Counter, ChainMap
 import itertools
 from pathlib import Path
 from typing import ClassVar, Iterable, TypeVar
+from typing_extensions import Self
 
 import pydantic
 import enum
@@ -78,26 +79,30 @@ class EnumFlag(CmdFlag):
     options: dict[str, EnumOption]
     nargs: ClassVar[int] = 1
 
-    @pydantic.root_validator
-    def only_one_default_option(cls, values):
-        options: dict[str, EnumOption] = values.get("options")
-        defaults = [name for name, option in options.items() if option.default]
-        if not defaults:
-            raise ValueError(f"There is no defult options"
-                             f" in '{values.get('name')}' flag, should be 1")
+    @pydantic.model_validator(mode='after')
+    def exactly_one_default_option(self) -> Self:
+        defaults = [
+            name for name, option in self.options.items() if option.default
+        ]
+        defaults_len = len(defaults)
 
-        if (n := len(defaults)) > 1:
-            raise ValueError(f"There is {n} default options"
-                             f" in '{values.get('name')}' flag:"
+        if defaults_len == 0:
+            raise ValueError(f"There is no defult options"
+                             f" in '{self.name}' flag, should be 1")
+
+        if defaults_len > 1:
+            raise ValueError(f"There is {defaults_len} default options"
+                             f" in '{self.name}' flag:"
                              f" {', '.join(defaults)}, should be only 1")
-        return values
+
+        return self
 
     @property
     def default_option(self) -> EnumOption:
         for option in self.options.values():
             if option.default:
                 return option
-        raise  # default option is always present
+        assert False, "Unreachable code: default option is always present."
 
     def parse(self, flag_name, flag_args, cmd_params):
         if not flag_args:
@@ -161,7 +166,7 @@ class GuessParams(pydantic.BaseModel):
 class ValueFlag(CmdFlag):
     args: list[str] = []
     optional: bool = False
-    default_value: str | None
+    default_value: str | None = None
     guess_params: GuessParams | None = None
     nargs: ClassVar[int] = 1
 
@@ -191,12 +196,12 @@ class CmdConfig(pydantic.BaseModel):
     switches: dict[str, SwitchFlag] = {}
     values: dict[str, ValueFlag] = {}
 
-    @pydantic.root_validator
-    def _add_flag_names(cls, values: dict[str, dict[str, CmdFlag]]):
-        for flag_dict_name in ("enums", "switches", "values"):
-            for name, cmdflag in values[flag_dict_name].items():
+    @pydantic.model_validator(mode='after')
+    def _add_flag_names(self) -> Self:
+        for flag_dict in self.flag_dicts:
+            for name, cmdflag in flag_dict.items():
                 cmdflag.name = name
-        return values
+        return self
 
     @property
     def flag_dicts(self) -> tuple[dict[str, CmdFlag], ...]:

@@ -32,8 +32,8 @@ class RunInfo(pydantic.BaseModel):
     output: str
     guess_value: str
     guess_iterations: str
-    guess_min: str | None
-    guess_max: str | None
+    guess_min: str | None = None
+    guess_max: str | None = None
 
 
 def generate_tmp_file_path(output: str, suffix: str = ""):
