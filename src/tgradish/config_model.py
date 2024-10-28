@@ -37,7 +37,7 @@ class CmdFlag(pydantic.BaseModel):
 
     def _print_flags_and_description(self):
         flags = ", ".join(self.aliases)
-        print(f"{flags:<31} {self.description}")
+        print(f"{flags:<23} {self.description}")
 
     def print_help(self):
         self._print_flags_and_description()
@@ -60,7 +60,8 @@ class EnumOption(pydantic.BaseModel):
         cmd_params.placeholders |= self.placeholders
 
     def print_help(self, name):
-        print(f"    {name:<23} {self.description}")
+        default_marker = "(default)" if self.default else ""
+        print(f"    {name:<23} {self.description} {default_marker}")
 
 
 class EnumFlag(CmdFlag):
@@ -104,6 +105,7 @@ class EnumFlag(CmdFlag):
         self._print_flags_and_description()
         for option_name, option in self.options.items():
             option.print_help(option_name)
+        print()
 
 
 class SwitchFlag(CmdFlag):
@@ -165,6 +167,11 @@ class ValueFlag(CmdFlag):
 
         cmd_params.args += self.args
         cmd_params.placeholders[flag_name] = flag_args[0]
+    
+    def print_help(self):
+        flags = ", ".join(self.aliases)
+        guessable_marker = "(guessable)" if self.guess_params else ""
+        print(f"{flags:<23} {self.description} {guessable_marker}")
 
 
 class CmdConfig(pydantic.BaseModel):
@@ -208,9 +215,15 @@ class CmdConfig(pydantic.BaseModel):
         return alias_dict
 
     def print_help(self):
-        section_headers = ("Enum flags. Usage: '--flag <OPTION>'",
-                           "Switch flags. Usage: '--flag' to turn on",
-                           "Value flags: '--flag <VALUE>'")
+        gvalues_list = [i.name for i in self.values.values() if i.guess_params]
+        guessable_values = "\n\nGuessable values: " + ", ".join(gvalues_list)
+
+        section_headers = (
+            "Enum flags. Usage: '--flag <OPTION>'",
+            "Switch flags. Usage: '--flag' to turn on",
+            "Value flags. Usage: '--flag <VALUE>'" + guessable_values,
+        )
+
         for section, header in zip(self.flag_dicts, section_headers):
             print(header, end="\n\n")
             for flag in section.values():
