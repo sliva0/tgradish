@@ -4,5 +4,7 @@ env/
 dist/
 *.egg-info/
 
+src/tgradish/config.toml
+
 *.mp4
 *.webm

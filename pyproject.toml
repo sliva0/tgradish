@@ -12,7 +12,7 @@ authors = [
 description = "Simple video converting cli utility specializing in Telegram videostickers with the ability to bypass the 3 second limit"
 readme = "README.md"
 license = { text = "MIT License" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",

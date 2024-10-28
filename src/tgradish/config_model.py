@@ -35,6 +35,13 @@ class CmdFlag(pydantic.BaseModel):
               cmd_params: CmdParams) -> None:
         raise NotImplementedError
 
+    def _print_flags_and_description(self):
+        flags = ", ".join(self.aliases)
+        print(f"{flags:<31} {self.description}")
+
+    def print_help(self):
+        self._print_flags_and_description()
+
 
 class ArgsPlaceholder(pydantic.BaseModel):
 
@@ -51,6 +58,9 @@ class EnumOption(pydantic.BaseModel):
     def apply(self, cmd_params: CmdParams):
         cmd_params.args += self.args
         cmd_params.placeholders |= self.placeholders
+
+    def print_help(self, name):
+        print(f"    {name:<23} {self.description}")
 
 
 class EnumFlag(CmdFlag):
@@ -89,6 +99,11 @@ class EnumFlag(CmdFlag):
             raise ValueError(f"Unknown '{flag_name}' option: '{option_name}'")
 
         option.apply(cmd_params)
+
+    def print_help(self):
+        self._print_flags_and_description()
+        for option_name, option in self.options.items():
+            option.print_help(option_name)
 
 
 class SwitchFlag(CmdFlag):
@@ -167,9 +182,12 @@ class CmdConfig(pydantic.BaseModel):
         return values
 
     @property
+    def flag_dicts(self) -> tuple[dict[str, CmdFlag], ...]:
+        return (self.enums, self.switches, self.values)  # type: ignore
+
+    @property
     def flag_dict(self) -> dict[str, CmdFlag]:
-        flag_dicts = (self.enums, self.switches, self.values)
-        flag_name_list = itertools.chain(*map(dict.keys, flag_dicts))
+        flag_name_list = itertools.chain(*map(dict.keys, self.flag_dicts))
 
         if duplicates := get_duplicates_list(flag_name_list):
             raise ValueError(f"Duplicate flag names: {', '.join(duplicates)}.")
@@ -188,3 +206,13 @@ class CmdConfig(pydantic.BaseModel):
             alias_dict.update(flag.get_flag_alias_dict())
 
         return alias_dict
+
+    def print_help(self):
+        section_headers = ("Enum flags. Usage: '--flag <OPTION>'",
+                           "Switch flags. Usage: '--flag' to turn on",
+                           "Value flags: '--flag <VALUE>'")
+        for section, header in zip(self.flag_dicts, section_headers):
+            print(header, end="\n\n")
+            for flag in section.values():
+                flag.print_help()
+            print()
