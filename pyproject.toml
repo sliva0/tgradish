@@ -27,5 +27,5 @@ dependencies = [
 tgradish = "tgradish:main"
 
 [project.urls]
-"Homepage" = "https://github.com/sliva0/tgradish"
+"Repository" = "https://github.com/sliva0/tgradish"
 "Author's telegram" = "https://t.me/sliva0"
