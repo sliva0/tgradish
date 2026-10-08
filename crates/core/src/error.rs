@@ -30,6 +30,8 @@ pub enum Error {
     #[error(transparent)]
     Webm(#[from] WebmError),
     #[error(transparent)]
+    Tgs(#[from] tgradish_tgs::Error),
+    #[error(transparent)]
     Io(#[from] std::io::Error),
 }
 

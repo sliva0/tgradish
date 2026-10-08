@@ -14,12 +14,18 @@ pub fn warning_label() -> console::StyledObject<&'static str> {
 }
 
 /// Size in KiB with the share of Telegram's limit, like `252.4 KiB (98.6%)`.
+/// A WebM's size, and how much of Telegram's limit it uses.
 pub fn size(bytes: u64) -> String {
-    format!(
-        "{:.1} KiB ({:.1}%)",
-        bytes as f64 / 1024.0,
-        bytes as f64 / telegram::MAX_BYTES as f64 * 100.0
-    )
+    size_within(bytes, telegram::MAX_BYTES)
+}
+
+/// A size, and how much of `limit` it uses.
+pub fn size_within(bytes: u64, limit: u64) -> String {
+    format!("{} ({:.1}%)", kib(bytes), bytes as f64 / limit as f64 * 100.0)
+}
+
+pub fn kib(bytes: u64) -> String {
+    format!("{:.1} KiB", bytes as f64 / 1024.0)
 }
 
 pub fn seconds(value: f64) -> String {

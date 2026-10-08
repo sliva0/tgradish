@@ -3,10 +3,14 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{self, Options, Range};
+use tgradish_core::presets::Format;
 use tgradish_core::telegram::Target;
+use tgradish_core::tgs::{self, TgsOptions};
+
+const TGS: &str = "Animated stickers (.tgs)";
 
 /// Converts videos into Telegram video stickers and emoji, with the ability
-/// to bypass the 3 second limit.
+/// to bypass the 3 second limit, and pixel art into animated stickers.
 #[derive(Debug, Parser)]
 #[command(version, max_term_width = 100)]
 pub struct Cli {
@@ -66,8 +70,8 @@ pub enum Command {
     Watch(WatchArgs),
     /// Spoof the duration of an existing WebM so Telegram accepts it.
     Spoof(SpoofArgs),
-    /// Show properties of WebM files and check them against Telegram's
-    /// requirements.
+    /// Show properties of WebM and .tgs files and check them against
+    /// Telegram's requirements.
     Inspect(InspectArgs),
     /// Print a JSON description of options, presets and events for
     /// front-ends.
@@ -92,9 +96,13 @@ pub struct ConvertArgs {
     /// image.
     #[arg(long, conflicts_with = "inputs")]
     pub clipboard: bool,
-    /// Output file. Only with a single input.
+    /// Output file. Only with a single input, or with --sequence.
     #[arg(short, long, conflicts_with = "output_dir")]
     pub output: Option<PathBuf>,
+    /// Join the inputs (images, or directories of them) into one animated
+    /// sticker, in name order with numbers counted as numbers.
+    #[arg(long, conflicts_with = "clipboard")]
+    pub sequence: bool,
     #[command(flatten)]
     pub conversion: ConversionArgs,
 }
@@ -119,8 +127,13 @@ pub struct WatchArgs {
 /// Flags shared by `convert` and `watch`.
 #[derive(Debug, Args)]
 pub struct ConversionArgs {
+    /// What to make: webm (video sticker or emoji, from any video or image)
+    /// or tgs (animated sticker, from pixel art). [default: by the output's
+    /// extension, then the preset, then webm]
+    #[arg(long, value_enum)]
+    pub format: Option<FormatArg>,
     /// Directory for results. Default: next to each input, as
-    /// NAME.sticker.webm or NAME.emoji.webm.
+    /// NAME.sticker.webm, NAME.emoji.webm or the same with .tgs.
     #[arg(short = 'O', long, value_name = "DIR")]
     pub output_dir: Option<PathBuf>,
     /// Replace existing output files.
@@ -140,7 +153,7 @@ pub struct ConversionArgs {
     pub options: OptionArgs,
 }
 
-/// One flag per [`Options`] field, with the same name.
+/// One flag per [`Options`] and [`TgsOptions`] field, with the same name.
 #[derive(Debug, Args)]
 pub struct OptionArgs {
     /// What to make. [default: sticker]
@@ -156,7 +169,8 @@ pub struct OptionArgs {
     /// Length of the result. [default: the rest of the input]
     #[arg(short = 't', long, value_name = "SECONDS", help_heading = "Output")]
     pub length: Option<f64>,
-    /// Frame rate. [default: the input's, at most 30]
+    /// Frame rate: of the result for WebM [default: the input's, at most
+    /// 30], of sprite sheets and image sequences for .tgs [default: 10].
     #[arg(long, help_heading = "Output")]
     pub fps: Option<f64>,
 
@@ -178,10 +192,13 @@ pub struct OptionArgs {
     /// or with --fit off. [default: 32]
     #[arg(long, value_parser = clap::value_parser!(u8).range(0..=63), help_heading = "Encoding")]
     pub crf: Option<u8>,
-    /// Encoder speed; faster looks worse at the same size. [default: balanced]
+    /// Encoder speed. Faster looks worse at the same size for WebM
+    /// [default: balanced], and comes out larger for .tgs [default: best].
     #[arg(long, value_enum, help_heading = "Encoding")]
     pub speed: Option<SpeedArg>,
-    /// Lossless encoding, only useful for tiny or static videos.
+    /// WebM: lossless encoding, only useful for tiny or static videos.
+    /// .tgs: never change the art to make it fit; report a sticker that is
+    /// too large instead.
     #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
           default_missing_value = "true", help_heading = "Encoding")]
     pub lossless: Option<bool>,
@@ -212,9 +229,86 @@ pub struct OptionArgs {
     #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
           default_missing_value = "true", help_heading = "Metadata")]
     pub watermark: Option<bool>,
+
+    /// What to do with more than 3 seconds. [default: speed-up]
+    #[arg(long, value_enum, help_heading = TGS)]
+    pub long: Option<LongArg>,
+    /// Reductions that may make a sticker fit, comma-separated. [default:
+    /// all]
+    #[arg(long, value_enum, value_delimiter = ',', help_heading = TGS)]
+    pub reductions: Vec<KindArg>,
+    /// Keep the input's canvas instead of cropping to the visible pixels.
+    #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
+          default_missing_value = "true", help_heading = TGS)]
+    pub keep_canvas: Option<bool>,
+    /// Size of one art pixel in input pixels; pixels off its grid move onto
+    /// it. [default: detected]
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..),
+          help_heading = TGS)]
+    pub pixel_scale: Option<u32>,
+    /// Aseprite tag to export. [default: all frames]
+    #[arg(long, help_heading = TGS)]
+    pub tag: Option<String>,
+    /// Read the input as a sprite sheet of equal cells, frames row by row.
+    #[arg(long, value_name = "COLUMNSxROWS", help_heading = TGS)]
+    pub sheet: Option<String>,
+    /// How many sprite sheet cells hold frames. [default: all but
+    /// transparent ones at the end]
+    #[arg(long, value_name = "N", help_heading = TGS)]
+    pub sheet_frames: Option<u32>,
 }
 
 impl OptionArgs {
+    /// Flags given that `format` doesn't use.
+    pub fn foreign(&self, format: Format) -> Vec<&'static str> {
+        let given = |set: bool, name: &'static str| set.then_some(name);
+        let flags = match format {
+            Format::Webm => vec![
+                given(self.long.is_some(), "--long"),
+                given(!self.reductions.is_empty(), "--reductions"),
+                given(self.keep_canvas.is_some(), "--keep-canvas"),
+                given(self.pixel_scale.is_some(), "--pixel-scale"),
+                given(self.tag.is_some(), "--tag"),
+                given(self.sheet.is_some(), "--sheet"),
+                given(self.sheet_frames.is_some(), "--sheet-frames"),
+            ],
+            Format::Tgs => vec![
+                given(self.resize.is_some(), "--resize"),
+                given(self.fit.is_some(), "--fit"),
+                given(self.attempts.is_some(), "--attempts"),
+                given(self.fit_range.is_some(), "--fit-range"),
+                given(self.bitrate.is_some(), "--bitrate"),
+                given(self.crf.is_some(), "--crf"),
+                given(!self.encoder_options.is_empty(), "--encoder-options"),
+                given(self.extra_args.is_some(), "--extra-args"),
+                given(self.spoof.is_some(), "--spoof"),
+                given(self.fake_duration.is_some(), "--fake-duration"),
+            ],
+        };
+        flags.into_iter().flatten().collect()
+    }
+
+    pub fn to_tgs_options(&self) -> TgsOptions {
+        TgsOptions {
+            target: self.target.map(Into::into),
+            start: self.start,
+            length: self.length,
+            long: self.long.map(Into::into),
+            speed: self.speed.map(Into::into),
+            lossless: self.lossless,
+            reductions: (!self.reductions.is_empty())
+                .then(|| self.reductions.iter().map(|&kind| kind.into()).collect()),
+            keep_canvas: self.keep_canvas,
+            pixel_scale: self.pixel_scale,
+            tag: self.tag.clone(),
+            sheet: self.sheet.clone(),
+            sheet_frames: self.sheet_frames,
+            fps: self.fps,
+            title: self.title.clone(),
+            watermark: self.watermark,
+        }
+    }
+
     pub fn to_options(&self) -> Options {
         Options {
             target: self.target.map(Into::into),
@@ -276,6 +370,16 @@ value_enum!(ResizeArg => options::Resize { Contain, Pad, Crop, Stretch });
 value_enum!(FitArg => options::Fit { Auto, Bitrate, Crf, Fps, Length, Off });
 value_enum!(SpeedArg => options::Speed { Fast, Balanced, Best });
 value_enum!(SpoofArg => options::Spoof { Auto, Always, Never });
+value_enum!(FormatArg => Format { Webm, Tgs });
+value_enum!(LongArg => tgs::Long { SpeedUp, Trim });
+value_enum!(KindArg => tgs::Kind {
+    SnapToGrid,
+    MergeColours,
+    MergeFrames,
+    DropFrames,
+    Despeckle,
+    Downscale,
+});
 
 #[derive(Debug, Args)]
 pub struct SpoofArgs {
@@ -305,7 +409,7 @@ pub struct SpoofArgs {
 
 #[derive(Debug, Args)]
 pub struct InspectArgs {
-    /// WebM files to inspect.
+    /// WebM or .tgs files to inspect.
     #[arg(required = true)]
     pub files: Vec<PathBuf>,
     /// Check against this target instead of guessing from the size.
@@ -348,19 +452,45 @@ mod tests {
         Cli::command().debug_assert();
     }
 
-    /// Front-ends rely on every option having a flag of the same name.
+    /// Front-ends rely on every option of either format having a flag of
+    /// the same name.
     #[test]
     fn every_option_has_a_flag() {
-        let schema = serde_json::to_value(schemars::schema_for!(Options)).unwrap();
-        let properties = schema["properties"].as_object().unwrap();
         let cli = Cli::command();
-        for command in ["convert", "watch"] {
-            let command = cli.find_subcommand(command).unwrap();
-            let flags: Vec<_> = command.get_arguments().filter_map(|a| a.get_long()).collect();
-            for property in properties.keys() {
-                assert!(flags.contains(&property.as_str()), "no --{property} flag");
+        for schema in [schemars::schema_for!(Options), schemars::schema_for!(TgsOptions)] {
+            let schema = serde_json::to_value(schema).unwrap();
+            let properties = schema["properties"].as_object().unwrap();
+            for command in ["convert", "watch"] {
+                let command = cli.find_subcommand(command).unwrap();
+                let flags: Vec<_> = command.get_arguments().filter_map(|a| a.get_long()).collect();
+                for property in properties.keys() {
+                    assert!(flags.contains(&property.as_str()), "no --{property} flag");
+                }
             }
         }
+    }
+
+    #[test]
+    fn sorts_flags_by_format() {
+        let cli = Cli::parse_from([
+            "tgradish",
+            "convert",
+            "a.gif",
+            "--crf",
+            "20",
+            "--reductions",
+            "merge-colours,drop-frames",
+            "--keep-canvas",
+            "--fps",
+            "12",
+        ]);
+        let Command::Convert(args) = cli.command else { panic!() };
+        let options = &args.conversion.options;
+        assert_eq!(options.foreign(Format::Tgs), ["--crf"]);
+        assert_eq!(options.foreign(Format::Webm), ["--reductions", "--keep-canvas"]);
+        let tgs = options.to_tgs_options();
+        assert_eq!(tgs.reductions.unwrap(), [tgs::Kind::MergeColours, tgs::Kind::DropFrames]);
+        assert_eq!((tgs.keep_canvas, tgs.fps), (Some(true), Some(12.0)));
     }
 
     #[test]

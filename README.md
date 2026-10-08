@@ -1,12 +1,13 @@
 # tgradish
 
 Converts videos and images into Telegram video stickers and custom emoji,
-with the ability to bypass the 3 second limit.
+with the ability to bypass the 3 second limit, and pixel art into animated
+(`.tgs`) stickers.
 
 > **Work in progress.** This branch is the 2.0 rewrite in Rust; there are no
 > releases yet. See [docs/PLAN.md](docs/PLAN.md) for the roadmap, including
-> `.tgs` animated stickers from pixel art ([docs/tgs.md](docs/tgs.md)), a
-> GUI and a Telegram web app. The Python 1.x version is on `master`.
+> a GUI and a Telegram web app. The Python 1.x version is on `master`, and
+> pixelart2tgs 1.x is now part of tgradish.
 
 ## What it does
 
@@ -17,6 +18,15 @@ with the ability to bypass the 3 second limit.
 - spoofs the duration in the file header when the video is longer than
   3 seconds, so Telegram accepts it;
 - checks the result against Telegram's requirements.
+
+For `.tgs` animated stickers, from GIF, APNG, WebP, Aseprite files, sprite
+sheets or image sequences of pixel art ([docs/tgs.md](docs/tgs.md)):
+
+- finds the art's own pixel grid and draws it pixel-exact, without the
+  seams 1.x had, at about half 1.x's size;
+- when it still doesn't fit in 64 KB, makes the least visible changes that
+  fit (merging close colours or near-identical frames, dropping frames,
+  ...) and says which.
 
 ## Usage
 
@@ -41,6 +51,13 @@ tgradish spoof pig.webm
 
 # what Telegram will think of a file
 tgradish inspect pig.sticker.webm
+
+# animated sticker from pixel art, written as dance.sticker.tgs
+tgradish convert dance.gif --format tgs
+
+# from an Aseprite tag, or from numbered frames at 8 fps
+tgradish convert walk.aseprite -o walk.tgs --tag run
+tgradish convert frames/ --sequence -o walk.tgs --fps 8
 ```
 
 `tgradish convert --help` lists every option. Presets are TOML files in the

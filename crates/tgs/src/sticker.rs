@@ -16,6 +16,7 @@ use crate::scene::Scene;
 use crate::{Result, file};
 
 /// What to do when the lossless result is too large.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Fit {
@@ -56,6 +57,7 @@ impl Default for Options {
 }
 
 /// A reduction fitting applied.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Step {
     #[serde(flatten)]
@@ -68,6 +70,7 @@ pub struct Step {
 }
 
 /// Progress, for front-ends to show.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "stage", rename_all = "snake_case")]
 pub enum Progress {
@@ -149,11 +152,16 @@ fn estimate(anim: &PixelAnim, options: &Options, calibration: f64) -> Option<usi
     Some((file::quick_size(json.as_bytes()) as f64 * calibration) as usize)
 }
 
+/// Makes a sticker of `animation`, reporting `progress`. `cancelled` is
+/// asked between steps; when it says yes, this stops with
+/// [`Error::Cancelled`](crate::Error::Cancelled).
 pub fn make(
     animation: &Animation,
     options: &Options,
     progress: &mut dyn FnMut(Progress),
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<Sticker> {
+    let check = || if cancelled() { Err(crate::Error::Cancelled) } else { Ok(()) };
     let (original, report) = normalise(animation, &options.normalise)?;
     progress(Progress::Normalised { report: Box::new(report.clone()) });
     let settings = Settings { effort: options.effort, ..Settings::default() };
@@ -177,8 +185,17 @@ pub fn make(
     let mut target = options.max_bytes;
     loop {
         if options.fit == Fit::Auto {
-            current = fit(&original, current, &mut steps, target, options, calibration, progress)?;
+            current = fit(
+                &original,
+                current,
+                &mut steps,
+                (target, calibration),
+                options,
+                progress,
+                cancelled,
+            )?;
         }
+        check()?;
         progress(Progress::Packing);
         let (scene, json) = render(&current, &settings, options)?;
         let tgs = file::pack(json.as_bytes(), zopfli_iterations(options.effort));
@@ -235,10 +252,10 @@ fn fit(
     original: &PixelAnim,
     mut current: PixelAnim,
     steps: &mut Vec<Step>,
-    target: usize,
+    (target, calibration): (usize, f64),
     options: &Options,
-    calibration: f64,
     progress: &mut dyn FnMut(Progress),
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<PixelAnim> {
     let size_of = |anim: &PixelAnim| estimate(anim, options, calibration).unwrap_or(usize::MAX);
     let mut size = size_of(&current);
@@ -270,6 +287,9 @@ fn fit(
     let mut before_last: Option<(PixelAnim, usize)> = None;
 
     while size > target {
+        if cancelled() {
+            return Err(crate::Error::Cancelled);
+        }
         // (value, kind, candidate, size, error)
         let mut best: Option<(f64, usize, PixelAnim, usize, f64)> = None;
         let mut tried = false;

@@ -12,6 +12,7 @@ use crate::normalise::{Edges, Grid, PixelAnim, PixelFrame, assemble, snap_to};
 use crate::{Error, Result};
 
 /// One reduction at one strength.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(tag = "reduction", rename_all = "snake_case")]
 pub enum Reduction {
@@ -33,6 +34,7 @@ pub enum Reduction {
 }
 
 /// The kinds of reductions, roughly from least to most visible.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Kind {

@@ -48,8 +48,9 @@ Done on `rewrite-v2`, with CI on Linux and Windows:
   x86-64 (16.8 MB) and Windows x86-64 (18.8 MB), tested on both;
 - `.tgs`: T1 (crates, WASM check), T2 (decoders, normalisation), T3 (Lottie
   writer, checks, `tgs-lab verify` in tlottie and rlottie), T4 (encoder v1:
-  half the size of 1.x, no seams), T5 (effort levels, bench baselines).
-  Next: T7, T8, then T6.
+  half the size of 1.x, no seams), T5 (effort levels, bench baselines), T7
+  (fitting with lossy reductions), T8 (`.tgs` in the CLI, protocol 2). Next:
+  T6.
 
 ## Roadmap
 

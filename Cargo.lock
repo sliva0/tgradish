@@ -1319,6 +1319,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tgradish-tgs",
  "thiserror",
  "toml",
  "which",
@@ -1338,6 +1339,7 @@ name = "tgradish-tgs"
 version = "2.0.0"
 dependencies = [
  "flate2",
+ "schemars",
  "serde",
  "serde_json",
  "tgradish-frames",

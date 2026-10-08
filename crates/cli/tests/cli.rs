@@ -37,11 +37,21 @@ fn describes_protocol() {
     let output = tgradish(&["describe"]);
     assert!(output.status.success());
     let description: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(description["protocol"], 1);
-    assert_eq!(description["default_preset"], "sticker");
-    assert!(description["options"]["properties"]["fit"].is_object());
+    assert_eq!(description["protocol"], 2);
+    assert_eq!(description["default_format"], "webm");
+    let formats = description["formats"].as_array().unwrap();
+    let format = |name: &str| formats.iter().find(|f| f["format"] == name).unwrap();
+    assert_eq!(format("webm")["default_preset"], "sticker");
+    assert!(format("webm")["options"]["properties"]["fit"].is_object());
+    assert_eq!(format("tgs")["default_preset"], "tgs-sticker");
+    assert_eq!(format("tgs")["output_extension"], "tgs");
+    assert!(format("tgs")["options"]["properties"]["reductions"].is_object());
     let presets = description["presets"].as_array().unwrap();
-    assert!(presets.iter().any(|p| p["name"] == "emoji" && p["options"]["target"] == "emoji"));
+    let preset = |name: &str| presets.iter().find(|p| p["name"] == name).unwrap();
+    assert_eq!(preset("emoji")["options"]["target"], "emoji");
+    assert_eq!(preset("emoji")["format"], "webm");
+    assert_eq!(preset("tgs-fast")["format"], "tgs");
+    assert_eq!(preset("tgs-fast")["options"]["speed"], "fast");
 }
 
 #[test]
@@ -129,8 +139,68 @@ fn cancels_from_stdin() {
 fn events_schema_includes_errors() {
     let output = tgradish(&["describe"]);
     let description: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let events = description["events"]["oneOf"].as_array().unwrap();
-    assert!(events.iter().any(|e| e["properties"]["event"]["const"] == "error"));
+    for format in description["formats"].as_array().unwrap() {
+        let events = format["events"]["oneOf"].as_array().unwrap();
+        assert!(events.iter().any(|e| e["properties"]["event"]["const"] == "error"));
+    }
+}
+
+/// A 4x4 PNG: a 2x2 square of `colour` on transparency.
+fn square_png(path: &Path, colour: [u8; 4]) {
+    let file = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
+    let mut encoder = png::Encoder::new(file, 4, 4);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let pixels: Vec<u8> = (0..16)
+        .flat_map(|i| {
+            if (1..3).contains(&(i % 4)) && (1..3).contains(&(i / 4)) { colour } else { [0; 4] }
+        })
+        .collect();
+    encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
+}
+
+#[test]
+fn makes_animated_stickers() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("2.png"), dir.path().join("10.png"));
+    square_png(&a, [255, 0, 0, 255]);
+    square_png(&b, [0, 0, 255, 255]);
+    let out = dir.path().join("out.tgs");
+    let output = tgradish(&[
+        "--json",
+        "convert",
+        dir.path().to_str().unwrap(),
+        "--sequence",
+        "-o",
+        out.to_str().unwrap(),
+        "--fps",
+        "4",
+    ]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let lines = json_lines(&output);
+    assert_eq!(lines[0]["event"], "started");
+    // 2x2 visible pixels, two frames of 15 ticks; 2.png comes first
+    assert_eq!(lines[0]["report"]["frames"], 2);
+    assert_eq!(lines[0]["report"]["ticks"], 30);
+    let finished = lines.last().unwrap();
+    assert_eq!(
+        (finished["event"].as_str(), finished["lossy"].as_bool()),
+        (Some("finished"), Some(false))
+    );
+    assert_eq!(finished["issues"], serde_json::json!([]));
+
+    let inspected = tgradish(&["--json", "inspect", out.to_str().unwrap()]);
+    let lines = json_lines(&inspected);
+    assert_eq!(lines[0]["format"], "tgs");
+    assert_eq!(lines[0]["stats"]["frames"], 30.0);
+    assert_eq!(lines[0]["issues"], serde_json::json!([]));
+
+    // WebM flags don't mix with .tgs output, nor the reverse
+    let mixed = tgradish(&["convert", a.to_str().unwrap(), "-o", "x.tgs", "--crf", "20"]);
+    assert_eq!(mixed.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&mixed.stderr).contains("--crf"));
+    let sequence = tgradish(&["convert", a.to_str().unwrap(), "--sequence"]);
+    assert!(String::from_utf8_lossy(&sequence.stderr).contains("--format tgs"));
 }
 
 #[test]

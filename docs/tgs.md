@@ -600,8 +600,29 @@ The web app there may also replace the "Web page" and "Bot" items under
     plan's `off` mode isn't needed: reductions only run when asked to fit.
   - susie_fortnite tiled 2x2 (77 KB lossless) fits at 62 KB after
     despeckling and dropping a tenth of the frames, in 5.5 s.
-- **T8:** CLI: `convert` to `.tgs`, `describe`/protocol, presets (sticker
+- **T8 (done):** CLI: `convert` to `.tgs`, `describe`/protocol, presets (sticker
   and emoji for `.tgs`), `inspect` for `.tgs`.
+
+  Notes from T8:
+  - `tgradish-core::tgs` holds the `.tgs` options (`TgsOptions`, layered
+    like WebM's), events and file handling (inputs, sequences with numbers
+    sorted as numbers, sheets, atomic output); `tgradish-tgs` gained a
+    `schema` feature for the JSON Schemas and cancellation between steps.
+  - Format: `--format`, else `-o`'s extension, else the preset's, else
+    webm. Shared flags where the meaning matches (target, start, length,
+    speed as effort, title, watermark; `--lossless` means "never reduce";
+    `--fps` is the frame rate of sheets and sequences); flags of the other
+    format are an error. New: `--long`, `--reductions`, `--keep-canvas`,
+    `--pixel-scale`, `--tag`, `--sheet`, `--sheet-frames`, `--sequence`.
+  - Presets have a format (`tgs-sticker`, `tgs-emoji`, `tgs-fast` built
+    in; files set `format` or take their base's); `config.toml` has
+    `tgs-preset`. Protocol 2 describes both formats, see
+    `docs/protocol.md`. `inspect` reads `.tgs` with `check`.
+  - The default effort for `.tgs` is best: seconds, for the smallest
+    stickers. The sticker's name is "made with tgradish VERSION", or the
+    title with that added; `--watermark=false` leaves only the title.
+  - Emoji use the same 512x512 canvas as stickers until T9 shows what
+    Telegram wants.
 - **T9:** Telegram probes. Generate a set of `.tgs` files for the user to
   upload through @Stickers:
   - minimal JSON without optional fields;
