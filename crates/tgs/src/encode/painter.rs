@@ -25,6 +25,8 @@ use crate::scene::{FillRule, Group, Layer, Scene, Shape};
 /// group's fill and wrapping take about one and a half rectangles' bytes.
 const RECT_COST: usize = 2;
 const GROUP_COST: usize = 3;
+/// What a layer of its own adds, measured on the corpus.
+const LAYER_COST: usize = 10;
 /// Up to this many colours, the order is searched exactly.
 const EXACT_ORDER: usize = 10;
 /// Above this many colours, the order isn't searched at all.
@@ -50,12 +52,15 @@ pub struct Settings {
     /// Keep shapes alive over frames where they don't change. Without it,
     /// every frame is drawn in full.
     pub lifetimes: bool,
+    /// Keep the unchanged part of a colour alive over frames where the
+    /// rest changes, when that is cheaper.
+    pub split: bool,
     pub effort: Effort,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { lifetimes: true, effort: Effort::default() }
+        Settings { lifetimes: true, split: true, effort: Effort::default() }
     }
 }
 
@@ -80,8 +85,29 @@ struct Piece {
     rects: Vec<Rect>,
 }
 
-fn cost(pieces: &[Piece]) -> usize {
-    pieces.iter().map(|piece| piece.rects.len() * RECT_COST + GROUP_COST).sum()
+fn cost(pieces: &[(u8, Piece)]) -> usize {
+    pieces.iter().map(|(_, piece)| piece.rects.len() * RECT_COST + GROUP_COST).sum()
+}
+
+/// [`cost`] of a split colour: its deltas mostly need layers of their own,
+/// since its core lies between them and the next colour's.
+fn split_cost(pieces: &[(u8, Piece)]) -> usize {
+    let deltas = pieces.iter().filter(|(place, _)| *place == 0).count();
+    cost(pieces) + deltas * LAYER_COST
+}
+
+/// A colour's core lasts while it keeps at least this share of each
+/// frame's cells; lower and higher were both worse over the corpus.
+const CORE_SHARE: f64 = 0.15;
+
+/// The 8 neighbours of a cell, inside the mask's bounds.
+fn core_neighbours(cell: (u32, u32), mask: &Mask) -> impl Iterator<Item = (u32, u32)> + '_ {
+    let (x, y) = cell;
+    (y.saturating_sub(1)..=(y + 1).min(mask.height() - 1)).flat_map(move |ny| {
+        (x.saturating_sub(1)..=(x + 1).min(mask.width() - 1))
+            .filter(move |&nx| (nx, ny) != (x, y))
+            .map(move |nx| (nx, ny))
+    })
 }
 
 struct Painter<'a> {
@@ -89,6 +115,8 @@ struct Painter<'a> {
     /// Cells of each colour in each frame: `cells[frame][colour]`.
     cells: Vec<Vec<Vec<u32>>>,
     lifetimes: bool,
+    /// Split colours into cores and deltas where that is cheaper.
+    split: bool,
 }
 
 impl Painter<'_> {
@@ -141,9 +169,10 @@ impl Painter<'_> {
         order
     }
 
-    /// The pieces of `colour` when `later[frame]` holds the cells of the
-    /// opaque colours drawn after it.
-    fn pieces(&self, colour: u16, later: &[Mask]) -> Result<Vec<Piece>, EncodeError> {
+    /// Pieces drawing, in each frame, the cells `needs[frame]` says it
+    /// must (nothing when `None`) within those it may. A piece lives on
+    /// while one shape fits every frame.
+    fn lifetime_pieces(&self, needs: Vec<(Option<Mask>, Mask)>) -> Result<Vec<Piece>, EncodeError> {
         let mut pieces = Vec::new();
         // the open piece: its first frame, the cells it must and may cover
         let mut open: Option<(usize, Mask, Mask)> = None;
@@ -154,19 +183,13 @@ impl Painter<'_> {
             }
             Ok(Piece { from, to, rects })
         };
-        for (frame, later) in later.iter().enumerate() {
-            let own = self.own(colour, frame);
-            let mut must = own.clone();
-            if self.opaque(colour) {
-                let mut reach = own.grown();
-                reach.intersect(later);
-                must.union(&reach);
-            }
-            let mut may = own.clone();
-            may.union(later);
+        let frames = needs.len();
+        for (frame, (must, may)) in needs.into_iter().enumerate() {
             if let Some((start, union, within)) = &mut open {
                 let mut joined = union.clone();
-                joined.union(&must);
+                if let Some(must) = &must {
+                    joined.union(must);
+                }
                 let mut narrowed = within.clone();
                 narrowed.intersect(&may);
                 if self.lifetimes && joined.is_subset(&narrowed) {
@@ -177,14 +200,162 @@ impl Painter<'_> {
                 pieces.push(close(*start, frame, union, within)?);
                 open = None;
             }
-            if !own.is_empty() {
+            if let Some(must) = must {
                 open = Some((frame, must, may));
             }
         }
         if let Some((start, union, within)) = open {
-            pieces.push(close(start, self.frames(), &union, &within)?);
+            pieces.push(close(start, frames, &union, &within)?);
         }
         Ok(pieces)
+    }
+
+    /// What `colour` must and may cover in a frame, given the cells of the
+    /// opaque colours after it, when nothing else of it is drawn.
+    fn needs(&self, own: &Mask, later: &Mask, opaque: bool) -> (Option<Mask>, Mask) {
+        let mut may = own.clone();
+        may.union(later);
+        if own.is_empty() {
+            return (None, may);
+        }
+        let mut must = own.clone();
+        if opaque {
+            let mut reach = own.grown();
+            reach.intersect(later);
+            must.union(&reach);
+        }
+        (Some(must), may)
+    }
+
+    /// The pieces of `colour` when `later[frame]` holds the cells of the
+    /// opaque colours drawn after it, each with its place under the colour:
+    /// 0 for a part drawn below the rest, 1 otherwise.
+    fn pieces(&self, colour: u16, later: &[Mask]) -> Result<Vec<(u8, Piece)>, EncodeError> {
+        let own: Vec<Mask> = (0..self.frames()).map(|f| self.own(colour, f)).collect();
+        let whole = self.lifetime_pieces(
+            own.iter()
+                .zip(later)
+                .map(|(own, later)| self.needs(own, later, self.opaque(colour)))
+                .collect(),
+        )?;
+        let whole: Vec<(u8, Piece)> = whole.into_iter().map(|piece| (1, piece)).collect();
+        if !self.lifetimes || !self.split || !self.opaque(colour) {
+            return Ok(whole);
+        }
+        match self.split_pieces(&own, later) {
+            Ok(split) if split_cost(&split) < cost(&whole) => Ok(split),
+            _ => Ok(whole),
+        }
+    }
+
+    /// A colour as cores, the cells that keep it for a stretch of frames,
+    /// drawn once for the stretch, and below each a delta with the rest.
+    ///
+    /// A delta lies directly under its core, so where they meet the delta
+    /// must reach under the core's cells (the seam invariant between two
+    /// groups), which is fine: the core paints the same colour over it.
+    fn split_pieces(&self, own: &[Mask], later: &[Mask]) -> Result<Vec<(u8, Piece)>, EncodeError> {
+        let frames = own.len();
+        let coverable: Vec<Mask> = own
+            .iter()
+            .zip(later)
+            .map(|(own, later)| {
+                let mut coverable = own.clone();
+                coverable.union(later);
+                coverable
+            })
+            .collect();
+        let mut out = Vec::new();
+        let mut deltas: Vec<(Option<Mask>, Mask)> = Vec::with_capacity(frames);
+        let mut start = 0;
+        while start < frames {
+            // the stretch: frames while the cells kept from its first are
+            // most of each frame's cells
+            let mut core = own[start].clone();
+            let mut end = start + 1;
+            while end < frames {
+                let mut kept = core.clone();
+                kept.intersect(&own[end]);
+                if kept.is_empty() || (kept.count() as f64) < CORE_SHARE * own[end].count() as f64 {
+                    break;
+                }
+                core = kept;
+                end += 1;
+            }
+            let span = start..end;
+            // cells under later colours in every frame of the stretch, which
+            // the core may cover without ever showing
+            let mut hidden = later[start].clone();
+            for f in span.clone() {
+                hidden.intersect(&later[f]);
+            }
+            // the core shows exactly its cells, so it must reach under every
+            // neighbour that a later colour shows in some frame; that is only
+            // possible where the neighbour is the core's or always hidden
+            if end - start > 1 {
+                loop {
+                    let reached = |(x, y): (u32, u32)| span.clone().any(|f| later[f].get(x, y));
+                    let unsure: Vec<(u32, u32)> = core
+                        .cells()
+                        .filter(|&cell| {
+                            core_neighbours(cell, &core)
+                                .any(|n| reached(n) && !core.get(n.0, n.1) && !hidden.get(n.0, n.1))
+                        })
+                        .collect();
+                    if unsure.is_empty() {
+                        break;
+                    }
+                    for (x, y) in unsure {
+                        core.clear(x, y);
+                    }
+                }
+            }
+            let core_shape = if end - start > 1 && !core.is_empty() {
+                let mut must = core.clone();
+                for f in span.clone() {
+                    let mut reach = core.grown();
+                    reach.intersect(&later[f]);
+                    must.union(&reach);
+                }
+                let mut may = core.clone();
+                may.union(&hidden);
+                let rects = cover(&must, &may);
+                if rects.len() > TLOTTIE.max_paint_source_items_per_layer {
+                    return Err(EncodeError::TooManyRects { rects: rects.len() });
+                }
+                out.push((1, Piece { from: start, to: end, rects }));
+                Some(core.clone())
+            } else {
+                None
+            };
+            for f in span {
+                let mut may = coverable[f].clone();
+                let Some(core) = &core_shape else {
+                    deltas.push(self.needs(&own[f], &later[f], true));
+                    continue;
+                };
+                // the cells the core doesn't draw, and where the delta must
+                // reach: later colours, and the core's cells of this colour
+                let mut rest = own[f].clone();
+                rest.subtract(core);
+                if rest.is_empty() {
+                    deltas.push((None, may));
+                    continue;
+                }
+                let mut above = later[f].clone();
+                let mut shown = core.clone();
+                shown.intersect(&own[f]);
+                above.union(&shown);
+                let mut must = rest.grown();
+                must.intersect(&above);
+                must.union(&rest);
+                may.union(&shown);
+                deltas.push((Some(must), may));
+            }
+            start = end;
+        }
+        out.extend(self.lifetime_pieces(deltas)?.into_iter().map(|piece| (0, piece)));
+        Ok(out)
     }
 
     fn cost_of(&self, colour: u16, later: &[Mask]) -> usize {
@@ -284,8 +455,8 @@ impl Painter<'_> {
         let mut later = vec![self.empty(); self.frames()];
         let mut pieces = Vec::new();
         for (rank, &colour) in order.iter().enumerate().rev() {
-            for piece in self.pieces(colour, &later)? {
-                pieces.push((rank, colour, piece));
+            for (place, piece) in self.pieces(colour, &later)? {
+                pieces.push((rank * 2 + usize::from(place), colour, piece));
             }
             if self.opaque(colour) {
                 for (f, mask) in later.iter_mut().enumerate() {
@@ -325,7 +496,7 @@ pub fn painter(
         }
         cells.push(by_colour);
     }
-    let mut painter = Painter { anim, cells, lifetimes: settings.lifetimes };
+    let mut painter = Painter { anim, cells, lifetimes: settings.lifetimes, split: settings.split };
     if settings.lifetimes {
         match painter.search(settings.effort, score) {
             // a layer per frame stays within the limit for up to 180 frames
