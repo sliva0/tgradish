@@ -8,7 +8,13 @@ use std::path::Path;
 /// appeared while tgradish was working.
 pub fn write_file(path: &Path, bytes: &[u8], replace: bool) -> std::io::Result<()> {
     let dir = path.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let mut tmp = tempfile::Builder::new().prefix(".tgradish-").tempfile_in(dir)?;
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(".tgradish-");
+    // temporary files are private; results get the permissions any new
+    // file gets, which the umask decides
+    #[cfg(unix)]
+    builder.permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666));
+    let mut tmp = builder.tempfile_in(dir)?;
     tmp.write_all(bytes)?;
     tmp.as_file().sync_all()?;
     let result = if replace { tmp.persist(path) } else { tmp.persist_noclobber(path) };
@@ -29,6 +35,21 @@ mod tests {
         write_file(&path, b"three", true).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"three");
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gives_results_normal_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.webm");
+        write_file(&path, b"one", false).unwrap();
+        // whatever the umask leaves, others can read it unless it says not
+        // to: compare with a file created the ordinary way
+        let plain = dir.path().join("plain");
+        std::fs::write(&plain, b"x").unwrap();
+        let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), mode(&plain));
     }
 
     #[cfg(unix)]
