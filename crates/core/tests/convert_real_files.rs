@@ -356,3 +356,145 @@ fn backends_agree() {
     let difference = (sizes[0] - sizes[1]).abs() / sizes[0];
     assert!(difference < 0.05, "sizes differ by {:.1}%: {sizes:?}", difference * 100.0);
 }
+
+/// Runs the system ffmpeg to make test input.
+fn make(args: &[&str]) {
+    let status = Command::new("ffmpeg").args(["-v", "error", "-y"]).args(args).status().unwrap();
+    assert!(status.success(), "ffmpeg {args:?}");
+}
+
+/// Mean absolute difference between two RGBA frames.
+fn difference(a: &[u8], b: &[u8]) -> f64 {
+    assert_eq!(a.len(), b.len());
+    a.iter().zip(b).map(|(x, y)| f64::from(x.abs_diff(*y))).sum::<f64>() / a.len() as f64
+}
+
+/// Converts with every backend and returns the first frame of each result.
+fn first_frames(backends: &[Backend], input: &Path, options: Options) -> Vec<Vec<u8>> {
+    let dir = tempfile::tempdir().unwrap();
+    backends
+        .iter()
+        .map(|backend| {
+            let output = dir.path().join(format!("{}.webm", name(backend)));
+            let request = Request {
+                output: Some(output.clone()),
+                options: options.clone(),
+                ..Request::new(input.to_path_buf())
+            };
+            let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {})
+                .unwrap_or_else(|err| panic!("{}: {err}", name(backend)));
+            assert!(outcome.issues.is_empty(), "{}: {:?}", name(backend), outcome.issues);
+            first_frame_rgba(&output)
+        })
+        .collect()
+}
+
+#[test]
+fn handles_offset_and_missing_timestamps() {
+    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let ts = dir.path().join("uhh.ts");
+    let raw = dir.path().join("uhh.h264");
+    let input = input.to_str().unwrap();
+    // MPEG-TS starts at a non-zero timestamp, raw H.264 has none
+    make(&["-i", input, "-c", "copy", "-f", "mpegts", ts.to_str().unwrap()]);
+    make(&["-i", input, "-c", "copy", "-bsf:v", "h264_mp4toannexb", raw.to_str().unwrap()]);
+
+    // seeking into these needs keyframes, which uhh.mp4 only has at the
+    // start; the ffmpeg command line decodes nothing after such a seek too
+    for path in [&ts, &raw] {
+        for backend in &backends {
+            let dir = tempfile::tempdir().unwrap();
+            let request = Request {
+                output: Some(dir.path().join("out.webm")),
+                options: Options { length: Some(1.0), ..fast(Fit::Off) },
+                ..Request::new(path.clone())
+            };
+            let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {})
+                .unwrap_or_else(|err| panic!("{} {}: {err}", name(backend), path.display()));
+            let info = webm::inspect_file(&outcome.output).unwrap();
+            assert_eq!(info.video_frames, 25, "{} {}", name(backend), path.display());
+        }
+    }
+}
+
+#[test]
+fn applies_display_matrix_like_ffmpeg() {
+    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let cases: [(&str, &[&str]); 3] = [
+        ("hflip", &["-display_hflip"]),
+        ("rotate", &["-display_rotation", "90"]),
+        ("vflip", &["-display_vflip"]),
+    ];
+    for (name, display) in cases {
+        let turned = dir.path().join(format!("{name}.mp4"));
+        let mut args = display.to_vec();
+        args.extend(["-t", "1", "-i", input.to_str().unwrap(), "-c", "copy"]);
+        args.push(turned.to_str().unwrap());
+        make(&args);
+
+        let probes: Vec<_> =
+            backends.iter().map(|b| b.probe(&turned, &CancelToken::new()).unwrap()).collect();
+        assert_ne!(probes[0].orientation, ffmpeg::Orientation::Normal, "{name}");
+        assert!(probes.windows(2).all(|p| p[0] == p[1]), "{name}: {probes:?}");
+
+        let frames = first_frames(&backends, &turned, Options { crf: Some(10), ..fast(Fit::Off) });
+        for frame in &frames[1..] {
+            let diff = difference(&frames[0], frame);
+            assert!(diff < 4.0, "{name}: backends differ by {diff}");
+        }
+    }
+}
+
+#[test]
+fn uses_first_video_stream() {
+    let Some(backends) = backends() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let two = dir.path().join("two.mkv");
+    // the second stream is bigger and marked default, the first one wins
+    make(&[
+        "-f",
+        "lavfi",
+        "-i",
+        "color=red:s=64x64:d=1",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=blue:s=128x128:d=1",
+        "-map",
+        "0",
+        "-map",
+        "1",
+        "-c:v",
+        "ffv1",
+        "-disposition:v:0",
+        "0",
+        "-disposition:v:1",
+        "default",
+        two.to_str().unwrap(),
+    ]);
+    for backend in &backends {
+        let probe = backend.probe(&two, &CancelToken::new()).unwrap();
+        assert_eq!((probe.width, probe.height), (64, 64), "{}", name(backend));
+    }
+    for frame in first_frames(&backends, &two, fast(Fit::Off)) {
+        let (red, blue) = (frame[0], frame[2]);
+        assert!(red > 200 && blue < 60, "first pixel is {:?}", &frame[..4]);
+    }
+}
+
+#[cfg(feature = "linked")]
+#[test]
+fn builtin_backend_rejects_extra_args() {
+    let Some(input) = reference("uhh.mp4") else { return };
+    let request = Request {
+        options: Options {
+            extra_args: Some(vec!["-tune-content".into(), "screen".into()]),
+            ..Default::default()
+        },
+        ..Request::new(input)
+    };
+    let result = convert(&Backend::Linked, &request, &CancelToken::new(), &mut |_| {});
+    assert!(matches!(result, Err(Error::InvalidOptions(_))), "{result:?}");
+}
