@@ -30,6 +30,7 @@
           packages = with pkgs; [
             cargo-about
             clippy
+            curl
             rustfmt
             meson
             nasm

@@ -665,7 +665,7 @@ The web app there may also replace the "Web page" and "Bot" items under
   The user checks acceptance and how they look on Android, Desktop, iOS
   and web. Adjust the encoder to the results.
 
-  Ready: `tgs-lab probes` writes eleven probes (plus real art) and a
+  Ready: `tgs-lab probes` writes twelve probes (plus real art) and a
   checklist; `docs/probes.md` has them with the WebM probes and how to
   upload them. Waiting for the user's results.
 - **T10:** release as part of tgradish 2.0, which waits for the whole

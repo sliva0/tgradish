@@ -31,7 +31,7 @@ struct Probe {
     json: String,
 }
 
-/// The test sprite: 32x32 art pixels, 12 frames of 15 ticks. A bordered
+/// The test sprite: 32x32 art pixels, 10 frames of 18 ticks. A bordered
 /// square of diagonal stripes (seams everywhere) on the left of a
 /// transparent canvas, with a square moving through it, a translucent bar
 /// and a blinking pixel.
@@ -42,7 +42,7 @@ fn sprite() -> Result<Frames> {
     let square = [60, 140, 230, 255];
     let translucent = [120, 220, 120, 128];
     let blink = [255, 255, 255, 255];
-    let frames = (0..12)
+    let frames = (0..10)
         .map(|frame| {
             let rgba = (0..SIZE * SIZE)
                 .flat_map(|index| {
@@ -58,7 +58,7 @@ fn sprite() -> Result<Frames> {
                     }
                 })
                 .collect();
-            Frame { rgba, duration: Duration::from_millis(250) }
+            Frame { rgba, duration: Duration::from_millis(300) }
         })
         .collect();
     Ok(Frames::new(SIZE, SIZE, frames)?)
@@ -197,10 +197,20 @@ fn keyframes(sprite: &str) -> String {
     lottie.to_string()
 }
 
-/// The sprite at 30 fps: the same 180 frames last 6 seconds.
-fn half_rate(sprite: &str) -> String {
+/// The sprite at 30 fps. With `same_frames`, the same 180 frames last 6
+/// seconds; otherwise every time is halved, keeping 3 seconds.
+fn half_rate(sprite: &str, same_frames: bool) -> String {
     let mut lottie = parse(sprite);
     lottie["fr"] = json!(30);
+    if !same_frames {
+        lottie["op"] = json!(90);
+        for layer in layers(&mut lottie) {
+            for key in ["ip", "op"] {
+                // frames are 18 ticks, so halves are whole
+                layer[key] = json!(layer[key].as_u64().unwrap() / 2);
+            }
+        }
+    }
     lottie.to_string()
 }
 
@@ -293,35 +303,42 @@ fn probes(art: Option<(String, String)>) -> Result<Vec<Probe>> {
         Probe {
             file: "08-30fps.tgs",
             pack: "sticker",
-            tests: "30 fps instead of 60: 180 frames lasting 6 s".into(),
-            expect: "rejected (stickers must be 60 fps); if accepted, note how long it plays",
-            json: half_rate(&sprite),
+            tests: "30 fps instead of 60, still 3 s (90 frames)".into(),
+            expect: "rejected (stickers must be 60 fps); if accepted, it plays like 01",
+            json: half_rate(&sprite, false),
         },
         Probe {
-            file: "09-6s.tgs",
+            file: "09-30fps-6s.tgs",
+            pack: "sticker",
+            tests: "180 frames at 30 fps: 6 s, if 08 is accepted".into(),
+            expect: "rejected (at most 3 s); if accepted, note whether it plays 6 s",
+            json: half_rate(&sprite, true),
+        },
+        Probe {
+            file: "10-6s.tgs",
             pack: "sticker",
             tests: "360 frames at 60 fps: 6 s".into(),
             expect: "rejected (at most 3 s); if accepted, note whether it plays 6 s",
             json: twice(&sprite),
         },
         Probe {
-            file: "10-emoji.tgs",
+            file: "11-emoji.tgs",
             pack: "emoji",
             tests: "01 as a custom emoji, 512x512 like stickers".into(),
             expect: "accepted; sharp at emoji size",
             json: sprite.clone(),
         },
         Probe {
-            file: "11-emoji-100.tgs",
+            file: "12-emoji-100.tgs",
             pack: "emoji",
             tests: "the same on a 100x100 canvas, the size of video emoji".into(),
-            expect: "one of 10 and 11 is accepted, or both: tells which size emoji use",
+            expect: "one of 11 and 12 is accepted, or both: tells which size emoji use",
             json: small_canvas(&sprite),
         },
     ];
     if let Some((name, json)) = art {
         probes.push(Probe {
-            file: "12-real-art.tgs",
+            file: "13-real-art.tgs",
             pack: "sticker",
             tests: format!("real art ({name}), encoded as tgradish does"),
             expect: "accepted; looks like the input, no seams or fringes along edges",
@@ -384,7 +401,7 @@ mod tests {
     #[test]
     fn probes_render_within_limits() {
         let probes = probes(None).unwrap();
-        assert_eq!(probes.len(), 11);
+        assert_eq!(probes.len(), 12);
         for probe in &probes {
             // gzip -9 packs worse than zopfli
             assert!(file::quick_size(probe.json.as_bytes()) <= MAX_TGS, "{}", probe.file);
