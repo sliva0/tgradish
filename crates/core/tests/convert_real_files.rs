@@ -136,6 +136,31 @@ fn starts_at_offset() {
 }
 
 #[test]
+fn previews_results() {
+    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("preview.webm");
+    let request = Request {
+        output: Some(output.clone()),
+        options: Options { length: Some(1.0), ..fast(Fit::Bitrate) },
+        ..Request::new(input)
+    };
+    convert(&backends[0], &request, &CancelToken::new(), &mut |_| {}).unwrap();
+    for backend in &backends {
+        let name = name(backend);
+        let preview = backend.preview(&output, &CancelToken::new()).unwrap();
+        // the sticker is 512 px on its longer side; previews are 320
+        assert_eq!(preview.width.max(preview.height), 320, "{name}");
+        assert!(!preview.frames.is_empty(), "{name}");
+        let ticks: u32 = preview.frames.iter().map(|(_, ticks)| ticks).sum();
+        assert!((55..=65).contains(&ticks), "{name}: one second is {ticks} ticks");
+        for (rgba, _) in &preview.frames {
+            assert_eq!(rgba.len(), (preview.width * preview.height * 4) as usize, "{name}");
+        }
+    }
+}
+
+#[test]
 fn makes_transparent_emoji_from_image() {
     let Some(backends) = backends() else { return };
     let dir = tempfile::tempdir().unwrap();
