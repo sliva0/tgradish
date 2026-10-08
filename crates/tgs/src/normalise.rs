@@ -800,6 +800,15 @@ mod tests {
         let (anim, report) = normalise(&input, &canvas).unwrap();
         assert_eq!(report.colours, 65535);
         assert_eq!(crate::encode::runs(&anim).compare(&anim), None);
+        let fast = crate::encode::Settings {
+            effort: crate::encode::Effort::Fast,
+            ..crate::encode::Settings::default()
+        };
+        // a group per colour, spread over enough layers for tlottie
+        let scene = crate::encode::painter(&anim, &fast, None).unwrap();
+        assert_eq!(scene.compare(&anim), None);
+        let merged = crate::reduce::Reduction::MergeColours { distance: 0.1 }.apply(&anim).unwrap();
+        assert!(merged.palette().len() < 65536);
 
         // a forced scale far past the art
         let dot = animation(1, 1, &[ms(100)], |_, _, _| RED);

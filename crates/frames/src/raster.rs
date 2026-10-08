@@ -34,7 +34,7 @@ pub(crate) fn decode(bytes: &[u8], format: Format, limits: &Limits) -> Result<An
                 let frames = decoder.apng().map_err(error)?.into_frames();
                 collect(frames, format, limits, |delay| delay)?
             } else {
-                return still(decoder, format);
+                return still(decoder, format, limits);
             }
         }
         Format::WebP => {
@@ -43,7 +43,7 @@ pub(crate) fn decode(bytes: &[u8], format: Format, limits: &Limits) -> Result<An
             if decoder.has_animation() {
                 collect(decoder.into_frames(), format, limits, |delay| delay)?
             } else {
-                return still(decoder, format);
+                return still(decoder, format, limits);
             }
         }
         Format::Aseprite => unreachable!("Aseprite files are decoded by aseprite/mod.rs"),
@@ -89,7 +89,14 @@ fn collect(
     Animation::new(width, height, out).map(Some)
 }
 
-fn still(decoder: impl ImageDecoder, format: Format) -> Result<Animation> {
+fn still(decoder: impl ImageDecoder, format: Format, limits: &Limits) -> Result<Animation> {
+    // the decoded image and its RGBA copy are both alive for a moment
+    let (width, height) = decoder.dimensions();
+    limits.check(width, height, 1)?;
+    let rgba = (u64::from(width) * u64::from(height)).saturating_mul(4);
+    if decoder.total_bytes().saturating_add(rgba) > limits.max_bytes as u64 {
+        return Err(Error::TooLarge(format!("a {width}x{height} image")));
+    }
     let image = DynamicImage::from_decoder(decoder)
         .map_err(|err| Error::Decode { format, message: err.to_string() })?
         .into_rgba8();

@@ -189,3 +189,17 @@ fn refuses_huge_gifs() {
     gif.extend([2, 2, 0x44, 0x01, 0, 0x3b]);
     assert!(matches!(decode(&gif, &DecodeOptions::default()), Err(Error::TooLarge(_))));
 }
+
+#[test]
+fn counts_the_rgba_copy_of_still_images() {
+    // a 256x256 RGB PNG is 196608 bytes decoded, 262144 as RGBA
+    let image = image::RgbImage::from_pixel(256, 256, image::Rgb([1, 2, 3]));
+    let mut bytes = Vec::new();
+    image.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).unwrap();
+    let tight =
+        DecodeOptions { tag: None, limits: Limits { max_dimension: 4096, max_bytes: 300_000 } };
+    assert!(matches!(decode(&bytes, &tight), Err(Error::TooLarge(_))));
+    let roomy =
+        DecodeOptions { tag: None, limits: Limits { max_dimension: 4096, max_bytes: 500_000 } };
+    assert_eq!(decode(&bytes, &roomy).unwrap().frames().len(), 1);
+}
