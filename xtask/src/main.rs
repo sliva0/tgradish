@@ -402,6 +402,19 @@ impl Build {
         Ok(dir)
     }
 
+    /// libvpx's pkg-config file asks for `-lpthread`, which rustc links as a
+    /// DLL even with `-static`, so tgradish.exe would need
+    /// libwinpthread-1.dll. A static copy named libpthread.a in the prefix,
+    /// which the linker searches first, is picked instead.
+    fn static_pthread(&self) -> Result<()> {
+        let found =
+            output(Command::new("x86_64-w64-mingw32-gcc").arg("-print-file-name=libwinpthread.a"))?;
+        let library = PathBuf::from(found.trim());
+        ensure!(library.is_absolute(), "MinGW's libwinpthread.a was not found");
+        std::fs::copy(&library, self.prefix.join("lib/libpthread.a"))?;
+        Ok(())
+    }
+
     fn package(&self, dirs: &[(&Source, PathBuf)]) -> Result<PathBuf> {
         let name = format!("ffmpeg-{}-{}", FFMPEG.version, self.target.triple());
         let stage = self.out.join(&name);
@@ -480,6 +493,9 @@ fn build_ffmpeg(args: &[String]) -> Result<()> {
         (&DAV1D, build.dav1d()?),
         (&FFMPEG, build.ffmpeg()?),
     ];
+    if target == Target::Windows {
+        build.static_pthread()?;
+    }
     let archive = build.package(&dirs)?;
     println!("{}", archive.display());
     Ok(())
@@ -583,6 +599,8 @@ const SYSTEM_DLLS: &[&str] = &[
     "winmm.dll",
     "iphlpapi.dll",
     "ucrtbase.dll",
+    "bcryptprimitives.dll",
+    "combase.dll",
 ];
 
 /// Fails if a Windows executable imports a DLL that is not part of Windows.
