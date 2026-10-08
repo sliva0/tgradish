@@ -130,7 +130,7 @@ impl Printer {
     fn event(&mut self, event: Event) {
         match event {
             Event::Started { plan } if !self.quiet => {
-                let spoof = if plan.spoof { ", spoofed" } else { "" };
+                let spoof = if plan.spoofs(plan.length) { ", spoofed" } else { "" };
                 self.line(format!(
                     "{} → {}\n  {} {}x{}, {}, {}, fit {}{spoof}",
                     plan.input.display(),

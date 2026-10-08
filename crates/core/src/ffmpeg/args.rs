@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::path::Path;
 
-use crate::convert::Plan;
+use crate::convert::{Plan, frame_count};
 use crate::events::{Params, Rate};
 use crate::options::Resize;
 
@@ -11,15 +11,18 @@ fn num(value: f64) -> String {
     text.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-/// Input options and the input itself, for a clip of `length` seconds.
-pub(crate) fn input_args(plan: &Plan, length: f64) -> Vec<OsString> {
+/// Input options and the input itself, for a clip of `length` seconds at
+/// `fps`. Reads one frame more than needed; outputs are cut to an exact
+/// frame count with `-frames:v`.
+pub(crate) fn input_args(plan: &Plan, length: f64, fps: f64) -> Vec<OsString> {
     let mut args: Vec<OsString> = Vec::new();
     if plan.source.still_image {
         args.extend(["-loop".into(), "1".into()]);
     } else if plan.start > 0.0 {
         args.extend(["-ss".into(), num(plan.start).into()]);
     }
-    args.extend(["-t".into(), num(length).into()]);
+    let read = (frame_count(length, fps) + 1) as f64 / fps;
+    args.extend(["-t".into(), num(read).into()]);
     if let Some(decoder) = &plan.source.decoder {
         args.extend(["-c:v".into(), decoder.into()]);
     }
@@ -60,12 +63,13 @@ pub(crate) fn encode_args(
         ["-hide_banner", "-nostdin", "-nostats", "-y", "-loglevel", "warning"]
             .map(OsString::from)
             .into();
-    args.extend(input_args(plan, params.length));
+    args.extend(input_args(plan, params.length, params.fps));
 
     let pix_fmt = if plan.alpha { "yuva420p" } else { "yuv420p" };
     let mut push = |items: &[&str]| args.extend(items.iter().map(OsString::from));
     push(&["-map", "0:v:0", "-map_metadata", "-1", "-map_chapters", "-1", "-an", "-sn", "-dn"]);
     push(&["-vf", &video_filter(plan, params.fps, pix_fmt)]);
+    push(&["-frames:v", &frame_count(params.length, params.fps).to_string()]);
     push(&["-c:v", "libvpx-vp9"]);
     match params.rate {
         Rate::Bitrate(kbps) => push(&["-b:v", &format!("{}", (kbps * 1000.0).round() as u64)]),
