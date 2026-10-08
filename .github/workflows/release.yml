@@ -38,6 +38,7 @@ jobs:
             triple: x86_64-pc-windows-gnu
             runner: ubuntu-24.04
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
 
@@ -103,14 +104,25 @@ jobs:
   test-windows:
     needs: build
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/download-artifact@v8
         with:
           name: release-windows
           path: artifacts
 
-      - name: Install a full ffmpeg to make test input
-        run: choco install ffmpeg -y --no-progress
+      # made here instead of with a downloaded ffmpeg, so the test needs
+      # nothing but the release
+      - name: Draw a test image with alpha
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $image = New-Object System.Drawing.Bitmap 320, 240
+          $graphics = [System.Drawing.Graphics]::FromImage($image)
+          $graphics.Clear([System.Drawing.Color]::Transparent)
+          $graphics.FillEllipse([System.Drawing.Brushes]::Orange, 40, 20, 240, 200)
+          $graphics.FillRectangle([System.Drawing.Brushes]::Teal, 120, 90, 80, 60)
+          $image.Save("$PWD\artifacts\input.png", [System.Drawing.Imaging.ImageFormat]::Png)
 
       - name: Convert with the built-in ffmpeg
         shell: bash
@@ -118,17 +130,19 @@ jobs:
           cd artifacts
           unzip -q tgradish-*.zip
           bin=$(ls tgradish-*/tgradish.exe)
-          ffmpeg -v error -f lavfi -i "testsrc2=s=320x240:d=4,format=yuva420p" -c:v libvpx-vp9 input.webm
           "$bin" ffmpeg status
-          "$bin" convert input.webm -o out.webm --preset fast
+          "$bin" convert input.png -o still.webm --length 1 --preset fast
+          # VP9 with alpha in, which needs the libvpx decoder
+          "$bin" convert still.webm -o out.webm --preset fast
           "$bin" inspect out.webm
           # Windows paths and an output that already exists
-          "$bin" convert input.webm -o out.webm --preset fast && exit 1 || true
+          "$bin" convert still.webm -o out.webm --preset fast && exit 1 || true
 
   publish:
     needs: [build, test-windows]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
