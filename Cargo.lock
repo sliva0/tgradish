@@ -1388,6 +1388,7 @@ name = "tgs-lab"
 version = "2.0.0"
 dependencies = [
  "anyhow",
+ "flate2",
  "png",
  "rlottie",
  "serde_json",

@@ -137,3 +137,24 @@ fn checks_stickers_from_1x() {
         assert!(stats.features.contains("merge paths") && stats.features.contains("strokes"));
     }
 }
+
+#[test]
+fn painter_is_exact_without_seams() {
+    use tgradish_tgs::encode::{Settings, painter};
+
+    for path in corpus() {
+        let input = decode(&std::fs::read(&path).unwrap(), &DecodeOptions::default()).unwrap();
+        let (anim, _) = normalise(&input, &Options::default()).unwrap();
+        for lifetimes in [true, false] {
+            let scene = painter(&anim, &Settings { lifetimes, ..Settings::default() }).unwrap();
+            assert_eq!(scene.compare(&anim), None, "{} ({lifetimes})", name(&path));
+            let seams = scene.seams(anim.palette());
+            assert!(
+                seams.is_empty(),
+                "{} ({lifetimes}): {:?}",
+                name(&path),
+                &seams[..seams.len().min(5)]
+            );
+        }
+    }
+}

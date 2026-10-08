@@ -10,6 +10,7 @@ publish = false
 tgradish-tgs.workspace = true
 
 anyhow.workspace = true
+flate2.workspace = true
 png.workspace = true
 serde_json.workspace = true
 # not on crates.io, so only this unpublished crate depends on it
