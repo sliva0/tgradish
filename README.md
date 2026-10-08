@@ -86,6 +86,19 @@ On Arch Linux, from the AUR: `tgradish` (built from source) or
 `tgradish-bin`. With Nix: `nix run github:sliva0/tgradish`, or the flake's
 package in a NixOS configuration.
 
+## Coming from 1.x
+
+tgradish 1.x was a Python package (`pip install tgradish`); 2.0 is a single
+program, installed as above. The package on PyPI stays at 1.x. Commands
+changed a little:
+
+| 1.x | 2.0 |
+| --- | --- |
+| `tgradish convert -i pig.mp4` | `tgradish convert pig.mp4` |
+| `tgradish spoof pig.webm spoofed.webm` | `tgradish spoof pig.webm -o spoofed.webm` |
+
+pixelart2tgs is now `tgradish convert art.gif --format tgs`.
+
 ## Front-ends
 
 `tgradish describe` prints a JSON description of every option, preset and

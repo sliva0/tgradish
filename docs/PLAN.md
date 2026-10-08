@@ -141,7 +141,10 @@ Done:
   them on Android, Desktop, iOS and web; the WebM side gets the same
   treatment (spoofed durations, watermarks, emoji).
 - Merge into `master`, remove the temporary release trigger on
-  `rewrite-v2`, tag 2.0.0, publish the drafted release.
+  `rewrite-v2` and the README's work-in-progress note, tag 2.0.0, publish
+  the drafted release.
+- Then the AUR packages (`docs/packaging.md`). PyPI keeps 1.x; ask the
+  user whether a last 1.x upload should point its description at 2.0.
 - After release: ask before pointing the old pixelart2tgs README at
   tgradish.
 
