@@ -4,8 +4,9 @@ Converts videos and images into Telegram video stickers and custom emoji,
 with the ability to bypass the 3 second limit.
 
 > **Work in progress.** This branch is the 2.0 rewrite in Rust; there are no
-> releases yet. See [docs/PLAN.md](docs/PLAN.md). The Python 1.x version is
-> on `master`.
+> releases yet. See [docs/PLAN.md](docs/PLAN.md) for the roadmap, including
+> `.tgs` animated stickers from pixel art ([docs/tgs.md](docs/tgs.md)), a
+> GUI and a Telegram web app. The Python 1.x version is on `master`.
 
 ## What it does
 
