@@ -114,6 +114,36 @@ impl Backend {
         }
     }
 
+    /// The first seconds of a video, decoded for a preview: straight RGBA
+    /// at most [`PREVIEW_SIDE`] pixels on the longer side, each frame with
+    /// how many 60 fps frames it shows for.
+    pub fn preview(&self, path: &Path, cancel: &CancelToken) -> Result<crate::tgs::Preview> {
+        let probe = self.probe(path, cancel)?;
+        let fps = probe.fps.unwrap_or(25.0).clamp(1.0, 60.0);
+        let count = (PREVIEW_SECONDS * fps).ceil() as usize;
+        let scale =
+            (f64::from(PREVIEW_SIDE) / f64::from(probe.width.max(probe.height).max(1))).min(1.0);
+        let size = |side: u32| ((f64::from(side) * scale).round() as u32).max(1);
+        let (width, height) = (size(probe.width), size(probe.height));
+        let frames = match self {
+            Backend::Process(ffmpeg) => {
+                ffmpeg::preview_frames(ffmpeg, path, &probe, (width, height), count, cancel)?
+            }
+            #[cfg(feature = "linked")]
+            Backend::Linked => {
+                crate::linked::preview_frames(path, &probe, (width, height), count, cancel)?
+            }
+        };
+        // whole 60 fps frames, rounding where each starts
+        let start = |index: usize| (index as f64 * 60.0 / fps).round() as u32;
+        let frames = frames
+            .into_iter()
+            .enumerate()
+            .map(|(index, rgba)| (rgba, (start(index + 1) - start(index)).max(1)))
+            .collect();
+        Ok(crate::tgs::Preview { width, height, frames })
+    }
+
     /// See [`ffmpeg::ssim`].
     pub fn ssim(
         &self,
@@ -130,6 +160,11 @@ impl Backend {
         }
     }
 }
+
+/// Longer side of previews, in pixels.
+pub const PREVIEW_SIDE: u32 = 320;
+/// How much of a video previews show, in seconds.
+const PREVIEW_SECONDS: f64 = 3.0;
 
 /// Statistics file that ffmpeg's `-passlogfile PREFIX` uses.
 #[cfg(feature = "linked")]

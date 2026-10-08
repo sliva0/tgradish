@@ -248,6 +248,29 @@ pub struct TgsOutcome {
     pub output: PathBuf,
     pub bytes: u64,
     pub lossy: bool,
+    /// What the sticker shows, for previews.
+    pub preview: Preview,
+}
+
+/// Frames of a sticker as straight RGBA at the art's resolution (the
+/// crop of the input), each with how many 60 fps frames it shows for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Preview {
+    pub width: u32,
+    pub height: u32,
+    pub frames: Vec<(Vec<u8>, u32)>,
+}
+
+impl Preview {
+    fn of(anim: &tgradish_tgs::PixelAnim) -> Preview {
+        Preview {
+            width: *anim.grid().columns.last().unwrap_or(&0),
+            height: *anim.grid().rows.last().unwrap_or(&0),
+            frames: (0..anim.frames().len())
+                .map(|frame| (anim.rgba(frame), anim.frames()[frame].ticks))
+                .collect(),
+        }
+    }
 }
 
 /// Image files of a sequence, numbers sorted as numbers: `2.png` before
@@ -431,7 +454,12 @@ pub fn convert(
         rectangles: sticker.rectangles,
         issues: sticker.issues.clone(),
     });
-    Ok(TgsOutcome { output: request.output.clone(), bytes: sticker.bytes as u64, lossy })
+    Ok(TgsOutcome {
+        output: request.output.clone(),
+        bytes: sticker.bytes as u64,
+        lossy,
+        preview: Preview::of(&sticker.anim),
+    })
 }
 
 #[cfg(test)]

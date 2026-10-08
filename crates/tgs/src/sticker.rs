@@ -100,6 +100,10 @@ pub struct Sticker {
     pub rectangles: usize,
     /// Problems the finished sticker has, from [`check::check`].
     pub issues: Vec<Issue>,
+    /// What the sticker shows, cell for cell: the animation after any
+    /// reductions.
+    #[serde(skip)]
+    pub anim: PixelAnim,
 }
 
 impl Sticker {
@@ -232,6 +236,7 @@ pub fn make(
             groups,
             rectangles,
             issues,
+            anim: current,
         });
     }
 }
