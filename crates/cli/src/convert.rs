@@ -33,16 +33,22 @@ pub struct Converter<'a> {
     written: RefCell<HashMap<PathBuf, PathBuf>>,
 }
 
+/// The format a command converts to: `--format`, or else the extension of
+/// `output` (the `-o` file), or else the preset's format.
+fn format_of(args: &ConversionArgs, output: Option<&Path>, presets: &Presets) -> Result<Format> {
+    Ok(match (args.format, output.and_then(Format::of_path), &args.preset) {
+        (Some(format), _, _) => format.into(),
+        (None, Some(format), _) => format,
+        (None, None, Some(preset)) => presets.format(preset)?,
+        (None, None, None) => Format::default(),
+    })
+}
+
 impl<'a> Converter<'a> {
     /// `output` is the `-o` file, which can choose the format.
     pub fn new(ctx: &'a Context, args: &'a ConversionArgs, output: Option<&Path>) -> Result<Self> {
         let presets = Presets::load_user()?;
-        let format = match (args.format, output.and_then(Format::of_path), &args.preset) {
-            (Some(format), _, _) => format.into(),
-            (None, Some(format), _) => format,
-            (None, None, Some(preset)) => presets.format(preset)?,
-            (None, None, None) => Format::default(),
-        };
+        let format = format_of(args, output, &presets)?;
         if let Some(asked) = output.and_then(Format::of_path).filter(|&f| f != format) {
             bail!(
                 "the output is a .{} file, but this converts to {}",
@@ -234,13 +240,15 @@ fn explain(err: tgradish_core::Error) -> anyhow::Error {
 }
 
 pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
+    // before Converter::new, which looks for ffmpeg when making WebM
+    if args.sequence
+        && format_of(&args.conversion, args.output.as_deref(), &Presets::load_user()?)?
+            != Format::Tgs
+    {
+        bail!("--sequence makes animated stickers; add --format tgs or an output ending in .tgs");
+    }
     let converter = Converter::new(ctx, &args.conversion, args.output.as_deref())?;
     if args.sequence {
-        if converter.format() != Format::Tgs {
-            bail!(
-                "--sequence makes animated stickers; add --format tgs or an output ending in .tgs"
-            );
-        }
         return converter
             .run_inputs(&args.inputs, true, args.output.clone(), converter.overwrite())
             .map_err(explain);

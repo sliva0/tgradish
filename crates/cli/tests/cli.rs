@@ -200,7 +200,8 @@ fn makes_animated_stickers() {
     assert_eq!(mixed.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&mixed.stderr).contains("--crf"));
     let sequence = tgradish(&["convert", a.to_str().unwrap(), "--sequence"]);
-    assert!(String::from_utf8_lossy(&sequence.stderr).contains("--format tgs"));
+    let stderr = String::from_utf8_lossy(&sequence.stderr);
+    assert!(stderr.contains("--format tgs"), "{stderr}");
 }
 
 #[test]
