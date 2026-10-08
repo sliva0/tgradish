@@ -1,7 +1,9 @@
 mod args;
+mod clipboard;
 mod commands;
 mod convert;
 mod ui;
+mod watch;
 
 use std::process::ExitCode;
 
@@ -69,6 +71,7 @@ fn run(cli: Cli) -> Result<()> {
     let ctx = Context { global: cli.global, config, cancel };
     match cli.command {
         Command::Convert(args) => convert::run(&ctx, args),
+        Command::Watch(args) => watch::run(&ctx, args),
         Command::Spoof(args) => commands::spoof(&ctx, args),
         Command::Inspect(args) => commands::inspect(&ctx, args),
         Command::Describe => commands::describe(&ctx),

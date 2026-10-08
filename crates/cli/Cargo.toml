@@ -20,14 +20,17 @@ linked-static = ["tgradish-core/linked-static"]
 tgradish-core.workspace = true
 
 anyhow.workspace = true
+arboard.workspace = true
 clap.workspace = true
 console.workspace = true
 ctrlc.workspace = true
 indicatif.workspace = true
+png.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shlex.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 

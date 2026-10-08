@@ -167,3 +167,49 @@ fn status_without_vp9_is_one_document() {
     assert_eq!(status["capabilities"]["libvpx_vp9"], false);
     assert_eq!(status["capabilities"]["version"], "ffmpeg version fake");
 }
+
+#[cfg(unix)]
+#[test]
+fn watch_converts_new_files() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+
+    let Some(input) = reference("uhh.mp4") else { return };
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("old.mp4"), b"there before watching").unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
+        .args(["--json", "watch", dir.path().to_str().unwrap(), "--interval", "0.2"])
+        .args(["--preset", "fast", "--length", "0.5"])
+        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // files there when watching starts are left alone, so let it start first
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    std::fs::copy(&input, dir.path().join("new.mp4")).unwrap();
+
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in stdout.lines().map_while(Result::ok) {
+            let event: Value = serde_json::from_str(&line).unwrap();
+            let done = matches!(event["event"].as_str(), Some("finished" | "error"));
+            let _ = tx.send(event);
+            if done {
+                break;
+            }
+        }
+    });
+    let mut events = Vec::new();
+    while let Ok(event) = rx.recv_timeout(std::time::Duration::from_secs(60)) {
+        events.push(event);
+    }
+    Command::new("kill").args(["-INT", &child.id().to_string()]).status().unwrap();
+    let status = child.wait().unwrap();
+
+    let last = events.last().expect("no events within a minute");
+    assert_eq!(last["event"], "finished", "{last}");
+    assert!(dir.path().join("new.sticker.webm").is_file());
+    assert!(!dir.path().join("old.sticker.webm").exists(), "files from before are left alone");
+    assert_eq!(status.code(), Some(0));
+}
