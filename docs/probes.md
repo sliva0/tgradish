@@ -61,3 +61,39 @@ and /k, macOS), open the packs and send a few of the stickers in a chat:
 Fill in the columns of `references/t9-probes/CHECKLIST.md` (and the
 WebM table above, in a copy), or just describe what differs from
 "Expected". Screenshots help where something looks wrong.
+
+## Results of the first round
+
+Uploaded 2026-10-08. Accepted and shown on Android, Desktop and web:
+01, 02, 06, 07, 08 and 13 as stickers, 11 as an emoji. @Stickers refused
+03, 04, 05, 09, 10 and 12. So:
+
+- tgradish's default output needs none of the optional fields (01).
+- Precomps and hold keyframes work (06, 07), if the encoder wants them.
+- The limit is 3 seconds, not 180 frames: 30 fps is allowed (08), but 180
+  frames at 30 fps were refused (09). tgradish keeps 60 fps, which times
+  frames more finely and costs nothing.
+- Emoji are 512x512 like stickers (11); 100x100 was refused (12).
+  tgradish already writes them that way.
+- Telegram has a limit the rules don't mention, which 03 (2 MB of JSON,
+  138 layers of 288 squares), 04 (2700 layers) and 05 (5100 squares in one
+  layer) went over. Stickers 1.x made with 31 layers and 660 KB of JSON
+  were accepted in 2022. The second round finds the limit.
+
+## Second round: Telegram's limits
+
+Each group raises one thing until Telegram refuses it: layers, squares
+in one layer, squares shown at once, squares over the whole animation and
+the size of the JSON. The last ones are real art encoded by tgradish with
+the most layers, rectangles or JSON of the test set.
+
+```console
+P=references/pixelart
+cargo run --release -p tgs-lab -- limits references/t9-probes-2 \
+  $P/Spamton_overworld_glitched_laugh.gif $P/animation_susie_cake.gif \
+  $P/susie_fortnite.gif $P/gf1.gif
+```
+
+Upload all of them into one test sticker pack and fill in
+`references/t9-probes-2/CHECKLIST.md`: which are accepted and, for the
+others, the bot's answer word for word. Only acceptance matters this time.

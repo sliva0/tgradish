@@ -75,9 +75,11 @@ accepted it anyway, so the server doesn't check everything on that list.
 The stickers in `references/pixelart/1x-uploaded/` were accepted in 2022
 with merge paths, strokes, no `"tgs":1` key and non-integer `op` values
 like 39.6.
-What the server really validates is unknown; T9 finds out. Custom emoji in
-TGS are presumably also 512x512 Lottie (the docs only give 100x100 for
-video/static emoji); verify in T9.
+T9 found (see `docs/probes.md`): the 3 seconds are counted in seconds,
+not frames, and 30 fps is allowed too; custom emoji are 512x512 like
+stickers, and a 100x100 one is refused. Telegram also refuses stickers
+with too much of something, layers, rectangles or JSON, that the rules
+don't mention; the second round of probes finds what.
 
 ### Limits in the clients
 
@@ -404,8 +406,8 @@ Measure each idea on the corpus and keep only what wins:
 - Palette cycling: the same geometry with fill colour hold keyframes.
 - Per-frame colour order overrides.
 - Probing Telegram's validator for a way past 3 s (`fr`/`op` tricks), the
-  TGS version of the WebM duration spoof. Only as a T9 probe; if it works,
-  it becomes an explicit opt-in.
+  TGS version of the WebM duration spoof. T9 found none: Telegram counts
+  seconds, refusing both 360 frames at 60 fps and 180 at 30 fps.
 
 ### Lay out and serialise
 
@@ -547,8 +549,8 @@ The web app there may also replace the "Web page" and "Bot" items under
   - Format: coordinates start half an art pixel early so odd sizes (most
     rectangles are 1 wide or high) have whole centres: 0.8%. Half-pixel
     units and putting `"s"` before `"p"` were worse. Leaving out `"st"`
-    and `"r"` saves 6% and is the default, pending T9 for `"r"` (1.x's
-    accepted stickers had no `"st"`, but no rectangles either).
+    and `"r"` saves 6% and is the default; T9 confirmed Telegram accepts
+    it.
   - Result: 345 404 bytes for the corpus against 691 738 for 1.x
     (zopfli against 1.x's `gzip -9`): 2.00x. Every file matches at cell
     centres in tlottie and rlottie, with 0 leaks.
@@ -651,8 +653,8 @@ The web app there may also replace the "Web page" and "Bot" items under
   - The default effort for `.tgs` is best: seconds, for the smallest
     stickers. The sticker's name is "made with tgradish VERSION", or the
     title with that added; `--watermark=false` leaves only the title.
-  - Emoji use the same 512x512 canvas as stickers until T9 shows what
-    Telegram wants.
+  - Emoji use the same 512x512 canvas as stickers, which T9 confirmed is
+    what Telegram wants.
 - **T9:** Telegram probes. Generate a set of `.tgs` files for the user to
   upload through @Stickers:
   - minimal JSON without optional fields;
@@ -665,9 +667,13 @@ The web app there may also replace the "Web page" and "Bot" items under
   The user checks acceptance and how they look on Android, Desktop, iOS
   and web. Adjust the encoder to the results.
 
-  Ready: `tgs-lab probes` writes twelve probes (plus real art) and a
-  checklist; `docs/probes.md` has them with the WebM probes and how to
-  upload them. Waiting for the user's results.
+  First round (`tgs-lab probes`, results in `docs/probes.md`): the
+  output, precomps, keyframes, 30 fps and 512x512 emoji are accepted;
+  longer than 3 s and 100x100 emoji are refused, and so were the three
+  probes with very many layers, rectangles or JSON. Second round
+  (`tgs-lab limits`): ladders of each of those and real art, to find the
+  limit and make the encoder keep under it. Waiting for the user's
+  results.
 - **T10:** release as part of tgradish 2.0, which waits for the whole
   roadmap.
 
