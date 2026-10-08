@@ -7,10 +7,12 @@
 //! cargo run -p tgs-lab -- info sticker.tgs
 //! cargo run -p tgs-lab -- render sticker.tgs --frame 10 --size 512 out.png
 //! cargo run -p tgs-lab -- normalise art.gif
-//! cargo run -p tgs-lab -- encode art.gif out.tgs
+//! cargo run -p tgs-lab -- encode art.gif out.tgs [--runs]
 //! cargo run -p tgs-lab -- verify art.gif [out.tgs]
+//! cargo run --release -p tgs-lab -- bench [--fast] [--verify] [--no-lifetimes] [--guess-order] [--full] [DIR]
 //! ```
 
+mod bench;
 mod verify;
 
 use std::path::{Path, PathBuf};
@@ -46,10 +48,10 @@ fn load(path: &Path) -> Result<(PixelAnim, Report)> {
     normalise(&animation, &Options::default()).with_context(|| format!("{}", path.display()))
 }
 
-/// The baseline encoding of `anim`, as Lottie JSON.
-fn baseline(anim: &PixelAnim) -> String {
-    let scene = encode::runs(anim);
-    lay_out(&scene, anim, Some("tgs-lab".into())).to_json(Style::default())
+/// `anim` as Lottie JSON, from the encoder or the `runs` baseline.
+fn encoded(anim: &PixelAnim, runs: bool) -> Result<String> {
+    let scene = if runs { encode::runs(anim) } else { encode::painter(anim, &Default::default())? };
+    Ok(lay_out(&scene, anim, Some("tgs-lab".into())).to_json(Style::default()))
 }
 
 fn info(paths: &[PathBuf]) -> Result<()> {
@@ -77,9 +79,14 @@ fn info(paths: &[PathBuf]) -> Result<()> {
 
 /// Writes premultiplied RGBA pixels as a straight RGBA PNG.
 fn write_png(path: &Path, size: u32, pixels: &[[u8; 4]]) -> Result<()> {
-    let rgba: Vec<u8> = pixels.iter().flat_map(|&pixel| straight(pixel)).collect();
+    let straight: Vec<[u8; 4]> = pixels.iter().map(|&pixel| straight(pixel)).collect();
+    write_straight_png(path, size, size, &straight)
+}
+
+fn write_straight_png(path: &Path, width: u32, height: u32, pixels: &[[u8; 4]]) -> Result<()> {
+    let rgba: Vec<u8> = pixels.iter().flatten().copied().collect();
     let file = std::io::BufWriter::new(std::fs::File::create(path)?);
-    let mut encoder = png::Encoder::new(file, size, size);
+    let mut encoder = png::Encoder::new(file, width, height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     let mut writer = encoder.write_header()?;
@@ -135,29 +142,46 @@ fn print_reports(paths: &[PathBuf]) -> Result<()> {
     Ok(())
 }
 
-fn encode_file(input: &Path, output: &Path) -> Result<()> {
+fn encode_file(args: &[String]) -> Result<()> {
+    let runs = args.iter().any(|arg| arg == "--runs");
+    let paths: Vec<&String> = args.iter().filter(|arg| *arg != "--runs").collect();
+    let [input, output] = paths[..] else {
+        bail!("usage: tgs-lab encode SOURCE OUTPUT.tgs [--runs]");
+    };
+    let (input, output) = (Path::new(input), Path::new(output));
     let (anim, _) = load(input)?;
-    let tgs = file::pack(baseline(&anim).as_bytes(), 15);
+    let tgs = file::pack(encoded(&anim, runs)?.as_bytes(), 15);
     std::fs::write(output, &tgs).with_context(|| format!("cannot write {}", output.display()))?;
     println!("{}: {} bytes", output.display(), tgs.len());
     Ok(())
 }
 
 fn verify_file(args: &[String]) -> Result<()> {
-    let (options, positional) = options(args, &["--sizes"])?;
-    let sizes: Vec<u32> = match options.first() {
-        Some((_, list)) => list.split(',').map(str::parse).collect::<Result<_, _>>()?,
+    let (options, positional) = options(args, &["--sizes", "--frames", "--picture", "--explain"])?;
+    let list = |name: &str| -> Result<Option<Vec<usize>>> {
+        let Some((_, list)) = options.iter().find(|(option, _)| *option == name) else {
+            return Ok(None);
+        };
+        Ok(Some(list.split(',').map(str::parse).collect::<Result<_, _>>()?))
+    };
+    let sizes: Vec<u32> = match list("--sizes")? {
+        Some(sizes) => sizes.into_iter().map(|size| size as u32).collect(),
         None => vec![100, 160, 237, 512],
     };
+    let frames = list("--frames")?;
+    let runs = positional.contains(&"--runs");
+    let positional: Vec<&str> = positional.into_iter().filter(|arg| *arg != "--runs").collect();
     let (source, tgs) = match positional[..] {
         [source] => (source, None),
         [source, tgs] => (source, Some(tgs)),
-        _ => bail!("usage: tgs-lab verify SOURCE [STICKER.tgs] [--sizes 100,160,237,512]"),
+        _ => bail!(
+            "usage: tgs-lab verify SOURCE [STICKER.tgs] [--sizes 100,160,237,512] [--frames 0,4] [--picture PREFIX] [--explain N] [--runs]"
+        ),
     };
     let (anim, _) = load(Path::new(source))?;
     let json = match tgs {
         Some(path) => read_lottie(Path::new(path))?,
-        None => baseline(&anim).into_bytes(),
+        None => encoded(&anim, runs)?.into_bytes(),
     };
     let (_, issues) = check(&json, None).map_err(anyhow::Error::msg)?;
     for issue in &issues {
@@ -173,7 +197,22 @@ fn verify_file(args: &[String]) -> Result<()> {
         for miss in &centres.examples {
             println!("  {miss:?}");
         }
-        let seams = verify::seams(&mut renderer, &anim, &sizes)?;
+        let seams = verify::seams(&mut renderer, &anim, &sizes, frames.as_deref())?;
+        if let Some((_, count)) = options.iter().find(|(option, _)| *option == "--explain") {
+            let frame = frames.as_ref().and_then(|frames| frames.first().copied()).unwrap_or(0);
+            let size = sizes.iter().copied().max().unwrap_or(512);
+            for line in verify::explain(&mut renderer, &anim, frame, size, count.parse()?)? {
+                println!("  {line}");
+            }
+        }
+        if let Some((_, path)) = options.iter().find(|(option, _)| *option == "--picture") {
+            // the first checked frame at the largest size, per renderer
+            let frame = frames.as_ref().and_then(|frames| frames.first().copied()).unwrap_or(0);
+            let size = sizes.iter().copied().max().unwrap_or(512);
+            let pixels = verify::picture(&mut renderer, &anim, frame, size)?;
+            let path = format!("{path}-{name}.png");
+            write_straight_png(Path::new(&path), 3 * size, size, &pixels)?;
+        }
         println!(
             "{name}: seams at {sizes:?}: {} leaks, {} fringes, mean error {:.2}",
             seams.leaks, seams.fringes, seams.mean_error
@@ -193,14 +232,35 @@ fn main() -> Result<()> {
         Some("info") if args.len() > 1 => info(&paths()),
         Some("render") => render(&args[1..]),
         Some("normalise") if args.len() > 1 => print_reports(&paths()),
-        Some("encode") if args.len() == 3 => encode_file(Path::new(&args[1]), Path::new(&args[2])),
+        Some("encode") => encode_file(&args[1..]),
         Some("verify") => verify_file(&args[1..]),
+        Some("bench") => {
+            let flag = |name: &str| args[1..].iter().any(|arg| arg == name);
+            let dir = args[1..].iter().find(|arg| !arg.starts_with("--"));
+            bench::run(
+                Path::new(dir.map_or("references/pixelart", String::as_str)),
+                &bench::Bench {
+                    fast: flag("--fast"),
+                    verify: flag("--verify"),
+                    settings: encode::Settings {
+                        lifetimes: !flag("--no-lifetimes"),
+                        search_order: !flag("--guess-order"),
+                    },
+                    style: if flag("--full") {
+                        Style { tgs_key: true, layer_start: true, rect_roundness: true }
+                    } else {
+                        Style::default()
+                    },
+                },
+            )
+        }
         _ => bail!(
             "usage: tgs-lab info FILE...\n       \
              tgs-lab render INPUT [--frame N] [--size PX] OUTPUT.png\n       \
              tgs-lab normalise FILE...\n       \
-             tgs-lab encode SOURCE OUTPUT.tgs\n       \
-             tgs-lab verify SOURCE [STICKER.tgs] [--sizes 100,160,237,512]"
+             tgs-lab encode SOURCE OUTPUT.tgs [--runs]\n       \
+             tgs-lab verify SOURCE [STICKER.tgs] [--sizes 100,160,237,512] [--frames 0,4] [--picture PREFIX] [--explain N] [--runs]\n       \
+             tgs-lab bench [--fast] [--verify] [--no-lifetimes] [--guess-order] [--full] [DIR]"
         ),
     }
 }

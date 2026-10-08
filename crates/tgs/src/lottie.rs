@@ -1,8 +1,9 @@
 //! The subset of Lottie tgradish writes, and a compact JSON writer for it.
 //!
-//! The default output has only fields that the stickers 1.x made (accepted
-//! by Telegram) or the planning prototypes (checked in rlottie and tlottie)
-//! had. [`Style`] switches the rest, for the T9 probes.
+//! The default output has only what pixelart2tgs 1.x's stickers (accepted
+//! by Telegram) had, plus rectangles without a corner radius, which both
+//! renderers draw correctly; the T9 upload probes confirm Telegram takes
+//! them. [`Style`] adds optional fields back, for the probes.
 
 use std::fmt::Write;
 
@@ -23,7 +24,8 @@ pub struct Animation {
 }
 
 /// Optional fields; renderers don't need them, Telegram's checks might.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Leaving out `"st"` and `"r"` saves about 6% of a sticker.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Style {
     /// `"tgs":1`, which Telegram's exporter writes.
     pub tgs_key: bool,
@@ -31,12 +33,6 @@ pub struct Style {
     pub layer_start: bool,
     /// `"r":{"k":0}` (no rounding) on rectangles.
     pub rect_roundness: bool,
-}
-
-impl Default for Style {
-    fn default() -> Style {
-        Style { tgs_key: false, layer_start: true, rect_roundness: true }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -285,7 +281,7 @@ mod tests {
         let json = animation.to_json(Style::default());
         assert_eq!(
             json,
-            r#"{"v":"5.7.2","fr":60,"ip":0,"op":30,"w":512,"h":512,"nm":"made with \"tgradish\"","layers":[{"ty":4,"ks":{"p":{"k":[6,0]},"s":{"k":[1000,1000]}},"ip":0,"op":30,"st":0,"shapes":[{"ty":"gr","it":[{"ty":"rc","p":{"k":[1.5,2]},"s":{"k":[3,4]},"r":{"k":0}},{"ty":"sh","ks":{"k":{"i":[[],[],[],[]],"o":[[],[],[],[]],"v":[[0,0],[1,0],[1,1],[0,0]]}}},{"ty":"fl","c":{"k":[1,0,0.201]},"o":{"k":50.3},"r":2},{"ty":"tr"}]}]}]}"#
+            r#"{"v":"5.7.2","fr":60,"ip":0,"op":30,"w":512,"h":512,"nm":"made with \"tgradish\"","layers":[{"ty":4,"ks":{"p":{"k":[6,0]},"s":{"k":[1000,1000]}},"ip":0,"op":30,"shapes":[{"ty":"gr","it":[{"ty":"rc","p":{"k":[1.5,2]},"s":{"k":[3,4]}},{"ty":"sh","ks":{"k":{"i":[[],[],[],[]],"o":[[],[],[],[]],"v":[[0,0],[1,0],[1,1],[0,0]]}}},{"ty":"fl","c":{"k":[1,0,0.201]},"o":{"k":50.3},"r":2},{"ty":"tr"}]}]}]}"#
         );
         serde_json::from_str::<serde_json::Value>(&json).unwrap();
         let bare = Style { tgs_key: true, layer_start: false, rect_roundness: false };

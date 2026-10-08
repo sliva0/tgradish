@@ -105,9 +105,11 @@ pub struct Centres {
     pub examples: Vec<Miss>,
 }
 
+/// Anti-aliasing noise allowed at cell centres, in 8-bit levels.
+const NOISE: u8 = 6;
+
 /// Renders every frame at 512x512 and reads the pixel at the centre of each
-/// cell. Opaque and transparent cells must match exactly; translucent ones
-/// within rounding.
+/// cell, which must match within [`NOISE`].
 pub fn centres(renderer: &mut Renderer, anim: &PixelAnim) -> Result<Centres> {
     let placement = Placement::new(anim.grid());
     let mut out = Centres::default();
@@ -127,11 +129,13 @@ pub fn centres(renderer: &mut Renderer, anim: &PixelAnim) -> Result<Centres> {
                 let expected = anim.palette()[frame.pixels[index] as usize];
                 let got = straight(pixels[y as usize * CANVAS as usize + x as usize]);
                 let close = |a: u8, b: u8, by: u8| a.abs_diff(b) <= by;
+                // rlottie's anti-aliasing leaks up to 5 levels into
+                // neighbours of cells smaller than about two canvas pixels
                 let same = match expected[3] {
-                    0 => got[3] == 0,
-                    255 => got == expected,
+                    0 => got[3] <= NOISE,
                     alpha => {
-                        close(got[3], alpha, 1) && (0..3).all(|i| close(got[i], expected[i], 3))
+                        close(got[3], alpha, NOISE)
+                            && (0..3).all(|i| close(got[i], expected[i], NOISE))
                     }
                 };
                 if !same {
@@ -175,15 +179,14 @@ fn overlaps(edges: &[f64], size: u32) -> Vec<Vec<(usize, f64)>> {
         .collect()
 }
 
-/// Renders each frame at every size, over magenta, and compares it with an
-/// exact area-averaged render of the art, like the planning prototype's
-/// `seams.py`.
-pub fn seams(renderer: &mut Renderer, anim: &PixelAnim, sizes: &[u32]) -> Result<Seams> {
-    const MAGENTA: [f64; 3] = [255.0, 0.0, 255.0];
+const MAGENTA: [f64; 3] = [255.0, 0.0, 255.0];
+
+/// An exact area-averaged render of a frame: premultiplied channels 0-255
+/// and alpha 0-1, row by row.
+fn ideal(anim: &PixelAnim, frame: usize, size: u32) -> Vec<[f64; 4]> {
     let placement = Placement::new(anim.grid());
     let columns: Vec<f64> = (0..=anim.width()).map(|c| placement.canvas(c, 0)[0]).collect();
     let rows: Vec<f64> = (0..=anim.height()).map(|r| placement.canvas(0, r)[1]).collect();
-    // premultiplied palette: channels 0-255, alpha 0-1
     let palette: Vec<[f64; 4]> = anim
         .palette()
         .iter()
@@ -192,44 +195,146 @@ pub fn seams(renderer: &mut Renderer, anim: &PixelAnim, sizes: &[u32]) -> Result
             [f64::from(r) * a, f64::from(g) * a, f64::from(b) * a, a]
         })
         .collect();
+    let pixels = &anim.frames()[frame].pixels;
+    let (along_x, along_y) = (overlaps(&columns, size), overlaps(&rows, size));
+    let mut out = Vec::with_capacity(size as usize * size as usize);
+    for row_cells in &along_y {
+        for column_cells in &along_x {
+            let mut sum = [0.0; 4];
+            for &(row, wy) in row_cells {
+                for &(column, wx) in column_cells {
+                    let paint = palette[pixels[row * anim.width() as usize + column] as usize];
+                    for i in 0..4 {
+                        sum[i] += paint[i] * wx * wy;
+                    }
+                }
+            }
+            out.push(sum);
+        }
+    }
+    out
+}
+
+/// Composites premultiplied RGBA (0-255 channels, 0-1 alpha) over magenta.
+fn over_magenta(pixel: [f64; 4]) -> [f64; 3] {
+    [0, 1, 2].map(|i| pixel[i] + MAGENTA[i] * (1.0 - pixel[3]))
+}
+
+fn as_float(pixel: [u8; 4]) -> [f64; 4] {
+    [f64::from(pixel[0]), f64::from(pixel[1]), f64::from(pixel[2]), f64::from(pixel[3]) / 255.0]
+}
+
+fn largest_error(a: [f64; 3], b: [f64; 3]) -> f64 {
+    (0..3).map(|i| (a[i] - b[i]).abs()).fold(0.0, f64::max)
+}
+
+/// Renders each frame (or the `only` ones) at every size, over magenta,
+/// and compares it with an exact area-averaged render of the art, like the
+/// planning prototype's `seams.py`.
+pub fn seams(
+    renderer: &mut Renderer,
+    anim: &PixelAnim,
+    sizes: &[u32],
+    only: Option<&[usize]>,
+) -> Result<Seams> {
     let mut out = Seams::default();
     let mut pixels_seen = 0usize;
     for size in sizes.iter().copied() {
-        let (along_x, along_y) = (overlaps(&columns, size), overlaps(&rows, size));
-        for (frame, tick) in anim.frames().iter().zip(starts(anim)) {
+        for (index, tick) in starts(anim).into_iter().enumerate() {
+            if only.is_some_and(|only| !only.contains(&index)) {
+                continue;
+            }
             let rendered = renderer.render(tick, size)?;
-            for (y, row_cells) in along_y.iter().enumerate() {
-                for (x, column_cells) in along_x.iter().enumerate() {
-                    let mut ideal = [0.0; 4];
-                    for &(row, wy) in row_cells {
-                        for &(column, wx) in column_cells {
-                            let colour = frame.pixels[row * anim.width() as usize + column];
-                            let paint = palette[colour as usize];
-                            for i in 0..4 {
-                                ideal[i] += paint[i] * wx * wy;
-                            }
-                        }
-                    }
-                    let got = rendered[y * size as usize + x];
-                    let got_alpha = f64::from(got[3]) / 255.0;
-                    let error = (0..3)
-                        .map(|i| {
-                            let want = ideal[i] + MAGENTA[i] * (1.0 - ideal[3]);
-                            let have = f64::from(got[i]) + MAGENTA[i] * (1.0 - got_alpha);
-                            (want - have).abs()
-                        })
-                        .fold(0.0, f64::max);
-                    out.mean_error += error;
-                    pixels_seen += 1;
-                    if ideal[3] > 0.999 {
-                        out.leaks += usize::from(got_alpha < 0.9);
-                        out.fringes += usize::from(error > 40.0);
-                    }
+            for (want, &got) in ideal(anim, index, size).into_iter().zip(&rendered) {
+                let got = as_float(got);
+                let error = largest_error(over_magenta(want), over_magenta(got));
+                out.mean_error += error;
+                pixels_seen += 1;
+                if want[3] > 0.999 {
+                    out.leaks += usize::from(got[3] < 0.9);
+                    out.fringes += usize::from(error > 40.0);
                 }
             }
         }
     }
     out.mean_error /= pixels_seen.max(1) as f64;
+    Ok(out)
+}
+
+/// The first `count` fringe pixels of a frame: where they are, the ideal
+/// and rendered colour over magenta, and the cells they overlap.
+pub fn explain(
+    renderer: &mut Renderer,
+    anim: &PixelAnim,
+    frame: usize,
+    size: u32,
+    count: usize,
+) -> Result<Vec<String>> {
+    let rendered = renderer.render(starts(anim)[frame], size)?;
+    let placement = Placement::new(anim.grid());
+    let columns: Vec<f64> = (0..=anim.width()).map(|c| placement.canvas(c, 0)[0]).collect();
+    let rows: Vec<f64> = (0..=anim.height()).map(|r| placement.canvas(0, r)[1]).collect();
+    let (along_x, along_y) = (overlaps(&columns, size), overlaps(&rows, size));
+    let pixels = &anim.frames()[frame].pixels;
+    let mut out = Vec::new();
+    for (index, want) in ideal(anim, frame, size).into_iter().enumerate() {
+        let got = as_float(rendered[index]);
+        let (want_rgb, got_rgb) = (over_magenta(want), over_magenta(got));
+        if want[3] <= 0.999 || largest_error(want_rgb, got_rgb) <= 40.0 {
+            continue;
+        }
+        let (x, y) = (index % size as usize, index / size as usize);
+        let mut cells = Vec::new();
+        for &(row, wy) in &along_y[y] {
+            for &(column, wx) in &along_x[x] {
+                let colour = pixels[row * anim.width() as usize + column];
+                cells.push(format!("({column},{row}) colour {colour} {:.2}", wx * wy));
+            }
+        }
+        let rgb = |c: [f64; 3]| format!("{:.0},{:.0},{:.0}", c[0], c[1], c[2]);
+        out.push(format!(
+            "pixel {x},{y}: ideal {} got {}; {}",
+            rgb(want_rgb),
+            rgb(got_rgb),
+            cells.join(", ")
+        ));
+        if out.len() == count {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// Three renders of a frame side by side, over magenta: the renderer's,
+/// the ideal one, and the renderer's with fringes in green and leaks in
+/// cyan. Straight RGBA, `3 * size` wide.
+pub fn picture(
+    renderer: &mut Renderer,
+    anim: &PixelAnim,
+    frame: usize,
+    size: u32,
+) -> Result<Vec<[u8; 4]>> {
+    let rendered = renderer.render(starts(anim)[frame], size)?;
+    let ideal = ideal(anim, frame, size);
+    let byte = |c: [f64; 3]| [c[0].round() as u8, c[1].round() as u8, c[2].round() as u8, 255];
+    let mut out = vec![[0; 4]; 3 * size as usize * size as usize];
+    for y in 0..size as usize {
+        for x in 0..size as usize {
+            let (want, got) =
+                (ideal[y * size as usize + x], as_float(rendered[y * size as usize + x]));
+            let row = y * 3 * size as usize;
+            out[row + x] = byte(over_magenta(got));
+            out[row + size as usize + x] = byte(over_magenta(want));
+            let interior = want[3] > 0.999;
+            out[row + 2 * size as usize + x] = if interior && got[3] < 0.9 {
+                [0, 255, 255, 255]
+            } else if interior && largest_error(over_magenta(want), over_magenta(got)) > 40.0 {
+                [0, 255, 0, 255]
+            } else {
+                byte(over_magenta(got))
+            };
+        }
+    }
     Ok(out)
 }
 
@@ -360,7 +465,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .map(|(name, mut renderer)| {
-                (name, seams(&mut renderer, anim, &[100, 237, 512]).unwrap())
+                (name, seams(&mut renderer, anim, &[100, 237, 512], None).unwrap())
             })
             .collect()
     }

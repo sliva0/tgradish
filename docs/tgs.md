@@ -350,10 +350,13 @@ reach. Check the invariant in code (debug assertion plus tests) on every
 `Scene`.
 
 **Primitives.**
-- Rectangles grouped under one fill per colour. Use a cover (overlap
-  allowed within a group, since one path with the nonzero rule has no
-  inner seams), not a partition. Start with greedy maximal rectangles, then
-  improve the cover heuristic.
+- Rectangles grouped under one fill per colour, as a partition: no
+  overlaps. (The plan first said overlaps were fine because one non-zero
+  path has no inner seams. They aren't: both renderers anti-alias a path by
+  adding up the coverage of its parts, so pixels on an outer edge two
+  rectangles share get double coverage. Abutting rectangles are fine, their
+  shared edges cancel.) Start with greedy maximal rectangles, then improve
+  the cover heuristic.
 - Rectilinear paths (with empty tangents) where they come out cheaper.
 - To try: 1 px strokes along pixel centres for straight runs; the even-odd
   fill rule for dithering and checkerboards (a checkerboard is O(n) XORed
@@ -517,9 +520,42 @@ The web app there may also replace the "Web page" and "Bot" items under
     invariant has 0 leaks and 0 fringes in both renderers.
   - `tgs-lab verify` computes the ideal render from exact pixel overlaps
     instead of the prototype's 8x8 supersampling.
-- **T4:** encoder v1: painter's layers + seam invariant + rectangle covers
-  + lifetimes. Target: at least 2x the content of 1.x across the corpus, 0
-  leaks in both renderers.
+- **T4 (done):** encoder v1: painter's layers + seam invariant + rectangle
+  covers + lifetimes. Target: at least 2x the content of 1.x across the
+  corpus, 0 leaks in both renderers.
+
+  Notes from T4 (`encode::painter`, measured with `tgs-lab bench`):
+  - One global colour order. A colour's shape must hold its cells and
+    every 8-neighbour of a later opaque colour, and may hold any other cell
+    of a later opaque colour. Covers are partitions (see Primitives).
+  - Lifetimes: a colour keeps one shape while one shape fits every frame,
+    so every frame still has one group per colour. Pieces with equal
+    lifetimes share layers when nothing in between is shown at the same
+    time. Worth 12%.
+  - The order: a colour's cost depends only on the set of colours above
+    it, so the cheapest order (by rectangles and groups) is exact over
+    subsets up to 10 colours, greedy up to 256. Worth 4% over larger
+    bounding boxes first. Rectangle count is a weak proxy for compressed
+    bytes: covering column by column gave fewer rectangles and bigger
+    files.
+  - Format: coordinates start half an art pixel early so odd sizes (most
+    rectangles are 1 wide or high) have whole centres: 0.8%. Half-pixel
+    units and putting `"s"` before `"p"` were worse. Leaving out `"st"`
+    and `"r"` saves 6% and is the default, pending T9 for `"r"` (1.x's
+    accepted stickers had no `"st"`, but no rectangles either).
+  - Result: 345 404 bytes for the corpus against 691 738 for 1.x
+    (zopfli against 1.x's `gzip -9`): 2.00x. Every file matches at cell
+    centres in tlottie and rlottie, with 0 leaks.
+  - Fringes remain, all from conflation: anti-aliasing treats coverage as
+    alpha, so a colour drawn between the two colours meeting at an edge
+    shows through that edge's pixels when its hidden part ends there,
+    by up to a quarter of the colour difference. Extensions the seam
+    invariant forces cause most of them. Letting shapes reach freely
+    under later colours gave 16x fewer fringes on `Ralsei_battle_start`
+    than reaching only away from uncoverable cells (55 against 904 on
+    frames 0 and 4; the prototype had 571), and 12% more over the corpus.
+    T5 should weigh fringes in the order search and keep hidden edges off
+    visible ones where it costs nothing.
 - **T5:** `tgs-lab bench`, cost model, optimiser.
 - **T6:** encoder v2 experiments: motion, precomps, palette cycling, mixing
   primitives, even-odd, strokes. Keep what the bench shows is better.

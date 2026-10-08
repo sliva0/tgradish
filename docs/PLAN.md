@@ -47,7 +47,8 @@ Done on `rewrite-v2`, with CI on Linux and Windows:
 - release workflow: single-file binaries with ffmpeg linked in for Linux
   x86-64 (16.8 MB) and Windows x86-64 (18.8 MB), tested on both;
 - `.tgs`: T1 (crates, WASM check), T2 (decoders, normalisation), T3 (Lottie
-  writer, checks, `tgs-lab verify` in tlottie and rlottie).
+  writer, checks, `tgs-lab verify` in tlottie and rlottie), T4 (encoder v1:
+  half the size of 1.x, no seams).
 
 ## Roadmap
 
