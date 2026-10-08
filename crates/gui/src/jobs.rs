@@ -1,5 +1,6 @@
 //! Conversions, run one at a time on a worker thread.
 
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
 
@@ -130,7 +131,17 @@ impl Job {
                 let _ = sender.send(message);
                 ctx.request_repaint();
             };
-            let result = run(plan, inputs, sequence, output, overwrite, &cancel, &send);
+            let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                run(plan, inputs, sequence, output, overwrite, &cancel, &send)
+            }));
+            let result = result.unwrap_or_else(|panic| {
+                let message = panic
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("no details");
+                Err(format!("tgradish crashed: {message}"))
+            });
             send(Message::Done(result));
         });
     }
