@@ -25,8 +25,6 @@ pub enum Error {
     NothingFits { smallest: u64, limit: u64 },
     #[error("cancelled")]
     Cancelled,
-    #[error("download failed: {0}")]
-    Download(String),
     #[error("ffmpeg: {0}")]
     Libav(String),
     #[error(transparent)]

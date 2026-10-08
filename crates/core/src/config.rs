@@ -4,7 +4,8 @@
 //! preset = "sticker"   # preset used when none is given
 //!
 //! [ffmpeg]
-//! use = "auto"         # auto, bundled, downloaded or system
+//! use = "auto"         # auto (built in if there is one, else system),
+//!                      # builtin or system
 //! path = "/opt/ffmpeg" # ffmpeg executable or its directory, overrides `use`
 //! ```
 

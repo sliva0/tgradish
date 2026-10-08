@@ -8,9 +8,6 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
-default = ["download"]
-# `tgradish ffmpeg download`: HTTP client and archive extraction
-download = ["dep:flate2", "dep:sha2", "dep:tar", "dep:ureq"]
 # ffmpeg libraries linked into the binary, from the system or FFMPEG_DIR
 linked = ["dep:ffmpeg-next"]
 # link them statically, as release builds do
@@ -19,10 +16,6 @@ linked-static = ["linked", "ffmpeg-next/static"]
 [dependencies]
 directories.workspace = true
 ffmpeg-next = { workspace = true, optional = true }
-flate2 = { workspace = true, optional = true }
-sha2 = { workspace = true, optional = true }
-tar = { workspace = true, optional = true }
-ureq = { workspace = true, optional = true }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

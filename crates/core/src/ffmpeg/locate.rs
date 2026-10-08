@@ -8,23 +8,6 @@ fn exe(dir: &Path, name: &str) -> PathBuf {
     dir.join(format!("{name}{EXE_SUFFIX}"))
 }
 
-/// Finds ffmpeg and ffprobe in `dir`, if both are there.
-fn in_dir(dir: &Path, source: FfmpegSource) -> Option<Ffmpeg> {
-    let ffmpeg = exe(dir, "ffmpeg");
-    let ffprobe = exe(dir, "ffprobe");
-    (ffmpeg.is_file() && ffprobe.is_file()).then_some(Ffmpeg { ffmpeg, ffprobe, source })
-}
-
-/// Directory of the build shipped next to the tgradish executable.
-pub fn bundled_dir() -> Option<PathBuf> {
-    Some(std::env::current_exe().ok()?.parent()?.to_path_buf())
-}
-
-/// Directory that `tgradish ffmpeg download` installs into.
-pub fn downloaded_dir() -> Option<PathBuf> {
-    Some(crate::paths::data_dir()?.join("ffmpeg"))
-}
-
 fn system() -> Option<Ffmpeg> {
     let ffmpeg = which::which("ffmpeg").ok()?;
     // prefer the ffprobe from the same installation
@@ -55,23 +38,15 @@ pub fn locate(choice: FfmpegChoice, path: Option<&Path>) -> Result<Ffmpeg> {
         return Ok(Ffmpeg { ffmpeg, ffprobe, source: FfmpegSource::Path });
     }
 
-    let bundled = || bundled_dir().and_then(|dir| in_dir(&dir, FfmpegSource::Bundled));
-    let downloaded = || downloaded_dir().and_then(|dir| in_dir(&dir, FfmpegSource::Downloaded));
     let found = match choice {
-        FfmpegChoice::Auto => bundled().or_else(downloaded).or_else(system),
-        FfmpegChoice::Bundled => bundled(),
-        FfmpegChoice::Downloaded => downloaded(),
-        FfmpegChoice::System => system(),
+        FfmpegChoice::Auto | FfmpegChoice::System => system(),
         FfmpegChoice::Builtin => None,
     };
     found.ok_or_else(|| {
         let hint = match choice {
-            FfmpegChoice::Auto => {
-                "install ffmpeg, run `tgradish ffmpeg download` or pass --ffmpeg PATH"
+            FfmpegChoice::Auto | FfmpegChoice::System => {
+                "ffmpeg and ffprobe are not on PATH: install them or pass --ffmpeg PATH"
             }
-            FfmpegChoice::Bundled => "this tgradish build does not include ffmpeg",
-            FfmpegChoice::Downloaded => "run `tgradish ffmpeg download` first",
-            FfmpegChoice::System => "ffmpeg and ffprobe are not on PATH",
             FfmpegChoice::Builtin => "the built-in ffmpeg is not an executable",
         };
         Error::FfmpegNotFound(hint.into())

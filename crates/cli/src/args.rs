@@ -32,7 +32,7 @@ pub struct Global {
     #[arg(long, global = true, env = "TGRADISH_FFMPEG", value_name = "PATH")]
     pub ffmpeg: Option<PathBuf>,
     /// Which ffmpeg to use when no path is given. Default: from config, or
-    /// auto (built in, bundled, downloaded, then system).
+    /// auto (built in if this build has it, otherwise system).
     #[arg(long, global = true, value_name = "WHERE", value_enum)]
     pub ffmpeg_from: Option<FfmpegFrom>,
     /// Config file to use instead of the default one.
@@ -45,8 +45,6 @@ pub struct Global {
 pub enum FfmpegFrom {
     Auto,
     Builtin,
-    Bundled,
-    Downloaded,
     System,
 }
 
@@ -55,8 +53,6 @@ impl From<FfmpegFrom> for FfmpegChoice {
         match value {
             FfmpegFrom::Auto => FfmpegChoice::Auto,
             FfmpegFrom::Builtin => FfmpegChoice::Builtin,
-            FfmpegFrom::Bundled => FfmpegChoice::Bundled,
-            FfmpegFrom::Downloaded => FfmpegChoice::Downloaded,
             FfmpegFrom::System => FfmpegChoice::System,
         }
     }
@@ -82,7 +78,7 @@ pub enum Command {
     /// Show the config file.
     #[command(subcommand)]
     Config(ConfigCommand),
-    /// Check, download or remove ffmpeg.
+    /// Check which ffmpeg is used.
     #[command(subcommand)]
     Ffmpeg(FfmpegCommand),
 }
@@ -339,18 +335,6 @@ pub enum ConfigCommand {
 pub enum FfmpegCommand {
     /// Show which ffmpeg is used and whether it can encode stickers.
     Status,
-    /// Download the minimal ffmpeg build into tgradish's data directory.
-    Download {
-        /// Archive to install instead of the build published for this
-        /// version: a URL, file:// URL or local path.
-        #[arg(long, requires = "sha256")]
-        url: Option<String>,
-        /// Expected SHA-256 of the archive given with --url.
-        #[arg(long, requires = "url")]
-        sha256: Option<String>,
-    },
-    /// Delete the downloaded ffmpeg.
-    Remove,
 }
 
 #[cfg(test)]

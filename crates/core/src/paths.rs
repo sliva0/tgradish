@@ -13,8 +13,3 @@ fn dirs() -> Option<ProjectDirs> {
 pub fn config_dir() -> Option<PathBuf> {
     Some(dirs()?.config_dir().to_path_buf())
 }
-
-/// Directory for downloaded data, such as ffmpeg builds.
-pub fn data_dir() -> Option<PathBuf> {
-    Some(dirs()?.data_dir().to_path_buf())
-}
