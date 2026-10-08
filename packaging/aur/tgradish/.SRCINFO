@@ -1,0 +1,25 @@
+pkgbase = tgradish
+	pkgdesc = Telegram video stickers and emoji from any video, and animated stickers from pixel art
+	pkgver = 2.0.0
+	pkgrel = 1
+	url = https://github.com/sliva0/tgradish
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = cargo
+	depends = ffmpeg
+	depends = gcc-libs
+	depends = glibc
+	depends = libglvnd
+	depends = libx11
+	depends = libxcursor
+	depends = libxi
+	depends = libxkbcommon
+	depends = libxkbcommon-x11
+	depends = libxrandr
+	depends = wayland
+	optdepends = xdg-desktop-portal: file dialogs in the window
+	source = tgradish-2.0.0.tar.gz::https://github.com/sliva0/tgradish/archive/refs/tags/v2.0.0.tar.gz
+	sha256sums = SKIP
+
+pkgname = tgradish

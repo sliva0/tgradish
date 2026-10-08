@@ -45,15 +45,19 @@ Done on `rewrite-v2`, with CI on Linux and Windows:
 - CLI: `convert`, `watch`, `--clipboard`, `spoof`, `inspect`, `describe`,
   presets, config, `ffmpeg status`;
 - release workflow: single-file binaries with ffmpeg linked in for Linux
-  x86-64 (16.8 MB) and Windows x86-64 (18.8 MB), tested on both;
+  x86-64 (26.5 MB), Linux aarch64 (20.7 MB) and Windows x86-64 (23.7 MB),
+  and Linux builds that use the system's ffmpeg (12.2 and 10.8 MB), each
+  tested on its own system; sizes include the window;
 - `.tgs`: T1 (crates, WASM check), T2 (decoders, normalisation), T3 (Lottie
   writer, checks, `tgs-lab verify` in tlottie and rlottie), T4 (encoder v1:
   half the size of 1.x, no seams), T5 (effort levels, bench baselines), T7
   (fitting with lossy reductions), T8 (`.tgs` in the CLI, protocol 2). T6
   (encoder v2: colours split into a lasting core and per-frame changes;
   other experiments are in `docs/tgs.md`);
-- GUI: `tgradish gui`, or tgradish started outside a terminal. Next:
-  distribution.
+- GUI: `tgradish gui`, or tgradish started outside a terminal;
+- distribution: the targets above, AUR packages and a Nix flake, with
+  publishing steps for the user in `docs/packaging.md`. Next: T9 probes
+  and the release.
 
 ## Roadmap
 
@@ -107,28 +111,28 @@ cover two formats, which the GUI then builds on.
 
 ### 4. Distribution
 
-- **Targets:** Linux x86-64 and Windows x86-64 exist; 2.0 adds Linux
-  aarch64, built natively on GitHub's free arm64 runners
-  (`ubuntu-24.04-arm`); ffmpeg's and libvpx's ARM assembly need no nasm.
-- **Old glibc baseline:** the Linux release is built on `ubuntu-22.04` to
-  run on older systems, but that runner image is deprecated from
-  2026-09-17 and unsupported from 2027-04-17. Build inside an old-glibc
-  container instead (for example `manylinux_2_28`, glibc 2.28, which also
-  exists for aarch64). A fully static musl build is not an option once the
-  GUI is in the binary, since it has to load the system's graphics
+Done:
+
+- **Targets:** Linux x86-64, Linux aarch64 (built natively on
+  `ubuntu-24.04-arm`; ffmpeg's and libvpx's ARM assembly need no nasm) and
+  Windows x86-64.
+- **Old glibc baseline:** Linux releases are built in `manylinux_2_28`
+  containers (AlmaLinux 8, glibc 2.28) instead of on the `ubuntu-22.04`
+  runner, which is unsupported from 2027-04-17; packaging fails if a
+  binary needs a newer glibc. A fully static musl build is not an option
+  with the GUI in the binary, since it loads the system's graphics
   libraries.
-- **Linux build without ffmpeg:** for distributions and users who want the
-  system ffmpeg. Either the process backend (works with any ffmpeg 6+ on
-  `PATH`, no ABI coupling, the right choice for a generic download) or
-  linked dynamically against the system's libav* (ties the binary to one
-  ffmpeg major version, fine for distribution packages that rebuild).
-- **AUR and Nix, prepared last:** PKGBUILDs for `tgradish` (from source,
-  `depends=(ffmpeg)`) and `tgradish-bin` (release binary), and a
-  `flake.nix` with the package (built against nixpkgs' ffmpeg) and a dev
-  shell (Rust, nasm, meson, ninja, clang for bindgen). Publishing to the AUR
-  needs the user's account: everything is prepared in the repo, with
-  step-by-step instructions for the user, once all other parts are ready.
-  Submitting to nixpkgs can come later.
+- **Linux build without ffmpeg:** the process backend, which works with any
+  ffmpeg 6+ on `PATH` without ABI coupling, released next to each Linux
+  build with ffmpeg linked in.
+- **Licenses:** archives list every Rust crate in them with its license
+  (cargo-about), besides ffmpeg's licenses and sources.
+- **AUR and Nix:** PKGBUILDs for `tgradish` (from source,
+  `depends=(ffmpeg)`) and `tgradish-bin` (the system-ffmpeg release
+  builds) in `packaging/aur`, and `flake.nix` with the package (built
+  against nixpkgs' ffmpeg, tests run in the sandbox) and a dev shell, built
+  by the `nix` workflow. Publishing to the AUR needs the user's account;
+  `docs/packaging.md` has the steps. Submitting to nixpkgs can come later.
 
 ### 5. Telegram probes and release
 
