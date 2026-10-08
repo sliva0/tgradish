@@ -27,6 +27,8 @@ pub enum Error {
     Cancelled,
     #[error("ffmpeg: {0}")]
     Libav(String),
+    #[error("could not paste from the clipboard: {0}")]
+    Clipboard(String),
     #[error(transparent)]
     Webm(#[from] WebmError),
     #[error(transparent)]

@@ -1,5 +1,4 @@
 mod args;
-mod clipboard;
 mod commands;
 mod convert;
 mod ui;

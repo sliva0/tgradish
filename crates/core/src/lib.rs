@@ -3,6 +3,8 @@
 //! gets stickers past the 3 second limit.
 
 pub mod backend;
+#[cfg(feature = "clipboard")]
+pub mod clipboard;
 pub mod config;
 pub mod convert;
 pub mod ebml;

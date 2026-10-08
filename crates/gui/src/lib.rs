@@ -12,12 +12,13 @@ use std::path::{Path, PathBuf};
 use eframe::egui;
 use serde_json::{Map, Value};
 use tgradish_core::backend::Backend;
+use tgradish_core::clipboard::Pasted;
 use tgradish_core::config::Config;
 use tgradish_core::ffmpeg::{CancelToken, FfmpegChoice};
 use tgradish_core::options::Options;
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::tgs::{self, TgsOptions};
-use tgradish_core::{telegram, webm};
+use tgradish_core::{paths, telegram, webm};
 
 use crate::form::Form;
 use crate::jobs::{Job, Plan, Status};
@@ -81,6 +82,8 @@ struct App {
     ffmpeg_status: Option<String>,
     inspection: Option<(PathBuf, String)>,
     message: Option<String>,
+    /// The clipboard was read for the Ctrl+V being held.
+    pasted: bool,
 }
 
 impl App {
@@ -141,6 +144,7 @@ impl App {
             ffmpeg_status: None,
             inspection: None,
             message,
+            pasted: false,
         }
     }
 
@@ -196,9 +200,26 @@ impl App {
             jobs.extend(files.into_iter().map(|file| Job::new(vec![file], false)));
         }
         for job in jobs {
-            self.jobs.push((self.next_id, job));
-            self.selected = Some(self.next_id);
-            self.next_id += 1;
+            self.push(job);
+        }
+    }
+
+    fn push(&mut self, job: Job) {
+        self.jobs.push((self.next_id, job));
+        self.selected = Some(self.next_id);
+        self.next_id += 1;
+    }
+
+    /// Adds what is on the clipboard: copied files, paths or an image.
+    fn paste(&mut self) {
+        match tgradish_core::clipboard::paste() {
+            Ok(Pasted { files, image_dir: None }) => self.add(files),
+            Ok(Pasted { files, image_dir: Some(dir) }) => {
+                let mut job = Job::new(files, false);
+                job.pasted = Some(dir);
+                self.push(job);
+            }
+            Err(err) => self.message = Some(err.to_string()),
         }
     }
 
@@ -217,8 +238,16 @@ impl App {
         };
         match self.plan() {
             Ok(plan) => {
-                let output = plan
-                    .output(&self.jobs[index].1.inputs[0], self.config.gui.output_dir.as_deref());
+                let job = &self.jobs[index].1;
+                let dir = self.config.gui.output_dir.clone();
+                let output = match &job.pasted {
+                    // not next to the image, which is in a temporary directory
+                    Some(_) => {
+                        let dir = dir.or_else(paths::pictures_dir).unwrap_or_default();
+                        pasted_output(&plan, &job.inputs[0], &dir)
+                    }
+                    None => plan.output(&job.inputs[0], dir.as_deref()),
+                };
                 self.jobs[index].1.start(plan, output, self.config.gui.overwrite, ctx.clone());
             }
             Err(err) => {
@@ -292,6 +321,9 @@ impl App {
             {
                 self.add(files);
             }
+            if ui.button("Paste").on_hover_text("Add copied files or an image (Ctrl+V)").clicked() {
+                self.paste();
+            }
             if self.format == Format::Tgs {
                 if ui.button("Add a folder of frames…").clicked()
                     && let Some(dir) = rfd::FileDialog::new().pick_folder()
@@ -321,11 +353,9 @@ impl App {
         if self.jobs.is_empty() {
             ui.centered_and_justified(|ui| {
                 ui.label(
-                    egui::RichText::new(
-                        "Drop videos, images or pixel art here,\nor paste their paths",
-                    )
-                    .size(18.0)
-                    .weak(),
+                    egui::RichText::new("Drop videos, images or pixel art here,\nor paste them")
+                        .size(18.0)
+                        .weak(),
                 );
             });
             return;
@@ -574,40 +604,53 @@ impl App {
 
     /// Files dropped on the window, or paths pasted as text.
     fn take_input(&mut self, ctx: &egui::Context) {
-        let (dropped, pasted) = ctx.input(|input| {
+        let (dropped, text_pasted, v_released) = ctx.input(|input| {
             let dropped: Vec<PathBuf> =
                 input.raw.dropped_files.iter().map(|file| file.path().to_path_buf()).collect();
-            let pasted: Vec<PathBuf> = input
-                .events
-                .iter()
-                .filter_map(|event| match event {
-                    egui::Event::Paste(text) => Some(text.clone()),
-                    _ => None,
-                })
-                .flat_map(|text| paths_in(&text))
-                .collect();
-            (dropped, pasted)
+            let text_pasted =
+                input.events.iter().any(|event| matches!(event, egui::Event::Paste(_)));
+            let v_released = input.events.iter().find_map(|event| match event {
+                egui::Event::Key { key: egui::Key::V, pressed: false, modifiers, .. } => {
+                    Some(modifiers.command)
+                }
+                _ => None,
+            });
+            (dropped, text_pasted, v_released)
         });
-        // pasting into a text field is just text
-        let typing = ctx.memory(|memory| memory.focused().is_some());
-        let mut paths = dropped;
-        if !typing {
-            paths.extend(pasted);
+        if !dropped.is_empty() {
+            self.add(dropped);
         }
-        if !paths.is_empty() {
-            self.add(paths);
+        // pasting into a text field is just text
+        if ctx.memory(|memory| memory.focused().is_some()) {
+            self.pasted = false;
+            return;
+        }
+        // egui only says when text is pasted, so files and images are
+        // pasted when Ctrl+V is let go
+        if text_pasted {
+            self.paste();
+            self.pasted = true;
+        }
+        if let Some(command) = v_released {
+            if command && !self.pasted {
+                self.paste();
+            }
+            self.pasted = false;
         }
     }
 }
 
-/// Paths in pasted text, one per line, that exist.
-fn paths_in(text: &str) -> Vec<PathBuf> {
-    text.lines()
-        .map(|line| line.trim().trim_matches('"'))
-        .map(|line| line.strip_prefix("file://").unwrap_or(line))
-        .map(PathBuf::from)
-        .filter(|path| path.exists())
-        .collect()
+/// Where the result of a pasted image goes: in `dir`, under a name nothing
+/// has yet, since every pasted image has the same name.
+fn pasted_output(plan: &Plan, image: &Path, dir: &Path) -> PathBuf {
+    let first = plan.output(image, Some(dir));
+    let stem = image.file_stem().unwrap_or_default().to_string_lossy();
+    let name = first.file_name().unwrap_or_default().to_string_lossy();
+    let rest = name.strip_prefix(&*stem).unwrap_or(&name);
+    std::iter::once(first.clone())
+        .chain((2..).map(|n| dir.join(format!("{stem} {n}{rest}"))))
+        .find(|path| !path.exists())
+        .expect("some name is free")
 }
 
 fn status_line(ui: &mut egui::Ui, status: &Status) {
@@ -908,16 +951,16 @@ mod tests {
     }
 
     #[test]
-    fn finds_paths_in_pasted_text() {
+    fn names_pasted_results_apart() {
         let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("a b.gif");
-        std::fs::write(&file, b"x").unwrap();
-        let text = format!(
-            "{}\nnot a file\n\"{}\"\nfile://{}",
-            file.display(),
-            file.display(),
-            file.display()
+        let plan = Plan::Tgs { options: TgsOptions::default() };
+        let image = Path::new("/tmp/somewhere/clipboard.png");
+        let first = pasted_output(&plan, image, dir.path());
+        assert_eq!(first, dir.path().join("clipboard.sticker.tgs"));
+        std::fs::write(&first, b"").unwrap();
+        assert_eq!(
+            pasted_output(&plan, image, dir.path()),
+            dir.path().join("clipboard 2.sticker.tgs")
         );
-        assert_eq!(paths_in(&text), vec![file.clone(), file.clone(), file]);
     }
 }
