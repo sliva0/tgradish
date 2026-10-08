@@ -10,11 +10,15 @@ publish = false
 tgradish-tgs.workspace = true
 
 anyhow.workspace = true
-flate2.workspace = true
 png.workspace = true
 serde_json.workspace = true
 # not on crates.io, so only this unpublished crate depends on it
 tlottie = { git = "https://github.com/dkaraush/tlottie", rev = "92df98dc209bc39b1e567ec74a8c86a0af5239de" }
+# builds Telegram's fork of rlottie, which needs git, cmake and libclang
+rlottie = { version = "0.5.4", default-features = false, features = ["vendor-telegram"], optional = true }
+
+[features]
+rlottie = ["dep:rlottie"]
 
 [lints]
 workspace = true

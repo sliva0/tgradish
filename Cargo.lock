@@ -124,6 +124,7 @@ dependencies = [
  "cexpr",
  "clang-sys",
  "itertools",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
@@ -977,6 +978,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
 
 [[package]]
+name = "prettyplease"
+version = "0.2.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
+dependencies = [
+ "proc-macro2",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1088,6 +1099,32 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "rgb"
+version = "0.8.53"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
+
+[[package]]
+name = "rlottie"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74b1485b7d3d35af9d248389250ebd0ab92ee9c989f1bb607d0aae51b1c66f6a"
+dependencies = [
+ "rgb",
+ "rlottie-sys",
+]
+
+[[package]]
+name = "rlottie-sys"
+version = "0.2.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8f260ceb76c75bdfd86ae215f0680ebbcbcfaefe0b2fa5eff0bdd4a4a4c62ba"
+dependencies = [
+ "bindgen",
+ "pkg-config",
+]
 
 [[package]]
 name = "rustc-hash"
@@ -1338,9 +1375,12 @@ dependencies = [
 name = "tgradish-tgs"
 version = "2.0.0"
 dependencies = [
+ "flate2",
  "serde",
+ "serde_json",
  "tgradish-frames",
  "thiserror",
+ "zopfli",
 ]
 
 [[package]]
@@ -1348,8 +1388,8 @@ name = "tgs-lab"
 version = "2.0.0"
 dependencies = [
  "anyhow",
- "flate2",
  "png",
+ "rlottie",
  "serde_json",
  "tgradish-tgs",
  "tlottie",
@@ -1781,6 +1821,18 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zopfli"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249"
+dependencies = [
+ "bumpalo",
+ "crc32fast",
+ "log",
+ "simd-adler32",
+]
 
 [[package]]
 name = "zune-core"

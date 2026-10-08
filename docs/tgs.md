@@ -227,11 +227,11 @@ xtask/     existing
   durations) and the pure-Rust decoders. The WebM side can use it later,
   for example to feed Aseprite files to ffmpeg as raw video. If it stays
   tiny, folding it into `tgs` is fine.
-- **`tgs-lab`** depends on tlottie (git) and optionally on the `rlottie`
-  crate (0.5.4, links the system librlottie via pkg-config: Ubuntu
-  `librlottie-dev`, Arch `rlottie`). Check that crate's API before relying
-  on it; the prototypes used `rlottie-python` instead. Keep tlottie out of
-  publishable crates' normal dependencies, since it isn't on crates.io.
+- **`tgs-lab`** depends on tlottie (git) and, with its `rlottie` feature,
+  on the `rlottie` crate (0.5.4) built from Telegram's fork
+  (`vendor-telegram`, needs git, cmake and libclang; a system librlottie
+  found by pkg-config takes precedence). Keep tlottie out of publishable
+  crates' normal dependencies, since it isn't on crates.io.
 - **CLI:** one binary. `.tgs` output is chosen with `--format tgs` or an
   `-o` ending in `.tgs`; fit this into the CLI as it exists by then.
   `.tgs` has its own options (the WebM options mostly don't apply), so
@@ -469,7 +469,7 @@ length, the pixel scale override, and the watermark.
     anti-aliasing noise level.
 
   Run the tlottie checks in normal CI on Linux and Windows, and rlottie in
-  a Linux job with `librlottie-dev`. ThorVG and lottie-web are optional
+  a Linux job (`rlottie` in `ci.yml`). ThorVG and lottie-web are optional
   extras.
 - **`tgs-lab bench`** runs the corpus through the encoder and prints a
   table of compressed size, raw size, time, losses and render time
@@ -491,9 +491,32 @@ The web app there may also replace the "Web page" and "Bot" items under
   through tlottie) and add the WASM check to CI.
 - **T2 (done):** `frames`: decoders. `tgs`: normalisation (scale
   detection, crop, timing, alpha); `tgs-lab normalise` prints the report.
-- **T3:** Lottie model, serialiser, zopfli, limits checker, `Scene`
+- **T3 (done):** Lottie model, serialiser, zopfli, limits checker, `Scene`
   rasteriser, seam invariant checker; `tgs-lab verify`. **Ask the user for
-  more test files now** (see Reminders).
+  more test files now** (see Reminders; asked 2026-10-08).
+
+  Notes from T3:
+  - The writer's defaults are the fields 1.x's accepted stickers and the
+    prototypes had: no `"a"` in properties, `"st":0` on layers,
+    `"r":{"k":0}` on rectangles, paths in 1.x's form (first point
+    repeated, empty tangents), no `"tgs":1`. `lottie::Style` switches the
+    optional ones for T9.
+  - tlottie and rlottie truncate colour and opacity to 8 bits, so each is
+    written as the shortest decimal in `[v + 0.02, v + 0.98] / 255`
+    (at most 3 decimals). Every cell centre then matches exactly in both
+    renderers, translucent colours included.
+  - Layout: Lottie units are art pixels, counted from where the art pixel
+    grid starts, so inner edges are integers even when the canvas cuts art
+    pixels; the longer side fills the canvas, centred.
+  - `check` counts shapes, paints and painted geometry like tlottie's
+    parser; it runs on any Lottie, for `inspect` later.
+  - `encode::runs` (a layer per frame, a group per colour, a rectangle per
+    run) is the baseline: exact at cell centres, but it leaks at seams
+    (about 64 000 leaking pixels over all frames at 4 sizes for
+    `Ralsei_battle_start.gif`). A hand-made scene that keeps the seam
+    invariant has 0 leaks and 0 fringes in both renderers.
+  - `tgs-lab verify` computes the ideal render from exact pixel overlaps
+    instead of the prototype's 8x8 supersampling.
 - **T4:** encoder v1: painter's layers + seam invariant + rectangle covers
   + lifetimes. Target: at least 2x the content of 1.x across the corpus, 0
   leaks in both renderers.

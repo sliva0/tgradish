@@ -10,8 +10,14 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+pub mod check;
+pub mod encode;
+pub mod file;
+pub mod layout;
 pub mod limits;
+pub mod lottie;
 pub mod normalise;
+pub mod scene;
 
 pub use normalise::{PixelAnim, normalise};
 pub use tgradish_frames as frames;

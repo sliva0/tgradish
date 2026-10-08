@@ -97,3 +97,43 @@ fn detects_pixel_scales() {
         }
     }
 }
+
+#[test]
+fn encodes_valid_lottie() {
+    use tgradish_tgs::check::{Severity, check};
+    use tgradish_tgs::encode;
+    use tgradish_tgs::layout::lay_out;
+    use tgradish_tgs::lottie::Style;
+
+    for path in corpus() {
+        let input = decode(&std::fs::read(&path).unwrap(), &DecodeOptions::default()).unwrap();
+        let (anim, _) = normalise(&input, &Options::default()).unwrap();
+        let scene = encode::runs(&anim);
+        assert_eq!(scene.compare(&anim), None, "{}", name(&path));
+        let json = lay_out(&scene, &anim, Some("tgradish".into())).to_json(Style::default());
+        let (stats, issues) = check(json.as_bytes(), None).unwrap();
+        let errors: Vec<_> = issues.iter().filter(|i| i.severity == Severity::Error).collect();
+        assert!(errors.is_empty(), "{}: {errors:?}", name(&path));
+        assert_eq!(stats.frames, f64::from(anim.ticks()));
+    }
+}
+
+#[test]
+fn checks_stickers_from_1x() {
+    use tgradish_tgs::check::{Severity, check};
+    use tgradish_tgs::file::unpack;
+
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../references/pixelart/1x-uploaded");
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for path in entries.map(|entry| entry.unwrap().path()) {
+        let tgs = std::fs::read(&path).unwrap();
+        let (stats, issues) = check(&unpack(&tgs).unwrap(), Some(tgs.len())).unwrap();
+        // Telegram accepted these, with merge paths and strokes in every group
+        assert!(
+            issues.iter().all(|issue| issue.severity == Severity::Warning),
+            "{}: {issues:?}",
+            name(&path)
+        );
+        assert!(stats.features.contains("merge paths") && stats.features.contains("strokes"));
+    }
+}
