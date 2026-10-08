@@ -264,12 +264,18 @@ check        → Telegram rules, 2 MiB raw limit, tlottie limits
 - GIF, APNG, animated WebP: the `image` crate's animation decoders (they
   handle frame disposal and blending). Treat GIF delays of 0-1 cs as 100
   ms, the way browsers do. Files whose frames all say 0 get 100 ms too.
-- Aseprite: `asefile` 0.3.8. It brings `image` 0.24 without codecs next to
-  our 0.25, which is cheap, and renders every blend mode, tilemaps and
-  linked cels. It doesn't do per-cel z-index or group opacity, and rejects
-  "ping-pong reverse" tags, which `frames` rewrites to ping-pong before
-  parsing and reverses itself. A tag chooses which loop to export;
-  ping-pong loops don't repeat their end frames.
+- Aseprite: our own parser and renderer (`frames/src/aseprite`). asefile
+  0.3.8 was used first, but it panics on malformed files (31 explicit
+  panics and unchecked indexing), ignores tile flips and is unmaintained,
+  and files will come from untrusted uploads in the web app. Ours checks
+  every read, renders every blend mode (ported from asefile's port of
+  Aseprite's `blend_funcs.cpp`), groups composited separately when the
+  file asks for it, linked cels, per-cel z-index and tilemaps, and refuses
+  flipped tiles rather than drawing them wrong. A tag chooses which loop
+  to export; ping-pong loops don't repeat their end frames.
+- Decoding has limits (`frames::Limits`: the largest side and a byte
+  budget for all decoded pixels), so hostile files fail instead of
+  exhausting memory. The web app can set them lower.
 - PNG sprite sheets (columns and rows, optional frame count, trailing
   transparent cells dropped) and image sequences (the CLI sorts the files).
 - Video and anything else (2.x): decode with `tgradish-core`'s ffmpeg to

@@ -18,8 +18,9 @@ pub fn runs(anim: &PixelAnim) -> Scene {
     let mut layers = Vec::new();
     let mut start = 0;
     for frame in anim.frames() {
-        let mut groups: Vec<Group> = (0..anim.palette().len() as u16)
-            .map(|colour| Group { colour, ..Group::default() })
+        // palette indices fit u16, the palette's length may not
+        let mut groups: Vec<Group> = (0..anim.palette().len())
+            .map(|colour| Group { colour: colour as u16, ..Group::default() })
             .collect();
         for (y, row) in frame.pixels.chunks_exact(width as usize).enumerate() {
             let mut x = 0;

@@ -66,8 +66,10 @@ pub enum Shape {
 pub enum Paint {
     Clear,
     Colour(u16),
-    /// A translucent colour over another colour: renderers blend these,
-    /// which never matches a normalised frame.
+    /// A translucent colour over another colour. Renderers blend these and
+    /// round differently, so [`Scene::compare`] counts every blend as wrong,
+    /// even one that would come out right; encoders never draw translucent
+    /// colours over anything.
     Blend,
 }
 
@@ -91,14 +93,26 @@ pub struct Seam {
 }
 
 impl Shape {
+    /// The box around the shape: `x0, y0, x1, y1`, ends excluded.
+    fn bounds(&self) -> (u32, u32, u32, u32) {
+        match *self {
+            Shape::Rect { x, y, width, height } => (x, y, x + width, y + height),
+            Shape::Path(ref corners) => {
+                corners.iter().fold((u32::MAX, u32::MAX, 0, 0), |(x0, y0, x1, y1), &(x, y)| {
+                    (x0.min(x), y0.min(y), x1.max(x), y1.max(y))
+                })
+            }
+        }
+    }
+
     /// Adds the shape's vertical edges crossing row `y` to `winding`, which
-    /// holds the change in winding number at each column edge.
-    fn add_crossings(&self, y: u32, winding: &mut [i32]) {
+    /// holds the change in winding number at each column edge from `left`.
+    fn add_crossings(&self, y: u32, left: u32, winding: &mut [i32]) {
         match *self {
             Shape::Rect { x, y: top, width, height } => {
                 if (top..top + height).contains(&y) {
-                    winding[x as usize] += 1;
-                    winding[(x + width) as usize] -= 1;
+                    winding[(x - left) as usize] += 1;
+                    winding[(x + width - left) as usize] -= 1;
                 }
             }
             Shape::Path(ref corners) => {
@@ -109,9 +123,9 @@ impl Shape {
                     }
                     // a clockwise outline goes up on its left side
                     if y1 < y0 && (y1..y0).contains(&y) {
-                        winding[x as usize] += 1;
+                        winding[(x - left) as usize] += 1;
                     } else if y0 < y1 && (y0..y1).contains(&y) {
-                        winding[x as usize] -= 1;
+                        winding[(x - left) as usize] -= 1;
                     }
                 }
             }
@@ -119,26 +133,63 @@ impl Shape {
     }
 }
 
+/// The cells a group fills, kept for the box around its shapes only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Coverage {
+    left: u32,
+    top: u32,
+    width: u32,
+    cells: Vec<bool>,
+}
+
+impl Coverage {
+    pub fn contains(&self, x: u32, y: u32) -> bool {
+        let (Some(dx), Some(dy)) = (x.checked_sub(self.left), y.checked_sub(self.top)) else {
+            return false;
+        };
+        dx < self.width && self.cells.get((dy * self.width + dx) as usize).copied().unwrap_or(false)
+    }
+
+    /// Filled cells, row by row.
+    pub fn cells(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
+        let width = self.width.max(1);
+        self.cells.iter().enumerate().filter(|(_, filled)| **filled).map(move |(index, _)| {
+            (self.left + index as u32 % width, self.top + index as u32 / width)
+        })
+    }
+}
+
 impl Group {
-    /// Cells the group fills, row by row.
-    pub fn coverage(&self, width: u32, height: u32) -> Vec<bool> {
-        let mut out = vec![false; width as usize * height as usize];
+    /// Cells the group fills.
+    pub fn coverage(&self) -> Coverage {
+        let (left, top, right, bottom) = self
+            .shapes
+            .iter()
+            .map(Shape::bounds)
+            .fold((u32::MAX, u32::MAX, 0, 0), |(x0, y0, x1, y1), (a, b, c, d)| {
+                (x0.min(a), y0.min(b), x1.max(c), y1.max(d))
+            });
+        if left >= right || top >= bottom {
+            return Coverage { left: 0, top: 0, width: 0, cells: Vec::new() };
+        }
+        let width = right - left;
+        let mut cells = Vec::with_capacity(width as usize * (bottom - top) as usize);
         let mut winding = vec![0i32; width as usize + 1];
-        for y in 0..height {
+        for y in top..bottom {
             winding.fill(0);
             for shape in &self.shapes {
-                shape.add_crossings(y, &mut winding);
+                shape.add_crossings(y, left, &mut winding);
             }
             let mut count = 0;
-            for x in 0..width as usize {
-                count += winding[x];
-                out[y as usize * width as usize + x] = match self.rule {
+            for &change in &winding[..width as usize] {
+                count += change;
+                cells.push(match self.rule {
                     FillRule::NonZero => count != 0,
                     FillRule::EvenOdd => count % 2 != 0,
-                };
+                });
             }
         }
-        out
+        Coverage { left, top, width, cells }
     }
 }
 
@@ -167,14 +218,16 @@ impl Scene {
         let mut cells = vec![Paint::Clear; self.width as usize * self.height as usize];
         for group in self.visible(tick) {
             let opaque = palette[group.colour as usize][3] == 255;
-            for (cell, covered) in cells.iter_mut().zip(group.coverage(self.width, self.height)) {
-                if covered {
-                    *cell = match *cell {
-                        Paint::Clear => Paint::Colour(group.colour),
-                        _ if opaque => Paint::Colour(group.colour),
-                        _ => Paint::Blend,
-                    };
+            for (x, y) in group.coverage().cells() {
+                if x >= self.width || y >= self.height {
+                    continue;
                 }
+                let cell = &mut cells[(y * self.width + x) as usize];
+                *cell = match *cell {
+                    Paint::Clear => Paint::Colour(group.colour),
+                    _ if opaque => Paint::Colour(group.colour),
+                    _ => Paint::Blend,
+                };
             }
         }
         cells
@@ -215,14 +268,13 @@ impl Scene {
         let changes = self.changes();
         for &tick in &changes[..changes.len() - 1] {
             let groups: Vec<&Group> = self.visible(tick).collect();
-            let coverage: Vec<Vec<bool>> =
-                groups.iter().map(|group| group.coverage(self.width, self.height)).collect();
+            let coverage: Vec<Coverage> = groups.iter().map(|group| group.coverage()).collect();
             // the topmost group at each cell, and whether it is opaque
             let mut top: Vec<Option<usize>> = vec![None; w * h];
             for (index, cover) in coverage.iter().enumerate() {
-                for (cell, &covered) in top.iter_mut().zip(cover) {
-                    if covered {
-                        *cell = Some(index);
+                for (x, y) in cover.cells() {
+                    if (x as usize) < w && (y as usize) < h {
+                        top[y as usize * w + x as usize] = Some(index);
                     }
                 }
             }
@@ -243,7 +295,8 @@ impl Scene {
                             continue;
                         }
                         let (low, high) = if top[a] < top[b] { (a, b) } else { (b, a) };
-                        if !coverage[top[low].unwrap()][high] {
+                        let (hx, hy) = ((high % w) as u32, (high / w) as u32);
+                        if !coverage[top[low].unwrap()].contains(hx, hy) {
                             let at = |cell: usize| ((cell % w) as u32, (cell / w) as u32);
                             out.push(Seam { tick, cell: at(high), neighbour: at(low) });
                         }

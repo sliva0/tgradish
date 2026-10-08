@@ -97,6 +97,7 @@ pub struct Miss {
 
 #[derive(Debug, Default)]
 pub struct Centres {
+    /// Cells checked, once for every 60 fps frame.
     pub checked: usize,
     /// Cells smaller than a canvas pixel, which can't be sampled cleanly.
     pub skipped: usize,
@@ -105,43 +106,45 @@ pub struct Centres {
     pub examples: Vec<Miss>,
 }
 
-/// Anti-aliasing noise allowed at cell centres, in 8-bit levels.
+/// Anti-aliasing noise allowed at cell centres, in 8-bit levels of
+/// premultiplied colour. rlottie leaks up to 5 levels into neighbours of
+/// cells smaller than about two canvas pixels.
 const NOISE: u8 = 6;
 
-/// Renders every frame at 512x512 and reads the pixel at the centre of each
-/// cell, which must match within [`NOISE`].
+fn premultiplied([r, g, b, a]: [u8; 4]) -> [u8; 4] {
+    let times = |c: u8| ((u32::from(c) * u32::from(a) + 127) / 255) as u8;
+    [times(r), times(g), times(b), a]
+}
+
+/// Renders every 60 fps frame at 512x512 and reads the pixel at the centre
+/// of each cell, which must match within [`NOISE`]. Every tick counts, so
+/// a layer that ends too early shows up even inside a frame.
 pub fn centres(renderer: &mut Renderer, anim: &PixelAnim) -> Result<Centres> {
     let placement = Placement::new(anim.grid());
     let mut out = Centres::default();
-    for (frame, tick) in anim.frames().iter().zip(starts(anim)) {
-        let pixels = renderer.render(tick, CANVAS)?;
-        for row in 0..anim.height() {
-            for column in 0..anim.width() {
-                let [x0, y0] = placement.canvas(column, row);
-                let [x1, y1] = placement.canvas(column + 1, row + 1);
-                let (x, y) = (((x0 + x1) / 2.0).floor(), ((y0 + y1) / 2.0).floor());
-                if x < x0 || x + 1.0 > x1 || y < y0 || y + 1.0 > y1 {
-                    out.skipped += 1;
-                    continue;
-                }
-                out.checked += 1;
-                let index = (row * anim.width() + column) as usize;
-                let expected = anim.palette()[frame.pixels[index] as usize];
-                let got = straight(pixels[y as usize * CANVAS as usize + x as usize]);
-                let close = |a: u8, b: u8, by: u8| a.abs_diff(b) <= by;
-                // rlottie's anti-aliasing leaks up to 5 levels into
-                // neighbours of cells smaller than about two canvas pixels
-                let same = match expected[3] {
-                    0 => got[3] <= NOISE,
-                    alpha => {
-                        close(got[3], alpha, NOISE)
-                            && (0..3).all(|i| close(got[i], expected[i], NOISE))
+    for (frame, start) in anim.frames().iter().zip(starts(anim)) {
+        for tick in start..start + frame.ticks {
+            let pixels = renderer.render(tick, CANVAS)?;
+            for row in 0..anim.height() {
+                for column in 0..anim.width() {
+                    let [x0, y0] = placement.canvas(column, row);
+                    let [x1, y1] = placement.canvas(column + 1, row + 1);
+                    let (x, y) = (((x0 + x1) / 2.0).floor(), ((y0 + y1) / 2.0).floor());
+                    if x < x0 || x + 1.0 > x1 || y < y0 || y + 1.0 > y1 {
+                        out.skipped += 1;
+                        continue;
                     }
-                };
-                if !same {
-                    out.misses += 1;
-                    if out.examples.len() < 10 {
-                        out.examples.push(Miss { tick, cell: (column, row), expected, got });
+                    out.checked += 1;
+                    let index = (row * anim.width() + column) as usize;
+                    let expected = anim.palette()[frame.pixels[index] as usize];
+                    let got = pixels[y as usize * CANVAS as usize + x as usize];
+                    let want = premultiplied(expected);
+                    if (0..4).any(|i| got[i].abs_diff(want[i]) > NOISE) {
+                        out.misses += 1;
+                        if out.examples.len() < 10 {
+                            let got = straight(got);
+                            out.examples.push(Miss { tick, cell: (column, row), expected, got });
+                        }
                     }
                 }
             }
@@ -527,5 +530,42 @@ mod tests {
                 assert_eq!(result.misses, 0, "{name} in {renderer}: {:?}", result.examples);
             }
         }
+    }
+
+    #[test]
+    fn checks_every_tick_and_faint_colours() {
+        // misses for a 1x1 colour shown for 6 ticks, by a layer that ends at
+        // `to`
+        let misses = |rgba: [u8; 4], to: u32| {
+            let frame = Frame { rgba: rgba.to_vec(), duration: Duration::from_millis(100) };
+            let input = Animation::new(1, 1, vec![frame]).unwrap();
+            let anim = normalise(&input, &Options::default()).unwrap().0;
+            assert_eq!(anim.ticks(), 6);
+            let scene = Scene {
+                width: 1,
+                height: 1,
+                ticks: 6,
+                layers: vec![Layer {
+                    from: 0,
+                    to,
+                    groups: vec![Group {
+                        colour: 1,
+                        rule: FillRule::NonZero,
+                        shapes: vec![Shape::Rect { x: 0, y: 0, width: 1, height: 1 }],
+                    }],
+                }],
+            };
+            let json = lay_out(&scene, &anim, None).to_json(Style::default());
+            Renderer::all(json.as_bytes())
+                .unwrap()
+                .into_iter()
+                .map(|(_, mut renderer)| centres(&mut renderer, &anim).unwrap().misses)
+                .sum::<usize>()
+        };
+        // unpremultiplying would turn this into white and miss
+        assert_eq!(misses([128, 128, 128, 1], 6), 0);
+        assert_eq!(misses([200, 30, 30, 255], 6), 0);
+        // gone after the first tick of the frame
+        assert!(misses([200, 30, 30, 255], 1) > 0);
     }
 }

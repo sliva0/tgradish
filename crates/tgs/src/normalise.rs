@@ -310,6 +310,8 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
     match options.pixel_scale {
         Some(0) => return Err(Error::ZeroScale),
         Some(scale @ 2..) => {
+            // anything larger than the art makes it one cell either way
+            let scale = scale.min(crop.width.max(crop.height));
             let offset = edges.fit(scale).offset;
             for frame in &mut pixels {
                 snapped_pixels += snap(frame, crop.width, crop.height, scale, offset);
@@ -411,7 +413,8 @@ fn cut(pixels: &[u32], width: u32, crop: Rect) -> Vec<u32> {
 
 /// Colour changes between neighbouring pixels, over every row (or
 /// column) of every frame: `columns[x]` counts changes between columns
-/// `x - 1` and `x`.
+/// `x - 1` and `x`. Outside the crop counts as transparent, so the first
+/// and last entries count visible pixels on the border.
 struct Edges {
     columns: Vec<u64>,
     rows: Vec<u64>,
@@ -427,11 +430,14 @@ struct GridFit {
 
 impl Edges {
     fn count(frames: &[Vec<u32>], width: u32, height: u32) -> Edges {
-        let w = width as usize;
-        let mut columns = vec![0; w];
-        let mut rows = vec![0; height as usize];
+        let (w, h) = (width as usize, height as usize);
+        let mut columns = vec![0; w + 1];
+        let mut rows = vec![0; h + 1];
+        let visible = |line: &[u32]| line.iter().filter(|&&pixel| pixel != 0).count() as u64;
         for pixels in frames {
             for (y, line) in pixels.chunks_exact(w).enumerate() {
+                columns[0] += u64::from(line[0] != 0);
+                columns[w] += u64::from(line[w - 1] != 0);
                 for x in 1..w {
                     columns[x] += u64::from(line[x] != line[x - 1]);
                 }
@@ -440,6 +446,8 @@ impl Edges {
                     rows[y] += line.iter().zip(above).filter(|(a, b)| a != b).count() as u64;
                 }
             }
+            rows[0] += visible(&pixels[..w]);
+            rows[h] += visible(&pixels[(h - 1) * w..]);
         }
         Edges { columns, rows }
     }
@@ -448,9 +456,10 @@ impl Edges {
     /// start a new cell; the rest are copies and join the cell before them.
     fn grid(&self) -> Grid {
         let edges = |counts: &[u64]| {
+            let size = counts.len() - 1;
             let mut edges: Vec<u32> =
-                (0..counts.len()).filter(|&i| i == 0 || counts[i] > 0).map(|i| i as u32).collect();
-            edges.push(counts.len() as u32);
+                (0..size).filter(|&i| i == 0 || counts[i] > 0).map(|i| i as u32).collect();
+            edges.push(size as u32);
             edges
         };
         Grid { columns: edges(&self.columns), rows: edges(&self.rows) }
@@ -490,24 +499,25 @@ fn snap(pixels: &mut [u32], width: u32, height: u32, scale: u32, offset: (u32, u
     let (columns, rows) = (starts(offset.0, width), starts(offset.1, height));
     let w = width as usize;
     let mut changed = 0;
-    let mut counts: Vec<(u32, u32)> = Vec::new();
+    let mut cell: Vec<u32> = Vec::new();
     for ys in rows.windows(2) {
         for xs in columns.windows(2) {
-            counts.clear();
             let centre = pixels[(ys[0] + (ys[1] - ys[0]) / 2) as usize * w
                 + (xs[0] + (xs[1] - xs[0]) / 2) as usize];
+            cell.clear();
             for y in ys[0]..ys[1] {
-                for &colour in
-                    &pixels[y as usize * w + xs[0] as usize..y as usize * w + xs[1] as usize]
-                {
-                    match counts.iter_mut().find(|(c, _)| *c == colour) {
-                        Some((_, n)) => *n += 1,
-                        None => counts.push((colour, 1)),
-                    }
-                }
+                cell.extend_from_slice(
+                    &pixels[y as usize * w + xs[0] as usize..y as usize * w + xs[1] as usize],
+                );
             }
-            let (colour, _) =
-                *counts.iter().max_by_key(|(colour, n)| (*n, *colour == centre)).unwrap();
+            // the most common colour; on ties the centre's, then the largest
+            cell.sort_unstable();
+            let colour = cell
+                .chunk_by(|a, b| a == b)
+                .map(|run| (run.len(), run[0] == centre, run[0]))
+                .max()
+                .unwrap()
+                .2;
             for y in ys[0]..ys[1] {
                 for pixel in
                     &mut pixels[y as usize * w + xs[0] as usize..y as usize * w + xs[1] as usize]
@@ -753,5 +763,30 @@ mod tests {
         let input = animation(300, 1, &[ms(100)], |_, x, _| [x as u8, (x >> 8) as u8, 0, 255]);
         let (_, report) = normalise(&input, &Options::default()).unwrap();
         assert_eq!(report.warnings, [Warning::ManyColours { colours: 300 }]);
+    }
+
+    #[test]
+    fn handles_extreme_inputs() {
+        // every colour a palette holds, and transparent
+        let input = animation(256, 256, &[ms(100)], |_, x, y| match y * 256 + x {
+            0 => CLEAR,
+            i => [i as u8, (i >> 8) as u8, 0, 255],
+        });
+        let canvas = Options { keep_canvas: true, ..Options::default() };
+        let (anim, report) = normalise(&input, &canvas).unwrap();
+        assert_eq!(report.colours, 65535);
+        assert_eq!(crate::encode::runs(&anim).compare(&anim), None);
+
+        // a forced scale far past the art
+        let dot = animation(1, 1, &[ms(100)], |_, _, _| RED);
+        let huge = Options { pixel_scale: Some(u32::MAX), ..Options::default() };
+        assert_eq!(normalise(&dot, &huge).unwrap().1.width, 1);
+
+        // snapping one cell of 65536 different pixels stays quick
+        let started = std::time::Instant::now();
+        let whole = Options { pixel_scale: Some(256), ..canvas };
+        let (anim, report) = normalise(&input, &whole).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!((anim.width(), report.snapped_pixels), (1, 65535));
     }
 }
