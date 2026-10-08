@@ -691,6 +691,11 @@ fn package_release(args: &[String]) -> Result<()> {
     std::fs::copy(&binary, stage.join(target.exe("tgradish")))?;
     std::fs::copy(root.join("README.md"), stage.join("README.md"))?;
     std::fs::copy(root.join("LICENSE.txt"), stage.join("LICENSE.txt"))?;
+    if !target.is_windows() {
+        // for menus: install as share/applications/tgradish.desktop
+        let desktop = "tgradish.desktop";
+        std::fs::copy(root.join("crates/cli/assets").join(desktop), stage.join(desktop))?;
+    }
     let third_party = if system_ffmpeg {
         "tgradish is MIT licensed, see LICENSE.txt.\n\n\
          This build has no ffmpeg in it: it runs the system's ffmpeg and ffprobe\n\
