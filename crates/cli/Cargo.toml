@@ -11,6 +11,11 @@ repository.workspace = true
 name = "tgradish"
 path = "src/main.rs"
 
+[features]
+# ffmpeg linked into the binary instead of separate executables
+linked = ["tgradish-core/linked"]
+linked-static = ["tgradish-core/linked-static"]
+
 [dependencies]
 tgradish-core.workspace = true
 

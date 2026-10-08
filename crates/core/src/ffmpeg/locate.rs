@@ -62,6 +62,7 @@ pub fn locate(choice: FfmpegChoice, path: Option<&Path>) -> Result<Ffmpeg> {
         FfmpegChoice::Bundled => bundled(),
         FfmpegChoice::Downloaded => downloaded(),
         FfmpegChoice::System => system(),
+        FfmpegChoice::Builtin => None,
     };
     found.ok_or_else(|| {
         let hint = match choice {
@@ -71,6 +72,7 @@ pub fn locate(choice: FfmpegChoice, path: Option<&Path>) -> Result<Ffmpeg> {
             FfmpegChoice::Bundled => "this tgradish build does not include ffmpeg",
             FfmpegChoice::Downloaded => "run `tgradish ffmpeg download` first",
             FfmpegChoice::System => "ffmpeg and ffprobe are not on PATH",
+            FfmpegChoice::Builtin => "the built-in ffmpeg is not an executable",
         };
         Error::FfmpegNotFound(hint.into())
     })

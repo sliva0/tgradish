@@ -17,6 +17,7 @@ clap = { version = "4.6.7", features = ["derive", "env", "wrap_help"] }
 console = "0.16.6"
 ctrlc = "3.5.2"
 directories = "6.0.0"
+ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec", "filter", "format", "software-scaling"] }
 flate2 = "1.1.10"
 indicatif = "0.18.6"
 schemars = "1.2.2"

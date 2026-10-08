@@ -32,7 +32,7 @@ pub struct Global {
     #[arg(long, global = true, env = "TGRADISH_FFMPEG", value_name = "PATH")]
     pub ffmpeg: Option<PathBuf>,
     /// Which ffmpeg to use when no path is given. Default: from config, or
-    /// auto (bundled, then downloaded, then system).
+    /// auto (built in, bundled, downloaded, then system).
     #[arg(long, global = true, value_name = "WHERE", value_enum)]
     pub ffmpeg_from: Option<FfmpegFrom>,
     /// Config file to use instead of the default one.
@@ -44,6 +44,7 @@ pub struct Global {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum FfmpegFrom {
     Auto,
+    Builtin,
     Bundled,
     Downloaded,
     System,
@@ -53,6 +54,7 @@ impl From<FfmpegFrom> for FfmpegChoice {
     fn from(value: FfmpegFrom) -> Self {
         match value {
             FfmpegFrom::Auto => FfmpegChoice::Auto,
+            FfmpegFrom::Builtin => FfmpegChoice::Builtin,
             FfmpegFrom::Bundled => FfmpegChoice::Bundled,
             FfmpegFrom::Downloaded => FfmpegChoice::Downloaded,
             FfmpegFrom::System => FfmpegChoice::System,

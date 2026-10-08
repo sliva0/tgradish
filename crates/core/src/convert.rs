@@ -5,13 +5,13 @@
 //! [`CancelToken`]:
 //!
 //! ```no_run
-//! # use tgradish_core::{convert::{convert, Request}, ffmpeg::{self, CancelToken}};
-//! let ffmpeg = ffmpeg::locate(Default::default(), None)?;
+//! # use tgradish_core::{backend::Backend, convert::{convert, Request}, ffmpeg::CancelToken};
+//! let backend = Backend::select(Default::default(), None)?;
 //! let cancel = CancelToken::new();
 //! let request = Request::new("pig.mp4".into());
 //! let worker = std::thread::spawn({
 //!     let cancel = cancel.clone();
-//!     move || convert(&ffmpeg, &request, &cancel, &mut |event| println!("{event:?}"))
+//!     move || convert(&backend, &request, &cancel, &mut |event| println!("{event:?}"))
 //! });
 //! // cancel.cancel() stops it early
 //! let outcome = worker.join().unwrap()?;
@@ -20,14 +20,14 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use schemars::JsonSchema;
 use serde::Serialize;
 
+use crate::backend::{Backend, Pass};
 use crate::error::{Error, Result};
 use crate::events::{Event, Params, Rate};
-use crate::ffmpeg::{self, CancelToken, Ffmpeg, Output, Probe};
+use crate::ffmpeg::{CancelToken, Output, Probe};
 use crate::fit::{self, Attempt, Encoder};
 use crate::options::{self, Fit, Options, Range, Resize, Speed, Spoof};
 use crate::telegram::{self, Issue, Target};
@@ -369,10 +369,10 @@ pub struct Outcome {
     pub temp_dir: Option<PathBuf>,
 }
 
-/// Runs ffmpeg for fitting attempts. Reuses first-pass logs: libvpx-vp9
-/// first-pass statistics do not depend on the target bitrate.
-struct FfmpegEncoder<'a> {
-    ffmpeg: &'a Ffmpeg,
+/// Runs fitting attempts through a [`Backend`]. Reuses first-pass logs:
+/// libvpx-vp9 first-pass statistics do not depend on the target bitrate.
+struct BackendEncoder<'a> {
+    backend: &'a Backend,
     plan: &'a Plan,
     dir: &'a Path,
     cancel: &'a CancelToken,
@@ -381,32 +381,35 @@ struct FfmpegEncoder<'a> {
     pass_logs: HashMap<(u64, u64, bool), PathBuf>,
 }
 
-impl FfmpegEncoder<'_> {
-    fn ffmpeg_command(&self, args: Vec<std::ffi::OsString>) -> Command {
-        let mut cmd = Command::new(&self.ffmpeg.ffmpeg);
-        cmd.args(args);
-        cmd
-    }
-
-    fn run_pass(&mut self, attempt: u32, pass: u8, passes: u8, cmd: Command) -> Result<()> {
-        let length = self.plan.length;
+impl BackendEncoder<'_> {
+    fn run_pass(
+        &mut self,
+        attempt: u32,
+        (pass_number, passes): (u8, u8),
+        params: &Params,
+        pass: Pass,
+        output: Option<&Path>,
+    ) -> Result<()> {
+        let length = params.length;
         let on_event = &mut *self.on_event;
-        on_event(Event::Progress { attempt, pass, passes, fraction: 0.0 });
-        ffmpeg::run(cmd, "ffmpeg", self.cancel, &mut |output| match output {
-            Output::Time { micros } => {
-                let fraction = (micros as f64 / 1e6 / length).clamp(0.0, 1.0);
-                on_event(Event::Progress { attempt, pass, passes, fraction });
+        let progress = |fraction| Event::Progress { attempt, pass: pass_number, passes, fraction };
+        on_event(progress(0.0));
+        self.backend.encode(self.plan, params, pass, output, self.cancel, &mut |output| {
+            match output {
+                Output::Time { micros } => {
+                    on_event(progress((micros as f64 / 1e6 / length).clamp(0.0, 1.0)));
+                }
+                Output::Line(line) => on_event(Event::Log { line }),
+                // other -progress keys
+                Output::Stdout(_) => {}
             }
-            Output::Line(line) => on_event(Event::Log { line }),
-            // other -progress keys
-            Output::Stdout(_) => {}
         })?;
-        on_event(Event::Progress { attempt, pass, passes, fraction: 1.0 });
+        on_event(progress(1.0));
         Ok(())
     }
 }
 
-impl Encoder for FfmpegEncoder<'_> {
+impl Encoder for BackendEncoder<'_> {
     fn encode(&mut self, params: Params) -> Result<Attempt> {
         self.cancel.check()?;
         self.attempts += 1;
@@ -415,9 +418,7 @@ impl Encoder for FfmpegEncoder<'_> {
         let path = self.dir.join(format!("attempt-{attempt:02}.webm"));
 
         if params.rate == Rate::Lossless {
-            let args = ffmpeg::encode_args(self.plan, &params, None, Some(&path));
-            let cmd = self.ffmpeg_command(args);
-            self.run_pass(attempt, 1, 1, cmd)?;
+            self.run_pass(attempt, (1, 1), &params, Pass::Single, Some(&path))?;
         } else {
             let key = (
                 params.fps.to_bits(),
@@ -430,16 +431,12 @@ impl Encoder for FfmpegEncoder<'_> {
                 Some(log) => log,
                 None => {
                     let log = self.dir.join(format!("pass-{}", self.pass_logs.len()));
-                    let args = ffmpeg::encode_args(self.plan, &params, Some((1, &log)), None);
-                    let cmd = self.ffmpeg_command(args);
-                    self.run_pass(attempt, 1, passes, cmd)?;
+                    self.run_pass(attempt, (1, passes), &params, Pass::First(&log), None)?;
                     self.pass_logs.insert(key, log.clone());
                     log
                 }
             };
-            let args = ffmpeg::encode_args(self.plan, &params, Some((2, &log)), Some(&path));
-            let cmd = self.ffmpeg_command(args);
-            self.run_pass(attempt, passes, passes, cmd)?;
+            self.run_pass(attempt, (passes, passes), &params, Pass::Second(&log), Some(&path))?;
         }
 
         let bytes = std::fs::metadata(&path)?.len();
@@ -451,10 +448,9 @@ impl Encoder for FfmpegEncoder<'_> {
     fn score(&mut self, attempt: &Attempt) -> Result<f64> {
         let on_event = &mut *self.on_event;
         let fps = attempt.params.fps;
-        let ssim =
-            ffmpeg::ssim(self.ffmpeg, self.plan, &attempt.path, fps, self.cancel, &mut |line| {
-                on_event(Event::Log { line })
-            })?;
+        let ssim = self.backend.ssim(self.plan, &attempt.path, fps, self.cancel, &mut |line| {
+            on_event(Event::Log { line })
+        })?;
         on_event(Event::Scored { attempt: attempt.number, ssim });
         Ok(ssim)
     }
@@ -462,12 +458,12 @@ impl Encoder for FfmpegEncoder<'_> {
 
 /// Converts a video into a Telegram sticker or emoji.
 pub fn convert(
-    ffmpeg: &Ffmpeg,
+    backend: &Backend,
     request: &Request,
     cancel: &CancelToken,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Outcome> {
-    let source = ffmpeg::probe(ffmpeg, &request.input, cancel)?;
+    let source = backend.probe(&request.input, cancel)?;
     let (plan, warnings) = plan(request, source)?;
     for message in warnings {
         on_event(Event::Warning { message });
@@ -475,8 +471,8 @@ pub fn convert(
     on_event(Event::Started { plan: Box::new(plan.clone()) });
 
     let temp = tempfile::Builder::new().prefix("tgradish-").tempdir()?;
-    let mut encoder = FfmpegEncoder {
-        ffmpeg,
+    let mut encoder = BackendEncoder {
+        backend,
         plan: &plan,
         dir: temp.path(),
         cancel,
@@ -541,6 +537,7 @@ mod tests {
             duration: Some(duration),
             alpha: false,
             still_image: false,
+            rotation: 0,
             decoder: None,
         }
     }

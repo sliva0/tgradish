@@ -14,8 +14,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub(crate) use args::encode_args;
+#[cfg(feature = "linked")]
+pub(crate) use args::video_filter;
 pub use locate::{bundled_dir, downloaded_dir, locate};
 pub use probe::{Probe, probe};
+#[cfg(feature = "linked")]
+pub(crate) use probe::{normalize_rotation, pix_fmt_has_alpha};
 pub use process::CancelToken;
 pub(crate) use process::{Output, run};
 pub use ssim::ssim;
@@ -24,7 +28,8 @@ pub use ssim::ssim;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FfmpegChoice {
-    /// The bundled build, then a downloaded one, then the system one.
+    /// The built-in ffmpeg if there is one, otherwise the bundled build,
+    /// then a downloaded one, then the system one.
     #[default]
     Auto,
     /// The build shipped next to the tgradish executable.
@@ -33,6 +38,8 @@ pub enum FfmpegChoice {
     Downloaded,
     /// ffmpeg from `PATH`.
     System,
+    /// ffmpeg linked into tgradish, in builds with the `linked` feature.
+    Builtin,
 }
 
 /// Where the ffmpeg in use came from.
