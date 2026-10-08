@@ -232,7 +232,10 @@ pub struct Sprite {
     transparent: u8,
     layer_opacity: bool,
     composite_groups: bool,
-    palette: Vec<Colour>,
+    /// Every version of the palette, and which one each frame uses: a
+    /// palette chunk changes it from its frame on.
+    palettes: Vec<Vec<Colour>>,
+    frame_palettes: Vec<usize>,
     layers: Vec<Layer>,
     /// Children of each layer, and of the top level last.
     children: Vec<Vec<usize>>,
@@ -283,7 +286,8 @@ impl Sprite {
             transparent,
             layer_opacity: flags & 1 != 0,
             composite_groups: flags & 2 != 0,
-            palette: Vec::new(),
+            palettes: Vec::new(),
+            frame_palettes: Vec::new(),
             layers: Vec::new(),
             children: Vec::new(),
             depth_of_groups: 0,
@@ -294,6 +298,7 @@ impl Sprite {
         };
         let mut old_palette: Option<Vec<Colour>> = None;
         let mut new_palette = false;
+        let mut palette: Vec<Colour> = Vec::new();
         // bytes of pixels decoded so far
         let mut spent = 0;
         for _ in 0..frame_count {
@@ -310,6 +315,7 @@ impl Sprite {
             let mut body = Reader::new(file.take(body_length)?);
             let chunks = if new_count != 0 { new_count } else { old_count.into() };
             let mut cels = Vec::new();
+            let mut changed = sprite.palettes.is_empty();
             for _ in 0..chunks {
                 let size = body.u32()? as usize;
                 let kind = body.u16()?;
@@ -324,7 +330,8 @@ impl Sprite {
                     0x2018 => sprite.tags = read_tags(&mut chunk)?,
                     0x2019 => {
                         new_palette = true;
-                        read_palette(&mut chunk, &mut sprite.palette)?;
+                        read_palette(&mut chunk, &mut palette)?;
+                        changed = true;
                     }
                     0x2023 => {
                         let tileset = sprite.read_tileset(&mut chunk, &mut spent)?;
@@ -342,9 +349,16 @@ impl Sprite {
             cels.sort_by_key(|cel: &Cel| cel.layer);
             cels.dedup_by_key(|cel| cel.layer);
             sprite.frames.push((duration, cels));
+            if changed {
+                spend(&mut spent, palette.len() * 4, limits)?;
+                sprite.palettes.push(palette.clone());
+            }
+            sprite.frame_palettes.push(sprite.palettes.len() - 1);
         }
-        if !new_palette && let Some(palette) = old_palette {
-            sprite.palette = palette;
+        // old files have only old palette chunks, which apply throughout
+        if !new_palette && let Some(old) = old_palette {
+            sprite.palettes = vec![old];
+            sprite.frame_palettes.fill(0);
         }
         if sprite.frames.is_empty() {
             return Err(Error::Empty);
@@ -530,12 +544,15 @@ impl Sprite {
         cels.binary_search_by_key(&layer, |cel| cel.layer).ok().map(|index| &cels[index])
     }
 
-    fn cel(&self, frame: usize, layer: usize) -> Option<&Cel> {
+    /// The cel of a layer in a frame, and its pixels: a linked cel keeps
+    /// its own position, opacity and z-index, and shows the pixels of the
+    /// cel it links to.
+    fn cel(&self, frame: usize, layer: usize) -> Option<(&Cel, &Content)> {
         let cel = self.stored_cel(frame, layer)?;
         match cel.content {
             // checked when reading: links point at image or tilemap cels
-            Content::Linked(target) => self.stored_cel(target, layer),
-            _ => Some(cel),
+            Content::Linked(target) => Some((cel, &self.stored_cel(target, layer)?.content)),
+            ref content => Some((cel, content)),
         }
     }
 
@@ -574,9 +591,14 @@ impl Sprite {
                 }
                 LayerKind::Group => self.draw_children(index, frame, canvas)?,
                 LayerKind::Image | LayerKind::Tilemap { .. } => {
-                    if let Some(cel) = self.cel(frame, index) {
-                        let opacity = blend::mul_un8(cel.opacity.into(), opacity.into()) as u8;
-                        self.draw_cel(cel, layer, opacity, mode, canvas)?;
+                    if let Some((cel, content)) = self.cel(frame, index) {
+                        let paint = Paint {
+                            background: layer.background,
+                            opacity: blend::mul_un8(cel.opacity.into(), opacity.into()) as u8,
+                            mode,
+                            palette: &self.palettes[self.frame_palettes[frame]],
+                        };
+                        self.draw_cel(cel, content, layer, &paint, canvas)?;
                     }
                 }
             }
@@ -584,25 +606,22 @@ impl Sprite {
         Ok(())
     }
 
-    fn colour(&self, pixel: &[u8], background: bool) -> Colour {
+    fn colour(&self, pixel: &[u8], paint: &Paint) -> Colour {
         match self.depth {
             Depth::Rgba => [pixel[0], pixel[1], pixel[2], pixel[3]],
             Depth::Grayscale => [pixel[0], pixel[0], pixel[0], pixel[1]],
-            Depth::Indexed if !background && pixel[0] == self.transparent => [0; 4],
-            Depth::Indexed => self.palette.get(usize::from(pixel[0])).copied().unwrap_or([0; 4]),
+            Depth::Indexed if !paint.background && pixel[0] == self.transparent => [0; 4],
+            Depth::Indexed => paint.palette.get(usize::from(pixel[0])).copied().unwrap_or([0; 4]),
         }
     }
 
     /// Draws an image with its top left at `x, y`, clipped to the canvas.
-    #[allow(clippy::too_many_arguments)]
     fn draw_image(
         &self,
         pixels: &[u8],
         (width, height): (usize, usize),
         (x, y): (i64, i64),
-        background: bool,
-        opacity: u8,
-        mode: fn(Colour, Colour, u8) -> Colour,
+        paint: &Paint,
         canvas: &mut [Colour],
     ) {
         let bytes = self.depth.bytes();
@@ -618,9 +637,9 @@ impl Sprite {
                     continue;
                 }
                 let start = (row * width + column) * bytes;
-                let src = self.colour(&pixels[start..start + bytes], background);
+                let src = self.colour(&pixels[start..start + bytes], paint);
                 let back = &mut canvas[(cy * canvas_width + cx) as usize];
-                *back = mode(*back, src, opacity);
+                *back = (paint.mode)(*back, src, paint.opacity);
             }
         }
     }
@@ -628,22 +647,14 @@ impl Sprite {
     fn draw_cel(
         &self,
         cel: &Cel,
+        content: &Content,
         layer: &Layer,
-        opacity: u8,
-        mode: fn(Colour, Colour, u8) -> Colour,
+        paint: &Paint,
         canvas: &mut [Colour],
     ) -> Result<()> {
-        match &cel.content {
+        match content {
             Content::Image { width, height, pixels } => {
-                self.draw_image(
-                    pixels,
-                    (*width, *height),
-                    (cel.x, cel.y),
-                    layer.background,
-                    opacity,
-                    mode,
-                    canvas,
-                );
+                self.draw_image(pixels, (*width, *height), (cel.x, cel.y), paint, canvas);
             }
             Content::Tilemap { width, tiles, id_mask, flip_mask } => {
                 let LayerKind::Tilemap { tileset } = layer.kind else { return Ok(()) };
@@ -666,21 +677,23 @@ impl Sprite {
                     let (column, row) = ((index % width) as i64, (index / width) as i64);
                     let at = (cel.x + column * set.width as i64, cel.y + row * set.height as i64);
                     let pixels = &set.pixels[id * tile_bytes..(id + 1) * tile_bytes];
-                    self.draw_image(
-                        pixels,
-                        (set.width, set.height),
-                        at,
-                        layer.background,
-                        opacity,
-                        mode,
-                        canvas,
-                    );
+                    self.draw_image(pixels, (set.width, set.height), at, paint, canvas);
                 }
             }
             Content::Linked(_) => {}
         }
         Ok(())
     }
+}
+
+/// How a cel is drawn.
+struct Paint<'a> {
+    /// Cels on the background layer show the transparent index too.
+    background: bool,
+    opacity: u8,
+    mode: fn(Colour, Colour, u8) -> Colour,
+    /// The palette of the frame being drawn.
+    palette: &'a [Colour],
 }
 
 fn read_layer(chunk: &mut Reader) -> Result<Layer> {
@@ -1140,5 +1153,49 @@ mod tests {
             &[vec![layer(1, 0, 0, 0, 255), image_cel(0, (0, 0), (60000, 60000), &RED, false)]],
         );
         assert!(matches!(Sprite::read_with(&cel, &roomy), Err(Error::TooLarge(_))));
+    }
+
+    #[test]
+    fn changes_palettes_between_frames() {
+        // index 1 is red in the first frame and green from the second on
+        let bytes = file(
+            1,
+            1,
+            8,
+            1,
+            &[
+                vec![
+                    palette(&[[0; 4], RED]),
+                    layer(1, 0, 0, 0, 255),
+                    image_cel(0, (0, 0), (1, 1), &[1], false),
+                ],
+                vec![palette(&[[0; 4], GREEN]), image_cel(0, (0, 0), (1, 1), &[1], false)],
+                vec![image_cel(0, (0, 0), (1, 1), &[1], false)],
+            ],
+        );
+        let animation = decode(&bytes).unwrap();
+        let colours: Vec<Colour> = (0..3).map(|f| animation.pixel(f, 0, 0).unwrap()).collect();
+        assert_eq!(colours, [RED, GREEN, GREEN]);
+    }
+
+    #[test]
+    fn links_keep_their_own_place() {
+        // the second frame links to the first frame's red pixel, but one
+        // pixel to the right and at half opacity
+        let mut moved = cel_header(0, 1, 0, 128, 1);
+        moved.extend(0u16.to_le_bytes());
+        let bytes = file(
+            2,
+            1,
+            32,
+            1,
+            &[
+                vec![layer(1, 0, 0, 0, 255), image_cel(0, (0, 0), (1, 1), &RED, false)],
+                vec![chunk(0x2005, &moved)],
+            ],
+        );
+        let animation = decode(&bytes).unwrap();
+        assert_eq!(pixels(&animation, 0), [RED, [0; 4]]);
+        assert_eq!(pixels(&animation, 1), [[0; 4], [255, 0, 0, 128]]);
     }
 }

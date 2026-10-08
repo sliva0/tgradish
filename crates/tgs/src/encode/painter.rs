@@ -86,14 +86,20 @@ struct Piece {
 }
 
 fn cost(pieces: &[(u8, Piece)]) -> usize {
-    pieces.iter().map(|(_, piece)| piece.rects.len() * RECT_COST + GROUP_COST).sum()
+    pieces.iter().fold(0, |total: usize, (_, piece)| {
+        total.saturating_add(piece.rects.len() * RECT_COST + GROUP_COST)
+    })
 }
+
+/// The cost of a colour that can't be drawn at all within tlottie's
+/// limits; sums of it saturate.
+const IMPOSSIBLE: usize = usize::MAX;
 
 /// [`cost`] of a split colour: its deltas mostly need layers of their own,
 /// since its core lies between them and the next colour's.
 fn split_cost(pieces: &[(u8, Piece)]) -> usize {
     let deltas = pieces.iter().filter(|(place, _)| *place == 0).count();
-    cost(pieces) + deltas * LAYER_COST
+    cost(pieces).saturating_add(deltas * LAYER_COST)
 }
 
 /// A colour's core lasts while it keeps at least this share of each
@@ -158,7 +164,9 @@ impl Painter<'_> {
                 counts[colour] += cells.len();
             }
         }
-        let mut order: Vec<u16> = (1..colours as u16).filter(|&c| counts[c as usize] > 0).collect();
+        // palette indices fit u16, the palette's length may not
+        let mut order: Vec<u16> =
+            (1..colours).filter(|&c| counts[c] > 0).map(|c| c as u16).collect();
         let area = |c: u16| {
             let (x0, y0, x1, y1) = bounds[c as usize];
             u64::from(x1 - x0) * u64::from(y1 - y0)
@@ -359,7 +367,7 @@ impl Painter<'_> {
     }
 
     fn cost_of(&self, colour: u16, later: &[Mask]) -> usize {
-        self.pieces(colour, later).map_or(usize::MAX / 4, |pieces| cost(&pieces))
+        self.pieces(colour, later).map_or(IMPOSSIBLE, |pieces| cost(&pieces))
     }
 
     /// The cheapest order, by dynamic programming over the sets of colours
@@ -385,7 +393,7 @@ impl Painter<'_> {
                 .filter(|&i| set >> i & 1 == 1)
                 .map(|i| {
                     let above = set & !(1 << i);
-                    (best[above].0 + self.cost_of(colours[i], &later_of(above)), i)
+                    (best[above].0.saturating_add(self.cost_of(colours[i], &later_of(above))), i)
                 })
                 .min()
                 .unwrap();
@@ -434,7 +442,7 @@ impl Painter<'_> {
                 .iter()
                 .enumerate()
                 .min_by_key(|&(_, &i)| {
-                    (self.cost_of(colours[i], &later) as i64 - at_bottom[i] as i64, i)
+                    (self.cost_of(colours[i], &later) as i128 - at_bottom[i] as i128, i)
                 })
                 .unwrap();
             remaining.remove(position);
@@ -613,4 +621,38 @@ fn stack(pieces: Vec<(usize, u16, Piece)>, starts: &[u32]) -> Result<Vec<Layer>,
         .into_iter()
         .map(|(from, to, groups, _)| Layer { from: starts[from], to: starts[to], groups })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tgradish_frames::{Animation, Frame};
+
+    use super::*;
+    use crate::normalise::{Options, normalise};
+
+    #[test]
+    fn survives_orders_that_cant_be_drawn() {
+        // five translucent colours in diagonal stripes: every order needs
+        // more rectangles than a layer takes
+        let size = 161u32;
+        let colours = [
+            [255, 0, 0, 100],
+            [0, 255, 0, 100],
+            [0, 0, 255, 100],
+            [9, 9, 9, 100],
+            [200, 200, 0, 100],
+        ];
+        let rgba =
+            (0..size * size).flat_map(|i| colours[((i % size + i / size) % 5) as usize]).collect();
+        let input =
+            Animation::new(size, size, vec![Frame { rgba, duration: Duration::from_millis(100) }])
+                .unwrap();
+        let anim = normalise(&input, &Options::default()).unwrap().0;
+        assert!(matches!(
+            painter(&anim, &Settings::default(), None),
+            Err(EncodeError::TooManyRects { .. })
+        ));
+    }
 }

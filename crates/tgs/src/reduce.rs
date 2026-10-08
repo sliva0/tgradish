@@ -302,7 +302,8 @@ fn merge_colours(anim: &PixelAnim, threshold: f64) -> PixelAnim {
     // the most used colours first; each joins the first kept one near it
     let mut order: Vec<usize> = (1..anim.palette.len()).collect();
     order.sort_by_key(|&colour| std::cmp::Reverse(counts[colour]));
-    let mut target: Vec<u16> = (0..anim.palette.len() as u16).collect();
+    // palette indices fit u16, the palette's length may not
+    let mut target: Vec<u16> = (0..anim.palette.len()).map(|colour| colour as u16).collect();
     let mut kept: Vec<usize> = Vec::new();
     for colour in order {
         let near = kept
@@ -355,10 +356,10 @@ fn merge_frames(anim: &PixelAnim, threshold: f64) -> PixelAnim {
 
 fn drop_frames(anim: &PixelAnim, share: f64) -> PixelAnim {
     let count = anim.frames.len();
-    let drop = ((count as f64 * share).round() as usize).clamp(1, count.saturating_sub(1));
     if count < 2 {
         return anim.clone();
     }
+    let drop = ((count as f64 * share).round() as usize).clamp(1, count - 1);
     // the first frame stays: it is the sticker's preview
     let mut cost: Vec<(f64, usize)> = (1..count)
         .map(|i| {
@@ -537,6 +538,9 @@ mod tests {
 
         let dropped = Reduction::DropFrames { share: 0.5 }.apply(&a).unwrap();
         assert_eq!((dropped.frames().len(), dropped.ticks()), (1, 12));
+        // a still image has nothing to drop
+        let still = anim(1, 1, &[(&[RED], 100)]);
+        assert_eq!(Reduction::DropFrames { share: 0.5 }.apply(&still).unwrap(), still);
 
         // a lone blue pixel among red becomes red
         let speck = anim(3, 3, &[(&[RED, RED, RED, RED, BLUE, RED, RED, RED, RED], 100)]);

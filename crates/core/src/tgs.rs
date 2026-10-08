@@ -135,10 +135,12 @@ impl TgsOptions {
 
     fn frame_duration(&self) -> Result<Duration> {
         let fps = self.fps.unwrap_or(DEFAULT_FPS);
+        let invalid = || Error::InvalidOptions(format!("fps {fps} is not between 0 and 60"));
         if !(fps > 0.0 && fps <= 60.0) {
-            return Err(Error::InvalidOptions(format!("fps {fps} is not between 0 and 60")));
+            return Err(invalid());
         }
-        Ok(Duration::from_secs_f64(1.0 / fps))
+        // tiny rates give durations past what Duration holds
+        Duration::try_from_secs_f64(1.0 / fps).map_err(|_| invalid())
     }
 
     fn seconds(value: Option<f64>, name: &str) -> Result<Option<Duration>> {
@@ -263,12 +265,13 @@ fn sequence_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>> {
                     && ["png", "gif", "webp", "ase", "aseprite"]
                         .contains(&extension.to_ascii_lowercase().as_str())
             });
-            found.sort_by(|a, b| natural_order(a, b));
             files.extend(found);
         } else {
             files.push(input.clone());
         }
     }
+    // the order the user gave is usually a shell's, which puts 10 before 2
+    files.sort_by(|a, b| natural_order(a, b));
     if files.is_empty() {
         return Err(Error::InvalidOptions("the sequence has no images".into()));
     }
@@ -359,6 +362,26 @@ pub fn inspect_file(path: &Path) -> Result<(Stats, Vec<Issue>)> {
     tgradish_tgs::check::check(&json, packed).map_err(probe)
 }
 
+/// Fails when the output is one of the inputs, even through another path
+/// or a link.
+fn refuse_overwriting_inputs(request: &TgsRequest) -> Result<()> {
+    let Ok(output) = request.output.canonicalize() else { return Ok(()) };
+    let inputs = if request.sequence || request.inputs.len() > 1 {
+        sequence_files(&request.inputs)?
+    } else {
+        request.inputs.clone()
+    };
+    for input in inputs {
+        if input.canonicalize().is_ok_and(|input| input == output) {
+            return Err(Error::InvalidOptions(format!(
+                "the output {} is an input",
+                request.output.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Converts pixel art into a `.tgs` sticker.
 pub fn convert(
     request: &TgsRequest,
@@ -368,6 +391,7 @@ pub fn convert(
     if request.output.exists() && !request.overwrite {
         return Err(Error::OutputExists(request.output.clone()));
     }
+    refuse_overwriting_inputs(request)?;
     let settings = request.options.sticker_options()?;
     let animation = load(request)?;
     let input = request.inputs.first().cloned().unwrap_or_default();
@@ -413,6 +437,42 @@ pub fn convert(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refuses_to_overwrite_inputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("art.png");
+        std::fs::write(&input, b"not even a png").unwrap();
+        let request = |output: PathBuf| TgsRequest {
+            inputs: vec![dir.path().to_path_buf()],
+            sequence: true,
+            output,
+            options: TgsOptions::default(),
+            overwrite: true,
+        };
+        let err = convert(&request(input.clone()), &CancelToken::new(), &mut |_| {}).unwrap_err();
+        assert!(err.to_string().contains("is an input"), "{err}");
+        assert_eq!(std::fs::read(&input).unwrap(), b"not even a png");
+        // the same file by another path
+        let other = dir.path().join(".").join("art.png");
+        assert!(convert(&request(other), &CancelToken::new(), &mut |_| {}).is_err());
+    }
+
+    #[test]
+    fn sorts_listed_files_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let files: Vec<PathBuf> = ["10.png", "2.png"].map(|name| dir.path().join(name)).to_vec();
+        assert_eq!(
+            sequence_files(&files).unwrap(),
+            [dir.path().join("2.png"), dir.path().join("10.png")]
+        );
+    }
+
+    #[test]
+    fn refuses_tiny_frame_rates() {
+        let slow = TgsOptions { fps: Some(1e-100), ..Default::default() };
+        assert!(matches!(slow.frame_duration(), Err(Error::InvalidOptions(_))));
+    }
 
     #[test]
     fn orders_numbers_naturally() {
