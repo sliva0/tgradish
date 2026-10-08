@@ -70,13 +70,11 @@ planning session). It now also feeds the GUI in this repo.
 
 ### 3. Distribution
 
-- **Targets:** Linux x86-64 and Windows x86-64 exist. Linux aarch64 and
-  Windows ARM64 can be built on GitHub's arm64 runners, which are free for
-  public repositories (`ubuntu-24.04-arm`, `windows-11-arm`). Linux aarch64
-  is mostly a matrix entry (native build, ffmpeg's and libvpx's ARM
-  assembly need no nasm). Windows ARM64 needs an aarch64 MinGW (llvm-mingw)
-  for the ffmpeg cross build and the `aarch64-pc-windows-gnullvm` Rust
-  target, or a native build on `windows-11-arm`.
+- **Targets:** Linux x86-64 and Windows x86-64 exist; 2.0 adds Linux
+  aarch64, built natively on GitHub's free arm64 runners
+  (`ubuntu-24.04-arm`); ffmpeg's and libvpx's ARM assembly need no nasm.
+  Windows ARM64 is left for later: it needs an aarch64 MinGW (llvm-mingw)
+  for the ffmpeg cross build, or native builds on `windows-11-arm`.
 - **Old glibc baseline:** the Linux release is built on `ubuntu-22.04` to
   run on older systems, but that runner image is deprecated from
   2026-09-17 and unsupported from 2027-04-17. Build inside an old-glibc
@@ -96,7 +94,17 @@ planning session). It now also feeds the GUI in this repo.
 - **Nix:** a `flake.nix` with the package (built against nixpkgs' ffmpeg)
   and a dev shell (Rust, nasm, meson, ninja, clang for bindgen). Submitting
   to nixpkgs can come later.
-- **`tgradish ffmpeg download`:** open question, see below.
+- **ffmpeg as a separate program** stays only for the system ffmpeg: the
+  ffmpeg-less Linux build, AUR, Nix and source builds. `tgradish ffmpeg
+  download`, the published ffmpeg archives and the downloader's HTTP/TLS
+  dependencies go. Building from source on Windows gets short instructions
+  (install ffmpeg, or build with `linked-static` through the xtask), no
+  separate build.
+- **`--extra-args` becomes `--encoder-option KEY=VALUE`** (repeatable),
+  which works with both backends: the process backend passes `-KEY VALUE`,
+  the built-in one sets the encoder option directly. Raw command-line
+  arguments can't work with the built-in ffmpeg, but what they are used
+  for, tuning libvpx (`tune-content`, `aq-mode`, `arnr-strength`, ...), can.
 
 ### 4. Telegram bot and web app
 
@@ -122,7 +130,7 @@ One `tgradish` binary is both the CLI and the GUI:
 - arguments given → CLI;
 - no arguments and not started from a terminal (double-click, desktop
   file, Start menu) → GUI;
-- no arguments in a terminal → open question, see below;
+- no arguments in a terminal → the CLI help, which mentions `tgradish gui`;
 - `tgradish gui` always opens the GUI.
 
 On Linux, "started from a terminal" means stdin or stdout is a TTY. The
@@ -138,16 +146,21 @@ On older Windows the same binary briefly shows a console window when
 double-clicked, which it can hide right away; a separate `tgradish-gui.exe`
 built as a GUI program is the fallback if that is too ugly.
 
-## Open questions
+## Decisions and open questions
 
-Answers go here as they come.
+Decided 2026-10-08:
 
-- Keep `tgradish ffmpeg download`? Release binaries have ffmpeg built in,
-  so it only helps source builds without ffmpeg and `--extra-args`.
-- In a terminal with no arguments: show the CLI help (mentioning
-  `tgradish gui`) or open the GUI?
-- Web app: convert in the browser, on a server, or both?
-- Which ARM targets: Linux aarch64, Windows ARM64?
+- GUI with egui, in this repo, in the same binary as the CLI.
+- No arguments in a terminal shows the CLI help.
+- `ffmpeg download` goes; `--extra-args` becomes `--encoder-option`.
+- ARM: Linux aarch64 in 2.0, Windows ARM64 later.
+- Web app: conversion in the browser is preferred if Telegram's WebViews
+  allow what it needs (file input, getting files out, threads); the probe
+  in `docs/web-app.md` decides. The probe needs a test bot (BotFather) and
+  somewhere to host the page, which only the user can set up.
+
+Open:
+
 - Track order: GUI first, `.tgs` first, or in parallel?
 
 ## Reference

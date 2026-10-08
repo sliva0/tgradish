@@ -110,6 +110,13 @@ encoding.
 3. **Both:** browser by default, a server mode for heavy jobs when the
    operator runs one. Most work.
 
+## Decision
+
+Conversion in the browser is preferred, if the probe below shows that
+Telegram's WebViews let the page take files in, give results back (through
+the bot at least) and run WebAssembly threads. Otherwise conversion moves to
+a server.
+
 ## To test first
 
 A throwaway Mini App opened in current Android, iOS, Desktop and web
