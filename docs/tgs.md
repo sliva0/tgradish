@@ -579,7 +579,7 @@ The web app there may also replace the "Web page" and "Bot" items under
   - Order: T7 and T8 come before T6, so `.tgs` works end to end (and the
     GUI has its protocol) before the open-ended encoder experiments, which
     are then measured through the whole pipeline.
-- **T6 (in progress):** encoder v2 experiments: motion, precomps, palette
+- **T6 (done):** encoder v2 experiments: motion, precomps, palette
   cycling, mixing primitives, even-odd, strokes. Keep what the bench shows
   is better.
 
@@ -605,8 +605,12 @@ The web app there may also replace the "Web page" and "Bot" items under
   core and cores can't reach under deltas, so rectangles grew 14%, and
   with every colour split, layers grew 20% instead of shrinking.
 
-  Next to try: motion as position keyframes for files like
-  `Spamton_trembling`; fringe-aware colour orders.
+  Left for later (see Later): motion as position keyframes, which only
+  files like `Spamton_trembling` would gain from; fringe-aware colour
+  orders, which are about looks rather than size. Precomps, palette
+  cycling and other primitives weren't tried: in this corpus colours
+  rarely cycle and sprites rarely repeat, while 70% of cells staying put
+  is what the split already uses.
 - **T7 (done):** fit and lossy reductions, with reporting.
 
   Notes from T7 (`reduce`, `sticker::make`):
@@ -664,6 +668,9 @@ The web app there may also replace the "Web page" and "Bot" items under
   roadmap.
 
 Later (2.x):
+- **Encoder:** motion as position keyframes for shaking or bobbing
+  sprites; colour orders that avoid fringes (see T4's notes); precomps
+  for repeated sprites, palette cycling, if a corpus shows them.
 - **Pixelate mode:** video or any image (through ffmpeg) to pixel art,
   then to TGS.
 - **Web page:** GIF to TGS in the browser. `tgs` is pure Rust, so this is

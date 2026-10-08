@@ -50,8 +50,8 @@ Done on `rewrite-v2`, with CI on Linux and Windows:
   writer, checks, `tgs-lab verify` in tlottie and rlottie), T4 (encoder v1:
   half the size of 1.x, no seams), T5 (effort levels, bench baselines), T7
   (fitting with lossy reductions), T8 (`.tgs` in the CLI, protocol 2). T6
-  (encoder v2) has its first part, splitting colours into a lasting core
-  and per-frame changes; more is in `docs/tgs.md`;
+  (encoder v2: colours split into a lasting core and per-frame changes;
+  other experiments are in `docs/tgs.md`);
 - GUI: `tgradish gui`, or tgradish started outside a terminal. Next:
   distribution.
 
