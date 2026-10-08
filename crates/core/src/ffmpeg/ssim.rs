@@ -4,7 +4,7 @@ use std::process::Command;
 
 use super::args::{input_args, video_filter};
 use super::{CancelToken, Ffmpeg, Output, run};
-use crate::convert::{Plan, frame_count};
+use crate::convert::Plan;
 use crate::error::{Error, Result};
 
 /// Compares an encoded attempt at `fps` with the source at the planned
@@ -22,12 +22,11 @@ pub fn ssim(
     // Timestamps are rebuilt from frame numbers: WebM stores whole
     // milliseconds, which would pair some frames with their neighbours.
     let retime = |fps: f64| format!("format=yuv420p,settb=AVTB,setpts=N/({fps}*TB)");
-    let reference = video_filter(plan, plan.fps, "yuv420p");
-    let frames = frame_count(plan.length, plan.fps);
+    let reference = video_filter(plan, plan.fps, plan.length, "yuv420p");
     // the first ssim input sets the timeline; the attempt's last frame is
     // repeated if it ends earlier
     let graph = format!(
-        "[1:v]{reference},trim=end_frame={frames},{}[source];\
+        "[1:v]{reference},{}[source];\
          [0:v]{}[attempt];[source][attempt]ssim=eof_action=repeat",
         retime(plan.fps),
         retime(fps),
