@@ -252,8 +252,9 @@ pub struct TgsOutcome {
     pub preview: Preview,
 }
 
-/// Frames of a sticker as straight RGBA at the art's resolution (the
-/// crop of the input), each with how many 60 fps frames it shows for.
+/// Frames of a sticker as straight RGBA, each with how many 60 fps frames
+/// it shows for. `.tgs` previews have a pixel per art pixel, WebM previews
+/// fit [`crate::backend::PREVIEW_SIDE`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preview {
     pub width: u32,
@@ -261,15 +262,40 @@ pub struct Preview {
     pub frames: Vec<(Vec<u8>, u32)>,
 }
 
+/// The longest side of a `.tgs` preview: plenty for a window, and within
+/// what any GPU takes as a texture.
+pub const PREVIEW_MAX_SIDE: u32 = 1024;
+
 impl Preview {
     fn of(anim: &tgradish_tgs::PixelAnim) -> Preview {
-        Preview {
-            width: *anim.grid().columns.last().unwrap_or(&0),
-            height: *anim.grid().rows.last().unwrap_or(&0),
-            frames: (0..anim.frames().len())
-                .map(|frame| (anim.rgba(frame), anim.frames()[frame].ticks))
-                .collect(),
-        }
+        let grid = anim.grid();
+        let width = *grid.columns.last().unwrap_or(&0);
+        let height = *grid.rows.last().unwrap_or(&0);
+        // input pixels per preview pixel
+        let step = grid.scale().max(width.max(height).div_ceil(PREVIEW_MAX_SIDE)).max(1);
+        // the cell under the middle of each step
+        let cells = |edges: &[u32], size: u32| -> Vec<usize> {
+            (0..size.div_ceil(step))
+                .map(|i| (i * step + step / 2).min(size - 1))
+                .map(|x| edges.partition_point(|&edge| edge <= x) - 1)
+                .collect()
+        };
+        let (columns, rows) = (cells(&grid.columns, width), cells(&grid.rows, height));
+        let frames = anim
+            .frames()
+            .iter()
+            .map(|frame| {
+                let mut rgba = Vec::with_capacity(columns.len() * rows.len() * 4);
+                for &row in &rows {
+                    for &column in &columns {
+                        let colour = frame.pixels[row * anim.width() as usize + column];
+                        rgba.extend(anim.palette()[colour as usize]);
+                    }
+                }
+                (rgba, frame.ticks)
+            })
+            .collect();
+        Preview { width: columns.len() as u32, height: rows.len() as u32, frames }
     }
 }
 
@@ -494,6 +520,28 @@ mod tests {
             sequence_files(&files).unwrap(),
             [dir.path().join("2.png"), dir.path().join("10.png")]
         );
+    }
+
+    #[test]
+    fn previews_a_pixel_per_art_pixel() {
+        let anim = |width: u32, height: u32, colour: &dyn Fn(u32, u32) -> [u8; 4]| {
+            let rgba =
+                (0..height).flat_map(|y| (0..width).flat_map(move |x| colour(x, y))).collect();
+            let frame = frames::Frame { rgba, duration: Duration::from_millis(100) };
+            let animation = frames::Animation::new(width, height, vec![frame]).unwrap();
+            tgradish_tgs::normalise(&animation, &Default::default()).unwrap().0
+        };
+        let (red, blue) = ([255, 0, 0, 255], [0, 0, 255, 255]);
+        // 3x2 art at 4x
+        let art = anim(12, 8, &|x, y| if (x / 4 + y / 4) % 2 == 0 { red } else { blue });
+        let preview = Preview::of(&art);
+        assert_eq!((preview.width, preview.height), (3, 2));
+        assert_eq!(preview.frames[0].0, [red, blue, red, blue, red, blue].concat());
+        // too wide to show a pixel per art pixel
+        let wide = anim(4000, 2, &|x, _| if x % 2 == 0 { red } else { blue });
+        let preview = Preview::of(&wide);
+        assert_eq!((preview.width, preview.height), (1000, 1));
+        assert_eq!(preview.frames[0].0.len(), 1000 * 4);
     }
 
     #[test]
