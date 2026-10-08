@@ -111,4 +111,6 @@ publishing anything.
 `cargo xtask package --target TARGET` assembles an archive locally after
 building with `--features linked-static --target <triple>`; with
 `--system-ffmpeg`, after building without features. `--max-glibc 2.28`
-adds the glibc check.
+adds the glibc check. It needs [cargo-about](https://github.com/EmbarkStudios/cargo-about),
+which writes the licenses of the crates in the binary into
+`THIRD-PARTY-CRATES.txt`.

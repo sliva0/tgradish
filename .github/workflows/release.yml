@@ -79,6 +79,11 @@ jobs:
 
       - run: cargo xtask ffmpeg --target ${{ matrix.target }}
 
+      # lists the licenses of the crates in the binary when packaging
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+
       - name: Build tgradish with ffmpeg linked in
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/target/ffmpeg/prefix-${{ matrix.triple }}/lib/pkgconfig

@@ -17,6 +17,7 @@
 //! `cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc
 //! 2.28]` packs a built tgradish into a release archive. With
 //! `--system-ffmpeg` it is a build without ffmpeg, which uses the system's.
+//! Needs cargo-about, which lists the licenses of the crates built in.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -269,7 +270,7 @@ impl Build {
         if !archive.exists() {
             let partial = archive.with_extension("partial");
             run(Command::new("curl")
-                .args(["-sSfL", "--retry", "3", "--retry-all-errors", "-o"])
+                .args(["-sSfL", "--retry", "3", "--retry-connrefused", "-o"])
                 .arg(&partial)
                 .arg(source.url))?;
             std::fs::rename(&partial, &archive)?;
@@ -709,7 +710,20 @@ fn package_release(args: &[String]) -> Result<()> {
             ffmpeg = FFMPEG.version,
         )
     };
-    std::fs::write(stage.join("THIRD-PARTY.txt"), third_party)?;
+    std::fs::write(
+        stage.join("THIRD-PARTY.txt"),
+        third_party + "\nThe Rust crates in it and their licenses are in THIRD-PARTY-CRATES.txt.\n",
+    )?;
+    // the crates differ by target and by whether ffmpeg is linked in
+    let mut about = Command::new("cargo");
+    about
+        .current_dir(root)
+        .args(["about", "generate", "--locked", "--fail", "-c", "xtask/about.toml"])
+        .args(["-m", "crates/cli/Cargo.toml", "--target", triple]);
+    if !system_ffmpeg {
+        about.args(["--features", "linked-static"]);
+    }
+    run(about.arg("xtask/about.hbs").arg("-o").arg(stage.join("THIRD-PARTY-CRATES.txt")))?;
 
     if target.is_windows() {
         check_dll_imports(&binary)?;
@@ -736,10 +750,13 @@ fn package_release(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// `2.28` as `(2, 28)`.
+/// `2.28` as `(2, 28)`; `2.2.5` is `(2, 2)`.
 fn glibc_version(text: &str) -> Result<(u32, u32)> {
-    let (major, minor) = text.split_once('.').context("a glibc version is like 2.28")?;
-    Ok((major.parse()?, minor.parse()?))
+    let mut parts = text.split('.').map(str::parse);
+    match (parts.next(), parts.next()) {
+        (Some(Ok(major)), Some(Ok(minor))) => Ok((major, minor)),
+        _ => bail!("{text:?} is not a glibc version like 2.28"),
+    }
 }
 
 /// Fails if a Linux executable needs a newer glibc than `max`, so it would
@@ -748,7 +765,7 @@ fn check_glibc(exe: &Path, max: (u32, u32)) -> Result<()> {
     let dump = output(Command::new("objdump").arg("-T").arg(exe))?;
     let newest = dump
         .split_whitespace()
-        .filter_map(|word| word.strip_prefix("GLIBC_"))
+        .filter_map(|word| word.trim_matches(['(', ')']).strip_prefix("GLIBC_"))
         .filter_map(|version| glibc_version(version).ok())
         .max()
         .context("the executable uses no versioned glibc symbols")?;
