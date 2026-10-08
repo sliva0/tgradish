@@ -562,7 +562,23 @@ The web app there may also replace the "Web page" and "Bot" items under
     frames 0 and 4; the prototype had 571), and 12% more over the corpus.
     T5 should weigh fringes in the order search and keep hidden edges off
     visible ones where it costs nothing.
-- **T5:** `tgs-lab bench`, cost model, optimiser.
+- **T5 (done):** `tgs-lab bench`, cost model, optimiser.
+
+  Notes from T5:
+  - `tgs-lab bench` prints sizes against 1.x and saves runs to compare
+    later ones with (`--save`, `--against`).
+  - A linear cost model fitted to the corpus (bytes per rectangle, group
+    and layer) was useless: 28% mean error, since groups and rectangles
+    grow together. So the optimiser compares candidates by their real
+    `gzip -9` size (`file::quick_size`), which ranks like zopfli.
+  - Effort levels, named like the WebM side's speed: `fast` (larger
+    colours first), `balanced` (the subset search), `best` (balanced,
+    then neighbouring colours swapped while the real size shrinks, at most
+    200 tries). Best is 2.4% smaller than balanced, about 2.05x smaller
+    than 1.x over the corpus, at up to 2.4 s for the largest file.
+  - Order: T7 and T8 come before T6, so `.tgs` works end to end (and the
+    GUI has its protocol) before the open-ended encoder experiments, which
+    are then measured through the whole pipeline.
 - **T6:** encoder v2 experiments: motion, precomps, palette cycling, mixing
   primitives, even-odd, strokes. Keep what the bench shows is better.
 - **T7:** fit and lossy reductions, with reporting.

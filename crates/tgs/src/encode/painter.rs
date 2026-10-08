@@ -30,21 +30,36 @@ const EXACT_ORDER: usize = 10;
 /// Above this many colours, the order isn't searched at all.
 const GREEDY_ORDER: usize = 256;
 
+/// How hard to look for a small encoding.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Effort {
+    /// A quick guess at the drawing order: larger colours first.
+    Fast,
+    /// The order with the fewest rectangles and groups.
+    #[default]
+    Balanced,
+    /// Starting from that, swaps neighbouring colours in the order while
+    /// the real compressed size goes down.
+    Best,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// Keep shapes alive over frames where they don't change. Without it,
     /// every frame is drawn in full.
     pub lifetimes: bool,
-    /// Search for the cheapest drawing order instead of using a quick
-    /// guess (larger colours first).
-    pub search_order: bool,
+    pub effort: Effort,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { lifetimes: true, search_order: true }
+        Settings { lifetimes: true, effort: Effort::default() }
     }
 }
+
+/// Most encodings [`Effort::Best`] tries.
+const BEST_TRIES: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EncodeError {
@@ -293,7 +308,14 @@ impl Painter<'_> {
     }
 }
 
-pub fn painter(anim: &PixelAnim, settings: &Settings) -> Result<Scene, EncodeError> {
+/// Encodes `anim`. [`Effort::Best`] compares candidates by `score`
+/// (smaller is better), typically the compressed size of their Lottie;
+/// without one it works like [`Effort::Balanced`].
+pub fn painter(
+    anim: &PixelAnim,
+    settings: &Settings,
+    score: Option<&dyn Fn(&Scene) -> usize>,
+) -> Result<Scene, EncodeError> {
     let mut cells = Vec::with_capacity(anim.frames().len());
     for frame in anim.frames() {
         let mut by_colour = vec![Vec::new(); anim.palette().len()];
@@ -303,23 +325,67 @@ pub fn painter(anim: &PixelAnim, settings: &Settings) -> Result<Scene, EncodeErr
         cells.push(by_colour);
     }
     let mut painter = Painter { anim, cells, lifetimes: settings.lifetimes };
-    let encode = |painter: &Painter| {
-        let guess = painter.guessed_order();
-        let order = match guess.len() {
-            _ if !settings.search_order => guess,
-            n if n <= EXACT_ORDER => painter.exact_order(&guess),
-            n if n <= GREEDY_ORDER => painter.greedy_order(&guess),
-            _ => guess,
-        };
-        painter.encode(&order)
-    };
-    match encode(&painter) {
-        // a layer per frame stays within the limit for up to 180 frames
-        Err(EncodeError::TooManyLayers { .. }) if settings.lifetimes => {
-            painter.lifetimes = false;
-            encode(&painter)
+    if settings.lifetimes {
+        match painter.search(settings.effort, score) {
+            // a layer per frame stays within the limit for up to 180 frames
+            Err(EncodeError::TooManyLayers { .. }) => painter.lifetimes = false,
+            result => return result,
         }
-        result => result,
+    }
+    painter.search(settings.effort, score)
+}
+
+impl Painter<'_> {
+    fn search(
+        &self,
+        effort: Effort,
+        score: Option<&dyn Fn(&Scene) -> usize>,
+    ) -> Result<Scene, EncodeError> {
+        let guess = self.guessed_order();
+        let searched = || match guess.len() {
+            n if n <= EXACT_ORDER => self.exact_order(&guess),
+            n if n <= GREEDY_ORDER => self.greedy_order(&guess),
+            _ => guess.clone(),
+        };
+        let score = match (effort, score) {
+            (Effort::Fast, _) => return self.encode(&guess),
+            (Effort::Balanced, _) | (Effort::Best, None) => return self.encode(&searched()),
+            (Effort::Best, Some(score)) => score,
+        };
+        // the better of both starting orders, then neighbours swapped while
+        // that helps
+        let try_order = |order: &[u16]| self.encode(order).ok().map(|scene| (score(&scene), scene));
+        let mut order = searched();
+        let mut best = try_order(&order);
+        if let Some(guessed) = try_order(&guess)
+            && best.as_ref().is_none_or(|(size, _)| guessed.0 < *size)
+        {
+            (order, best) = (guess, Some(guessed));
+        }
+        let Some((mut smallest, mut scene)) = best else {
+            // no order fits tlottie's limits; report why
+            return self.encode(&order);
+        };
+        let mut tries = 2;
+        let mut improved = true;
+        while improved && tries < BEST_TRIES {
+            improved = false;
+            for i in 0..order.len().saturating_sub(1) {
+                if tries >= BEST_TRIES {
+                    break;
+                }
+                tries += 1;
+                order.swap(i, i + 1);
+                match try_order(&order) {
+                    Some((size, candidate)) if size < smallest => {
+                        (smallest, scene) = (size, candidate);
+                        improved = true;
+                    }
+                    _ => order.swap(i, i + 1),
+                }
+            }
+        }
+        Ok(scene)
     }
 }
 

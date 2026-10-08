@@ -4,7 +4,7 @@ mod cover;
 mod mask;
 mod painter;
 
-pub use painter::{EncodeError, Settings, painter};
+pub use painter::{Effort, EncodeError, Settings, painter};
 
 use crate::normalise::PixelAnim;
 use crate::scene::{Group, Layer, Scene, Shape};

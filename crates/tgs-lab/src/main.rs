@@ -9,7 +9,7 @@
 //! cargo run -p tgs-lab -- normalise art.gif
 //! cargo run -p tgs-lab -- encode art.gif out.tgs [--runs]
 //! cargo run -p tgs-lab -- verify art.gif [out.tgs]
-//! cargo run --release -p tgs-lab -- bench [--fast] [--verify] [--no-lifetimes] [--guess-order] [--full] [DIR]
+//! cargo run --release -p tgs-lab -- bench [--fast] [--verify] [--no-lifetimes] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]
 //! ```
 
 mod bench;
@@ -50,7 +50,8 @@ fn load(path: &Path) -> Result<(PixelAnim, Report)> {
 
 /// `anim` as Lottie JSON, from the encoder or the `runs` baseline.
 fn encoded(anim: &PixelAnim, runs: bool) -> Result<String> {
-    let scene = if runs { encode::runs(anim) } else { encode::painter(anim, &Default::default())? };
+    let scene =
+        if runs { encode::runs(anim) } else { encode::painter(anim, &Default::default(), None)? };
     Ok(lay_out(&scene, anim, Some("tgs-lab".into())).to_json(Style::default()))
 }
 
@@ -235,22 +236,35 @@ fn main() -> Result<()> {
         Some("encode") => encode_file(&args[1..]),
         Some("verify") => verify_file(&args[1..]),
         Some("bench") => {
-            let flag = |name: &str| args[1..].iter().any(|arg| arg == name);
-            let dir = args[1..].iter().find(|arg| !arg.starts_with("--"));
+            let (paths, rest) = options(&args[1..], &["--save", "--against"])?;
+            let flag = |name: &str| rest.contains(&name);
+            let path = |name: &str| {
+                paths
+                    .iter()
+                    .find(|(option, _)| *option == name)
+                    .map(|(_, path)| PathBuf::from(path))
+            };
+            let dir = rest.iter().find(|arg| !arg.starts_with("--"));
             bench::run(
-                Path::new(dir.map_or("references/pixelart", String::as_str)),
+                Path::new(dir.copied().unwrap_or("references/pixelart")),
                 &bench::Bench {
                     fast: flag("--fast"),
                     verify: flag("--verify"),
                     settings: encode::Settings {
                         lifetimes: !flag("--no-lifetimes"),
-                        search_order: !flag("--guess-order"),
+                        effort: match () {
+                            _ if flag("--fast-effort") => encode::Effort::Fast,
+                            _ if flag("--best") => encode::Effort::Best,
+                            _ => encode::Effort::Balanced,
+                        },
                     },
                     style: if flag("--full") {
                         Style { tgs_key: true, layer_start: true, rect_roundness: true }
                     } else {
                         Style::default()
                     },
+                    save: path("--save"),
+                    against: path("--against"),
                 },
             )
         }
@@ -260,7 +274,7 @@ fn main() -> Result<()> {
              tgs-lab normalise FILE...\n       \
              tgs-lab encode SOURCE OUTPUT.tgs [--runs]\n       \
              tgs-lab verify SOURCE [STICKER.tgs] [--sizes 100,160,237,512] [--frames 0,4] [--picture PREFIX] [--explain N] [--runs]\n       \
-             tgs-lab bench [--fast] [--verify] [--no-lifetimes] [--guess-order] [--full] [DIR]"
+             tgs-lab bench [--fast] [--verify] [--no-lifetimes] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]"
         ),
     }
 }

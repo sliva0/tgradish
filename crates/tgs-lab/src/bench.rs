@@ -21,6 +21,10 @@ pub struct Bench {
     pub verify: bool,
     pub settings: Settings,
     pub style: Style,
+    /// Writes each file's packed size here, as `name<TAB>bytes` lines.
+    pub save: Option<std::path::PathBuf>,
+    /// Shows how sizes changed from a file `save` wrote.
+    pub against: Option<std::path::PathBuf>,
 }
 
 /// "1.x now" sizes by file name, from the README's table.
@@ -47,9 +51,31 @@ pub fn run(dir: &Path, bench: &Bench) -> Result<()> {
     });
     files.sort();
 
+    let earlier: Vec<(String, u64)> = match &bench.against {
+        Some(path) => std::fs::read_to_string(path)
+            .with_context(|| format!("cannot read {}", path.display()))?
+            .lines()
+            .filter_map(|line| {
+                let (name, size) = line.split_once('\t')?;
+                Some((name.to_owned(), size.parse().ok()?))
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    let mut saved = String::new();
+    let (mut now_total, mut then_total) = (0u64, 0u64);
     println!(
-        "{:38} {:>7} {:>7} {:>7} {:>6} {:>6} {:>6} {:>6} {:>6}",
-        "file", "raw", "packed", "1.x", "ratio", "layers", "groups", "rects", "ms"
+        "{:38} {:>7} {:>7} {:>7} {:>6} {:>6} {:>6} {:>6} {:>6}{}",
+        "file",
+        "raw",
+        "packed",
+        "1.x",
+        "ratio",
+        "layers",
+        "groups",
+        "rects",
+        "ms",
+        if bench.against.is_some() { "  change" } else { "" }
     );
     let (mut ours, mut theirs, mut over) = (0u64, 0u64, 0);
     let (mut misses, mut leaks, mut fringes) = (0, 0, 0);
@@ -59,8 +85,15 @@ pub fn run(dir: &Path, bench: &Bench) -> Result<()> {
         let input = decode(&std::fs::read(path)?, &DecodeOptions::default())
             .with_context(|| name.to_string())?;
         let (anim, _) = normalise(&input, &Options::default())?;
-        let scene = painter(&anim, &bench.settings).with_context(|| name.to_string())?;
-        let json = lay_out(&scene, &anim, Some("tgradish".into())).to_json(bench.style);
+        let name_tag = Some("tgradish".to_owned());
+        let score = |scene: &tgradish_tgs::scene::Scene| {
+            file::quick_size(
+                lay_out(scene, &anim, name_tag.clone()).to_json(bench.style).as_bytes(),
+            )
+        };
+        let scene =
+            painter(&anim, &bench.settings, Some(&score)).with_context(|| name.to_string())?;
+        let json = lay_out(&scene, &anim, name_tag.clone()).to_json(bench.style);
         let packed = if bench.fast {
             use std::io::Write;
             let mut encoder =
@@ -80,8 +113,14 @@ pub fn run(dir: &Path, bench: &Bench) -> Result<()> {
             .sum();
         let old = reference.iter().find(|(file, _)| *file == name).map(|(_, size)| *size);
         let ratio = old.map(|old| format!("{:.2}", old as f64 / packed.len() as f64));
+        saved.push_str(&format!("{name}\t{}\n", packed.len()));
+        let change = earlier.iter().find(|(file, _)| *file == name).map(|&(_, then)| {
+            now_total += packed.len() as u64;
+            then_total += then;
+            format!("  {:+.1}%", (packed.len() as f64 / then as f64 - 1.0) * 100.0)
+        });
         println!(
-            "{name:38} {:>7} {:>7} {:>7} {:>6} {:>6} {:>6} {:>6} {:>6}",
+            "{name:38} {:>7} {:>7} {:>7} {:>6} {:>6} {:>6} {:>6} {:>6}{}",
             json.len(),
             packed.len(),
             old.map(|old| old.to_string()).unwrap_or_default(),
@@ -89,7 +128,8 @@ pub fn run(dir: &Path, bench: &Bench) -> Result<()> {
             scene.layers.len(),
             groups,
             rects,
-            ms
+            ms,
+            change.unwrap_or_default()
         );
         if let Some(old) = old {
             ours += packed.len() as u64;
@@ -118,6 +158,15 @@ pub fn run(dir: &Path, bench: &Bench) -> Result<()> {
     );
     if bench.verify {
         println!("rendered: {misses} wrong cells, {leaks} leaks, {fringes} fringes");
+    }
+    if then_total > 0 {
+        println!(
+            "against the saved run: {now_total} bytes, was {then_total} ({:+.2}%)",
+            (now_total as f64 / then_total as f64 - 1.0) * 100.0
+        );
+    }
+    if let Some(path) = &bench.save {
+        std::fs::write(path, saved).with_context(|| format!("cannot write {}", path.display()))?;
     }
     Ok(())
 }
