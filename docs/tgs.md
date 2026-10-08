@@ -598,11 +598,15 @@ The web app there may also replace the "Web page" and "Bot" items under
   a layer per delta. 2.7% smaller over the corpus (20% on idle-ish files
   like `pizza_dude`), now 2.06x smaller than 1.x at balanced effort.
 
-  Next to try: two tiers, every delta below every core, so the deltas of
-  all colours share each frame's layer again (splitting per colour adds
-  76% layers, which eats most of the 8% fewer rectangles); motion as
-  position keyframes for files like `Spamton_trembling`; fringe-aware
-  colour orders.
+  Tried and dropped: two tiers, every colour's cores above every colour's
+  deltas, so the deltas would share each frame's layer again (splitting
+  per colour adds 76% layers, which eats most of the 8% fewer
+  rectangles). 22% larger over the corpus: deltas must reach under every
+  core and cores can't reach under deltas, so rectangles grew 14%, and
+  with every colour split, layers grew 20% instead of shrinking.
+
+  Next to try: motion as position keyframes for files like
+  `Spamton_trembling`; fringe-aware colour orders.
 - **T7 (done):** fit and lossy reductions, with reporting.
 
   Notes from T7 (`reduce`, `sticker::make`):
