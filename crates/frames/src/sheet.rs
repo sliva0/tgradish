@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use crate::{Animation, DecodeOptions, Error, Frame, Result, decode};
+use crate::{Animation, DecodeOptions, Error, Frame, Limits, Result, decode};
 
 /// How a sprite sheet is laid out: equal cells, frames row by row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,8 +17,8 @@ pub struct Sheet {
 }
 
 /// Splits a still image into the frames of a sprite sheet.
-pub fn sprite_sheet(bytes: &[u8], sheet: &Sheet) -> Result<Animation> {
-    let image = decode(bytes, &DecodeOptions::default())?;
+pub fn sprite_sheet(bytes: &[u8], sheet: &Sheet, limits: &Limits) -> Result<Animation> {
+    let image = decode(bytes, &DecodeOptions { tag: None, limits: *limits })?;
     let (width, height) = (image.width(), image.height());
     let grid_error =
         || Error::SheetGrid { width, height, columns: sheet.columns, rows: sheet.rows };
@@ -70,16 +70,18 @@ pub fn sprite_sheet(bytes: &[u8], sheet: &Sheet) -> Result<Animation> {
 pub fn sequence<'a>(
     images: impl IntoIterator<Item = &'a [u8]>,
     frame_duration: Duration,
+    limits: &Limits,
 ) -> Result<Animation> {
     let mut size = None;
     let mut frames = Vec::new();
     for (index, bytes) in images.into_iter().enumerate() {
-        let image = decode(bytes, &DecodeOptions::default())?;
+        let image = decode(bytes, &DecodeOptions { tag: None, limits: *limits })?;
         let (width, height) = (image.width(), image.height());
         let (first_width, first_height) = *size.get_or_insert((width, height));
         if (width, height) != (first_width, first_height) {
             return Err(Error::SequenceSize { index, width, height, first_width, first_height });
         }
+        limits.check(width, height, frames.len() + image.frames().len())?;
         let still = image.frames().len() == 1;
         frames.extend(image.into_frames().into_iter().map(|mut frame| {
             if still {
