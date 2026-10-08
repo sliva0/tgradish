@@ -33,8 +33,19 @@ fn format_label(format: Format) -> &'static str {
     }
 }
 
+/// How the window starts, from the command line.
+#[derive(Debug, Default)]
+pub struct Launch {
+    /// The `config.toml` to read and save; the user's own when `None`.
+    pub config_path: Option<PathBuf>,
+    /// Which ffmpeg to use instead of the config's.
+    pub ffmpeg_choice: Option<FfmpegChoice>,
+    /// An ffmpeg executable or directory to use instead of the config's.
+    pub ffmpeg_path: Option<PathBuf>,
+}
+
 /// Opens the window and runs until it is closed.
-pub fn run() -> eframe::Result<()> {
+pub fn run(launch: Launch) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("tgradish")
@@ -43,7 +54,7 @@ pub fn run() -> eframe::Result<()> {
             .with_drag_and_drop(true),
         ..Default::default()
     };
-    eframe::run_native("tgradish", options, Box::new(|_| Ok(Box::new(App::new()))))
+    eframe::run_native("tgradish", options, Box::new(|_| Ok(Box::new(App::new(launch)))))
 }
 
 /// Shows an error in a dialog, for when there is no terminal to print to.
@@ -88,10 +99,10 @@ struct App {
 
 impl App {
     /// The window with the user's config and presets.
-    fn new() -> App {
-        let config_path = Config::default_path();
+    fn new(launch: Launch) -> App {
+        let config_path = launch.config_path.or_else(Config::default_path);
         let mut message = None;
-        let config = match config_path.as_deref().map(Config::load) {
+        let mut config = match config_path.as_deref().map(Config::load) {
             Some(Ok(config)) => config,
             Some(Err(err)) => {
                 message = Some(format!("the config couldn't be read, using defaults: {err}"));
@@ -99,6 +110,14 @@ impl App {
             }
             None => Config::default(),
         };
+        // as on the command line: a path beats a choice
+        if let Some(choice) = launch.ffmpeg_choice {
+            config.ffmpeg.choice = choice;
+            config.ffmpeg.path = None;
+        }
+        if let Some(path) = launch.ffmpeg_path {
+            config.ffmpeg.path = Some(path);
+        }
         let presets = Presets::load_user().unwrap_or_else(|err| {
             message = Some(format!("presets couldn't be read: {err}"));
             Presets::builtin()
@@ -155,13 +174,13 @@ impl App {
         value.and_then(|value| value.as_object().cloned()).unwrap_or_default()
     }
 
-    /// What a job started now would convert with.
-    fn plan(&self) -> Result<Plan, String> {
-        let state = &self.states[&self.format];
+    /// What a job making `format` started now would convert with.
+    fn plan(&self, format: Format) -> Result<Plan, String> {
+        let state = &self.states[&format];
         let mut options = self.preset_values(&state.preset);
         options.extend(state.values.clone());
         let options = Value::Object(options);
-        Ok(match self.format {
+        Ok(match format {
             Format::Webm => {
                 let options: Options =
                     serde_json::from_value(options).map_err(|err| err.to_string())?;
@@ -186,7 +205,7 @@ impl App {
         let mut jobs = Vec::new();
         for dir in dirs {
             if self.format == Format::Tgs {
-                jobs.push(Job::new(vec![dir], true));
+                jobs.push(Job::new(vec![dir], true, Format::Tgs));
             } else {
                 self.message = Some(format!(
                     "{} is a folder; folders of frames make TGS stickers",
@@ -195,9 +214,10 @@ impl App {
             }
         }
         if self.join && self.format == Format::Tgs && files.len() > 1 {
-            jobs.push(Job::new(files, true));
+            jobs.push(Job::new(files, true, Format::Tgs));
         } else {
-            jobs.extend(files.into_iter().map(|file| Job::new(vec![file], false)));
+            let format = self.format;
+            jobs.extend(files.into_iter().map(|file| Job::new(vec![file], false, format)));
         }
         for job in jobs {
             self.push(job);
@@ -215,7 +235,7 @@ impl App {
         match tgradish_core::clipboard::paste() {
             Ok(Pasted { files, image_dir: None }) => self.add(files),
             Ok(Pasted { files, image_dir: Some(dir) }) => {
-                let mut job = Job::new(files, false);
+                let mut job = Job::new(files, false, self.format);
                 job.pasted = Some(dir);
                 self.push(job);
             }
@@ -236,7 +256,8 @@ impl App {
             self.running = false;
             return;
         };
-        match self.plan() {
+        // the format it was added for, whichever is shown now
+        match self.plan(self.jobs[index].1.format) {
             Ok(plan) => {
                 let job = &self.jobs[index].1;
                 let dir = self.config.gui.output_dir.clone();
@@ -380,6 +401,9 @@ impl App {
                                 remove = Some(*id);
                             }
                             status_line(ui, &job.status);
+                            ui.label(
+                                egui::RichText::new(format!(".{}", job.format.extension())).weak(),
+                            );
                         });
                     });
                 }
@@ -948,6 +972,18 @@ mod tests {
         assert!(matches!(job.status, Status::Done { .. }), "{:?}", job.status);
         assert!(job.preview.as_ref().is_some_and(|preview| !preview.frames.is_empty()));
         assert!(dir.path().join("clip.sticker.webm").exists());
+    }
+
+    #[test]
+    fn jobs_keep_their_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::with(Config::default(), None, Presets::builtin(), None);
+        app.format = Format::Tgs;
+        app.add(vec![dir.path().to_path_buf()]);
+        app.format = Format::Webm;
+        let job = &app.jobs[0].1;
+        assert_eq!((job.format, job.sequence), (Format::Tgs, true));
+        assert!(matches!(app.plan(job.format), Ok(Plan::Tgs { .. })));
     }
 
     #[test]
