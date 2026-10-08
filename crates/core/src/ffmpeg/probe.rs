@@ -22,6 +22,9 @@ pub struct Probe {
     pub duration: Option<f64>,
     pub alpha: bool,
     pub still_image: bool,
+    /// Clockwise rotation applied when decoding, from the display matrix:
+    /// 0, 90, 180 or 270 degrees. Width and height are already swapped.
+    pub rotation: u16,
     /// Decoder that has to be forced to keep transparency: ffmpeg's native
     /// VP8/VP9 decoders ignore WebM alpha.
     pub decoder: Option<String>,
@@ -37,7 +40,14 @@ fn parse_f64(value: &Value) -> Option<f64> {
     value.as_str()?.parse().ok().filter(|v: &f64| v.is_finite() && *v > 0.0)
 }
 
-fn pix_fmt_has_alpha(pix_fmt: &str) -> bool {
+/// Turns a display matrix angle (counterclockwise) into the clockwise
+/// rotation ffmpeg applies, rounded to quarter turns.
+pub(crate) fn normalize_rotation(counterclockwise: f64) -> u16 {
+    let quarter_turns = (-counterclockwise / 90.0).round() as i64;
+    (quarter_turns.rem_euclid(4) * 90) as u16
+}
+
+pub(crate) fn pix_fmt_has_alpha(pix_fmt: &str) -> bool {
     ["yuva", "rgba", "bgra", "argb", "abgr", "gbrap", "ya8", "ya16"]
         .iter()
         .any(|prefix| pix_fmt.starts_with(prefix))
@@ -88,7 +98,8 @@ pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Prob
         .flatten()
         .find_map(|data| data["rotation"].as_f64())
         .unwrap_or(0.0);
-    if (rotation.abs() - 90.0).abs() < 1.0 || (rotation.abs() - 270.0).abs() < 1.0 {
+    let rotation = normalize_rotation(rotation);
+    if rotation % 180 == 90 {
         std::mem::swap(&mut width, &mut height);
     }
 
@@ -115,6 +126,7 @@ pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Prob
         },
         alpha: pix_fmt_has_alpha(pix_fmt) || webm_alpha,
         still_image,
+        rotation,
         decoder,
         format: format_name,
         codec,

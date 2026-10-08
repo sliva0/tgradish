@@ -27,6 +27,8 @@ pub enum Error {
     Cancelled,
     #[error("download failed: {0}")]
     Download(String),
+    #[error("ffmpeg: {0}")]
+    Libav(String),
     #[error(transparent)]
     Webm(#[from] WebmError),
     #[error(transparent)]

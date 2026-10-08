@@ -9,6 +9,10 @@
 //! The result is `target/ffmpeg/ffmpeg-<version>-<target>.tar.gz` with the
 //! two executables and the licenses of everything linked into them. ffmpeg
 //! is configured without GPL parts, so it is LGPL 2.1 or later.
+//!
+//! The static libraries end up in `target/ffmpeg/prefix-<target>`; point
+//! `PKG_CONFIG_PATH` at its `lib/pkgconfig` to build tgradish with
+//! `--features linked-static`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -351,7 +355,8 @@ impl Build {
                 .arg("--extra-ldexeflags=-static");
         }
         run(&mut configure)?;
-        run(Command::new("make").current_dir(&dir).args(["-j", &self.jobs]))?;
+        // installs the static libraries too, for `--features linked-static`
+        self.make(&dir)?;
         Ok(dir)
     }
 

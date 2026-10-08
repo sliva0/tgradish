@@ -7,8 +7,9 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::Parser;
+use tgradish_core::backend::Backend;
 use tgradish_core::config::Config;
-use tgradish_core::ffmpeg::{self, CancelToken, Ffmpeg};
+use tgradish_core::ffmpeg::CancelToken;
 
 use crate::args::{Cli, Command, Global};
 
@@ -35,10 +36,14 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn ffmpeg(&self) -> Result<Ffmpeg> {
-        let path = self.global.ffmpeg.as_ref().or(self.config.ffmpeg.path.as_ref());
-        let choice = self.global.ffmpeg_from.map_or(self.config.ffmpeg.choice, Into::into);
-        Ok(ffmpeg::locate(choice, path.map(|p| p.as_path()))?)
+    pub fn backend(&self) -> Result<Backend> {
+        // an explicit choice on the command line beats a path in the config
+        let (choice, path) = match (self.global.ffmpeg_from, &self.global.ffmpeg) {
+            (_, Some(path)) => (self.config.ffmpeg.choice, Some(path)),
+            (Some(choice), None) => (choice.into(), None),
+            (None, None) => (self.config.ffmpeg.choice, self.config.ffmpeg.path.as_ref()),
+        };
+        Ok(Backend::select(choice, path.map(|p| p.as_path()))?)
     }
 }
 

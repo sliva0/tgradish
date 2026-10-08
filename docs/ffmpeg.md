@@ -1,19 +1,43 @@
 # ffmpeg builds
 
-tgradish runs ffmpeg and ffprobe as separate programs. It looks for them in
-this order, unless `--ffmpeg PATH`, `--ffmpeg-from` or `config.toml` says
-otherwise:
+tgradish can use ffmpeg in two ways:
 
-1. next to the tgradish executable (release archives ship them there);
+- **built in**: with the `linked` Cargo feature, the ffmpeg libraries are
+  linked into tgradish and used in-process. Release builds link them
+  statically, so tgradish is a single file;
+- **as separate programs**: `ffmpeg` and `ffprobe` executables.
+
+Unless `--ffmpeg PATH`, `--ffmpeg-from` or `config.toml` says otherwise,
+tgradish uses the built-in ffmpeg if it has one, and otherwise looks for the
+executables:
+
+1. next to the tgradish executable;
 2. in the data directory, where `tgradish ffmpeg download` puts them;
 3. on `PATH`, which is how Linux distributions would package tgradish.
 
-`tgradish ffmpeg status` shows which one is used.
+`tgradish ffmpeg status` shows which one is used. Both ways run the same
+filters and encoder settings; the tests check that they give the same
+results.
+
+## Building with ffmpeg built in
+
+```console
+# against the system's ffmpeg libraries (needs their headers and libclang)
+cargo build --release --features linked
+
+# statically, against the minimal build described below
+cargo xtask ffmpeg
+PKG_CONFIG_PATH=$PWD/target/ffmpeg/prefix-x86_64-unknown-linux-gnu/lib/pkgconfig \
+  PKG_CONFIG_ALL_STATIC=1 cargo build --release --features linked-static
+```
+
+The static build only depends on glibc (about 15 MB).
 
 ## The minimal build
 
 `cargo xtask ffmpeg [--target linux|windows] [--no-asm]` builds static
-ffmpeg and ffprobe with only what tgradish needs: common video and image
+ffmpeg libraries, and ffmpeg and ffprobe executables, with only what
+tgradish needs: common video and image
 decoders, libvpx for VP9, dav1d for AV1, and the filters used for scaling,
 padding and SSIM. It writes
 `target/ffmpeg/ffmpeg-<version>-<target>.tar.gz` and a `.sha256` file.

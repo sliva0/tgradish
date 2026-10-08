@@ -2,6 +2,7 @@
 //! stickers and patches WebM metadata, including the duration spoofing that
 //! gets stickers past the 3 second limit.
 
+pub mod backend;
 pub mod config;
 pub mod convert;
 pub mod ebml;
@@ -10,6 +11,8 @@ pub mod events;
 pub mod ffmpeg;
 pub mod fit;
 mod fsutil;
+#[cfg(feature = "linked")]
+mod linked;
 pub mod options;
 pub mod paths;
 pub mod presets;

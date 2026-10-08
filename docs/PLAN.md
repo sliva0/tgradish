@@ -85,7 +85,8 @@ Verified facts that the design relies on (ffmpeg 9.0):
    `--json`;
 5. minimal static ffmpeg built in CI, bundled next to the binary, plus
    `tgradish ffmpeg download`;
-6. linked ffmpeg backend behind a Cargo feature, including Windows;
+6. linked ffmpeg backend behind a Cargo feature (done for Linux, Windows
+   cross builds still to be tried in CI);
 7. `tgradish watch <dir>` and clipboard input;
 8. release archives, tag 2.0.0.
 
