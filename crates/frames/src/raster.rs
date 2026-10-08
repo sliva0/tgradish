@@ -1,0 +1,85 @@
+//! GIF, PNG/APNG and WebP through the `image` crate, which composites
+//! frames (disposal, blending, sub-rectangles) into full-size RGBA.
+
+use std::io::Cursor;
+use std::time::Duration;
+
+use image::codecs::gif::GifDecoder;
+use image::codecs::png::PngDecoder;
+use image::codecs::webp::WebPDecoder;
+use image::{AnimationDecoder, DynamicImage, Frames, ImageDecoder, ImageError};
+
+use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Format, Frame, Result};
+
+pub(crate) fn decode(bytes: &[u8], format: Format) -> Result<Animation> {
+    let error = |err: ImageError| Error::Decode { format, message: err.to_string() };
+    let reader = Cursor::new(bytes);
+    let animated = match format {
+        Format::Gif => {
+            let frames = GifDecoder::new(reader).map_err(error)?.into_frames();
+            collect(frames, format, gif_delay)?
+        }
+        Format::Png => {
+            let decoder = PngDecoder::new(reader).map_err(error)?;
+            if decoder.is_apng().map_err(error)? {
+                collect(decoder.apng().map_err(error)?.into_frames(), format, |delay| delay)?
+            } else {
+                return still(decoder, format);
+            }
+        }
+        Format::WebP => {
+            let decoder = WebPDecoder::new(reader).map_err(error)?;
+            if decoder.has_animation() {
+                collect(decoder.into_frames(), format, |delay| delay)?
+            } else {
+                return still(decoder, format);
+            }
+        }
+        Format::Aseprite => unreachable!("Aseprite files are decoded by aseprite.rs"),
+    };
+    animated.ok_or(Error::Empty)
+}
+
+/// Browsers show GIF frames with a delay of 0 or 1 centiseconds for 100 ms,
+/// and GIFs are made to look right in browsers.
+fn gif_delay(delay: Duration) -> Duration {
+    if delay <= Duration::from_millis(10) { DEFAULT_FRAME_DURATION } else { delay }
+}
+
+fn collect(
+    frames: Frames<'_>,
+    format: Format,
+    delay: impl Fn(Duration) -> Duration,
+) -> Result<Option<Animation>> {
+    let mut size = None;
+    let mut out = Vec::new();
+    for frame in frames {
+        let frame = frame.map_err(|err| Error::Decode { format, message: err.to_string() })?;
+        let duration = delay(Duration::from(frame.delay()));
+        let buffer = frame.into_buffer();
+        size.get_or_insert(buffer.dimensions());
+        out.push(Frame { rgba: buffer.into_raw(), duration });
+    }
+    let Some((width, height)) = size else { return Ok(None) };
+    // A single frame is a still image, whatever delay it has.
+    if out.len() == 1 {
+        out[0].duration = DEFAULT_FRAME_DURATION;
+    }
+    // Files whose frames all say 0 rely on the viewer's default speed.
+    if out.iter().all(|frame| frame.duration.is_zero()) {
+        out.iter_mut().for_each(|frame| frame.duration = DEFAULT_FRAME_DURATION);
+    }
+    Animation::new(width, height, out).map(Some)
+}
+
+fn still(decoder: impl ImageDecoder, format: Format) -> Result<Animation> {
+    let image = DynamicImage::from_decoder(decoder)
+        .map_err(|err| Error::Decode { format, message: err.to_string() })?
+        .into_rgba8();
+    let (width, height) = image.dimensions();
+    Animation::new(
+        width,
+        height,
+        vec![Frame { rgba: image.into_raw(), duration: DEFAULT_FRAME_DURATION }],
+    )
+}
