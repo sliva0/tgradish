@@ -101,14 +101,7 @@ pub(crate) fn preview_frames(
     cmd.arg("-i").arg(input);
     cmd.args(["-frames:v", &count.to_string(), "-vf", &format!("scale={width}:{height}")]);
     cmd.args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
-    let out = cmd.output()?;
-    if !out.status.success() {
-        return Err(crate::Error::Ffmpeg {
-            program: "ffmpeg",
-            status: out.status.to_string(),
-            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-        });
-    }
+    let out = process::run_bytes(cmd, "ffmpeg", cancel)?;
     let frame = width as usize * height as usize * 4;
-    Ok(out.stdout.chunks_exact(frame).map(<[u8]>::to_vec).collect())
+    Ok(out.chunks_exact(frame).map(<[u8]>::to_vec).collect())
 }

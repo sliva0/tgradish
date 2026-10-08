@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
@@ -56,15 +56,11 @@ pub(crate) enum Output {
 
 const STDERR_TAIL: usize = 40;
 
-/// Runs `cmd` until it exits, passing its output to `on_output`. ffmpeg
-/// commands should use `-progress pipe:1` to report progress. Returns the
-/// last lines of stderr.
-pub(crate) fn run(
+/// Starts `cmd` with its output piped, so that cancelling kills it.
+fn spawn(
     mut cmd: Command,
-    program: &'static str,
     cancel: &CancelToken,
-    on_output: &mut dyn FnMut(Output),
-) -> Result<Vec<String>> {
+) -> Result<(Arc<Mutex<Child>>, ChildStdout, ChildStderr)> {
     cancel.check()?;
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
@@ -89,7 +85,41 @@ pub(crate) fn run(
     if cancel.is_cancelled() {
         let _ = child.lock().unwrap().kill();
     }
+    Ok((child, stdout, stderr))
+}
 
+/// Waits for a child whose output is read to the end. `stderr` is the last
+/// lines of its stderr, for the error if it failed.
+fn wait(
+    child: &Mutex<Child>,
+    program: &'static str,
+    cancel: &CancelToken,
+    stderr: &[String],
+) -> Result<()> {
+    let status = child.lock().unwrap().wait();
+    cancel.register(None);
+    let status = status?;
+    cancel.check()?;
+    if !status.success() {
+        return Err(Error::Ffmpeg {
+            program,
+            status: status.to_string(),
+            stderr: stderr.join("\n"),
+        });
+    }
+    Ok(())
+}
+
+/// Runs `cmd` until it exits, passing its output to `on_output`. ffmpeg
+/// commands should use `-progress pipe:1` to report progress. Returns the
+/// last lines of stderr.
+pub(crate) fn run(
+    cmd: Command,
+    program: &'static str,
+    cancel: &CancelToken,
+    on_output: &mut dyn FnMut(Output),
+) -> Result<Vec<String>> {
+    let (child, stdout, stderr) = spawn(cmd, cancel)?;
     let (tx, rx) = mpsc::channel();
     let stdout_thread = spawn_reader(stdout, tx.clone(), |line| {
         match line.strip_prefix("out_time_us=").map(|micros| micros.trim().parse()) {
@@ -113,19 +143,33 @@ pub(crate) fn run(
     }
     let _ = stdout_thread.join();
     let _ = stderr_thread.join();
-
-    let status = child.lock().unwrap().wait();
-    cancel.register(None);
-    let status = status?;
-    cancel.check()?;
-    if !status.success() {
-        return Err(Error::Ffmpeg {
-            program,
-            status: status.to_string(),
-            stderr: Vec::from(tail).join("\n"),
-        });
-    }
+    wait(&child, program, cancel, tail.make_contiguous())?;
     Ok(tail.into())
+}
+
+/// Runs `cmd` until it exits and returns everything it wrote to stdout,
+/// which may be binary.
+pub(crate) fn run_bytes(
+    cmd: Command,
+    program: &'static str,
+    cancel: &CancelToken,
+) -> Result<Vec<u8>> {
+    let (child, mut stdout, stderr) = spawn(cmd, cancel)?;
+    let (tx, rx) = mpsc::channel();
+    let stderr_thread = spawn_reader(stderr, tx, |line| Some(Output::Line(line)));
+    let mut bytes = Vec::new();
+    let read = stdout.read_to_end(&mut bytes);
+    let _ = stderr_thread.join();
+    let lines: Vec<String> = rx
+        .into_iter()
+        .filter_map(|output| match output {
+            Output::Line(line) => Some(line),
+            _ => None,
+        })
+        .collect();
+    wait(&child, program, cancel, &lines[lines.len().saturating_sub(STDERR_TAIL)..])?;
+    read?;
+    Ok(bytes)
 }
 
 fn spawn_reader(
