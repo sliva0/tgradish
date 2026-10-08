@@ -27,8 +27,10 @@ pub enum WebmError {
     NoSegment,
     #[error("no Info element found in the Segment")]
     NoInfo,
-    #[error("fake duration must be a positive number of seconds, got {0}")]
+    #[error("fake duration must be more than 0 and at most {MAX_FAKE_DURATION} seconds, got {0}")]
     InvalidDuration(f64),
+    #[error("the file has an invalid TimestampScale")]
+    InvalidTimestampScale,
     #[error("{field} is too long ({len} bytes)")]
     ValueTooLong { field: &'static str, len: usize },
     #[error(
@@ -92,6 +94,9 @@ impl WebmInfo {
         (self.video_frames > 0).then(|| self.video_frames as f64 / duration)
     }
 }
+
+/// Longest fake duration [`patch`] accepts, in seconds (a year).
+pub const MAX_FAKE_DURATION: f64 = 365.0 * 24.0 * 3600.0;
 
 /// Prefix of the signature text written into padding.
 pub const SIGNATURE_PREFIX: &str = "tgradish";
@@ -201,16 +206,36 @@ struct TrackStats {
     last: Option<i64>,
     /// BlockDuration of the block at `last`, in timestamp units.
     last_duration: Option<u64>,
+    /// Number of frames laced into the block at `last`.
+    last_frames: u64,
 }
 
 impl TrackStats {
     fn add(&mut self, timestamp: i64, frames: u64, duration: Option<u64>) {
-        self.frames += frames;
+        self.frames = self.frames.saturating_add(frames);
         self.first = Some(self.first.map_or(timestamp, |first| first.min(timestamp)));
         if self.last.is_none_or(|last| timestamp >= last) {
             self.last = Some(timestamp);
             self.last_duration = duration;
+            self.last_frames = frames;
         }
+    }
+
+    /// Time from the first frame to the end of the last one, in timestamp
+    /// units, given the track's frame duration in timestamp units.
+    fn duration(&self, frame_duration: Option<f64>) -> Option<f64> {
+        let (first, last) = (self.first?, self.last?);
+        let span = (i128::from(last) - i128::from(first)) as f64;
+        let last_block = match (self.last_duration, frame_duration) {
+            (Some(units), _) => units as f64,
+            (None, Some(frame)) => frame * self.last_frames as f64,
+            // without any declared durations, assume evenly spaced frames
+            (None, None) if self.frames > self.last_frames => {
+                span / (self.frames - self.last_frames) as f64 * self.last_frames as f64
+            }
+            (None, None) => 0.0,
+        };
+        Some(span + last_block)
     }
 }
 
@@ -230,18 +255,23 @@ fn parse_block(data: &[u8], offset: usize) -> Result<(u64, i16, u64)> {
     Ok((track, timestamp, frames))
 }
 
+/// Adds the blocks of a Cluster to `stats`. Returns whether any element in it
+/// was truncated.
 fn parse_cluster(
     buf: &[u8],
     cluster: &Element,
     stats: &mut HashMap<u64, TrackStats>,
-) -> Result<()> {
-    let mut cluster_ts = 0i64;
-    for child in ebml::Children::new(buf, cluster.data_start, cluster.end) {
+) -> Result<bool> {
+    // Timestamp should come first, but blocks before it still need it
+    let cluster_ts = match cluster.children(buf).find_id(ids::TIMESTAMP)? {
+        Some(el) => i64::try_from(ebml::read_uint(buf, &el)?).unwrap_or(i64::MAX),
+        None => 0,
+    };
+    let mut truncated = false;
+    for child in cluster.children(buf) {
         let child = child?;
+        truncated |= child.truncated;
         match child.id {
-            ids::TIMESTAMP => {
-                cluster_ts = i64::try_from(ebml::read_uint(buf, &child)?).unwrap_or(i64::MAX)
-            }
             ids::SIMPLE_BLOCK => {
                 let (track, rel, frames) = parse_block(child.data(buf), child.data_start)?;
                 let ts = cluster_ts.saturating_add(i64::from(rel));
@@ -252,6 +282,7 @@ fn parse_cluster(
                 let mut duration = None;
                 for item in child.children(buf) {
                     let item = item?;
+                    truncated |= item.truncated;
                     match item.id {
                         ids::BLOCK => block = Some(item),
                         ids::BLOCK_DURATION => duration = Some(ebml::read_uint(buf, &item)?),
@@ -267,7 +298,7 @@ fn parse_cluster(
             _ => {}
         }
     }
-    Ok(())
+    Ok(truncated)
 }
 
 struct Tracks {
@@ -366,13 +397,14 @@ fn duration_tags_in(buf: &[u8], tags: &Element) -> Result<Vec<DurationTag>> {
     Ok(found)
 }
 
-fn find_signature(buf: &[u8], segment: &Segment) -> Option<String> {
-    segment.children.iter().filter(|el| el.id == ids::VOID).find_map(|el| {
-        let data = el.data(buf);
-        let text = data.split(|&b| b == 0).next()?;
-        text.starts_with(SIGNATURE_PREFIX.as_bytes())
-            .then(|| String::from_utf8_lossy(text).into_owned())
-    })
+/// Signature text at the start of a Void element, see [`Patch::signature`].
+fn void_signature(buf: &[u8], el: &Element) -> Option<String> {
+    if el.id != ids::VOID {
+        return None;
+    }
+    let text = el.data(buf).split(|&b| b == 0).next()?;
+    text.starts_with(SIGNATURE_PREFIX.as_bytes())
+        .then(|| String::from_utf8_lossy(text).into_owned())
 }
 
 /// Reads stream properties and metadata of a WebM (or Matroska) file.
@@ -390,7 +422,7 @@ pub fn inspect(buf: &[u8]) -> Result<WebmInfo> {
         match child.id {
             ids::INFO => fields = parse_info(buf, child)?,
             ids::TRACKS => tracks = parse_tracks(buf, child)?,
-            ids::CLUSTER => parse_cluster(buf, child, &mut stats)?,
+            ids::CLUSTER => truncated |= parse_cluster(buf, child, &mut stats)?,
             ids::TAGS => {
                 for tag in duration_tags_in(buf, child)? {
                     duration_tags.push(ebml::read_string(buf, &tag.value));
@@ -405,16 +437,9 @@ pub fn inspect(buf: &[u8]) -> Result<WebmInfo> {
 
     let video_stats = tracks.video.as_ref().and_then(|video| stats.get(&video.number));
     let content_duration = video_stats.and_then(|s| {
-        let (first, last) = (s.first?, s.last?);
-        let span = units_to_secs((last - first) as f64);
-        let default_duration = tracks.video.as_ref()?.default_duration_ns;
-        let last_frame = match (s.last_duration, default_duration) {
-            (Some(units), _) => units_to_secs(units as f64),
-            (None, Some(ns)) => ns as f64 / 1e9,
-            (None, None) if s.frames > 1 => span / (s.frames - 1) as f64,
-            (None, None) => 0.0,
-        };
-        Some(span + last_frame)
+        let frame_ns = tracks.video.as_ref()?.default_duration_ns;
+        let frame_units = frame_ns.filter(|_| scale > 0).map(|ns| ns as f64 / scale as f64);
+        s.duration(frame_units).map(units_to_secs)
     });
 
     Ok(WebmInfo {
@@ -427,7 +452,7 @@ pub fn inspect(buf: &[u8]) -> Result<WebmInfo> {
         muxing_app: fields.muxing_app,
         writing_app: fields.writing_app,
         duration_tags,
-        signature: find_signature(buf, &segment),
+        signature: segment.children.iter().find_map(|el| void_signature(buf, el)),
         video_frames: video_stats.map_or(0, |s| s.frames),
         video: tracks.video,
         audio_tracks: tracks.audio,
@@ -450,7 +475,8 @@ fn format_tag_duration(secs: f64) -> String {
 /// Turns a CRC-32 child of `parent` into a Void of the same size. Used after
 /// changing bytes the checksum covers.
 fn neutralize_crc(buf: &mut [u8], parent: &Element) -> Result<()> {
-    let crc = parent.children(buf).find_id(ids::CRC32)?;
+    // a CRC-32 element must be the first child
+    let crc = parent.children(buf).next().transpose()?.filter(|el| el.id == ids::CRC32);
     if let Some(crc) = crc
         && let Some(void) = ebml::encode_void(crc.end - crc.start, b"")
     {
@@ -623,7 +649,7 @@ pub fn patch(buf: &mut [u8], changes: &Patch) -> Result<PatchReport> {
 
 fn patch_in_place(buf: &mut [u8], patch: &Patch) -> Result<PatchReport> {
     if let Some(duration) = patch.duration
-        && !(duration.is_finite() && duration > 0.0)
+        && !(duration.is_finite() && duration > 0.0 && duration <= MAX_FAKE_DURATION)
     {
         return Err(WebmError::InvalidDuration(duration));
     }
@@ -633,19 +659,38 @@ fn patch_in_place(buf: &mut [u8], patch: &Patch) -> Result<PatchReport> {
         segment.children.iter().position(|el| el.id == ids::INFO).ok_or(WebmError::NoInfo)?;
     let info = segment.children[info_index];
     let fields = parse_info(buf, &info)?;
-    let scale = fields.timestamp_scale.unwrap_or(DEFAULT_TIMESTAMP_SCALE) as f64;
+    let scale = match fields.timestamp_scale.unwrap_or(DEFAULT_TIMESTAMP_SCALE) {
+        0 => return Err(WebmError::InvalidTimestampScale),
+        scale => scale as f64,
+    };
     let duration_units = patch.duration.map(|secs| secs * 1e9 / scale);
+    if let Some(units) = duration_units
+        && units > f64::from(f32::MAX)
+    {
+        // would not fit a 4-byte Duration
+        return Err(WebmError::InvalidTimestampScale);
+    }
 
     // Info plus the padding right before and after it
     let is_void = |el: &&Element| el.id == ids::VOID;
-    let before = segment.children[..info_index].iter().rev().take_while(is_void).last();
-    let after = segment.children[info_index + 1..].iter().take_while(is_void).last();
-    let span = (before.map_or(info.start, |el| el.start), after.map_or(info.end, |el| el.end));
+    let before: Vec<_> =
+        segment.children[..info_index].iter().rev().take_while(is_void).copied().collect();
+    let after: Vec<_> =
+        segment.children[info_index + 1..].iter().take_while(is_void).copied().collect();
+    let span = (
+        before.last().map_or(info.start, |el| el.start),
+        after.last().map_or(info.end, |el| el.end),
+    );
 
+    // the padding is rewritten, so keep a signature that is already there
+    let signature = patch
+        .signature
+        .clone()
+        .or_else(|| before.iter().chain(&after).find_map(|el| void_signature(buf, el)))
+        .unwrap_or_default();
     let info_data = build_info_data(buf, &info, patch, duration_units)?;
-    let signature = patch.signature.as_deref().unwrap_or_default().as_bytes();
     let (info_start, signature_written) =
-        layout_info(buf, span, info.start, &info_data, signature)?;
+        layout_info(buf, span, info.start, &info_data, signature.as_bytes())?;
     let info_moved = info_start != info.start;
     if info_moved {
         update_seek_head(buf, &segment, info_start)?;
@@ -673,6 +718,8 @@ fn patch_in_place(buf: &mut [u8], patch: &Patch) -> Result<PatchReport> {
             tags_patched += 1;
         }
     }
+    // a Segment checksum covers everything changed above
+    neutralize_crc(buf, &segment.el)?;
 
     Ok(PatchReport {
         old_duration: fields.duration.map(|units| units * scale / 1e9),
@@ -690,13 +737,10 @@ pub fn patch_file(input: &Path, output: &Path, changes: &Patch) -> Result<PatchR
     let mut buf = std::fs::read(input)?;
     let report = patch(&mut buf, changes)?;
 
-    let mut tmp_name = output.file_name().unwrap_or_default().to_os_string();
-    tmp_name.push(".tgradish-tmp");
-    let tmp = output.with_file_name(tmp_name);
-    std::fs::write(&tmp, &buf)?;
-    std::fs::rename(&tmp, output).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })?;
+    let dir = output.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let mut tmp = tempfile::Builder::new().prefix(".tgradish-").tempfile_in(dir)?;
+    std::io::Write::write_all(&mut tmp, &buf)?;
+    tmp.persist(output).map_err(|err| err.error)?;
     Ok(report)
 }
 
@@ -973,5 +1017,127 @@ mod tests {
     fn formats_tag_durations() {
         assert_eq!(format_tag_duration(0.42069), "00:00:00.420690000");
         assert_eq!(format_tag_duration(3725.5), "01:02:05.500000000");
+    }
+
+    /// Minimal file with the given Segment children: Info with TimestampScale
+    /// `scale`, one 40 ms video track, then `rest`.
+    fn minimal_webm(scale: u64, rest: &[Vec<u8>], unknown_sizes: bool) -> Vec<u8> {
+        let info = el(
+            ids::INFO,
+            &concat(&[uint(ids::TIMESTAMP_SCALE, scale), f64_el(ids::DURATION, 1000.0)]),
+        );
+        let track = el(
+            ids::TRACK_ENTRY,
+            &concat(&[
+                uint(ids::TRACK_NUMBER, 1),
+                uint(ids::TRACK_TYPE, 1),
+                el(ids::CODEC_ID, b"V_VP9"),
+                uint(ids::DEFAULT_DURATION, 40_000_000),
+            ]),
+        );
+        let mut children = vec![info, el(ids::TRACKS, &track)];
+        children.extend_from_slice(rest);
+        let body = concat(&children);
+        let segment = if unknown_sizes {
+            el_unknown_size(ids::SEGMENT, &body)
+        } else {
+            el(ids::SEGMENT, &body)
+        };
+        concat(&[el(ids::EBML, &el(ids::DOC_TYPE, b"webm")), segment])
+    }
+
+    /// SimpleBlock for track 1. `laced` extra frames use fixed-size lacing.
+    fn block(timestamp: i16, laced: u8) -> Vec<u8> {
+        let mut data = vec![0x81];
+        data.extend(timestamp.to_be_bytes());
+        if laced == 0 {
+            data.extend([0x80, 0xAA]);
+        } else {
+            data.extend([0x84, laced]);
+            data.extend(std::iter::repeat_n(0xAA, usize::from(laced) + 1));
+        }
+        el(ids::SIMPLE_BLOCK, &data)
+    }
+
+    #[test]
+    fn counts_laced_frames_in_duration() {
+        let cluster = el(ids::CLUSTER, &concat(&[uint(ids::TIMESTAMP, 0), block(0, 2)]));
+        let info = inspect(&minimal_webm(1_000_000, &[cluster], false)).unwrap();
+        assert_eq!(info.video_frames, 3);
+        assert_close(info.content_duration, 0.12);
+    }
+
+    #[test]
+    fn uses_cluster_timestamp_written_after_blocks() {
+        let first = el(ids::CLUSTER, &concat(&[uint(ids::TIMESTAMP, 0), block(0, 0)]));
+        let second = el(ids::CLUSTER, &concat(&[block(0, 0), uint(ids::TIMESTAMP, 1000)]));
+        let info = inspect(&minimal_webm(1_000_000, &[first, second], false)).unwrap();
+        assert_close(info.content_duration, 1.04);
+    }
+
+    #[test]
+    fn survives_extreme_timestamps() {
+        let first = el(ids::CLUSTER, &concat(&[uint(ids::TIMESTAMP, 0), block(-1, 0)]));
+        let last = el(ids::CLUSTER, &concat(&[uint(ids::TIMESTAMP, u64::MAX), block(i16::MAX, 0)]));
+        let info = inspect(&minimal_webm(1_000_000, &[first, last], false)).unwrap();
+        assert!(info.content_duration.unwrap() > 0.0);
+    }
+
+    #[test]
+    fn reports_truncation_inside_unknown_size_clusters() {
+        let mut cut_block = vec![0xA3, 0x80 | 100, 0x81, 0x00, 0x00, 0x80, 0xAA];
+        cut_block.truncate(7);
+        let cluster = el_unknown_size(ids::CLUSTER, &concat(&[uint(ids::TIMESTAMP, 0), cut_block]));
+        let info = inspect(&minimal_webm(1_000_000, &[cluster], true)).unwrap();
+        assert!(info.truncated);
+    }
+
+    #[test]
+    fn rejects_unusable_durations_and_scales() {
+        let mut buf = Fixture::default().build();
+        let huge = Patch { duration: Some(f64::MAX), ..Default::default() };
+        assert!(matches!(patch(&mut buf, &huge), Err(WebmError::InvalidDuration(_))));
+
+        let mut buf = minimal_webm(0, &[], false);
+        let changes = Patch { duration: Some(1.0), ..Default::default() };
+        assert!(matches!(patch(&mut buf, &changes), Err(WebmError::InvalidTimestampScale)));
+    }
+
+    #[test]
+    fn clears_segment_checksum() {
+        let crc = el(ids::CRC32, &[1, 2, 3, 4]);
+        let mut buf = minimal_webm(1_000_000, &[], false);
+        // put the CRC-32 first in the Segment by rebuilding it
+        let (_, segment) = parse_segment(&buf).unwrap();
+        let body = concat(&[crc, segment.el.data(&buf).to_vec()]);
+        buf = concat(&[el(ids::EBML, &el(ids::DOC_TYPE, b"webm")), el(ids::SEGMENT, &body)]);
+
+        patch(&mut buf, &Patch { duration: Some(0.5), ..Default::default() }).unwrap();
+        let (_, segment) = parse_segment(&buf).unwrap();
+        assert_eq!(segment.children[0].id, ids::VOID);
+    }
+
+    #[test]
+    fn keeps_existing_signature() {
+        let mut buf = Fixture::default().build();
+        let signed = Patch { signature: Some("tgradish was here".into()), ..Default::default() };
+        patch(&mut buf, &signed).unwrap();
+        patch(&mut buf, &Patch { duration: Some(0.5), ..Default::default() }).unwrap();
+        assert_eq!(inspect(&buf).unwrap().signature.as_deref(), Some("tgradish was here"));
+    }
+
+    #[test]
+    fn patch_file_leaves_other_files_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("out.webm");
+        let bystander = dir.path().join("out.webm.tgradish-tmp");
+        std::fs::write(&bystander, b"keep me").unwrap();
+        let input = dir.path().join("in.webm");
+        std::fs::write(&input, Fixture::default().build()).unwrap();
+
+        patch_file(&input, &output, &Patch { duration: Some(0.5), ..Default::default() }).unwrap();
+        assert_eq!(std::fs::read(&bystander).unwrap(), b"keep me");
+        let leftovers = std::fs::read_dir(dir.path()).unwrap().count();
+        assert_eq!(leftovers, 3, "no temporary files left behind");
     }
 }
