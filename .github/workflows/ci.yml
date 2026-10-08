@@ -52,6 +52,17 @@ jobs:
       - run: cargo clippy --workspace --all-targets --features tgradish/linked -- -D warnings
       - run: cargo test --workspace --features tgradish/linked,tgradish-core/linked
 
+  # .tgs output rendered with rlottie too; the check job covers tlottie
+  rlottie:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Swatinem/rust-cache@v2
+      - name: Install what Telegram's rlottie builds with
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang libclang-dev
+      - run: cargo clippy -p tgs-lab --all-targets --features rlottie -- -D warnings
+      - run: cargo test -p tgs-lab --features rlottie
+
   # libraries the Telegram web app will run in the browser
   wasm:
     runs-on: ubuntu-latest
