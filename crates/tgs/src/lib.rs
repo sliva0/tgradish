@@ -17,7 +17,9 @@ pub mod layout;
 pub mod limits;
 pub mod lottie;
 pub mod normalise;
+pub mod reduce;
 pub mod scene;
+pub mod sticker;
 
 pub use normalise::{PixelAnim, normalise};
 pub use tgradish_frames as frames;
@@ -34,6 +36,8 @@ pub enum Error {
     ZeroScale,
     #[error("more than 65535 colours: this is not pixel art")]
     TooManyColours,
+    #[error(transparent)]
+    Encode(#[from] encode::EncodeError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

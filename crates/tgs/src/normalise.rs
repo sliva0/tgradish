@@ -90,11 +90,11 @@ fn gcd(a: u32, b: u32) -> u32 {
 /// is transparent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PixelAnim {
-    width: u32,
-    height: u32,
-    grid: Grid,
-    palette: Vec<[u8; 4]>,
-    frames: Vec<PixelFrame>,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) grid: Grid,
+    pub(crate) palette: Vec<[u8; 4]>,
+    pub(crate) frames: Vec<PixelFrame>,
 }
 
 impl PixelAnim {
@@ -321,31 +321,9 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
         _ => {}
     }
 
-    let grid = edges.grid();
-    let (width, height) = (grid.columns.len() as u32 - 1, grid.rows.len() as u32 - 1);
-    let mut palette = vec![[0; 4]];
-    let mut index = HashMap::from([(0u32, 0u16)]);
-    let mut out = Vec::with_capacity(frames.len());
-    for (pixels, (_, ticks)) in pixels.iter().zip(&frames) {
-        let mut cells = Vec::with_capacity(width as usize * height as usize);
-        for &y in &grid.rows[..height as usize] {
-            for &x in &grid.columns[..width as usize] {
-                let colour = pixels[(y * crop.width + x) as usize];
-                let entry = match index.get(&colour) {
-                    Some(&entry) => entry,
-                    None => {
-                        let entry =
-                            u16::try_from(palette.len()).map_err(|_| Error::TooManyColours)?;
-                        index.insert(colour, entry);
-                        palette.push(colour.to_le_bytes());
-                        entry
-                    }
-                };
-                cells.push(entry);
-            }
-        }
-        out.push(PixelFrame { pixels: cells, ticks: *ticks });
-    }
+    let ticks: Vec<u32> = frames.iter().map(|&(_, ticks)| ticks).collect();
+    let anim = assemble(&pixels, &ticks, crop.width, &edges)?;
+    let (width, height, grid) = (anim.width, anim.height, anim.grid.clone());
 
     let scale = grid.scale();
     let likely_scale = if options.pixel_scale.is_some() {
@@ -357,12 +335,11 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
             .find(|&(_, fit)| fit >= LIKELY_FIT)
             .map(|(scale, fit)| LikelyScale { scale, fit })
     };
-    let colours = palette.len() - 1;
+    let colours = anim.palette.len() - 1;
     let mut warnings = Vec::new();
     if colours > MANY_COLOURS {
         warnings.push(Warning::ManyColours { colours });
     }
-    let anim = PixelAnim { width, height, grid, palette, frames: out };
     let report = Report {
         input_width,
         input_height,
@@ -384,6 +361,42 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
         warnings,
     };
     Ok((anim, report))
+}
+
+/// Turns frames of packed pixels, `width` wide, into cells and a palette.
+/// `edges` must be their [`Edges`].
+pub(crate) fn assemble(
+    pixels: &[Vec<u32>],
+    ticks: &[u32],
+    width: u32,
+    edges: &Edges,
+) -> Result<PixelAnim> {
+    let grid = edges.grid();
+    let (cells_wide, cells_high) = (grid.columns.len() as u32 - 1, grid.rows.len() as u32 - 1);
+    let mut palette = vec![[0; 4]];
+    let mut index = HashMap::from([(0u32, 0u16)]);
+    let mut frames = Vec::with_capacity(pixels.len());
+    for (pixels, &ticks) in pixels.iter().zip(ticks) {
+        let mut cells = Vec::with_capacity(cells_wide as usize * cells_high as usize);
+        for &y in &grid.rows[..cells_high as usize] {
+            for &x in &grid.columns[..cells_wide as usize] {
+                let colour = pixels[(y * width + x) as usize];
+                let entry = match index.get(&colour) {
+                    Some(&entry) => entry,
+                    None => {
+                        let entry =
+                            u16::try_from(palette.len()).map_err(|_| Error::TooManyColours)?;
+                        index.insert(colour, entry);
+                        palette.push(colour.to_le_bytes());
+                        entry
+                    }
+                };
+                cells.push(entry);
+            }
+        }
+        frames.push(PixelFrame { pixels: cells, ticks });
+    }
+    Ok(PixelAnim { width: cells_wide, height: cells_high, grid, palette, frames })
 }
 
 /// The smallest rectangle holding every visible pixel of every frame.
@@ -415,21 +428,21 @@ fn cut(pixels: &[u32], width: u32, crop: Rect) -> Vec<u32> {
 /// column) of every frame: `columns[x]` counts changes between columns
 /// `x - 1` and `x`. Outside the crop counts as transparent, so the first
 /// and last entries count visible pixels on the border.
-struct Edges {
+pub(crate) struct Edges {
     columns: Vec<u64>,
     rows: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct GridFit {
+pub(crate) struct GridFit {
     /// Where the grid starts, from the crop's top left.
-    offset: (u32, u32),
+    pub(crate) offset: (u32, u32),
     /// Share of colour edges on the grid.
     fit: f64,
 }
 
 impl Edges {
-    fn count(frames: &[Vec<u32>], width: u32, height: u32) -> Edges {
+    pub(crate) fn count(frames: &[Vec<u32>], width: u32, height: u32) -> Edges {
         let (w, h) = (width as usize, height as usize);
         let mut columns = vec![0; w + 1];
         let mut rows = vec![0; h + 1];
@@ -467,7 +480,7 @@ impl Edges {
 
     /// How well colour edges line up with a grid of `scale`, at its best
     /// offset.
-    fn fit(&self, scale: u32) -> GridFit {
+    pub(crate) fn fit(&self, scale: u32) -> GridFit {
         let best = |counts: &[u64]| {
             let mut on_grid = vec![0u64; scale as usize];
             for (at, count) in counts.iter().enumerate() {
@@ -496,7 +509,13 @@ fn snap(pixels: &mut [u32], width: u32, height: u32, scale: u32, offset: (u32, u
         starts.push(size);
         starts
     };
-    let (columns, rows) = (starts(offset.0, width), starts(offset.1, height));
+    snap_to(pixels, width, &starts(offset.0, width), &starts(offset.1, height))
+}
+
+/// Fills every cell between `columns` and `rows` (edges in pixels, from 0
+/// to the size) with its most common colour, the one at its centre on
+/// ties. Returns how many pixels changed.
+pub(crate) fn snap_to(pixels: &mut [u32], width: u32, columns: &[u32], rows: &[u32]) -> u64 {
     let w = width as usize;
     let mut changed = 0;
     let mut cell: Vec<u32> = Vec::new();

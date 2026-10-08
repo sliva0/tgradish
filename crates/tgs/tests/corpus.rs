@@ -159,3 +159,53 @@ fn painter_is_exact_without_seams() {
         }
     }
 }
+
+/// Copies of an animation side by side, `across` by `down`.
+fn tiled(input: &Animation, across: u32, down: u32) -> Animation {
+    let (width, height) = (input.width(), input.height());
+    let frames = input
+        .frames()
+        .iter()
+        .map(|frame| {
+            let mut rgba = Vec::new();
+            for y in 0..height * down {
+                for _ in 0..across {
+                    let start = ((y % height) * width * 4) as usize;
+                    rgba.extend_from_slice(&frame.rgba[start..start + width as usize * 4]);
+                }
+            }
+            tgradish_tgs::frames::Frame { rgba, duration: frame.duration }
+        })
+        .collect();
+    Animation::new(width * across, height * down, frames).unwrap()
+}
+
+#[test]
+fn fits_large_animations() {
+    use tgradish_tgs::sticker::{Fit, Options as StickerOptions, make};
+
+    let Some(path) = corpus().into_iter().find(|path| name(path) == "susie_fortnite.gif") else {
+        return;
+    };
+    let input = decode(&std::fs::read(&path).unwrap(), &DecodeOptions::default()).unwrap();
+    let small = make(&input, &StickerOptions::default(), &mut |_| {}).unwrap();
+    assert!(small.fits() && small.steps.is_empty(), "{:?}", small.issues);
+
+    let big = tiled(&input, 2, 2);
+    let lossless = StickerOptions { fit: Fit::Lossless, ..StickerOptions::default() };
+    let too_large = make(&big, &lossless, &mut |_| {}).unwrap();
+    assert!(!too_large.fits() && too_large.steps.is_empty());
+    assert!(too_large.bytes > 65536, "{}", too_large.bytes);
+
+    let started = std::time::Instant::now();
+    let fitted = make(&big, &StickerOptions::default(), &mut |_| {}).unwrap();
+    eprintln!(
+        "{} bytes in {:?}, from {} lossless: {:?}",
+        fitted.bytes,
+        started.elapsed(),
+        too_large.bytes,
+        fitted.steps
+    );
+    assert!(fitted.fits(), "{:?}", fitted.issues);
+    assert!(fitted.bytes <= 65536 && fitted.lossy());
+}

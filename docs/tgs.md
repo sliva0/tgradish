@@ -581,7 +581,25 @@ The web app there may also replace the "Web page" and "Bot" items under
     are then measured through the whole pipeline.
 - **T6:** encoder v2 experiments: motion, precomps, palette cycling, mixing
   primitives, even-odd, strokes. Keep what the bench shows is better.
-- **T7:** fit and lossy reductions, with reporting.
+- **T7 (done):** fit and lossy reductions, with reporting.
+
+  Notes from T7 (`reduce`, `sticker::make`):
+  - Reductions: snap to the likely pixel grid, merge colours close in
+    OKLab, merge frames that barely differ, drop the least different
+    frames (never the first, the preview), despeckle, downscale. Trimming
+    stays an explicit option of normalising. Each has a ladder of
+    strengths; the error of a result is the OKLab distance (plus alpha
+    difference) of every input pixel at every 60 fps frame, averaged.
+  - Fit: each round tries every kind at its next strength and takes the
+    most bytes saved per unit of error; the last step is weakened by
+    bisection when it overshoots by more than 10%. Estimates are fast
+    encodes scaled by how the real effort and zopfli did on the original;
+    if the real result still doesn't fit, the target drops 4% and fitting
+    goes on.
+  - `fit: lossless` never reduces and reports the size instead. The
+    plan's `off` mode isn't needed: reductions only run when asked to fit.
+  - susie_fortnite tiled 2x2 (77 KB lossless) fits at 62 KB after
+    despeckling and dropping a tenth of the frames, in 5.5 s.
 - **T8:** CLI: `convert` to `.tgs`, `describe`/protocol, presets (sticker
   and emoji for `.tgs`), `inspect` for `.tgs`.
 - **T9:** Telegram probes. Generate a set of `.tgs` files for the user to
