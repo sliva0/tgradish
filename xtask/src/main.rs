@@ -6,9 +6,9 @@
 //! Windows builds are cross-compiled with mingw-w64. Needs a C toolchain,
 //! make, pkg-config, nasm (unless --no-asm), meson, ninja, curl and tar.
 //!
-//! The result is `target/ffmpeg/ffmpeg-<version>-<target>.tar.gz` with the
-//! two executables and the licenses of everything linked into them. ffmpeg
-//! is configured without GPL parts, so it is LGPL 2.1 or later.
+//! The static libraries end up in `target/ffmpeg/prefix-<target>`, and the
+//! licenses of everything in them in `target/ffmpeg/licenses-<target>`.
+//! ffmpeg is configured without GPL parts, so it is LGPL 2.1 or later.
 //!
 //! The static libraries end up in `target/ffmpeg/prefix-<target>`; point
 //! `PKG_CONFIG_PATH` at its `lib/pkgconfig` to build tgradish with
@@ -368,8 +368,9 @@ impl Build {
             .current_dir(&dir)
             .arg(format!("--prefix={}", self.prefix.display()))
             .args(["--disable-everything", "--disable-autodetect", "--disable-network"])
-            .args(["--disable-doc", "--disable-debug", "--disable-ffplay"])
-            .args(["--enable-ffmpeg", "--enable-ffprobe", "--enable-static", "--disable-shared"])
+            // only the libraries; tgradish links them in
+            .args(["--disable-doc", "--disable-debug", "--disable-programs"])
+            .args(["--enable-static", "--disable-shared"])
             .args(["--enable-zlib", "--enable-libvpx", "--enable-libdav1d"])
             .args(["--pkg-config-flags=--static", "--extra-version=tgradish"])
             .arg(format!("--extra-cflags=-I{}/include", self.prefix.display()))
@@ -415,43 +416,27 @@ impl Build {
         Ok(())
     }
 
-    fn package(&self, dirs: &[(&Source, PathBuf)]) -> Result<PathBuf> {
-        let name = format!("ffmpeg-{}-{}", FFMPEG.version, self.target.triple());
-        let stage = self.out.join(&name);
+    /// Collects the licenses of everything in the build, and where its
+    /// sources come from, for release archives.
+    fn stage_licenses(&self, dirs: &[(&Source, PathBuf)]) -> Result<PathBuf> {
+        let stage = self.out.join(format!("licenses-{}", self.target.triple()));
         if stage.exists() {
             std::fs::remove_dir_all(&stage)?;
         }
-        std::fs::create_dir_all(stage.join("licenses"))?;
-
-        let ffmpeg_dir = &dirs.iter().find(|(s, _)| s.name == "ffmpeg").unwrap().1;
-        let strip = format!("{}strip", self.target.cross_prefix().unwrap_or_default());
-        for program in ["ffmpeg", "ffprobe"] {
-            let exe = self.target.exe(program);
-            let dest = stage.join(&exe);
-            std::fs::copy(ffmpeg_dir.join(&exe), &dest)?;
-            run(Command::new(&strip).arg(&dest))?;
-        }
-        let mut readme = format!(
-            "Minimal ffmpeg {} build for tgradish, made by `cargo xtask ffmpeg`.\n\
+        std::fs::create_dir_all(&stage)?;
+        let mut sources = format!(
+            "tgradish links a minimal ffmpeg {} build, made by `cargo xtask ffmpeg`.\n\
              ffmpeg is licensed under the LGPL 2.1 or later. Sources:\n\n",
             FFMPEG.version
         );
         for (source, dir) in dirs {
-            readme.push_str(&format!("{} {}: {}\n", source.name, source.version, source.url));
+            sources.push_str(&format!("{} {}: {}\n", source.name, source.version, source.url));
             for license in source.licenses {
-                std::fs::copy(
-                    dir.join(license),
-                    stage.join("licenses").join(format!("{}-{license}", source.name)),
-                )?;
+                std::fs::copy(dir.join(license), stage.join(format!("{}-{license}", source.name)))?;
             }
         }
-        std::fs::write(stage.join("README.txt"), readme)?;
-
-        let archive = self.out.join(format!("{name}.tar.gz"));
-        run(Command::new("tar").arg("-czf").arg(&archive).arg("-C").arg(&self.out).arg(&name))?;
-        let sum = output(Command::new("sha256sum").arg(&archive))?;
-        std::fs::write(archive.with_extension("gz.sha256"), &sum)?;
-        Ok(archive)
+        std::fs::write(stage.join("SOURCES.txt"), sources)?;
+        Ok(stage)
     }
 }
 
@@ -496,8 +481,8 @@ fn build_ffmpeg(args: &[String]) -> Result<()> {
     if target == Target::Windows {
         build.static_pthread()?;
     }
-    let archive = build.package(&dirs)?;
-    println!("{}", archive.display());
+    let licenses = build.stage_licenses(&dirs)?;
+    println!("{}\n{}", build.prefix.display(), licenses.display());
     Ok(())
 }
 
@@ -620,9 +605,9 @@ fn check_dll_imports(exe: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Packs a release archive with the tgradish binary built with
-/// `--features linked-static --target <triple>`, and copies the ffmpeg
-/// executables archive for `tgradish ffmpeg download` next to it.
+/// Packs a release archive: the tgradish binary built with
+/// `--features linked-static --target <triple>`, and the licenses of the
+/// ffmpeg build linked into it.
 fn package_release(args: &[String]) -> Result<()> {
     let target = match args {
         [flag, name] if flag == "--target" => match name.as_str() {
@@ -637,8 +622,8 @@ fn package_release(args: &[String]) -> Result<()> {
     let triple = target.triple();
     let binary = root.join("target").join(triple).join("release").join(target.exe("tgradish"));
     ensure!(binary.is_file(), "{} is missing, build it first", binary.display());
-    let ffmpeg_dir = root.join(format!("target/ffmpeg/ffmpeg-{}-{triple}", FFMPEG.version));
-    ensure!(ffmpeg_dir.is_dir(), "{} is missing, run cargo xtask ffmpeg", ffmpeg_dir.display());
+    let licenses = root.join(format!("target/ffmpeg/licenses-{triple}"));
+    ensure!(licenses.is_dir(), "{} is missing, run cargo xtask ffmpeg", licenses.display());
 
     let out = root.join("target/release-artifacts");
     let name = format!("tgradish-{version}-{triple}");
@@ -650,7 +635,7 @@ fn package_release(args: &[String]) -> Result<()> {
     std::fs::copy(&binary, stage.join(target.exe("tgradish")))?;
     std::fs::copy(root.join("README.md"), stage.join("README.md"))?;
     std::fs::copy(root.join("LICENSE.txt"), stage.join("LICENSE.txt"))?;
-    for entry in std::fs::read_dir(ffmpeg_dir.join("licenses"))? {
+    for entry in std::fs::read_dir(&licenses)? {
         let entry = entry?;
         std::fs::copy(entry.path(), stage.join("licenses").join(entry.file_name()))?;
     }
@@ -688,9 +673,6 @@ fn package_release(args: &[String]) -> Result<()> {
     };
     sha256_file(&archive)?;
 
-    let ffmpeg_archive = format!("ffmpeg-{}-{triple}.tar.gz", FFMPEG.version);
-    std::fs::copy(root.join("target/ffmpeg").join(&ffmpeg_archive), out.join(&ffmpeg_archive))?;
-    sha256_file(&out.join(&ffmpeg_archive))?;
     println!("{}", archive.display());
     Ok(())
 }

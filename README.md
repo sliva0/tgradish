@@ -52,10 +52,9 @@ sticker` for the format of options.
 Release builds for Linux and Windows are single files with ffmpeg built in;
 download one from the releases page and run it. Nothing else is needed.
 
-Built from source without the `linked` feature, tgradish needs ffmpeg and
-ffprobe with libvpx (VP9). It looks for them next to its own executable,
-then in its data directory, then on `PATH`; `tgradish ffmpeg download`
-fetches a minimal build, and `tgradish ffmpeg status` shows which one is
+Built from source without the `linked` feature, tgradish uses the system's
+ffmpeg and ffprobe (6.0 or newer, with libvpx for VP9) from `PATH`, or the
+ones `--ffmpeg PATH` points at; `tgradish ffmpeg status` shows which one is
 used. See [docs/ffmpeg.md](docs/ffmpeg.md).
 
 ## Front-ends

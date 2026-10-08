@@ -3,7 +3,9 @@ name: CI
 on:
   push:
     branches: [master, rewrite-v2]
+    paths-ignore: ["docs/**", "**.md"]
   pull_request:
+    paths-ignore: ["docs/**", "**.md"]
 
 env:
   CARGO_TERM_COLOR: always

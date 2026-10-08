@@ -43,7 +43,7 @@ Done on `rewrite-v2`, with CI on Linux and Windows:
 - ffmpeg as separate executables or linked in (`linked` feature), with a
   minimal static ffmpeg built by `cargo xtask ffmpeg`;
 - CLI: `convert`, `watch`, `--clipboard`, `spoof`, `inspect`, `describe`,
-  presets, config, `ffmpeg status/download/remove`;
+  presets, config, `ffmpeg status`;
 - release workflow: single-file binaries with ffmpeg linked in for Linux
   x86-64 (16.8 MB) and Windows x86-64 (18.8 MB), tested on both.
 
@@ -63,11 +63,11 @@ Decided changes that affect the option and protocol shape:
   `--extra-args` stays for raw ffmpeg arguments, but only with ffmpeg as a
   separate program, since the built-in ffmpeg has no command line.
 - **ffmpeg as a separate program** stays only for the system ffmpeg: the
-  ffmpeg-less Linux build, AUR, Nix and source builds. `tgradish ffmpeg
-  download`, the published ffmpeg archives and the downloader's HTTP/TLS
-  dependencies go. Building from source on Windows gets short instructions
-  (install ffmpeg, or build with `linked-static` through the xtask), no
-  separate build.
+  ffmpeg-less Linux build, AUR, Nix and source builds (done). `tgradish
+  ffmpeg download`, the published ffmpeg archives and the downloader's
+  HTTP/TLS dependencies are gone, and the xtask builds only ffmpeg's
+  libraries. Building from source on Windows has short instructions in
+  `docs/ffmpeg.md`.
 
 ### 2. `.tgs` animated stickers
 

@@ -2,14 +2,21 @@ name: release
 
 # Builds single-file tgradish binaries with ffmpeg linked statically, for
 # Linux and Windows (cross-compiled with mingw-w64), tests them, and on a
-# version tag drafts a GitHub release with them, the ffmpeg executables for
-# `tgradish ffmpeg download`, and the ffmpeg sources the LGPL asks for.
+# version tag drafts a GitHub release with them and the ffmpeg sources the
+# LGPL asks for. Pull requests that touch the ffmpeg build run it too.
 on:
   push:
     tags: ["v*"]
     # TODO: remove before merging into master; manual runs only work for
     # workflows on the default branch, so this tests releases until then
     branches: [rewrite-v2]
+    paths-ignore: ["docs/**", "**.md"]
+  pull_request:
+    paths:
+      - xtask/**
+      - crates/core/src/linked/**
+      - Cargo.lock
+      - .github/workflows/release.yml
   workflow_dispatch:
 
 env:
