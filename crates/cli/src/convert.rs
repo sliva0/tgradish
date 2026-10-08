@@ -1,82 +1,144 @@
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 use console::style;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
-use tgradish_core::convert::{Request, convert};
+use tgradish_core::backend::Backend;
+use tgradish_core::convert::{Outcome, Request, convert, default_output};
 use tgradish_core::events::Event;
 use tgradish_core::options::Options;
 use tgradish_core::presets::{DEFAULT_PRESET, Presets};
 
 use crate::Context;
-use crate::args::ConvertArgs;
+use crate::args::{ConversionArgs, ConvertArgs};
 use crate::ui;
 
-/// Preset, then `--options-json`, then flags.
-fn options(ctx: &Context, args: &ConvertArgs) -> Result<Options> {
-    let presets = Presets::load_user()?;
-    let name = args.preset.as_deref().or(ctx.config.preset.as_deref()).unwrap_or(DEFAULT_PRESET);
-    let mut options = presets.resolve(name)?;
-    if let Some(json) = &args.options_json {
-        let overlay: Options = serde_json::from_str(json).context("invalid --options-json")?;
-        options = options.merged(&overlay);
-    }
-    Ok(options.merged(&args.options.to_options()))
+/// Runs conversions with the options and output settings of one command.
+pub struct Converter<'a> {
+    ctx: &'a Context,
+    args: &'a ConversionArgs,
+    backend: Backend,
+    options: Options,
 }
 
-pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
-    if args.output.is_some() && args.inputs.len() > 1 {
-        bail!("--output only works with a single input");
-    }
-    let options = options(ctx, &args)?;
-    let backend = ctx.backend()?;
-    if ctx.global.json {
-        listen_for_cancel(ctx);
+impl<'a> Converter<'a> {
+    pub fn new(ctx: &'a Context, args: &'a ConversionArgs) -> Result<Self> {
+        // preset, then --options-json, then flags
+        let presets = Presets::load_user()?;
+        let name =
+            args.preset.as_deref().or(ctx.config.preset.as_deref()).unwrap_or(DEFAULT_PRESET);
+        let mut options = presets.resolve(name)?;
+        if let Some(json) = &args.options_json {
+            let overlay: Options = serde_json::from_str(json).context("invalid --options-json")?;
+            options = options.merged(&overlay);
+        }
+        let options = options.merged(&args.options.to_options());
+        if let Some(dir) = &args.output_dir {
+            std::fs::create_dir_all(dir)
+                .with_context(|| format!("could not create {}", dir.display()))?;
+        }
+        if ctx.global.json {
+            listen_for_cancel(ctx);
+        }
+        Ok(Self { ctx, args, backend: ctx.backend()?, options })
     }
 
-    let mut failed = 0;
-    for input in &args.inputs {
+    /// Where the result for `input` goes, unless `-o` says otherwise.
+    pub fn output_for(&self, input: &Path) -> PathBuf {
+        let output = default_output(input, self.options.target.unwrap_or_default());
+        match (&self.args.output_dir, output.file_name()) {
+            (Some(dir), Some(name)) => dir.join(name),
+            _ => output,
+        }
+    }
+
+    /// Converts one input, printing events as text or JSON.
+    pub fn run(&self, input: &Path, output: Option<PathBuf>) -> tgradish_core::Result<Outcome> {
         let request = Request {
-            input: input.clone(),
-            output: args.output.clone(),
-            options: options.clone(),
-            overwrite: args.overwrite,
-            keep_temp: args.keep_temp,
+            input: input.to_path_buf(),
+            output: Some(output.unwrap_or_else(|| self.output_for(input))),
+            options: self.options.clone(),
+            overwrite: self.args.overwrite,
+            keep_temp: self.args.keep_temp,
         };
-        let result = if ctx.global.json {
-            convert(&backend, &request, &ctx.cancel, &mut |event| {
+        let cancel = &self.ctx.cancel;
+        let result = if self.ctx.global.json {
+            convert(&self.backend, &request, cancel, &mut |event| {
                 println!("{}", serde_json::to_string(&event).expect("events serialize"));
             })
         } else {
-            let mut printer = Printer::new(ctx);
-            let result = convert(&backend, &request, &ctx.cancel, &mut |e| printer.event(e));
+            let mut printer = Printer::new(self.ctx);
+            let result = convert(&self.backend, &request, cancel, &mut |e| printer.event(e));
             printer.finish();
             result
         };
+        if let Ok(Outcome { temp_dir: Some(dir), .. }) = &result
+            && !self.ctx.global.json
+        {
+            eprintln!("intermediate files kept in {}", dir.display());
+        }
+        result
+    }
 
-        match result {
-            Ok(outcome) => {
-                if let Some(dir) = outcome.temp_dir
-                    && !ctx.global.json
-                {
-                    eprintln!("intermediate files kept in {}", dir.display());
-                }
+    /// Reports a failed conversion of one of several inputs.
+    pub fn report_failure(&self, input: &Path, err: tgradish_core::Error) {
+        let err = explain(err);
+        if self.ctx.global.json {
+            crate::print_json_error(&err, Some(input));
+        } else {
+            eprintln!("{} {}: {err:#}", ui::error_label(), input.display());
+        }
+    }
+}
+
+/// Adds hints to errors where the CLI knows what to do about them.
+fn explain(err: tgradish_core::Error) -> anyhow::Error {
+    match err {
+        tgradish_core::Error::OutputExists(path) => {
+            anyhow::anyhow!("{} already exists, use --overwrite to replace it", path.display())
+        }
+        err => err.into(),
+    }
+}
+
+pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
+    let converter = Converter::new(ctx, &args.conversion)?;
+    // keeps a pasted image on disk until it is converted
+    let mut _pasted_image = None;
+    let inputs = if args.clipboard {
+        let (inputs, image) = crate::clipboard::inputs()?;
+        _pasted_image = image;
+        inputs
+    } else {
+        args.inputs.clone()
+    };
+    if args.output.is_some() && inputs.len() > 1 {
+        bail!("--output only works with a single input");
+    }
+
+    let mut failed = 0;
+    for input in &inputs {
+        // a pasted image lives in a temporary directory; its result goes to
+        // the current one
+        let output = match (&args.output, &_pasted_image) {
+            (Some(output), _) => Some(output.clone()),
+            (None, Some(_)) if args.conversion.output_dir.is_none() => {
+                let name = converter.output_for(input);
+                Some(std::env::current_dir()?.join(name.file_name().unwrap_or_default()))
             }
+            (None, _) => None,
+        };
+        match converter.run(input, output) {
+            Ok(_) => {}
             Err(tgradish_core::Error::Cancelled) => {
                 return Err(tgradish_core::Error::Cancelled.into());
             }
-            Err(err) if args.inputs.len() > 1 => {
+            Err(err) if inputs.len() > 1 => {
                 failed += 1;
-                if ctx.global.json {
-                    crate::print_json_error(&err.into(), Some(input));
-                } else {
-                    eprintln!("{} {}: {err}", ui::error_label(), input.display());
-                }
+                converter.report_failure(input, err);
             }
-            Err(tgradish_core::Error::OutputExists(path)) => {
-                bail!("{} already exists, use --overwrite to replace it", path.display())
-            }
-            Err(err) => return Err(err.into()),
+            Err(err) => return Err(explain(err)),
         }
     }
     if failed > 0 {
@@ -84,7 +146,7 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
             // each failure was already reported with its input
             return Err(crate::Exit(1).into());
         }
-        bail!("{failed} of {} conversions failed", args.inputs.len());
+        bail!("{failed} of {} conversions failed", inputs.len());
     }
     Ok(())
 }

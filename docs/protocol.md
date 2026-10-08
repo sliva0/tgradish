@@ -90,6 +90,15 @@ tgradish then stops ffmpeg, deletes its temporary files and exits with 130.
 Closing stdin does nothing. Killing the process works too, but leaves
 temporary files behind.
 
+## Watch
+
+`tgradish --json watch DIR [conversion flags]` converts files as they
+appear and prints the same events as `convert`, with each `started` event
+naming its input. A failed conversion prints an `error` with its `input`
+and watching goes on. Files already in the directory are left alone unless
+`--existing` is given. Stop it like a conversion; it then exits with 0, or
+130 if a conversion was running.
+
 ## Other commands
 
 All of these accept `--json`:

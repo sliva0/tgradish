@@ -87,7 +87,7 @@ Verified facts that the design relies on (ffmpeg 9.0):
    `tgradish ffmpeg download`;
 6. linked ffmpeg backend behind a Cargo feature (done for Linux, Windows
    cross builds still to be tried in CI);
-7. `tgradish watch <dir>` and clipboard input;
+7. `tgradish watch <dir>` and clipboard input (done);
 8. release archives, tag 2.0.0.
 
 2.x:

@@ -66,6 +66,8 @@ impl From<FfmpegFrom> for FfmpegChoice {
 pub enum Command {
     /// Convert videos or images into stickers or emoji.
     Convert(ConvertArgs),
+    /// Convert every video or image that appears in a directory.
+    Watch(WatchArgs),
     /// Spoof the duration of an existing WebM so Telegram accepts it.
     Spoof(SpoofArgs),
     /// Show properties of WebM files and check them against Telegram's
@@ -88,12 +90,43 @@ pub enum Command {
 #[derive(Debug, Args)]
 pub struct ConvertArgs {
     /// Videos or images to convert.
-    #[arg(required = true)]
+    #[arg(required_unless_present = "clipboard")]
     pub inputs: Vec<PathBuf>,
-    /// Output file. Default: next to the input, as NAME.sticker.webm or
-    /// NAME.emoji.webm. Only with a single input.
-    #[arg(short, long)]
+    /// Convert what is on the clipboard: copied files, a copied path, or an
+    /// image.
+    #[arg(long, conflicts_with = "inputs")]
+    pub clipboard: bool,
+    /// Output file. Only with a single input.
+    #[arg(short, long, conflicts_with = "output_dir")]
     pub output: Option<PathBuf>,
+    #[command(flatten)]
+    pub conversion: ConversionArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct WatchArgs {
+    /// Directory to watch.
+    pub dir: PathBuf,
+    /// Also watch subdirectories.
+    #[arg(short, long)]
+    pub recursive: bool,
+    /// Also convert files that are already there and have no result yet.
+    #[arg(long)]
+    pub existing: bool,
+    /// Seconds between looks at the directory.
+    #[arg(long, value_name = "SECONDS", default_value_t = 1.0)]
+    pub interval: f64,
+    #[command(flatten)]
+    pub conversion: ConversionArgs,
+}
+
+/// Flags shared by `convert` and `watch`.
+#[derive(Debug, Args)]
+pub struct ConversionArgs {
+    /// Directory for results. Default: next to each input, as
+    /// NAME.sticker.webm or NAME.emoji.webm.
+    #[arg(short = 'O', long, value_name = "DIR")]
+    pub output_dir: Option<PathBuf>,
     /// Replace existing output files.
     #[arg(short = 'y', long)]
     pub overwrite: bool,
@@ -128,7 +161,7 @@ pub struct OptionArgs {
     #[arg(short = 't', long, value_name = "SECONDS", help_heading = "Output")]
     pub length: Option<f64>,
     /// Frame rate. [default: the input's, at most 30]
-    #[arg(short = 'r', long, help_heading = "Output")]
+    #[arg(long, help_heading = "Output")]
     pub fps: Option<f64>,
 
     /// What to tune to get close to the 256 KB limit. [default: auto]
@@ -321,10 +354,12 @@ mod tests {
         let schema = serde_json::to_value(schemars::schema_for!(Options)).unwrap();
         let properties = schema["properties"].as_object().unwrap();
         let cli = Cli::command();
-        let convert = cli.find_subcommand("convert").unwrap();
-        let flags: Vec<_> = convert.get_arguments().filter_map(|a| a.get_long()).collect();
-        for property in properties.keys() {
-            assert!(flags.contains(&property.as_str()), "no --{property} flag");
+        for command in ["convert", "watch"] {
+            let command = cli.find_subcommand(command).unwrap();
+            let flags: Vec<_> = command.get_arguments().filter_map(|a| a.get_long()).collect();
+            for property in properties.keys() {
+                assert!(flags.contains(&property.as_str()), "no --{property} flag");
+            }
         }
     }
 
@@ -333,9 +368,10 @@ mod tests {
         let cli =
             Cli::parse_from(["tgradish", "convert", "a.mp4", "--lossless", "--watermark=false"]);
         let Command::Convert(args) = cli.command else { panic!() };
-        assert_eq!(args.options.lossless, Some(true));
-        assert_eq!(args.options.watermark, Some(false));
-        assert_eq!(args.options.to_options().title, None);
+        let options = &args.conversion.options;
+        assert_eq!(options.lossless, Some(true));
+        assert_eq!(options.watermark, Some(false));
+        assert_eq!(options.to_options().title, None);
     }
 
     #[test]
@@ -348,7 +384,7 @@ mod tests {
             r#"-metadata comment="hello world" -tune-content screen"#,
         ]);
         let Command::Convert(args) = cli.command else { panic!() };
-        let extra = args.options.to_options().extra_args.unwrap();
+        let extra = args.conversion.options.to_options().extra_args.unwrap();
         assert_eq!(extra, ["-metadata", "comment=hello world", "-tune-content", "screen"]);
         assert!(Cli::try_parse_from(["tgradish", "convert", "a", "--extra-args", "'x"]).is_err());
     }

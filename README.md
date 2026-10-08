@@ -29,6 +29,12 @@ tgradish convert pig.mp4 --preset emoji --start 1.5 --length 2
 # quick result: bitrate fitting only, fast encoder
 tgradish convert pig.mp4 --preset fast
 
+# whatever is on the clipboard: copied files, a copied path or an image
+tgradish convert --clipboard
+
+# convert everything that lands in a folder, results go elsewhere
+tgradish watch ~/Downloads/stickers --output-dir ~/stickers
+
 # spoof an existing sticker
 tgradish spoof pig.webm
 
