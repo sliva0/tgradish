@@ -8,7 +8,7 @@ use tgradish_tgs::normalise::PixelAnim;
 use tlottie::{CPURenderer, Composition, Limits, RenderOptions};
 
 pub enum Renderer {
-    Tlottie(CPURenderer),
+    Tlottie(Box<CPURenderer>),
     #[cfg(feature = "rlottie")]
     Rlottie(rlottie::Animation),
 }
@@ -17,7 +17,7 @@ impl Renderer {
     pub fn new(json: &[u8]) -> Result<Renderer> {
         let composition =
             Composition::parse(json, &Limits::default()).map_err(|err| anyhow!("{err}"))?;
-        Ok(Renderer::Tlottie(CPURenderer::new(composition)))
+        Ok(Renderer::Tlottie(Box::new(CPURenderer::new(composition))))
     }
 
     /// rlottie, built from Telegram's fork, which older clients use.
