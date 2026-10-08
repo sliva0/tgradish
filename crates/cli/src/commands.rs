@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::process::Command;
 
 use anyhow::{Context as _, Result, bail};
 use console::style;
@@ -34,7 +33,8 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
         signature: args.watermark.then(tgradish_core::signature),
         ..Default::default()
     };
-    let report = webm::patch_file(&args.input, &output, &changes)
+    let replace = args.overwrite || output == args.input;
+    let report = webm::patch_file(&args.input, &output, &changes, replace)
         .with_context(|| format!("could not spoof {}", args.input.display()))?;
 
     if ctx.global.json {
@@ -128,7 +128,11 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
             Ok(info) => info,
             Err(err) if args.files.len() > 1 => {
                 failed += 1;
-                eprintln!("{} {}: {err}", ui::error_label(), path.display());
+                if ctx.global.json {
+                    println!("{}", json!({ "file": path, "error": err.to_string() }));
+                } else {
+                    eprintln!("{} {}: {err}", ui::error_label(), path.display());
+                }
                 continue;
             }
             Err(err) => return Err(err).with_context(|| format!("{}", path.display())),
@@ -153,6 +157,9 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
         }
     }
     if failed > 0 {
+        if ctx.global.json {
+            return Err(crate::Exit(1).into());
+        }
         bail!("{failed} of {} files could not be read", args.files.len());
     }
     Ok(())
@@ -228,18 +235,6 @@ pub fn config(ctx: &Context, command: ConfigCommand, path: Option<PathBuf>) -> R
     Ok(())
 }
 
-/// First line of `ffmpeg -version`, and whether the encoders needed for
-/// stickers are available.
-fn ffmpeg_capabilities(ffmpeg: &std::path::Path) -> Result<(String, bool)> {
-    let run = |arg: &str| -> Result<String> {
-        let out = Command::new(ffmpeg).args(["-hide_banner", arg]).output()?;
-        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
-    };
-    let version = run("-version")?.lines().next().unwrap_or_default().to_string();
-    let vp9 = run("-encoders")?.lines().any(|line| line.contains(" libvpx-vp9 "));
-    Ok((version, vp9))
-}
-
 fn download(ctx: &Context, url: Option<String>, sha256: Option<String>) -> Result<()> {
     use tgradish_core::ffmpeg::download;
 
@@ -277,11 +272,11 @@ fn download(ctx: &Context, url: Option<String>, sha256: Option<String>) -> Resul
         bar.finish_and_clear();
     }
     let ffmpeg = ffmpeg?;
-    let (version, vp9) = ffmpeg_capabilities(&ffmpeg.ffmpeg)?;
+    let caps = tgradish_core::ffmpeg::capabilities(&ffmpeg, &ctx.cancel)?;
     if ctx.global.json {
-        print_json(&json!({ "ffmpeg": ffmpeg, "version": version, "libvpx_vp9": vp9 }));
+        print_json(&json!({ "ffmpeg": ffmpeg, "capabilities": caps }));
     } else {
-        println!("{} {version}", style("installed").green().bold());
+        println!("{} {}", style("installed").green().bold(), caps.version);
         println!("into {}", ffmpeg.ffmpeg.parent().unwrap_or(&ffmpeg.ffmpeg).display());
     }
     Ok(())
@@ -302,19 +297,22 @@ pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
         }
         FfmpegCommand::Status => {
             let ffmpeg = ctx.ffmpeg()?;
-            let (version, vp9) = ffmpeg_capabilities(&ffmpeg.ffmpeg)?;
+            let caps = tgradish_core::ffmpeg::capabilities(&ffmpeg, &ctx.cancel)?;
             if ctx.global.json {
-                print_json(&json!({ "ffmpeg": ffmpeg, "version": version, "libvpx_vp9": vp9 }));
+                print_json(&json!({ "ffmpeg": ffmpeg, "capabilities": caps }));
+                if !caps.libvpx_vp9 {
+                    return Err(crate::Exit(1).into());
+                }
             } else {
                 println!("ffmpeg   {}", ffmpeg.ffmpeg.display());
                 println!("ffprobe  {}", ffmpeg.ffprobe.display());
-                println!("source   {:?}", ffmpeg.source);
-                println!("version  {version}");
-                let vp9 = if vp9 { style("yes").green() } else { style("no").red() };
+                println!("source   {}", ui::name(&ffmpeg.source));
+                println!("version  {}", caps.version);
+                let vp9 = if caps.libvpx_vp9 { style("yes").green() } else { style("no").red() };
                 println!("libvpx-vp9 encoder  {vp9}");
-            }
-            if !vp9 {
-                bail!("this ffmpeg cannot encode VP9 with libvpx, stickers need it");
+                if !caps.libvpx_vp9 {
+                    bail!("this ffmpeg cannot encode VP9 with libvpx, stickers need it");
+                }
             }
         }
     }

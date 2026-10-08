@@ -68,7 +68,13 @@ fn maximize(
     // largest fitting and smallest non-fitting points, as (x, bytes)
     let mut below: Option<(f64, u64)> = None;
     let mut above: Option<(f64, u64)> = None;
-    let mut x = quantize(initial.clamp(min, max));
+    // rounding must not leave the range, use the exact value if it would
+    let snap = |x: f64| {
+        let x = x.clamp(min, max);
+        let rounded = quantize(x);
+        if (min..=max).contains(&rounded) { rounded } else { x }
+    };
+    let mut x = snap(initial);
 
     while search.used < budget {
         let attempt = encoder.encode(params(x))?;
@@ -95,7 +101,7 @@ fn maximize(
             (None, Some((ax, as_))) if ax > min => ax * (aim / as_ as f64).clamp(0.25, 0.95),
             _ => break,
         };
-        let next = quantize(next.clamp(min, max));
+        let next = snap(next);
         let tried = |p: Option<(f64, u64)>| p.is_some_and(|(px, _)| px == next);
         if next == x || tried(below) || tried(above) {
             break;
@@ -432,6 +438,28 @@ mod tests {
         assert_eq!(auto_frame_rates(&plan, MAX_BYTES), [30.0]);
         let plan = test_plan(Options { fps: Some(24.0), ..options(Fit::Auto) }, 30.0);
         assert_eq!(auto_frame_rates(&plan, MAX_BYTES), [24.0]);
+    }
+
+    #[test]
+    fn rounding_stays_in_range() {
+        let exact = Options {
+            length: Some(2.996),
+            crf: Some(50),
+            fit_range: Some(Range { min: 2.996, max: 2.996 }),
+            ..options(Fit::Length)
+        };
+        let plan = test_plan(exact, 10.0);
+        let best = run(&plan, &mut FakeEncoder::new(0.0), MAX_BYTES).unwrap();
+        assert_eq!(best.params.length, 2.996);
+
+        let fit_range = Some(Range { min: 1.0, max: 1.04 });
+        let plan = test_plan(Options { fit_range, ..options(Fit::Bitrate) }, 3.0);
+        let mut encoder = FakeEncoder::new(0.0);
+        run(&plan, &mut encoder, MAX_BYTES).unwrap();
+        for params in encoder.calls {
+            let Rate::Bitrate(kbps) = params.rate else { panic!() };
+            assert!((1.0..=1.04).contains(&kbps), "{kbps}");
+        }
     }
 
     #[test]
