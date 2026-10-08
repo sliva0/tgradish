@@ -8,7 +8,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-asefile.workspace = true
+flate2.workspace = true
 image.workspace = true
 thiserror.workspace = true
 

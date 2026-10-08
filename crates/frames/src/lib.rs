@@ -42,6 +42,8 @@ pub enum Error {
     SheetGrid { width: u32, height: u32, columns: u32, rows: u32 },
     #[error("the sprite sheet has {cells} cells, {frames} frames were asked for")]
     SheetFrames { cells: u32, frames: u32 },
+    #[error("the input is too large: {0}")]
+    TooLarge(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -83,10 +85,41 @@ impl Format {
     }
 }
 
+/// How much decoding may take, so hostile files fail instead of
+/// exhausting memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    /// The largest width or height.
+    pub max_dimension: u32,
+    /// The most bytes of pixels: all decoded frames together, and what the
+    /// decoders need on the way.
+    pub max_bytes: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Limits {
+        Limits { max_dimension: 16384, max_bytes: 1 << 30 }
+    }
+}
+
+impl Limits {
+    /// Fails when `frames` frames of `width`x`height` don't fit.
+    pub(crate) fn check(&self, width: u32, height: u32, frames: usize) -> Result<()> {
+        let bytes = frame_bytes(width, height)?;
+        if width.max(height) > self.max_dimension
+            || bytes.checked_mul(frames).is_none_or(|total| total > self.max_bytes)
+        {
+            return Err(Error::TooLarge(format!("{frames} frames of {width}x{height}")));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DecodeOptions {
     /// Aseprite: only the frames of this tag, in its direction.
     pub tag: Option<String>,
+    pub limits: Limits,
 }
 
 /// Decodes an animated or still image. Still images get one frame of
@@ -97,8 +130,10 @@ pub fn decode(bytes: &[u8], options: &DecodeOptions) -> Result<Animation> {
         return Err(Error::TagWithoutAseprite);
     }
     match format {
-        Format::Aseprite => Sprite::read(bytes)?.animation(options.tag.as_deref()),
-        _ => raster::decode(bytes, format),
+        Format::Aseprite => {
+            Sprite::read_with(bytes, &options.limits)?.animation(options.tag.as_deref())
+        }
+        _ => raster::decode(bytes, format, &options.limits),
     }
 }
 
