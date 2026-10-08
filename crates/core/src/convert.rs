@@ -18,7 +18,7 @@
 //! # Ok::<(), tgradish_core::Error>(())
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -97,6 +97,8 @@ pub struct Plan {
     pub fake_duration: f64,
     pub title: Option<String>,
     pub watermark: bool,
+    pub encoder_options: BTreeMap<String, String>,
+    /// Raw ffmpeg arguments, only for ffmpeg as a separate program.
     pub extra_args: Vec<String>,
 }
 
@@ -121,6 +123,14 @@ pub fn frame_count(length: f64, fps: f64) -> u64 {
 /// Duration of [`frame_count`] frames, as written into the file header.
 pub fn encoded_length(length: f64, fps: f64) -> f64 {
     frame_count(length, fps) as f64 / fps
+}
+
+/// Whether `name` can be an ffmpeg option name. Keeps the process backend's
+/// `-NAME:v` argument from turning into something else.
+fn is_option_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('-')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// Output, input or option problems detected while planning.
@@ -305,6 +315,13 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         (None, Fit::Length) => Range { min: length.min(0.1), max: length },
     };
 
+    let encoder_options = o.encoder_options.clone().unwrap_or_default();
+    if let Some(name) = encoder_options.keys().find(|name| !is_option_name(name)) {
+        return Err(invalid(format!(
+            "{name:?} is not an encoder option name: use letters, digits, - and _"
+        )));
+    }
+
     let (box_w, box_h) = target.box_size();
     let (box_w, box_h) = (f64::from(box_w), f64::from(box_h));
     let (src_w, src_h) = (f64::from(source.width), f64::from(source.height));
@@ -351,6 +368,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         fake_duration,
         title: o.title.clone(),
         watermark: o.watermark.unwrap_or(true),
+        encoder_options,
         extra_args: o.extra_args.clone().unwrap_or_default(),
         source,
     };
@@ -467,8 +485,9 @@ pub fn convert(
     let (plan, warnings) = plan(request, source)?;
     if !plan.extra_args.is_empty() && !backend.supports_extra_args() {
         return Err(Error::InvalidOptions(
-            "extra-args are ffmpeg command line arguments, they need ffmpeg as a separate \
-             program: use --ffmpeg-from system, bundled or downloaded, or --ffmpeg PATH"
+            "extra-args are ffmpeg command line arguments, so they need ffmpeg as a \
+             separate program: use --ffmpeg-from system or --ffmpeg PATH, or \
+             --encoder-options for encoder settings, which work with the built-in ffmpeg"
                 .into(),
         ));
     }
@@ -594,6 +613,17 @@ mod tests {
         assert!(plan_with(Options { attempts: Some(51), ..Default::default() }).is_err());
         assert!(plan_with(Options { attempts: Some(0), ..Default::default() }).is_err());
         assert!(plan_with(Options { bitrate: Some(0.5), ..Default::default() }).is_err());
+    }
+
+    #[test]
+    fn rejects_encoder_option_names_that_are_not_names() {
+        for name in ["", "-f", "f webm", "x;y", "a=b"] {
+            let encoder_options = Some([(name.to_string(), "1".to_string())].into());
+            let options = Options { encoder_options, ..Default::default() };
+            assert!(plan_with(options).is_err(), "{name:?} was accepted");
+        }
+        let encoder_options = Some([("tune-content".to_string(), "screen".into())].into());
+        assert!(plan_with(Options { encoder_options, ..Default::default() }).is_ok());
     }
 
     #[test]

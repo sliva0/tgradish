@@ -59,7 +59,7 @@ impl Backend {
     }
 
     /// Whether `extra_args` can be used: they are ffmpeg command line
-    /// arguments.
+    /// arguments, and the built-in ffmpeg has no command line.
     pub fn supports_extra_args(&self) -> bool {
         matches!(self, Backend::Process(_))
     }

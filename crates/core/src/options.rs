@@ -4,6 +4,8 @@
 //! then a preset, then command-line flags. Missing values get defaults when a
 //! conversion is planned, some of them based on the input video.
 
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -172,7 +174,17 @@ pub struct Options {
     /// and a signature hidden in padding. Default: true.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watermark: Option<bool>,
-    /// Extra ffmpeg output arguments, added before the output file.
+    /// libvpx-vp9 encoder options by name, for tuning beyond what the other
+    /// options cover, for example `tune-content = "screen"` for flat
+    /// graphics, `aq-mode = "2"`, `sharpness = "4"`, `arnr-strength = "3"`,
+    /// `g = "60"` (keyframe interval) or `qmax = "50"`. `ffmpeg -h
+    /// encoder=libvpx-vp9` lists them all. Unknown names are an error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encoder_options: Option<BTreeMap<String, String>>,
+    /// Raw ffmpeg arguments, added before the output file. Only with
+    /// ffmpeg as a separate program (the system one or `--ffmpeg PATH`),
+    /// since the built-in ffmpeg has no command line; prefer
+    /// `encoder-options` for encoder settings, which work with both.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extra_args: Option<Vec<String>>,
 }
@@ -206,6 +218,7 @@ impl Options {
             fake_duration,
             title,
             watermark,
+            encoder_options,
             extra_args,
         );
         self
@@ -244,7 +257,7 @@ mod tests {
     fn reads_kebab_case_toml() {
         let options: Options = toml::from_str(
             "target = 'emoji'\nfit = 'bitrate'\nfit-range = { min = 50, max = 300 }\n\
-             fake-duration = 1.5\nextra-args = ['-tune-content', 'screen']",
+             fake-duration = 1.5\nencoder-options = { tune-content = 'screen' }",
         )
         .unwrap();
         assert_eq!(options.target, Some(Target::Emoji));
