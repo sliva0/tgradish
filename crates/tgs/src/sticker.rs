@@ -8,7 +8,7 @@ use tgradish_frames::Animation;
 use crate::check::{self, Issue, Severity};
 use crate::encode::{Effort, Settings, painter};
 use crate::layout::lay_out;
-use crate::limits::{MAX_RAW_JSON, telegram};
+use crate::limits::telegram;
 use crate::lottie::Style;
 use crate::normalise::{self, PixelAnim, Report, normalise};
 use crate::reduce::{Kind, Reduction, error};
@@ -126,9 +126,8 @@ impl Sticker {
 /// zopfli packs about this much smaller than `gzip -9`; estimates lean
 /// high.
 const ZOPFLI_SHARE: f64 = 0.93;
-/// Raw JSON past this counts as too large, short of Telegram Desktop's 2
-/// MiB.
-const MAX_JSON: usize = MAX_RAW_JSON / 16 * 15;
+/// Raw JSON past this counts as too large.
+const MAX_JSON: usize = telegram::MAX_JSON;
 /// When the real size misses an estimate, the next target is this much
 /// lower.
 const RETARGET: f64 = 0.96;
@@ -212,14 +211,8 @@ pub fn make(
                 continue;
             }
         }
-        let (_, mut issues) =
+        let (_, issues) =
             check::check(json.as_bytes(), Some(tgs.len())).expect("the writer's JSON parses");
-        if json.len() > MAX_JSON && json.len() <= MAX_RAW_JSON {
-            issues.push(Issue {
-                severity: Severity::Warning,
-                message: format!("{} bytes of JSON, close to Telegram Desktop's limit", json.len()),
-            });
-        }
         let groups = scene.layers.iter().map(|layer| layer.groups.len()).sum();
         let rectangles = scene
             .layers

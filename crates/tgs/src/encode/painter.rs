@@ -17,7 +17,7 @@
 
 use super::cover::{Rect, cover};
 use super::mask::Mask;
-use crate::limits::TLOTTIE;
+use crate::limits::{TLOTTIE, telegram};
 use crate::normalise::PixelAnim;
 use crate::scene::{FillRule, Group, Layer, Scene, Shape};
 
@@ -67,14 +67,22 @@ impl Default for Settings {
 /// Most encodings [`Effort::Best`] tries.
 const BEST_TRIES: usize = 200;
 
+const fn min(a: usize, b: usize) -> usize {
+    if a < b { a } else { b }
+}
+
+/// Per layer: the stricter of tlottie's and Telegram's limits.
+const MAX_SHAPES: usize = min(TLOTTIE.max_shapes_per_layer, telegram::MAX_SHAPES_PER_LAYER);
+/// Rectangles of one colour in one frame: a layer holding only them adds
+/// their group, its fill and its transform.
+const MAX_GROUP_RECTS: usize = min(TLOTTIE.max_paint_source_items_per_layer, MAX_SHAPES - 3);
+const MAX_LAYERS: usize = min(TLOTTIE.max_painted_shape_layers, telegram::MAX_LAYERS);
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EncodeError {
-    #[error(
-        "a colour needs {rects} rectangles in one frame, Telegram's renderer allows {}",
-        TLOTTIE.max_paint_source_items_per_layer
-    )]
+    #[error("a colour needs {rects} rectangles in one frame, Telegram allows {MAX_GROUP_RECTS}")]
     TooManyRects { rects: usize },
-    #[error("the animation needs {layers} layers, Telegram's renderer allows {}", TLOTTIE.max_painted_shape_layers)]
+    #[error("the animation needs {layers} layers, Telegram allows {MAX_LAYERS}")]
     TooManyLayers { layers: usize },
 }
 
@@ -186,7 +194,7 @@ impl Painter<'_> {
         let mut open: Option<(usize, Mask, Mask)> = None;
         let close = |from, to, must: &Mask, may: &Mask| {
             let rects = cover(must, may);
-            if rects.len() > TLOTTIE.max_paint_source_items_per_layer {
+            if rects.len() > MAX_GROUP_RECTS {
                 return Err(EncodeError::TooManyRects { rects: rects.len() });
             }
             Ok(Piece { from, to, rects })
@@ -327,7 +335,7 @@ impl Painter<'_> {
             let mut may = core.clone();
             may.union(&hidden);
             let rects = cover(&must, &may);
-            if rects.len() > TLOTTIE.max_paint_source_items_per_layer {
+            if rects.len() > MAX_GROUP_RECTS {
                 return Err(EncodeError::TooManyRects { rects: rects.len() });
             }
             pieces.push(Piece { from: span.start, to: span.end, rects });
@@ -579,15 +587,15 @@ impl Painter<'_> {
 
 /// Puts pieces, in drawing order, into layers: a piece joins the highest
 /// layer with the same lifetime when no layer above that one is shown at
-/// the same time and tlottie's per-layer limits allow; otherwise it starts
-/// a layer on top.
+/// the same time and the per-layer limits allow; otherwise it starts a
+/// layer on top.
 fn stack(pieces: Vec<(usize, u16, Piece)>, starts: &[u32]) -> Result<Vec<Layer>, EncodeError> {
     // tlottie counts every group, rectangle, fill and group transform as a
     // shape, and every rectangle a fill paints as a paint source
     let fits = |groups: usize, rects: usize| {
         rects <= TLOTTIE.max_paint_source_items_per_layer
             && groups <= TLOTTIE.max_paints_per_layer
-            && rects + 3 * groups <= TLOTTIE.max_shapes_per_layer
+            && rects + 3 * groups <= MAX_SHAPES
     };
     // per layer: frames, groups and rectangles so far
     let mut layers: Vec<(usize, usize, Vec<Group>, usize)> = Vec::new();
@@ -622,7 +630,7 @@ fn stack(pieces: Vec<(usize, u16, Piece)>, starts: &[u32]) -> Result<Vec<Layer>,
             None => layers.push((piece.from, piece.to, vec![group], count)),
         }
     }
-    if layers.len() > TLOTTIE.max_painted_shape_layers {
+    if layers.len() > MAX_LAYERS {
         return Err(EncodeError::TooManyLayers { layers: layers.len() });
     }
     Ok(layers

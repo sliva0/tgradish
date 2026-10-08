@@ -5,7 +5,8 @@ use serde::Serialize;
 
 /// Telegram's rules for animated stickers, from
 /// <https://core.telegram.org/stickers> and
-/// <https://core.telegram.org/animated_stickers> (checked 2026-10-08).
+/// <https://core.telegram.org/animated_stickers> (checked 2026-10-08), and
+/// the limits its server has beyond them.
 pub mod telegram {
     /// The canvas is exactly this many pixels wide and high.
     pub const CANVAS: u32 = 512;
@@ -14,11 +15,22 @@ pub mod telegram {
     pub const MAX_FRAMES: u32 = 180;
     /// Size of the gzipped file.
     pub const MAX_BYTES: usize = 64 * 1024;
-}
 
-/// Telegram Desktop refuses Lottie JSON larger than this (`kMaxFileSize` in
-/// desktop-app/lib_lottie). Output stays well below it.
-pub const MAX_RAW_JSON: usize = 2 * 1024 * 1024;
+    // Found by uploading probes (`docs/probes.md`): past these, the server
+    // keeps a `.tgs` as a plain file instead of making it a sticker, and
+    // @Stickers answers "File type is invalid".
+
+    /// Raw JSON: 996 KB of rectangles was accepted, 1.2 MB refused. A 1.9
+    /// MB file made long by a padded name was accepted, so names may not
+    /// count; this counts everything. Telegram Desktop's own limit is 2 MiB.
+    pub const MAX_JSON: usize = 1_000_000;
+    /// 1500 layers were accepted, 2000 refused.
+    pub const MAX_LAYERS: usize = 1_500;
+    /// Shapes in one layer, counted like tlottie counts them (groups, their
+    /// fills and transforms, and what they draw): 4093 were accepted, 4103
+    /// refused.
+    pub const MAX_SHAPES_PER_LAYER: usize = 4_096;
+}
 
 /// Default parse limits of tlottie, the renderer in Telegram's current
 /// clients; Telegram Android passes no limits of its own. From tlottie's

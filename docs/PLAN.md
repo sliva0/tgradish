@@ -57,9 +57,9 @@ Done on `rewrite-v2`, with CI on Linux and Windows:
 - GUI: `tgradish gui`, or tgradish started outside a terminal;
 - distribution: the targets above, AUR packages and a Nix flake, with
   publishing steps for the user in `docs/packaging.md`;
-- T9 probes (`docs/probes.md`): the first round is done; the second, finding
-  a limit on layers, rectangles or JSON that Telegram has, is ready for the
-  user to upload. Next: its results, then the release.
+- T9 probes (`docs/probes.md`): both `.tgs` rounds are done; Telegram's
+  server limits on JSON, layers and shapes per layer are in the encoder.
+  Still open: the WebM probes and iOS. Then the release.
 
 ## Roadmap
 

@@ -331,6 +331,27 @@ fn checkerboard_layers(count: u32, in_turn: bool) -> String {
     animation(layers)
 }
 
+/// `count` paths in one layer, each going round its own square 1000
+/// times: 4000 points, much JSON from few shapes, and it packs small.
+fn long_paths(count: u32) -> String {
+    let columns = f64::from(count).sqrt().ceil() as u32;
+    let units = f64::from(columns * 2);
+    let mut items: Vec<Item> = (0..count)
+        .map(|path| {
+            let (x, y) = (f64::from(path % columns * 2), f64::from(path / columns * 2));
+            let square = [[x, y], [x + 1.0, y], [x + 1.0, y + 1.0], [x, y + 1.0]];
+            Item::Path(square.iter().copied().cycle().take(4000).collect())
+        })
+        .collect();
+    items.push(Item::Fill { colour: [60, 140, 230, 255], rule: FillRule::NonZero });
+    items.push(Item::GroupTransform);
+    let transform = grid_transform(units, units);
+    let layer = Layer { from: 0, to: 180, transform, items: vec![Item::Group(items)] };
+    let blink =
+        Layer { from: 0, to: 90, transform, items: vec![group([(1.5, 1.5)], [230, 90, 60, 255])] };
+    animation(vec![layer, blink])
+}
+
 /// The sprite with its name padded until the JSON is `bytes` long: size
 /// alone, nothing more to draw.
 fn padded(sprite: &str, bytes: usize) -> String {
@@ -351,14 +372,14 @@ fn limit_probes(art: Vec<(String, String)>) -> Result<Vec<Probe>> {
         let file = format!("{:02}-{name}.tgs", probes.len() + 1);
         probes.push(Probe { file, pack: "sticker", tests, expect: "", json });
     };
-    for count in [60, 120, 180, 250, 500, 1000] {
+    for count in [60, 120, 180, 250, 500, 1000, 1500, 2000] {
         add(
             format!("layers-{count}"),
             format!("{count} layers of one square"),
             one_square_layers(count),
         );
     }
-    for count in [600, 1200, 2400, 3600] {
+    for count in [600, 1200, 2400, 3600, 4000, 4090, 4100, 4500] {
         add(
             format!("squares-{count}"),
             format!("{count} squares in one layer, all shown"),
@@ -372,11 +393,18 @@ fn limit_probes(art: Vec<(String, String)>) -> Result<Vec<Probe>> {
             checkerboard_layers(count, false),
         );
     }
-    for count in [48, 120] {
+    for count in [48, 49, 50, 60, 80, 100, 120] {
         add(
             format!("boards-in-turn-{count}"),
             format!("{count} layers of 200 squares, one at a time: {} squares", count * 200),
             checkerboard_layers(count, true),
+        );
+    }
+    for count in [20, 24] {
+        add(
+            format!("paths-{count}"),
+            format!("{count} paths of 4000 points in one layer: much JSON, few shapes"),
+            long_paths(count),
         );
     }
     for kb in [700, 1000, 1100, 1500, 1900] {
@@ -593,7 +621,7 @@ mod tests {
     #[test]
     fn limit_probes_raise_one_thing_each() {
         let probes = limit_probes(Vec::new()).unwrap();
-        assert_eq!(probes.len(), 19);
+        assert_eq!(probes.len(), 32);
         for probe in &probes {
             assert!(file::quick_size(probe.json.as_bytes()) <= MAX_TGS, "{}", probe.file);
             let (stats, _) = check(probe.json.as_bytes(), None).unwrap();
@@ -605,6 +633,12 @@ mod tests {
                 assert_eq!((stats.layers, stats.max_paint_sources_per_layer), (count, 1));
             } else if let Some(count) = number("-squares-") {
                 assert_eq!((stats.layers, stats.max_paint_sources_per_layer), (2, count));
+            } else if let Some(count) = number("-paths-") {
+                // the writer repeats the first point at the end
+                assert_eq!(
+                    (stats.layers, stats.max_paint_sources_per_layer, stats.max_path_points),
+                    (2, count, 4001)
+                );
             } else if let Some(count) = number("-boards-").or_else(|| number("-in-turn-")) {
                 assert_eq!((stats.layers, stats.max_paint_sources_per_layer), (count, 200));
             } else {

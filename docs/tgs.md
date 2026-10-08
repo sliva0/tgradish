@@ -34,7 +34,7 @@ structure, all can go.
   reductions are allowed, but the result must clearly say it is lossy and
   what was lost (CLI text and `--json` events).
 - The 1 MB limit on uncompressed JSON in 1.x was a guess. Use the real
-  limits below.
+  limits below (T9 found Telegram's is about 1 MB after all).
 - The user will upload test stickers to Telegram and check them on iOS when
   asked (step T9).
 
@@ -77,9 +77,29 @@ with merge paths, strokes, no `"tgs":1` key and non-integer `op` values
 like 39.6.
 T9 found (see `docs/probes.md`): the 3 seconds are counted in seconds,
 not frames, and 30 fps is allowed too; custom emoji are 512x512 like
-stickers, and a 100x100 one is refused. Telegram also refuses stickers
-with too much of something, layers, rectangles or JSON, that the rules
-don't mention; the second round of probes finds what.
+stickers, and a 100x100 one is refused.
+
+### Limits of Telegram's server
+
+The rules don't mention these; T9 found them by uploading probes. The
+server checks every uploaded `.tgs` and makes it a sticker only within
+them; otherwise it stays a plain file and @Stickers answers "File type is
+invalid. Please convert your image to the .TGS format." They look like a
+parser's limits, like tlottie's but lower:
+
+- about 1 MB of JSON: 996 KB of rectangles was accepted, 1.2 MB refused
+  (a 1.9 MB file made long by a padded name was accepted, so names may
+  not count);
+- layers: 1500 accepted, 2000 refused;
+- 4096 shapes in a layer, counted like tlottie (groups, fills, transforms
+  and what they draw): 4093 accepted, 4103 refused;
+- 20 paths of 4000 points were refused in 962 KB, less JSON than the
+  rectangles that got through; maybe a limit on points. tgradish writes
+  no paths that long, so this wasn't narrowed down.
+
+`limits::telegram` has them; the encoder keeps under them and `check`
+reports them. The fitter now has to reduce some large animations more
+than the 64 KB alone would need.
 
 ### Limits in the clients
 
@@ -243,8 +263,8 @@ xtask/     existing
   `docs/protocol.md`.
 - `tgradish inspect` should also accept `.tgs`. It shows canvas, fps,
   duration, file and raw size, layer/shape/keyframe counts and features
-  used, plus issues against Telegram's rules, the 2 MiB limit and tlottie's
-  limits. This is useful for any `.tgs`, not just ours.
+  used, plus issues against Telegram's rules, its server's limits and
+  tlottie's limits. This is useful for any `.tgs`, not just ours.
 
 Reuse what's already in the workspace (clap, serde, schemars, thiserror,
 flate2, the presets and config code) instead of adding parallel versions.
@@ -258,7 +278,7 @@ reduce       → PixelAnim (lossy, only when fitting needs it; every step record
 encode       → Scene (z-ordered primitives with lifetimes)
 lay out      → Lottie model (layers, groups, within limits)
 serialise    → compact JSON → zopfli gzip → .tgs
-check        → Telegram rules, 2 MiB raw limit, tlottie limits
+check        → Telegram rules and server limits, tlottie limits
 ```
 
 ### Decode
@@ -431,8 +451,8 @@ Measure each idea on the corpus and keep only what wins:
 - Watermark: top-level `nm` with tgradish's signature (1.x had a `--label`
   option for this). The user also likes marks that are harder to strip
   (WebM got some); any hidden mark must pass both renderers and T9.
-- Final check: ≤ 64 KB, raw ≤ 2 MiB (with margin), tlottie limits, ≤ 180
-  frames, no forbidden features.
+- Final check: ≤ 64 KB, Telegram's server limits (raw ≤ 1 MB), tlottie
+  limits, ≤ 180 frames, no forbidden features.
 
 ### Fit (when lossless doesn't fit)
 
@@ -457,8 +477,9 @@ Measure loss as a perceptual error weighted by frame duration. Greedily
 pick the step with the best bytes saved per unit of error, and bisect the
 strength of the last step. Report every applied step in a `finished` event
 (`lossy: true` plus the list of steps and their sizes) and as a visible
-warning in text mode. Fitting must also respect the 2 MiB raw limit, which
-may favour paths over rectangles for very large outputs.
+warning in text mode. Fitting must also respect the raw JSON limit (1 MB,
+Telegram's server), which may favour paths over rectangles for very large
+outputs.
 
 Options to expose (names should fit the WebM side; reuse `speed`
 fast/balanced/best as the effort setting): target (sticker/emoji), fit, the
@@ -671,9 +692,9 @@ The web app there may also replace the "Web page" and "Bot" items under
   output, precomps, keyframes, 30 fps and 512x512 emoji are accepted;
   longer than 3 s and 100x100 emoji are refused, and so were the three
   probes with very many layers, rectangles or JSON. Second round
-  (`tgs-lab limits`): ladders of each of those and real art, to find the
-  limit and make the encoder keep under it. Waiting for the user's
-  results.
+  (`tgs-lab limits`, uploaded through Telegram Web): found the server's
+  limits above; the encoder, fitting and `check` now keep to them. Still
+  open: the WebM probes, and how stickers look on iOS.
 - **T10:** release as part of tgradish 2.0, which waits for the whole
   roadmap.
 

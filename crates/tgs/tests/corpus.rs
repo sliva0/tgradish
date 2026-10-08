@@ -108,7 +108,8 @@ fn encodes_valid_lottie() {
     for path in corpus() {
         let input = decode(&std::fs::read(&path).unwrap(), &DecodeOptions::default()).unwrap();
         let (anim, _) = normalise(&input, &Options::default()).unwrap();
-        let scene = encode::runs(&anim);
+        let fast = encode::Settings { effort: encode::Effort::Fast, ..Default::default() };
+        let scene = encode::painter(&anim, &fast, None).unwrap();
         assert_eq!(scene.compare(&anim), None, "{}", name(&path));
         let json = lay_out(&scene, &anim, Some("tgradish".into())).to_json(Style::default());
         let (stats, issues) = check(json.as_bytes(), None).unwrap();

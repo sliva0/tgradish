@@ -83,9 +83,9 @@ Uploaded 2026-10-08. Accepted and shown on Android, Desktop and web:
 ## Second round: Telegram's limits
 
 Each group raises one thing until Telegram refuses it: layers, squares
-in one layer, squares shown at once, squares over the whole animation and
-the size of the JSON. The last ones are real art encoded by tgradish with
-the most layers, rectangles or JSON of the test set.
+in one layer, squares shown at once and over the whole animation, the size
+of the JSON, long paths. The last ones are real art encoded by tgradish
+with the most layers, rectangles or JSON of the test set.
 
 ```console
 P=references/pixelart
@@ -94,6 +94,28 @@ cargo run --release -p tgs-lab -- limits references/t9-probes-2 \
   $P/susie_fortnite.gif $P/gf1.gif
 ```
 
-Upload all of them into one test sticker pack and fill in
-`references/t9-probes-2/CHECKLIST.md`: which are accepted and, for the
-others, the bot's answer word for word. Only acceptance matters this time.
+Send them one at a time to @Stickers after `/newanimated` (an album of
+several files isn't checked the same way). Telegram's server checks each
+`.tgs` as it is uploaded: an accepted one arrives as a sticker, renamed
+`AnimatedSticker.tgs`, and the bot asks for its emoji; a refused one stays
+a file under its own name, and the bot answers "File type is invalid.
+Please convert your image to the .TGS format. See this guide for details."
+Telegram Web does no check of its own, so the app doesn't matter.
+
+### Results
+
+Uploaded 2026-10-08 through Telegram Web:
+
+| What | Accepted | Refused |
+| --- | --- | --- |
+| layers of one square | 60 to 1500 | 2000; 2700 (round 1) |
+| squares in one layer (shapes as tlottie counts) | up to 4090 (4093) | 4100 (4103), 4500; 5100 (round 1) |
+| layers of 200 squares in turn: squares, JSON | 20 000, 996 KB | 24 000, 1.2 MB; 39 744, 2 MB (round 1) |
+| JSON made long by a padded name | 700 KB, 1.9 MB | |
+| 20 paths of 4000 points, 962 KB | | refused |
+| `susie_fortnite` as tgradish encodes it: 49 layers, 7716 shapes | accepted | |
+
+So the server has limits like a parser's: about 1 MB of JSON (names may
+not count), at most 1500 to 2000 layers and 4096 shapes in a layer.
+tgradish now keeps under 1 000 000 bytes, 1500 layers and 4096 shapes
+(`limits::telegram`), and `inspect` reports files over them.
