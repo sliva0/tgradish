@@ -29,7 +29,7 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
         bail!("--output only works with a single input");
     }
     let options = options(ctx, &args)?;
-    let ffmpeg = ctx.ffmpeg()?;
+    let backend = ctx.backend()?;
     if ctx.global.json {
         listen_for_cancel(ctx);
     }
@@ -44,12 +44,12 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
             keep_temp: args.keep_temp,
         };
         let result = if ctx.global.json {
-            convert(&ffmpeg, &request, &ctx.cancel, &mut |event| {
+            convert(&backend, &request, &ctx.cancel, &mut |event| {
                 println!("{}", serde_json::to_string(&event).expect("events serialize"));
             })
         } else {
             let mut printer = Printer::new(ctx);
-            let result = convert(&ffmpeg, &request, &ctx.cancel, &mut |e| printer.event(e));
+            let result = convert(&backend, &request, &ctx.cancel, &mut |e| printer.event(e));
             printer.finish();
             result
         };

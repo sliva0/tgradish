@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use anyhow::{Context as _, Result, bail};
 use console::style;
 use serde_json::json;
+use tgradish_core::backend::BackendInfo;
 use tgradish_core::config::Config;
 use tgradish_core::presets::{self, DEFAULT_PRESET, Presets};
 use tgradish_core::telegram::{self, Target};
@@ -296,17 +297,22 @@ pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
             }
         }
         FfmpegCommand::Status => {
-            let ffmpeg = ctx.ffmpeg()?;
-            let caps = tgradish_core::ffmpeg::capabilities(&ffmpeg, &ctx.cancel)?;
+            let backend = ctx.backend()?;
+            let caps = backend.capabilities(&ctx.cancel)?;
             if ctx.global.json {
-                print_json(&json!({ "ffmpeg": ffmpeg, "capabilities": caps }));
+                print_json(&json!({ "ffmpeg": backend.info(), "capabilities": caps }));
                 if !caps.libvpx_vp9 {
                     return Err(crate::Exit(1).into());
                 }
             } else {
-                println!("ffmpeg   {}", ffmpeg.ffmpeg.display());
-                println!("ffprobe  {}", ffmpeg.ffprobe.display());
-                println!("source   {}", ui::name(&ffmpeg.source));
+                match backend.info() {
+                    BackendInfo::Process { ffmpeg } => {
+                        println!("ffmpeg   {}", ffmpeg.ffmpeg.display());
+                        println!("ffprobe  {}", ffmpeg.ffprobe.display());
+                        println!("source   {}", ui::name(&ffmpeg.source));
+                    }
+                    BackendInfo::Builtin => println!("ffmpeg   built into tgradish"),
+                }
                 println!("version  {}", caps.version);
                 let vp9 = if caps.libvpx_vp9 { style("yes").green() } else { style("no").red() };
                 println!("libvpx-vp9 encoder  {vp9}");
