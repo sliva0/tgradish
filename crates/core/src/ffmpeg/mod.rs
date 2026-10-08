@@ -1,6 +1,8 @@
 //! Running ffmpeg as a separate process.
 
 mod args;
+#[cfg(feature = "download")]
+pub mod download;
 mod locate;
 mod probe;
 mod process;
