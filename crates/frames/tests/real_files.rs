@@ -4,7 +4,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use tgradish_frames::{Animation, DecodeOptions, Error, Sheet, decode, sequence, sprite_sheet};
+use tgradish_frames::{
+    Animation, DecodeOptions, Error, Limits, Sheet, decode, sequence, sprite_sheet,
+};
 
 fn reference(name: &str) -> Option<PathBuf> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../references/pixelart").join(name);
@@ -83,7 +85,7 @@ fn aseprite_matches_its_gif() {
         let (a, g) = (ase.frames()[index].duration, gif.frames()[index].duration);
         assert!(a.abs_diff(g) < Duration::from_millis(10), "frame {index}: {a:?} vs {g:?}");
     }
-    let tagged = DecodeOptions { tag: Some("idle".into()) };
+    let tagged = DecodeOptions { tag: Some("idle".into()), ..DecodeOptions::default() };
     assert_eq!(decode(&gif_bytes, &tagged), Err(Error::TagWithoutAseprite));
 }
 
@@ -92,7 +94,9 @@ fn joins_image_sequences() {
     let Some(dir) = reference("sequences/kris_dance") else { return };
     let files: Vec<Vec<u8>> =
         (1..=4).map(|n| std::fs::read(dir.join(format!("{n}.png"))).unwrap()).collect();
-    let animation = sequence(files.iter().map(Vec::as_slice), Duration::from_millis(200)).unwrap();
+    let animation =
+        sequence(files.iter().map(Vec::as_slice), Duration::from_millis(200), &Limits::default())
+            .unwrap();
     assert_eq!((animation.width(), animation.height()), (27, 31));
     assert_eq!(animation.frames().len(), 4);
     assert_eq!(animation.duration(), Duration::from_millis(800));
@@ -102,7 +106,7 @@ fn joins_image_sequences() {
     let Some(other) = reference("sequences/ralsei_dance/1.png") else { return };
     let mixed = [files[0].clone(), std::fs::read(other).unwrap()];
     assert!(matches!(
-        sequence(mixed.iter().map(Vec::as_slice), Duration::from_millis(200)),
+        sequence(mixed.iter().map(Vec::as_slice), Duration::from_millis(200), &Limits::default()),
         Err(Error::SequenceSize { index: 1, .. })
     ));
 }
@@ -123,7 +127,7 @@ fn splits_sprite_sheets() {
     });
     let sheet =
         Sheet { columns: 3, rows: 2, frames: None, frame_duration: Duration::from_millis(50) };
-    let animation = sprite_sheet(&sheet_png, &sheet).unwrap();
+    let animation = sprite_sheet(&sheet_png, &sheet, &Limits::default()).unwrap();
     assert_eq!((animation.width(), animation.height(), animation.frames().len()), (4, 3, 6));
     assert_eq!(animation.pixel(4, 3, 2), Some([4, 0, 0, 160]));
     assert_eq!(animation.duration(), Duration::from_millis(300));
@@ -131,12 +135,57 @@ fn splits_sprite_sheets() {
     // only cell 1 is visible: trailing transparent cells are dropped,
     // leading ones kept
     let sparse = png(12, 6, |x, y| [0, 0, 0, if y / 3 * 3 + x / 4 == 1 { 255 } else { 0 }]);
-    assert_eq!(sprite_sheet(&sparse, &sheet).unwrap().frames().len(), 2);
+    assert_eq!(sprite_sheet(&sparse, &sheet, &Limits::default()).unwrap().frames().len(), 2);
     let three = Sheet { frames: Some(3), ..sheet.clone() };
-    assert_eq!(sprite_sheet(&sparse, &three).unwrap().frames().len(), 3);
+    assert_eq!(sprite_sheet(&sparse, &three, &Limits::default()).unwrap().frames().len(), 3);
 
     let uneven = Sheet { columns: 5, ..sheet.clone() };
-    assert!(matches!(sprite_sheet(&sparse, &uneven), Err(Error::SheetGrid { .. })));
+    assert!(matches!(
+        sprite_sheet(&sparse, &uneven, &Limits::default()),
+        Err(Error::SheetGrid { .. })
+    ));
     let too_many = Sheet { frames: Some(7), ..sheet };
-    assert!(matches!(sprite_sheet(&sparse, &too_many), Err(Error::SheetFrames { .. })));
+    assert!(matches!(
+        sprite_sheet(&sparse, &too_many, &Limits::default()),
+        Err(Error::SheetFrames { .. })
+    ));
+}
+
+#[test]
+fn survives_corrupted_files() {
+    let Some(path) = reference("Kris_battle.ase") else { return };
+    let original = std::fs::read(path).unwrap();
+    // a fixed pseudo-random sequence
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let limits = Limits { max_dimension: 4096, max_bytes: 64 << 20 };
+    let options = DecodeOptions { tag: None, limits };
+    for _ in 0..3000 {
+        let mut bytes = original.clone();
+        for _ in 0..1 + next() % 8 {
+            let at = (next() % bytes.len() as u64) as usize;
+            bytes[at] = next() as u8;
+        }
+        if next() % 4 == 0 {
+            bytes.truncate((next() % bytes.len() as u64) as usize);
+        }
+        // errors are fine, panics and running out of memory aren't
+        let _ = decode(&bytes, &options);
+    }
+}
+
+#[test]
+fn refuses_huge_gifs() {
+    // a 65535x65535 logical screen with one 1x1 frame
+    let mut gif = b"GIF89a".to_vec();
+    gif.extend([0xff, 0xff, 0xff, 0xff, 0x80, 0, 0]);
+    gif.extend([0, 0, 0, 255, 255, 255]);
+    gif.extend([0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0]);
+    gif.extend([2, 2, 0x44, 0x01, 0, 0x3b]);
+    assert!(matches!(decode(&gif, &DecodeOptions::default()), Err(Error::TooLarge(_))));
 }

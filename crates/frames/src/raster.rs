@@ -9,33 +9,44 @@ use image::codecs::png::PngDecoder;
 use image::codecs::webp::WebPDecoder;
 use image::{AnimationDecoder, DynamicImage, Frames, ImageDecoder, ImageError};
 
-use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Format, Frame, Result};
+use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Format, Frame, Limits, Result};
 
-pub(crate) fn decode(bytes: &[u8], format: Format) -> Result<Animation> {
-    let error = |err: ImageError| Error::Decode { format, message: err.to_string() };
+pub(crate) fn decode(bytes: &[u8], format: Format, limits: &Limits) -> Result<Animation> {
+    let error = |err: ImageError| match err {
+        ImageError::Limits(err) => Error::TooLarge(err.to_string()),
+        err => Error::Decode { format, message: err.to_string() },
+    };
+    // the codecs check sizes against these before they allocate
+    let mut codec_limits = image::Limits::default();
+    codec_limits.max_image_width = Some(limits.max_dimension);
+    codec_limits.max_image_height = Some(limits.max_dimension);
+    codec_limits.max_alloc = Some(limits.max_bytes as u64);
     let reader = Cursor::new(bytes);
     let animated = match format {
         Format::Gif => {
-            let frames = GifDecoder::new(reader).map_err(error)?.into_frames();
-            collect(frames, format, gif_delay)?
+            let mut decoder = GifDecoder::new(reader).map_err(error)?;
+            decoder.set_limits(codec_limits).map_err(error)?;
+            collect(decoder.into_frames(), format, limits, gif_delay)?
         }
         Format::Png => {
-            let decoder = PngDecoder::new(reader).map_err(error)?;
+            let decoder = PngDecoder::with_limits(reader, codec_limits).map_err(error)?;
             if decoder.is_apng().map_err(error)? {
-                collect(decoder.apng().map_err(error)?.into_frames(), format, |delay| delay)?
+                let frames = decoder.apng().map_err(error)?.into_frames();
+                collect(frames, format, limits, |delay| delay)?
             } else {
                 return still(decoder, format);
             }
         }
         Format::WebP => {
-            let decoder = WebPDecoder::new(reader).map_err(error)?;
+            let mut decoder = WebPDecoder::new(reader).map_err(error)?;
+            decoder.set_limits(codec_limits).map_err(error)?;
             if decoder.has_animation() {
-                collect(decoder.into_frames(), format, |delay| delay)?
+                collect(decoder.into_frames(), format, limits, |delay| delay)?
             } else {
                 return still(decoder, format);
             }
         }
-        Format::Aseprite => unreachable!("Aseprite files are decoded by aseprite.rs"),
+        Format::Aseprite => unreachable!("Aseprite files are decoded by aseprite/mod.rs"),
     };
     animated.ok_or(Error::Empty)
 }
@@ -49,15 +60,21 @@ fn gif_delay(delay: Duration) -> Duration {
 fn collect(
     frames: Frames<'_>,
     format: Format,
+    limits: &Limits,
     delay: impl Fn(Duration) -> Duration,
 ) -> Result<Option<Animation>> {
     let mut size = None;
     let mut out = Vec::new();
     for frame in frames {
-        let frame = frame.map_err(|err| Error::Decode { format, message: err.to_string() })?;
+        let frame = frame.map_err(|err| match err {
+            ImageError::Limits(err) => Error::TooLarge(err.to_string()),
+            err => Error::Decode { format, message: err.to_string() },
+        })?;
         let duration = delay(Duration::from(frame.delay()));
         let buffer = frame.into_buffer();
-        size.get_or_insert(buffer.dimensions());
+        let (width, height) = *size.get_or_insert(buffer.dimensions());
+        // every frame is kept, so together they must fit
+        limits.check(width, height, out.len() + 1)?;
         out.push(Frame { rgba: buffer.into_raw(), duration });
     }
     let Some((width, height)) = size else { return Ok(None) };
