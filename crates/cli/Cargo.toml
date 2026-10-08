@@ -1,0 +1,14 @@
+[package]
+name = "tgradish"
+description = "Converts videos into Telegram video stickers, with the ability to bypass the 3 second limit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+tgradish-core.workspace = true
+
+[lints]
+workspace = true
