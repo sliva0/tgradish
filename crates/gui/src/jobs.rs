@@ -10,6 +10,7 @@ use tgradish_core::convert::{Request, convert, default_output};
 use tgradish_core::events::Event;
 use tgradish_core::ffmpeg::CancelToken;
 use tgradish_core::options::Options;
+use tgradish_core::presets::Format;
 use tgradish_core::tgs::{self, Preview, TgsEvent, TgsOptions, TgsRequest};
 
 /// What a job converts with, fixed when it starts.
@@ -69,6 +70,8 @@ pub struct Job {
     /// One file, or the frames of one sticker.
     pub inputs: Vec<PathBuf>,
     pub sequence: bool,
+    /// What it makes, fixed when it is added.
+    pub format: Format,
     pub output: Option<PathBuf>,
     pub status: Status,
     pub log: Vec<String>,
@@ -84,10 +87,11 @@ fn kib(bytes: u64) -> String {
 }
 
 impl Job {
-    pub fn new(inputs: Vec<PathBuf>, sequence: bool) -> Job {
+    pub fn new(inputs: Vec<PathBuf>, sequence: bool, format: Format) -> Job {
         Job {
             inputs,
             sequence,
+            format,
             output: None,
             status: Status::Waiting,
             log: Vec::new(),

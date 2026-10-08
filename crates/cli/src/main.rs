@@ -78,7 +78,12 @@ fn run(cli: Cli) -> Result<()> {
         Command::Config(command) => commands::config(&ctx, command, config_path),
         Command::Ffmpeg(command) => commands::ffmpeg(&ctx, command),
         #[cfg(feature = "gui")]
-        Command::Gui => tgradish_gui::run().map_err(|err| anyhow::anyhow!("{err}")),
+        Command::Gui => tgradish_gui::run(tgradish_gui::Launch {
+            config_path,
+            ffmpeg_choice: ctx.global.ffmpeg_from.map(Into::into),
+            ffmpeg_path: ctx.global.ffmpeg.clone(),
+        })
+        .map_err(|err| anyhow::anyhow!("{err}")),
     }
 }
 
@@ -123,7 +128,7 @@ mod console {
 fn main() -> ExitCode {
     #[cfg(feature = "gui")]
     if started_outside_a_terminal() {
-        return match tgradish_gui::run() {
+        return match tgradish_gui::run(tgradish_gui::Launch::default()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 // there is no terminal to print to
