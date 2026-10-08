@@ -424,7 +424,9 @@ impl Build {
         if self.target.is_windows() {
             configure.args(["--disable-pthreads", "--enable-w32threads"]);
         } else {
-            configure.arg("--enable-pthreads");
+            // position-independent code for Rust's PIE executables, which
+            // not every distribution's compiler makes by default
+            configure.args(["--enable-pthreads", "--enable-pic"]);
         }
         if let Some(cross) = self.target.cross_prefix() {
             configure
