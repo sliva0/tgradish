@@ -20,6 +20,8 @@ filters and encoder settings; the tests check that they give the same
 results. Differences:
 
 - `extra-args` only works with ffmpeg as a separate program;
+- the built-in ffmpeg only reads regular files, not FIFOs or devices,
+  because reads that block in the OS could not be cancelled;
 - display matrices with rotations other than quarter turns are ignored by
   the built-in ffmpeg, the command line would rotate by the exact angle.
 

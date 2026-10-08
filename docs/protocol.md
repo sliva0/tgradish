@@ -95,9 +95,13 @@ temporary files behind.
 `tgradish --json watch DIR [conversion flags]` converts files as they
 appear and prints the same events as `convert`, with each `started` event
 naming its input. A failed conversion prints an `error` with its `input`
-and watching goes on. Files already in the directory are left alone unless
-`--existing` is given. Stop it like a conversion; it then exits with 0, or
-130 if a conversion was running.
+and watching goes on; failures that might be temporary, like a locked
+file, are retried a few times. Directories that cannot be read are reported
+as `error` events without `input`, once, and watching goes on. Files
+already in the directory are left alone unless `--existing` is given. With
+`--recursive` and `--output-dir`, results keep the subdirectories of their
+inputs. Stop it like a conversion; it then exits with 0, or 130 if a
+conversion was running.
 
 ## Other commands
 

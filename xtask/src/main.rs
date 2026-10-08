@@ -542,6 +542,55 @@ fn sha256_file(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// DLLs that every Windows has. Anything else, like MinGW's winpthread or
+/// libgcc, would have to be shipped next to the executable.
+const SYSTEM_DLLS: &[&str] = &[
+    "advapi32.dll",
+    "bcrypt.dll",
+    "crypt32.dll",
+    "gdi32.dll",
+    "kernel32.dll",
+    "msvcrt.dll",
+    "ntdll.dll",
+    "ole32.dll",
+    "oleaut32.dll",
+    "secur32.dll",
+    "shell32.dll",
+    "user32.dll",
+    "userenv.dll",
+    "ws2_32.dll",
+    "psapi.dll",
+    "dbghelp.dll",
+    "shlwapi.dll",
+    "mfplat.dll",
+    "mfuuid.dll",
+    "strmiids.dll",
+    "api-ms-win-core-synch-l1-2-0.dll",
+    "uxtheme.dll",
+    "comctl32.dll",
+    "comdlg32.dll",
+    "winmm.dll",
+    "iphlpapi.dll",
+    "ucrtbase.dll",
+];
+
+/// Fails if a Windows executable imports a DLL that is not part of Windows.
+fn check_dll_imports(exe: &Path) -> Result<()> {
+    let dump = output(Command::new("x86_64-w64-mingw32-objdump").arg("-p").arg(exe))?;
+    let imports: Vec<String> = dump
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("DLL Name:"))
+        .map(|name| name.trim().to_lowercase())
+        .collect();
+    let foreign: Vec<_> = imports
+        .iter()
+        .filter(|dll| !SYSTEM_DLLS.contains(&dll.as_str()) && !dll.starts_with("api-ms-win-"))
+        .collect();
+    ensure!(foreign.is_empty(), "{} needs DLLs Windows does not have: {foreign:?}", exe.display());
+    println!("DLL imports: {}", imports.join(", "));
+    Ok(())
+}
+
 /// Packs a release archive with the tgradish binary built with
 /// `--features linked-static --target <triple>`, and copies the ffmpeg
 /// executables archive for `tgradish ffmpeg download` next to it.
@@ -588,6 +637,10 @@ fn package_release(args: &[String]) -> Result<()> {
             ffmpeg = FFMPEG.version,
         ),
     )?;
+
+    if target == Target::Windows {
+        check_dll_imports(&binary)?;
+    }
 
     let archive = match target {
         Target::Linux => {

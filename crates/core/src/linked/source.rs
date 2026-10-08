@@ -87,7 +87,15 @@ impl Source {
         cancel: &CancelToken,
     ) -> Result<Source> {
         cancel.check()?;
-        // lets ffmpeg give up on reads that block, for example on a FIFO
+        // the interrupt callback below cannot stop an open() or read() that
+        // blocks in the OS, as on a FIFO without a writer
+        if !std::fs::metadata(path).is_ok_and(|m| m.is_file()) {
+            return Err(Error::Probe {
+                path: path.to_path_buf(),
+                message: "not a regular file; the built-in ffmpeg only reads files".into(),
+            });
+        }
+        // lets ffmpeg give up on reads that take long, like on network drives
         let interrupt = {
             let cancel = cancel.clone();
             move || cancel.is_cancelled()
