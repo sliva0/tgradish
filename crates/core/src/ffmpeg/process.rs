@@ -48,6 +48,8 @@ impl CancelToken {
 pub(crate) enum Output {
     /// Encoded media time, from `-progress pipe:1`.
     Time { micros: u64 },
+    /// Any other line of stdout.
+    Stdout(String),
     /// A line of stderr.
     Line(String),
 }
@@ -90,8 +92,12 @@ pub(crate) fn run(
 
     let (tx, rx) = mpsc::channel();
     let stdout_thread = spawn_reader(stdout, tx.clone(), |line| {
-        let micros = line.strip_prefix("out_time_us=")?.trim().parse().ok()?;
-        Some(Output::Time { micros })
+        match line.strip_prefix("out_time_us=").map(|micros| micros.trim().parse()) {
+            Some(Ok(micros)) => Some(Output::Time { micros }),
+            // N/A before the first frame
+            Some(Err(_)) => None,
+            None => Some(Output::Stdout(line)),
+        }
     });
     let stderr_thread = spawn_reader(stderr, tx, |line| Some(Output::Line(line)));
 

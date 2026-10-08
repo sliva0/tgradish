@@ -163,3 +163,73 @@ fn cancels_running_conversion() {
     assert!(start.elapsed().as_secs() < 10);
     assert!(!output.exists());
 }
+
+#[test]
+fn stays_under_three_seconds_without_spoofing() {
+    let (Some(ffmpeg), Some(input)) = (system_ffmpeg(), reference("uhh.mp4")) else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let request = Request {
+        output: Some(dir.path().join("out.webm")),
+        options: Options {
+            length: Some(3.0),
+            fps: Some(29.97),
+            spoof: Some(tgradish_core::options::Spoof::Never),
+            ..fast(Fit::Bitrate)
+        },
+        ..Request::new(input)
+    };
+    let outcome = convert(&ffmpeg, &request, &CancelToken::new(), &mut |_| {}).unwrap();
+    assert!(outcome.issues.is_empty(), "{:?}", outcome.issues);
+    let header = webm::inspect_file(&outcome.output).unwrap().header_duration.unwrap();
+    assert!(header <= telegram::MAX_SECONDS, "header duration {header}");
+}
+
+#[test]
+fn cancelled_before_start_runs_nothing() {
+    let (Some(ffmpeg), Some(input)) = (system_ffmpeg(), reference("uhh.mp4")) else { return };
+    let cancel = CancelToken::new();
+    cancel.cancel();
+    let mut events = 0;
+    let result = convert(&ffmpeg, &Request::new(input), &cancel, &mut |_| events += 1);
+    assert!(matches!(result, Err(Error::Cancelled)), "{result:?}");
+    assert_eq!(events, 0);
+}
+
+#[test]
+fn ssim_penalizes_dropped_frames() {
+    use tgradish_core::convert::plan;
+
+    let Some(ffmpeg) = system_ffmpeg() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("flash.mkv");
+    // dark frames with a bright flash on every third one
+    let status = Command::new("ffmpeg")
+        .args(["-v", "error", "-f", "lavfi", "-i"])
+        .arg("color=black:s=512x512:r=30:d=2,geq=lum='if(eq(mod(N\\,3)\\,2)\\,235\\,16)':cb=128:cr=128")
+        .args(["-c:v", "ffv1"])
+        .arg(&source)
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let cancel = CancelToken::new();
+    let probe = ffmpeg::probe(&ffmpeg, &source, &cancel).unwrap();
+    let (plan, _) = plan(&Request::new(source.clone()), probe).unwrap();
+    let score = |fps: &str| {
+        let candidate = dir.path().join(format!("{fps}.mkv"));
+        let status = Command::new("ffmpeg")
+            .args(["-v", "error", "-i"])
+            .arg(&source)
+            .args(["-vf", &format!("fps={fps}"), "-c:v", "ffv1"])
+            .arg(&candidate)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let fps = fps.parse().unwrap();
+        ffmpeg::ssim(&ffmpeg, &plan, &candidate, fps, &cancel, &mut |_| {}).unwrap()
+    };
+    let full = score("30");
+    let dropped = score("10");
+    assert!(full > 0.99, "full frame rate scored {full}");
+    assert!(dropped < 0.9, "dropping every flash scored {dropped}");
+}

@@ -16,7 +16,7 @@ pub use locate::{bundled_dir, downloaded_dir, locate};
 pub use probe::{Probe, probe};
 pub use process::CancelToken;
 pub(crate) use process::{Output, run};
-pub(crate) use ssim::ssim;
+pub use ssim::ssim;
 
 /// Where to look for ffmpeg.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

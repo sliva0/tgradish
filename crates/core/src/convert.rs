@@ -93,16 +93,71 @@ pub struct Plan {
     pub speed: Speed,
     /// Encode with an alpha channel.
     pub alpha: bool,
-    pub spoof: bool,
+    pub spoof: Spoof,
     pub fake_duration: f64,
     pub title: Option<String>,
     pub watermark: bool,
     pub extra_args: Vec<String>,
 }
 
+impl Plan {
+    /// Whether a result of `length` seconds gets its duration spoofed.
+    pub fn spoofs(&self, length: f64) -> bool {
+        match self.spoof {
+            Spoof::Auto => length > telegram::MAX_SECONDS + 1e-3,
+            Spoof::Always => true,
+            Spoof::Never => false,
+        }
+    }
+}
+
+/// Number of frames encoded for `length` seconds at `fps`. Rounds down so
+/// the result never lasts longer than asked, which matters at the 3 second
+/// limit, but always at least one frame.
+pub fn frame_count(length: f64, fps: f64) -> u64 {
+    ((length * fps + 1e-6).floor() as u64).max(1)
+}
+
+/// Duration of [`frame_count`] frames, as written into the file header.
+pub fn encoded_length(length: f64, fps: f64) -> f64 {
+    frame_count(length, fps) as f64 / fps
+}
+
 /// Output, input or option problems detected while planning.
 fn invalid(message: impl Into<String>) -> Error {
     Error::InvalidOptions(message.into())
+}
+
+/// Whether `output` is the same file as `input`, following `..` and links.
+fn same_file(input: &Path, output: &Path) -> bool {
+    match (std::fs::canonicalize(input), std::fs::canonicalize(output)) {
+        (Ok(input), Ok(output)) => input == output,
+        _ => input == output,
+    }
+}
+
+/// Validates a user-given fit range. Integer ranges must contain an integer.
+fn check_range(range: Range, fit: Fit, length: f64) -> Result<Range> {
+    if !(range.min.is_finite() && range.max.is_finite() && range.min <= range.max) {
+        return Err(invalid(format!("fit range {range} must be MIN..MAX with MIN <= MAX")));
+    }
+    let (low, high, what) = match fit {
+        Fit::Crf => (0.0, 63.0, "crf"),
+        Fit::Fps => (1.0, telegram::MAX_FPS, "fps"),
+        Fit::Length => (f64::MIN_POSITIVE, length, "length"),
+        Fit::Auto | Fit::Bitrate | Fit::Off => (f64::MIN_POSITIVE, f64::INFINITY, "bitrate"),
+    };
+    if range.min < low || range.max > high {
+        return Err(invalid(match (low, high.is_finite()) {
+            (f64::MIN_POSITIVE, false) => format!("{what} range must be above 0"),
+            (f64::MIN_POSITIVE, true) => format!("{what} range must be above 0 and at most {high}"),
+            _ => format!("{what} range must be within {low}..{high}"),
+        }));
+    }
+    if matches!(fit, Fit::Crf | Fit::Fps) && range.min.ceil() > range.max.floor() {
+        return Err(invalid(format!("{what} range {range} contains no whole number")));
+    }
+    Ok(range)
 }
 
 fn even(value: f64) -> u32 {
@@ -141,14 +196,14 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     }
 
     let output = request.output.clone().unwrap_or_else(|| default_output(&request.input, target));
-    if output == request.input {
+    if same_file(&request.input, &output) {
         return Err(invalid("output would overwrite the input"));
     }
     if !request.overwrite && output.exists() {
         return Err(Error::OutputExists(output));
     }
 
-    let spoof_mode = o.spoof.unwrap_or(Spoof::Auto);
+    let spoof = o.spoof.unwrap_or(Spoof::Auto);
     let fake_duration = o.fake_duration.unwrap_or(options::DEFAULT_FAKE_DURATION);
     if !(fake_duration > 0.0 && fake_duration <= telegram::MAX_SECONDS) {
         return Err(invalid(format!(
@@ -180,19 +235,13 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         None if available.is_finite() => available,
         None => telegram::MAX_SECONDS,
     };
-    if spoof_mode == Spoof::Never && length > telegram::MAX_SECONDS {
+    if spoof == Spoof::Never && length > telegram::MAX_SECONDS {
         warnings.push(format!(
             "cutting to {} s because spoofing is off; Telegram rejects longer videos",
             telegram::MAX_SECONDS
         ));
         length = telegram::MAX_SECONDS;
     }
-    let spoof = match spoof_mode {
-        Spoof::Auto => length > telegram::MAX_SECONDS + 1e-3,
-        Spoof::Always => true,
-        Spoof::Never => false,
-    };
-
     let source_fps = source.fps.unwrap_or(25.0);
     let fps = match o.fps {
         Some(fps) if !(fps > 0.0 && fps <= telegram::MAX_FPS) => {
@@ -232,21 +281,18 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         _ => {}
     }
 
+    // length fitting may only shorten: `length` already respects the input
+    // and the spoofing policy
     let fit_range = match (o.fit_range, fit) {
-        (Some(range), Fit::Crf) if range.min < 0.0 || range.max > 63.0 => {
-            return Err(invalid("crf range must be within 0..63"));
+        (Some(range), Fit::Length) if range.max > length && range.min.is_finite() => {
+            warnings.push(format!("length range capped at {length:.2} s"));
+            check_range(Range { min: range.min.min(length), max: length }, fit, length)?
         }
-        (Some(range), Fit::Fps) if range.min <= 0.0 || range.max > telegram::MAX_FPS => {
-            return Err(invalid(format!("fps range must be within 1..{}", telegram::MAX_FPS)));
-        }
-        (Some(range), _) if range.min <= 0.0 && fit != Fit::Crf => {
-            return Err(invalid("fit range must be above 0"));
-        }
-        (Some(range), _) => range,
+        (Some(range), _) => check_range(range, fit, length)?,
         (None, Fit::Auto | Fit::Bitrate | Fit::Off) => Range { min: 8.0, max: 50_000.0 },
         (None, Fit::Crf) => Range { min: 4.0, max: 63.0 },
-        (None, Fit::Fps) => Range { min: 1.0, max: fps },
-        (None, Fit::Length) => Range { min: 0.1, max: length },
+        (None, Fit::Fps) => Range { min: 1.0, max: fps.floor().max(1.0) },
+        (None, Fit::Length) => Range { min: length.min(0.1), max: length },
     };
 
     let (box_w, box_h) = target.box_size();
@@ -342,6 +388,8 @@ impl FfmpegEncoder<'_> {
                 on_event(Event::Progress { attempt, pass, passes, fraction });
             }
             Output::Line(line) => on_event(Event::Log { line }),
+            // other -progress keys
+            Output::Stdout(_) => {}
         })?;
         on_event(Event::Progress { attempt, pass, passes, fraction: 1.0 });
         Ok(())
@@ -392,9 +440,11 @@ impl Encoder for FfmpegEncoder<'_> {
 
     fn score(&mut self, attempt: &Attempt) -> Result<f64> {
         let on_event = &mut *self.on_event;
-        let ssim = ffmpeg::ssim(self.ffmpeg, self.plan, &attempt.path, self.cancel, &mut |line| {
-            on_event(Event::Log { line })
-        })?;
+        let fps = attempt.params.fps;
+        let ssim =
+            ffmpeg::ssim(self.ffmpeg, self.plan, &attempt.path, fps, self.cancel, &mut |line| {
+                on_event(Event::Log { line })
+            })?;
         on_event(Event::Scored { attempt: attempt.number, ssim });
         Ok(ssim)
     }
@@ -407,7 +457,7 @@ pub fn convert(
     cancel: &CancelToken,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Outcome> {
-    let source = ffmpeg::probe(ffmpeg, &request.input)?;
+    let source = ffmpeg::probe(ffmpeg, &request.input, cancel)?;
     let (plan, warnings) = plan(request, source)?;
     for message in warnings {
         on_event(Event::Warning { message });
@@ -426,9 +476,10 @@ pub fn convert(
     };
     let best = fit::run(&plan, &mut encoder, telegram::MAX_BYTES)?;
     cancel.check()?;
+    let spoofed = plan.spoofs(encoded_length(best.params.length, best.params.fps));
 
     let changes = Patch {
-        duration: plan.spoof.then_some(plan.fake_duration),
+        duration: spoofed.then_some(plan.fake_duration),
         muxing_app: plan.watermark.then(|| crate::TOOL_ID.to_string()),
         signature: plan.watermark.then(crate::signature),
         ..Default::default()
@@ -447,15 +498,99 @@ pub fn convert(
         bytes: info.file_size,
         attempt: best.number,
         params: best.params,
-        spoofed: plan.spoof,
+        spoofed,
         issues: issues.clone(),
     });
     Ok(Outcome {
         output: plan.output,
         bytes: info.file_size,
         params: best.params,
-        spoofed: plan.spoof,
+        spoofed,
         issues,
         temp_dir,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn source(duration: f64) -> Probe {
+        Probe {
+            format: "mov,mp4".into(),
+            codec: "h264".into(),
+            width: 640,
+            height: 480,
+            fps: Some(30.0),
+            duration: Some(duration),
+            alpha: false,
+            still_image: false,
+            decoder: None,
+        }
+    }
+
+    fn plan_with(options: Options) -> Result<(Plan, Vec<String>)> {
+        let request = Request { options, ..Request::new("in.mp4".into()) };
+        plan(&request, source(4.84))
+    }
+
+    #[test]
+    fn refuses_to_overwrite_input_through_dot_dot() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("input.mp4");
+        std::fs::write(&input, b"").unwrap();
+        let name = dir.path().file_name().unwrap();
+        let sneaky = dir.path().join("..").join(name).join("input.mp4");
+        let request =
+            Request { output: Some(sneaky), overwrite: true, ..Request::new(input.clone()) };
+        assert!(matches!(plan(&request, source(4.84)), Err(Error::InvalidOptions(_))));
+    }
+
+    #[test]
+    fn validates_fit_ranges() {
+        let range = |min, max| Some(Range { min, max });
+        for (fit, fit_range) in [
+            (Fit::Bitrate, range(400.0, 100.0)),
+            (Fit::Bitrate, range(f64::NAN, 100.0)),
+            (Fit::Bitrate, range(0.0, 100.0)),
+            (Fit::Crf, range(10.0, 70.0)),
+            (Fit::Fps, range(1.5, 1.7)),
+            (Fit::Fps, range(10.0, 60.0)),
+        ] {
+            let options = Options { fit: Some(fit), fit_range, ..Default::default() };
+            assert!(plan_with(options).is_err(), "{fit:?} {fit_range:?} was accepted");
+        }
+    }
+
+    #[test]
+    fn length_fit_stays_within_planned_length() {
+        let options = Options {
+            fit: Some(Fit::Length),
+            length: Some(2.0),
+            fit_range: Some(Range { min: 1.0, max: 5.0 }),
+            ..Default::default()
+        };
+        let (plan, warnings) = plan_with(options).unwrap();
+        assert_eq!(plan.fit_range, Range { min: 1.0, max: 2.0 });
+        assert_eq!(warnings.len(), 1);
+
+        let tiny = Options { fit: Some(Fit::Length), length: Some(0.04), ..Default::default() };
+        let (plan, _) = plan_with(tiny).unwrap();
+        assert!(plan.fit_range.min <= plan.fit_range.max);
+    }
+
+    #[test]
+    fn frame_counts_never_exceed_length() {
+        assert_eq!(frame_count(3.0, 29.97), 89);
+        assert!(encoded_length(3.0, 29.97) <= 3.0);
+        assert_eq!(frame_count(4.84, 25.0), 121);
+        assert_eq!(frame_count(0.001, 25.0), 1);
+    }
+
+    #[test]
+    fn spoofs_by_result_length() {
+        let (plan, _) = plan_with(Options::default()).unwrap();
+        assert_eq!(plan.spoof, Spoof::Auto);
+        assert!(plan.spoofs(4.84) && !plan.spoofs(3.0));
+    }
 }

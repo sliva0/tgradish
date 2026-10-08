@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
+use super::{CancelToken, Output, run};
 use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
@@ -43,29 +44,25 @@ fn pix_fmt_has_alpha(pix_fmt: &str) -> bool {
         || pix_fmt == "pal8"
 }
 
-pub fn probe(ffmpeg: &Ffmpeg, input: &Path) -> Result<Probe> {
+pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Probe> {
     let probe_error = |message: String| Error::Probe { path: input.to_path_buf(), message };
 
     let mut cmd = Command::new(&ffmpeg.ffprobe);
     cmd.args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"])
         .args(["-select_streams", "v:0"])
         .arg(input);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
-    let out = cmd.output().map_err(|err| match err.kind() {
-        std::io::ErrorKind::NotFound => {
-            Error::FfmpegNotFound(format!("{} does not exist", ffmpeg.ffprobe.display()))
+    let mut stdout = String::new();
+    let result = run(cmd, "ffprobe", cancel, &mut |output| {
+        if let Output::Stdout(line) = output {
+            stdout.push_str(&line);
+            stdout.push('\n');
         }
-        _ => Error::Io(err),
-    })?;
-    if !out.status.success() {
-        return Err(probe_error(String::from_utf8_lossy(&out.stderr).trim().to_string()));
-    }
-    let json: Value =
-        serde_json::from_slice(&out.stdout).map_err(|err| probe_error(err.to_string()))?;
+    });
+    match result {
+        Err(Error::Ffmpeg { stderr, .. }) => return Err(probe_error(stderr.trim().to_string())),
+        result => result?,
+    };
+    let json: Value = serde_json::from_str(&stdout).map_err(|err| probe_error(err.to_string()))?;
 
     let stream = json["streams"]
         .as_array()
