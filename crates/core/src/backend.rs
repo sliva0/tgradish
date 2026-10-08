@@ -58,6 +58,12 @@ impl Backend {
         }
     }
 
+    /// Whether `extra_args` can be used: they are ffmpeg command line
+    /// arguments.
+    pub fn supports_extra_args(&self) -> bool {
+        matches!(self, Backend::Process(_))
+    }
+
     pub fn info(&self) -> BackendInfo {
         match self {
             Backend::Process(ffmpeg) => BackendInfo::Process { ffmpeg: ffmpeg.clone() },
@@ -70,10 +76,7 @@ impl Backend {
         match self {
             Backend::Process(ffmpeg) => ffmpeg::probe(ffmpeg, input, cancel),
             #[cfg(feature = "linked")]
-            Backend::Linked => {
-                cancel.check()?;
-                crate::linked::probe(input)
-            }
+            Backend::Linked => crate::linked::probe(input, cancel),
         }
     }
 

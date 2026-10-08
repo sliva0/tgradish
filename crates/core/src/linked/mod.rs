@@ -14,13 +14,13 @@ use std::sync::OnceLock;
 use ff::{Dictionary, Packet, Rational, codec, filter, format, frame};
 use ffmpeg_next as ff;
 
-use self::source::{Source, rotation_filters};
+use self::source::Source;
 use crate::backend::{Pass, pass_log_file};
 use crate::convert::{Plan, frame_count};
 use crate::error::{Error, Result};
 use crate::events::{Params, Rate};
 use crate::ffmpeg::{CancelToken, Capabilities, Output, Probe};
-use crate::ffmpeg::{normalize_rotation, pix_fmt_has_alpha, video_filter};
+use crate::ffmpeg::{Orientation, pix_fmt_has_alpha, video_filter};
 
 /// Turns an ffmpeg error into ours, saying what was being done.
 fn libav(doing: &'static str) -> impl Fn(ff::Error) -> Error {
@@ -49,8 +49,8 @@ pub(crate) fn capabilities() -> Result<Capabilities> {
     })
 }
 
-/// Rotation from the display matrix of `stream`, counterclockwise degrees.
-fn display_rotation(stream: &format::stream::Stream) -> f64 {
+/// Orientation from the display matrix of `stream`.
+fn orientation(stream: &format::stream::Stream) -> Orientation {
     // SAFETY: the parameters belong to the open stream; side data is
     // checked for presence and size before reading
     unsafe {
@@ -61,10 +61,10 @@ fn display_rotation(stream: &format::stream::Stream) -> f64 {
             ff::ffi::AVPacketSideDataType::AV_PKT_DATA_DISPLAYMATRIX,
         );
         if data.is_null() || (*data).size < 9 * 4 {
-            return 0.0;
+            return Orientation::Normal;
         }
-        let rotation = ff::ffi::av_display_rotation_get((*data).data as *const i32);
-        if rotation.is_finite() { rotation } else { 0.0 }
+        let matrix = std::ptr::read_unaligned((*data).data as *const [i32; 9]);
+        Orientation::from_display_matrix(&matrix)
     }
 }
 
@@ -78,9 +78,9 @@ fn ratio(value: Rational) -> Option<f64> {
     (value.numerator() > 0 && value.denominator() > 0).then(|| f64::from(value))
 }
 
-pub(crate) fn probe(input: &Path) -> Result<Probe> {
+pub(crate) fn probe(input: &Path, cancel: &CancelToken) -> Result<Probe> {
     init()?;
-    let source = Source::open_file(input, None)?;
+    let source = Source::open_file(input, None, cancel)?;
     let probe_error = |message: String| Error::Probe { path: input.to_path_buf(), message };
     let (context, stream) = (source.input(), source.stream());
 
@@ -95,8 +95,8 @@ pub(crate) fn probe(input: &Path) -> Result<Probe> {
     if let Some(sar) = ratio(stream_sar).or_else(|| ratio(decoder.aspect_ratio())) {
         width *= sar;
     }
-    let rotation = normalize_rotation(display_rotation(&stream));
-    if rotation % 180 == 90 {
+    let orientation = orientation(&stream);
+    if orientation.swaps_size() {
         std::mem::swap(&mut width, &mut height);
     }
 
@@ -131,7 +131,7 @@ pub(crate) fn probe(input: &Path) -> Result<Probe> {
         duration,
         alpha: pix_fmt_has_alpha(&pix_fmt) || webm_alpha,
         still_image,
-        rotation,
+        orientation,
         decoder: decoder_name,
     })
 }
@@ -159,6 +159,23 @@ fn is_again(err: &ff::Error) -> bool {
     matches!(err, ff::Error::Other { errno } if *errno == ff::util::error::EAGAIN)
 }
 
+/// A string allocated by ffmpeg's allocator, freed on drop.
+struct AvString(*mut std::ffi::c_char);
+
+impl AvString {
+    fn new(text: &CStr) -> AvString {
+        // SAFETY: av_strdup copies a NUL-terminated string
+        AvString(unsafe { ff::ffi::av_strdup(text.as_ptr()) })
+    }
+}
+
+impl Drop for AvString {
+    fn drop(&mut self) {
+        // SAFETY: allocated by av_strdup in new; av_free accepts null
+        unsafe { ff::ffi::av_free(self.0.cast()) }
+    }
+}
+
 /// Opened encoder, the output it writes to, and two-pass state.
 struct Encoder {
     encoder: ff::encoder::Video,
@@ -167,8 +184,9 @@ struct Encoder {
     /// duration to the header duration, and libvpx leaves it unset.
     frame_duration: i64,
     output: Option<format::context::Output>,
-    /// `stats_in` given to libvpx, freed after the encoder.
-    stats_in: *mut std::ffi::c_char,
+    /// `stats_in` of the encoder. Declared after it, so it is dropped after
+    /// the encoder, which only borrows it.
+    _stats_in: Option<AvString>,
 }
 
 impl Encoder {
@@ -222,7 +240,7 @@ impl Encoder {
         {
             flags |= codec::Flags::GLOBAL_HEADER;
         }
-        let mut stats_in = std::ptr::null_mut();
+        let mut stats_in = None;
         match pass {
             Pass::Single => {}
             Pass::First(_) => flags |= codec::Flags::PASS1,
@@ -231,12 +249,13 @@ impl Encoder {
                 let stats = std::fs::read(pass_log_file(log))?;
                 let stats = CString::new(stats)
                     .map_err(|_| Error::Libav("invalid first-pass statistics".into()))?;
-                // SAFETY: libvpx reads stats_in while encoding; it must come
-                // from av_malloc and is freed in Drop after the encoder
-                unsafe {
-                    stats_in = ff::ffi::av_strdup(stats.as_ptr());
-                    (*encoder.as_mut_ptr()).stats_in = stats_in;
-                }
+                let stats = stats_in.insert(AvString::new(&stats));
+                // SAFETY: libvpx reads stats_in while opening and encoding.
+                // On success the string moves into Encoder after the
+                // encoder field, so it is freed after it; on errors it is
+                // freed while the context is only being released, which
+                // does not read it
+                unsafe { (*encoder.as_mut_ptr()).stats_in = stats.0 };
             }
         }
         encoder.set_flags(flags);
@@ -258,7 +277,7 @@ impl Encoder {
             output.write_header().map_err(libav("writing the header"))?;
         }
         let frame_duration = (f64::from(time_base.invert()) / params.fps).round().max(1.0) as i64;
-        Ok(Encoder { encoder, time_base, frame_duration, output, stats_in })
+        Ok(Encoder { encoder, time_base, frame_duration, output, _stats_in: stats_in })
     }
 
     fn send(&mut self, frame: Option<&frame::Video>) -> Result<()> {
@@ -305,19 +324,6 @@ impl Encoder {
     }
 }
 
-impl Drop for Encoder {
-    fn drop(&mut self) {
-        if !self.stats_in.is_null() {
-            // SAFETY: allocated with av_strdup in open; the encoder is no
-            // longer used, its context only borrows the pointer
-            unsafe {
-                (*self.encoder.as_mut_ptr()).stats_in = std::ptr::null_mut();
-                ff::ffi::av_free(self.stats_in.cast());
-            }
-        }
-    }
-}
-
 pub(crate) fn encode(
     plan: &Plan,
     params: &Params,
@@ -330,7 +336,7 @@ pub(crate) fn encode(
     cancel.check()?;
     let total = frame_count(params.length, params.fps);
     let read = (total + 1) as f64 / params.fps;
-    let mut source = Source::open(plan, read)?;
+    let mut source = Source::open(plan, read, cancel)?;
     let mut frame = frame::Video::empty();
     if !source.next(&mut frame)? {
         return Err(Error::Libav(format!("{} has no frames to encode", plan.input.display())));
@@ -338,7 +344,7 @@ pub(crate) fn encode(
 
     let pix_fmt = if plan.alpha { "yuva420p" } else { "yuv420p" };
     let chain = video_filter(plan, params.fps, pix_fmt);
-    let spec = format!("[in]{}{chain}[out]", rotation_filters(plan.source.rotation));
+    let spec = format!("[in]{}{chain}[out]", plan.source.orientation.filters());
     let mut graph = filter_graph(&[("in", source.buffer_args(&frame))], &spec)?;
     let time_base = graph.get("out").expect("added").sink().time_base();
     let mut encoder = Encoder::open(plan, params, pass, output, time_base)?;
@@ -388,8 +394,10 @@ pub(crate) fn encode(
 pub(crate) fn ssim(plan: &Plan, candidate: &Path, fps: f64, cancel: &CancelToken) -> Result<f64> {
     init()?;
     let frames = frame_count(plan.length, plan.fps);
-    let mut sources =
-        [Source::open(plan, (frames + 1) as f64 / plan.fps)?, Source::open_file(candidate, None)?];
+    let mut sources = [
+        Source::open(plan, (frames + 1) as f64 / plan.fps, cancel)?,
+        Source::open_file(candidate, None, cancel)?,
+    ];
     let mut next = [frame::Video::empty(), frame::Video::empty()];
     let mut open = [false; 2];
     for i in 0..2 {
@@ -404,7 +412,7 @@ pub(crate) fn ssim(plan: &Plan, candidate: &Path, fps: f64, cancel: &CancelToken
     let spec = format!(
         "[source]{}{reference},trim=end_frame={frames},{}[s];[attempt]{}[a];\
          [s][a]ssim=eof_action=repeat[out]",
-        rotation_filters(plan.source.rotation),
+        plan.source.orientation.filters(),
         retime(plan.fps),
         retime(fps),
     );

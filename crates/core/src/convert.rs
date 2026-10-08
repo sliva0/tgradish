@@ -465,6 +465,13 @@ pub fn convert(
 ) -> Result<Outcome> {
     let source = backend.probe(&request.input, cancel)?;
     let (plan, warnings) = plan(request, source)?;
+    if !plan.extra_args.is_empty() && !backend.supports_extra_args() {
+        return Err(Error::InvalidOptions(
+            "extra-args are ffmpeg command line arguments, they need ffmpeg as a separate \
+             program: use --ffmpeg-from system, bundled or downloaded, or --ffmpeg PATH"
+                .into(),
+        ));
+    }
     for message in warnings {
         on_event(Event::Warning { message });
     }
@@ -537,7 +544,7 @@ mod tests {
             duration: Some(duration),
             alpha: false,
             still_image: false,
-            rotation: 0,
+            orientation: Default::default(),
             decoder: None,
         }
     }
