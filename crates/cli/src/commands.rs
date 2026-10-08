@@ -5,8 +5,9 @@ use console::style;
 use serde_json::json;
 use tgradish_core::backend::BackendInfo;
 use tgradish_core::config::Config;
-use tgradish_core::presets::{self, DEFAULT_PRESET, Presets};
+use tgradish_core::presets::{self, Format, Presets};
 use tgradish_core::telegram::{self, Target};
+use tgradish_core::tgs;
 use tgradish_core::webm::{self, Patch, WebmInfo};
 use tgradish_core::{TOOL_ID, protocol};
 
@@ -125,6 +126,31 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
 pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
     let mut failed = 0;
     for (i, path) in args.files.iter().enumerate() {
+        if tgs::is_sticker(path) {
+            match tgs::inspect_file(path) {
+                Ok((stats, issues)) if ctx.global.json => {
+                    let line =
+                        json!({ "file": path, "format": "tgs", "stats": stats, "issues": issues });
+                    println!("{line}");
+                }
+                Ok((stats, issues)) => {
+                    if i > 0 {
+                        println!();
+                    }
+                    print_sticker(path, &stats, &issues);
+                }
+                Err(err) if args.files.len() > 1 => {
+                    failed += 1;
+                    if ctx.global.json {
+                        println!("{}", json!({ "file": path, "error": err.to_string() }));
+                    } else {
+                        eprintln!("{} {}: {err}", ui::error_label(), path.display());
+                    }
+                }
+                Err(err) => return Err(err).with_context(|| format!("{}", path.display())),
+            }
+            continue;
+        }
         let info = match webm::inspect_file(path) {
             Ok(info) => info,
             Err(err) if args.files.len() > 1 => {
@@ -143,12 +169,13 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
             #[derive(serde::Serialize)]
             struct Line<'a> {
                 file: &'a std::path::Path,
+                format: &'static str,
                 target: Target,
                 info: &'a WebmInfo,
                 issues: Vec<telegram::Issue>,
             }
             let issues = telegram::check(&info, target);
-            let line = Line { file: path, target, info: &info, issues };
+            let line = Line { file: path, format: "webm", target, info: &info, issues };
             println!("{}", serde_json::to_string(&line)?);
         } else {
             if i > 0 {
@@ -166,13 +193,14 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
     Ok(())
 }
 
-fn default_preset(ctx: &Context) -> &str {
-    ctx.config.preset.as_deref().unwrap_or(DEFAULT_PRESET)
+/// The presets used when none is given, for WebM and `.tgs`.
+fn default_presets(ctx: &Context) -> [&str; 2] {
+    [ctx.config.preset_for(Format::Webm), ctx.config.preset_for(Format::Tgs)]
 }
 
 pub fn describe(ctx: &Context) -> Result<()> {
     let presets = Presets::load_user()?;
-    print_json(&protocol::describe(&presets, default_preset(ctx)));
+    print_json(&protocol::describe(&presets, default_presets(ctx)));
     Ok(())
 }
 
@@ -180,19 +208,26 @@ pub fn preset(ctx: &Context, command: PresetCommand) -> Result<()> {
     let presets = Presets::load_user()?;
     match command {
         PresetCommand::List if ctx.global.json => {
-            print_json(&protocol::describe(&presets, default_preset(ctx)).presets);
+            print_json(&protocol::describe(&presets, default_presets(ctx)).presets);
         }
         PresetCommand::List => {
             for (name, preset) in presets.iter() {
-                let default = if name == default_preset(ctx) { " (default)" } else { "" };
+                let format = presets.format(name).ok();
+                let default = match format {
+                    Some(format) if default_presets(ctx).contains(&name) => {
+                        format!(" (default for {})", format.extension())
+                    }
+                    _ => String::new(),
+                };
                 match preset {
                     Ok(preset) => {
                         let origin = preset
                             .path
                             .as_ref()
                             .map_or("built-in".to_string(), |p| p.display().to_string());
+                        let format = format.map_or("?", Format::extension);
                         println!("{}{default}  {}", style(name).bold(), preset.description);
-                        println!("    {}", style(origin).dim());
+                        println!("    {}, {}", format, style(origin).dim());
                     }
                     Err(err) => println!("{}  {} {err}", style(name).bold(), ui::error_label()),
                 }
@@ -265,4 +300,40 @@ pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn print_sticker(path: &std::path::Path, stats: &tgs::Stats, issues: &[tgs::Issue]) {
+    println!("{}", style(path.display()).bold());
+    let size = match stats.tgs_bytes {
+        Some(bytes) => {
+            format!("{}, {} of JSON", ui::size(bytes as u64), ui::size(stats.json_bytes as u64))
+        }
+        None => ui::size(stats.json_bytes as u64),
+    };
+    println!(
+        "  animated sticker, {}x{}, {} fps, {} frames ({}), {size}",
+        stats.width,
+        stats.height,
+        stats.fps,
+        stats.frames,
+        ui::seconds(stats.frames / stats.fps.max(1.0)),
+    );
+    println!(
+        "  {} layers, up to {} shapes and {} fills in one",
+        stats.layers, stats.max_shapes_per_layer, stats.max_paints_per_layer
+    );
+    if !stats.features.is_empty() {
+        let features: Vec<&str> = stats.features.iter().copied().collect();
+        println!("  uses {}", features.join(", "));
+    }
+    if issues.is_empty() {
+        println!("  {}", style("Telegram should accept it").green());
+    }
+    for issue in issues {
+        let label = match issue.severity {
+            tgs::Severity::Error => ui::error_label(),
+            tgs::Severity::Warning => ui::warning_label(),
+        };
+        println!("  {label} {}", issue.message);
+    }
 }

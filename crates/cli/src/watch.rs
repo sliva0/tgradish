@@ -12,6 +12,8 @@ use anyhow::{Context as _, Result, bail};
 use crate::Context;
 use crate::args::WatchArgs;
 use crate::convert::Converter;
+use tgradish_core::presets::Format;
+
 use crate::ui;
 
 /// Extensions of files worth converting.
@@ -20,13 +22,16 @@ const EXTENSIONS: &[&str] = &[
     "jpg", "jpeg", "webp", "bmp", "tif", "tiff",
 ];
 
+/// Aseprite files, which only `.tgs` conversion reads.
+const ASEPRITE: &[&str] = &["ase", "aseprite"];
+
 /// Failed conversions are retried this many times, in case the file was
 /// locked or not readable yet.
 const MAX_FAILURES: u32 = 5;
 
-/// Whether `path` looks like an input rather than a result, a hidden file
-/// or a download in progress.
-fn is_input(path: &Path) -> bool {
+/// Whether `path` looks like an input for `format` rather than a result, a
+/// hidden file or a download in progress.
+fn is_input(path: &Path, format: Format) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else { return false };
     let name = name.to_lowercase();
     if name.starts_with('.') || name.starts_with('~') {
@@ -35,9 +40,10 @@ fn is_input(path: &Path) -> bool {
     if [".sticker.webm", ".emoji.webm", ".spoofed.webm"].iter().any(|s| name.ends_with(s)) {
         return false;
     }
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+    let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else { return false };
+    let extension = extension.to_lowercase();
+    EXTENSIONS.contains(&extension.as_str())
+        || format == Format::Tgs && ASEPRITE.contains(&extension.as_str())
 }
 
 /// What a file looked like at one scan.
@@ -58,11 +64,12 @@ fn current_stamp(path: &Path) -> Option<Stamp> {
 struct Scan {
     files: HashMap<PathBuf, Stamp>,
     unreadable: Vec<(PathBuf, std::io::Error)>,
+    format: Format,
 }
 
 impl Scan {
-    fn run(dir: &Path, recursive: bool) -> Scan {
-        let mut scan = Scan::default();
+    fn run(dir: &Path, recursive: bool, format: Format) -> Scan {
+        let mut scan = Scan { format, ..Scan::default() };
         scan.visit(dir, recursive);
         scan
     }
@@ -86,7 +93,7 @@ impl Scan {
                     self.visit(&path, recursive);
                 }
             } else if file_type.is_file()
-                && is_input(&path)
+                && is_input(&path, self.format)
                 && let Some(stamp) = current_stamp(&path)
             {
                 self.files.insert(path, stamp);
@@ -169,11 +176,11 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
         bail!("--interval must be more than 0");
     }
     std::fs::read_dir(&args.dir).with_context(|| format!("cannot read {}", args.dir.display()))?;
-    let converter = Converter::new(ctx, &args.conversion)?;
+    let converter = Converter::new(ctx, &args.conversion, None)?;
     let output_for = |path: &Path| converter.output_under(path, Some(&args.dir));
 
     let mut tracker = Tracker::default();
-    for (path, stamp) in Scan::run(&args.dir, args.recursive).files {
+    for (path, stamp) in Scan::run(&args.dir, args.recursive, converter.format()).files {
         if args.existing && !output_for(&path).exists() {
             tracker.pending.insert(path, stamp);
         } else {
@@ -198,7 +205,7 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
             return Ok(());
         }
 
-        let scan = Scan::run(&args.dir, args.recursive);
+        let scan = Scan::run(&args.dir, args.recursive, converter.format());
         let now_unreadable: HashSet<PathBuf> =
             scan.unreadable.iter().map(|(p, _)| p.clone()).collect();
         for (path, err) in &scan.unreadable {
@@ -266,13 +273,17 @@ mod tests {
 
     #[test]
     fn recognizes_inputs() {
-        assert!(is_input(Path::new("dir/Pig.MP4")));
-        assert!(is_input(Path::new("cat.gif")));
-        assert!(!is_input(Path::new("pig.sticker.webm")));
-        assert!(!is_input(Path::new("pig.emoji.webm")));
-        assert!(!is_input(Path::new(".pig.mp4")));
-        assert!(!is_input(Path::new("pig.mp4.part")));
-        assert!(!is_input(Path::new("notes.txt")));
+        let webm = |path: &str| is_input(Path::new(path), Format::Webm);
+        assert!(webm("dir/Pig.MP4"));
+        assert!(webm("cat.gif"));
+        assert!(!webm("pig.sticker.webm"));
+        assert!(!webm("pig.emoji.webm"));
+        assert!(!webm(".pig.mp4"));
+        assert!(!webm("pig.mp4.part"));
+        assert!(!webm("notes.txt"));
+        assert!(!webm("walk.ase"));
+        assert!(is_input(Path::new("walk.ase"), Format::Tgs));
+        assert!(!is_input(Path::new("walk.sticker.tgs"), Format::Tgs));
     }
 
     #[test]
@@ -300,7 +311,7 @@ mod tests {
         let locked = dir.path().join("locked");
         std::fs::create_dir(&locked).unwrap();
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-        let scan = Scan::run(dir.path(), true);
+        let scan = Scan::run(dir.path(), true, Format::Webm);
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
         // root can read anything, then there is nothing to report
         if scan.unreadable.is_empty() {

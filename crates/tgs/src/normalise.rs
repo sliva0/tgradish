@@ -25,8 +25,9 @@ const LIKELY_FIT: f64 = 0.8;
 const MANY_COLOURS: usize = 256;
 
 /// What to do with inputs longer than Telegram's 3 seconds.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "kebab-case")]
 pub enum Long {
     /// Play everything faster.
     #[default]
@@ -148,6 +149,7 @@ impl PixelAnim {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Rect {
     pub x: u32,
@@ -157,6 +159,7 @@ pub struct Rect {
 }
 
 /// What normalising did, for the user and the protocol.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Report {
     pub input_width: u32,
@@ -192,12 +195,14 @@ pub struct Report {
     pub warnings: Vec<Warning>,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct LikelyScale {
     pub scale: u32,
     pub fit: f64,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "warning", rename_all = "snake_case")]
 pub enum Warning {

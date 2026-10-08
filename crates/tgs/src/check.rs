@@ -10,6 +10,7 @@ use serde_json::Value;
 
 use crate::limits::{MAX_RAW_JSON, TLOTTIE, telegram};
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Stats {
     pub width: f64,
@@ -40,6 +41,7 @@ pub struct Stats {
     pub features: BTreeSet<&'static str>,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
@@ -49,6 +51,7 @@ pub enum Severity {
     Warning,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Issue {
     pub severity: Severity,

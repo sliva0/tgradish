@@ -1,7 +1,8 @@
 //! User configuration, `config.toml` in the config dir:
 //!
 //! ```toml
-//! preset = "sticker"   # preset used when none is given
+//! preset = "sticker"   # preset used when none is given, for WebM
+//! tgs-preset = "tgs-sticker"  # the same for .tgs
 //!
 //! [ffmpeg]
 //! use = "auto"         # auto (built in if there is one, else system),
@@ -20,9 +21,22 @@ use crate::ffmpeg::FfmpegChoice;
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Config {
-    /// Preset used when none is given.
+    /// Preset used when none is given, for WebM.
     pub preset: Option<String>,
+    /// Preset used when none is given, for `.tgs`.
+    pub tgs_preset: Option<String>,
     pub ffmpeg: FfmpegConfig,
+}
+
+impl Config {
+    /// The preset to use for `format` when none is given.
+    pub fn preset_for(&self, format: crate::presets::Format) -> &str {
+        let configured = match format {
+            crate::presets::Format::Webm => &self.preset,
+            crate::presets::Format::Tgs => &self.tgs_preset,
+        };
+        configured.as_deref().unwrap_or(format.default_preset())
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
