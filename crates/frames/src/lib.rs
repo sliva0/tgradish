@@ -1,6 +1,5 @@
-//! RGBA animations with frame durations: what `.tgs` conversion starts from.
-//! Decoders for GIF, APNG, animated WebP, Aseprite, sprite sheets and image
-//! sequences come next (see `docs/tgs.md`, T2).
+//! RGBA animations with frame durations, and pure-Rust decoders for them:
+//! GIF, PNG and APNG, WebP, Aseprite, sprite sheets and image sequences.
 //!
 //! Builds for `wasm32-unknown-unknown`, so everything works on bytes: no
 //! filesystem, processes or threads.
@@ -10,6 +9,17 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+mod aseprite;
+mod raster;
+mod sheet;
+
+pub use aseprite::{Direction, Sprite, Tag};
+pub use sheet::{Sheet, sequence, sprite_sheet};
+
+/// Duration of still images in an animation when nothing else says how long
+/// to show them, and of frames whose files say 0.
+pub const DEFAULT_FRAME_DURATION: Duration = Duration::from_millis(100);
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum Error {
     #[error("the animation has no frames")]
@@ -18,9 +28,79 @@ pub enum Error {
     BadSize { width: u32, height: u32 },
     #[error("frame {index} has {len} bytes, a {width}x{height} RGBA frame has {expected}")]
     FrameSize { index: usize, len: usize, width: u32, height: u32, expected: usize },
+    #[error("not a GIF, PNG, WebP or Aseprite file")]
+    UnknownFormat,
+    #[error("cannot decode the {format} file: {message}")]
+    Decode { format: Format, message: String },
+    #[error("no tag named {name:?} (tags: {})", if available.is_empty() { "none".into() } else { available.join(", ") })]
+    NoSuchTag { name: String, available: Vec<String> },
+    #[error("tags only exist in Aseprite files")]
+    TagWithoutAseprite,
+    #[error("image {index} is {width}x{height}, the first one is {first_width}x{first_height}")]
+    SequenceSize { index: usize, width: u32, height: u32, first_width: u32, first_height: u32 },
+    #[error("{width}x{height} doesn't split into {columns} columns and {rows} rows")]
+    SheetGrid { width: u32, height: u32, columns: u32, rows: u32 },
+    #[error("the sprite sheet has {cells} cells, {frames} frames were asked for")]
+    SheetFrames { cells: u32, frames: u32 },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    Gif,
+    /// PNG and APNG.
+    Png,
+    WebP,
+    Aseprite,
+}
+
+impl fmt::Display for Format {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Format::Gif => "GIF",
+            Format::Png => "PNG",
+            Format::WebP => "WebP",
+            Format::Aseprite => "Aseprite",
+        })
+    }
+}
+
+impl Format {
+    /// Recognises a file by its first bytes.
+    pub fn detect(bytes: &[u8]) -> Option<Format> {
+        if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+            Some(Format::Gif)
+        } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+            Some(Format::Png)
+        } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+            Some(Format::WebP)
+        } else if bytes.get(4..6) == Some(&[0xe0, 0xa5]) {
+            Some(Format::Aseprite)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DecodeOptions {
+    /// Aseprite: only the frames of this tag, in its direction.
+    pub tag: Option<String>,
+}
+
+/// Decodes an animated or still image. Still images get one frame of
+/// [`DEFAULT_FRAME_DURATION`].
+pub fn decode(bytes: &[u8], options: &DecodeOptions) -> Result<Animation> {
+    let format = Format::detect(bytes).ok_or(Error::UnknownFormat)?;
+    if format != Format::Aseprite && options.tag.is_some() {
+        return Err(Error::TagWithoutAseprite);
+    }
+    match format {
+        Format::Aseprite => Sprite::read(bytes)?.animation(options.tag.as_deref()),
+        _ => raster::decode(bytes, format),
+    }
+}
 
 /// One frame: straight (not premultiplied) RGBA, row by row from the top.
 #[derive(Clone, PartialEq, Eq)]
@@ -48,11 +128,7 @@ pub struct Animation {
 
 impl Animation {
     pub fn new(width: u32, height: u32, frames: Vec<Frame>) -> Result<Animation> {
-        let expected = (width as usize)
-            .checked_mul(height as usize)
-            .and_then(|pixels| pixels.checked_mul(4))
-            .filter(|&bytes| bytes > 0)
-            .ok_or(Error::BadSize { width, height })?;
+        let expected = frame_bytes(width, height)?;
         if frames.is_empty() {
             return Err(Error::Empty);
         }
@@ -96,6 +172,14 @@ impl Animation {
     }
 }
 
+fn frame_bytes(width: u32, height: u32) -> Result<usize> {
+    (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .filter(|&bytes| bytes > 0)
+        .ok_or(Error::BadSize { width, height })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,5 +210,15 @@ mod tests {
         assert_eq!(animation.pixel(0, 2, 0), None);
         assert_eq!(animation.pixel(2, 0, 0), None);
         assert_eq!(animation.duration(), Duration::from_millis(150));
+    }
+
+    #[test]
+    fn detects_formats() {
+        assert_eq!(Format::detect(b"GIF89a..."), Some(Format::Gif));
+        assert_eq!(Format::detect(b"\x89PNG\r\n\x1a\n...."), Some(Format::Png));
+        assert_eq!(Format::detect(b"RIFF\0\0\0\0WEBPVP8 "), Some(Format::WebP));
+        assert_eq!(Format::detect(b"\0\0\0\0\xe0\xa5"), Some(Format::Aseprite));
+        assert_eq!(Format::detect(b"RIFF\0\0\0\0WAVE"), None);
+        assert_eq!(decode(b"nope", &DecodeOptions::default()), Err(Error::UnknownFormat));
     }
 }

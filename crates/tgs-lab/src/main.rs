@@ -1,10 +1,12 @@
 //! Development tool for tgradish's `.tgs` output: renders stickers with
-//! tlottie, the renderer in Telegram's current clients. Verification and
-//! benchmarks come with later milestones (see `docs/tgs.md`).
+//! tlottie, the renderer in Telegram's current clients, and shows what
+//! normalising does to inputs. Verification and benchmarks come with later
+//! milestones (see `docs/tgs.md`).
 //!
 //! ```console
 //! cargo run -p tgs-lab -- info sticker.tgs
 //! cargo run -p tgs-lab -- render sticker.tgs --frame 10 --size 512 out.png
+//! cargo run -p tgs-lab -- normalise art.gif
 //! ```
 
 use std::io::Read;
@@ -89,6 +91,26 @@ fn render(args: &[String]) -> Result<()> {
     write_png(Path::new(output), size, &pixels)
 }
 
+/// Prints the normalisation report of each input as a JSON line.
+fn normalise(paths: &[PathBuf]) -> Result<()> {
+    use tgradish_tgs::frames::{DecodeOptions, decode};
+    use tgradish_tgs::normalise::{Options, normalise};
+    for path in paths {
+        let bytes =
+            std::fs::read(path).with_context(|| format!("cannot read {}", path.display()))?;
+        let animation = decode(&bytes, &DecodeOptions::default())
+            .with_context(|| format!("{}", path.display()))?;
+        let (_, report) = normalise(&animation, &Options::default())
+            .with_context(|| format!("{}", path.display()))?;
+        let mut line = serde_json::json!({ "file": path });
+        line.as_object_mut()
+            .unwrap()
+            .extend(serde_json::to_value(&report)?.as_object().unwrap().clone());
+        println!("{line}");
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -96,9 +118,13 @@ fn main() -> Result<()> {
             info(&args[1..].iter().map(PathBuf::from).collect::<Vec<_>>())
         }
         Some("render") => render(&args[1..]),
+        Some("normalise") if args.len() > 1 => {
+            normalise(&args[1..].iter().map(PathBuf::from).collect::<Vec<_>>())
+        }
         _ => bail!(
             "usage: tgs-lab info FILE...\n       \
-             tgs-lab render INPUT [--frame N] [--size PX] OUTPUT.png"
+             tgs-lab render INPUT [--frame N] [--size PX] OUTPUT.png\n       \
+             tgs-lab normalise FILE..."
         ),
     }
 }

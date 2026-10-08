@@ -46,7 +46,7 @@ Done on `rewrite-v2`, with CI on Linux and Windows:
   presets, config, `ffmpeg status`;
 - release workflow: single-file binaries with ffmpeg linked in for Linux
   x86-64 (16.8 MB) and Windows x86-64 (18.8 MB), tested on both;
-- `.tgs`: T1 (crates and the WASM check).
+- `.tgs`: T1 (crates, WASM check), T2 (decoders, normalisation).
 
 ## Roadmap
 

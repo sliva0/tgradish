@@ -263,11 +263,15 @@ check        → Telegram rules, 2 MiB raw limit, tlottie limits
 
 - GIF, APNG, animated WebP: the `image` crate's animation decoders (they
   handle frame disposal and blending). Treat GIF delays of 0-1 cs as 100
-  ms, the way browsers do.
-- Aseprite: `asefile` (0.3.8, last updated 2024-03) or our own parser (the
-  format is documented and simple). Aseprite gives exact pixels, layers and
-  tags, so tags can choose which loop to export.
-- PNG sprite sheets (grid size as an option) and numbered image sequences.
+  ms, the way browsers do. Files whose frames all say 0 get 100 ms too.
+- Aseprite: `asefile` 0.3.8. It brings `image` 0.24 without codecs next to
+  our 0.25, which is cheap, and renders every blend mode, tilemaps and
+  linked cels. It doesn't do per-cel z-index or group opacity, and rejects
+  "ping-pong reverse" tags, which `frames` rewrites to ping-pong before
+  parsing and reverses itself. A tag chooses which loop to export;
+  ping-pong loops don't repeat their end frames.
+- PNG sprite sheets (columns and rows, optional frame count, trailing
+  transparent cells dropped) and image sequences (the CLI sorts the files).
 - Video and anything else (2.x): decode with `tgradish-core`'s ffmpeg to
   raw RGBA, then use the pixelate mode (see Later).
 
@@ -277,11 +281,25 @@ check        → Telegram rules, 2 MiB raw limit, tlottie limits
   run lengths across frames, then make it robust: uneven nearest-neighbour
   scales (for example 2.5x), a grid offset, and objects moved by less than
   one art pixel. Fall back to 1 when unsure, and report the detected
-  scale. In the test set:
-  - 19 files are plain 2x;
-  - 7 are 2x or 4x with some pixels off the grid, where plain GCD finds 1
-    (listed in its README; `animation_hammer.gif` is 91% 4x);
-  - the rest are 1x.
+  scale.
+
+  Done (T2) as an exact cell grid: columns that equal their left
+  neighbour in every row of every frame join its cell, and the same for
+  rows. That is lossless and covers integer and uneven scales, grid
+  offsets and art pixels cut by the canvas; the encoder works on cells and
+  the serialiser maps cell edges back to input pixels. The reported scale
+  is the GCD of the inner cell sizes. When it is smaller than a scale most
+  colour edges fit (80% or more), that one is reported as likely, and
+  forcing it with the pixel scale option snaps the rest to its grid
+  (lossy, counted in the report). Snapping is also a candidate for the
+  first fit reduction. In the test set:
+  - 22 GIFs are exact 2x and `animation_hammer.gif` is exact 4x, cut
+    through an art pixel on the right. The README's "probably 2x"
+    `Ralsei_battle_item`, `Spamton_battle_head_enlarge` and
+    `Susie_battle_act` are exact once cropped;
+  - `Noelle_battle_act` and `Spamton_overworld_glitched_laugh` are 2x with
+    a handful of edges off the grid (99.98% fit), `Spamton_trembling` 88%;
+  - the rest are 1x, many with a few columns or rows that join.
 - Crop to the bounding box of opaque pixels over all frames (option: keep
   the original canvas).
 - Merge identical consecutive frames into one with the summed duration.
@@ -471,8 +489,8 @@ The web app there may also replace the "Web page" and "Bot" items under
 - **T1 (done):** move this plan to `docs/tgs.md` and link it from
   `docs/PLAN.md`. Create `tgs`, `frames` and `tgs-lab` (`info` and `render`
   through tlottie) and add the WASM check to CI.
-- **T2:** `frames`: decoders. `tgs`: normalisation (scale detection, crop,
-  timing, alpha).
+- **T2 (done):** `frames`: decoders. `tgs`: normalisation (scale
+  detection, crop, timing, alpha); `tgs-lab normalise` prints the report.
 - **T3:** Lottie model, serialiser, zopfli, limits checker, `Scene`
   rasteriser, seam invariant checker; `tgs-lab verify`. **Ask the user for
   more test files now** (see Reminders).

@@ -12,6 +12,7 @@ tgradish-tgs.workspace = true
 anyhow.workspace = true
 flate2.workspace = true
 png.workspace = true
+serde_json.workspace = true
 # not on crates.io, so only this unpublished crate depends on it
 tlottie = { git = "https://github.com/dkaraush/tlottie", rev = "92df98dc209bc39b1e567ec74a8c86a0af5239de" }
 
