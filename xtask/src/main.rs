@@ -1,18 +1,22 @@
 //! Development tasks, run with `cargo xtask <task>`.
 //!
-//! `cargo xtask ffmpeg [--target linux|windows] [--no-asm]` builds the minimal
-//! static ffmpeg and ffprobe that release archives ship with: only what
-//! tgradish needs to decode common inputs and encode VP9 WebM. Runs on Linux;
-//! Windows builds are cross-compiled with mingw-w64. Needs a C toolchain,
-//! make, pkg-config, nasm (unless --no-asm), meson, ninja, curl and tar.
+//! `cargo xtask ffmpeg [--target TARGET] [--no-asm]` builds the minimal
+//! static ffmpeg libraries that release builds link in: only what tgradish
+//! needs to decode common inputs and encode VP9 WebM. Runs on Linux, for the
+//! machine's own architecture; Windows builds are cross-compiled with
+//! mingw-w64. Needs a C toolchain, make, pkg-config, nasm (x86-64, unless
+//! --no-asm), meson, ninja, curl and tar. Targets are `linux-x86_64`,
+//! `linux-aarch64` and `windows-x86_64`.
 //!
-//! The static libraries end up in `target/ffmpeg/prefix-<target>`, and the
-//! licenses of everything in them in `target/ffmpeg/licenses-<target>`.
+//! The static libraries end up in `target/ffmpeg/prefix-<triple>`, and the
+//! licenses of everything in them in `target/ffmpeg/licenses-<triple>`.
 //! ffmpeg is configured without GPL parts, so it is LGPL 2.1 or later.
+//! Point `PKG_CONFIG_PATH` at the prefix's `lib/pkgconfig` to build
+//! tgradish with `--features linked-static`.
 //!
-//! The static libraries end up in `target/ffmpeg/prefix-<target>`; point
-//! `PKG_CONFIG_PATH` at its `lib/pkgconfig` to build tgradish with
-//! `--features linked-static`.
+//! `cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc
+//! 2.28]` packs a built tgradish into a release archive. With
+//! `--system-ffmpeg` it is a build without ffmpeg, which uses the system's.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -178,27 +182,58 @@ fn check_components(ffmpeg_dir: &Path) -> Result<()> {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Target {
-    Linux,
-    Windows,
+    LinuxX64,
+    LinuxArm64,
+    WindowsX64,
 }
 
 impl Target {
+    const ALL: [Target; 3] = [Target::LinuxX64, Target::LinuxArm64, Target::WindowsX64];
+
+    fn name(self) -> &'static str {
+        match self {
+            Target::LinuxX64 => "linux-x86_64",
+            Target::LinuxArm64 => "linux-aarch64",
+            Target::WindowsX64 => "windows-x86_64",
+        }
+    }
+
+    fn parse(name: Option<&String>) -> Result<Target> {
+        let names: Vec<_> = Target::ALL.iter().map(|target| target.name()).collect();
+        Target::ALL
+            .into_iter()
+            .find(|target| Some(target.name()) == name.map(String::as_str))
+            .with_context(|| {
+                format!("unknown target {name:?}, expected one of {}", names.join(", "))
+            })
+    }
+
+    /// Linux on the machine's own architecture.
+    fn host() -> Target {
+        match std::env::consts::ARCH {
+            "aarch64" => Target::LinuxArm64,
+            _ => Target::LinuxX64,
+        }
+    }
+
     fn triple(self) -> &'static str {
         match self {
-            Target::Linux => "x86_64-unknown-linux-gnu",
-            Target::Windows => "x86_64-pc-windows-gnu",
+            Target::LinuxX64 => "x86_64-unknown-linux-gnu",
+            Target::LinuxArm64 => "aarch64-unknown-linux-gnu",
+            Target::WindowsX64 => "x86_64-pc-windows-gnu",
         }
+    }
+
+    fn is_windows(self) -> bool {
+        self == Target::WindowsX64
     }
 
     fn cross_prefix(self) -> Option<&'static str> {
-        (self == Target::Windows).then_some("x86_64-w64-mingw32-")
+        self.is_windows().then_some("x86_64-w64-mingw32-")
     }
 
     fn exe(self, name: &str) -> String {
-        match self {
-            Target::Linux => name.to_string(),
-            Target::Windows => format!("{name}.exe"),
-        }
+        if self.is_windows() { format!("{name}.exe") } else { name.to_string() }
     }
 }
 
@@ -316,8 +351,9 @@ impl Build {
         let dir = self.fetch(&LIBVPX)?;
         let target = match (self.target, self.asm) {
             (_, false) => "generic-gnu",
-            (Target::Linux, true) => "x86_64-linux-gcc",
-            (Target::Windows, true) => "x86_64-win64-gcc",
+            (Target::LinuxX64, true) => "x86_64-linux-gcc",
+            (Target::LinuxArm64, true) => "arm64-linux-gcc",
+            (Target::WindowsX64, true) => "x86_64-win64-gcc",
         };
         let mut configure = Command::new("./configure");
         configure
@@ -384,10 +420,11 @@ impl Build {
         }
         // threads are not left to autodetection; on Windows the native ones
         // avoid depending on winpthread's DLL
-        match self.target {
-            Target::Linux => configure.arg("--enable-pthreads"),
-            Target::Windows => configure.args(["--disable-pthreads", "--enable-w32threads"]),
-        };
+        if self.target.is_windows() {
+            configure.args(["--disable-pthreads", "--enable-w32threads"]);
+        } else {
+            configure.arg("--enable-pthreads");
+        }
         if let Some(cross) = self.target.cross_prefix() {
             configure
                 .args(["--enable-cross-compile", "--target-os=mingw32", "--arch=x86_64"])
@@ -441,18 +478,12 @@ impl Build {
 }
 
 fn build_ffmpeg(args: &[String]) -> Result<()> {
-    let mut target = Target::Linux;
+    let mut target = Target::host();
     let mut asm = true;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--target" => {
-                target = match iter.next().map(String::as_str) {
-                    Some("linux") => Target::Linux,
-                    Some("windows") => Target::Windows,
-                    other => bail!("unknown target {other:?}, expected linux or windows"),
-                }
-            }
+            "--target" => target = Target::parse(iter.next())?,
             "--no-asm" => asm = false,
             other => bail!("unknown argument {other:?}"),
         }
@@ -478,7 +509,7 @@ fn build_ffmpeg(args: &[String]) -> Result<()> {
         (&DAV1D, build.dav1d()?),
         (&FFMPEG, build.ffmpeg()?),
     ];
-    if target == Target::Windows {
+    if target.is_windows() {
         build.static_pthread()?;
     }
     let licenses = build.stage_licenses(&dirs)?;
@@ -492,7 +523,7 @@ fn package_sources() -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let out = root.join("target/ffmpeg");
     let build = Build {
-        target: Target::Linux,
+        target: Target::host(),
         asm: true,
         jobs: "1".into(),
         sources: out.join("sources"),
@@ -613,38 +644,61 @@ fn check_dll_imports(exe: &Path) -> Result<()> {
 /// `--features linked-static --target <triple>`, and the licenses of the
 /// ffmpeg build linked into it.
 fn package_release(args: &[String]) -> Result<()> {
-    let target = match args {
-        [flag, name] if flag == "--target" => match name.as_str() {
-            "linux" => Target::Linux,
-            "windows" => Target::Windows,
-            other => bail!("unknown target {other:?}, expected linux or windows"),
-        },
-        _ => bail!("usage: cargo xtask package --target linux|windows"),
-    };
+    let mut target = None;
+    let mut system_ffmpeg = false;
+    let mut max_glibc = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--target" => target = Some(Target::parse(iter.next())?),
+            "--system-ffmpeg" => system_ffmpeg = true,
+            "--max-glibc" => {
+                max_glibc =
+                    Some(glibc_version(iter.next().context("--max-glibc needs a version")?)?)
+            }
+            other => bail!("unknown argument {other:?}"),
+        }
+    }
+    let target = target.context(
+        "usage: cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc 2.28]",
+    )?;
+    ensure!(!(system_ffmpeg && target.is_windows()), "Windows builds always link ffmpeg in");
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let version = workspace_version(root)?;
     let triple = target.triple();
     let binary = root.join("target").join(triple).join("release").join(target.exe("tgradish"));
     ensure!(binary.is_file(), "{} is missing, build it first", binary.display());
     let licenses = root.join(format!("target/ffmpeg/licenses-{triple}"));
-    ensure!(licenses.is_dir(), "{} is missing, run cargo xtask ffmpeg", licenses.display());
+    ensure!(
+        system_ffmpeg || licenses.is_dir(),
+        "{} is missing, run cargo xtask ffmpeg",
+        licenses.display()
+    );
 
     let out = root.join("target/release-artifacts");
-    let name = format!("tgradish-{version}-{triple}");
+    let name = match system_ffmpeg {
+        true => format!("tgradish-{version}-{triple}-system-ffmpeg"),
+        false => format!("tgradish-{version}-{triple}"),
+    };
     let stage = out.join(&name);
     if stage.exists() {
         std::fs::remove_dir_all(&stage)?;
     }
-    std::fs::create_dir_all(stage.join("licenses"))?;
+    std::fs::create_dir_all(&stage)?;
     std::fs::copy(&binary, stage.join(target.exe("tgradish")))?;
     std::fs::copy(root.join("README.md"), stage.join("README.md"))?;
     std::fs::copy(root.join("LICENSE.txt"), stage.join("LICENSE.txt"))?;
-    for entry in std::fs::read_dir(&licenses)? {
-        let entry = entry?;
-        std::fs::copy(entry.path(), stage.join("licenses").join(entry.file_name()))?;
-    }
-    std::fs::write(
-        stage.join("THIRD-PARTY.txt"),
+    let third_party = if system_ffmpeg {
+        "tgradish is MIT licensed, see LICENSE.txt.\n\n\
+         This build has no ffmpeg in it: it runs the system's ffmpeg and ffprobe\n\
+         (6.0 or newer, with libvpx for VP9) from PATH.\n"
+            .to_owned()
+    } else {
+        std::fs::create_dir_all(stage.join("licenses"))?;
+        for entry in std::fs::read_dir(&licenses)? {
+            let entry = entry?;
+            std::fs::copy(entry.path(), stage.join("licenses").join(entry.file_name()))?;
+        }
         format!(
             "tgradish is MIT licensed, see LICENSE.txt.\n\n\
              It includes ffmpeg {ffmpeg} (LGPL 2.1 or later) built with zlib, libvpx and\n\
@@ -653,31 +707,60 @@ fn package_release(args: &[String]) -> Result<()> {
              docs/ffmpeg.md in the tgradish repository explains how to rebuild\n\
              tgradish against a modified ffmpeg.\n",
             ffmpeg = FFMPEG.version,
-        ),
-    )?;
+        )
+    };
+    std::fs::write(stage.join("THIRD-PARTY.txt"), third_party)?;
 
-    if target == Target::Windows {
+    if target.is_windows() {
         check_dll_imports(&binary)?;
     }
+    if let Some(max) = max_glibc {
+        check_glibc(&binary, max)?;
+    }
 
-    let archive = match target {
-        Target::Linux => {
-            let archive = out.join(format!("{name}.tar.gz"));
-            run(Command::new("tar").arg("-czf").arg(&archive).arg("-C").arg(&out).arg(&name))?;
-            archive
+    let archive = if target.is_windows() {
+        let archive = out.join(format!("{name}.zip"));
+        if archive.exists() {
+            std::fs::remove_file(&archive)?;
         }
-        Target::Windows => {
-            let archive = out.join(format!("{name}.zip"));
-            if archive.exists() {
-                std::fs::remove_file(&archive)?;
-            }
-            run(Command::new("zip").current_dir(&out).arg("-qr").arg(&archive).arg(&name))?;
-            archive
-        }
+        run(Command::new("zip").current_dir(&out).arg("-qr").arg(&archive).arg(&name))?;
+        archive
+    } else {
+        let archive = out.join(format!("{name}.tar.gz"));
+        run(Command::new("tar").arg("-czf").arg(&archive).arg("-C").arg(&out).arg(&name))?;
+        archive
     };
     sha256_file(&archive)?;
 
     println!("{}", archive.display());
+    Ok(())
+}
+
+/// `2.28` as `(2, 28)`.
+fn glibc_version(text: &str) -> Result<(u32, u32)> {
+    let (major, minor) = text.split_once('.').context("a glibc version is like 2.28")?;
+    Ok((major.parse()?, minor.parse()?))
+}
+
+/// Fails if a Linux executable needs a newer glibc than `max`, so it would
+/// not start on older systems.
+fn check_glibc(exe: &Path, max: (u32, u32)) -> Result<()> {
+    let dump = output(Command::new("objdump").arg("-T").arg(exe))?;
+    let newest = dump
+        .split_whitespace()
+        .filter_map(|word| word.strip_prefix("GLIBC_"))
+        .filter_map(|version| glibc_version(version).ok())
+        .max()
+        .context("the executable uses no versioned glibc symbols")?;
+    ensure!(
+        newest <= max,
+        "{} needs glibc {}.{}, newer than {}.{}",
+        exe.display(),
+        newest.0,
+        newest.1,
+        max.0,
+        max.1
+    );
     Ok(())
 }
 
@@ -688,9 +771,10 @@ fn main() -> Result<()> {
         Some("ffmpeg-sources") => package_sources(),
         Some("package") => package_release(&args[1..]),
         _ => bail!(
-            "usage: cargo xtask ffmpeg [--target linux|windows] [--no-asm]\n       \
+            "usage: cargo xtask ffmpeg [--target TARGET] [--no-asm]\n       \
              cargo xtask ffmpeg-sources\n       \
-             cargo xtask package --target linux|windows"
+             cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc 2.28]\n\
+             targets: linux-x86_64, linux-aarch64, windows-x86_64"
         ),
     }
 }

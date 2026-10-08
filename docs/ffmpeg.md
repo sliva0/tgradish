@@ -56,15 +56,19 @@ the releases is made on Linux by cross-compiling, see
 
 ## The minimal build
 
-`cargo xtask ffmpeg [--target linux|windows] [--no-asm]` builds static
-ffmpeg libraries with only what tgradish needs: common video and image
-decoders, libvpx for VP9, dav1d for AV1, and the filters used for scaling,
-padding and SSIM. They go into `target/ffmpeg/prefix-<target>`, and the
-licenses of everything in them into `target/ffmpeg/licenses-<target>`.
+`cargo xtask ffmpeg [--target TARGET] [--no-asm]` builds static ffmpeg
+libraries with only what tgradish needs: common video and image decoders,
+libvpx for VP9, dav1d for AV1, and the filters used for scaling, padding
+and SSIM. They go into `target/ffmpeg/prefix-<triple>`, and the licenses
+of everything in them into `target/ffmpeg/licenses-<triple>`.
 
-- Runs on Linux. Windows builds are cross-compiled with mingw-w64.
-- Needs a C toolchain, make, pkg-config, nasm, meson, ninja, curl and tar.
-  `--no-asm` skips nasm, for testing only: encoding gets much slower.
+- Targets are `linux-x86_64`, `linux-aarch64` and `windows-x86_64`; the
+  default is Linux on the machine's own architecture.
+- Runs on Linux, building for its own architecture. Windows builds are
+  cross-compiled with mingw-w64.
+- Needs a C toolchain, make, pkg-config, nasm (on x86-64), meson, ninja,
+  curl and tar. `--no-asm` skips assembly, for testing only: encoding gets
+  much slower.
 - Source versions and checksums are pinned in `xtask/src/main.rs`. The
   zlib and dav1d checksums match the ones those projects publish; ffmpeg
   and libvpx were pinned when first downloaded.
@@ -85,17 +89,26 @@ as described above.
 ## Releases
 
 Pushing a `v*` tag runs the `release` workflow. It builds the minimal ffmpeg
-for Linux and Windows, links it into tgradish statically, checks that the
-Windows executable only needs DLLs that come with Windows, smoke-tests both
-(the Windows build on Windows), and drafts a GitHub release with:
+for Linux (x86-64 and aarch64) and Windows, links it into tgradish
+statically, and drafts a GitHub release with:
 
-- `tgradish-<version>-<target>` archives with the single-file binary and
+- `tgradish-<version>-<triple>` archives with the single-file binary and
   the licenses;
+- for Linux also `tgradish-<version>-<triple>-system-ffmpeg` archives,
+  built without ffmpeg, which run the system's;
 - `ffmpeg-<version>-sources.tar`;
 - `.sha256` files.
+
+Linux builds run in `manylinux_2_28` containers (AlmaLinux 8), and
+packaging fails if a binary needs a glibc newer than 2.28, so they start
+on distributions from 2019 on. The Windows executable may only need DLLs
+that come with Windows. Every build is smoke-tested on its own system:
+Linux on current Ubuntu for both architectures, Windows on Windows.
 
 Pull requests that change the ffmpeg build run the same workflow without
 publishing anything.
 
-`cargo xtask package --target linux|windows` assembles an archive locally
-after building with `--features linked-static --target <triple>`.
+`cargo xtask package --target TARGET` assembles an archive locally after
+building with `--features linked-static --target <triple>`; with
+`--system-ffmpeg`, after building without features. `--max-glibc 2.28`
+adds the glibc check.

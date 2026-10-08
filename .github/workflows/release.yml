@@ -1,9 +1,10 @@
 name: release
 
 # Builds single-file tgradish binaries with ffmpeg linked statically, for
-# Linux and Windows (cross-compiled with mingw-w64), tests them, and on a
-# version tag drafts a GitHub release with them and the ffmpeg sources the
-# LGPL asks for. Pull requests that touch the ffmpeg build run it too.
+# Linux (x86-64 and aarch64) and Windows (cross-compiled with mingw-w64),
+# and Linux binaries that use the system's ffmpeg instead. Tests them, and
+# on a version tag drafts a GitHub release with them and the ffmpeg sources
+# the LGPL asks for. Pull requests that touch the ffmpeg build run it too.
 on:
   push:
     tags: ["v*"]
@@ -28,25 +29,43 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # the oldest supported Ubuntu, so the Linux build runs on older glibc too
-          - target: linux
+          # Linux builds run in manylinux containers (AlmaLinux 8, glibc
+          # 2.28) so they start on older distributions too
+          - target: linux-x86_64
             triple: x86_64-unknown-linux-gnu
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
+            container: quay.io/pypa/manylinux_2_28_x86_64
+          - target: linux-aarch64
+            triple: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            container: quay.io/pypa/manylinux_2_28_aarch64
           # MinGW headers older than 11 lack the Direct3D 12 headers that
           # ffmpeg-sys-next's bindings include
-          - target: windows
+          - target: windows-x86_64
             triple: x86_64-pc-windows-gnu
             runner: ubuntu-24.04
+            container: ""
     runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install build tools
+      - name: Install build tools (Linux)
+        if: matrix.container
+        run: |
+          dnf install -y clang perl zip xz pkgconf-pkg-config
+          if [ "$(uname -m)" = x86_64 ]; then dnf install -y nasm; fi
+          pipx install meson
+          pipx install ninja
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install build tools (Windows)
+        if: ${{ !matrix.container }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y nasm meson ninja-build pkg-config clang libclang-dev zip
-          if [ "${{ matrix.target }}" = windows ]; then sudo apt-get install -y mingw-w64; fi
+          sudo apt-get install -y nasm meson ninja-build pkg-config clang libclang-dev zip mingw-w64
 
       - run: rustup target add ${{ matrix.triple }}
       - uses: Swatinem/rust-cache@v2
@@ -79,18 +98,17 @@ jobs:
           cargo build --release --locked -p tgradish
           --features linked-static --target ${{ matrix.triple }}
 
-      - name: Smoke test
-        if: matrix.target == 'linux'
-        run: |
-          sudo apt-get install -y ffmpeg
-          ffmpeg -v error -f lavfi -i testsrc2=s=320x240:d=4 -pix_fmt yuv420p input.mp4
-          bin=target/${{ matrix.triple }}/release/tgradish
-          ldd "$bin"
-          "$bin" ffmpeg status
-          "$bin" convert input.mp4 -o out.webm --preset fast
-          "$bin" inspect out.webm
+      - name: Package
+        if: ${{ !matrix.container }}
+        run: cargo xtask package --target ${{ matrix.target }}
 
-      - run: cargo xtask package --target ${{ matrix.target }}
+      # the system-ffmpeg build replaces the linked one, packaged first
+      - name: Package, then build and package without ffmpeg
+        if: matrix.container
+        run: |
+          cargo xtask package --target ${{ matrix.target }} --max-glibc 2.28
+          cargo build --release --locked -p tgradish --target ${{ matrix.triple }}
+          cargo xtask package --target ${{ matrix.target }} --system-ffmpeg --max-glibc 2.28
 
       - uses: actions/upload-artifact@v7
         with:
@@ -100,6 +118,41 @@ jobs:
             target/release-artifacts/*.zip
             target/release-artifacts/*.sha256
 
+  # runs the Linux builds on a current Ubuntu, with and without ffmpeg
+  test-linux:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            runner: ubuntu-24.04
+          - target: linux-aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-${{ matrix.target }}
+          path: artifacts
+
+      - name: Convert with each build
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          cd artifacts
+          for archive in tgradish-*.tar.gz; do tar -xzf "$archive"; done
+          ffmpeg -v error -f lavfi -i testsrc2=s=320x240:d=4 -pix_fmt yuv420p input.mp4
+          for bin in tgradish-*/tgradish; do
+            echo "== $bin"
+            ldd "$bin"
+            "$bin" ffmpeg status
+            "$bin" convert input.mp4 -o out.webm --preset fast --overwrite
+            "$bin" inspect out.webm
+          done
+          # the system-ffmpeg build really uses the system's
+          tgradish-*-system-ffmpeg/tgradish --json ffmpeg status | grep -q /usr/bin/ffmpeg
+
   # runs the Windows build on Windows
   test-windows:
     needs: build
@@ -108,7 +161,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: release-windows
+          name: release-windows-x86_64
           path: artifacts
 
       # made here instead of with a downloaded ffmpeg, so the test needs
@@ -141,9 +194,9 @@ jobs:
           "$bin" convert still.webm -o out.webm --preset fast && exit 1 || true
 
   publish:
-    needs: [build, test-windows]
+    needs: [build, test-linux, test-windows]
     if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: write
