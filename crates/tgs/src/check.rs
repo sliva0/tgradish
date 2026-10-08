@@ -1,5 +1,5 @@
-//! Checks any Lottie JSON against Telegram's sticker rules, the 2 MiB
-//! limit of Telegram Desktop and the parse limits of tlottie, Telegram's
+//! Checks any Lottie JSON against Telegram's sticker rules, the limits
+//! its server has beyond them and the parse limits of tlottie, Telegram's
 //! renderer. Shapes, paints and their sources are counted the way tlottie's
 //! parser counts them (`src/composition/parse.rs`).
 
@@ -8,7 +8,7 @@ use std::collections::{BTreeSet, HashMap};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::limits::{MAX_RAW_JSON, TLOTTIE, telegram};
+use crate::limits::{TLOTTIE, telegram};
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -202,16 +202,18 @@ fn rules(stats: &Stats) -> Vec<Issue> {
     if let Some(bytes) = stats.tgs_bytes.filter(|&bytes| bytes > telegram::MAX_BYTES) {
         fail(format!("the file is {bytes} bytes, at most {} are allowed", telegram::MAX_BYTES));
     }
-    if stats.json_bytes > MAX_RAW_JSON {
-        fail(format!(
-            "{} bytes of JSON; Telegram Desktop plays at most {MAX_RAW_JSON}",
-            stats.json_bytes
-        ));
+    // Telegram's own limits are below tlottie's for these
+    let server = [
+        ("bytes of JSON", stats.json_bytes, telegram::MAX_JSON),
+        ("layers", stats.layers, telegram::MAX_LAYERS),
+        ("shapes in a layer", stats.max_shapes_per_layer, telegram::MAX_SHAPES_PER_LAYER),
+    ];
+    for (what, count, limit) in server {
+        if count > limit {
+            fail(format!("{count} {what}; Telegram takes at most {limit}"));
+        }
     }
     let limits = [
-        ("layers", stats.layers, TLOTTIE.max_layers),
-        ("painted shape layers", stats.painted_shape_layers, TLOTTIE.max_painted_shape_layers),
-        ("shapes in a layer", stats.max_shapes_per_layer, TLOTTIE.max_shapes_per_layer),
         ("fills and strokes in a layer", stats.max_paints_per_layer, TLOTTIE.max_paints_per_layer),
         (
             "shapes painted in a layer",
