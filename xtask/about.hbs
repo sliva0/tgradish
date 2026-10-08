@@ -1,0 +1,17 @@
+Rust crates in tgradish and their licenses
+==========================================
+
+{{#each overview}}
+{{name}}: {{count}} crates
+{{/each}}
+
+{{#each licenses}}
+--------------------------------------------------------------------------------
+{{name}}, used by:
+{{#each used_by}}
+  {{crate.name}} {{crate.version}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

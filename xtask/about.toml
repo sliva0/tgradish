@@ -1,0 +1,27 @@
+# Licenses of the crates in release binaries, which `cargo xtask package`
+# lists with `cargo about`. Of a crate's choices, the first one accepted
+# here is used.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    # ffmpeg-next, with ffmpeg linked in
+    "WTFPL",
+]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-gnu",
+]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
