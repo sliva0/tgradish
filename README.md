@@ -72,13 +72,19 @@ sticker` for the format of options.
 
 ## Installing
 
-Release builds for Linux and Windows are single files with ffmpeg built in;
-download one from the releases page and run it. Nothing else is needed.
+Release builds for Windows and Linux (x86-64 and ARM) are single files with
+ffmpeg built in; download one from the releases page and run it. Nothing
+else is needed. The Linux builds run on distributions from 2019 on.
 
-Built from source without the `linked` feature, tgradish uses the system's
-ffmpeg and ffprobe (6.0 or newer, with libvpx for VP9) from `PATH`, or the
-ones `--ffmpeg PATH` points at; `tgradish ffmpeg status` shows which one is
-used. See [docs/ffmpeg.md](docs/ffmpeg.md).
+Linux builds marked `system-ffmpeg`, and builds from source without the
+`linked` feature, use the system's ffmpeg and ffprobe (6.0 or newer, with
+libvpx for VP9) from `PATH`, or the ones `--ffmpeg PATH` points at;
+`tgradish ffmpeg status` shows which one is used. See
+[docs/ffmpeg.md](docs/ffmpeg.md).
+
+On Arch Linux, from the AUR: `tgradish` (built from source) or
+`tgradish-bin`. With Nix: `nix run github:sliva0/tgradish`, or the flake's
+package in a NixOS configuration.
 
 ## Front-ends
 
