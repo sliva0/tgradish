@@ -1,0 +1,61 @@
+# Maintainer: sliva0 <sliva0mk at gmail dot com>
+
+pkgname=tgradish
+pkgver=2.0.0
+pkgrel=1
+pkgdesc='Telegram video stickers and emoji from any video, and animated stickers from pixel art'
+arch=(x86_64 aarch64)
+url='https://github.com/sliva0/tgradish'
+license=(MIT)
+# ffmpeg runs as a program; the window loads the graphics libraries when
+# it opens
+depends=(
+  ffmpeg
+  gcc-libs
+  glibc
+  libglvnd
+  libx11
+  libxcursor
+  libxi
+  libxkbcommon
+  libxkbcommon-x11
+  libxrandr
+  wayland
+)
+makedepends=(cargo)
+optdepends=('xdg-desktop-portal: file dialogs in the window')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+_cargo_env() {
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  # no build paths in the binary's panic messages
+  export RUSTFLAGS="$RUSTFLAGS --remap-path-prefix=$srcdir=/"
+}
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  _cargo_env
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  _cargo_env
+  cargo build --frozen --release -p tgradish
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  _cargo_env
+  cargo test --frozen -p tgradish-frames -p tgradish-tgs -p tgradish-core -p tgradish
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/tgradish -t "$pkgdir/usr/bin/"
+  install -Dm644 crates/cli/assets/tgradish.desktop -t "$pkgdir/usr/share/applications/"
+  install -Dm644 README.md -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -Dm644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

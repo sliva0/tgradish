@@ -1,0 +1,41 @@
+# Maintainer: sliva0 <sliva0mk at gmail dot com>
+
+pkgname=tgradish-bin
+_pkgname=tgradish
+pkgver=2.0.0
+pkgrel=1
+pkgdesc='Telegram video stickers and emoji from any video, and animated stickers from pixel art (release build)'
+arch=(x86_64 aarch64)
+url='https://github.com/sliva0/tgradish'
+license=(MIT)
+# the release build without ffmpeg, which runs the system's; the window
+# loads the graphics libraries when it opens
+depends=(
+  ffmpeg
+  gcc-libs
+  glibc
+  libglvnd
+  libx11
+  libxcursor
+  libxi
+  libxkbcommon
+  libxkbcommon-x11
+  libxrandr
+  wayland
+)
+optdepends=('xdg-desktop-portal: file dialogs in the window')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+options=(!strip !debug)
+source_x86_64=("$url/releases/download/v$pkgver/$_pkgname-$pkgver-x86_64-unknown-linux-gnu-system-ffmpeg.tar.gz")
+source_aarch64=("$url/releases/download/v$pkgver/$_pkgname-$pkgver-aarch64-unknown-linux-gnu-system-ffmpeg.tar.gz")
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+package() {
+  cd "$_pkgname-$pkgver-$CARCH-unknown-linux-gnu-system-ffmpeg"
+  install -Dm755 tgradish -t "$pkgdir/usr/bin/"
+  install -Dm644 tgradish.desktop -t "$pkgdir/usr/share/applications/"
+  install -Dm644 README.md THIRD-PARTY.txt THIRD-PARTY-CRATES.txt -t "$pkgdir/usr/share/doc/$_pkgname/"
+  install -Dm644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
