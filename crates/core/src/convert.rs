@@ -41,13 +41,21 @@ pub struct Request {
     /// extension.
     pub output: Option<PathBuf>,
     pub options: Options,
+    /// Replace the output if it exists.
+    pub overwrite: bool,
     /// Keep intermediate files and report where they are.
     pub keep_temp: bool,
 }
 
 impl Request {
     pub fn new(input: PathBuf) -> Self {
-        Self { input, output: None, options: Options::default(), keep_temp: false }
+        Self {
+            input,
+            output: None,
+            options: Options::default(),
+            overwrite: false,
+            keep_temp: false,
+        }
     }
 }
 
@@ -135,6 +143,9 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     let output = request.output.clone().unwrap_or_else(|| default_output(&request.input, target));
     if output == request.input {
         return Err(invalid("output would overwrite the input"));
+    }
+    if !request.overwrite && output.exists() {
+        return Err(Error::OutputExists(output));
     }
 
     let spoof_mode = o.spoof.unwrap_or(Spoof::Auto);
@@ -419,9 +430,7 @@ pub fn convert(
     let changes = Patch {
         duration: plan.spoof.then_some(plan.fake_duration),
         muxing_app: plan.watermark.then(|| crate::TOOL_ID.to_string()),
-        signature: plan
-            .watermark
-            .then(|| format!("{} https://github.com/sliva0/tgradish", crate::TOOL_ID)),
+        signature: plan.watermark.then(crate::signature),
         ..Default::default()
     };
     if changes == Patch::default() {

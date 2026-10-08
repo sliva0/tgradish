@@ -16,6 +16,8 @@ pub enum Error {
     NoVideo(PathBuf),
     #[error("invalid options: {0}")]
     InvalidOptions(String),
+    #[error("{} already exists", .0.display())]
+    OutputExists(PathBuf),
     #[error(
         "nothing fits the {limit} byte limit, the smallest attempt was {smallest} bytes; \
          try a shorter length, a lower frame rate or a wider --fit-range"
