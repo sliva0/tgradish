@@ -8,6 +8,10 @@
 //! use = "auto"         # auto (built in if there is one, else system),
 //!                      # builtin or system
 //! path = "/opt/ffmpeg" # ffmpeg executable or its directory, overrides `use`
+//!
+//! [gui]
+//! output-dir = "/home/me/stickers"  # results go here instead of next to inputs
+//! overwrite = false                  # replace existing results
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -26,6 +30,17 @@ pub struct Config {
     /// Preset used when none is given, for `.tgs`.
     pub tgs_preset: Option<String>,
     pub ffmpeg: FfmpegConfig,
+    pub gui: GuiConfig,
+}
+
+/// Settings of the tgradish window.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct GuiConfig {
+    /// Directory for results, instead of next to each input.
+    pub output_dir: Option<PathBuf>,
+    /// Replace existing results.
+    pub overwrite: bool,
 }
 
 impl Config {
@@ -65,6 +80,18 @@ impl Config {
             Err(err) => Err(err.into()),
         }
     }
+
+    /// Writes the config to `path`, creating its directory. Comments in an
+    /// existing file are lost.
+    pub fn save(&self, path: &Path) -> Result<()> {
+        let text = toml::to_string(self)
+            .map_err(|err| Error::InvalidOptions(format!("cannot write the config: {err}")))?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        crate::fsutil::write_file(path, text.as_bytes(), true)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -78,6 +105,17 @@ mod tests {
         assert_eq!(config.preset.as_deref(), Some("emoji"));
         assert_eq!(config.ffmpeg.choice, FfmpegChoice::System);
         assert!(toml::from_str::<Config>("[ffmpeg]\nsource = 'system'\n").is_err());
+    }
+
+    #[test]
+    fn saves_and_reads_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("config.toml");
+        let mut config = Config { tgs_preset: Some("tgs-fast".into()), ..Config::default() };
+        config.gui.output_dir = Some(dir.path().join("out"));
+        config.ffmpeg.choice = FfmpegChoice::System;
+        config.save(&path).unwrap();
+        assert_eq!(Config::load(&path).unwrap(), config);
     }
 
     #[test]
