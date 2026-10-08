@@ -56,11 +56,12 @@ both formats' options, presets and events.
 
 Decided changes that affect the option and protocol shape:
 
-- **`--extra-args` becomes `--encoder-option KEY=VALUE`** (repeatable),
-  which works with both backends: the process backend passes `-KEY VALUE`,
-  the built-in one sets the encoder option directly. Raw command-line
-  arguments can't work with the built-in ffmpeg, but what they are used
-  for, tuning libvpx (`tune-content`, `aq-mode`, `arnr-strength`, ...), can.
+- **`--encoder-options NAME=VALUE`** (repeatable, done) tunes libvpx with
+  both backends: the process backend passes `-NAME:v VALUE`, the built-in
+  one sets the encoder option directly. Examples: `tune-content=screen`,
+  `aq-mode=2`, `sharpness=4`, `arnr-strength=3`, `g=60`, `qmax=50`.
+  `--extra-args` stays for raw ffmpeg arguments, but only with ffmpeg as a
+  separate program, since the built-in ffmpeg has no command line.
 - **ffmpeg as a separate program** stays only for the system ffmpeg: the
   ffmpeg-less Linux build, AUR, Nix and source builds. `tgradish ffmpeg
   download`, the published ffmpeg archives and the downloader's HTTP/TLS
@@ -179,7 +180,8 @@ Decided 2026-10-08:
 
 - GUI with egui, in this repo, in the same binary as the CLI.
 - No arguments in a terminal shows the CLI help.
-- `ffmpeg download` goes; `--extra-args` becomes `--encoder-option`.
+- `ffmpeg download` goes. `--encoder-options` works with both backends,
+  `--extra-args` only with ffmpeg as a separate program.
 - ARM: Linux aarch64 in 2.0, Windows ARM64 later.
 - Order: WebM cleanups, `.tgs`, GUI, distribution, probes and release.
 - The web app comes after 2.0. Conversion in the browser is preferred if

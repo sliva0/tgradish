@@ -90,6 +90,11 @@ pub(crate) fn encode_args(
     if let Some(title) = &plan.title {
         push(&["-metadata", &format!("title={title}")]);
     }
+    // `:v` limits them to the video encoder, so they can't change anything
+    // else; names are checked while planning
+    for (name, value) in &plan.encoder_options {
+        args.extend([format!("-{name}:v").into(), value.into()]);
+    }
     args.extend(plan.extra_args.iter().map(OsString::from));
     if let Some((pass, log)) = pass {
         args.extend(["-pass".into(), pass.to_string().into(), "-passlogfile".into(), log.into()]);

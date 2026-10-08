@@ -176,6 +176,32 @@ impl Drop for AvString {
     }
 }
 
+/// Opens `encoder`, failing on options libavcodec did not use, as the ffmpeg
+/// command line does. ffmpeg-next's `open_with` drops them silently.
+fn open_encoder(
+    mut encoder: ff::encoder::video::Video,
+    options: Dictionary,
+) -> Result<ff::encoder::Video> {
+    // SAFETY: the same calls as ffmpeg-next's `open_with`, keeping the
+    // dictionary libavcodec hands back with the options it didn't use
+    let (result, unused) = unsafe {
+        let mut options = options.disown();
+        let result = ff::ffi::avcodec_open2(encoder.as_mut_ptr(), std::ptr::null(), &mut options);
+        (result, Dictionary::own(options))
+    };
+    if result < 0 {
+        return Err(libav("opening libvpx-vp9")(ff::Error::from(result)));
+    }
+    let unused: Vec<_> = unused.iter().map(|(name, _)| name.to_string()).collect();
+    if !unused.is_empty() {
+        return Err(Error::InvalidOptions(format!(
+            "unknown encoder options: {}",
+            unused.join(", ")
+        )));
+    }
+    Ok(ff::encoder::video::Encoder(encoder))
+}
+
 /// Opened encoder, the output it writes to, and two-pass state.
 struct Encoder {
     encoder: ff::encoder::Video,
@@ -260,7 +286,10 @@ impl Encoder {
         }
         encoder.set_flags(flags);
 
-        let encoder = encoder.open_with(options).map_err(libav("opening libvpx-vp9"))?;
+        for (name, value) in &plan.encoder_options {
+            options.set(name, value);
+        }
+        let encoder = open_encoder(encoder, options)?;
         if let Some(output) = &mut output {
             let mut stream = output.add_stream(codec).map_err(libav("adding the stream"))?;
             stream.set_parameters(&encoder);
