@@ -1,0 +1,31 @@
+name: nix
+
+# Builds the flake's package, which runs the tests in Nix's sandbox, and
+# its development shell.
+on:
+  push:
+    branches: [master, rewrite-v2]
+    paths-ignore: ["docs/**", "**.md"]
+  pull_request:
+    paths-ignore: ["docs/**", "**.md"]
+  workflow_dispatch:
+
+jobs:
+  flake:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+      - run: nix flake check -L
+      - name: Run the package
+        run: |
+          nix build .#tgradish
+          ./result/bin/tgradish --version
+          # ffmpeg comes with the package
+          ./result/bin/tgradish ffmpeg status
+      - run: nix develop --command cargo --version
