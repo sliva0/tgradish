@@ -37,6 +37,8 @@ pub enum Error {
     TooManyColours,
     #[error(transparent)]
     Encode(#[from] encode::EncodeError),
+    #[error("cancelled")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

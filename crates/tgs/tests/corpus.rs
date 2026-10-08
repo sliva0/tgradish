@@ -188,17 +188,17 @@ fn fits_large_animations() {
         return;
     };
     let input = decode(&std::fs::read(&path).unwrap(), &DecodeOptions::default()).unwrap();
-    let small = make(&input, &StickerOptions::default(), &mut |_| {}).unwrap();
+    let small = make(&input, &StickerOptions::default(), &mut |_| {}, &|| false).unwrap();
     assert!(small.fits() && small.steps.is_empty(), "{:?}", small.issues);
 
     let big = tiled(&input, 2, 2);
     let lossless = StickerOptions { fit: Fit::Lossless, ..StickerOptions::default() };
-    let too_large = make(&big, &lossless, &mut |_| {}).unwrap();
+    let too_large = make(&big, &lossless, &mut |_| {}, &|| false).unwrap();
     assert!(!too_large.fits() && too_large.steps.is_empty());
     assert!(too_large.bytes > 65536, "{}", too_large.bytes);
 
     let started = std::time::Instant::now();
-    let fitted = make(&big, &StickerOptions::default(), &mut |_| {}).unwrap();
+    let fitted = make(&big, &StickerOptions::default(), &mut |_| {}, &|| false).unwrap();
     eprintln!(
         "{} bytes in {:?}, from {} lossless: {:?}",
         fitted.bytes,

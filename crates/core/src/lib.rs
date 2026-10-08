@@ -18,6 +18,7 @@ pub mod paths;
 pub mod presets;
 pub mod protocol;
 pub mod telegram;
+pub mod tgs;
 pub mod webm;
 
 pub use error::{Error, Result};
