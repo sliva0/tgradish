@@ -28,3 +28,11 @@ tgradish = "tgradish:main"
 [project.urls]
 "Repository" = "https://github.com/sliva0/tgradish"
 "Author's telegram" = "https://t.me/sliva0"
+
+[tool.ruff]
+line-length = 80
+
+[tool.ruff.format]
+line-ending = "lf"
+docstring-code-format = true
+quote-style = "single"

@@ -144,7 +144,7 @@ def guess_value(config: CmdConfig, cmd_params: CmdParams, run_info: RunInfo):
     return best_valid_option
 
 
-def convert_video(config, argv: list[str]):
+def convert_video(config: CmdConfig, argv: list[str]):
     flag_args_dict = parse_command_args(config, argv)
     cmd_params = CmdParams(config)
 
