@@ -10,8 +10,9 @@ config format and packages are all new. The Python 1.x code lives on
 `master` and in the `rewrite-attempt` branch for reference only.
 
 **Release rule:** nothing is merged into `master`, tagged or released until
-the whole roadmap below is done: GUI, `.tgs`, packaging and the web app
-included. Until then everything happens on `rewrite-v2`.
+the whole 2.0 roadmap below is done: `.tgs`, the GUI and packaging included.
+Until then everything happens on `rewrite-v2`. The Telegram web app comes
+after 2.0.
 
 ## Layout
 
@@ -48,9 +49,33 @@ Done on `rewrite-v2`, with CI on Linux and Windows:
 
 ## Roadmap
 
-Order is a proposal; tracks can overlap.
+In this order; the GUI waits for `.tgs` because it needs the final shape of
+both formats' options, presets and events.
 
-### 1. GUI
+### 1. WebM cleanups
+
+Decided changes that affect the option and protocol shape:
+
+- **`--extra-args` becomes `--encoder-option KEY=VALUE`** (repeatable),
+  which works with both backends: the process backend passes `-KEY VALUE`,
+  the built-in one sets the encoder option directly. Raw command-line
+  arguments can't work with the built-in ffmpeg, but what they are used
+  for, tuning libvpx (`tune-content`, `aq-mode`, `arnr-strength`, ...), can.
+- **ffmpeg as a separate program** stays only for the system ffmpeg: the
+  ffmpeg-less Linux build, AUR, Nix and source builds. `tgradish ffmpeg
+  download`, the published ffmpeg archives and the downloader's HTTP/TLS
+  dependencies go. Building from source on Windows gets short instructions
+  (install ffmpeg, or build with `linked-static` through the xtask), no
+  separate build.
+
+### 2. `.tgs` animated stickers
+
+The plan is in `docs/tgs.md` (milestones T1–T10, written in a separate
+planning session). T1–T8 come here; T9 (upload probes) and T10 (release)
+are part of the last step. T8 settles how `describe`, presets and events
+cover two formats, which the GUI then builds on.
+
+### 3. GUI
 
 - egui (eframe), in this repo, linked against the libraries rather than
   driving the CLI.
@@ -63,18 +88,11 @@ Order is a proposal; tracks can overlap.
 - Prefer the glow renderer over wgpu: eframe's docs say it is
   significantly smaller. Measure the size it adds to the binary.
 
-### 2. `.tgs` animated stickers
-
-The plan is in `docs/tgs.md` (milestones T1–T10, written in a separate
-planning session). It now also feeds the GUI in this repo.
-
-### 3. Distribution
+### 4. Distribution
 
 - **Targets:** Linux x86-64 and Windows x86-64 exist; 2.0 adds Linux
   aarch64, built natively on GitHub's free arm64 runners
   (`ubuntu-24.04-arm`); ffmpeg's and libvpx's ARM assembly need no nasm.
-  Windows ARM64 is left for later: it needs an aarch64 MinGW (llvm-mingw)
-  for the ffmpeg cross build, or native builds on `windows-11-arm`.
 - **Old glibc baseline:** the Linux release is built on `ubuntu-22.04` to
   run on older systems, but that runner image is deprecated from
   2026-09-17 and unsupported from 2027-04-17. Build inside an old-glibc
@@ -87,31 +105,13 @@ planning session). It now also feeds the GUI in this repo.
   `PATH`, no ABI coupling, the right choice for a generic download) or
   linked dynamically against the system's libav* (ties the binary to one
   ffmpeg major version, fine for distribution packages that rebuild).
-- **AUR:** `tgradish` built from source (`depends=(ffmpeg)`, linked
-  dynamically or using the process backend) and `tgradish-bin` from the
-  release binary. The PKGBUILDs can live in this repo; publishing to the
-  AUR needs the user's AUR account.
-- **Nix:** a `flake.nix` with the package (built against nixpkgs' ffmpeg)
-  and a dev shell (Rust, nasm, meson, ninja, clang for bindgen). Submitting
-  to nixpkgs can come later.
-- **ffmpeg as a separate program** stays only for the system ffmpeg: the
-  ffmpeg-less Linux build, AUR, Nix and source builds. `tgradish ffmpeg
-  download`, the published ffmpeg archives and the downloader's HTTP/TLS
-  dependencies go. Building from source on Windows gets short instructions
-  (install ffmpeg, or build with `linked-static` through the xtask), no
-  separate build.
-- **`--extra-args` becomes `--encoder-option KEY=VALUE`** (repeatable),
-  which works with both backends: the process backend passes `-KEY VALUE`,
-  the built-in one sets the encoder option directly. Raw command-line
-  arguments can't work with the built-in ffmpeg, but what they are used
-  for, tuning libvpx (`tune-content`, `aq-mode`, `arnr-strength`, ...), can.
-
-### 4. Telegram bot and web app
-
-A Telegram Mini App (web UI inside Telegram) plus a bot, and the same page
-usable in a normal browser. Findings and options are in `docs/web-app.md`.
-This absorbs the earlier "WebAssembly demo page" and "self-hosted bot"
-ideas.
+- **AUR and Nix, prepared last:** PKGBUILDs for `tgradish` (from source,
+  `depends=(ffmpeg)`) and `tgradish-bin` (release binary), and a
+  `flake.nix` with the package (built against nixpkgs' ffmpeg) and a dev
+  shell (Rust, nasm, meson, ninja, clang for bindgen). Publishing to the AUR
+  needs the user's account: everything is prepared in the repo, with
+  step-by-step instructions for the user, once all other parts are ready.
+  Submitting to nixpkgs can come later.
 
 ### 5. Telegram probes and release
 
@@ -122,6 +122,33 @@ ideas.
   `rewrite-v2`, tag 2.0.0, publish the drafted release.
 - After release: ask before pointing the old pixelart2tgs README at
   tgradish.
+
+### After 2.0
+
+- **Telegram bot and web app:** a Mini App (web UI inside Telegram) plus a
+  bot that puts results into the user's sticker packs, and the same page in
+  a normal browser. Platform findings and limits are in `docs/web-app.md`.
+  It absorbs the earlier "WebAssembly demo page" and "self-hosted bot"
+  ideas, and the "Web page" and "Bot" items in `docs/tgs.md`.
+- Windows ARM64: needs an aarch64 MinGW (llvm-mingw) for the ffmpeg cross
+  build, or native builds on `windows-11-arm`.
+- Pixelate mode from `docs/tgs.md`.
+
+### Designing for the web app now
+
+The web app is planned, so 2.0's APIs should not rule it out:
+
+- `tgradish-tgs` and `tgradish-frames` build for `wasm32-unknown-unknown`,
+  with a CI check (already in `docs/tgs.md`).
+- Library entry points work on bytes and callbacks, not paths: file
+  handling stays in the CLI, GUI and thin `*_file` helpers. WebM inspection
+  and patching already work this way.
+- Options, presets and events stay plain serialisable data with JSON
+  Schemas, so a web page can render the same forms as the GUI.
+- Conversion stays behind the `Backend` abstraction, so a browser backend
+  (WebCodecs or ffmpeg in WebAssembly) can be added later.
+- Nothing in the libraries assumes threads, a filesystem or processes
+  unless it sits behind a feature.
 
 ## Shipping one binary
 
@@ -154,14 +181,13 @@ Decided 2026-10-08:
 - No arguments in a terminal shows the CLI help.
 - `ffmpeg download` goes; `--extra-args` becomes `--encoder-option`.
 - ARM: Linux aarch64 in 2.0, Windows ARM64 later.
-- Web app: conversion in the browser is preferred if Telegram's WebViews
-  allow what it needs (file input, getting files out, threads); the probe
-  in `docs/web-app.md` decides. The probe needs a test bot (BotFather) and
-  somewhere to host the page, which only the user can set up.
-
-Open:
-
-- Track order: GUI first, `.tgs` first, or in parallel?
+- Order: WebM cleanups, `.tgs`, GUI, distribution, probes and release.
+- The web app comes after 2.0. Conversion in the browser is preferred if
+  Telegram's WebViews allow what it needs (file input, getting files out,
+  threads); the probe in `docs/web-app.md` decides. The probe needs a test
+  bot (BotFather) and somewhere to host the page, which only the user can
+  set up.
+- AUR and Nix are prepared at the end, with instructions for the user.
 
 ## Reference
 

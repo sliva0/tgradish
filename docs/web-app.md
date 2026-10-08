@@ -5,7 +5,8 @@ opens in its own WebView) together with a bot, and from a normal browser.
 Ideally the bot also puts the results straight into the user's sticker
 packs.
 
-Investigated 2026-10-08. Nothing here is built yet.
+Planned for after 2.0. Investigated 2026-10-08; nothing here is built
+yet. `docs/PLAN.md` lists what 2.0's design does to keep this possible.
 
 ## What the platform allows
 
