@@ -88,9 +88,37 @@ fn run(cli: Cli) -> Result<()> {
 #[cfg(feature = "gui")]
 fn started_outside_a_terminal() -> bool {
     use std::io::IsTerminal;
-    std::env::args_os().len() == 1
-        && !std::io::stdin().is_terminal()
-        && !std::io::stdout().is_terminal()
+    if std::env::args_os().len() != 1 {
+        return false;
+    }
+    #[cfg(windows)]
+    if console::is_our_own() {
+        // Windows before 11 24H2 ignores the manifest asking for no
+        // console, and the one it made would stay open behind the window
+        console::close();
+        return true;
+    }
+    !std::io::stdin().is_terminal() && !std::io::stdout().is_terminal()
+}
+
+#[cfg(all(windows, feature = "gui"))]
+#[allow(unsafe_code)]
+mod console {
+    use windows_sys::Win32::System::Console::{FreeConsole, GetConsoleProcessList};
+
+    /// Whether the console was made for this process alone, as when it was
+    /// started from Explorer rather than a terminal.
+    pub fn is_our_own() -> bool {
+        let mut processes = [0u32; 2];
+        // SAFETY: the buffer holds as many ids as it is said to
+        let count = unsafe { GetConsoleProcessList(processes.as_mut_ptr(), 2) };
+        count == 1
+    }
+
+    pub fn close() {
+        // SAFETY: nothing has used the console's handles yet
+        unsafe { FreeConsole() };
+    }
 }
 
 fn main() -> ExitCode {
@@ -99,7 +127,8 @@ fn main() -> ExitCode {
         return match tgradish_gui::run() {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
-                eprintln!("{} {err}", ui::error_label());
+                // there is no terminal to print to
+                tgradish_gui::show_error(&format!("The window couldn't open: {err}"));
                 ExitCode::FAILURE
             }
         };
