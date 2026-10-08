@@ -733,14 +733,17 @@ fn patch_in_place(buf: &mut [u8], patch: &Patch) -> Result<PatchReport> {
 
 /// Patches `input` and writes the result to `output`, which may be the same
 /// file. The output is written to a temporary file first and then renamed.
-pub fn patch_file(input: &Path, output: &Path, changes: &Patch) -> Result<PatchReport> {
+/// Without `replace`, an existing output is an
+/// [`AlreadyExists`](std::io::ErrorKind::AlreadyExists) error.
+pub fn patch_file(
+    input: &Path,
+    output: &Path,
+    changes: &Patch,
+    replace: bool,
+) -> Result<PatchReport> {
     let mut buf = std::fs::read(input)?;
     let report = patch(&mut buf, changes)?;
-
-    let dir = output.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let mut tmp = tempfile::Builder::new().prefix(".tgradish-").tempfile_in(dir)?;
-    std::io::Write::write_all(&mut tmp, &buf)?;
-    tmp.persist(output).map_err(|err| err.error)?;
+    crate::fsutil::write_file(output, &buf, replace)?;
     Ok(report)
 }
 
@@ -1135,7 +1138,8 @@ mod tests {
         let input = dir.path().join("in.webm");
         std::fs::write(&input, Fixture::default().build()).unwrap();
 
-        patch_file(&input, &output, &Patch { duration: Some(0.5), ..Default::default() }).unwrap();
+        let changes = Patch { duration: Some(0.5), ..Default::default() };
+        patch_file(&input, &output, &changes, false).unwrap();
         assert_eq!(std::fs::read(&bystander).unwrap(), b"keep me");
         let leftovers = std::fs::read_dir(dir.path()).unwrap().count();
         assert_eq!(leftovers, 3, "no temporary files left behind");

@@ -154,9 +154,9 @@ pub struct OptionArgs {
     #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
           default_missing_value = "true", help_heading = "Encoding")]
     pub lossless: Option<bool>,
-    /// Extra ffmpeg output arguments, separated by spaces.
+    /// Extra ffmpeg output arguments, split like a shell would.
     #[arg(long, value_name = "ARGS", allow_hyphen_values = true, help_heading = "Encoding")]
-    pub extra_args: Option<String>,
+    pub extra_args: Option<ShellWords>,
 
     /// When to spoof the duration so Telegram accepts videos longer than 3 s.
     /// [default: auto, only when needed]
@@ -193,11 +193,20 @@ impl OptionArgs {
             fake_duration: self.fake_duration,
             title: self.title.clone(),
             watermark: self.watermark,
-            extra_args: self
-                .extra_args
-                .as_ref()
-                .map(|args| args.split_whitespace().map(String::from).collect()),
+            extra_args: self.extra_args.clone().map(|words| words.0),
         }
+    }
+}
+
+/// One argument split into several like a shell would.
+#[derive(Debug, Clone)]
+pub struct ShellWords(pub Vec<String>);
+
+impl std::str::FromStr for ShellWords {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        shlex::split(s).map(ShellWords).ok_or("unbalanced quotes")
     }
 }
 
@@ -325,5 +334,20 @@ mod tests {
         assert_eq!(args.options.lossless, Some(true));
         assert_eq!(args.options.watermark, Some(false));
         assert_eq!(args.options.to_options().title, None);
+    }
+
+    #[test]
+    fn splits_extra_args_like_a_shell() {
+        let cli = Cli::parse_from([
+            "tgradish",
+            "convert",
+            "a.mp4",
+            "--extra-args",
+            r#"-metadata comment="hello world" -tune-content screen"#,
+        ]);
+        let Command::Convert(args) = cli.command else { panic!() };
+        let extra = args.options.to_options().extra_args.unwrap();
+        assert_eq!(extra, ["-metadata", "comment=hello world", "-tune-content", "screen"]);
+        assert!(Cli::try_parse_from(["tgradish", "convert", "a", "--extra-args", "'x"]).is_err());
     }
 }

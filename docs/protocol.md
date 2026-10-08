@@ -75,10 +75,15 @@ With `--json`, stdout carries one JSON event per line, tagged by `event`:
 | `warning` | `message` about an adjusted or ignored option |
 | `log` | a line of ffmpeg output |
 | `finished` | `output`, `bytes`, the kept `params`, `spoofed`, and `issues` Telegram would still have |
-| `error` | `message`; the process then exits with a non-zero status |
+| `error` | `message`, and the `input` it is about when converting several |
+
+An `error` without `input` ends the process. With several inputs, a failed
+conversion prints an `error` with its `input` and tgradish moves on to the
+next one; the exit status is then 1.
 
 Exit status: 0 on success, 1 on errors, 2 on invalid command lines, 130
-when cancelled.
+when cancelled. Invalid command lines are reported by the argument parser
+as text on stderr, not as JSON.
 
 To cancel, write `cancel` and a newline to stdin, or send SIGINT on Unix.
 tgradish then stops ffmpeg, deletes its temporary files and exits with 130.
@@ -90,8 +95,14 @@ temporary files behind.
 All of these accept `--json`:
 
 - `inspect FILE...`: one JSON object per line with `file`, `target`,
-  `info` (stream properties and metadata) and `issues`;
+  `info` (stream properties and metadata) and `issues`, or `file` and
+  `error` for files that could not be read;
 - `spoof FILE [-o OUT | --in-place] [--duration S]`: `output` and a
   `report` of what changed;
 - `preset list`: the `presets` array from `describe`;
-- `ffmpeg status`: which ffmpeg is used and whether it can encode VP9.
+- `ffmpeg status`: `ffmpeg` (paths and where it came from) and
+  `capabilities` (`version`, and `libvpx_vp9`: whether it can encode
+  stickers; if not, the exit status is 1).
+
+Commands other than `convert` and `inspect` print a single JSON document.
+Every command prints an `error` event instead when it fails.

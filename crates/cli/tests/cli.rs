@@ -124,3 +124,46 @@ fn cancels_from_stdin() {
     assert_eq!(last["event"], "error");
     assert!(!out.exists());
 }
+
+#[test]
+fn events_schema_includes_errors() {
+    let output = tgradish(&["describe"]);
+    let description: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let events = description["events"]["oneOf"].as_array().unwrap();
+    assert!(events.iter().any(|e| e["properties"]["event"]["const"] == "error"));
+}
+
+#[test]
+fn reports_batch_failures_per_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing.webm");
+    let other = dir.path().join("other.webm");
+    std::fs::write(&other, b"not a webm").unwrap();
+
+    let output =
+        tgradish(&["--json", "inspect", missing.to_str().unwrap(), other.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(1));
+    let lines = json_lines(&output);
+    assert_eq!(lines.len(), 2, "only per-file lines on stdout");
+    assert!(lines.iter().all(|line| line["error"].is_string() && line["file"].is_string()));
+}
+
+/// An "ffmpeg" without the VP9 encoder must give one JSON document.
+#[cfg(unix)]
+#[test]
+fn status_without_vp9_is_one_document() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["ffmpeg", "ffprobe"] {
+        let path = dir.path().join(name);
+        std::fs::write(&path, "#!/bin/sh\necho 'ffmpeg version fake'\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let output =
+        tgradish(&["--json", "--ffmpeg", dir.path().to_str().unwrap(), "ffmpeg", "status"]);
+    assert_eq!(output.status.code(), Some(1));
+    let status: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status["capabilities"]["libvpx_vp9"], false);
+    assert_eq!(status["capabilities"]["version"], "ffmpeg version fake");
+}

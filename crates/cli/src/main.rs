@@ -12,6 +12,21 @@ use tgradish_core::ffmpeg::{self, CancelToken, Ffmpeg};
 
 use crate::args::{Cli, Command, Global};
 
+/// Ends the program with an exit code, after the command already reported
+/// why.
+#[derive(Debug, thiserror::Error)]
+#[error("exit with status {0}")]
+pub struct Exit(pub u8);
+
+/// Prints an error as a JSON line, see `Event::Error`.
+pub fn print_json_error(err: &anyhow::Error, input: Option<&std::path::Path>) {
+    let event = tgradish_core::events::Event::Error {
+        message: format!("{err:#}"),
+        input: input.map(Into::into),
+    };
+    println!("{}", serde_json::to_string(&event).expect("events serialize"));
+}
+
 /// Settings shared by all commands.
 pub struct Context {
     pub global: Global,
@@ -64,10 +79,12 @@ fn main() -> ExitCode {
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
+            if let Some(Exit(code)) = err.downcast_ref() {
+                return ExitCode::from(*code);
+            }
             let cancelled = matches!(err.downcast_ref(), Some(tgradish_core::Error::Cancelled));
             if json {
-                let message = format!("{err:#}");
-                println!("{}", serde_json::json!({ "event": "error", "message": message }));
+                print_json_error(&err, None);
             } else {
                 eprintln!("{} {err:#}", ui::error_label());
             }

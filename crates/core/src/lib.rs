@@ -9,6 +9,7 @@ mod error;
 pub mod events;
 pub mod ffmpeg;
 pub mod fit;
+mod fsutil;
 pub mod options;
 pub mod paths;
 pub mod presets;
