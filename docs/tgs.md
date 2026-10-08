@@ -579,8 +579,30 @@ The web app there may also replace the "Web page" and "Bot" items under
   - Order: T7 and T8 come before T6, so `.tgs` works end to end (and the
     GUI has its protocol) before the open-ended encoder experiments, which
     are then measured through the whole pipeline.
-- **T6:** encoder v2 experiments: motion, precomps, palette cycling, mixing
-  primitives, even-odd, strokes. Keep what the bench shows is better.
+- **T6 (in progress):** encoder v2 experiments: motion, precomps, palette
+  cycling, mixing primitives, even-odd, strokes. Keep what the bench shows
+  is better.
+
+  Measured on the corpus first: only 21 of 645 frames are a shifted copy
+  of an earlier frame (17 of them in `Spamton_trembling`), so whole-sprite
+  motion is a niche; but 70% of visible cells keep their colour from one
+  frame to the next, and 30% (median 15%, up to 93%) for the whole loop.
+
+  Kept: splitting a colour into a core and deltas (`Settings::split`). The
+  core draws the cells that keep the colour over a stretch of frames, once;
+  deltas below it draw the rest. A delta must reach under the core where
+  they meet; the core can only keep a cell whose later-colour neighbours
+  are its own or hidden under later colours for the whole stretch, and may
+  only reach under cells hidden for the whole stretch (otherwise it shows
+  cells it doesn't guard). A colour is split when that is cheaper counting
+  a layer per delta. 2.7% smaller over the corpus (20% on idle-ish files
+  like `pizza_dude`), now 2.06x smaller than 1.x at balanced effort.
+
+  Next to try: two tiers, every delta below every core, so the deltas of
+  all colours share each frame's layer again (splitting per colour adds
+  76% layers, which eats most of the 8% fewer rectangles); motion as
+  position keyframes for files like `Spamton_trembling`; fringe-aware
+  colour orders.
 - **T7 (done):** fit and lossy reductions, with reporting.
 
   Notes from T7 (`reduce`, `sticker::make`):

@@ -9,7 +9,7 @@
 //! cargo run -p tgs-lab -- normalise art.gif
 //! cargo run -p tgs-lab -- encode art.gif out.tgs [--runs]
 //! cargo run -p tgs-lab -- verify art.gif [out.tgs]
-//! cargo run --release -p tgs-lab -- bench [--fast] [--verify] [--no-lifetimes] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]
+//! cargo run --release -p tgs-lab -- bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]
 //! ```
 
 mod bench;
@@ -252,6 +252,7 @@ fn main() -> Result<()> {
                     verify: flag("--verify"),
                     settings: encode::Settings {
                         lifetimes: !flag("--no-lifetimes"),
+                        split: !flag("--no-split"),
                         effort: match () {
                             _ if flag("--fast-effort") => encode::Effort::Fast,
                             _ if flag("--best") => encode::Effort::Best,
@@ -274,7 +275,7 @@ fn main() -> Result<()> {
              tgs-lab normalise FILE...\n       \
              tgs-lab encode SOURCE OUTPUT.tgs [--runs]\n       \
              tgs-lab verify SOURCE [STICKER.tgs] [--sizes 100,160,237,512] [--frames 0,4] [--picture PREFIX] [--explain N] [--runs]\n       \
-             tgs-lab bench [--fast] [--verify] [--no-lifetimes] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]"
+             tgs-lab bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]"
         ),
     }
 }
