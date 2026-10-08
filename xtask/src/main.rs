@@ -33,7 +33,9 @@ struct Source {
 const ZLIB: Source = Source {
     name: "zlib",
     version: "1.3.2",
-    url: "https://zlib.net/zlib-1.3.2.tar.gz",
+    // zlib.net sometimes serves other content to CI machines; the GitHub
+    // release has the same bytes
+    url: "https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz",
     sha256: "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16",
     licenses: &["LICENSE"],
 };
@@ -231,14 +233,23 @@ impl Build {
         let archive = self.sources.join(format!("{}-{file_name}", source.name));
         if !archive.exists() {
             let partial = archive.with_extension("partial");
-            run(Command::new("curl").args(["-sSfL", "-o"]).arg(&partial).arg(source.url))?;
+            run(Command::new("curl")
+                .args(["-sSfL", "--retry", "3", "--retry-all-errors", "-o"])
+                .arg(&partial)
+                .arg(source.url))?;
             std::fs::rename(&partial, &archive)?;
         }
         let sum = output(Command::new("sha256sum").arg(&archive))?;
         let sum = sum.split_whitespace().next().unwrap_or_default();
         if sum != source.sha256 {
             std::fs::remove_file(&archive)?;
-            bail!("{} checksum mismatch: expected {}, got {sum}", source.name, source.sha256);
+            bail!(
+                "{} checksum mismatch: expected {}, got {sum}; the server may have sent an \
+                 error page instead of {}",
+                source.name,
+                source.sha256,
+                source.url
+            );
         }
         Ok(archive)
     }

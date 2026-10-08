@@ -12,8 +12,8 @@ fn num(value: f64) -> String {
 }
 
 /// Input options and the input itself, for a clip of `length` seconds at
-/// `fps`. Reads one frame more than needed; outputs are cut to an exact
-/// frame count with `-frames:v`.
+/// `fps`. Reads one frame more than needed; the filter chain cuts it to an
+/// exact frame count.
 pub(crate) fn input_args(plan: &Plan, length: f64, fps: f64) -> Vec<OsString> {
     let mut args: Vec<OsString> = Vec::new();
     if plan.source.still_image {
@@ -30,12 +30,19 @@ pub(crate) fn input_args(plan: &Plan, length: f64, fps: f64) -> Vec<OsString> {
     args
 }
 
-/// Filter chain that turns the source into frames of the planned size.
-pub(crate) fn video_filter(plan: &Plan, fps: f64, pix_fmt: &str) -> String {
+/// Filter chain that turns the source into `length` seconds of frames of
+/// the planned size.
+///
+/// The frame count is cut here rather than with `-frames:v`: ffmpeg before
+/// 7.0 stops the encoder at that limit without flushing it, so libvpx's
+/// first pass misses its end-of-stream statistics and the second pass
+/// fails.
+pub(crate) fn video_filter(plan: &Plan, fps: f64, length: f64, pix_fmt: &str) -> String {
     let (w, h) = (plan.width, plan.height);
     let (sw, sh) = (plan.scaled_width, plan.scaled_height);
     let scale = format!("scale={sw}:{sh}:flags=lanczos");
-    let mut filters = vec![format!("fps={}", num(fps))];
+    let mut filters =
+        vec![format!("fps={}", num(fps)), format!("trim=end_frame={}", frame_count(length, fps))];
     match plan.resize {
         Resize::Contain | Resize::Stretch => filters.push(scale),
         Resize::Crop => filters.extend([scale, format!("crop={w}:{h}")]),
@@ -68,8 +75,7 @@ pub(crate) fn encode_args(
     let pix_fmt = if plan.alpha { "yuva420p" } else { "yuv420p" };
     let mut push = |items: &[&str]| args.extend(items.iter().map(OsString::from));
     push(&["-map", "0:v:0", "-map_metadata", "-1", "-map_chapters", "-1", "-an", "-sn", "-dn"]);
-    push(&["-vf", &video_filter(plan, params.fps, pix_fmt)]);
-    push(&["-frames:v", &frame_count(params.length, params.fps).to_string()]);
+    push(&["-vf", &video_filter(plan, params.fps, params.length, pix_fmt)]);
     push(&["-c:v", "libvpx-vp9"]);
     match params.rate {
         Rate::Bitrate(kbps) => push(&["-b:v", &format!("{}", (kbps * 1000.0).round() as u64)]),
