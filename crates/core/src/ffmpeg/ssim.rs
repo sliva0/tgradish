@@ -4,29 +4,39 @@ use std::process::Command;
 
 use super::args::{input_args, video_filter};
 use super::{CancelToken, Ffmpeg, Output, run};
-use crate::convert::Plan;
+use crate::convert::{Plan, frame_count};
 use crate::error::{Error, Result};
 
-/// Compares an encoded attempt with the source at the planned frame rate.
-/// Lower frame rates lose points on frames they skip. Returns SSIM from 0
-/// to 1, ignoring alpha.
-pub(crate) fn ssim(
+/// Compares an encoded attempt at `fps` with the source at the planned
+/// frame rate. The source drives the comparison and the attempt's frames are
+/// repeated in between, so lower frame rates lose points on frames they
+/// skip. Returns SSIM from 0 to 1, ignoring alpha.
+pub fn ssim(
     ffmpeg: &Ffmpeg,
     plan: &Plan,
     candidate: &Path,
+    fps: f64,
     cancel: &CancelToken,
     on_line: &mut dyn FnMut(String),
 ) -> Result<f64> {
-    // both sides start at 0 with the same timebase, or ssim pairs frames wrongly
-    let normalize = "format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS";
+    // Timestamps are rebuilt from frame numbers: WebM stores whole
+    // milliseconds, which would pair some frames with their neighbours.
+    let retime = |fps: f64| format!("format=yuv420p,settb=AVTB,setpts=N/({fps}*TB)");
     let reference = video_filter(plan, plan.fps, "yuv420p");
-    let graph =
-        format!("[0:v]{normalize}[a];[1:v]{reference},{normalize}[b];[a][b]ssim=eof_action=endall");
+    let frames = frame_count(plan.length, plan.fps);
+    // the first ssim input sets the timeline; the attempt's last frame is
+    // repeated if it ends earlier
+    let graph = format!(
+        "[1:v]{reference},trim=end_frame={frames},{}[source];\
+         [0:v]{}[attempt];[source][attempt]ssim=eof_action=repeat",
+        retime(plan.fps),
+        retime(fps),
+    );
 
     let mut cmd = Command::new(&ffmpeg.ffmpeg);
     cmd.args(["-hide_banner", "-nostdin", "-nostats", "-loglevel", "info", "-i"])
         .arg(candidate)
-        .args(input_args(plan, plan.length))
+        .args(input_args(plan, plan.length, plan.fps))
         .args::<_, OsString>(["-lavfi".into(), graph.into(), "-f".into(), "null".into()])
         .arg("-");
     let tail = run(cmd, "ffmpeg", cancel, &mut |output| {
