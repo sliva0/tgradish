@@ -1,33 +1,11 @@
 # tgradish
 
-Simple video converting cli utility specializing in Telegram videostickers with the ability to bypass the 3 second limit.
+Converts videos into Telegram video stickers and custom emoji, with the
+ability to bypass the 3 second limit.
 
-
-## Installation
-
-``` console
-python -m pip install tgradish
-```
-
-
-## Dependencies
-
-For the `tgradish convert` command `ffmpeg` should be installed in PATH,
-but `tgradish spoof` works just fine even without it.
-
-
-## Usage examples
-
-Converting .mp4 video to videosticker:
-``` console
-tgradish convert -i ~/pig.mp4
-```
-
-Spoofing duration of already correctly encoded videosticker:
-``` console
-tgradish spoof ~/pig.webm ~/spoofed_pig.webm
-```
-
+> **Work in progress.** This branch is the 2.0 rewrite in Rust and is not
+> usable yet. See [docs/PLAN.md](docs/PLAN.md). The Python 1.x version is on
+> `master`.
 
 ## License
 

@@ -1,13 +1,8 @@
-__pycache__/
-*.py[cod]
-env/
-build/
-dist/
-*.egg-info/
+/target/
 
+# local test media, see docs/PLAN.md
+/references/
 
-src/ffmpeg2pass-0.log
-src/tgradish/config.toml
-
-*.mp4
-*.webm
+# conversion results accidentally left in the repo root
+/*.mp4
+/*.webm
