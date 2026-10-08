@@ -109,54 +109,71 @@ impl std::fmt::Display for Range {
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Options {
     /// What to make. Default: sticker.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<Target>,
     /// How to scale the video into the target size. Default: contain for
     /// stickers, pad for emoji.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub resize: Option<Resize>,
     /// What to tune to get close to the 256 KB limit. Default: auto.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fit: Option<Fit>,
     /// Maximum number of encodes while fitting. Default: 8.
     #[schemars(range(min = 1, max = 50))]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub attempts: Option<u32>,
     /// Range searched while fitting, in the unit of the fitted value
     /// (kbit/s, CRF, fps or seconds). Default depends on `fit`.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fit_range: Option<Range>,
     /// Seconds to skip at the start of the input. Default: 0.
     #[schemars(range(min = 0.0))]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub start: Option<f64>,
     /// Length of the result in seconds. Default: the rest of the input, or
     /// at most 3 seconds when not spoofing.
     #[schemars(range(min = 0.0))]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub length: Option<f64>,
     /// Frame rate of the result. Default: the input frame rate, at most 30.
     #[schemars(range(min = 1.0, max = 30.0))]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<f64>,
     /// Target bitrate in kbit/s. Used when not fitting bitrate. Default:
     /// estimated from the size limit.
     #[schemars(range(min = 1.0))]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bitrate: Option<f64>,
     /// Constant quality from 0 (best) to 63 (worst). Used when fitting
     /// frame rate or length, or with `fit = "off"`. Default: 32.
     #[schemars(range(min = 0, max = 63))]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub crf: Option<u8>,
     /// Encoder speed. Default: balanced.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub speed: Option<Speed>,
     /// Lossless encoding. Only useful for tiny or static videos. Default:
     /// false.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub lossless: Option<bool>,
     /// When to spoof the duration header so Telegram accepts videos longer
     /// than 3 seconds. Default: auto.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub spoof: Option<Spoof>,
     /// Duration written into the header when spoofing, in seconds. Default:
     /// 0.42069.
     #[schemars(range(min = 0.001, max = 3.0))]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fake_duration: Option<f64>,
     /// Title stored in the file metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     /// Mark the file as made by tgradish: writing and muxing app metadata
     /// and a signature hidden in padding. Default: true.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub watermark: Option<bool>,
     /// Extra ffmpeg output arguments, added before the output file.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub extra_args: Option<Vec<String>>,
 }
 

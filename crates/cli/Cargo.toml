@@ -7,8 +7,25 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[[bin]]
+name = "tgradish"
+path = "src/main.rs"
+
 [dependencies]
 tgradish-core.workspace = true
 
+anyhow.workspace = true
+clap.workspace = true
+console.workspace = true
+ctrlc.workspace = true
+indicatif.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
