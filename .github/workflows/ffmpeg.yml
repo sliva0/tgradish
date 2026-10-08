@@ -31,7 +31,7 @@ jobs:
           sudo apt-get install -y nasm meson ninja-build pkg-config
           if [ "${{ matrix.target }}" = windows ]; then sudo apt-get install -y mingw-w64; fi
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/ffmpeg/sources
           key: ffmpeg-sources-${{ hashFiles('xtask/src/main.rs') }}
@@ -46,7 +46,7 @@ jobs:
           "$dir/ffmpeg" -hide_banner -encoders | grep libvpx-vp9
           ldd "$dir/ffmpeg"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ffmpeg-${{ matrix.target }}
           path: |
@@ -60,7 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: ffmpeg-windows
           path: ffmpeg-archive
