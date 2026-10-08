@@ -145,14 +145,16 @@ fn render(anim: &PixelAnim, settings: &Settings, options: &Options) -> Result<(S
 }
 
 /// Estimates what a `.tgs` of `anim` comes to: quickly encoded, then
-/// scaled by `calibration`. `None` when it can't be made at all.
+/// scaled by `calibration`. JSON near its own limit counts as that share
+/// of `max_bytes` when that is more, so reductions that shrink the JSON
+/// count as progress even before it fits. `None` when it can't be made at
+/// all.
 fn estimate(anim: &PixelAnim, options: &Options, calibration: f64) -> Option<usize> {
     let quick = Settings { effort: Effort::Fast, ..Settings::default() };
     let (_, json) = render(anim, &quick, options).ok()?;
-    if json.len() > MAX_JSON {
-        return None;
-    }
-    Some((file::quick_size(json.as_bytes()) as f64 * calibration) as usize)
+    let packed = file::quick_size(json.as_bytes()) as f64 * calibration;
+    let raw = json.len() as f64 / MAX_JSON as f64 * options.max_bytes as f64;
+    Some(packed.max(raw) as usize)
 }
 
 /// Makes a sticker of `animation`, reporting `progress`. `cancelled` is
@@ -363,4 +365,31 @@ fn normalise_likely_scale(anim: &PixelAnim) -> Option<u32> {
     let animation = Animation::new(width, height, rgba).ok()?;
     let options = normalise::Options { keep_canvas: true, ..normalise::Options::default() };
     normalise(&animation, &options).ok()?.1.likely_scale.map(|likely| likely.scale)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tgradish_frames::Frame;
+
+    use super::*;
+
+    #[test]
+    fn estimates_json_over_its_limit_as_too_large() {
+        let input = Animation::new(
+            2,
+            2,
+            vec![Frame { rgba: vec![255; 16], duration: Duration::from_millis(100) }],
+        )
+        .unwrap();
+        let (anim, _) = normalise(&input, &normalise::Options::default()).unwrap();
+        let named = |bytes: usize| Options { name: Some("x".repeat(bytes)), ..Options::default() };
+        let small = estimate(&anim, &named(0), 1.0).unwrap();
+        assert!(small < 1000, "{small}");
+        // the name packs to almost nothing, but the JSON is too large
+        let over = estimate(&anim, &named(MAX_JSON + 100_000), 1.0).unwrap();
+        let further = estimate(&anim, &named(MAX_JSON + 200_000), 1.0).unwrap();
+        assert!(telegram::MAX_BYTES < over && over < further, "{over} {further}");
+    }
 }

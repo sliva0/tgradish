@@ -523,8 +523,12 @@ pub fn painter(
     let mut painter = Painter { anim, cells, lifetimes: settings.lifetimes, split: settings.split };
     if settings.lifetimes {
         match painter.search(settings.effort, score) {
-            // a layer per frame stays within the limit for up to 180 frames
-            Err(EncodeError::TooManyLayers { .. }) => painter.lifetimes = false,
+            // a layer per frame stays within the limit for up to 180
+            // frames, and a colour's rectangles in one frame are fewer
+            // than over a merged lifetime
+            Err(EncodeError::TooManyLayers { .. } | EncodeError::TooManyRects { .. }) => {
+                painter.lifetimes = false
+            }
             result => return result,
         }
     }
@@ -647,6 +651,37 @@ mod tests {
 
     use super::*;
     use crate::normalise::{Options, normalise};
+
+    #[test]
+    fn draws_frame_by_frame_when_lifetimes_need_too_many_rects() {
+        // isolated pixels swapping two colours: kept for both frames, a
+        // colour covers every one of them, more than a layer takes
+        let size = 129u32;
+        let frames = (0..2)
+            .map(|frame| {
+                let rgba = (0..size * size)
+                    .flat_map(|index| {
+                        let (x, y) = (index % size, index / size);
+                        match (x % 2, y % 2, (x / 2 + y / 2 + frame) % 2) {
+                            (0, 0, 0) => [230, 40, 40, 255],
+                            (0, 0, _) => [40, 40, 230, 255],
+                            _ => [0; 4],
+                        }
+                    })
+                    .collect();
+                Frame { rgba, duration: Duration::from_millis(100) }
+            })
+            .collect();
+        let input = Animation::new(size, size, frames).unwrap();
+        let anim =
+            normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
+        let scene = painter(&anim, &Settings::default(), None).unwrap();
+        assert_eq!(scene.compare(&anim), None);
+        for layer in &scene.layers {
+            let rects: usize = layer.groups.iter().map(|group| group.shapes.len()).sum();
+            assert!(rects + 3 * layer.groups.len() <= MAX_SHAPES);
+        }
+    }
 
     #[test]
     fn survives_orders_that_cant_be_drawn() {
