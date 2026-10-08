@@ -130,6 +130,8 @@ jobs:
           cd artifacts
           unzip -q tgradish-*.zip
           bin=$(ls tgradish-*/tgradish.exe)
+          # opens the window without a console when started from Explorer
+          grep -q consoleAllocationPolicy "$bin"
           "$bin" ffmpeg status
           "$bin" convert input.png -o still.webm --length 1 --preset fast
           # VP9 with alpha in, which needs the libvpx decoder

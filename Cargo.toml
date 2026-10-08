@@ -21,6 +21,7 @@ clap = { version = "4.6.7", features = ["derive", "env", "wrap_help"] }
 console = "0.16.6"
 ctrlc = "3.5.2"
 directories = "6.0.0"
+embed-manifest = "1.5.1"
 eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 flate2 = "1.1.10"
 image = { version = "0.25.10", default-features = false, features = ["gif", "png", "webp"] }
@@ -36,6 +37,7 @@ tempfile = "3.27.0"
 thiserror = "2.0.21"
 toml = "1.1.7"
 which = "8.0.6"
+windows-sys = "0.61.2"
 zopfli = { version = "0.8.3", default-features = false, features = ["gzip", "std"] }
 
 [workspace.lints.rust]
