@@ -3,21 +3,26 @@
 //! converts a file once its size and modification time stop changing, so
 //! files that are still being copied are left alone.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
-use anyhow::{Result, bail};
+use anyhow::{Context as _, Result, bail};
 
 use crate::Context;
 use crate::args::WatchArgs;
 use crate::convert::Converter;
+use crate::ui;
 
 /// Extensions of files worth converting.
 const EXTENSIONS: &[&str] = &[
     "mp4", "m4v", "mov", "mkv", "webm", "avi", "flv", "ts", "mts", "ogv", "gif", "apng", "png",
     "jpg", "jpeg", "webp", "bmp", "tif", "tiff",
 ];
+
+/// Failed conversions are retried this many times, in case the file was
+/// locked or not readable yet.
+const MAX_FAILURES: u32 = 5;
 
 /// Whether `path` looks like an input rather than a result, a hidden file
 /// or a download in progress.
@@ -42,19 +47,50 @@ struct Stamp {
     modified: Option<SystemTime>,
 }
 
-fn scan(dir: &Path, recursive: bool, found: &mut HashMap<PathBuf, Stamp>) {
-    // unreadable entries are skipped: they may be in the middle of a move
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Ok(metadata) = entry.metadata() else { continue };
-        if metadata.is_dir() {
-            let hidden = path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
-            if recursive && !hidden {
-                scan(&path, recursive, found);
+fn current_stamp(path: &Path) -> Option<Stamp> {
+    let metadata = std::fs::metadata(path).ok()?;
+    metadata.is_file().then(|| Stamp { size: metadata.len(), modified: metadata.modified().ok() })
+}
+
+/// One look at the directory: input files, and directories that could not
+/// be read.
+#[derive(Default)]
+struct Scan {
+    files: HashMap<PathBuf, Stamp>,
+    unreadable: Vec<(PathBuf, std::io::Error)>,
+}
+
+impl Scan {
+    fn run(dir: &Path, recursive: bool) -> Scan {
+        let mut scan = Scan::default();
+        scan.visit(dir, recursive);
+        scan
+    }
+
+    fn visit(&mut self, dir: &Path, recursive: bool) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(err) => {
+                self.unreadable.push((dir.to_path_buf(), err));
+                return;
             }
-        } else if metadata.is_file() && is_input(&path) {
-            found.insert(path, Stamp { size: metadata.len(), modified: metadata.modified().ok() });
+        };
+        // entries can disappear while listing, they are simply skipped
+        for entry in entries.flatten() {
+            let path = entry.path();
+            // does not follow symlinks, so links cannot make loops
+            let Ok(file_type) = entry.file_type() else { continue };
+            if file_type.is_dir() {
+                let hidden = path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
+                if recursive && !hidden {
+                    self.visit(&path, recursive);
+                }
+            } else if file_type.is_file()
+                && is_input(&path)
+                && let Some(stamp) = current_stamp(&path)
+            {
+                self.files.insert(path, stamp);
+            }
         }
     }
 }
@@ -74,7 +110,7 @@ impl Tracker {
         self.handled.insert(path, stamp);
     }
 
-    /// Returns files that are ready, oldest scan order first.
+    /// Returns files that are ready, sorted by path.
     fn update(&mut self, current: HashMap<PathBuf, Stamp>) -> Vec<(PathBuf, Stamp)> {
         self.handled.retain(|path, _| current.contains_key(path));
         let mut ready = Vec::new();
@@ -95,11 +131,33 @@ impl Tracker {
     }
 }
 
+/// Failed attempts at one file, while its stamp stays the same.
+struct Failures {
+    stamp: Stamp,
+    count: u32,
+    retry_at: Instant,
+}
+
+/// Whether trying again could help: the file may have been locked, not
+/// readable yet, or still being written.
+fn worth_retrying(err: &tgradish_core::Error) -> bool {
+    use tgradish_core::Error;
+    matches!(err, Error::Io(_) | Error::Probe { .. } | Error::Ffmpeg { .. } | Error::Libav(_))
+}
+
 /// Sleeps for `seconds`, waking up early when cancelled.
 fn sleep(ctx: &Context, seconds: f64) {
-    let until = std::time::Instant::now() + Duration::from_secs_f64(seconds);
-    while !ctx.cancel.is_cancelled() && std::time::Instant::now() < until {
+    let until = Instant::now() + Duration::from_secs_f64(seconds);
+    while !ctx.cancel.is_cancelled() && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn warn(ctx: &Context, message: String) {
+    if ctx.global.json {
+        crate::print_json_error(&anyhow::anyhow!(message), None);
+    } else {
+        eprintln!("{} {message}", ui::warning_label());
     }
 }
 
@@ -110,19 +168,23 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
     if !(args.interval > 0.0 && args.interval.is_finite()) {
         bail!("--interval must be more than 0");
     }
+    std::fs::read_dir(&args.dir).with_context(|| format!("cannot read {}", args.dir.display()))?;
     let converter = Converter::new(ctx, &args.conversion)?;
+    let output_for = |path: &Path| converter.output_under(path, Some(&args.dir));
 
     let mut tracker = Tracker::default();
-    let mut found = HashMap::new();
-    scan(&args.dir, args.recursive, &mut found);
-    for (path, stamp) in found {
-        let has_result = converter.output_for(&path).exists();
-        if args.existing && !has_result {
+    for (path, stamp) in Scan::run(&args.dir, args.recursive).files {
+        if args.existing && !output_for(&path).exists() {
             tracker.pending.insert(path, stamp);
         } else {
             tracker.ignore(path, stamp);
         }
     }
+    // inputs whose result this command wrote, so it may replace it when the
+    // input changes again
+    let mut ours: HashSet<PathBuf> = HashSet::new();
+    let mut failures: HashMap<PathBuf, Failures> = HashMap::new();
+    let mut unreadable: HashSet<PathBuf> = HashSet::new();
 
     if !ctx.global.json && !ctx.global.quiet {
         eprintln!("watching {}, press Ctrl-C to stop", args.dir.display());
@@ -135,18 +197,65 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
             }
             return Ok(());
         }
-        let mut found = HashMap::new();
-        scan(&args.dir, args.recursive, &mut found);
-        for (path, stamp) in tracker.update(found) {
-            match converter.run(&path, None) {
-                Ok(_) => {}
+
+        let scan = Scan::run(&args.dir, args.recursive);
+        let now_unreadable: HashSet<PathBuf> =
+            scan.unreadable.iter().map(|(p, _)| p.clone()).collect();
+        for (path, err) in &scan.unreadable {
+            if !unreadable.contains(path) {
+                warn(ctx, format!("cannot read {}: {err}", path.display()));
+            }
+        }
+        unreadable = now_unreadable;
+
+        for (path, stamp) in tracker.update(scan.files) {
+            if let Some(failed) = failures.get(&path) {
+                if failed.stamp != stamp {
+                    failures.remove(&path);
+                } else if Instant::now() < failed.retry_at {
+                    // comes back as ready after the next scan
+                    continue;
+                }
+            }
+            // earlier conversions took time, the file may have changed since
+            if current_stamp(&path) != Some(stamp) {
+                continue;
+            }
+
+            let overwrite = converter.overwrite() || ours.contains(&path);
+            let result = converter.run(&path, Some(output_for(&path)), overwrite);
+            let changed_meanwhile = current_stamp(&path) != Some(stamp);
+            match result {
+                Ok(_) => {
+                    ours.insert(path.clone());
+                    failures.remove(&path);
+                }
                 Err(tgradish_core::Error::Cancelled) => {
                     return Err(tgradish_core::Error::Cancelled.into());
                 }
+                Err(err) if worth_retrying(&err) && !changed_meanwhile => {
+                    let failed = failures.entry(path.clone()).or_insert(Failures {
+                        stamp,
+                        count: 0,
+                        retry_at: Instant::now(),
+                    });
+                    failed.count += 1;
+                    converter.report_failure(&path, err);
+                    if failed.count < MAX_FAILURES {
+                        let delay = (args.interval * 2f64.powi(failed.count as i32)).min(60.0);
+                        failed.retry_at = Instant::now() + Duration::from_secs_f64(delay);
+                        // not handled: it is retried while it stays the same
+                        continue;
+                    }
+                    warn(ctx, format!("giving up on {} until it changes", path.display()));
+                }
                 Err(err) => converter.report_failure(&path, err),
             }
-            // also after failures: retried only when the file changes
-            tracker.ignore(path, stamp);
+            // a file that changed while converting is converted again once
+            // it settles
+            if !changed_meanwhile {
+                tracker.ignore(path, stamp);
+            }
         }
     }
 }
@@ -180,5 +289,23 @@ mod tests {
         assert!(tracker.update(scan(20)).is_empty(), "already converted");
         assert!(tracker.update(scan(30)).is_empty(), "changed again");
         assert_eq!(tracker.update(scan(30)).len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reports_unreadable_directories() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let locked = dir.path().join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let scan = Scan::run(dir.path(), true);
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // root can read anything, then there is nothing to report
+        if scan.unreadable.is_empty() {
+            return;
+        }
+        assert_eq!(scan.unreadable[0].0, locked);
     }
 }

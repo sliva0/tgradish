@@ -177,16 +177,18 @@ fn watch_converts_new_files() {
     let Some(input) = reference("uhh.mp4") else { return };
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("old.mp4"), b"there before watching").unwrap();
+    let out = dir.path().join("out");
     let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
-        .args(["--json", "watch", dir.path().to_str().unwrap(), "--interval", "0.2"])
-        .args(["--preset", "fast", "--length", "0.5"])
+        .args(["--json", "watch", dir.path().to_str().unwrap(), "--interval", "0.2", "-r"])
+        .args(["--output-dir", out.to_str().unwrap(), "--preset", "fast", "--length", "0.5"])
         .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
     // files there when watching starts are left alone, so let it start first
     std::thread::sleep(std::time::Duration::from_secs(2));
-    std::fs::copy(&input, dir.path().join("new.mp4")).unwrap();
+    std::fs::create_dir(dir.path().join("sub")).unwrap();
+    std::fs::copy(&input, dir.path().join("sub/new.mp4")).unwrap();
 
     let stdout = BufReader::new(child.stdout.take().unwrap());
     let (tx, rx) = std::sync::mpsc::channel();
@@ -209,7 +211,45 @@ fn watch_converts_new_files() {
 
     let last = events.last().expect("no events within a minute");
     assert_eq!(last["event"], "finished", "{last}");
-    assert!(dir.path().join("new.sticker.webm").is_file());
-    assert!(!dir.path().join("old.sticker.webm").exists(), "files from before are left alone");
+    // subdirectories are kept under --output-dir
+    assert!(out.join("sub/new.sticker.webm").is_file());
+    assert!(!out.join("old.sticker.webm").exists(), "files from before are left alone");
     assert_eq!(status.code(), Some(0));
+}
+
+#[test]
+fn refuses_to_merge_outputs_of_same_named_inputs() {
+    if Command::new("ffmpeg").arg("-version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    for sub in ["a", "b"] {
+        std::fs::create_dir(dir.path().join(sub)).unwrap();
+        let status = Command::new("ffmpeg")
+            .args(["-v", "error", "-f", "lavfi", "-i", "testsrc2=s=64x64:d=1", "-frames:v", "1"])
+            .arg(dir.path().join(sub).join("same.png"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+    let out = dir.path().join("out");
+    let output = tgradish(&[
+        "--json",
+        "convert",
+        dir.path().join("a/same.png").to_str().unwrap(),
+        dir.path().join("b/same.png").to_str().unwrap(),
+        "--output-dir",
+        out.to_str().unwrap(),
+        "--overwrite",
+        "--preset",
+        "fast",
+        "--length",
+        "0.2",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let events = json_lines(&output);
+    let errors: Vec<_> = events.iter().filter(|e| e["event"] == "error").collect();
+    assert_eq!(errors.len(), 1, "{events:?}");
+    assert!(errors[0]["input"].as_str().unwrap().ends_with("b/same.png"));
+    assert!(out.join("same.sticker.webm").is_file());
 }

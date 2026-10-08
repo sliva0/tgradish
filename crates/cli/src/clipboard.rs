@@ -30,23 +30,42 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Paths in copied text: plain paths or `file://` URIs, one per line.
-fn paths_in_text(text: &str) -> Vec<PathBuf> {
+/// Path of a `file://` URI, without the `file://`. Handles
+/// `file:///home/x`, `file:///C:/x`, `file://localhost/x` and, on Windows,
+/// network shares like `file://server/share/x`.
+fn uri_path(rest: &str, windows: bool) -> PathBuf {
+    let path = percent_decode(rest);
+    let (host, path) = match path.strip_prefix('/') {
+        Some(_) => ("", path.as_str()),
+        None => path.split_once('/').map_or((path.as_str(), ""), |(host, p)| (host, p)),
+    };
+    let host = if host.eq_ignore_ascii_case("localhost") { "" } else { host };
+    match (windows, host) {
+        // /C:/x is C:/x
+        (true, "") => PathBuf::from(path.trim_start_matches('/')),
+        (true, host) => PathBuf::from(format!(r"\\{host}\{}", path.replace('/', "\\"))),
+        (false, "") => PathBuf::from(format!("/{}", path.trim_start_matches('/'))),
+        // shares on other hosts are not reachable as paths here
+        (false, host) => PathBuf::from(format!("//{host}/{path}")),
+    }
+}
+
+/// Paths in copied text: plain paths, possibly in quotes as Windows'
+/// "Copy as path" writes them, or `file://` URIs, one per line.
+fn paths_in_text(text: &str, windows: bool) -> Vec<PathBuf> {
     text.lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(|line| match line.strip_prefix("file://") {
-            // file:///home/x on Unix, file:///C:/x on Windows
-            Some(rest) => {
-                let path = percent_decode(rest);
-                let path = path.strip_prefix("localhost").unwrap_or(&path).to_string();
-                if cfg!(windows) {
-                    PathBuf::from(path.trim_start_matches('/'))
-                } else {
-                    path.into()
-                }
+        .map(|line| {
+            let line = line
+                .strip_prefix('"')
+                .and_then(|l| l.strip_suffix('"'))
+                .or_else(|| line.strip_prefix('\'').and_then(|l| l.strip_suffix('\'')))
+                .unwrap_or(line);
+            match line.strip_prefix("file://") {
+                Some(rest) => uri_path(rest, windows),
+                None => PathBuf::from(line),
             }
-            None => PathBuf::from(line),
         })
         .collect()
 }
@@ -63,7 +82,7 @@ pub fn inputs() -> Result<(Vec<PathBuf>, Option<tempfile::TempDir>)> {
         return Ok((files, None));
     }
     if let Ok(text) = clipboard.get_text() {
-        let paths = paths_in_text(&text);
+        let paths = paths_in_text(&text, cfg!(windows));
         if !paths.is_empty() && paths.iter().all(|path| path.is_file()) {
             return Ok((paths, None));
         }
@@ -90,15 +109,34 @@ mod tests {
 
     #[test]
     fn reads_paths_and_uris() {
-        let text = "# copied\nfile:///home/me/My%20Pig.mp4\n/tmp/cat.gif\n\n";
-        let paths = paths_in_text(text);
-        if cfg!(windows) {
-            assert_eq!(paths[0], PathBuf::from("home/me/My Pig.mp4"));
-        } else {
-            assert_eq!(paths[0], PathBuf::from("/home/me/My Pig.mp4"));
-        }
-        assert_eq!(paths[1], PathBuf::from("/tmp/cat.gif"));
-        assert_eq!(paths.len(), 2);
+        let text = "# copied\nfile:///home/me/My%20Pig.mp4\n/tmp/cat.gif\n'/tmp/a b.mp4'\n\n";
+        let paths = paths_in_text(text, false);
+        assert_eq!(
+            paths,
+            [
+                PathBuf::from("/home/me/My Pig.mp4"),
+                PathBuf::from("/tmp/cat.gif"),
+                PathBuf::from("/tmp/a b.mp4"),
+            ]
+        );
+        assert_eq!(
+            paths_in_text("file://localhost/tmp/x.mp4", false),
+            [PathBuf::from("/tmp/x.mp4")]
+        );
         assert_eq!(percent_decode("a%zzb%41"), "a%zzbA");
+    }
+
+    #[test]
+    fn reads_windows_paths() {
+        let text = "\"C:\\Users\\me\\pig.mp4\"\nfile:///C:/Users/me/My%20Pig.mp4\n\
+                    file://server/share/pig.mp4";
+        assert_eq!(
+            paths_in_text(text, true),
+            [
+                PathBuf::from(r"C:\Users\me\pig.mp4"),
+                PathBuf::from("C:/Users/me/My Pig.mp4"),
+                PathBuf::from(r"\\server\share\pig.mp4"),
+            ]
+        );
     }
 }

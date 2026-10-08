@@ -498,3 +498,15 @@ fn builtin_backend_rejects_extra_args() {
     let result = convert(&Backend::Linked, &request, &CancelToken::new(), &mut |_| {});
     assert!(matches!(result, Err(Error::InvalidOptions(_))), "{result:?}");
 }
+
+/// A FIFO without a writer would block the built-in ffmpeg in the OS,
+/// where cancelling cannot reach.
+#[cfg(all(unix, feature = "linked"))]
+#[test]
+fn builtin_backend_rejects_fifos() {
+    let dir = tempfile::tempdir().unwrap();
+    let fifo = dir.path().join("fifo.mp4");
+    assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+    let result = Backend::Linked.probe(&fifo, &CancelToken::new());
+    assert!(matches!(result, Err(Error::Probe { .. })), "{result:?}");
+}

@@ -15,9 +15,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [linux, windows]
-    # the oldest supported Ubuntu, so the Linux build runs on older glibc too
-    runs-on: ubuntu-22.04
+        include:
+          # the oldest supported Ubuntu, so the Linux build runs on older glibc too
+          - target: linux
+            runner: ubuntu-22.04
+          - target: windows
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
 
