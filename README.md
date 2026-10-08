@@ -5,8 +5,8 @@ with the ability to bypass the 3 second limit, and pixel art into animated
 (`.tgs`) stickers.
 
 > **Work in progress.** This branch is the 2.0 rewrite in Rust; there are no
-> releases yet. See [docs/PLAN.md](docs/PLAN.md) for the roadmap, including
-> a GUI and a Telegram web app. The Python 1.x version is on `master`, and
+> releases yet. See [docs/PLAN.md](docs/PLAN.md) for the roadmap; a
+> Telegram web app comes after 2.0. The Python 1.x version is on `master`, and
 > pixelart2tgs 1.x is now part of tgradish.
 
 ## What it does
@@ -29,6 +29,12 @@ sheets or image sequences of pixel art ([docs/tgs.md](docs/tgs.md)):
   ...) and says which.
 
 ## Usage
+
+Started from a file manager or the Start menu, tgradish opens a window:
+drop or paste files, pick a preset, adjust options and convert, with a
+preview of each result. `tgradish gui` opens it from a terminal.
+
+On the command line:
 
 ```console
 # sticker from a video, written next to it as pig.sticker.webm
@@ -86,6 +92,9 @@ progress event, and `--json` makes commands machine-readable. See
 ```console
 # uses ffmpeg executables
 cargo build --release
+
+# without the window
+cargo build --release --no-default-features
 
 # with ffmpeg built in, against the system's ffmpeg libraries
 cargo build --release --features linked

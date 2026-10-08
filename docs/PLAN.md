@@ -19,10 +19,10 @@ after 2.0.
 ```
 crates/
   core/     tgradish-core    WebM, ffmpeg backends, presets, protocol
-  cli/      tgradish         the binary: CLI now, GUI later (see GUI)
+  cli/      tgradish         the binary: CLI and GUI (see "Shipping one binary")
   tgs/      tgradish-tgs     frames in, .tgs bytes out (docs/tgs.md)
   frames/   tgradish-frames  RGBA animations, pure-Rust decoders
-  gui/      planned, if the GUI lives in its own crate linked into the binary
+  gui/      tgradish-gui     the window (egui), linked into the binary
   tgs-lab/  publish = false: render and seam checks, benchmark
 xtask/      ffmpeg build, packaging
 docs/       plan, protocol, ffmpeg, tgs, web app
@@ -49,8 +49,11 @@ Done on `rewrite-v2`, with CI on Linux and Windows:
 - `.tgs`: T1 (crates, WASM check), T2 (decoders, normalisation), T3 (Lottie
   writer, checks, `tgs-lab verify` in tlottie and rlottie), T4 (encoder v1:
   half the size of 1.x, no seams), T5 (effort levels, bench baselines), T7
-  (fitting with lossy reductions), T8 (`.tgs` in the CLI, protocol 2). Next:
-  T6.
+  (fitting with lossy reductions), T8 (`.tgs` in the CLI, protocol 2). T6
+  (encoder v2) has its first part, splitting colours into a lasting core
+  and per-frame changes; more is in `docs/tgs.md`;
+- GUI: `tgradish gui`, or tgradish started outside a terminal. Next:
+  distribution.
 
 ## Roadmap
 
@@ -88,11 +91,19 @@ cover two formats, which the GUI then builds on.
 - One binary that is both CLI and GUI, see "Shipping one binary" below.
 - Forms are generated from the options' JSON Schema, so `.webm` and `.tgs`
   options show up without hand-written UI for each.
-- Features to settle: file drop and paste, presets, progress per attempt,
-  preview of the result (looping, over a checkerboard for transparency),
-  batch queue, `inspect` view, settings (ffmpeg source, config).
-- Prefer the glow renderer over wgpu: eframe's docs say it is
-  significantly smaller. Measure the size it adds to the binary.
+- Done: files by dialog, drag and drop or paste (files, paths, images);
+  folders and several images as the frames of one `.tgs`; presets with the
+  form showing what differs from them; a queue run one job at a time with
+  progress, log and cancelling; a looping preview of the result over a
+  checkerboard (`.tgs` from the final animation, WebM decoded by the
+  backend); an inspect view; settings (output folder, overwriting, default
+  presets, ffmpeg) saved to `config.toml`. Headless tests drive it with
+  egui_kittest.
+- glow rather than wgpu, as eframe's docs say it is much smaller. The
+  window adds about 8 MB to the Linux binary (4.4 MB without it); the
+  window's dependencies are built for size (`opt-level = "s"`), which
+  saves 1.5 MB without slowing conversions. egui's fonts (1.4 MB) stay, so
+  emoji and symbols in file names show; Wayland support stays too.
 
 ### 4. Distribution
 
@@ -176,8 +187,10 @@ its manifest gets no console window when started from Explorer, but still
 behaves like a normal CLI in a terminal ([Microsoft
 docs](https://learn.microsoft.com/windows/console/console-allocation-policy)).
 On older Windows the same binary briefly shows a console window when
-double-clicked, which it can hide right away; a separate `tgradish-gui.exe`
-built as a GUI program is the fallback if that is too ugly.
+double-clicked; tgradish frees it when no other process shares it, which
+closes it. A separate `tgradish-gui.exe` built as a GUI program is the
+fallback if that is too ugly. The manifest is embedded with
+`embed-manifest`, which needs no Windows tools when cross-compiling.
 
 ## Decisions and open questions
 
