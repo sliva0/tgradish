@@ -1,8 +1,6 @@
 //! Running ffmpeg as a separate process.
 
 mod args;
-#[cfg(feature = "download")]
-pub mod download;
 mod locate;
 mod orientation;
 mod probe;
@@ -17,7 +15,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) use args::encode_args;
 #[cfg(feature = "linked")]
 pub(crate) use args::video_filter;
-pub use locate::{bundled_dir, downloaded_dir, locate};
+pub use locate::locate;
 pub use orientation::Orientation;
 #[cfg(feature = "linked")]
 pub(crate) use probe::pix_fmt_has_alpha;
@@ -30,15 +28,10 @@ pub use ssim::ssim;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FfmpegChoice {
-    /// The built-in ffmpeg if there is one, otherwise the bundled build,
-    /// then a downloaded one, then the system one.
+    /// The built-in ffmpeg if there is one, otherwise the system one.
     #[default]
     Auto,
-    /// The build shipped next to the tgradish executable.
-    Bundled,
-    /// The build fetched by `tgradish ffmpeg download`.
-    Downloaded,
-    /// ffmpeg from `PATH`.
+    /// ffmpeg and ffprobe from `PATH`.
     System,
     /// ffmpeg linked into tgradish, in builds with the `linked` feature.
     Builtin,
@@ -50,8 +43,7 @@ pub enum FfmpegChoice {
 pub enum FfmpegSource {
     /// Explicitly configured path.
     Path,
-    Bundled,
-    Downloaded,
+    /// Found on `PATH`.
     System,
 }
 
