@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -20,6 +22,9 @@ pub struct Converter<'a> {
     args: &'a ConversionArgs,
     backend: Backend,
     options: Options,
+    /// Outputs written by this command, and their inputs, so two inputs
+    /// with the same name never overwrite each other's result.
+    written: RefCell<HashMap<PathBuf, PathBuf>>,
 }
 
 impl<'a> Converter<'a> {
@@ -41,25 +46,58 @@ impl<'a> Converter<'a> {
         if ctx.global.json {
             listen_for_cancel(ctx);
         }
-        Ok(Self { ctx, args, backend: ctx.backend()?, options })
+        Ok(Self { ctx, args, backend: ctx.backend()?, options, written: Default::default() })
     }
 
     /// Where the result for `input` goes, unless `-o` says otherwise.
     pub fn output_for(&self, input: &Path) -> PathBuf {
+        self.output_under(input, None)
+    }
+
+    /// Like [`Converter::output_for`], but keeps the directories between
+    /// `base` and the input when writing to `--output-dir`.
+    pub fn output_under(&self, input: &Path, base: Option<&Path>) -> PathBuf {
         let output = default_output(input, self.options.target.unwrap_or_default());
-        match (&self.args.output_dir, output.file_name()) {
-            (Some(dir), Some(name)) => dir.join(name),
-            _ => output,
-        }
+        let (Some(dir), Some(name)) = (&self.args.output_dir, output.file_name()) else {
+            return output;
+        };
+        let relative =
+            base.and_then(|base| input.parent()?.strip_prefix(base).ok()).unwrap_or(Path::new(""));
+        dir.join(relative).join(name)
+    }
+
+    pub fn overwrite(&self) -> bool {
+        self.args.overwrite
     }
 
     /// Converts one input, printing events as text or JSON.
-    pub fn run(&self, input: &Path, output: Option<PathBuf>) -> tgradish_core::Result<Outcome> {
+    pub fn run(
+        &self,
+        input: &Path,
+        output: Option<PathBuf>,
+        overwrite: bool,
+    ) -> tgradish_core::Result<Outcome> {
+        let output = output.unwrap_or_else(|| self.output_for(input));
+        let key = std::path::absolute(&output).unwrap_or_else(|_| output.clone());
+        let input_key = std::path::absolute(input).unwrap_or_else(|_| input.to_path_buf());
+        if let Some(other) = self.written.borrow().get(&key)
+            && *other != input_key
+        {
+            return Err(tgradish_core::Error::InvalidOptions(format!(
+                "{} was already written from {}; inputs with the same name need \
+                 different output directories",
+                output.display(),
+                other.display()
+            )));
+        }
+        if let Some(parent) = output.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)?;
+        }
         let request = Request {
             input: input.to_path_buf(),
-            output: Some(output.unwrap_or_else(|| self.output_for(input))),
+            output: Some(output),
             options: self.options.clone(),
-            overwrite: self.args.overwrite,
+            overwrite,
             keep_temp: self.args.keep_temp,
         };
         let cancel = &self.ctx.cancel;
@@ -73,10 +111,13 @@ impl<'a> Converter<'a> {
             printer.finish();
             result
         };
-        if let Ok(Outcome { temp_dir: Some(dir), .. }) = &result
-            && !self.ctx.global.json
-        {
-            eprintln!("intermediate files kept in {}", dir.display());
+        if let Ok(outcome) = &result {
+            self.written.borrow_mut().insert(key, input_key);
+            if let Some(dir) = &outcome.temp_dir
+                && !self.ctx.global.json
+            {
+                eprintln!("intermediate files kept in {}", dir.display());
+            }
         }
         result
     }
@@ -129,7 +170,7 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
             }
             (None, _) => None,
         };
-        match converter.run(input, output) {
+        match converter.run(input, output, converter.overwrite()) {
             Ok(_) => {}
             Err(tgradish_core::Error::Cancelled) => {
                 return Err(tgradish_core::Error::Cancelled.into());

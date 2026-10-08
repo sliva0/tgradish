@@ -18,12 +18,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # the oldest supported Ubuntu, so the Linux build runs on older glibc too
           - target: linux
             triple: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          # MinGW headers older than 11 lack the Direct3D 12 headers that
+          # ffmpeg-sys-next's bindings include
           - target: windows
             triple: x86_64-pc-windows-gnu
-    # the oldest supported Ubuntu, so the Linux build runs on older glibc too
-    runs-on: ubuntu-22.04
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
 
@@ -54,6 +58,9 @@ jobs:
           CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
           AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
           BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_gnu: -I/usr/x86_64-w64-mingw32/include
+          # links winpthread and libgcc into the executable instead of
+          # depending on their DLLs; `xtask package` checks the result
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS: -C link-arg=-static
         run: >
           cargo build --release --locked -p tgradish
           --features linked-static --target ${{ matrix.triple }}
