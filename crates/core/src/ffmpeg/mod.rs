@@ -46,6 +46,33 @@ pub enum FfmpegSource {
     System,
 }
 
+/// What an ffmpeg build can do, as far as tgradish cares.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct Capabilities {
+    /// First line of `ffmpeg -version`.
+    pub version: String,
+    /// Whether it has the libvpx VP9 encoder that stickers need.
+    pub libvpx_vp9: bool,
+}
+
+/// Runs `ffmpeg -version` and `ffmpeg -encoders`.
+pub fn capabilities(ffmpeg: &Ffmpeg, cancel: &CancelToken) -> crate::Result<Capabilities> {
+    let stdout = |arg: &str| -> crate::Result<Vec<String>> {
+        let mut cmd = std::process::Command::new(&ffmpeg.ffmpeg);
+        cmd.args(["-hide_banner", arg]);
+        let mut lines = Vec::new();
+        run(cmd, "ffmpeg", cancel, &mut |output| {
+            if let Output::Stdout(line) = output {
+                lines.push(line);
+            }
+        })?;
+        Ok(lines)
+    };
+    let version = stdout("-version")?.into_iter().next().unwrap_or_default();
+    let libvpx_vp9 = stdout("-encoders")?.iter().any(|line| line.contains(" libvpx-vp9 "));
+    Ok(Capabilities { version, libvpx_vp9 })
+}
+
 /// ffmpeg and ffprobe executables.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Ffmpeg {

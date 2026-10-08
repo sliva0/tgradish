@@ -145,12 +145,12 @@ fn check_range(range: Range, fit: Fit, length: f64) -> Result<Range> {
         Fit::Crf => (0.0, 63.0, "crf"),
         Fit::Fps => (1.0, telegram::MAX_FPS, "fps"),
         Fit::Length => (f64::MIN_POSITIVE, length, "length"),
-        Fit::Auto | Fit::Bitrate | Fit::Off => (f64::MIN_POSITIVE, f64::INFINITY, "bitrate"),
+        Fit::Auto | Fit::Bitrate | Fit::Off => (1.0, f64::INFINITY, "bitrate"),
     };
     if range.min < low || range.max > high {
         return Err(invalid(match (low, high.is_finite()) {
-            (f64::MIN_POSITIVE, false) => format!("{what} range must be above 0"),
-            (f64::MIN_POSITIVE, true) => format!("{what} range must be above 0 and at most {high}"),
+            (f64::MIN_POSITIVE, _) => format!("{what} range must be above 0 and at most {high}"),
+            (_, false) => format!("{what} range must be at least {low}"),
             _ => format!("{what} range must be within {low}..{high}"),
         }));
     }
@@ -259,14 +259,18 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         return Err(invalid("crf must be between 0 and 63"));
     }
     let bitrate = match o.bitrate {
-        Some(bitrate) if !(bitrate > 0.0 && bitrate.is_finite()) => {
-            return Err(invalid("bitrate must be more than 0"));
+        Some(bitrate) if !(bitrate >= 1.0 && bitrate.is_finite()) => {
+            return Err(invalid("bitrate must be at least 1 kbit/s"));
         }
         Some(bitrate) => bitrate,
         None => estimate_bitrate(length),
     };
 
     let fit = o.fit.unwrap_or(Fit::Auto);
+    let attempts = o.attempts.unwrap_or(options::DEFAULT_ATTEMPTS);
+    if !(1..=options::MAX_ATTEMPTS).contains(&attempts) {
+        return Err(invalid(format!("attempts must be between 1 and {}", options::MAX_ATTEMPTS)));
+    }
     let lossless = o.lossless.unwrap_or(false);
     if lossless && !matches!(fit, Fit::Fps | Fit::Length | Fit::Off) {
         return Err(invalid("lossless only works with fit fps, length or off"));
@@ -284,7 +288,13 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     // length fitting may only shorten: `length` already respects the input
     // and the spoofing policy
     let fit_range = match (o.fit_range, fit) {
-        (Some(range), Fit::Length) if range.max > length && range.min.is_finite() => {
+        (Some(range), _) if !(range.min.is_finite() && range.max.is_finite()) => {
+            return Err(invalid(format!("fit range {range} must be finite")));
+        }
+        (Some(range), _) if range.min > range.max => {
+            return Err(invalid(format!("fit range {range} must have MIN <= MAX")));
+        }
+        (Some(range), Fit::Length) if range.max > length => {
             warnings.push(format!("length range capped at {length:.2} s"));
             check_range(Range { min: range.min.min(length), max: length }, fit, length)?
         }
@@ -325,7 +335,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         scaled_width,
         scaled_height,
         fit,
-        attempts: o.attempts.unwrap_or(options::DEFAULT_ATTEMPTS).max(1),
+        attempts,
         fit_range,
         auto_fps: o.fps.is_none(),
         start,
@@ -484,11 +494,17 @@ pub fn convert(
         signature: plan.watermark.then(crate::signature),
         ..Default::default()
     };
-    if changes == Patch::default() {
-        std::fs::copy(&best.path, &plan.output)?;
-    } else {
-        webm::patch_file(&best.path, &plan.output, &changes)?;
+    let mut bytes = std::fs::read(&best.path)?;
+    if changes != Patch::default() {
+        webm::patch(&mut bytes, &changes)?;
     }
+    // checked again here: the output may have appeared while encoding
+    crate::fsutil::write_file(&plan.output, &bytes, request.overwrite).map_err(|err| match err
+        .kind()
+    {
+        std::io::ErrorKind::AlreadyExists => Error::OutputExists(plan.output.clone()),
+        _ => Error::Io(err),
+    })?;
 
     let info = webm::inspect_file(&plan.output)?;
     let issues = telegram::check(&info, plan.target);
@@ -560,6 +576,20 @@ mod tests {
             let options = Options { fit: Some(fit), fit_range, ..Default::default() };
             assert!(plan_with(options).is_err(), "{fit:?} {fit_range:?} was accepted");
         }
+    }
+
+    #[test]
+    fn validates_ranges_before_capping_and_other_limits() {
+        let reversed = Options {
+            fit: Some(Fit::Length),
+            length: Some(1.0),
+            fit_range: Some(Range { min: 8.0, max: 4.0 }),
+            ..Default::default()
+        };
+        assert!(plan_with(reversed).is_err());
+        assert!(plan_with(Options { attempts: Some(51), ..Default::default() }).is_err());
+        assert!(plan_with(Options { attempts: Some(0), ..Default::default() }).is_err());
+        assert!(plan_with(Options { bitrate: Some(0.5), ..Default::default() }).is_err());
     }
 
     #[test]

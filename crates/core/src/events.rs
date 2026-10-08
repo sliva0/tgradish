@@ -74,4 +74,12 @@ pub enum Event {
         /// Problems Telegram would still have with the result.
         issues: Vec<Issue>,
     },
+    /// A conversion failed. Only printed by the CLI; the library returns
+    /// errors instead.
+    Error {
+        message: String,
+        /// The input that failed when converting several, `None` when the
+        /// whole command failed.
+        input: Option<PathBuf>,
+    },
 }

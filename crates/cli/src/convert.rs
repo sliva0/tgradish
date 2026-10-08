@@ -67,12 +67,10 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
             }
             Err(err) if args.inputs.len() > 1 => {
                 failed += 1;
-                let err = anyhow::Error::from(err).context(format!("{}", input.display()));
                 if ctx.global.json {
-                    let message = format!("{err:#}");
-                    println!("{}", serde_json::json!({ "event": "error", "message": message }));
+                    crate::print_json_error(&err.into(), Some(input));
                 } else {
-                    eprintln!("{} {err:#}", ui::error_label());
+                    eprintln!("{} {}: {err}", ui::error_label(), input.display());
                 }
             }
             Err(tgradish_core::Error::OutputExists(path)) => {
@@ -82,6 +80,10 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
         }
     }
     if failed > 0 {
+        if ctx.global.json {
+            // each failure was already reported with its input
+            return Err(crate::Exit(1).into());
+        }
         bail!("{failed} of {} conversions failed", args.inputs.len());
     }
     Ok(())

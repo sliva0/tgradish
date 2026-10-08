@@ -132,11 +132,11 @@ pub struct Options {
     pub start: Option<f64>,
     /// Length of the result in seconds. Default: the rest of the input, or
     /// at most 3 seconds when not spoofing.
-    #[schemars(range(min = 0.0))]
+    #[schemars(extend("exclusiveMinimum" = 0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub length: Option<f64>,
     /// Frame rate of the result. Default: the input frame rate, at most 30.
-    #[schemars(range(min = 1.0, max = 30.0))]
+    #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 30))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<f64>,
     /// Target bitrate in kbit/s. Used when not fitting bitrate. Default:
@@ -162,7 +162,7 @@ pub struct Options {
     pub spoof: Option<Spoof>,
     /// Duration written into the header when spoofing, in seconds. Default:
     /// 0.42069.
-    #[schemars(range(min = 0.001, max = 3.0))]
+    #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 3))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fake_duration: Option<f64>,
     /// Title stored in the file metadata.
@@ -213,6 +213,7 @@ impl Options {
 }
 
 pub const DEFAULT_ATTEMPTS: u32 = 8;
+pub const MAX_ATTEMPTS: u32 = 50;
 pub const DEFAULT_CRF: u8 = 32;
 pub const DEFAULT_FAKE_DURATION: f64 = 0.42069;
 

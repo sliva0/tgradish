@@ -76,7 +76,7 @@ fn spoofs_and_watermarks_ffmpeg_output() {
             writing_app: Some(tgradish_core::TOOL_ID.into()),
             signature: Some(format!("{} test signature", tgradish_core::TOOL_ID)),
         };
-        let report = webm::patch_file(&encoded, &patched, &changes).unwrap();
+        let report = webm::patch_file(&encoded, &patched, &changes, false).unwrap();
         assert!(report.signature_written);
         assert_eq!(report.duration_tags_patched, 1);
 
@@ -96,7 +96,7 @@ fn spoofs_and_watermarks_ffmpeg_output() {
         assert!(decodes_cleanly(&patched), "{name}: patched file has decoding errors");
 
         // patching in place gives the same result
-        webm::patch_file(&encoded, &encoded, &changes).unwrap();
+        webm::patch_file(&encoded, &encoded, &changes, true).unwrap();
         assert_eq!(std::fs::read(&encoded).unwrap(), std::fs::read(&patched).unwrap());
     }
 }
