@@ -77,11 +77,11 @@ const FFMPEG_COMPONENTS: &[(&str, &[&str])] = &[
             "apng",
             "image2",
             "image2pipe",
-            "png_pipe",
-            "jpeg_pipe",
-            "webp_pipe",
-            "bmp_pipe",
-            "tiff_pipe",
+            "image_png_pipe",
+            "image_jpeg_pipe",
+            "image_webp_pipe",
+            "image_bmp_pipe",
+            "image_tiff_pipe",
             "h264",
             "hevc",
             "m4v",
@@ -156,6 +156,24 @@ const FFMPEG_COMPONENTS: &[(&str, &[&str])] = &[
     ),
 ];
 
+/// Fails if configure silently left out a requested component, which it
+/// does for misspelled names.
+fn check_components(ffmpeg_dir: &Path) -> Result<()> {
+    let config = std::fs::read_to_string(ffmpeg_dir.join("config_components.h"))?;
+    let mut missing = Vec::new();
+    for (kind, names) in FFMPEG_COMPONENTS {
+        for name in *names {
+            let define =
+                format!("#define CONFIG_{}_{} 1", name.to_uppercase(), kind.to_uppercase());
+            if !config.lines().any(|line| line.trim() == define) {
+                missing.push(format!("{kind} {name}"));
+            }
+        }
+    }
+    ensure!(missing.is_empty(), "ffmpeg configure did not enable: {}", missing.join(", "));
+    Ok(())
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Target {
     Linux,
@@ -207,8 +225,8 @@ fn output(cmd: &mut Command) -> Result<String> {
 }
 
 impl Build {
-    /// Downloads, verifies and extracts `source`. Returns the source directory.
-    fn fetch(&self, source: &Source) -> Result<PathBuf> {
+    /// Downloads and verifies the archive of `source`.
+    fn fetch_archive(&self, source: &Source) -> Result<PathBuf> {
         let file_name = source.url.rsplit('/').next().unwrap();
         let archive = self.sources.join(format!("{}-{file_name}", source.name));
         if !archive.exists() {
@@ -222,6 +240,12 @@ impl Build {
             std::fs::remove_file(&archive)?;
             bail!("{} checksum mismatch: expected {}, got {sum}", source.name, source.sha256);
         }
+        Ok(archive)
+    }
+
+    /// Downloads, verifies and extracts `source`. Returns the source directory.
+    fn fetch(&self, source: &Source) -> Result<PathBuf> {
+        let archive = self.fetch_archive(source)?;
 
         // fresh copy per target, builds happen in the source tree
         let dir = self.sources.join(format!(
@@ -355,6 +379,7 @@ impl Build {
                 .arg("--extra-ldexeflags=-static");
         }
         run(&mut configure)?;
+        check_components(&dir)?;
         // installs the static libraries too, for `--features linked-static`
         self.make(&dir)?;
         Ok(dir)
@@ -443,10 +468,61 @@ fn build_ffmpeg(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Packs the exact sources of the libraries in the ffmpeg build, for
+/// publishing next to binaries as the LGPL asks.
+fn package_sources() -> Result<()> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let out = root.join("target/ffmpeg");
+    let build = Build {
+        target: Target::Linux,
+        asm: true,
+        jobs: "1".into(),
+        sources: out.join("sources"),
+        prefix: out.join("unused"),
+        out: out.clone(),
+    };
+    std::fs::create_dir_all(&build.sources)?;
+
+    let name = format!("ffmpeg-{}-sources", FFMPEG.version);
+    let stage = out.join(&name);
+    if stage.exists() {
+        std::fs::remove_dir_all(&stage)?;
+    }
+    std::fs::create_dir_all(&stage)?;
+    let mut readme = String::from(
+        "Sources of the ffmpeg build that tgradish releases include or link\n\
+         statically. Build it with `cargo xtask ffmpeg` from the tgradish\n\
+         repository at the same version; xtask/src/main.rs has every configure\n\
+         flag. To relink tgradish against a modified ffmpeg, build it as\n\
+         described in docs/ffmpeg.md.\n\n",
+    );
+    for source in [&ZLIB, &LIBVPX, &DAV1D, &FFMPEG] {
+        let archive = build.fetch_archive(source)?;
+        let file_name = archive.file_name().unwrap();
+        std::fs::copy(&archive, stage.join(file_name))?;
+        readme.push_str(&format!(
+            "{}: {} {}, sha256 {}\n",
+            file_name.to_string_lossy(),
+            source.name,
+            source.version,
+            source.sha256
+        ));
+    }
+    std::fs::write(stage.join("README.txt"), readme)?;
+    let archive = out.join(format!("{name}.tar"));
+    run(Command::new("tar").arg("-cf").arg(&archive).arg("-C").arg(&out).arg(&name))?;
+    println!("{}", archive.display());
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("ffmpeg") => build_ffmpeg(&args[1..]),
-        _ => bail!("usage: cargo xtask ffmpeg [--target linux|windows] [--no-asm]"),
+        Some("ffmpeg-sources") => package_sources(),
+        _ => bail!(
+            "usage: cargo xtask ffmpeg [--target linux|windows] [--no-asm]\n       \
+             cargo xtask ffmpeg-sources"
+        ),
     }
 }

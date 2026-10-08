@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
+use super::orientation::{Orientation, parse_display_matrix};
 use super::{CancelToken, Output, run};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -22,9 +23,9 @@ pub struct Probe {
     pub duration: Option<f64>,
     pub alpha: bool,
     pub still_image: bool,
-    /// Clockwise rotation applied when decoding, from the display matrix:
-    /// 0, 90, 180 or 270 degrees. Width and height are already swapped.
-    pub rotation: u16,
+    /// How frames are turned for display. Width and height above already
+    /// take it into account.
+    pub orientation: Orientation,
     /// Decoder that has to be forced to keep transparency: ffmpeg's native
     /// VP8/VP9 decoders ignore WebM alpha.
     pub decoder: Option<String>,
@@ -38,13 +39,6 @@ fn parse_ratio(value: &Value) -> Option<f64> {
 
 fn parse_f64(value: &Value) -> Option<f64> {
     value.as_str()?.parse().ok().filter(|v: &f64| v.is_finite() && *v > 0.0)
-}
-
-/// Turns a display matrix angle (counterclockwise) into the clockwise
-/// rotation ffmpeg applies, rounded to quarter turns.
-pub(crate) fn normalize_rotation(counterclockwise: f64) -> u16 {
-    let quarter_turns = (-counterclockwise / 90.0).round() as i64;
-    (quarter_turns.rem_euclid(4) * 90) as u16
 }
 
 pub(crate) fn pix_fmt_has_alpha(pix_fmt: &str) -> bool {
@@ -92,14 +86,13 @@ pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Prob
     if let Some(sar) = parse_ratio(&stream["sample_aspect_ratio"]) {
         width *= sar;
     }
-    let rotation = stream["side_data_list"]
+    let orientation = stream["side_data_list"]
         .as_array()
         .into_iter()
         .flatten()
-        .find_map(|data| data["rotation"].as_f64())
-        .unwrap_or(0.0);
-    let rotation = normalize_rotation(rotation);
-    if rotation % 180 == 90 {
+        .find_map(|data| parse_display_matrix(data["displaymatrix"].as_str()?))
+        .map_or(Orientation::Normal, |m| Orientation::from_display_matrix(&m));
+    if orientation.swaps_size() {
         std::mem::swap(&mut width, &mut height);
     }
 
@@ -126,7 +119,7 @@ pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Prob
         },
         alpha: pix_fmt_has_alpha(pix_fmt) || webm_alpha,
         still_image,
-        rotation,
+        orientation,
         decoder,
         format: format_name,
         codec,

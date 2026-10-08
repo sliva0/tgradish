@@ -343,7 +343,7 @@ mod tests {
             duration: Some(duration),
             alpha: false,
             still_image: false,
-            rotation: 0,
+            orientation: Default::default(),
             decoder: None,
         };
         let request = Request { options, ..Request::new("in.mp4".into()) };

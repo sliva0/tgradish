@@ -4,6 +4,7 @@ mod args;
 #[cfg(feature = "download")]
 pub mod download;
 mod locate;
+mod orientation;
 mod probe;
 mod process;
 mod ssim;
@@ -17,9 +18,10 @@ pub(crate) use args::encode_args;
 #[cfg(feature = "linked")]
 pub(crate) use args::video_filter;
 pub use locate::{bundled_dir, downloaded_dir, locate};
-pub use probe::{Probe, probe};
+pub use orientation::Orientation;
 #[cfg(feature = "linked")]
-pub(crate) use probe::{normalize_rotation, pix_fmt_has_alpha};
+pub(crate) use probe::pix_fmt_has_alpha;
+pub use probe::{Probe, probe};
 pub use process::CancelToken;
 pub(crate) use process::{Output, run};
 pub use ssim::ssim;

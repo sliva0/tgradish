@@ -17,7 +17,16 @@ executables:
 
 `tgradish ffmpeg status` shows which one is used. Both ways run the same
 filters and encoder settings; the tests check that they give the same
-results.
+results. Differences:
+
+- `extra-args` only works with ffmpeg as a separate program;
+- display matrices with rotations other than quarter turns are ignored by
+  the built-in ffmpeg, the command line would rotate by the exact angle.
+
+Like the ffmpeg command line, `--start` seeks to the nearest keyframe
+before the start. In files without an index (MPEG-TS, raw H.264) that have
+few keyframes, the seek can land where nothing decodes, and the conversion
+fails with no frames; convert the file to MP4 or MKV first.
 
 ## Building with ffmpeg built in
 
@@ -55,6 +64,15 @@ padding and SSIM. It writes
 
 The `ffmpeg` GitHub workflow builds both targets and tests the Windows build
 by converting a video on a Windows runner.
+
+## License obligations
+
+ffmpeg is LGPL, so anything that ships it, as executables or linked into
+tgradish, must come with its exact sources. `cargo xtask ffmpeg-sources`
+packs the pinned source archives into
+`target/ffmpeg/ffmpeg-<version>-sources.tar`; publish it with every
+release. Since tgradish itself is open source, linking statically is fine:
+anyone can rebuild it against a modified ffmpeg as described above.
 
 ## Publishing builds for `tgradish ffmpeg download`
 

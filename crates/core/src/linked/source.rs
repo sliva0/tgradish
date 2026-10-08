@@ -1,31 +1,76 @@
-//! Decoding the input the way the ffmpeg command line does: seek to the
-//! start, drop frames before it, stop after the read window, repeat still
-//! images.
+//! Decoding the input the way the ffmpeg command line does: first video
+//! stream, timestamps counted from the file's start, seek to the start and
+//! drop frames before it, stop after the read window, repeat still images.
 
 use std::path::Path;
 
-use ff::{Packet, Rational, codec, format, frame};
+use ff::{Packet, Rational, Rescale, codec, format, frame};
 use ffmpeg_next as ff;
 
 use super::libav;
 use crate::convert::Plan;
 use crate::error::{Error, Result};
+use crate::ffmpeg::CancelToken;
 
 /// Frame rate still images are repeated at, like ffmpeg's image demuxer.
 const STILL_FPS: i32 = 25;
 
-pub(super) struct Source {
+/// Demuxer and decoder of one stream.
+struct Decoding {
     input: format::context::Input,
     stream: usize,
     decoder: ff::decoder::Video,
+    input_done: bool,
+    cancel: CancelToken,
+}
+
+impl Decoding {
+    /// Decodes the next frame of the stream, reading packets as needed.
+    fn next(&mut self, frame: &mut frame::Video) -> Result<bool> {
+        loop {
+            self.cancel.check()?;
+            match self.decoder.receive_frame(frame) {
+                Ok(()) => return Ok(true),
+                Err(ff::Error::Eof) => return Ok(false),
+                Err(ff::Error::Other { errno }) if errno == ff::util::error::EAGAIN => {}
+                Err(err) => return Err(libav("decoding")(err)),
+            }
+            if self.input_done {
+                return Ok(false);
+            }
+            let mut packet = Packet::empty();
+            match packet.read(&mut self.input) {
+                Ok(()) if packet.stream() == self.stream => {
+                    self.decoder.send_packet(&packet).map_err(libav("decoding"))?;
+                }
+                Ok(()) | Err(ff::Error::InvalidData) => {}
+                Err(ff::Error::Eof) => {
+                    self.input_done = true;
+                    self.decoder.send_eof().map_err(libav("decoding"))?;
+                }
+                // the interrupt callback makes reads fail when cancelled
+                Err(_) if self.cancel.is_cancelled() => return Err(Error::Cancelled),
+                Err(err) => return Err(libav("reading the input")(err)),
+            }
+        }
+    }
+}
+
+pub(super) struct Source {
+    decoding: Decoding,
     time_base: Rational,
-    /// Start of the wanted window, in `time_base` units.
+    /// Timestamp where the wanted window starts, in `time_base` units: the
+    /// file's start time plus the requested start, which is how the ffmpeg
+    /// command line counts `-ss`.
     start: i64,
     /// Length of the window, in `time_base` units.
     window: i64,
+    /// One frame in `time_base` units, to number frames without timestamps.
+    frame_step: i64,
+    /// Timestamp for the next frame if it has none.
+    next_pts: i64,
     /// For still images: the image and the index of the next repeat.
     still: Option<(Option<frame::Video>, i64)>,
-    input_done: bool,
     done: bool,
 }
 
@@ -35,15 +80,36 @@ fn to_units(seconds: f64, time_base: Rational) -> i64 {
 }
 
 impl Source {
-    /// Opens a file and its best video stream with the default decoder.
-    pub(super) fn open_file(path: &Path, decoder: Option<&str>) -> Result<Source> {
-        let input = format::input(path)
-            .map_err(|err| Error::Probe { path: path.to_path_buf(), message: err.to_string() })?;
+    /// Opens a file and its first video stream, like ffmpeg's `-map 0:v:0`.
+    pub(super) fn open_file(
+        path: &Path,
+        decoder: Option<&str>,
+        cancel: &CancelToken,
+    ) -> Result<Source> {
+        cancel.check()?;
+        // lets ffmpeg give up on reads that block, for example on a FIFO
+        let interrupt = {
+            let cancel = cancel.clone();
+            move || cancel.is_cancelled()
+        };
+        let input = format::input_with_interrupt(path, interrupt).map_err(|err| {
+            if cancel.is_cancelled() {
+                Error::Cancelled
+            } else {
+                Error::Probe { path: path.to_path_buf(), message: err.to_string() }
+            }
+        })?;
         let stream = input
             .streams()
-            .best(ff::media::Type::Video)
+            .find(|stream| stream.parameters().medium() == ff::media::Type::Video)
             .ok_or_else(|| Error::NoVideo(path.to_path_buf()))?;
         let (index, time_base) = (stream.index(), stream.time_base());
+        let rate = [stream.avg_frame_rate(), stream.rate()]
+            .into_iter()
+            .find(|r| r.numerator() > 0 && r.denominator() > 0)
+            .unwrap_or(Rational::new(25, 1));
+        let frame_step = to_units(f64::from(rate.invert()), time_base).max(1);
+
         let mut context = codec::context::Context::from_parameters(stream.parameters())
             .map_err(libav("reading stream parameters"))?;
         context.set_threading(codec::threading::Config::kind(codec::threading::Type::Frame));
@@ -52,47 +118,60 @@ impl Source {
             None => context.decoder().video(),
         }
         .map_err(libav("opening the decoder"))?;
+
+        // SAFETY: reading a plain field of the open context
+        let file_start = unsafe { (*input.as_ptr()).start_time };
+        let file_start = if file_start == ff::ffi::AV_NOPTS_VALUE { 0 } else { file_start };
+        let start = file_start.rescale(Rational::new(1, ff::ffi::AV_TIME_BASE), time_base);
         Ok(Source {
-            input,
-            stream: index,
-            decoder,
+            decoding: Decoding {
+                input,
+                stream: index,
+                decoder,
+                input_done: false,
+                cancel: cancel.clone(),
+            },
             time_base,
-            start: 0,
+            start,
             window: i64::MAX,
+            frame_step,
+            next_pts: start,
             still: None,
-            input_done: false,
             done: false,
         })
     }
 
     /// Opens the planned input, limited to `read` seconds after the start.
-    pub(super) fn open(plan: &Plan, read: f64) -> Result<Source> {
-        let mut source = Self::open_file(&plan.input, plan.source.decoder.as_deref())?;
+    pub(super) fn open(plan: &Plan, read: f64, cancel: &CancelToken) -> Result<Source> {
+        let mut source = Self::open_file(&plan.input, plan.source.decoder.as_deref(), cancel)?;
         if plan.source.still_image {
             source.still = Some((None, 0));
             source.window = (read * f64::from(STILL_FPS)).ceil() as i64;
             return Ok(source);
         }
-        source.start = to_units(plan.start, source.time_base);
+        source.start += to_units(plan.start, source.time_base);
         source.window = to_units(read, source.time_base);
         if plan.start > 0.0 {
-            let target = (plan.start * f64::from(ff::ffi::AV_TIME_BASE)) as i64;
-            // lands on a keyframe at or before the start; earlier frames are dropped
-            source.input.seek(target, ..target).map_err(libav("seeking"))?;
+            let av_time_base = Rational::new(1, ff::ffi::AV_TIME_BASE);
+            let target = source.start.rescale(source.time_base, av_time_base);
+            // lands on a keyframe at or before the start; earlier frames are
+            // dropped. Like the ffmpeg command line, a failed seek only
+            // means decoding from the beginning, as with raw streams.
+            let _ = source.decoding.input.seek(target, ..target);
         }
         Ok(source)
     }
 
     pub(super) fn decoder(&self) -> &ff::decoder::Video {
-        &self.decoder
+        &self.decoding.decoder
     }
 
     pub(super) fn input(&self) -> &format::context::Input {
-        &self.input
+        &self.decoding.input
     }
 
     pub(super) fn stream(&self) -> format::stream::Stream<'_> {
-        self.input.stream(self.stream).expect("opened from this input")
+        self.decoding.input.stream(self.decoding.stream).expect("opened from this input")
     }
 
     /// Time base of the frames returned by [`Source::next`].
@@ -109,13 +188,7 @@ impl Source {
         if let Some((image, index)) = &mut self.still {
             if image.is_none() {
                 let mut decoded = frame::Video::empty();
-                if !Self::decode(
-                    &mut self.input,
-                    self.stream,
-                    &mut self.decoder,
-                    &mut self.input_done,
-                    &mut decoded,
-                )? {
+                if !self.decoding.next(&mut decoded)? {
                     return Ok(false);
                 }
                 *image = Some(decoded);
@@ -130,14 +203,10 @@ impl Source {
             return Ok(true);
         }
 
-        while Self::decode(
-            &mut self.input,
-            self.stream,
-            &mut self.decoder,
-            &mut self.input_done,
-            frame,
-        )? {
-            let Some(pts) = frame.timestamp().or(frame.pts()) else { continue };
+        while self.decoding.next(frame)? {
+            // like the ffmpeg command line, number frames without timestamps
+            let pts = frame.timestamp().or(frame.pts()).unwrap_or(self.next_pts);
+            self.next_pts = pts.saturating_add(self.frame_step);
             let relative = pts.saturating_sub(self.start);
             if relative < 0 {
                 continue;
@@ -151,39 +220,6 @@ impl Source {
         }
         self.done = true;
         Ok(false)
-    }
-
-    /// Decodes the next frame of the stream, reading packets as needed.
-    fn decode(
-        input: &mut format::context::Input,
-        stream: usize,
-        decoder: &mut ff::decoder::Video,
-        input_done: &mut bool,
-        frame: &mut frame::Video,
-    ) -> Result<bool> {
-        loop {
-            match decoder.receive_frame(frame) {
-                Ok(()) => return Ok(true),
-                Err(ff::Error::Eof) => return Ok(false),
-                Err(ff::Error::Other { errno }) if errno == ff::util::error::EAGAIN => {}
-                Err(err) => return Err(libav("decoding")(err)),
-            }
-            if *input_done {
-                return Ok(false);
-            }
-            let mut packet = Packet::empty();
-            match packet.read(input) {
-                Ok(()) if packet.stream() == stream => {
-                    decoder.send_packet(&packet).map_err(libav("decoding"))?;
-                }
-                Ok(()) | Err(ff::Error::InvalidData) => {}
-                Err(ff::Error::Eof) => {
-                    *input_done = true;
-                    decoder.send_eof().map_err(libav("decoding"))?;
-                }
-                Err(err) => return Err(libav("reading the input")(err)),
-            }
-        }
     }
 
     /// Arguments of a `buffer` filter that receives `frame`.
@@ -201,15 +237,5 @@ impl Source {
             aspect.numerator(),
             aspect.denominator(),
         )
-    }
-}
-
-/// Filters that apply the display matrix, as ffmpeg's autorotation does.
-pub(super) fn rotation_filters(rotation: u16) -> &'static str {
-    match rotation {
-        90 => "transpose=clock,",
-        180 => "hflip,vflip,",
-        270 => "transpose=cclock,",
-        _ => "",
     }
 }
