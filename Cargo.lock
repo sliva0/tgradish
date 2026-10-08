@@ -1259,6 +1259,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "tgradish-frames"
+version = "2.0.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "tgradish-tgs"
+version = "2.0.0"
+dependencies = [
+ "serde",
+ "tgradish-frames",
+ "thiserror",
+]
+
+[[package]]
+name = "tgs-lab"
+version = "2.0.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "png",
+ "tgradish-tgs",
+ "tlottie",
+]
+
+[[package]]
 name = "thiserror"
 version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1291,6 +1318,11 @@ dependencies = [
  "weezl",
  "zune-jpeg",
 ]
+
+[[package]]
+name = "tlottie"
+version = "1.0.6"
+source = "git+https://github.com/dkaraush/tlottie?rev=92df98dc209bc39b1e567ec74a8c86a0af5239de#92df98dc209bc39b1e567ec74a8c86a0af5239de"
 
 [[package]]
 name = "toml"

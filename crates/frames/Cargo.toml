@@ -1,0 +1,14 @@
+[package]
+name = "tgradish-frames"
+description = "RGBA animations with frame durations, and pure-Rust decoders for them"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

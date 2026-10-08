@@ -99,7 +99,7 @@ places. Treat them as hard limits and check every output against them:
   - 5 120 paints (fills/strokes) per layer;
   - 5 120 cumulative geometry items observed by paints per layer (in
     practice: rectangles or paths feeding fills in one layer);
-  - 4 355 points per path;
+  - 4 355 points per path, coordinates within ±165 389;
   - 2 048 keyframes per animated property;
   - 256 assets, 18 005 expanded precomp references;
   - nesting depth 175, input 16 MiB.
@@ -468,9 +468,9 @@ This is one track of the roadmap in `docs/PLAN.md`; 2.0.0 waits for it.
 The web app there may also replace the "Web page" and "Bot" items under
 "Later".
 
-- **T1:** move this plan to `docs/tgs.md` and link it from `docs/PLAN.md`
-  (done). Create `tgs`, `frames` and `tgs-lab` and add the WASM check to
-  CI.
+- **T1 (done):** move this plan to `docs/tgs.md` and link it from
+  `docs/PLAN.md`. Create `tgs`, `frames` and `tgs-lab` (`info` and `render`
+  through tlottie) and add the WASM check to CI.
 - **T2:** `frames`: decoders. `tgs`: normalisation (scale detection, crop,
   timing, alpha).
 - **T3:** Lottie model, serialiser, zopfli, limits checker, `Scene`

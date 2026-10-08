@@ -51,3 +51,12 @@ jobs:
             libswscale-dev libswresample-dev libavdevice-dev
       - run: cargo clippy --workspace --all-targets --features tgradish/linked -- -D warnings
       - run: cargo test --workspace --features tgradish/linked,tgradish-core/linked
+
+  # libraries the Telegram web app will run in the browser
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p tgradish-frames -p tgradish-tgs --target wasm32-unknown-unknown

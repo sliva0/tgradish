@@ -20,10 +20,10 @@ after 2.0.
 crates/
   core/     tgradish-core    WebM, ffmpeg backends, presets, protocol
   cli/      tgradish         the binary: CLI now, GUI later (see GUI)
-  tgs/      tgradish-tgs     planned: frames in, .tgs bytes out (docs/tgs.md)
-  frames/   tgradish-frames  planned: RGBA animations, pure-Rust decoders
+  tgs/      tgradish-tgs     frames in, .tgs bytes out (docs/tgs.md)
+  frames/   tgradish-frames  RGBA animations, pure-Rust decoders
   gui/      planned, if the GUI lives in its own crate linked into the binary
-  tgs-lab/  planned, publish = false: render and seam checks, benchmark
+  tgs-lab/  publish = false: render and seam checks, benchmark
 xtask/      ffmpeg build, packaging
 docs/       plan, protocol, ffmpeg, tgs, web app
 ```
@@ -45,7 +45,8 @@ Done on `rewrite-v2`, with CI on Linux and Windows:
 - CLI: `convert`, `watch`, `--clipboard`, `spoof`, `inspect`, `describe`,
   presets, config, `ffmpeg status`;
 - release workflow: single-file binaries with ffmpeg linked in for Linux
-  x86-64 (16.8 MB) and Windows x86-64 (18.8 MB), tested on both.
+  x86-64 (16.8 MB) and Windows x86-64 (18.8 MB), tested on both;
+- `.tgs`: T1 (crates and the WASM check).
 
 ## Roadmap
 
@@ -140,7 +141,7 @@ cover two formats, which the GUI then builds on.
 The web app is planned, so 2.0's APIs should not rule it out:
 
 - `tgradish-tgs` and `tgradish-frames` build for `wasm32-unknown-unknown`,
-  with a CI check (already in `docs/tgs.md`).
+  checked in CI.
 - Library entry points work on bytes and callbacks, not paths: file
   handling stays in the CLI, GUI and thin `*_file` helpers. WebM inspection
   and patching already work this way.
