@@ -1,0 +1,19 @@
+[package]
+name = "tgs-lab"
+description = "Render checks and benchmarks for tgradish's .tgs output"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+tgradish-tgs.workspace = true
+
+anyhow.workspace = true
+flate2.workspace = true
+png.workspace = true
+# not on crates.io, so only this unpublished crate depends on it
+tlottie = { git = "https://github.com/dkaraush/tlottie", rev = "92df98dc209bc39b1e567ec74a8c86a0af5239de" }
+
+[lints]
+workspace = true

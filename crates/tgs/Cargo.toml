@@ -1,0 +1,17 @@
+[package]
+name = "tgradish-tgs"
+description = "Telegram animated stickers (.tgs) from pixel art animations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+tgradish-frames.workspace = true
+
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
