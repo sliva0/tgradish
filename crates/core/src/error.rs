@@ -25,6 +25,8 @@ pub enum Error {
     NothingFits { smallest: u64, limit: u64 },
     #[error("cancelled")]
     Cancelled,
+    #[error("download failed: {0}")]
+    Download(String),
     #[error(transparent)]
     Webm(#[from] WebmError),
     #[error(transparent)]

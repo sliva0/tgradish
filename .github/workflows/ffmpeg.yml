@@ -1,0 +1,75 @@
+name: ffmpeg
+
+# Builds the minimal ffmpeg shipped with tgradish, see `cargo xtask ffmpeg`.
+on:
+  workflow_dispatch:
+  workflow_call:
+  push:
+    paths: [xtask/**, .github/workflows/ffmpeg.yml]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [linux, windows]
+    # the oldest supported Ubuntu, so the Linux build runs on older glibc too
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm meson ninja-build pkg-config
+          if [ "${{ matrix.target }}" = windows ]; then sudo apt-get install -y mingw-w64; fi
+
+      - uses: actions/cache@v4
+        with:
+          path: target/ffmpeg/sources
+          key: ffmpeg-sources-${{ hashFiles('xtask/src/main.rs') }}
+
+      - run: cargo xtask ffmpeg --target ${{ matrix.target }}
+
+      - name: Smoke test
+        if: matrix.target == 'linux'
+        run: |
+          dir=$(ls -d target/ffmpeg/ffmpeg-*-x86_64-unknown-linux-gnu)
+          "$dir/ffmpeg" -hide_banner -version
+          "$dir/ffmpeg" -hide_banner -encoders | grep libvpx-vp9
+          ldd "$dir/ffmpeg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-${{ matrix.target }}
+          path: |
+            target/ffmpeg/*.tar.gz
+            target/ffmpeg/*.tar.gz.sha256
+
+  # converts a real video with the Windows build, on Windows
+  test-windows:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v5
+        with:
+          name: ffmpeg-windows
+          path: ffmpeg-archive
+
+      - name: Install a full ffmpeg to make test input
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Convert with the minimal build
+        shell: bash
+        run: |
+          tar -xzf ffmpeg-archive/*.tar.gz -C ffmpeg-archive
+          minimal=$(ls -d ffmpeg-archive/ffmpeg-*/)
+          "$minimal/ffmpeg.exe" -hide_banner -version
+          ffmpeg -v error -f lavfi -i "testsrc2=s=320x240:d=4,format=yuva420p" -c:v libvpx-vp9 input.webm
+          cargo run --release -p tgradish -- --ffmpeg "$minimal" convert input.webm -o out.webm --preset fast
+          cargo run --release -p tgradish -- inspect out.webm
