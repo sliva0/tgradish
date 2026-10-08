@@ -256,25 +256,18 @@ impl Painter<'_> {
         }
     }
 
-    /// A colour as cores, the cells that keep it for a stretch of frames,
-    /// drawn once for the stretch, and below each a delta with the rest.
-    ///
-    /// A delta lies directly under its core, so where they meet the delta
-    /// must reach under the core's cells (the seam invariant between two
-    /// groups), which is fine: the core paints the same colour over it.
-    fn split_pieces(&self, own: &[Mask], later: &[Mask]) -> Result<Vec<(u8, Piece)>, EncodeError> {
+    /// The cores of a colour: for each stretch of frames where most of its
+    /// cells keep it, those cells, drawn once for the stretch. `later[frame]`
+    /// holds the cells of the opaque groups drawn above the cores. Returns
+    /// the core pieces and each frame's core cells.
+    fn cores(
+        &self,
+        own: &[Mask],
+        later: &[Mask],
+    ) -> Result<(Vec<Piece>, Vec<Option<Mask>>), EncodeError> {
         let frames = own.len();
-        let coverable: Vec<Mask> = own
-            .iter()
-            .zip(later)
-            .map(|(own, later)| {
-                let mut coverable = own.clone();
-                coverable.union(later);
-                coverable
-            })
-            .collect();
-        let mut out = Vec::new();
-        let mut deltas: Vec<(Option<Mask>, Mask)> = Vec::with_capacity(frames);
+        let mut pieces = Vec::new();
+        let mut at = Vec::with_capacity(frames);
         let mut start = 0;
         while start < frames {
             // the stretch: frames while the cells kept from its first are
@@ -291,77 +284,86 @@ impl Painter<'_> {
                 end += 1;
             }
             let span = start..end;
+            start = end;
+            if span.len() == 1 {
+                at.push(None);
+                continue;
+            }
             // cells under later colours in every frame of the stretch, which
             // the core may cover without ever showing
-            let mut hidden = later[start].clone();
+            let mut hidden = later[span.start].clone();
             for f in span.clone() {
                 hidden.intersect(&later[f]);
             }
             // the core shows exactly its cells, so it must reach under every
             // neighbour that a later colour shows in some frame; that is only
             // possible where the neighbour is the core's or always hidden
-            if end - start > 1 {
-                loop {
-                    let reached = |(x, y): (u32, u32)| span.clone().any(|f| later[f].get(x, y));
-                    let unsure: Vec<(u32, u32)> = core
-                        .cells()
-                        .filter(|&cell| {
-                            core_neighbours(cell, &core)
-                                .any(|n| reached(n) && !core.get(n.0, n.1) && !hidden.get(n.0, n.1))
-                        })
-                        .collect();
-                    if unsure.is_empty() {
-                        break;
-                    }
-                    for (x, y) in unsure {
-                        core.clear(x, y);
-                    }
+            loop {
+                let reached = |(x, y): (u32, u32)| span.clone().any(|f| later[f].get(x, y));
+                let unsure: Vec<(u32, u32)> = core
+                    .cells()
+                    .filter(|&cell| {
+                        core_neighbours(cell, &core)
+                            .any(|n| reached(n) && !core.get(n.0, n.1) && !hidden.get(n.0, n.1))
+                    })
+                    .collect();
+                if unsure.is_empty() {
+                    break;
+                }
+                for (x, y) in unsure {
+                    core.clear(x, y);
                 }
             }
-            let core_shape = if end - start > 1 && !core.is_empty() {
-                let mut must = core.clone();
-                for f in span.clone() {
-                    let mut reach = core.grown();
-                    reach.intersect(&later[f]);
-                    must.union(&reach);
-                }
-                let mut may = core.clone();
-                may.union(&hidden);
-                let rects = cover(&must, &may);
-                if rects.len() > TLOTTIE.max_paint_source_items_per_layer {
-                    return Err(EncodeError::TooManyRects { rects: rects.len() });
-                }
-                out.push((1, Piece { from: start, to: end, rects }));
-                Some(core.clone())
-            } else {
-                None
-            };
-            for f in span {
-                let mut may = coverable[f].clone();
-                let Some(core) = &core_shape else {
-                    deltas.push(self.needs(&own[f], &later[f], true));
-                    continue;
-                };
-                // the cells the core doesn't draw, and where the delta must
-                // reach: later colours, and the core's cells of this colour
-                let mut rest = own[f].clone();
-                rest.subtract(core);
-                if rest.is_empty() {
-                    deltas.push((None, may));
-                    continue;
-                }
-                let mut above = later[f].clone();
-                let mut shown = core.clone();
-                shown.intersect(&own[f]);
-                above.union(&shown);
-                let mut must = rest.grown();
-                must.intersect(&above);
-                must.union(&rest);
-                may.union(&shown);
-                deltas.push((Some(must), may));
+            if core.is_empty() {
+                at.extend(span.map(|_| None));
+                continue;
             }
-            start = end;
+            let mut must = core.clone();
+            for f in span.clone() {
+                let mut reach = core.grown();
+                reach.intersect(&later[f]);
+                must.union(&reach);
+            }
+            let mut may = core.clone();
+            may.union(&hidden);
+            let rects = cover(&must, &may);
+            if rects.len() > TLOTTIE.max_paint_source_items_per_layer {
+                return Err(EncodeError::TooManyRects { rects: rects.len() });
+            }
+            pieces.push(Piece { from: span.start, to: span.end, rects });
+            at.extend(span.map(|_| Some(core.clone())));
         }
+        Ok((pieces, at))
+    }
+
+    /// A colour as cores (see [`Painter::cores`]), and below them a delta
+    /// with the rest of each frame.
+    ///
+    /// A delta lies directly under its core, so where they meet the delta
+    /// must reach under the core's cells (the seam invariant between two
+    /// groups), which is fine: the core paints the same colour over it.
+    fn split_pieces(&self, own: &[Mask], later: &[Mask]) -> Result<Vec<(u8, Piece)>, EncodeError> {
+        let (cores, at) = self.cores(own, later)?;
+        let deltas = own
+            .iter()
+            .zip(later)
+            .zip(at)
+            .map(|((own, later), core)| {
+                let Some(core) = core else {
+                    return self.needs(own, later, true);
+                };
+                // the cells the core doesn't draw; the delta must also reach
+                // under the core's where they meet
+                let mut rest = own.clone();
+                rest.subtract(&core);
+                let mut above = later.clone();
+                above.union(&core);
+                let (must, mut may) = self.needs(&rest, &above, true);
+                may.union(own);
+                (must, may)
+            })
+            .collect();
+        let mut out: Vec<(u8, Piece)> = cores.into_iter().map(|piece| (1, piece)).collect();
         out.extend(self.lifetime_pieces(deltas)?.into_iter().map(|piece| (0, piece)));
         Ok(out)
     }
@@ -459,6 +461,23 @@ impl Painter<'_> {
     }
 
     fn encode(&self, order: &[u16]) -> Result<Scene, EncodeError> {
+        let pieces = self.ordered_pieces(order)?;
+        let mut starts = Vec::with_capacity(self.frames() + 1);
+        starts.push(0);
+        for frame in self.anim.frames() {
+            starts.push(starts.last().unwrap() + frame.ticks);
+        }
+        Ok(Scene {
+            width: self.anim.width(),
+            height: self.anim.height(),
+            ticks: *starts.last().unwrap(),
+            layers: stack(pieces, &starts)?,
+        })
+    }
+
+    /// Every colour's pieces in `order`, each split colour's delta just
+    /// below its cores, sorted by drawing order.
+    fn ordered_pieces(&self, order: &[u16]) -> Result<Vec<(usize, u16, Piece)>, EncodeError> {
         // from the top colour down, so `later` grows as colours are done
         let mut later = vec![self.empty(); self.frames()];
         let mut pieces = Vec::new();
@@ -473,18 +492,7 @@ impl Painter<'_> {
             }
         }
         pieces.sort_by_key(|(rank, _, piece)| (*rank, piece.from));
-
-        let mut starts = Vec::with_capacity(self.frames() + 1);
-        starts.push(0);
-        for frame in self.anim.frames() {
-            starts.push(starts.last().unwrap() + frame.ticks);
-        }
-        Ok(Scene {
-            width: self.anim.width(),
-            height: self.anim.height(),
-            ticks: *starts.last().unwrap(),
-            layers: stack(pieces, &starts)?,
-        })
+        Ok(pieces)
     }
 }
 
