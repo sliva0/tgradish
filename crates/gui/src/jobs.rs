@@ -73,6 +73,8 @@ pub struct Job {
     pub status: Status,
     pub log: Vec<String>,
     pub preview: Option<Preview>,
+    /// Where a pasted image is kept until it is converted.
+    pub pasted: Option<tempfile::TempDir>,
     cancel: CancelToken,
     messages: Option<Receiver<Message>>,
 }
@@ -90,6 +92,7 @@ impl Job {
             status: Status::Waiting,
             log: Vec::new(),
             preview: None,
+            pasted: None,
             cancel: CancelToken::new(),
             messages: None,
         }

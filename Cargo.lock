@@ -3496,7 +3496,6 @@ name = "tgradish"
 version = "2.0.0"
 dependencies = [
  "anyhow",
- "arboard",
  "clap",
  "console",
  "ctrlc",
@@ -3519,8 +3518,10 @@ dependencies = [
 name = "tgradish-core"
 version = "2.0.0"
 dependencies = [
+ "arboard",
  "directories",
  "ffmpeg-next",
+ "png",
  "schemars",
  "serde",
  "serde_json",

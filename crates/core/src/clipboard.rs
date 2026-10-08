@@ -1,13 +1,21 @@
-//! `convert --clipboard`: inputs from the clipboard.
+//! Inputs from the clipboard: copied files, copied paths, or an image.
 
 use std::io::BufWriter;
 use std::path::PathBuf;
 
-use anyhow::{Context as _, Result, bail};
+use crate::{Error, Result};
 
-/// Name a pasted image is converted under, so the result is
+/// Name a pasted image is saved under, so its result is
 /// `clipboard.sticker.webm`.
 pub const PASTED_IMAGE_NAME: &str = "clipboard.png";
+
+/// What was on the clipboard.
+pub struct Pasted {
+    pub files: Vec<PathBuf>,
+    /// The temporary directory of a pasted image, which is the one file;
+    /// it is deleted when this is dropped.
+    pub image_dir: Option<tempfile::TempDir>,
+}
 
 /// Decodes `%XX` escapes in a `file://` URI path.
 fn percent_decode(text: &str) -> String {
@@ -51,8 +59,9 @@ fn uri_path(rest: &str, windows: bool) -> PathBuf {
 }
 
 /// Paths in copied text: plain paths, possibly in quotes as Windows'
-/// "Copy as path" writes them, or `file://` URIs, one per line.
-fn paths_in_text(text: &str, windows: bool) -> Vec<PathBuf> {
+/// "Copy as path" writes them, or `file://` URIs, one per line. `windows`
+/// says how to read URIs.
+pub fn paths_in_text(text: &str, windows: bool) -> Vec<PathBuf> {
     text.lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
@@ -70,37 +79,40 @@ fn paths_in_text(text: &str, windows: bool) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Files to convert from the clipboard. A pasted image is saved as
-/// [`PASTED_IMAGE_NAME`] in a temporary directory that lives as long as the
-/// returned guard.
-pub fn inputs() -> Result<(Vec<PathBuf>, Option<tempfile::TempDir>)> {
-    let mut clipboard = arboard::Clipboard::new().context("could not open the clipboard")?;
+/// Files to convert from the clipboard: copied files, else copied paths of
+/// files that exist, else an image, saved as [`PASTED_IMAGE_NAME`] in a
+/// temporary directory.
+pub fn paste() -> Result<Pasted> {
+    let failed = |err: arboard::Error| Error::Clipboard(err.to_string());
+    let mut clipboard = arboard::Clipboard::new().map_err(failed)?;
 
     if let Ok(files) = clipboard.get().file_list()
         && !files.is_empty()
     {
-        return Ok((files, None));
+        return Ok(Pasted { files, image_dir: None });
     }
     if let Ok(text) = clipboard.get_text() {
-        let paths = paths_in_text(&text, cfg!(windows));
-        if !paths.is_empty() && paths.iter().all(|path| path.is_file()) {
-            return Ok((paths, None));
+        let files = paths_in_text(&text, cfg!(windows));
+        if !files.is_empty() && files.iter().all(|path| path.is_file()) {
+            return Ok(Pasted { files, image_dir: None });
         }
     }
-    if let Ok(image) = clipboard.get_image() {
-        let dir = tempfile::Builder::new().prefix("tgradish-clipboard-").tempdir()?;
-        let path = dir.path().join(PASTED_IMAGE_NAME);
-        let file = std::fs::File::create(&path)?;
-        let mut encoder =
-            png::Encoder::new(BufWriter::new(file), image.width as u32, image.height as u32);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().context("could not save the pasted image")?;
-        writer.write_image_data(&image.bytes).context("could not save the pasted image")?;
-        writer.finish().context("could not save the pasted image")?;
-        return Ok((vec![path], Some(dir)));
-    }
-    bail!("the clipboard has no files, file path or image")
+    let Ok(image) = clipboard.get_image() else {
+        return Err(Error::Clipboard("it has no files, file paths or image".into()));
+    };
+    let dir = tempfile::Builder::new().prefix("tgradish-clipboard-").tempdir()?;
+    let path = dir.path().join(PASTED_IMAGE_NAME);
+    let not_saved =
+        |err: png::EncodingError| Error::Clipboard(format!("couldn't save the image: {err}"));
+    let file = std::fs::File::create(&path)?;
+    let mut encoder =
+        png::Encoder::new(BufWriter::new(file), image.width as u32, image.height as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().map_err(not_saved)?;
+    writer.write_image_data(&image.bytes).map_err(not_saved)?;
+    writer.finish().map_err(not_saved)?;
+    Ok(Pasted { files: vec![path], image_dir: Some(dir) })
 }
 
 #[cfg(test)]

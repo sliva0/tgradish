@@ -256,9 +256,9 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
     // keeps a pasted image on disk until it is converted
     let mut _pasted_image = None;
     let inputs = if args.clipboard {
-        let (inputs, image) = crate::clipboard::inputs()?;
-        _pasted_image = image;
-        inputs
+        let pasted = tgradish_core::clipboard::paste()?;
+        _pasted_image = pasted.image_dir;
+        pasted.files
     } else {
         args.inputs.clone()
     };

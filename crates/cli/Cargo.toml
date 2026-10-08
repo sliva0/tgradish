@@ -20,21 +20,18 @@ linked = ["tgradish-core/linked"]
 linked-static = ["tgradish-core/linked-static"]
 
 [dependencies]
-tgradish-core.workspace = true
+tgradish-core = { workspace = true, features = ["clipboard"] }
 tgradish-gui = { workspace = true, optional = true }
 
 anyhow.workspace = true
-arboard.workspace = true
 clap.workspace = true
 console.workspace = true
 ctrlc.workspace = true
 indicatif.workspace = true
-png.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shlex.workspace = true
-tempfile.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 
@@ -48,4 +45,5 @@ embed-manifest.workspace = true
 workspace = true
 
 [dev-dependencies]
+png.workspace = true
 tempfile.workspace = true
