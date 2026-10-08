@@ -27,6 +27,7 @@ pub const MAX_RAW_JSON: usize = 2 * 1024 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct RendererLimits {
     pub max_input_bytes: usize,
+    /// Arrays and objects inside each other in the JSON.
     pub max_nesting_depth: usize,
     pub max_layers: usize,
     /// Shape layers that paint something.
@@ -41,6 +42,8 @@ pub struct RendererLimits {
     pub max_keyframes: usize,
     pub max_assets: usize,
     pub max_precomp_expansion: usize,
+    /// Groups inside groups; a constant in tlottie (`MAX_GROUP_DEPTH`).
+    pub max_group_depth: usize,
 }
 
 pub const TLOTTIE: RendererLimits = RendererLimits {
@@ -56,4 +59,5 @@ pub const TLOTTIE: RendererLimits = RendererLimits {
     max_keyframes: 2_048,
     max_assets: 256,
     max_precomp_expansion: 18_005,
+    max_group_depth: 65,
 };
