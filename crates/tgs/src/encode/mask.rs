@@ -24,12 +24,10 @@ impl Mask {
         Mask { width, height, words: vec![0; cells.div_ceil(64)] }
     }
 
-    #[cfg(test)]
     pub fn width(&self) -> u32 {
         self.width
     }
 
-    #[cfg(test)]
     pub fn height(&self) -> u32 {
         self.height
     }
@@ -48,11 +46,15 @@ impl Mask {
         self.words[i / 64] |= 1 << (i % 64);
     }
 
+    pub fn clear(&mut self, x: u32, y: u32) {
+        let i = self.index(x, y);
+        self.words[i / 64] &= !(1 << (i % 64));
+    }
+
     pub fn is_empty(&self) -> bool {
         self.words.iter().all(|&word| word == 0)
     }
 
-    #[cfg(test)]
     pub fn count(&self) -> usize {
         self.words.iter().map(|word| word.count_ones() as usize).sum()
     }

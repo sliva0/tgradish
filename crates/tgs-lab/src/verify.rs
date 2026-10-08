@@ -99,7 +99,7 @@ pub struct Miss {
 pub struct Centres {
     /// Cells checked, once for every 60 fps frame.
     pub checked: usize,
-    /// Cells smaller than a canvas pixel, which can't be sampled cleanly.
+    /// Cells narrower than 2 canvas pixels, which can't be sampled cleanly.
     pub skipped: usize,
     pub misses: usize,
     /// The first few misses.
@@ -130,7 +130,15 @@ pub fn centres(renderer: &mut Renderer, anim: &PixelAnim) -> Result<Centres> {
                     let [x0, y0] = placement.canvas(column, row);
                     let [x1, y1] = placement.canvas(column + 1, row + 1);
                     let (x, y) = (((x0 + x1) / 2.0).floor(), ((y0 + y1) / 2.0).floor());
-                    if x < x0 || x + 1.0 > x1 || y < y0 || y + 1.0 > y1 {
+                    // in narrower cells, anti-aliasing from the neighbours
+                    // reaches the centre
+                    if x1 - x0 < 2.0
+                        || y1 - y0 < 2.0
+                        || x < x0
+                        || x + 1.0 > x1
+                        || y < y0
+                        || y + 1.0 > y1
+                    {
                         out.skipped += 1;
                         continue;
                     }
