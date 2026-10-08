@@ -45,6 +45,15 @@ pub fn run() -> eframe::Result<()> {
     eframe::run_native("tgradish", options, Box::new(|_| Ok(Box::new(App::new()))))
 }
 
+/// Shows an error in a dialog, for when there is no terminal to print to.
+pub fn show_error(message: &str) {
+    rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title("tgradish")
+        .set_description(message)
+        .show();
+}
+
 /// The preset and options of one format.
 struct FormatState {
     preset: String,

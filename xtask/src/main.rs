@@ -586,6 +586,10 @@ const SYSTEM_DLLS: &[&str] = &[
     "ucrtbase.dll",
     "bcryptprimitives.dll",
     "combase.dll",
+    // the window's
+    "dwmapi.dll",
+    "imm32.dll",
+    "opengl32.dll",
 ];
 
 /// Fails if a Windows executable imports a DLL that is not part of Windows.
