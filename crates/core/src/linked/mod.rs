@@ -420,6 +420,49 @@ pub(crate) fn encode(
 
 /// Linked version of [`crate::ffmpeg::ssim`], averaging the per-frame SSIM
 /// the filter reports.
+/// Up to `count` frames of `input`, scaled to `size`, as straight RGBA.
+pub(crate) fn preview_frames(
+    input: &Path,
+    probe: &Probe,
+    (width, height): (u32, u32),
+    count: usize,
+    cancel: &CancelToken,
+) -> Result<Vec<Vec<u8>>> {
+    use ff::software::scaling;
+    init()?;
+    let mut source = Source::open_file(input, probe.decoder.as_deref(), cancel)?;
+    let mut frame = frame::Video::empty();
+    let mut scaler: Option<scaling::Context> = None;
+    let mut out = Vec::new();
+    while out.len() < count && source.next(&mut frame)? {
+        let scaler = match &mut scaler {
+            Some(scaler) => scaler,
+            None => scaler.insert(
+                scaling::Context::get(
+                    frame.format(),
+                    frame.width(),
+                    frame.height(),
+                    ff::format::Pixel::RGBA,
+                    width,
+                    height,
+                    scaling::Flags::BILINEAR,
+                )
+                .map_err(libav("scaling"))?,
+            ),
+        };
+        let mut rgba = frame::Video::empty();
+        scaler.run(&frame, &mut rgba).map_err(libav("scaling"))?;
+        // rows can be padded
+        let (stride, data, row) = (rgba.stride(0), rgba.data(0), width as usize * 4);
+        let mut pixels = Vec::with_capacity(row * height as usize);
+        for y in 0..height as usize {
+            pixels.extend_from_slice(&data[y * stride..y * stride + row]);
+        }
+        out.push(pixels);
+    }
+    Ok(out)
+}
+
 pub(crate) fn ssim(plan: &Plan, candidate: &Path, fps: f64, cancel: &CancelToken) -> Result<f64> {
     init()?;
     let frames = frame_count(plan.length, plan.fps);
