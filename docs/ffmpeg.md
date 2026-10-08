@@ -74,6 +74,21 @@ packs the pinned source archives into
 release. Since tgradish itself is open source, linking statically is fine:
 anyone can rebuild it against a modified ffmpeg as described above.
 
+## Releases
+
+Pushing a `v*` tag runs the `release` workflow. It builds the minimal ffmpeg
+for Linux and Windows, links it into tgradish statically, smoke-tests both
+(the Windows build on Windows), and drafts a GitHub release with:
+
+- `tgradish-<version>-<target>` archives with the single-file binary;
+- `ffmpeg-<version>-<target>.tar.gz`, the executables for
+  `tgradish ffmpeg download`;
+- `ffmpeg-<version>-sources.tar`;
+- `.sha256` files.
+
+`cargo xtask package --target linux|windows` assembles an archive locally
+after building with `--features linked-static --target <triple>`.
+
 ## Publishing builds for `tgradish ffmpeg download`
 
 1. Run the `ffmpeg` workflow and download its artifacts.

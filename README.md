@@ -46,12 +46,16 @@ tgradish inspect pig.sticker.webm
 directory printed by `tgradish preset path`, see `tgradish preset show
 sticker` for the format of options.
 
-## Requirements
+## Installing
 
-ffmpeg and ffprobe with libvpx (VP9). tgradish looks for them next to its
-own executable, then in its data directory, then on `PATH`; `tgradish
-ffmpeg status` shows which one it found. Release builds will include a
-minimal ffmpeg.
+Release builds for Linux and Windows are single files with ffmpeg built in;
+download one from the releases page and run it. Nothing else is needed.
+
+Built from source without the `linked` feature, tgradish needs ffmpeg and
+ffprobe with libvpx (VP9). It looks for them next to its own executable,
+then in its data directory, then on `PATH`; `tgradish ffmpeg download`
+fetches a minimal build, and `tgradish ffmpeg status` shows which one is
+used. See [docs/ffmpeg.md](docs/ffmpeg.md).
 
 ## Front-ends
 
@@ -63,7 +67,11 @@ progress event, and `--json` makes commands machine-readable. See
 ## Building
 
 ```console
+# uses ffmpeg executables
 cargo build --release
+
+# with ffmpeg built in, against the system's ffmpeg libraries
+cargo build --release --features linked
 ```
 
 Tests that need ffmpeg or the local test media in `references/` (not in

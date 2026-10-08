@@ -1,0 +1,134 @@
+name: release
+
+# Builds single-file tgradish binaries with ffmpeg linked statically, for
+# Linux and Windows (cross-compiled with mingw-w64), tests them, and on a
+# version tag drafts a GitHub release with them, the ffmpeg executables for
+# `tgradish ffmpeg download`, and the ffmpeg sources the LGPL asks for.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux
+            triple: x86_64-unknown-linux-gnu
+          - target: windows
+            triple: x86_64-pc-windows-gnu
+    # the oldest supported Ubuntu, so the Linux build runs on older glibc too
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm meson ninja-build pkg-config clang libclang-dev zip
+          if [ "${{ matrix.target }}" = windows ]; then sudo apt-get install -y mingw-w64; fi
+
+      - run: rustup target add ${{ matrix.triple }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.triple }}
+
+      - uses: actions/cache@v4
+        with:
+          path: target/ffmpeg/sources
+          key: ffmpeg-sources-${{ hashFiles('xtask/src/main.rs') }}
+
+      - run: cargo xtask ffmpeg --target ${{ matrix.target }}
+
+      - name: Build tgradish with ffmpeg linked in
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/target/ffmpeg/prefix-${{ matrix.triple }}/lib/pkgconfig
+          PKG_CONFIG_ALL_STATIC: "1"
+          PKG_CONFIG_ALLOW_CROSS: "1"
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
+          AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
+          BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_gnu: -I/usr/x86_64-w64-mingw32/include
+        run: >
+          cargo build --release --locked -p tgradish
+          --features linked-static --target ${{ matrix.triple }}
+
+      - name: Smoke test
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get install -y ffmpeg
+          ffmpeg -v error -f lavfi -i testsrc2=s=320x240:d=4 -pix_fmt yuv420p input.mp4
+          bin=target/${{ matrix.triple }}/release/tgradish
+          ldd "$bin"
+          "$bin" ffmpeg status
+          "$bin" convert input.mp4 -o out.webm --preset fast
+          "$bin" inspect out.webm
+
+      - run: cargo xtask package --target ${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            target/release-artifacts/*.tar.gz
+            target/release-artifacts/*.zip
+            target/release-artifacts/*.sha256
+
+  # runs the Windows build on Windows
+  test-windows:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-windows
+          path: artifacts
+
+      - name: Install a full ffmpeg to make test input
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Convert with the built-in ffmpeg
+        shell: bash
+        run: |
+          cd artifacts
+          unzip -q tgradish-*.zip
+          bin=$(ls tgradish-*/tgradish.exe)
+          ffmpeg -v error -f lavfi -i "testsrc2=s=320x240:d=4,format=yuva420p" -c:v libvpx-vp9 input.webm
+          "$bin" ffmpeg status
+          "$bin" convert input.webm -o out.webm --preset fast
+          "$bin" inspect out.webm
+          # Windows paths and an output that already exists
+          "$bin" convert input.webm -o out.webm --preset fast && exit 1 || true
+
+  publish:
+    needs: [build, test-windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache@v4
+        with:
+          path: target/ffmpeg/sources
+          key: ffmpeg-sources-${{ hashFiles('xtask/src/main.rs') }}
+      - run: cargo xtask ffmpeg-sources
+
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: release-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag
+          --title "tgradish $GITHUB_REF_NAME" --generate-notes
+          artifacts/* target/ffmpeg/ffmpeg-*-sources.tar

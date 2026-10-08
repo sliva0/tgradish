@@ -370,6 +370,12 @@ impl Build {
         if !self.asm {
             configure.arg("--disable-x86asm");
         }
+        // threads are not left to autodetection; on Windows the native ones
+        // avoid depending on winpthread's DLL
+        match self.target {
+            Target::Linux => configure.arg("--enable-pthreads"),
+            Target::Windows => configure.args(["--disable-pthreads", "--enable-w32threads"]),
+        };
         if let Some(cross) = self.target.cross_prefix() {
             configure
                 .args(["--enable-cross-compile", "--target-os=mingw32", "--arch=x86_64"])
@@ -515,14 +521,108 @@ fn package_sources() -> Result<()> {
     Ok(())
 }
 
+/// Version of the tgradish crates, from the workspace manifest.
+fn workspace_version(root: &Path) -> Result<String> {
+    let manifest = std::fs::read_to_string(root.join("Cargo.toml"))?;
+    let package = manifest.split("[workspace.package]").nth(1).context("no [workspace.package]")?;
+    let line = package
+        .lines()
+        .find(|line| line.trim_start().starts_with("version"))
+        .context("no workspace version")?;
+    Ok(line.split('"').nth(1).context("malformed version")?.to_string())
+}
+
+fn sha256_file(path: &Path) -> Result<()> {
+    let dir = path.parent().unwrap();
+    let name = path.file_name().unwrap();
+    let sum = output(Command::new("sha256sum").current_dir(dir).arg(name))?;
+    let mut sum_path = path.as_os_str().to_owned();
+    sum_path.push(".sha256");
+    std::fs::write(sum_path, sum)?;
+    Ok(())
+}
+
+/// Packs a release archive with the tgradish binary built with
+/// `--features linked-static --target <triple>`, and copies the ffmpeg
+/// executables archive for `tgradish ffmpeg download` next to it.
+fn package_release(args: &[String]) -> Result<()> {
+    let target = match args {
+        [flag, name] if flag == "--target" => match name.as_str() {
+            "linux" => Target::Linux,
+            "windows" => Target::Windows,
+            other => bail!("unknown target {other:?}, expected linux or windows"),
+        },
+        _ => bail!("usage: cargo xtask package --target linux|windows"),
+    };
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let version = workspace_version(root)?;
+    let triple = target.triple();
+    let binary = root.join("target").join(triple).join("release").join(target.exe("tgradish"));
+    ensure!(binary.is_file(), "{} is missing, build it first", binary.display());
+    let ffmpeg_dir = root.join(format!("target/ffmpeg/ffmpeg-{}-{triple}", FFMPEG.version));
+    ensure!(ffmpeg_dir.is_dir(), "{} is missing, run cargo xtask ffmpeg", ffmpeg_dir.display());
+
+    let out = root.join("target/release-artifacts");
+    let name = format!("tgradish-{version}-{triple}");
+    let stage = out.join(&name);
+    if stage.exists() {
+        std::fs::remove_dir_all(&stage)?;
+    }
+    std::fs::create_dir_all(stage.join("licenses"))?;
+    std::fs::copy(&binary, stage.join(target.exe("tgradish")))?;
+    std::fs::copy(root.join("README.md"), stage.join("README.md"))?;
+    std::fs::copy(root.join("LICENSE.txt"), stage.join("LICENSE.txt"))?;
+    for entry in std::fs::read_dir(ffmpeg_dir.join("licenses"))? {
+        let entry = entry?;
+        std::fs::copy(entry.path(), stage.join("licenses").join(entry.file_name()))?;
+    }
+    std::fs::write(
+        stage.join("THIRD-PARTY.txt"),
+        format!(
+            "tgradish is MIT licensed, see LICENSE.txt.\n\n\
+             It includes ffmpeg {ffmpeg} (LGPL 2.1 or later) built with zlib, libvpx and\n\
+             dav1d, linked statically. Their licenses are in licenses/. The exact\n\
+             sources are in ffmpeg-{ffmpeg}-sources.tar, published with this release;\n\
+             docs/ffmpeg.md in the tgradish repository explains how to rebuild\n\
+             tgradish against a modified ffmpeg.\n",
+            ffmpeg = FFMPEG.version,
+        ),
+    )?;
+
+    let archive = match target {
+        Target::Linux => {
+            let archive = out.join(format!("{name}.tar.gz"));
+            run(Command::new("tar").arg("-czf").arg(&archive).arg("-C").arg(&out).arg(&name))?;
+            archive
+        }
+        Target::Windows => {
+            let archive = out.join(format!("{name}.zip"));
+            if archive.exists() {
+                std::fs::remove_file(&archive)?;
+            }
+            run(Command::new("zip").current_dir(&out).arg("-qr").arg(&archive).arg(&name))?;
+            archive
+        }
+    };
+    sha256_file(&archive)?;
+
+    let ffmpeg_archive = format!("ffmpeg-{}-{triple}.tar.gz", FFMPEG.version);
+    std::fs::copy(root.join("target/ffmpeg").join(&ffmpeg_archive), out.join(&ffmpeg_archive))?;
+    sha256_file(&out.join(&ffmpeg_archive))?;
+    println!("{}", archive.display());
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("ffmpeg") => build_ffmpeg(&args[1..]),
         Some("ffmpeg-sources") => package_sources(),
+        Some("package") => package_release(&args[1..]),
         _ => bail!(
             "usage: cargo xtask ffmpeg [--target linux|windows] [--no-asm]\n       \
-             cargo xtask ffmpeg-sources"
+             cargo xtask ffmpeg-sources\n       \
+             cargo xtask package --target linux|windows"
         ),
     }
 }
