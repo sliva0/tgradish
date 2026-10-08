@@ -166,9 +166,13 @@ pub fn check(json: &[u8], tgs_bytes: Option<usize>) -> Result<(Stats, Vec<Issue>
     for layer in layers {
         walker.layer(layer);
     }
-    match walker.expand(layers, &mut HashMap::new(), &mut Vec::new()) {
-        Some(count) => walker.stats.expanded_layers = count,
-        None => issues.push(error("precomps reference each other in a loop".into())),
+    // expanding recurses once per nested precomp, at most once per asset;
+    // past tlottie's limit on assets the file fails anyway
+    if walker.stats.assets <= TLOTTIE.max_assets {
+        match walker.expand(layers, &mut HashMap::new(), &mut Vec::new()) {
+            Some(count) => walker.stats.expanded_layers = count,
+            None => issues.push(error("precomps reference each other in a loop".into())),
+        }
     }
     let stats = walker.stats;
     issues.extend(rules(&stats));
@@ -596,5 +600,20 @@ mod tests {
         assert!(check(groups(100).as_bytes(), None).unwrap_err().contains("nests"));
         // brackets in strings don't count
         assert_eq!(nesting(br#"{"a":"[[[{{{\"]]]","b":[1]}"#), 2);
+    }
+
+    #[test]
+    fn stops_at_long_precomp_chains() {
+        // each asset uses the next; deep enough to overflow a stack
+        let assets: Vec<String> = (0..20_000)
+            .map(|n| format!(r#"{{"id":"a{n}","layers":[{{"ty":0,"refId":"a{}"}}]}}"#, n + 1))
+            .collect();
+        let json = format!(
+            r#"{{"fr":60,"ip":0,"op":10,"w":512,"h":512,"assets":[{}],"layers":[{{"ty":0,"refId":"a0"}}]}}"#,
+            assets.join(",")
+        );
+        let (stats, issues) = check(json.as_bytes(), None).unwrap();
+        assert_eq!(stats.assets, 20_000);
+        assert!(issues.iter().any(|issue| issue.message.contains("assets")));
     }
 }
