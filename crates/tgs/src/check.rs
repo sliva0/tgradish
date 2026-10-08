@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::limits::{MAX_RAW_JSON, TLOTTIE, telegram};
@@ -32,7 +32,10 @@ pub struct Stats {
     pub assets: usize,
     /// Layers once precomps are expanded where they are used.
     pub expanded_layers: usize,
+    /// Arrays and objects inside each other in the JSON.
     pub depth: usize,
+    /// Shape groups inside each other.
+    pub group_depth: usize,
     /// Lottie features used, by name.
     pub features: BTreeSet<&'static str>,
 }
@@ -86,9 +89,48 @@ struct Walker<'a> {
     assets: HashMap<&'a str, &'a Value>,
 }
 
+/// How deeply arrays and objects nest, read without parsing.
+fn nesting(json: &[u8]) -> usize {
+    let (mut depth, mut deepest, mut in_string, mut escaped) = (0usize, 0, false, false);
+    for &byte in json {
+        if in_string {
+            match byte {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' | b'[' => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            b'}' | b']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    deepest
+}
+
 /// Checks Lottie JSON; `tgs_bytes` is the size of the `.tgs` it came from.
+/// Fails on JSON that doesn't parse, or nests deeper than Telegram's
+/// renderer reads.
 pub fn check(json: &[u8], tgs_bytes: Option<usize>) -> Result<(Stats, Vec<Issue>), String> {
-    let root: Value = serde_json::from_slice(json).map_err(|err| err.to_string())?;
+    let depth = nesting(json);
+    if depth > TLOTTIE.max_nesting_depth {
+        return Err(format!(
+            "the JSON nests {depth} levels deep; Telegram's renderer reads up to {}",
+            TLOTTIE.max_nesting_depth
+        ));
+    }
+    // serde_json stops at 128 levels on its own; the depth is bounded above
+    let mut parser = serde_json::Deserializer::from_slice(json);
+    parser.disable_recursion_limit();
+    let root = Value::deserialize(&mut parser).map_err(|err| err.to_string())?;
+    parser.end().map_err(|err| err.to_string())?;
     let number = |key: &str| root.get(key).and_then(Value::as_f64).unwrap_or(0.0);
     let mut walker = Walker {
         stats: Stats {
@@ -117,11 +159,11 @@ pub fn check(json: &[u8], tgs_bytes: Option<usize>) -> Result<(Stats, Vec<Issue>
             None => _ = walker.stats.features.insert("images"),
         }
     }
-    let layers = root.get("layers").and_then(Value::as_array).cloned().unwrap_or_default();
-    for layer in &layers {
+    let layers = root.get("layers").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+    for layer in layers {
         walker.layer(layer);
     }
-    match walker.expand(&layers, &mut Vec::new()) {
+    match walker.expand(layers, &mut HashMap::new(), &mut Vec::new()) {
         Some(count) => walker.stats.expanded_layers = count,
         None => issues.push(error("precomps reference each other in a loop".into())),
     }
@@ -174,6 +216,7 @@ fn rules(stats: &Stats) -> Vec<Issue> {
         ("assets", stats.assets, TLOTTIE.max_assets),
         ("layers with precomps expanded", stats.expanded_layers, TLOTTIE.max_precomp_expansion),
         ("levels of nesting", stats.depth, TLOTTIE.max_nesting_depth),
+        ("groups inside each other", stats.group_depth, TLOTTIE.max_group_depth),
     ];
     for (what, count, limit) in limits {
         if count > limit {
@@ -263,7 +306,7 @@ impl<'a> Walker<'a> {
         if ty == 4 {
             let mut counts = ShapeCounts::default();
             if let Some(shapes) = layer.get("shapes").and_then(Value::as_array) {
-                self.shapes(shapes, &mut counts);
+                self.shapes(shapes, &mut counts, 0);
             }
             let stats = &mut self.stats;
             stats.max_shapes_per_layer = stats.max_shapes_per_layer.max(counts.items);
@@ -278,7 +321,8 @@ impl<'a> Walker<'a> {
 
     /// One list of shape items. A paint covers the geometry before it in
     /// its list, and a group counts as one piece of geometry in its parent.
-    fn shapes(&mut self, items: &[Value], counts: &mut ShapeCounts) {
+    fn shapes(&mut self, items: &[Value], counts: &mut ShapeCounts, depth: usize) {
+        self.stats.group_depth = self.stats.group_depth.max(depth);
         let mut sources = 0;
         for item in items {
             counts.items += 1;
@@ -286,7 +330,7 @@ impl<'a> Walker<'a> {
             let feature = match ty {
                 "gr" => {
                     let children = item.get("it").and_then(Value::as_array);
-                    self.shapes(children.map_or(&[][..], Vec::as_slice), counts);
+                    self.shapes(children.map_or(&[][..], Vec::as_slice), counts, depth + 1);
                     sources += 1;
                     None
                 }
@@ -328,31 +372,43 @@ impl<'a> Walker<'a> {
 
     fn path(&mut self, item: &Value) {
         let shape = item.get("ks").and_then(|ks| ks.get("k"));
-        // a static shape, or the start shapes of keyframes
+        // a static shape, or the start and end shapes of keyframes
         let shapes: Vec<&Value> = match shape {
-            Some(Value::Array(keys)) => {
-                keys.iter().filter_map(|key| key.get("s")?.as_array()?.first()).collect()
-            }
+            Some(Value::Array(keys)) => keys
+                .iter()
+                .flat_map(|key| ["s", "e"].map(|end| key.get(end).and_then(Value::as_array)))
+                .flatten()
+                .flatten()
+                .collect(),
             Some(shape) => vec![shape],
             None => Vec::new(),
         };
+        let stats = &mut self.stats;
         for shape in shapes {
-            let Some(points) = shape.get("v").and_then(Value::as_array) else { continue };
-            let stats = &mut self.stats;
-            stats.max_path_points = stats.max_path_points.max(points.len());
-            for coordinate in points.iter().filter_map(Value::as_array).flatten() {
-                let value = coordinate.as_f64().unwrap_or(0.0).abs();
-                stats.max_path_coordinate = stats.max_path_coordinate.max(value);
+            // vertices and both tangents
+            for name in ["v", "i", "o"] {
+                let Some(points) = shape.get(name).and_then(Value::as_array) else { continue };
+                stats.max_path_points = stats.max_path_points.max(points.len());
+                for coordinate in points.iter().filter_map(Value::as_array).flatten() {
+                    let value = coordinate.as_f64().unwrap_or(0.0).abs();
+                    stats.max_path_coordinate = stats.max_path_coordinate.max(value);
+                }
             }
         }
     }
 
-    /// Layers counted once for every place a precomp is used; `None` for
-    /// precomps that contain themselves.
-    fn expand(&self, layers: &[Value], stack: &mut Vec<&'a str>) -> Option<usize> {
-        let mut total = 0;
+    /// Layers counted once for every place a precomp is used, up to just
+    /// past tlottie's limit; `None` for precomps that contain themselves.
+    fn expand(
+        &self,
+        layers: &'a [Value],
+        sizes: &mut HashMap<&'a str, usize>,
+        stack: &mut Vec<&'a str>,
+    ) -> Option<usize> {
+        let cap = TLOTTIE.max_precomp_expansion + 1;
+        let mut total = 0usize;
         for layer in layers {
-            total += 1;
+            total = total.saturating_add(1);
             let reference = layer.get("refId").and_then(Value::as_str);
             let Some((&id, asset)) = reference.and_then(|id| self.assets.get_key_value(id)) else {
                 continue;
@@ -361,9 +417,20 @@ impl<'a> Walker<'a> {
             if stack.contains(&id) {
                 return None;
             }
-            stack.push(id);
-            total += self.expand(inner, stack)?;
-            stack.pop();
+            let size = match sizes.get(id) {
+                Some(&size) => size,
+                None => {
+                    stack.push(id);
+                    let size = self.expand(inner, sizes, stack)?;
+                    stack.pop();
+                    sizes.insert(id, size);
+                    size
+                }
+            };
+            total = total.saturating_add(size);
+            if total >= cap {
+                return Some(cap);
+            }
         }
         Some(total)
     }
@@ -463,5 +530,68 @@ mod tests {
         assert_eq!(issues, []);
         // 3 top layers and 2 for each use of the precomp
         assert_eq!((stats.layers, stats.expanded_layers), (5, 7));
+    }
+
+    #[test]
+    fn expands_precomps_once() {
+        // each asset uses the one before twice: 2^40 layers if expanded
+        // naively, but only 41 assets to look at
+        let mut assets = vec![r#"{"id":"a0","layers":[{"ty":4}]}"#.to_owned()];
+        for n in 1..=40 {
+            let previous = n - 1;
+            assets.push(format!(
+                r#"{{"id":"a{n}","layers":[{{"ty":0,"refId":"a{previous}"}},{{"ty":0,"refId":"a{previous}"}}]}}"#
+            ));
+        }
+        let json = format!(
+            r#"{{"fr":60,"ip":0,"op":10,"w":512,"h":512,"assets":[{}],"layers":[{{"ty":0,"refId":"a40"}}]}}"#,
+            assets.join(",")
+        );
+        let started = std::time::Instant::now();
+        let (stats, issues) = check(json.as_bytes(), None).unwrap();
+        assert!(started.elapsed().as_secs() < 2);
+        assert!(stats.expanded_layers > TLOTTIE.max_precomp_expansion);
+        assert!(issues.iter().any(|issue| issue.message.contains("precomps expanded")));
+    }
+
+    #[test]
+    fn reads_tangents_and_end_shapes() {
+        let path = |shape: &str| {
+            format!(
+                r#"{{"fr":60,"ip":0,"op":10,"w":512,"h":512,"layers":[{{"ty":4,"shapes":[{{"ty":"sh","ks":{shape}}}]}}]}}"#
+            )
+        };
+        let far_tangent =
+            path(r#"{"k":{"v":[[0,0],[1,1]],"i":[[200000,0],[0,0]],"o":[[0,0],[0,0]]}}"#);
+        let far_end =
+            path(r#"{"a":1,"k":[{"t":0,"s":[{"v":[[0,0]]}],"e":[{"v":[[0,-200000]]}]},{"t":9}]}"#);
+        for json in [far_tangent, far_end] {
+            let (stats, issues) = check(json.as_bytes(), None).unwrap();
+            assert_eq!(stats.max_path_coordinate, 200_000.0);
+            assert!(issues.iter().any(|issue| issue.message.contains("path point")), "{issues:?}");
+        }
+    }
+
+    #[test]
+    fn reads_deep_nesting_like_tlottie() {
+        let groups = |depth: usize| {
+            let open = r#"{"ty":"gr","it":["#.repeat(depth);
+            let close = "]}".repeat(depth);
+            format!(
+                r#"{{"fr":60,"ip":0,"op":10,"w":512,"h":512,"layers":[{{"ty":4,"shapes":[{open}{close}]}}]}}"#
+            )
+        };
+        // past serde_json's own limit of 128, within tlottie's: two levels
+        // per group, four around them
+        let (stats, issues) = check(groups(64).as_bytes(), None).unwrap();
+        assert_eq!((stats.group_depth, stats.depth), (64, 132));
+        assert_eq!(issues, []);
+        // more groups inside groups than tlottie takes
+        let (_, issues) = check(groups(70).as_bytes(), None).unwrap();
+        assert!(issues.iter().any(|issue| issue.message.contains("groups inside")));
+        // nesting past what tlottie reads at all
+        assert!(check(groups(100).as_bytes(), None).unwrap_err().contains("nests"));
+        // brackets in strings don't count
+        assert_eq!(nesting(br#"{"a":"[[[{{{\"]]]","b":[1]}"#), 2);
     }
 }
