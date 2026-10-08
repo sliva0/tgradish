@@ -2,8 +2,8 @@
 //!
 //! The default output has only what pixelart2tgs 1.x's stickers (accepted
 //! by Telegram) had, plus rectangles without a corner radius, which both
-//! renderers draw correctly; upload probes confirm Telegram takes
-//! them. [`Style`] adds optional fields back, for the probes.
+//! renderers draw correctly; Telegram accepted it in upload probes.
+//! [`Style`] adds optional fields back, for the probes.
 
 use std::fmt::Write;
 
