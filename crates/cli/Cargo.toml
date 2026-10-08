@@ -12,12 +12,16 @@ name = "tgradish"
 path = "src/main.rs"
 
 [features]
+default = ["gui"]
+# the window, `tgradish gui`
+gui = ["dep:tgradish-gui"]
 # ffmpeg linked into the binary instead of separate executables
 linked = ["tgradish-core/linked"]
 linked-static = ["tgradish-core/linked-static"]
 
 [dependencies]
 tgradish-core.workspace = true
+tgradish-gui = { workspace = true, optional = true }
 
 anyhow.workspace = true
 arboard.workspace = true

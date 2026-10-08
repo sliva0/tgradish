@@ -78,10 +78,32 @@ fn run(cli: Cli) -> Result<()> {
         Command::Preset(command) => commands::preset(&ctx, command),
         Command::Config(command) => commands::config(&ctx, command, config_path),
         Command::Ffmpeg(command) => commands::ffmpeg(&ctx, command),
+        #[cfg(feature = "gui")]
+        Command::Gui => tgradish_gui::run().map_err(|err| anyhow::anyhow!("{err}")),
     }
 }
 
+/// Started without arguments from a file manager, desktop entry or the
+/// Start menu, rather than a terminal.
+#[cfg(feature = "gui")]
+fn started_outside_a_terminal() -> bool {
+    use std::io::IsTerminal;
+    std::env::args_os().len() == 1
+        && !std::io::stdin().is_terminal()
+        && !std::io::stdout().is_terminal()
+}
+
 fn main() -> ExitCode {
+    #[cfg(feature = "gui")]
+    if started_outside_a_terminal() {
+        return match tgradish_gui::run() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("{} {err}", ui::error_label());
+                ExitCode::FAILURE
+            }
+        };
+    }
     let cli = Cli::parse();
     let json = cli.global.json;
     match run(cli) {
