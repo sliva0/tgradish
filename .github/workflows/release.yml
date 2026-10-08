@@ -45,7 +45,7 @@ jobs:
         with:
           key: ${{ matrix.triple }}
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/ffmpeg/sources
           key: ffmpeg-sources-${{ hashFiles('xtask/src/main.rs') }}
@@ -84,7 +84,7 @@ jobs:
 
       - run: cargo xtask package --target ${{ matrix.target }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.target }}
           path: |
@@ -97,7 +97,7 @@ jobs:
     needs: build
     runs-on: windows-latest
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: release-windows
           path: artifacts
@@ -126,13 +126,13 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/ffmpeg/sources
           key: ffmpeg-sources-${{ hashFiles('xtask/src/main.rs') }}
       - run: cargo xtask ffmpeg-sources
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           pattern: release-*
           path: artifacts
