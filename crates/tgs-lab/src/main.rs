@@ -9,10 +9,12 @@
 //! cargo run -p tgs-lab -- normalise art.gif
 //! cargo run -p tgs-lab -- encode art.gif out.tgs [--runs]
 //! cargo run -p tgs-lab -- verify art.gif [out.tgs]
+//! cargo run --release -p tgs-lab -- probes DIR [ART]
 //! cargo run --release -p tgs-lab -- bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]
 //! ```
 
 mod bench;
+mod probes;
 mod verify;
 
 use std::path::{Path, PathBuf};
@@ -235,6 +237,13 @@ fn main() -> Result<()> {
         Some("normalise") if args.len() > 1 => print_reports(&paths()),
         Some("encode") => encode_file(&args[1..]),
         Some("verify") => verify_file(&args[1..]),
+        Some("probes") if args.len() > 1 => {
+            let art = args.get(2).map(PathBuf::from).map(|path| -> Result<(String, String)> {
+                let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                Ok((name, encoded(&load(&path)?.0, false)?))
+            });
+            probes::write(Path::new(&args[1]), art.transpose()?)
+        }
         Some("bench") => {
             let (paths, rest) = options(&args[1..], &["--save", "--against"])?;
             let flag = |name: &str| rest.contains(&name);
@@ -275,6 +284,7 @@ fn main() -> Result<()> {
              tgs-lab normalise FILE...\n       \
              tgs-lab encode SOURCE OUTPUT.tgs [--runs]\n       \
              tgs-lab verify SOURCE [STICKER.tgs] [--sizes 100,160,237,512] [--frames 0,4] [--picture PREFIX] [--explain N] [--runs]\n       \
+             tgs-lab probes DIR [ART]\n       \
              tgs-lab bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]"
         ),
     }

@@ -56,8 +56,9 @@ Done on `rewrite-v2`, with CI on Linux and Windows:
   other experiments are in `docs/tgs.md`);
 - GUI: `tgradish gui`, or tgradish started outside a terminal;
 - distribution: the targets above, AUR packages and a Nix flake, with
-  publishing steps for the user in `docs/packaging.md`. Next: T9 probes
-  and the release.
+  publishing steps for the user in `docs/packaging.md`;
+- T9 probes, ready for the user to upload (`docs/probes.md`). Next: their
+  results, then the release.
 
 ## Roadmap
 
