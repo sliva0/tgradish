@@ -78,7 +78,7 @@ pub enum Command {
     /// Show the config file.
     #[command(subcommand)]
     Config(ConfigCommand),
-    /// Check which ffmpeg is used.
+    /// Check, download or remove ffmpeg.
     #[command(subcommand)]
     Ffmpeg(FfmpegCommand),
 }
@@ -279,6 +279,18 @@ pub enum ConfigCommand {
 pub enum FfmpegCommand {
     /// Show which ffmpeg is used and whether it can encode stickers.
     Status,
+    /// Download the minimal ffmpeg build into tgradish's data directory.
+    Download {
+        /// Archive to install instead of the build published for this
+        /// version: a URL, file:// URL or local path.
+        #[arg(long, requires = "sha256")]
+        url: Option<String>,
+        /// Expected SHA-256 of the archive given with --url.
+        #[arg(long, requires = "url")]
+        sha256: Option<String>,
+    },
+    /// Delete the downloaded ffmpeg.
+    Remove,
 }
 
 #[cfg(test)]

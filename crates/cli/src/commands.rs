@@ -240,8 +240,66 @@ fn ffmpeg_capabilities(ffmpeg: &std::path::Path) -> Result<(String, bool)> {
     Ok((version, vp9))
 }
 
+fn download(ctx: &Context, url: Option<String>, sha256: Option<String>) -> Result<()> {
+    use tgradish_core::ffmpeg::download;
+
+    let (url, sha256) = match (url, sha256) {
+        (Some(url), Some(sha256)) => (url, sha256),
+        _ => {
+            let build = download::published_build().context(
+                "no ffmpeg build is published for this platform and version yet; \
+                 install ffmpeg yourself or pass --url and --sha256",
+            )?;
+            (build.url, build.sha256)
+        }
+    };
+
+    let bar = (!ctx.global.json && !ctx.global.quiet).then(|| {
+        let bar = indicatif::ProgressBar::new(0);
+        bar.set_style(
+            indicatif::ProgressStyle::with_template(
+                "downloading [{bar:30}] {bytes}/{total_bytes} {bytes_per_sec}",
+            )
+            .expect("valid template")
+            .progress_chars("=> "),
+        );
+        bar
+    });
+    let ffmpeg = download::install(&url, &sha256, None, &mut |done, total| {
+        if let Some(bar) = &bar {
+            if let Some(total) = total {
+                bar.set_length(total);
+            }
+            bar.set_position(done);
+        }
+    });
+    if let Some(bar) = bar {
+        bar.finish_and_clear();
+    }
+    let ffmpeg = ffmpeg?;
+    let (version, vp9) = ffmpeg_capabilities(&ffmpeg.ffmpeg)?;
+    if ctx.global.json {
+        print_json(&json!({ "ffmpeg": ffmpeg, "version": version, "libvpx_vp9": vp9 }));
+    } else {
+        println!("{} {version}", style("installed").green().bold());
+        println!("into {}", ffmpeg.ffmpeg.parent().unwrap_or(&ffmpeg.ffmpeg).display());
+    }
+    Ok(())
+}
+
 pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
     match command {
+        FfmpegCommand::Download { url, sha256 } => download(ctx, url, sha256)?,
+        FfmpegCommand::Remove => {
+            let removed = tgradish_core::ffmpeg::download::uninstall()?;
+            if ctx.global.json {
+                print_json(&json!({ "removed": removed }));
+            } else if removed {
+                println!("removed the downloaded ffmpeg");
+            } else {
+                println!("no downloaded ffmpeg to remove");
+            }
+        }
         FfmpegCommand::Status => {
             let ffmpeg = ctx.ffmpeg()?;
             let (version, vp9) = ffmpeg_capabilities(&ffmpeg.ffmpeg)?;

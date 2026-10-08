@@ -1,0 +1,447 @@
+//! Development tasks, run with `cargo xtask <task>`.
+//!
+//! `cargo xtask ffmpeg [--target linux|windows] [--no-asm]` builds the minimal
+//! static ffmpeg and ffprobe that release archives ship with: only what
+//! tgradish needs to decode common inputs and encode VP9 WebM. Runs on Linux;
+//! Windows builds are cross-compiled with mingw-w64. Needs a C toolchain,
+//! make, pkg-config, nasm (unless --no-asm), meson, ninja, curl and tar.
+//!
+//! The result is `target/ffmpeg/ffmpeg-<version>-<target>.tar.gz` with the
+//! two executables and the licenses of everything linked into them. ffmpeg
+//! is configured without GPL parts, so it is LGPL 2.1 or later.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use anyhow::{Context, Result, bail, ensure};
+
+struct Source {
+    name: &'static str,
+    version: &'static str,
+    url: &'static str,
+    sha256: &'static str,
+    /// License files to ship, relative to the source directory.
+    licenses: &'static [&'static str],
+}
+
+// zlib and dav1d hashes match the ones their projects publish; ffmpeg and
+// libvpx were pinned when first downloaded.
+const ZLIB: Source = Source {
+    name: "zlib",
+    version: "1.3.2",
+    url: "https://zlib.net/zlib-1.3.2.tar.gz",
+    sha256: "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16",
+    licenses: &["LICENSE"],
+};
+const LIBVPX: Source = Source {
+    name: "libvpx",
+    version: "1.17.0",
+    url: "https://github.com/webmproject/libvpx/archive/refs/tags/v1.17.0.tar.gz",
+    sha256: "1020f184046187baa2985dbde38e0691f49c44088bca7a1842b0236c6081dc0a",
+    licenses: &["LICENSE", "PATENTS"],
+};
+const DAV1D: Source = Source {
+    name: "dav1d",
+    version: "1.5.4",
+    url: "https://downloads.videolan.org/pub/videolan/dav1d/1.5.4/dav1d-1.5.4.tar.xz",
+    sha256: "686616b7c69eb88d44459391ab25cac13b6647a3b288835c5784e71c1514a5c5",
+    licenses: &["COPYING"],
+};
+const FFMPEG: Source = Source {
+    name: "ffmpeg",
+    version: "9.0.2",
+    url: "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",
+    sha256: "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e",
+    licenses: &["COPYING.LGPLv2.1", "LICENSE.md"],
+};
+
+/// Everything tgradish asks ffmpeg to do, and nothing else.
+const FFMPEG_COMPONENTS: &[(&str, &[&str])] = &[
+    ("protocol", &["file", "pipe"]),
+    (
+        "demuxer",
+        &[
+            "mov",
+            "matroska",
+            "avi",
+            "flv",
+            "mpegts",
+            "mpegps",
+            "ogg",
+            "ivf",
+            "gif",
+            "apng",
+            "image2",
+            "image2pipe",
+            "png_pipe",
+            "jpeg_pipe",
+            "webp_pipe",
+            "bmp_pipe",
+            "tiff_pipe",
+            "h264",
+            "hevc",
+            "m4v",
+            "rawvideo",
+        ],
+    ),
+    (
+        "decoder",
+        &[
+            "h264",
+            "hevc",
+            "vp8",
+            "vp9",
+            "libvpx_vp8",
+            "libvpx_vp9",
+            "libdav1d",
+            "mpeg4",
+            "mpeg1video",
+            "mpeg2video",
+            "h263",
+            "theora",
+            "prores",
+            "ffv1",
+            "mjpeg",
+            "png",
+            "apng",
+            "gif",
+            "webp",
+            "bmp",
+            "tiff",
+            "qtrle",
+            "rawvideo",
+        ],
+    ),
+    ("encoder", &["libvpx_vp9", "rawvideo", "wrapped_avframe"]),
+    ("muxer", &["webm", "matroska", "null", "rawvideo"]),
+    (
+        "parser",
+        &[
+            "h264",
+            "hevc",
+            "vp8",
+            "vp9",
+            "av1",
+            "mpeg4video",
+            "mpegvideo",
+            "mjpeg",
+            "png",
+            "gif",
+            "webp",
+        ],
+    ),
+    (
+        "filter",
+        &[
+            "scale",
+            "fps",
+            "format",
+            "pad",
+            "crop",
+            "setsar",
+            "settb",
+            "setpts",
+            "trim",
+            "ssim",
+            "null",
+            "copy",
+            "transpose",
+            "hflip",
+            "vflip",
+        ],
+    ),
+];
+
+#[derive(Clone, Copy, PartialEq)]
+enum Target {
+    Linux,
+    Windows,
+}
+
+impl Target {
+    fn triple(self) -> &'static str {
+        match self {
+            Target::Linux => "x86_64-unknown-linux-gnu",
+            Target::Windows => "x86_64-pc-windows-gnu",
+        }
+    }
+
+    fn cross_prefix(self) -> Option<&'static str> {
+        (self == Target::Windows).then_some("x86_64-w64-mingw32-")
+    }
+
+    fn exe(self, name: &str) -> String {
+        match self {
+            Target::Linux => name.to_string(),
+            Target::Windows => format!("{name}.exe"),
+        }
+    }
+}
+
+struct Build {
+    target: Target,
+    asm: bool,
+    jobs: String,
+    /// Downloads and extracted sources.
+    sources: PathBuf,
+    /// Install prefix for the libraries.
+    prefix: PathBuf,
+    out: PathBuf,
+}
+
+fn run(cmd: &mut Command) -> Result<()> {
+    eprintln!("$ {cmd:?}");
+    let status = cmd.status().with_context(|| format!("could not run {cmd:?}"))?;
+    ensure!(status.success(), "{cmd:?} failed with {status}");
+    Ok(())
+}
+
+fn output(cmd: &mut Command) -> Result<String> {
+    let out = cmd.output().with_context(|| format!("could not run {cmd:?}"))?;
+    ensure!(out.status.success(), "{cmd:?} failed with {}", out.status);
+    Ok(String::from_utf8(out.stdout)?)
+}
+
+impl Build {
+    /// Downloads, verifies and extracts `source`. Returns the source directory.
+    fn fetch(&self, source: &Source) -> Result<PathBuf> {
+        let file_name = source.url.rsplit('/').next().unwrap();
+        let archive = self.sources.join(format!("{}-{file_name}", source.name));
+        if !archive.exists() {
+            let partial = archive.with_extension("partial");
+            run(Command::new("curl").args(["-sSfL", "-o"]).arg(&partial).arg(source.url))?;
+            std::fs::rename(&partial, &archive)?;
+        }
+        let sum = output(Command::new("sha256sum").arg(&archive))?;
+        let sum = sum.split_whitespace().next().unwrap_or_default();
+        if sum != source.sha256 {
+            std::fs::remove_file(&archive)?;
+            bail!("{} checksum mismatch: expected {}, got {sum}", source.name, source.sha256);
+        }
+
+        // fresh copy per target, builds happen in the source tree
+        let dir = self.sources.join(format!(
+            "{}-{}-{}",
+            source.name,
+            source.version,
+            self.target.triple()
+        ));
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir)?;
+        }
+        std::fs::create_dir_all(&dir)?;
+        run(Command::new("tar")
+            .arg("-xf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&dir)
+            .arg("--strip-components=1"))?;
+        Ok(dir)
+    }
+
+    fn make(&self, dir: &Path) -> Result<()> {
+        run(Command::new("make").current_dir(dir).args(["-j", &self.jobs]))?;
+        run(Command::new("make").current_dir(dir).arg("install"))
+    }
+
+    fn zlib(&self) -> Result<PathBuf> {
+        let dir = self.fetch(&ZLIB)?;
+        match self.target.cross_prefix() {
+            None => {
+                run(Command::new("./configure")
+                    .current_dir(&dir)
+                    .arg("--static")
+                    .arg(format!("--prefix={}", self.prefix.display()))
+                    .env("CFLAGS", "-O2 -fPIC"))?;
+                self.make(&dir)?;
+            }
+            Some(cross) => {
+                let prefix = self.prefix.display();
+                run(Command::new("make").current_dir(&dir).args([
+                    "-f",
+                    "win32/Makefile.gcc",
+                    &format!("PREFIX={cross}"),
+                    &format!("BINARY_PATH={prefix}/bin"),
+                    &format!("INCLUDE_PATH={prefix}/include"),
+                    &format!("LIBRARY_PATH={prefix}/lib"),
+                    "-j",
+                    &self.jobs,
+                    "install",
+                ]))?;
+            }
+        }
+        Ok(dir)
+    }
+
+    fn libvpx(&self) -> Result<PathBuf> {
+        let dir = self.fetch(&LIBVPX)?;
+        let target = match (self.target, self.asm) {
+            (_, false) => "generic-gnu",
+            (Target::Linux, true) => "x86_64-linux-gcc",
+            (Target::Windows, true) => "x86_64-win64-gcc",
+        };
+        let mut configure = Command::new("./configure");
+        configure
+            .current_dir(&dir)
+            .arg(format!("--prefix={}", self.prefix.display()))
+            .arg(format!("--target={target}"))
+            .args(["--enable-static", "--disable-shared", "--enable-pic"])
+            .args(["--disable-examples", "--disable-tools", "--disable-docs"])
+            .args(["--disable-unit-tests", "--disable-vp8-encoder", "--enable-vp9"]);
+        if let Some(cross) = self.target.cross_prefix() {
+            configure.env("CROSS", cross);
+        }
+        run(&mut configure)?;
+        self.make(&dir)?;
+        Ok(dir)
+    }
+
+    fn dav1d(&self) -> Result<PathBuf> {
+        let dir = self.fetch(&DAV1D)?;
+        let mut setup = Command::new("meson");
+        setup
+            .current_dir(&dir)
+            .args(["setup", "build", "--buildtype=release", "--default-library=static"])
+            .arg(format!("--prefix={}", self.prefix.display()))
+            .args(["--libdir=lib", "-Denable_tools=false", "-Denable_tests=false"])
+            .arg(format!("-Denable_asm={}", self.asm));
+        if let Some(cross) = self.target.cross_prefix() {
+            let file = dir.join("cross.ini");
+            std::fs::write(
+                &file,
+                format!(
+                    "[binaries]\nc = '{cross}gcc'\nar = '{cross}ar'\nstrip = '{cross}strip'\n\
+                     windres = '{cross}windres'\n\n[host_machine]\nsystem = 'windows'\n\
+                     cpu_family = 'x86_64'\ncpu = 'x86_64'\nendian = 'little'\n"
+                ),
+            )?;
+            setup.arg("--cross-file").arg(&file);
+        }
+        run(&mut setup)?;
+        run(Command::new("ninja").current_dir(&dir).args(["-C", "build", "install"]))?;
+        Ok(dir)
+    }
+
+    fn ffmpeg(&self) -> Result<PathBuf> {
+        let dir = self.fetch(&FFMPEG)?;
+        let mut configure = Command::new("./configure");
+        configure
+            .current_dir(&dir)
+            .arg(format!("--prefix={}", self.prefix.display()))
+            .args(["--disable-everything", "--disable-autodetect", "--disable-network"])
+            .args(["--disable-doc", "--disable-debug", "--disable-ffplay"])
+            .args(["--enable-ffmpeg", "--enable-ffprobe", "--enable-static", "--disable-shared"])
+            .args(["--enable-zlib", "--enable-libvpx", "--enable-libdav1d"])
+            .args(["--pkg-config-flags=--static", "--extra-version=tgradish"])
+            .arg(format!("--extra-cflags=-I{}/include", self.prefix.display()))
+            .arg(format!("--extra-ldflags=-L{}/lib", self.prefix.display()))
+            .env("PKG_CONFIG_PATH", self.prefix.join("lib/pkgconfig"));
+        for (kind, names) in FFMPEG_COMPONENTS {
+            configure.arg(format!("--enable-{kind}={}", names.join(",")));
+        }
+        if !self.asm {
+            configure.arg("--disable-x86asm");
+        }
+        if let Some(cross) = self.target.cross_prefix() {
+            configure
+                .args(["--enable-cross-compile", "--target-os=mingw32", "--arch=x86_64"])
+                .arg(format!("--cross-prefix={cross}"))
+                .arg("--pkg-config=pkg-config")
+                // no libgcc or winpthreads DLLs next to the executables
+                .arg("--extra-ldexeflags=-static");
+        }
+        run(&mut configure)?;
+        run(Command::new("make").current_dir(&dir).args(["-j", &self.jobs]))?;
+        Ok(dir)
+    }
+
+    fn package(&self, dirs: &[(&Source, PathBuf)]) -> Result<PathBuf> {
+        let name = format!("ffmpeg-{}-{}", FFMPEG.version, self.target.triple());
+        let stage = self.out.join(&name);
+        if stage.exists() {
+            std::fs::remove_dir_all(&stage)?;
+        }
+        std::fs::create_dir_all(stage.join("licenses"))?;
+
+        let ffmpeg_dir = &dirs.iter().find(|(s, _)| s.name == "ffmpeg").unwrap().1;
+        let strip = format!("{}strip", self.target.cross_prefix().unwrap_or_default());
+        for program in ["ffmpeg", "ffprobe"] {
+            let exe = self.target.exe(program);
+            let dest = stage.join(&exe);
+            std::fs::copy(ffmpeg_dir.join(&exe), &dest)?;
+            run(Command::new(&strip).arg(&dest))?;
+        }
+        let mut readme = format!(
+            "Minimal ffmpeg {} build for tgradish, made by `cargo xtask ffmpeg`.\n\
+             ffmpeg is licensed under the LGPL 2.1 or later. Sources:\n\n",
+            FFMPEG.version
+        );
+        for (source, dir) in dirs {
+            readme.push_str(&format!("{} {}: {}\n", source.name, source.version, source.url));
+            for license in source.licenses {
+                std::fs::copy(
+                    dir.join(license),
+                    stage.join("licenses").join(format!("{}-{license}", source.name)),
+                )?;
+            }
+        }
+        std::fs::write(stage.join("README.txt"), readme)?;
+
+        let archive = self.out.join(format!("{name}.tar.gz"));
+        run(Command::new("tar").arg("-czf").arg(&archive).arg("-C").arg(&self.out).arg(&name))?;
+        let sum = output(Command::new("sha256sum").arg(&archive))?;
+        std::fs::write(archive.with_extension("gz.sha256"), &sum)?;
+        Ok(archive)
+    }
+}
+
+fn build_ffmpeg(args: &[String]) -> Result<()> {
+    let mut target = Target::Linux;
+    let mut asm = true;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--target" => {
+                target = match iter.next().map(String::as_str) {
+                    Some("linux") => Target::Linux,
+                    Some("windows") => Target::Windows,
+                    other => bail!("unknown target {other:?}, expected linux or windows"),
+                }
+            }
+            "--no-asm" => asm = false,
+            other => bail!("unknown argument {other:?}"),
+        }
+    }
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("target/ffmpeg");
+    let build = Build {
+        target,
+        asm,
+        jobs: std::thread::available_parallelism().map_or(4, |n| n.get()).to_string(),
+        sources: root.join("sources"),
+        prefix: root.join(format!("prefix-{}", target.triple())),
+        out: root.clone(),
+    };
+    std::fs::create_dir_all(&build.sources)?;
+    if build.prefix.exists() {
+        std::fs::remove_dir_all(&build.prefix)?;
+    }
+
+    let dirs = vec![
+        (&ZLIB, build.zlib()?),
+        (&LIBVPX, build.libvpx()?),
+        (&DAV1D, build.dav1d()?),
+        (&FFMPEG, build.ffmpeg()?),
+    ];
+    let archive = build.package(&dirs)?;
+    println!("{}", archive.display());
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("ffmpeg") => build_ffmpeg(&args[1..]),
+        _ => bail!("usage: cargo xtask ffmpeg [--target linux|windows] [--no-asm]"),
+    }
+}
