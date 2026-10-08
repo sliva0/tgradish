@@ -7,6 +7,9 @@ name: release
 on:
   push:
     tags: ["v*"]
+    # TODO: remove before merging into master; manual runs only work for
+    # workflows on the default branch, so this tests releases until then
+    branches: [rewrite-v2]
   workflow_dispatch:
 
 env:

@@ -343,7 +343,7 @@ pub(crate) fn encode(
     }
 
     let pix_fmt = if plan.alpha { "yuva420p" } else { "yuv420p" };
-    let chain = video_filter(plan, params.fps, pix_fmt);
+    let chain = video_filter(plan, params.fps, params.length, pix_fmt);
     let spec = format!("[in]{}{chain}[out]", plan.source.orientation.filters());
     let mut graph = filter_graph(&[("in", source.buffer_args(&frame))], &spec)?;
     let time_base = graph.get("out").expect("added").sink().time_base();
@@ -408,9 +408,9 @@ pub(crate) fn ssim(plan: &Plan, candidate: &Path, fps: f64, cancel: &CancelToken
     }
 
     let retime = |fps: f64| format!("format=yuv420p,settb=AVTB,setpts=N/({fps}*TB)");
-    let reference = video_filter(plan, plan.fps, "yuv420p");
+    let reference = video_filter(plan, plan.fps, plan.length, "yuv420p");
     let spec = format!(
-        "[source]{}{reference},trim=end_frame={frames},{}[s];[attempt]{}[a];\
+        "[source]{}{reference},{}[s];[attempt]{}[a];\
          [s][a]ssim=eof_action=repeat[out]",
         plan.source.orientation.filters(),
         retime(plan.fps),
