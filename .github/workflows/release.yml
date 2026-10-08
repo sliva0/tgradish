@@ -60,7 +60,10 @@ jobs:
           CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
           CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
           AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
-          BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_gnu: -I/usr/x86_64-w64-mingw32/include
+          # the stubs come last, so they only fill in headers MinGW lacks
+          BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_gnu: >-
+            -I/usr/x86_64-w64-mingw32/include
+            -I${{ github.workspace }}/xtask/mingw-stubs
           # links winpthread and libgcc into the executable instead of
           # depending on their DLLs; `xtask package` checks the result
           CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS: -C link-arg=-static
