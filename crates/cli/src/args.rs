@@ -189,7 +189,16 @@ pub struct OptionArgs {
     #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
           default_missing_value = "true", help_heading = "Encoding")]
     pub lossless: Option<bool>,
-    /// Extra ffmpeg output arguments, split like a shell would.
+    /// libvpx-vp9 option for tuning; repeat for more. For example
+    /// tune-content=screen (flat graphics), aq-mode=2, sharpness=4,
+    /// arnr-strength=3, g=60 (keyframe interval) or qmax=50. `ffmpeg -h
+    /// encoder=libvpx-vp9` lists them all.
+    #[arg(long = "encoder-options", visible_alias = "encoder-option",
+          value_name = "NAME=VALUE", value_parser = parse_option_pair,
+          help_heading = "Encoding")]
+    pub encoder_options: Vec<(String, String)>,
+    /// Raw ffmpeg output arguments, split like a shell would. Only with
+    /// ffmpeg as a separate program (--ffmpeg-from system or --ffmpeg PATH).
     #[arg(long, value_name = "ARGS", allow_hyphen_values = true, help_heading = "Encoding")]
     pub extra_args: Option<ShellWords>,
 
@@ -228,6 +237,8 @@ impl OptionArgs {
             fake_duration: self.fake_duration,
             title: self.title.clone(),
             watermark: self.watermark,
+            encoder_options: (!self.encoder_options.is_empty())
+                .then(|| self.encoder_options.iter().cloned().collect()),
             extra_args: self.extra_args.clone().map(|words| words.0),
         }
     }
@@ -243,6 +254,11 @@ impl std::str::FromStr for ShellWords {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         shlex::split(s).map(ShellWords).ok_or("unbalanced quotes")
     }
+}
+
+fn parse_option_pair(text: &str) -> Result<(String, String), String> {
+    let (name, value) = text.split_once('=').ok_or("expected NAME=VALUE")?;
+    Ok((name.trim().to_string(), value.to_string()))
 }
 
 /// Mirrors a core enum as a clap value enum.
@@ -387,5 +403,24 @@ mod tests {
         let extra = args.conversion.options.to_options().extra_args.unwrap();
         assert_eq!(extra, ["-metadata", "comment=hello world", "-tune-content", "screen"]);
         assert!(Cli::try_parse_from(["tgradish", "convert", "a", "--extra-args", "'x"]).is_err());
+    }
+
+    #[test]
+    fn collects_encoder_options() {
+        let cli = Cli::parse_from([
+            "tgradish",
+            "convert",
+            "a.mp4",
+            "--encoder-options",
+            "tune-content=screen",
+            "--encoder-option",
+            "arnr-strength=3",
+        ]);
+        let Command::Convert(args) = cli.command else { panic!() };
+        let options = args.conversion.options.to_options().encoder_options.unwrap();
+        assert_eq!(options["tune-content"], "screen");
+        assert_eq!(options["arnr-strength"], "3");
+        let bad = ["tgradish", "convert", "a", "--encoder-options", "no-equals"];
+        assert!(Cli::try_parse_from(bad).is_err());
     }
 }
