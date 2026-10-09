@@ -386,6 +386,7 @@ reach. Check the invariant in code (debug assertion plus tests) on every
   shared edges cancel.) Start with greedy maximal rectangles, then improve
   the cover heuristic.
 - Rectilinear paths (with empty tangents) where they come out cheaper.
+  T6 found none where they do.
 - To try: 1 px strokes along pixel centres for straight runs; the even-odd
   fill rule for dithering and checkerboards (a checkerboard is O(n) XORed
   stripes instead of O(n²) squares). Choose per shape by measured cost.
@@ -478,8 +479,8 @@ pick the step with the best bytes saved per unit of error, and bisect the
 strength of the last step. Report every applied step in a `finished` event
 (`lossy: true` plus the list of steps and their sizes) and as a visible
 warning in text mode. Fitting must also respect the raw JSON limit (1 MB,
-Telegram's server), which may favour paths over rectangles for very large
-outputs.
+Telegram's server). Paths don't help there: they write more JSON than
+rectangles (see T6).
 
 Options to expose (names should fit the WebM side; reuse `speed`
 fast/balanced/best as the effort setting): target (sticker/emoji), fit, the
@@ -628,12 +629,23 @@ The web app there may also replace the "Web page" and "Bot" items under
   core and cores can't reach under deltas, so rectangles grew 14%, and
   with every colour split, layers grew 20% instead of shrinking.
 
+  Also dropped: paths. Writing each group's outline (corners only, holes
+  counter-clockwise) instead of its rectangles renders the same, but the
+  corpus came out 47% larger and its raw JSON 46% larger. An outline has
+  3.2 corners per rectangle of the cover, each two absolute coordinates
+  with an empty `i` and `o` tangent, while a rectangle's size is mostly 1
+  or 2 and compresses well. Paths only for groups with few corners per
+  rectangle never paid off (at most 2: no change; 2.5: 1% larger), nor
+  did outlining the widest shape a group may take where that has fewer
+  corners. Paths would only save shapes against the per-layer limit,
+  which the fallback to a layer per frame already handles.
+
   Left for later (see Later): motion as position keyframes, which only
   files like `Spamton_trembling` would gain from; fringe-aware colour
   orders, which are about looks rather than size. Precomps, palette
-  cycling and other primitives weren't tried: in this corpus colours
-  rarely cycle and sprites rarely repeat, while 70% of cells staying put
-  is what the split already uses.
+  cycling, strokes and the even-odd rule weren't tried: in this corpus
+  colours rarely cycle and sprites rarely repeat, while 70% of cells
+  staying put is what the split already uses.
 - **T7 (done):** fit and lossy reductions, with reporting.
 
   Notes from T7 (`reduce`, `sticker::make`):
