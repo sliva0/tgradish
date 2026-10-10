@@ -55,6 +55,9 @@ pub struct VideoTrack {
     pub alpha: bool,
     /// Frame duration declared by the track, in nanoseconds.
     pub default_duration_ns: Option<u64>,
+    /// The track's UID, which holds tgradish's hidden mark (see
+    /// [`crate::mark`]).
+    pub uid: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -114,6 +117,9 @@ pub struct Patch {
     /// shown by ffprobe. Must start with [`SIGNATURE_PREFIX`] to be found by
     /// [`inspect`]. Written only if there is enough padding left.
     pub signature: Option<String>,
+    /// A new UID for the video track, written over the old one when that
+    /// takes 8 bytes, as ffmpeg's do.
+    pub track_uid: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -318,6 +324,7 @@ fn parse_tracks(buf: &[u8], tracks: &Element) -> Result<Tracks> {
         let mut kind = 0;
         let mut codec_id = String::new();
         let mut default_duration_ns = None;
+        let mut uid = None;
         let (mut width, mut height, mut alpha) = (0, 0, false);
         for field in entry.children(buf) {
             let field = field?;
@@ -326,6 +333,7 @@ fn parse_tracks(buf: &[u8], tracks: &Element) -> Result<Tracks> {
                 ids::TRACK_TYPE => kind = ebml::read_uint(buf, &field)?,
                 ids::CODEC_ID => codec_id = ebml::read_string(buf, &field),
                 ids::DEFAULT_DURATION => default_duration_ns = Some(ebml::read_uint(buf, &field)?),
+                ids::TRACK_UID => uid = Some(ebml::read_uint(buf, &field)?),
                 ids::VIDEO => {
                     for video in field.children(buf) {
                         let video = video?;
@@ -349,6 +357,7 @@ fn parse_tracks(buf: &[u8], tracks: &Element) -> Result<Tracks> {
                     height,
                     alpha,
                     default_duration_ns,
+                    uid,
                 });
             }
             2 => result.audio += 1,
@@ -391,6 +400,30 @@ fn duration_tags_in(buf: &[u8], tags: &Element) -> Result<Vec<DurationTag>> {
                 && let Some(value) = value
             {
                 found.push(DurationTag { value, parents: [*tags, tag, simple] });
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// The TagTrackUIDs in `tags`, with their parents: Tags, Tag, Targets.
+fn tag_track_uids(buf: &[u8], tags: &Element) -> Result<Vec<(Element, [Element; 3])>> {
+    let mut found = Vec::new();
+    for tag in tags.children(buf) {
+        let tag = tag?;
+        if tag.id != ids::TAG {
+            continue;
+        }
+        for targets in tag.children(buf) {
+            let targets = targets?;
+            if targets.id != ids::TARGETS {
+                continue;
+            }
+            for field in targets.children(buf) {
+                let field = field?;
+                if field.id == ids::TAG_TRACK_UID {
+                    found.push((field, [*tags, tag, targets]));
+                }
             }
         }
     }
@@ -470,6 +503,30 @@ fn format_tag_duration(secs: f64) -> String {
     let total_ns = (secs * 1e9).round() as u64;
     let (secs, ns) = (total_ns / 1_000_000_000, total_ns % 1_000_000_000);
     format!("{:02}:{:02}:{:02}.{:09}", secs / 3600, secs / 60 % 60, secs % 60, ns)
+}
+
+/// The first video track in `tracks`, and its UID element.
+fn video_track_uid(buf: &[u8], tracks: &Element) -> Result<Option<(Element, Element)>> {
+    for entry in tracks.children(buf) {
+        let entry = entry?;
+        if entry.id != ids::TRACK_ENTRY {
+            continue;
+        }
+        let mut video = false;
+        let mut uid = None;
+        for field in entry.children(buf) {
+            let field = field?;
+            match field.id {
+                ids::TRACK_TYPE => video = ebml::read_uint(buf, &field)? == 1,
+                ids::TRACK_UID => uid = Some(field),
+                _ => {}
+            }
+        }
+        if video {
+            return Ok(uid.map(|uid| (entry, uid)));
+        }
+    }
+    Ok(None)
 }
 
 /// Turns a CRC-32 child of `parent` into a Void of the same size. Used after
@@ -718,6 +775,31 @@ fn patch_in_place(buf: &mut [u8], patch: &Patch) -> Result<PatchReport> {
             tags_patched += 1;
         }
     }
+    if let Some(uid) = patch.track_uid {
+        for tracks in segment.children.iter().filter(|el| el.id == ids::TRACKS) {
+            if let Some((entry, field)) = video_track_uid(buf, tracks)?
+                && field.end - field.data_start == 8
+            {
+                let old = ebml::read_uint(buf, &field)?;
+                buf[field.data_start..field.end].copy_from_slice(&uid.to_be_bytes());
+                neutralize_crc(buf, &entry)?;
+                neutralize_crc(buf, tracks)?;
+                // tags name their track by its UID
+                for tags in segment.children.iter().filter(|el| el.id == ids::TAGS) {
+                    for (target, parents) in tag_track_uids(buf, tags)? {
+                        if ebml::read_uint(buf, &target)? == old
+                            && target.end - target.data_start == 8
+                        {
+                            buf[target.data_start..target.end].copy_from_slice(&uid.to_be_bytes());
+                            for parent in &parents {
+                                neutralize_crc(buf, parent)?;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     // a Segment checksum covers everything changed above
     neutralize_crc(buf, &segment.el)?;
 
@@ -945,6 +1027,7 @@ mod tests {
             muxing_app: Some("tgradish 2.0.0".into()),
             writing_app: Some("tgradish 2.0.0 (libvpx-vp9)".into()),
             signature: Some("tgradish 2.0.0 was here".into()),
+            track_uid: None,
         };
         let report = patch(&mut buf, &changes).unwrap();
         assert!(report.info_moved);

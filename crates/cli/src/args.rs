@@ -241,7 +241,8 @@ pub struct OptionArgs {
     /// Title stored in the file.
     #[arg(long, help_heading = "Metadata")]
     pub title: Option<String>,
-    /// Mark the file as made by tgradish. [default: true]
+    /// Mark the file as made by tgradish in its metadata and name. A mark
+    /// hidden in the picture stays either way. [default: true]
     #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
           default_missing_value = "true", help_heading = "Metadata")]
     pub watermark: Option<bool>,
