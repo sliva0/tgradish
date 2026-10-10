@@ -3550,6 +3550,7 @@ dependencies = [
  "rfd",
  "rustix 1.1.5",
  "shlex 2.0.1",
+ "skrifa",
  "tempfile",
  "tgradish-core",
  "tgradish-tgs",
