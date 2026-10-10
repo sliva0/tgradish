@@ -73,7 +73,7 @@ fn guess_target(info: &WebmInfo) -> Target {
 
 fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
     println!("{}", style(path.display()).bold());
-    println!("  size        {}", ui::size(info.file_size));
+    println!("  size        {}", ui::size_within(info.file_size, target.max_bytes()));
     match &info.video {
         Some(video) => {
             let fps = info.fps().map(ui::fps).unwrap_or_else(|| "unknown fps".into());
@@ -306,9 +306,10 @@ fn print_sticker(path: &std::path::Path, stats: &tgs::Stats, issues: &[tgs::Issu
     println!("{}", style(path.display()).bold());
     let size = match stats.tgs_bytes {
         Some(bytes) => {
-            format!("{}, {} of JSON", ui::size(bytes as u64), ui::size(stats.json_bytes as u64))
+            let packed = ui::size_within(bytes as u64, tgs::MAX_BYTES);
+            format!("{packed}, {} of JSON", ui::kib(stats.json_bytes as u64))
         }
-        None => ui::size(stats.json_bytes as u64),
+        None => format!("{} of JSON", ui::kib(stats.json_bytes as u64)),
     };
     println!(
         "  animated sticker, {}x{}, {} fps, {} frames ({}), {size}",

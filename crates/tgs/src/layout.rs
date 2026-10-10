@@ -112,9 +112,55 @@ pub fn lay_out(scene: &Scene, anim: &PixelAnim, name: Option<String>) -> Animati
     Animation { name, ticks: scene.ticks, layers }
 }
 
+/// What [`lay_out`] makes of `scene` comes to on Telegram's server
+/// ([`telegram::cost`](crate::limits::telegram::cost)): each group adds
+/// itself, its fill and its transform to its shapes.
+pub fn cost(scene: &Scene) -> usize {
+    let groups = scene.layers.iter().flat_map(|layer| &layer.groups);
+    let shapes = groups.map(|group| group.shapes.len() + 3).sum();
+    crate::limits::telegram::cost(shapes, scene.layers.len())
+}
+
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use tgradish_frames::{Animation as Frames, Frame};
+
     use super::*;
+    use crate::check::check;
+    use crate::lottie::Style;
+    use crate::normalise::{Options, normalise};
+    use crate::scene::{FillRule, Group, Layer as SceneLayer};
+
+    #[test]
+    fn costs_what_check_counts() {
+        let rects = |count: u32| (0..count).map(|x| Shape::Rect { x, y: 0, width: 1, height: 1 });
+        let group = |colour, count| Group {
+            colour,
+            rule: FillRule::NonZero,
+            shapes: rects(count).collect(),
+        };
+        let scene = Scene {
+            width: 8,
+            height: 1,
+            ticks: 2,
+            layers: vec![
+                SceneLayer { from: 0, to: 2, groups: vec![group(0, 3), group(1, 2)] },
+                SceneLayer { from: 1, to: 2, groups: vec![group(0, 8)] },
+            ],
+        };
+        // red and blue in turn, so both are in the palette
+        let rgba =
+            (0..8).flat_map(|x| if x % 2 == 0 { [255, 0, 0, 255] } else { [0, 0, 255, 255] });
+        let frame = Frame { rgba: rgba.collect(), duration: Duration::from_millis(100) };
+        let input = Frames::new(8, 1, vec![frame]).unwrap();
+        let options = Options { keep_canvas: true, ..Options::default() };
+        let (anim, _) = normalise(&input, &options).unwrap();
+        let json = lay_out(&scene, &anim, None).to_json(Style::default());
+        let (stats, _) = check(json.as_bytes(), None).unwrap();
+        assert_eq!(cost(&scene), crate::limits::telegram::cost(stats.shapes, stats.layers));
+    }
 
     #[test]
     fn centres_and_scales() {

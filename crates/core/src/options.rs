@@ -117,7 +117,8 @@ pub struct Options {
     /// stickers, pad for emoji.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resize: Option<Resize>,
-    /// What to tune to get close to the 256 KB limit. Default: auto.
+    /// What to tune to get close to the size limit: 256 KB for stickers, 64
+    /// KB for emoji. Default: auto.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fit: Option<Fit>,
     /// Maximum number of encodes while fitting. Default: 8.
@@ -137,8 +138,9 @@ pub struct Options {
     #[schemars(extend("exclusiveMinimum" = 0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub length: Option<f64>,
-    /// Frame rate of the result. Default: the input frame rate, at most 30.
-    #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 30))]
+    /// Frame rate of the result, at most 60. Default: the input frame rate,
+    /// at most 30.
+    #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 60))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<f64>,
     /// Target bitrate in kbit/s. Used when not fitting bitrate. Default:
