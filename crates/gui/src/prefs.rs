@@ -116,7 +116,7 @@ pub fn show(
 
             widgets::section(ui, "Window");
             grid(ui, "prefs-window", |ui| {
-                label(ui, "Theme", "The button beside Settings switches between light and dark too");
+                label(ui, "Theme", "The button beside ⚙ switches between light and dark too");
                 use tgradish_core::config::Theme;
                 let themes = [
                     (Theme::System, "As the system", ""),
