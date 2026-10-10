@@ -10,7 +10,7 @@ use ffmpeg_next as ff;
 use super::libav;
 use crate::convert::Plan;
 use crate::error::{Error, Result};
-use crate::ffmpeg::CancelToken;
+use crate::ffmpeg::{CancelToken, Probe};
 
 /// Frame rate still images are repeated at, like ffmpeg's image demuxer.
 const STILL_FPS: i32 = 25;
@@ -151,15 +151,27 @@ impl Source {
 
     /// Opens the planned input, limited to `read` seconds after the start.
     pub(super) fn open(plan: &Plan, read: f64, cancel: &CancelToken) -> Result<Source> {
-        let mut source = Self::open_file(&plan.input, plan.source.decoder.as_deref(), cancel)?;
-        if plan.source.still_image {
+        Self::open_window(&plan.input, &plan.source, plan.start, read, cancel)
+    }
+
+    /// Opens `path`, probed as `probe`, limited to `read` seconds after
+    /// `start`.
+    pub(super) fn open_window(
+        path: &Path,
+        probe: &Probe,
+        start: f64,
+        read: f64,
+        cancel: &CancelToken,
+    ) -> Result<Source> {
+        let mut source = Self::open_file(path, probe.decoder.as_deref(), cancel)?;
+        if probe.still_image {
             source.still = Some((None, 0));
             source.window = (read * f64::from(STILL_FPS)).ceil() as i64;
             return Ok(source);
         }
-        source.start += to_units(plan.start, source.time_base);
+        source.start += to_units(start, source.time_base);
         source.window = to_units(read, source.time_base);
-        if plan.start > 0.0 {
+        if start > 0.0 {
             let av_time_base = Rational::new(1, ff::ffi::AV_TIME_BASE);
             let target = source.start.rescale(source.time_base, av_time_base);
             // lands on a keyframe at or before the start; earlier frames are

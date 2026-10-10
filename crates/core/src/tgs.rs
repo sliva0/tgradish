@@ -17,7 +17,7 @@ use tgradish_tgs::sticker::{self, Fit, Progress, Step};
 
 use crate::error::{Error, Result};
 use crate::ffmpeg::CancelToken;
-use crate::options::Speed;
+use crate::options::{Crop, Speed};
 use crate::telegram::Target;
 
 /// Frame rate of still images, sprite sheets and image sequences unless
@@ -57,8 +57,11 @@ pub struct TgsOptions {
     /// Reductions fitting may use, least visible first. [default: all]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reductions: Option<Vec<Kind>>,
-    /// Keep the input's canvas instead of cropping to the visible pixels.
-    /// [default: false]
+    /// The part of the input to use, in input pixels. [default: all of it]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crop: Option<Crop>,
+    /// Keep the input's canvas, or the crop, instead of cropping to the
+    /// visible pixels. [default: false]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keep_canvas: Option<bool>,
     /// Size of one art pixel in input pixels. Pixels off its grid are moved
@@ -111,6 +114,7 @@ impl TgsOptions {
             speed,
             lossless,
             reductions,
+            crop,
             keep_canvas,
             pixel_scale,
             tag,
@@ -165,6 +169,12 @@ impl TgsOptions {
         Ok(sticker::Options {
             normalise: normalise::Options {
                 keep_canvas: self.keep_canvas.unwrap_or(false),
+                crop: self.crop.map(|crop| normalise::Rect {
+                    x: crop.x,
+                    y: crop.y,
+                    width: crop.width,
+                    height: crop.height,
+                }),
                 pixel_scale: self.pixel_scale,
                 start: Self::seconds(self.start, "start")?.unwrap_or_default(),
                 length: Self::seconds(self.length, "length")?,
@@ -257,7 +267,7 @@ pub struct TgsOutcome {
 
 /// Frames of a sticker as straight RGBA, each with how many 60 fps frames
 /// it shows for. `.tgs` previews have a pixel per art pixel, WebM previews
-/// fit [`crate::backend::PREVIEW_SIDE`].
+/// fit the size asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preview {
     pub width: u32,
@@ -358,15 +368,14 @@ fn read(path: &Path) -> Result<Vec<u8>> {
 }
 
 /// The animation the inputs describe.
-fn load(request: &TgsRequest) -> Result<frames::Animation> {
-    let options = &request.options;
+fn load(inputs: &[PathBuf], sequence: bool, options: &TgsOptions) -> Result<frames::Animation> {
     let limits = Limits::default();
     let decode_error = |path: &Path| {
         let path = path.to_path_buf();
         move |err: frames::Error| Error::Probe { path: path.clone(), message: err.to_string() }
     };
-    if request.sequence || request.inputs.len() > 1 {
-        let files = sequence_files(&request.inputs)?;
+    if sequence || inputs.len() > 1 {
+        let files = sequence_files(inputs)?;
         let bytes: Vec<Vec<u8>> = files.iter().map(|file| read(file)).collect::<Result<_>>()?;
         return frames::sequence(
             bytes.iter().map(Vec::as_slice),
@@ -375,7 +384,7 @@ fn load(request: &TgsRequest) -> Result<frames::Animation> {
         )
         .map_err(decode_error(&files[0]));
     }
-    let [input] = &request.inputs[..] else {
+    let [input] = inputs else {
         return Err(Error::InvalidOptions("nothing to convert".into()));
     };
     let bytes = read(input)?;
@@ -384,6 +393,44 @@ fn load(request: &TgsRequest) -> Result<frames::Animation> {
         None => frames::decode(&bytes, &DecodeOptions { tag: options.tag.clone(), limits }),
     }
     .map_err(decode_error(input))
+}
+
+/// Pixel art as it is read, before anything is cropped or reduced.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Source {
+    pub width: u32,
+    pub height: u32,
+    /// Straight RGBA, each frame with how long it shows, in seconds.
+    pub frames: Vec<(Vec<u8>, f64)>,
+    /// Tags of an Aseprite file, which `tag` can choose from.
+    pub tags: Vec<String>,
+}
+
+/// Reads pixel art the way [`convert`] does, with the options that choose
+/// what is read: `tag`, `sheet`, `sheet_frames` and `fps`.
+pub fn read_source(inputs: &[PathBuf], sequence: bool, options: &TgsOptions) -> Result<Source> {
+    let animation = load(inputs, sequence, options)?;
+    let tags = match inputs {
+        [input] if !sequence && !input.is_dir() => {
+            let bytes = read(input)?;
+            match frames::Format::detect(&bytes) {
+                Some(frames::Format::Aseprite) => {
+                    frames::Sprite::read_with(&bytes, &Limits::default())
+                        .map(|sprite| sprite.tags().iter().map(|tag| tag.name.clone()).collect())
+                        .unwrap_or_default()
+                }
+                _ => Vec::new(),
+            }
+        }
+        _ => Vec::new(),
+    };
+    let (width, height) = (animation.width(), animation.height());
+    let frames = animation
+        .into_frames()
+        .into_iter()
+        .map(|frame| (frame.rgba, frame.duration.as_secs_f64()))
+        .collect();
+    Ok(Source { width, height, frames, tags })
 }
 
 /// Whether `path` is a `.tgs` sticker: by its extension, or for other
@@ -445,7 +492,7 @@ pub fn convert(
     }
     refuse_overwriting_inputs(request)?;
     let settings = request.options.sticker_options()?;
-    let animation = load(request)?;
+    let animation = load(&request.inputs, request.sequence, &request.options)?;
     let input = request.inputs.first().cloned().unwrap_or_default();
     let sticker = sticker::make(
         &animation,

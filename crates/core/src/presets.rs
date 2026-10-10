@@ -1,20 +1,23 @@
-//! Named sets of options: a few built in, more from TOML files in the
-//! `presets` directory of the config dir.
+//! Named sets of options that say how to convert: three built in (fast,
+//! balanced and best), more from TOML files in the `presets` directory of
+//! the config dir. What to make, a sticker or an emoji as WebM or `.tgs`,
+//! is chosen separately, so one preset serves every kind of result.
 //!
 //! A preset file looks like this, and is named after the preset:
 //!
 //! ```toml
 //! description = "Small and fast, for previews"
-//! extends = "sticker"  # optional, options of the base preset come first
-//! format = "webm"      # optional: webm or tgs, by default the base's
+//! extends = "fast"  # optional, options of the base preset come first
 //!
-//! [options]
-//! fit = "bitrate"
-//! speed = "fast"
+//! [webm]            # options for WebM results
+//! crf = 40
+//!
+//! [tgs]             # options for .tgs results
+//! speed = "balanced"
 //! ```
 //!
-//! The options are those of the preset's format. A user preset with the
-//! name of a built-in one replaces it.
+//! Either table can be left out. A user preset with the name of a built-in
+//! one replaces it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -24,13 +27,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::options::{Fit, Options, Speed};
-use crate::telegram::Target;
 use crate::tgs::TgsOptions;
 
 /// The preset used for WebM output when none is given.
-pub const DEFAULT_PRESET: &str = "sticker";
-/// The preset used for `.tgs` output when none is given.
-pub const DEFAULT_TGS_PRESET: &str = "tgs-sticker";
+pub const DEFAULT_PRESET: &str = "balanced";
+/// The preset used for `.tgs` output when none is given: its best encoding
+/// takes seconds, not minutes.
+pub const DEFAULT_TGS_PRESET: &str = "best";
 
 /// What kind of file a conversion makes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -90,8 +93,8 @@ impl FormatOptions {
 struct PresetFile {
     description: String,
     extends: Option<String>,
-    format: Option<Format>,
-    options: toml::Table,
+    webm: toml::Table,
+    tgs: toml::Table,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
@@ -99,12 +102,13 @@ pub struct Preset {
     pub name: String,
     pub description: String,
     pub extends: Option<String>,
-    /// The format this preset sets; others take their base's.
-    pub format: Option<Format>,
-    /// Options set by this preset itself, without the presets it extends,
-    /// as written in the file.
+    /// Options for WebM results set by this preset itself, without the
+    /// presets it extends, as written in the file.
     #[schemars(with = "BTreeMap<String, serde_json::Value>")]
-    pub options: toml::Table,
+    pub webm: toml::Table,
+    /// The same for `.tgs` results.
+    #[schemars(with = "BTreeMap<String, serde_json::Value>")]
+    pub tgs: toml::Table,
     /// File the preset was loaded from, `None` for built-in presets.
     pub path: Option<PathBuf>,
 }
@@ -114,62 +118,34 @@ fn table(options: &impl Serialize) -> toml::Table {
 }
 
 fn builtin() -> Vec<Preset> {
-    let preset = |name: &str, description: &str, extends: Option<&str>, format, options| Preset {
+    let preset = |name: &str, description: &str, webm: Options, tgs: TgsOptions| Preset {
         name: name.into(),
         description: description.into(),
-        extends: extends.map(Into::into),
-        format,
-        options,
+        extends: None,
+        webm: table(&webm),
+        tgs: table(&tgs),
         path: None,
     };
-    let webm = |options: Options| table(&options);
-    let tgs = |options: TgsOptions| table(&options);
+    let speed = |speed| TgsOptions { speed: Some(speed), ..Default::default() };
     vec![
         preset(
-            "sticker",
-            "Video sticker, 512 px on the longer side",
-            None,
-            Some(Format::Webm),
-            webm(Options { target: Some(Target::Sticker), ..Default::default() }),
-        ),
-        preset(
-            "emoji",
-            "Custom emoji, 100x100 px",
-            None,
-            Some(Format::Webm),
-            webm(Options { target: Some(Target::Emoji), ..Default::default() }),
-        ),
-        preset(
             "fast",
-            "Sticker in a few seconds: fits bitrate only, with the fast encoder",
-            Some("sticker"),
-            None,
-            webm(Options {
-                fit: Some(Fit::Bitrate),
-                speed: Some(Speed::Fast),
-                ..Default::default()
-            }),
+            "Quick: WebM fits only the bitrate, with the fast encoder; .tgs comes out a few \
+             percent larger",
+            Options { fit: Some(Fit::Bitrate), speed: Some(Speed::Fast), ..Default::default() },
+            speed(Speed::Fast),
         ),
         preset(
-            "tgs-sticker",
-            "Animated sticker from pixel art",
-            None,
-            Some(Format::Tgs),
-            tgs(TgsOptions { target: Some(Target::Sticker), ..Default::default() }),
+            "balanced",
+            "Good looking WebM in reasonable time: tries a few frame rates",
+            Options { fit: Some(Fit::Auto), speed: Some(Speed::Balanced), ..Default::default() },
+            speed(Speed::Balanced),
         ),
         preset(
-            "tgs-emoji",
-            "Animated custom emoji from pixel art",
-            None,
-            Some(Format::Tgs),
-            tgs(TgsOptions { target: Some(Target::Emoji), ..Default::default() }),
-        ),
-        preset(
-            "tgs-fast",
-            "Animated sticker in under a second, a few percent larger",
-            Some("tgs-sticker"),
-            None,
-            tgs(TgsOptions { speed: Some(Speed::Fast), ..Default::default() }),
+            "best",
+            "Best looking WebM, slowly; the smallest .tgs, in seconds",
+            Options { fit: Some(Fit::Auto), speed: Some(Speed::Best), ..Default::default() },
+            speed(Speed::Best),
         ),
     ]
 }
@@ -204,8 +180,8 @@ impl Presets {
                     name: name.to_string(),
                     description: file.description,
                     extends: file.extends,
-                    format: file.format,
-                    options: file.options,
+                    webm: file.webm,
+                    tgs: file.tgs,
                     path: Some(path.clone()),
                 })
                 .map_err(|err| format!("{}: {err}", path.display()));
@@ -252,48 +228,39 @@ impl Presets {
         Ok(chain)
     }
 
-    /// The format of `name`: its own, or the first one a base sets.
-    pub fn format(&self, name: &str) -> Result<Format> {
-        let chain = self.chain(name)?;
-        let mut formats = chain.iter().filter_map(|preset| preset.format.map(|f| (preset, f)));
-        let Some((_, format)) = formats.next() else { return Ok(Format::default()) };
-        if let Some((other, _)) = formats.find(|(_, other)| *other != format) {
-            return Err(Error::InvalidOptions(format!(
-                "preset {name:?} is for {}, but extends {:?}, which is for {}",
-                format.extension(),
-                other.name,
-                other.format.unwrap_or_default().extension()
-            )));
-        }
-        Ok(format)
+    /// Options of `name` for `format`, with everything it extends applied
+    /// first.
+    pub fn resolve(&self, name: &str, format: Format) -> Result<FormatOptions> {
+        Ok(match format {
+            Format::Webm => FormatOptions::Webm(self.webm(name)?),
+            Format::Tgs => FormatOptions::Tgs(self.tgs(name)?),
+        })
     }
 
-    /// Options of `name` with everything it extends applied first.
-    pub fn resolve(&self, name: &str) -> Result<FormatOptions> {
-        let format = self.format(name)?;
-        let chain = self.chain(name)?;
-        let invalid = |preset: &Preset, err: toml::de::Error| {
-            let place =
-                preset.path.as_ref().map_or(preset.name.clone(), |p| p.display().to_string());
-            Error::InvalidOptions(format!("broken preset {place}: {err}"))
-        };
-        Ok(match format {
-            Format::Webm => FormatOptions::Webm(chain.iter().rev().try_fold(
-                Options::default(),
-                |acc, preset| {
-                    let options: Options =
-                        preset.options.clone().try_into().map_err(|err| invalid(preset, err))?;
-                    Ok::<_, Error>(acc.merged(&options))
-                },
-            )?),
-            Format::Tgs => FormatOptions::Tgs(chain.iter().rev().try_fold(
-                TgsOptions::default(),
-                |acc, preset| {
-                    let options: TgsOptions =
-                        preset.options.clone().try_into().map_err(|err| invalid(preset, err))?;
-                    Ok::<_, Error>(acc.merged(&options))
-                },
-            )?),
+    /// Options of `name` for WebM results.
+    pub fn webm(&self, name: &str) -> Result<Options> {
+        self.fold(name, |preset| &preset.webm, Options::default(), Options::merged)
+    }
+
+    /// Options of `name` for `.tgs` results.
+    pub fn tgs(&self, name: &str) -> Result<TgsOptions> {
+        self.fold(name, |preset| &preset.tgs, TgsOptions::default(), TgsOptions::merged)
+    }
+
+    fn fold<T: serde::de::DeserializeOwned>(
+        &self,
+        name: &str,
+        table: fn(&Preset) -> &toml::Table,
+        empty: T,
+        merged: fn(T, &T) -> T,
+    ) -> Result<T> {
+        self.chain(name)?.iter().rev().try_fold(empty, |acc, preset| {
+            let options: T = table(preset).clone().try_into().map_err(|err| {
+                let place =
+                    preset.path.as_ref().map_or(preset.name.clone(), |p| p.display().to_string());
+                Error::InvalidOptions(format!("broken preset {place}: {err}"))
+            })?;
+            Ok(merged(acc, &options))
         })
     }
 }
@@ -306,28 +273,26 @@ pub fn user_dir() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::telegram::Target;
 
     fn write(dir: &Path, name: &str, text: &str) {
         std::fs::write(dir.join(format!("{name}.toml")), text).unwrap();
     }
 
-    fn webm(options: FormatOptions) -> Options {
-        match options {
-            FormatOptions::Webm(options) => options,
-            other => panic!("{other:?} is not for webm"),
-        }
-    }
-
     #[test]
-    fn resolves_builtin_chain() {
+    fn resolves_builtin_presets_for_either_format() {
         let presets = Presets::builtin();
-        let fast = webm(presets.resolve("fast").unwrap());
-        assert_eq!(fast.target, Some(Target::Sticker));
-        assert_eq!(fast.speed, Some(Speed::Fast));
-        assert!(presets.resolve("nope").is_err());
-        let FormatOptions::Tgs(tgs) = presets.resolve("tgs-fast").unwrap() else { panic!() };
-        assert_eq!((tgs.target, tgs.speed), (Some(Target::Sticker), Some(Speed::Fast)));
-        assert_eq!(presets.format("tgs-fast").unwrap(), Format::Tgs);
+        let fast = presets.webm("fast").unwrap();
+        assert_eq!(
+            (fast.fit, fast.speed, fast.target),
+            (Some(Fit::Bitrate), Some(Speed::Fast), None)
+        );
+        assert_eq!(presets.tgs("fast").unwrap().speed, Some(Speed::Fast));
+        assert!(matches!(presets.resolve("best", Format::Tgs), Ok(FormatOptions::Tgs(_))));
+        assert!(presets.webm("nope").is_err());
+        for format in [Format::Webm, Format::Tgs] {
+            assert!(presets.get(format.default_preset()).is_ok());
+        }
     }
 
     #[test]
@@ -336,33 +301,41 @@ mod tests {
         write(
             dir.path(),
             "tiny",
-            "description = 'tiny emoji'\nextends = 'emoji'\n[options]\nfps = 10.0\n",
+            "description = 'tiny emoji'\nextends = 'fast'\n[webm]\ntarget = 'emoji'\nfps = 10.0\n",
         );
-        write(dir.path(), "sticker", "[options]\ncrf = 20\n");
-        write(dir.path(), "broken", "[options]\nfsp = 10\n");
+        write(dir.path(), "balanced", "[webm]\ncrf = 20\n");
+        write(dir.path(), "broken", "[webm]\nfsp = 10\n");
         write(dir.path(), "loop-a", "extends = 'loop-b'\n");
         write(dir.path(), "loop-b", "extends = 'loop-a'\n");
-        write(dir.path(), "pixels", "extends = 'tgs-sticker'\n[options]\nkeep-canvas = true\n");
-        write(dir.path(), "mixed", "extends = 'tgs-sticker'\nformat = 'webm'\n");
-        write(dir.path(), "wrong", "format = 'tgs'\n[options]\ncrf = 20\n");
+        write(dir.path(), "pixels", "extends = 'best'\n[tgs]\nkeep-canvas = true\n");
+        write(dir.path(), "wrong", "[tgs]\ncrf = 20\n");
+        write(dir.path(), "old", "format = 'tgs'\n[options]\nspeed = 'fast'\n");
         std::fs::write(dir.path().join("notes.txt"), "ignored").unwrap();
 
         let presets = Presets::load(Some(dir.path())).unwrap();
-        let tiny = webm(presets.resolve("tiny").unwrap());
-        assert_eq!((tiny.target, tiny.fps), (Some(Target::Emoji), Some(10.0)));
-        // the user file replaced the built-in sticker preset
-        assert_eq!(webm(presets.resolve("sticker").unwrap()).target, None);
-        assert_eq!(webm(presets.resolve("fast").unwrap()).crf, Some(20));
-        // the format comes from the base
-        let FormatOptions::Tgs(pixels) = presets.resolve("pixels").unwrap() else { panic!() };
-        assert_eq!((pixels.keep_canvas, pixels.target), (Some(true), Some(Target::Sticker)));
+        let tiny = presets.webm("tiny").unwrap();
+        assert_eq!(
+            (tiny.target, tiny.fps, tiny.speed),
+            (Some(Target::Emoji), Some(10.0), Some(Speed::Fast))
+        );
+        // only WebM options were set, the rest comes from the base
+        assert_eq!(presets.tgs("tiny").unwrap().speed, Some(Speed::Fast));
+        // the user file replaced the built-in preset
+        assert_eq!(
+            presets.webm("balanced").unwrap(),
+            Options { crf: Some(20), ..Default::default() }
+        );
+        let pixels = presets.tgs("pixels").unwrap();
+        assert_eq!((pixels.keep_canvas, pixels.speed), (Some(true), Some(Speed::Best)));
 
-        let broken = presets.resolve("broken").unwrap_err().to_string();
+        let broken = presets.webm("broken").unwrap_err().to_string();
         assert!(broken.contains("broken.toml") && broken.contains("fsp"), "{broken}");
-        assert!(presets.resolve("loop-a").unwrap_err().to_string().contains("extends itself"));
-        assert!(presets.resolve("mixed").unwrap_err().to_string().contains("for tgs"));
+        // broken for one format only
+        assert!(presets.tgs("broken").is_ok());
+        assert!(presets.webm("loop-a").unwrap_err().to_string().contains("extends itself"));
         // crf isn't a .tgs option
-        assert!(presets.resolve("wrong").unwrap_err().to_string().contains("crf"));
-        assert_eq!(presets.iter().count(), 13);
+        assert!(presets.tgs("wrong").unwrap_err().to_string().contains("crf"));
+        assert!(presets.get("old").is_err());
+        assert_eq!(presets.iter().count(), 10);
     }
 }

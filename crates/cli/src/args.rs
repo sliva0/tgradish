@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use tgradish_core::ffmpeg::FfmpegChoice;
-use tgradish_core::options::{self, Options, Range};
+use tgradish_core::options::{self, Crop, Options, Range};
 use tgradish_core::presets::Format;
 use tgradish_core::telegram::Target;
 use tgradish_core::tgs::{self, TgsOptions};
@@ -133,7 +133,7 @@ pub struct WatchArgs {
 pub struct ConversionArgs {
     /// What to make: webm (video sticker or emoji, from any video or image)
     /// or tgs (animated sticker, from pixel art). [default: by the output's
-    /// extension, then the preset, then webm]
+    /// extension, then webm]
     #[arg(long, value_enum)]
     pub format: Option<FormatArg>,
     /// Directory for results. Default: next to each input, as
@@ -143,7 +143,8 @@ pub struct ConversionArgs {
     /// Replace existing output files.
     #[arg(short = 'y', long)]
     pub overwrite: bool,
-    /// Preset to start from, see `tgradish preset list`.
+    /// Preset to start from: fast, balanced, best or one of your own, see
+    /// `tgradish preset list`. [default: balanced for webm, best for tgs]
     #[arg(short, long)]
     pub preset: Option<String>,
     /// Options as a JSON object, applied after the preset and before other
@@ -163,6 +164,10 @@ pub struct OptionArgs {
     /// What to make. [default: sticker]
     #[arg(long, value_enum, help_heading = "Output")]
     pub target: Option<TargetArg>,
+    /// The part of the input to use, in its pixels: WIDTHxHEIGHT+X+Y from
+    /// the top left, for example 640x360+100+50. [default: all of it]
+    #[arg(long, value_name = "WxH+X+Y", help_heading = "Output")]
+    pub crop: Option<Crop>,
     /// How to scale into the target size. [default: contain for stickers,
     /// pad for emoji]
     #[arg(long, value_enum, help_heading = "Output")]
@@ -304,6 +309,7 @@ impl OptionArgs {
             lossless: self.lossless,
             reductions: (!self.reductions.is_empty())
                 .then(|| self.reductions.iter().map(|&kind| kind.into()).collect()),
+            crop: self.crop,
             keep_canvas: self.keep_canvas,
             pixel_scale: self.pixel_scale,
             tag: self.tag.clone(),
@@ -318,6 +324,7 @@ impl OptionArgs {
     pub fn to_options(&self) -> Options {
         Options {
             target: self.target.map(Into::into),
+            crop: self.crop,
             resize: self.resize.map(Into::into),
             fit: self.fit.map(Into::into),
             attempts: self.attempts,

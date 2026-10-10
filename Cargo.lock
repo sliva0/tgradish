@@ -3546,15 +3546,17 @@ name = "tgradish-gui"
 version = "2.0.0"
 dependencies = [
  "eframe",
+ "egui-wgpu",
  "egui_kittest",
  "png",
+ "raw-window-handle",
  "rfd",
- "schemars",
- "serde",
- "serde_json",
  "shlex 2.0.1",
  "tempfile",
  "tgradish-core",
+ "tgradish-tgs",
+ "wayland-backend",
+ "wayland-client",
 ]
 
 [[package]]

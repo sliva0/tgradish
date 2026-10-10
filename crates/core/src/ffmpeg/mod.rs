@@ -14,7 +14,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub(crate) use args::encode_args;
-#[cfg(feature = "linked")]
+#[cfg(any(feature = "linked", test))]
 pub(crate) use args::video_filter;
 pub use locate::locate;
 pub use orientation::Orientation;
@@ -83,11 +83,13 @@ pub struct Ffmpeg {
     pub source: FfmpegSource,
 }
 
-/// Up to `count` frames of `input`, scaled to `size`, as straight RGBA.
-pub(crate) fn preview_frames(
+/// Up to `count` frames of `input` from `start` seconds on, at `fps`,
+/// scaled to `size`, as straight RGBA.
+pub(crate) fn frames(
     ffmpeg: &Ffmpeg,
     input: &Path,
     probe: &Probe,
+    (start, fps): (f64, f64),
     (width, height): (u32, u32),
     count: usize,
     cancel: &CancelToken,
@@ -95,11 +97,16 @@ pub(crate) fn preview_frames(
     cancel.check()?;
     let mut cmd = Command::new(&ffmpeg.ffmpeg);
     cmd.args(["-hide_banner", "-nostdin", "-v", "error"]);
+    if start > 0.0 && !probe.still_image {
+        cmd.args(["-ss", &format!("{start:.6}")]);
+    }
     if let Some(decoder) = &probe.decoder {
         cmd.args(["-c:v", decoder]);
     }
     cmd.arg("-i").arg(input);
-    cmd.args(["-frames:v", &count.to_string(), "-vf", &format!("scale={width}:{height}")]);
+    let resample = if probe.still_image { String::new() } else { format!("fps={fps},") };
+    let filter = format!("{resample}scale={width}:{height}:flags=bilinear,setsar=1");
+    cmd.args(["-map", "0:v:0", "-frames:v", &count.to_string(), "-vf", &filter]);
     cmd.args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
     let out = process::run_bytes(cmd, "ffmpeg", cancel)?;
     let frame = width as usize * height as usize * 4;

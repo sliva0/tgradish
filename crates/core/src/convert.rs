@@ -29,7 +29,7 @@ use crate::error::{Error, Result};
 use crate::events::{Event, Params, Rate};
 use crate::ffmpeg::{CancelToken, Output, Probe};
 use crate::fit::{self, Attempt, Encoder};
-use crate::options::{self, Fit, Options, Range, Resize, Speed, Spoof};
+use crate::options::{self, Crop, Fit, Options, Range, Resize, Speed, Spoof};
 use crate::telegram::{self, Issue, Target};
 use crate::webm::{self, Patch};
 
@@ -67,6 +67,8 @@ pub struct Plan {
     pub output: PathBuf,
     pub source: Probe,
     pub target: Target,
+    /// The part of the source used, in its display pixels.
+    pub crop: Option<Crop>,
     pub resize: Resize,
     /// Size of the encoded video.
     pub width: u32,
@@ -322,9 +324,15 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         )));
     }
 
+    if let Some(crop) = o.crop {
+        crop.check(source.width, source.height).map_err(invalid)?;
+    }
     let (box_w, box_h) = target.box_size();
     let (box_w, box_h) = (f64::from(box_w), f64::from(box_h));
-    let (src_w, src_h) = (f64::from(source.width), f64::from(source.height));
+    let (src_w, src_h) = match o.crop {
+        Some(crop) => (f64::from(crop.width), f64::from(crop.height)),
+        None => (f64::from(source.width), f64::from(source.height)),
+    };
     let ((scaled_width, scaled_height), (width, height)) = match resize {
         Resize::Contain | Resize::Pad => {
             let scale = (box_w / src_w).min(box_h / src_h);
@@ -346,6 +354,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         input: request.input.clone(),
         output,
         target,
+        crop: o.crop,
         resize,
         width,
         height,
@@ -649,6 +658,21 @@ mod tests {
         assert!(encoded_length(3.0, 29.97) <= 3.0);
         assert_eq!(frame_count(4.84, 25.0), 121);
         assert_eq!(frame_count(0.001, 25.0), 1);
+    }
+
+    #[test]
+    fn sizes_a_crop_like_a_whole_input() {
+        let crop = Some(Crop { x: 100, y: 40, width: 300, height: 100 });
+        let (plan, _) = plan_with(Options { crop, ..Default::default() }).unwrap();
+        assert_eq!((plan.width, plan.height), (512, 170));
+        let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuv420p");
+        assert!(
+            filter
+                .contains("crop=w=iw*300/640:h=ih*100/480:x=iw*100/640:y=ih*40/480,scale=512:170"),
+            "{filter}"
+        );
+        let outside = Some(Crop { x: 400, y: 0, width: 300, height: 100 });
+        assert!(plan_with(Options { crop: outside, ..Default::default() }).is_err());
     }
 
     #[test]

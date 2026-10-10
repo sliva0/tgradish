@@ -37,21 +37,24 @@ fn describes_protocol() {
     let output = tgradish(&["describe"]);
     assert!(output.status.success());
     let description: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(description["protocol"], 2);
+    assert_eq!(description["protocol"], 3);
     assert_eq!(description["default_format"], "webm");
     let formats = description["formats"].as_array().unwrap();
     let format = |name: &str| formats.iter().find(|f| f["format"] == name).unwrap();
-    assert_eq!(format("webm")["default_preset"], "sticker");
+    assert_eq!(format("webm")["default_preset"], "balanced");
     assert!(format("webm")["options"]["properties"]["fit"].is_object());
-    assert_eq!(format("tgs")["default_preset"], "tgs-sticker");
+    assert!(format("webm")["options"]["properties"]["crop"].is_object());
+    assert_eq!(format("tgs")["default_preset"], "best");
     assert_eq!(format("tgs")["output_extension"], "tgs");
     assert!(format("tgs")["options"]["properties"]["reductions"].is_object());
     let presets = description["presets"].as_array().unwrap();
     let preset = |name: &str| presets.iter().find(|p| p["name"] == name).unwrap();
-    assert_eq!(preset("emoji")["options"]["target"], "emoji");
-    assert_eq!(preset("emoji")["format"], "webm");
-    assert_eq!(preset("tgs-fast")["format"], "tgs");
-    assert_eq!(preset("tgs-fast")["options"]["speed"], "fast");
+    // presets say how, for both formats, and nothing about the target
+    assert_eq!(preset("fast")["webm"]["speed"], "fast");
+    assert_eq!(preset("fast")["webm"]["fit"], "bitrate");
+    assert_eq!(preset("fast")["tgs"]["speed"], "fast");
+    assert!(preset("best")["webm"]["target"].is_null());
+    assert!(preset("best")["error"].is_null());
 }
 
 #[test]
