@@ -612,7 +612,10 @@ impl App {
             .clicked()
         {
             if let Some(files) = rfd::FileDialog::new()
-                .add_filter("images", &["png", "gif", "webp", "ase", "aseprite"])
+                .add_filter(
+                    "images",
+                    &["png", "gif", "webp", "jpg", "jpeg", "bmp", "ase", "aseprite"],
+                )
                 .pick_files()
             {
                 self.add_frames(files);
