@@ -209,14 +209,12 @@ pub fn tgs_bounds(frames: &[Vec<u8>], width: u32, part: Part, keep_canvas: bool)
 }
 
 /// The `.tgs` result of `rgba`, a frame `width` pixels wide: `bounds` of
-/// it scaled to fill the canvas along its longer side, pixel for pixel,
-/// shown on a smaller canvas of `side` that keeps art pixels whole when it
-/// can.
+/// it scaled to fill the canvas along its longer side, as the conversion
+/// does, shown on a smaller canvas of `side`. Shapes have no pixels of
+/// their own, so the scale needn't be whole.
 pub fn tgs(rgba: &[u8], width: u32, [x0, y0, x1, y1]: [usize; 4], side: usize) -> egui::ColorImage {
     let (w, h) = ((x1 - x0).max(1), (y1 - y0).max(1));
-    // whole canvas pixels per art pixel, when the canvas is large enough
-    let fit = side as f64 / w.max(h) as f64;
-    let scale = if fit >= 1.0 { fit.floor() } else { fit };
+    let scale = side as f64 / w.max(h) as f64;
     let (shown_w, shown_h) =
         ((w as f64 * scale).round() as usize, (h as f64 * scale).round() as usize);
     let (left, top) = ((side - shown_w.min(side)) / 2, (side - shown_h.min(side)) / 2);
@@ -303,5 +301,15 @@ mod tests {
         let kept = tgs(&art, 2, tgs_bounds(&frames, 2, part, true), 64);
         assert_eq!(kept.pixels[8 * 64 + 2], egui::Color32::TRANSPARENT);
         assert_eq!(kept.pixels[32 * 64 + 2].to_srgba_unmultiplied(), [255, 0, 0, 255]);
+        // 3x1 art fills the canvas's width, though 64 isn't a multiple of 3
+        let three = [art.clone(), vec![255, 0, 0, 255]].concat();
+        let wide = tgs(
+            &three,
+            3,
+            tgs_bounds(&[three.clone()], 3, Part::of(None, (3, 1), (3, 1)), true),
+            64,
+        );
+        assert_eq!(wide.pixels[32 * 64].to_srgba_unmultiplied(), [255, 0, 0, 255]);
+        assert_eq!(wide.pixels[32 * 64 + 63].to_srgba_unmultiplied(), [255, 0, 0, 255]);
     }
 }
