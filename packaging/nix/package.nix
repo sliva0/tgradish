@@ -36,6 +36,9 @@ rustPlatform.buildRustPackage {
       ../../Cargo.lock
       ../../crates
       ../../xtask
+      # licence notices the binary carries, see crates/core/build.rs
+      ../../LICENSE.txt
+      ../../licenses
     ];
   };
 
