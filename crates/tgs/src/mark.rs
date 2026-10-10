@@ -7,6 +7,10 @@
 //! fourth, and so on, holds a bit: 1 when the pair is written swapped.
 //! Groups are read in the order they are written. Pairs of equal
 //! rectangles hold nothing.
+//!
+//! Stickers with too few rectangles for a copy carry the payload as the
+//! first layer's name (`ln`) instead, in hex: a few bytes more, and a
+//! name like any other.
 
 use crate::lottie::{Animation, Item};
 
@@ -28,11 +32,17 @@ fn key(centre: [f64; 2], size: [f64; 2]) -> Key {
 /// about 0.6% of a sticker's size, as swapped pairs break up repeats.
 const COPIES: usize = 1;
 
-/// Hides a copy of `payload` in the order of `animation`'s rectangles, if
-/// they have room for it. Returns how many copies it hid.
-pub fn embed(animation: &mut Animation, payload: &[u8]) -> usize {
+/// Hides `payload` in the order of `animation`'s rectangles, or as its first
+/// layer's name when they have no room for it. False when it has no layers
+/// either.
+pub fn embed(animation: &mut Animation, payload: &[u8]) -> bool {
     let room = capacity(animation);
     let copies = (room / (payload.len() * 8).max(1)).min(COPIES);
+    if copies == 0 {
+        let Some(first) = animation.layers.first_mut() else { return false };
+        first.id = Some(payload.iter().map(|byte| format!("{byte:02x}")).collect());
+        return true;
+    }
     let bits: Vec<bool> = std::iter::repeat_n(payload, copies)
         .flatten()
         .flat_map(|&byte| (0..8).rev().map(move |bit| byte >> bit & 1 == 1))
@@ -45,7 +55,17 @@ pub fn embed(animation: &mut Animation, payload: &[u8]) -> usize {
             }
         }
     }
-    copies
+    true
+}
+
+/// The payload a sticker carries as its first layer's name, if it does.
+pub fn layer_name(json: &[u8]) -> Option<Vec<u8>> {
+    let value = serde_json::from_slice::<serde_json::Value>(json).ok()?;
+    let name = value.get("layers")?.get(0)?.get("ln")?.as_str()?;
+    if name.len() % 2 != 0 || !name.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    (0..name.len()).step_by(2).map(|i| u8::from_str_radix(&name[i..i + 2], 16).ok()).collect()
 }
 
 /// How many bits `animation`'s rectangles can hold.
@@ -159,6 +179,7 @@ mod tests {
             name: None,
             ticks: 60,
             layers: vec![Layer {
+                id: None,
                 from: 0,
                 to: 60,
                 hidden: Vec::new(),
@@ -173,7 +194,7 @@ mod tests {
         let mut lottie = animation(100);
         assert_eq!(capacity(&lottie), 100);
         let payload = [0b1011_0001, 0x5a, 0xff, 0x00];
-        assert_eq!(embed(&mut lottie, &payload), 1);
+        assert!(embed(&mut lottie, &payload));
         let json = lottie.to_json(Style::default());
         let bits = hidden_bits(json.as_bytes());
         let expected: Vec<bool> = payload
@@ -194,8 +215,12 @@ mod tests {
     fn hides_nothing_where_there_is_no_room() {
         let mut lottie = animation(3);
         assert_eq!(capacity(&lottie), 2);
-        assert_eq!(embed(&mut lottie, &[1, 2]), 0);
-        assert_eq!(hidden_bits(lottie.to_json(Style::default()).as_bytes()), [false, false]);
-        assert!(hidden_bits(b"not json").is_empty());
+        // the first layer's name holds it instead
+        assert!(embed(&mut lottie, &[1, 0xab]));
+        let json = lottie.to_json(Style::default());
+        assert_eq!(hidden_bits(json.as_bytes()), [false, false]);
+        assert!(json.starts_with(r#"{"v""#) && json.contains(r#"{"ln":"01ab","ty":4,"#), "{json}");
+        assert_eq!(layer_name(json.as_bytes()), Some(vec![1, 0xab]));
+        assert!(hidden_bits(b"not json").is_empty() && layer_name(b"{}").is_none());
     }
 }

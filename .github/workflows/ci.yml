@@ -36,6 +36,8 @@ jobs:
 
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # the command line on its own, without the window
+      - run: cargo clippy -p tgradish --no-default-features --all-targets -- -D warnings
       - run: cargo test --workspace
 
       # binaries carry the licenses of their crates; they must list today's

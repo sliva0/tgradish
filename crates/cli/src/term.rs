@@ -104,11 +104,23 @@ fn features() -> Features {
     FEATURES.get().copied().unwrap_or_default()
 }
 
-/// `text` linking to the file at `path`, where links show.
+/// `text` linking to the file at `path`, for stderr, where links show.
 pub fn link(text: impl std::fmt::Display, path: &std::path::Path) -> String {
     if !features().links {
         return text.to_string();
     }
+    linked(text, path)
+}
+
+/// [`link`] for stdout, which may go to a file even when stderr shows.
+pub fn link_out(text: impl std::fmt::Display, path: &std::path::Path) -> String {
+    if !features().links || !std::io::stdout().is_terminal() {
+        return text.to_string();
+    }
+    linked(text, path)
+}
+
+fn linked(text: impl std::fmt::Display, path: &std::path::Path) -> String {
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let url = url_of(&absolute);
     format!("\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\")

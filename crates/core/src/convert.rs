@@ -874,7 +874,7 @@ mod tests {
         let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuva420p");
         assert!(
             filter.contains(
-                "scale=500:300:flags=neighbor,format=yuva420p,pad=512:308:(ow-iw)/2:(oh-ih)/2"
+                "scale=500:300:flags=neighbor,format=rgba,pad=512:308:trunc((ow-iw)/4)*2:"
             ),
             "{filter}"
         );
@@ -887,6 +887,9 @@ mod tests {
         assert_eq!("0.5".parse::<ExactScale>(), Ok(half));
         assert_eq!("2x".parse::<ExactScale>(), Ok(twice));
         assert!("1.5".parse::<ExactScale>().is_err() && "2/3".parse::<ExactScale>().is_err());
+        assert!("4294967295".parse::<ExactScale>().is_err());
+        let huge = ExactScale { up: u32::MAX, down: 1 };
+        assert!(exact_sizes(Target::Sticker, (2, 2), huge).is_err());
         assert_eq!((half.to_string(), twice.to_string()), ("1/2".into(), "2".into()));
 
         // 1024 x 576 halved makes a 512 x 288 sticker, pixels in 2x2 blocks
