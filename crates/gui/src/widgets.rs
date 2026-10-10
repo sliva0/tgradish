@@ -4,9 +4,35 @@ use eframe::egui::{self, Color32, RichText};
 
 use crate::jobs::Problem;
 
-pub const GOOD: Color32 = Color32::from_rgb(96, 186, 112);
-pub const WARN: Color32 = Color32::from_rgb(226, 170, 72);
-pub const BAD: Color32 = Color32::from_rgb(232, 96, 88);
+/// Colours that say how things are, readable on the theme's background.
+pub fn good(ui: &egui::Ui) -> Color32 {
+    if ui.visuals().dark_mode {
+        Color32::from_rgb(96, 186, 112)
+    } else {
+        Color32::from_rgb(30, 130, 56)
+    }
+}
+
+pub fn warn(ui: &egui::Ui) -> Color32 {
+    if ui.visuals().dark_mode {
+        Color32::from_rgb(226, 170, 72)
+    } else {
+        Color32::from_rgb(166, 98, 0)
+    }
+}
+
+pub fn bad(ui: &egui::Ui) -> Color32 {
+    if ui.visuals().dark_mode {
+        Color32::from_rgb(232, 96, 88)
+    } else {
+        Color32::from_rgb(190, 40, 36)
+    }
+}
+
+/// The background pictures are shown on.
+pub fn stage(dark: bool) -> Color32 {
+    if dark { Color32::from_gray(24) } else { Color32::from_gray(222) }
+}
 
 pub fn kib(bytes: u64) -> String {
     format!("{:.1} KiB", bytes as f64 / 1024.0)
@@ -212,7 +238,7 @@ pub fn auto_number<T: egui::emath::Numeric>(
 /// How much of a limit something uses: a bar, red when over.
 pub fn gauge(ui: &mut egui::Ui, used: u64, limit: u64, text: String) {
     let share = used as f32 / limit.max(1) as f32;
-    let colour = if share > 1.0 { BAD } else { GOOD };
+    let colour = if share > 1.0 { bad(ui) } else { good(ui) };
     bar(ui, Some(share), &text, colour.gamma_multiply(0.55));
 }
 
@@ -259,24 +285,28 @@ pub fn bar_sized(
         egui::Align2::LEFT_CENTER,
         text,
         egui::FontId::proportional(12.5),
-        Color32::WHITE,
+        ui.visuals().strong_text_color(),
     );
 }
 
 /// Telegram's problems with a result, or that it has none.
 pub fn problems(ui: &mut egui::Ui, problems: &[Problem]) {
     if problems.is_empty() {
-        ui.colored_label(GOOD, "✔ Telegram should accept it");
+        ui.colored_label(good(ui), "✔ Telegram should accept it");
     }
     for problem in problems {
-        let (colour, mark) = if problem.refused { (BAD, "✖") } else { (WARN, "⚠") };
+        let (colour, mark) = if problem.refused { (bad(ui), "✖") } else { (warn(ui), "⚠") };
         ui.colored_label(colour, format!("{mark} {}", problem.text));
     }
 }
 
 /// Draws a checkerboard, so transparency shows.
 pub fn checkerboard(painter: &egui::Painter, rect: egui::Rect, square: f32) {
-    let (light, dark) = (Color32::from_gray(92), Color32::from_gray(72));
+    let (light, dark) = if painter.ctx().global_style().visuals.dark_mode {
+        (Color32::from_gray(92), Color32::from_gray(72))
+    } else {
+        (Color32::from_gray(240), Color32::from_gray(212))
+    };
     painter.rect_filled(rect, 0.0, light);
     let clip = painter.clip_rect().intersect(rect);
     if clip.width() <= 0.0 || clip.height() <= 0.0 {

@@ -29,7 +29,7 @@ uvx --from fonttools pyftsubset Ubuntu-Light.ttf --unicodes="$ranges" --no-hinti
   --output-file=Ubuntu-Light-tgradish.ttf
 uvx --from fonttools pyftsubset JetBrainsMonoNL-Regular.ttf --unicodes="$ranges" \
   --no-hinting --desubroutinize --output-file=JetBrainsMonoNL-Regular-tgradish.ttf
-uvx --from fonttools pyftsubset emoji-icon-font.ttf --text="✖⚠✔⟳⟲⚙▶⏸⏷⏵⏹" \
+uvx --from fonttools pyftsubset emoji-icon-font.ttf --text="✖⚠✔⟳⟲⚙▶⏸⏷⏵⏹☀🌓💻" \
   --no-hinting --output-file=emoji-icon-font-tgradish.ttf
 ```
 

@@ -531,7 +531,7 @@ fn picture(ui: &mut egui::Ui, item: &mut Item) {
                 item.choices.crop.map_or(size.is_none_or(|(w, h)| w == h), |c| c.width == c.height);
             if item.format == Format::Tgs && !square {
                 ui.colored_label(
-                    widgets::WARN,
+                    widgets::warn(ui),
                     "⚠ TGS stickers are always 512 × 512: other shapes get transparent margins",
                 );
             }
@@ -704,7 +704,7 @@ fn time(ui: &mut egui::Ui, item: &mut Item) {
                     && used > telegram::MAX_SECONDS + 1e-3
                 {
                     ui.colored_label(
-                        widgets::WARN,
+                        widgets::warn(ui),
                         format!(
                             "⚠ The part used lasts {}, so its duration will be spoofed",
                             widgets::seconds(used)
