@@ -626,6 +626,8 @@ pub fn convert(
         duration: spoofed.then_some(plan.fake_duration),
         muxing_app: plan.watermark.then(|| crate::TOOL_ID.to_string()),
         signature: plan.watermark.then(crate::signature),
+        // the hidden mark, which no option leaves out
+        track_uid: Some(crate::mark::Mark::current().to_u64()),
         ..Default::default()
     };
     let mut bytes = std::fs::read(&best.path)?;

@@ -84,6 +84,19 @@ tgradish convert machine.gif --format tgs --compromise motion
 the directory printed by `tgradish preset path`, see `tgradish preset show
 balanced` for the format of options.
 
+### Marks in the stickers
+
+Stickers say they were made with tgradish in their metadata (WebM) or name
+(`.tgs`); `--watermark=false` leaves that out. Every sticker also carries a
+hidden mark of 8 bytes that no option removes: the tgradish version, whether
+the command line or the window made it, and 24 bits of a hash of your user
+name. The hash tells stickers by one person from others' without naming
+them, though a common name can be guessed by hashing it. In WebM files the
+mark is the video track's UID; in `.tgs` files it is the order of
+rectangles that are drawn the same in any order, which costs about 0.6% of
+the size. `tgradish inspect` shows it. The window also uses it to replace
+results tgradish made before rather than numbering new ones.
+
 ## Installing
 
 Release builds for Windows and Linux (x86-64 and ARM) are single files with

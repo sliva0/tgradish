@@ -240,6 +240,9 @@ fn makes_transparent_emoji_from_image() {
         let info = webm::inspect_file(&output).unwrap();
         let video = info.video.unwrap();
         assert_eq!((video.width, video.height, video.alpha), (100, 100, true), "{name}");
+        // the hidden mark, in the track's UID
+        let mark = tgradish_core::mark::read_file(&output).unwrap();
+        assert_eq!(mark, tgradish_core::mark::Mark::current(), "{name}");
         assert_eq!(info.video_frames, 25, "{name}: still images repeat at 25 fps");
         // padded to a square: the top left pixel is in the transparent padding
         let rgba = first_frame_rgba(&output);

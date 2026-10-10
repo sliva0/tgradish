@@ -138,6 +138,9 @@ fn main() -> ExitCode {
         };
     }
     let cli = Cli::parse();
+    if !matches!(cli.command, Command::Gui) {
+        tgradish_core::mark::set_client(tgradish_core::mark::Client::Cli);
+    }
     let json = cli.global.json;
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,

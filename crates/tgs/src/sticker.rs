@@ -13,7 +13,7 @@ use crate::lottie::Style;
 use crate::normalise::{self, PixelAnim, Report, normalise};
 use crate::reduce::{Compromise, Kind, Reduction, error};
 use crate::scene::Scene;
-use crate::{Result, file};
+use crate::{Result, file, mark};
 
 /// What to do when the lossless result is too large.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -41,6 +41,8 @@ pub struct Options {
     pub max_bytes: usize,
     /// Written into the sticker as its name.
     pub name: Option<String>,
+    /// Hidden in the order of its rectangles (see [`crate::mark`]).
+    pub mark: Option<Vec<u8>>,
     pub style: Style,
 }
 
@@ -54,6 +56,7 @@ impl Default for Options {
             compromise: Compromise::default(),
             max_bytes: telegram::MAX_BYTES,
             name: None,
+            mark: None,
             style: Style::default(),
         }
     }
@@ -135,13 +138,16 @@ const RETARGET: f64 = 0.96;
 
 /// Encodes and lays out `anim`.
 fn render(anim: &PixelAnim, settings: &Settings, options: &Options) -> Result<(Scene, String)> {
-    let score = |scene: &Scene| {
-        file::quick_size(
-            lay_out(scene, anim, options.name.clone()).to_json(options.style).as_bytes(),
-        )
+    let json = |scene: &Scene| {
+        let mut lottie = lay_out(scene, anim, options.name.clone());
+        if let Some(mark) = &options.mark {
+            mark::embed(&mut lottie, mark);
+        }
+        lottie.to_json(options.style)
     };
+    let score = |scene: &Scene| file::quick_size(json(scene).as_bytes());
     let scene = painter(anim, settings, Some(&score))?;
-    let json = lay_out(&scene, anim, options.name.clone()).to_json(options.style);
+    let json = json(&scene);
     Ok((scene, json))
 }
 

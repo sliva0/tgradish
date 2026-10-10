@@ -16,6 +16,7 @@ pub mod file;
 pub mod layout;
 pub mod limits;
 pub mod lottie;
+pub mod mark;
 pub mod normalise;
 pub mod reduce;
 pub mod scene;

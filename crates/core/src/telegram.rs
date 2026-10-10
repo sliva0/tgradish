@@ -178,6 +178,7 @@ mod tests {
                 height: size,
                 alpha: true,
                 default_duration_ns: Some((1e9 / fps) as u64),
+                uid: None,
             }),
             video_frames: (3.0 * fps) as u64,
             audio_tracks: 0,
