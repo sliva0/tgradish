@@ -326,6 +326,9 @@ impl App {
             if let Some((_, part)) = &mut item.part {
                 part.poll();
             }
+            if let Some((_, still)) = &mut item.still {
+                still.poll();
+            }
             item.result_clip.poll();
             if finished {
                 settle(ctx, item);
@@ -380,40 +383,41 @@ impl App {
                 load_result_clip(ctx, item, &backend);
             }
         }
-        self.load_part(ctx, &backend);
+        self.load_detail(ctx, &backend);
         self.convert_next(ctx, &backend);
     }
 
-    /// Reads the played part of the selected video at full rate, once its
-    /// range has stayed put for a moment.
-    fn load_part(&mut self, ctx: &egui::Context, backend: &Result<Backend, String>) {
+    /// Reads more of the selected video once what is looked at stays put
+    /// for a moment: the used part at full rate, and the frame shown while
+    /// paused at full size.
+    fn load_detail(&mut self, ctx: &egui::Context, backend: &Result<Backend, String>) {
         let Some(id) = self.selected else { return };
         let Ok(backend) = backend else { return };
-        let now = ctx.input(|input| input.time);
         let Some(item) = self.item_mut(id) else { return };
         if item.format != Format::Webm {
             return;
         }
-        let (Some(video), Some((start, end))) = (item.video.ready(), item.range()) else { return };
-        let range = (start, end - start);
-        if item.part.as_ref().is_some_and(|(loaded, _)| *loaded == range) {
-            return;
-        }
-        // wait until dragging the range stops
-        let settled_at = ctx.data_mut(|data| {
-            let entry =
-                data.get_temp_mut_or_insert_with(egui::Id::new(("range", id)), || (range, now));
-            if entry.0 != range {
-                *entry = (range, now);
+        let range = item.range().map(|(start, end)| (start, end - start));
+        let Some(video) = item.video.ready() else { return };
+        let path = item.inputs[0].clone();
+        let still = video.probe.still_image;
+        if !item.view.playing || still {
+            let time = if still { 0.0 } else { item.view.time };
+            let loaded = item.still.as_ref().is_some_and(|(at, _)| *at == time);
+            if !loaded && settled(ctx, ("still", id), (time, 0.0), 0.25) {
+                let task = video.load_still(ctx, backend.clone(), path.clone(), time);
+                item.still = Some((time, Load::Loading(task)));
             }
-            entry.1
-        });
-        if now - settled_at < 0.4 {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
-            return;
+        } else {
+            item.still = None;
         }
-        let task = video.load_part(ctx, backend.clone(), item.inputs[0].clone(), range);
-        item.part = Some((range, Load::Loading(task)));
+        let Some(range) = range else { return };
+        if !item.part.as_ref().is_some_and(|(loaded, _)| *loaded == range)
+            && settled(ctx, ("range", id), range, 0.4)
+        {
+            let task = video.load_part(ctx, backend.clone(), path, range);
+            item.part = Some((range, Load::Loading(task)));
+        }
     }
 
     fn convert_next(&mut self, ctx: &egui::Context, backend: &Result<Backend, String>) {
@@ -983,12 +987,13 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, item: &mut Item) {
     let input_size = item.input_size();
     let error = item.input_error().map(str::to_owned);
     // fields rather than methods, so the view and crop can change
-    let (overview, part) = match item.format {
+    let (overview, part, still) = match item.format {
         Format::Webm => (
             item.video.ready().map(|video| &video.overview),
             item.part.as_ref().and_then(|(_, part)| part.ready()),
+            item.still.as_ref().and_then(|(at, still)| Some((*at, still.ready()?))),
         ),
-        Format::Tgs => (item.art.ready().map(|art| &art.clip), None),
+        Format::Tgs => (item.art.ready().map(|art| &art.clip), None, None),
     };
     let filling = (item.format == Format::Webm
         && item.choices.webm.resize == Some(tgradish_core::options::Resize::Crop))
@@ -1014,7 +1019,10 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, item: &mut Item) {
                 }
                 let time = item.view.time;
                 let part = part.filter(|part| part.start() <= time && time < part.end() + 0.05);
-                let clip = part.unwrap_or(clip);
+                // paused: the sharp frame, once it is there
+                let still =
+                    still.filter(|(at, _)| !item.view.playing && (*at == time || range.is_none()));
+                let clip = still.map(|(_, still)| still).or(part).unwrap_or(clip);
                 let picture = Picture { clip, frame: clip.index_at(time), size, square: false };
                 let ratio = settings::ratio(item.view.aspect, size);
                 let cropping = Cropping { crop: &mut item.choices.crop, ratio, filling };
@@ -1063,6 +1071,29 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, item: &mut Item) {
     }
 }
 
+/// Whether `value`, kept under `key`, has stayed the same for `wait`
+/// seconds; asks for a repaint to look again when it hasn't.
+fn settled(
+    ctx: &egui::Context,
+    key: impl std::hash::Hash + std::fmt::Debug,
+    value: (f64, f64),
+    wait: f64,
+) -> bool {
+    let now = ctx.input(|input| input.time);
+    let since = ctx.data_mut(|data| {
+        let entry = data.get_temp_mut_or_insert_with(egui::Id::new(key), || (value, now));
+        if entry.0 != value {
+            *entry = (value, now);
+        }
+        entry.1
+    });
+    let settled = now - since >= wait;
+    if !settled {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait / 4.0));
+    }
+    settled
+}
+
 /// Makes the input thumbnail and settles the guessed format once an
 /// input is read.
 fn settle(ctx: &egui::Context, item: &mut Item) {
@@ -1089,6 +1120,7 @@ fn release(item: &mut Item) {
         item.video = Load::Idle;
     }
     item.part = None;
+    item.still = None;
     if item.result_clip.ready().is_some_and(|clip| !clip.pixelated) {
         item.result_clip = Load::Idle;
     }
@@ -1616,6 +1648,32 @@ mod tests {
         let picture = info.video.unwrap();
         assert_eq!((picture.width, picture.height), (512, 256));
         assert!(item.result_clip.ready().is_some());
+    }
+
+    #[test]
+    fn shows_a_sharp_frame_while_paused() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video(dir.path(), "1280x720") else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        assert_eq!(harness.state().items[0].input_clip().unwrap().width, 640);
+        harness.state_mut().items[0].view.playing = false;
+        for _ in 0..500 {
+            harness.step();
+            if harness.state().items[0]
+                .still
+                .as_ref()
+                .is_some_and(|(_, still)| still.ready().is_some())
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let (_, still) = harness.state().items[0].still.as_ref().expect("asked for");
+        assert_eq!(still.ready().map(|clip| (clip.width, clip.height)), Some((1280, 720)));
     }
 
     #[test]

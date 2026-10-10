@@ -277,6 +277,35 @@ impl Video {
     }
 }
 
+impl Video {
+    /// The frame at `time`, at full size.
+    pub fn load_still(
+        &self,
+        ctx: &egui::Context,
+        backend: Backend,
+        path: PathBuf,
+        time: f64,
+    ) -> Task<Clip> {
+        let probe = self.probe.clone();
+        Task::spawn(ctx, move |cancel| {
+            let fps = probe.fps.unwrap_or(25.0);
+            let request = FramesRequest {
+                start: time,
+                length: Some(1.5 / fps),
+                fps,
+                max_side: probe.width.max(probe.height),
+                max_frames: 1,
+            };
+            let frames =
+                backend.frames(&path, &probe, &request, cancel).map_err(|err| err.to_string())?;
+            if frames.frames.is_empty() {
+                return Err("ffmpeg found no frame there".into());
+            }
+            Ok(Clip::from_frames(frames))
+        })
+    }
+}
+
 /// Pixel art read the way `.tgs` conversions read it.
 pub struct Art {
     pub clip: Clip,
