@@ -42,6 +42,17 @@ pub struct WebmPlan {
     pub fps: f64,
     pub length: f64,
     pub spoofs: bool,
+    /// How many times fitting may encode.
+    pub attempts: u32,
+}
+
+/// What a `.tgs` conversion is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TgsStage {
+    Reading,
+    Drawing,
+    Fitting,
+    Compressing,
 }
 
 /// What a conversion is doing or did, besides its result.
@@ -58,6 +69,38 @@ pub struct Progress {
     pub lossless_bytes: Option<usize>,
     pub steps: Vec<Step>,
     pub warnings: Vec<String>,
+    /// For `.tgs`: what it is doing.
+    pub tgs: Option<TgsStage>,
+}
+
+impl Progress {
+    /// How far fitting a `.tgs` got: the size taken off so far, against
+    /// what has to go, on a log scale, as reductions save shares.
+    pub fn tgs_fitting(&self) -> Option<f32> {
+        let lossless = self.lossless_bytes? as f64;
+        let now = self.steps.last().map_or(lossless, |step| step.bytes as f64);
+        let target = tgs::MAX_BYTES as f64;
+        if lossless <= target {
+            return Some(1.0);
+        }
+        Some(((lossless / now).ln() / (lossless / target).ln()).clamp(0.0, 1.0) as f32)
+    }
+
+    /// How far the whole conversion got, roughly.
+    pub fn overall(&self) -> Option<f32> {
+        if let Some(stage) = self.tgs {
+            return Some(match stage {
+                TgsStage::Reading => 0.03,
+                TgsStage::Drawing => 0.15,
+                TgsStage::Fitting => 0.3 + 0.5 * self.tgs_fitting().unwrap_or(0.0),
+                TgsStage::Compressing => 0.85,
+            });
+        }
+        let most = self.webm.as_ref()?.attempts.max(1) as f32;
+        let done = self.attempts.iter().filter(|attempt| attempt.bytes.is_some()).count() as f32;
+        let current = self.fraction.unwrap_or(0.0);
+        Some(((done + current) / most).min(1.0))
+    }
 }
 
 /// A problem Telegram would have with a result.
@@ -230,20 +273,25 @@ fn run(
             let request = TgsRequest { inputs, sequence, output, options, overwrite };
             let mut found = Vec::new();
             let mut finished = None;
+            update(Box::new(|progress| progress.tgs = Some(TgsStage::Reading)));
             let outcome = tgs::convert(&request, cancel, &mut |event| match event {
                 TgsEvent::Started { report, .. } => update(Box::new(move |progress| {
                     progress.report = Some(report);
-                    progress.stage = "encoding".into();
+                    progress.stage = "drawing".into();
+                    progress.tgs = Some(TgsStage::Drawing);
                 })),
                 TgsEvent::TooLarge { bytes } => update(Box::new(move |progress| {
                     progress.lossless_bytes = Some(bytes);
                     progress.stage = format!("about {} losslessly; fitting", kib(bytes as u64));
+                    progress.tgs = Some(TgsStage::Fitting);
                 })),
                 TgsEvent::Reduced { step } => update(Box::new(move |progress| {
                     progress.steps.push(step);
+                    progress.tgs = Some(TgsStage::Fitting);
                 })),
                 TgsEvent::Packing => update(Box::new(|progress| {
                     progress.stage = "compressing".into();
+                    progress.tgs = Some(TgsStage::Compressing);
                 })),
                 TgsEvent::Warning { message } => update(Box::new(move |progress| {
                     progress.warnings.push(message);
@@ -302,6 +350,11 @@ fn webm(
                 fps: plan.fps,
                 length: plan.length,
                 spoofs: plan.spoofs(plan.length),
+                attempts: if plan.fit == tgradish_core::options::Fit::Off {
+                    1
+                } else {
+                    plan.attempts
+                },
             };
             update(Box::new(move |progress| progress.webm = Some(planned)));
         }

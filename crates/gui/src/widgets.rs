@@ -209,24 +209,56 @@ pub fn auto_number<T: egui::emath::Numeric>(
     changed
 }
 
-/// How much of a size limit something uses: a bar, red when over.
+/// How much of a limit something uses: a bar, red when over.
 pub fn gauge(ui: &mut egui::Ui, used: u64, limit: u64, text: String) {
-    let width = ui.available_width().min(380.0);
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 22.0), egui::Sense::hover());
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
     let share = used as f32 / limit.max(1) as f32;
     let colour = if share > 1.0 { BAD } else { GOOD };
-    let filled = egui::Rect::from_min_size(
-        rect.min,
-        egui::vec2(rect.width() * share.min(1.0), rect.height()),
-    );
-    painter.rect_filled(filled, 4.0, colour.gamma_multiply(0.55));
+    bar(ui, Some(share), &text, colour.gamma_multiply(0.55));
+}
+
+/// A bar filled to `fraction`, or with a band moving through it while how
+/// far along is unknown, and `text` over it.
+pub fn bar(ui: &mut egui::Ui, fraction: Option<f32>, text: &str, colour: Color32) {
+    let width = ui.available_width().min(380.0);
+    bar_sized(ui, egui::vec2(width, 22.0), fraction, text, colour);
+}
+
+/// A [`bar`] of `size`.
+pub fn bar_sized(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    fraction: Option<f32>,
+    text: &str,
+    colour: Color32,
+) {
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let rounding = (size.y / 2.0).min(4.0);
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, rounding, ui.visuals().extreme_bg_color);
+    // the whole bar's shape, cut to how far it got: no blob at its start
+    // when it is nearly empty
+    let part = match fraction {
+        Some(fraction) => egui::Rect::from_min_size(
+            rect.min,
+            egui::vec2(rect.width() * fraction.clamp(0.0, 1.0), rect.height()),
+        ),
+        None => {
+            let band = rect.width() * 0.3;
+            let time = ui.input(|input| input.time) as f32;
+            let left = rect.left() - band + (time * 0.7).fract() * (rect.width() + band);
+            ui.ctx().request_repaint();
+            egui::Rect::from_min_max(
+                egui::pos2(left, rect.top()),
+                egui::pos2(left + band, rect.bottom()),
+            )
+        }
+    };
+    ui.painter_at(part.intersect(rect)).rect_filled(rect, rounding, colour);
     painter.text(
         rect.left_center() + egui::vec2(8.0, 0.0),
         egui::Align2::LEFT_CENTER,
         text,
-        egui::FontId::proportional(13.0),
+        egui::FontId::proportional(12.5),
         Color32::WHITE,
     );
 }

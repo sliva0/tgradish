@@ -846,6 +846,7 @@ impl App {
             return;
         };
         let extra_args = self.backend().as_ref().is_ok_and(Backend::supports_extra_args);
+        let queued = self.queue.iter().position(|&other| other == id);
         egui::Panel::bottom("actions").show(ui, |ui| {
             ui.add_space(8.0);
             self.actions(ui, id);
@@ -882,7 +883,7 @@ impl App {
                                 ui.set_max_width(side - 12.0);
                                 ui.add_space(6.0);
                                 settings::make(ui, item, &context);
-                                summary(ui, item);
+                                summary(ui, item, queued);
                             });
                     },
                 );
@@ -923,12 +924,7 @@ impl App {
                     if ui.add(egui::Button::new("Stop").min_size(vec2(140.0, 32.0))).clicked() {
                         job.cancel();
                     }
-                    let progress = &job.progress;
-                    let bar = match progress.fraction {
-                        Some(fraction) => egui::ProgressBar::new(fraction).text(&progress.stage),
-                        None => egui::ProgressBar::new(0.0).animate(true).text(&progress.stage),
-                    };
-                    ui.add(bar.desired_width(ui.available_width().min(420.0)));
+                    widgets::note(ui, "Converting: progress is beside the preview");
                 }
                 Some((job, ..)) => {
                     if ui
@@ -1497,11 +1493,10 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
     let small = |text: String| RichText::new(text).small();
     match (&item.job, item.failed.as_ref().or(item.made.as_ref())) {
         (Some((job, ..)), _) if job.is_running() => {
-            let bar = match job.progress.fraction {
-                Some(fraction) => egui::ProgressBar::new(fraction),
-                None => egui::ProgressBar::new(0.0).animate(true),
-            };
-            ui.add(bar.desired_height(6.0).desired_width(ui.available_width()));
+            ui.add_space(3.0);
+            let size = vec2(ui.available_width(), 6.0);
+            let colour = ui.visuals().selection.bg_fill;
+            widgets::bar_sized(ui, size, job.progress.overall(), "", colour);
         }
         (Some(_), _) => {
             ui.label(
@@ -1540,7 +1535,10 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
 
 /// The last result of an item in short: its size and what Telegram would
 /// say, beside the preview.
-fn summary(ui: &mut egui::Ui, item: &Item) {
+fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
+    if let Some((job, ..)) = &item.job {
+        progress_column(ui, job, queued);
+    }
     if let Some(failed) = &item.failed {
         widgets::section(ui, "Last conversion");
         match &failed.job.status {
@@ -1597,6 +1595,97 @@ fn summary(ui: &mut egui::Ui, item: &Item) {
         }
         Status::Cancelled => widgets::note(ui, "Stopped before it was done"),
         Status::Waiting | Status::Running => {}
+    }
+}
+
+/// What a conversion is doing, a bar for each part of it: the stages of a
+/// `.tgs`, or each encode of a WebM.
+fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
+    widgets::section(ui, "Converting");
+    if job.is_waiting() {
+        widgets::note(
+            ui,
+            match queued {
+                Some(0) | None => "Next to convert".to_owned(),
+                Some(ahead) => format!("Waiting for {ahead} more"),
+            },
+        );
+        return;
+    }
+    let progress = &job.progress;
+    let running = ui.visuals().selection.bg_fill;
+    let done = widgets::GOOD.gamma_multiply(0.45);
+    if let Some(stage) = progress.tgs {
+        use jobs::TgsStage;
+        let fits = progress.lossless_bytes.is_none() && stage > TgsStage::Fitting;
+        let stages = [
+            (TgsStage::Reading, "Reading the art".to_owned()),
+            (TgsStage::Drawing, "Drawing it as shapes".to_owned()),
+            (
+                TgsStage::Fitting,
+                match (progress.lossless_bytes, progress.steps.last()) {
+                    (Some(_), Some(step)) => {
+                        let count = progress.steps.len();
+                        let steps = if count == 1 { "step" } else { "steps" };
+                        format!(
+                            "Fitting into 64 KiB: {count} {steps}, about {}",
+                            widgets::kib(step.bytes as u64)
+                        )
+                    }
+                    (Some(bytes), None) => {
+                        format!("Fitting into 64 KiB from {}", widgets::kib(bytes as u64))
+                    }
+                    (None, _) if fits => "Fits as it is".to_owned(),
+                    (None, _) => "Fitting into 64 KiB, if it has to".to_owned(),
+                },
+            ),
+            (TgsStage::Compressing, "Compressing".to_owned()),
+        ];
+        for (each, text) in stages {
+            let (fraction, colour) = match each.cmp(&stage) {
+                std::cmp::Ordering::Less => (Some(1.0), done),
+                std::cmp::Ordering::Equal if each == TgsStage::Fitting => {
+                    (progress.tgs_fitting(), running)
+                }
+                std::cmp::Ordering::Equal => (None, running),
+                std::cmp::Ordering::Greater => (Some(0.0), running),
+            };
+            widgets::bar(ui, fraction, &text, colour);
+            ui.add_space(2.0);
+        }
+        return;
+    }
+    if progress.attempts.is_empty() {
+        widgets::bar(ui, None, "Starting", running);
+    }
+    for attempt in &progress.attempts {
+        let rate = match attempt.params.rate {
+            tgradish_core::events::Rate::Bitrate(kbps) => format!("{kbps:.0} kbit/s"),
+            tgradish_core::events::Rate::Crf(crf) => format!("quality {crf}"),
+            tgradish_core::events::Rate::Lossless => "lossless".into(),
+        };
+        let text = format!("Encode {}: {:.0} fps, {rate}", attempt.number, attempt.params.fps);
+        match attempt.bytes {
+            Some(bytes) => {
+                let (mark, colour) = if attempt.fits {
+                    ("fits", done)
+                } else {
+                    ("too large", widgets::BAD.gamma_multiply(0.45))
+                };
+                let text = format!("{text} → {}, {mark}", widgets::kib(bytes));
+                widgets::bar(ui, Some(1.0), &text, colour);
+            }
+            None => widgets::bar(ui, progress.fraction, &text, running),
+        }
+        ui.add_space(2.0);
+    }
+    if let Some(plan) = &progress.webm
+        && plan.attempts > 1
+    {
+        widgets::note(
+            ui,
+            format!("Up to {} encodes, until one lands just under the limit", plan.attempts),
+        );
     }
 }
 
@@ -2197,6 +2286,24 @@ mod tests {
         harness.state_mut().inspection = Some(inspect::Inspection::of(&sticker));
         harness.run_steps(3);
         save(&mut harness, "inspect");
+        harness.state_mut().inspection = None;
+        // a .tgs halfway through fitting
+        let mut job = Job::waiting(dir.path().join("progress.tgs"));
+        job.status = Status::Running;
+        job.progress = jobs::Progress {
+            tgs: Some(jobs::TgsStage::Fitting),
+            lossless_bytes: Some(200_000),
+            steps: vec![tgradish_tgs::sticker::Step {
+                reduction: tgradish_tgs::reduce::Reduction::MergeColours { distance: 0.02 },
+                bytes: 110_000,
+                error: 0.01,
+            }],
+            ..jobs::Progress::default()
+        };
+        let item = harness.state_mut().items.last_mut().unwrap();
+        item.job = Some((job, Format::Tgs, item.choices.clone()));
+        harness.run_steps(3);
+        save(&mut harness, "progress");
     }
 
     #[test]
