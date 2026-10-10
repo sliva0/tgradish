@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::convert::{Plan, frame_count};
 use crate::events::{Params, Rate};
-use crate::options::Resize;
+use crate::options::Scaling;
 
 /// Formats a number for ffmpeg without float noise like `0.30000000000000004`.
 fn num(value: f64) -> String {
@@ -40,7 +40,6 @@ pub(crate) fn input_args(plan: &Plan, length: f64, fps: f64) -> Vec<OsString> {
 pub(crate) fn video_filter(plan: &Plan, fps: f64, length: f64, pix_fmt: &str) -> String {
     let (w, h) = (plan.width, plan.height);
     let (sw, sh) = (plan.scaled_width, plan.scaled_height);
-    let scale = format!("scale={sw}:{sh}:flags=lanczos");
     let mut filters =
         vec![format!("fps={}", num(fps)), format!("trim=end_frame={}", frame_count(length, fps))];
     if let Some(crop) = plan.crop {
@@ -53,18 +52,73 @@ pub(crate) fn video_filter(plan: &Plan, fps: f64, length: f64, pix_fmt: &str) ->
             crop.width, crop.height, crop.x, crop.y
         ));
     }
-    match plan.resize {
-        Resize::Contain | Resize::Stretch => filters.push(scale),
-        Resize::Crop => filters.extend([scale, format!("crop={w}:{h}")]),
-        Resize::Pad => filters.extend([
-            scale,
+    filters.extend(scale_filters(plan));
+    // around the middle; pad keeps chroma whole, so pixel blocks stay
+    // apart from their neighbours' colour
+    if sw > w || sh > h {
+        filters.push(format!("crop={}:{}", w.min(sw), h.min(sh)));
+    }
+    if sw < w || sh < h {
+        filters.extend([
             // padding has to be transparent, so alpha must exist first
             "format=yuva420p".into(),
             format!("pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black@0"),
-        ]),
+        ]);
     }
     filters.extend(["setsar=1".into(), format!("format={pix_fmt}")]);
     filters.join(",")
+}
+
+/// sRGB to linear light and back, for `lutrgb`, which escapes the commas.
+const TO_LINEAR: &str =
+    "if(lte(val/maxval\\,0.04045)\\,val/12.92\\,maxval*pow((val/maxval+0.055)/1.055\\,2.4))";
+const TO_SRGB: &str =
+    "if(lte(val/maxval\\,0.0031308)\\,val*12.92\\,maxval*(1.055*pow(val/maxval\\,1/2.4)-0.055))";
+
+/// `scale`, blending in linear light, with alpha premultiplied so
+/// transparent pixels lend no colour to the edges.
+fn in_linear_light(plan: &Plan, scale: String) -> Vec<String> {
+    let alpha = plan.source.alpha;
+    let lut = |expr: &str| format!("lutrgb=r='{expr}':g='{expr}':b='{expr}'");
+    let mut filters =
+        vec![format!("format={}", if alpha { "gbrap16le" } else { "gbrp16le" }), lut(TO_LINEAR)];
+    if alpha {
+        filters.push("premultiply=inplace=1".into());
+    }
+    filters.push(scale);
+    if alpha {
+        filters.push("unpremultiply=inplace=1".into());
+    }
+    filters.push(lut(TO_SRGB));
+    filters
+}
+
+/// Scales the part used to the planned size.
+fn scale_filters(plan: &Plan) -> Vec<String> {
+    let (sw, sh) = (plan.scaled_width, plan.scaled_height);
+    let (used_w, used_h) = plan.used();
+    match plan.scaling {
+        Scaling::Smooth | Scaling::Auto => {
+            in_linear_light(plan, format!("scale={sw}:{sh}:flags=lanczos"))
+        }
+        // blocks of whole pixels at least as large as asked, then down to
+        // the size: only the edges that fall between pixels blend
+        Scaling::Sharp => {
+            let blocks = (
+                used_w * sw.div_ceil(used_w.max(1)).max(1),
+                used_h * sh.div_ceil(used_h.max(1)).max(1),
+            );
+            let mut filters = Vec::new();
+            if blocks != (used_w, used_h) {
+                filters.push(format!("scale={}:{}:flags=neighbor", blocks.0, blocks.1));
+            }
+            if blocks != (sw, sh) {
+                filters.extend(in_linear_light(plan, format!("scale={sw}:{sh}:flags=area")));
+            }
+            filters
+        }
+        Scaling::PixelPerfect => vec![format!("scale={sw}:{sh}:flags=neighbor")],
+    }
 }
 
 /// Arguments for one libvpx-vp9 encode. `pass` is the pass number and log

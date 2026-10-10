@@ -27,6 +27,22 @@ pub enum Resize {
     Stretch,
 }
 
+/// How the picture's pixels become the result's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum Scaling {
+    /// Sharp for pixel art made at least twice as large, smooth otherwise.
+    Auto,
+    /// Neighbouring pixels blend, in linear light so edges don't darken.
+    Smooth,
+    /// Each pixel becomes a block; only block edges that fall between
+    /// output pixels blend. Keeps pixel art crisp at any size.
+    Sharp,
+    /// Each pixel becomes the same whole number of output pixels, and
+    /// transparent margins fill the rest of the box.
+    PixelPerfect,
+}
+
 /// What to tune so the file ends up just under the size limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -177,6 +193,10 @@ pub struct Options {
     /// stickers, pad for emoji.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resize: Option<Resize>,
+    /// How pixels are scaled: smooth, or kept sharp for pixel art. Default:
+    /// auto, sharp for pixel art made at least twice as large.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scaling: Option<Scaling>,
     /// What to tune to get close to the size limit: 256 KB for stickers, 64
     /// KB for emoji. Default: auto.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -267,6 +287,7 @@ impl Options {
             target,
             crop,
             resize,
+            scaling,
             fit,
             attempts,
             fit_range,
