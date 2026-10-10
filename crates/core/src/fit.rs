@@ -193,7 +193,7 @@ fn fit_auto(encoder: &mut dyn Encoder, plan: &Plan, limit: u64) -> Result<Search
     let rates = auto_frame_rates(plan, limit);
     let mut total = Search::default();
     let mut best_score = None;
-    let mut initial = estimate_bitrate(plan.length);
+    let mut initial = estimate_bitrate(plan.length, limit);
 
     for (i, &fps) in rates.iter().enumerate() {
         let remaining = plan.attempts.saturating_sub(total.used);
@@ -292,7 +292,7 @@ mod tests {
     use crate::convert::{Request, plan};
     use crate::ffmpeg::Probe;
     use crate::options::{Options, Range};
-    use crate::telegram::MAX_BYTES;
+    use crate::telegram::MAX_STICKER_BYTES as MAX_BYTES;
 
     /// Pretends to encode: bitrate encodes overshoot their target by 3%,
     /// constant quality encodes shrink 9% per CRF step. SSIM rewards bits per

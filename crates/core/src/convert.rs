@@ -174,10 +174,10 @@ fn even(value: f64) -> u32 {
     ((value / 2.0).round() as u32 * 2).max(2)
 }
 
-/// Bitrate in kbit/s that should land a bit under the size limit.
-pub fn estimate_bitrate(length: f64) -> f64 {
+/// Bitrate in kbit/s that should land a bit under `limit` bytes.
+pub fn estimate_bitrate(length: f64, limit: u64) -> f64 {
     // leaves room for container overhead and encoder overshoot
-    telegram::MAX_BYTES as f64 * 8.0 / length / 1000.0 * 0.93
+    limit as f64 * 8.0 / length / 1000.0 * 0.93
 }
 
 pub fn default_output(input: &Path, target: Target) -> PathBuf {
@@ -261,7 +261,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
             )));
         }
         Some(fps) => fps,
-        None => source_fps.min(telegram::MAX_FPS),
+        None => source_fps.min(telegram::DEFAULT_MAX_FPS),
     };
 
     let crf = o.crf.unwrap_or(options::DEFAULT_CRF);
@@ -273,7 +273,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
             return Err(invalid("bitrate must be at least 1 kbit/s"));
         }
         Some(bitrate) => bitrate,
-        None => estimate_bitrate(length),
+        None => estimate_bitrate(length, target.max_bytes()),
     };
 
     let fit = o.fit.unwrap_or(Fit::Auto);
@@ -458,7 +458,7 @@ impl Encoder for BackendEncoder<'_> {
         }
 
         let bytes = std::fs::metadata(&path)?.len();
-        let fits = bytes <= telegram::MAX_BYTES;
+        let fits = bytes <= self.plan.target.max_bytes();
         (self.on_event)(Event::AttemptFinished { attempt, params, bytes, fits });
         Ok(Attempt { number: attempt, params, bytes, path })
     }
@@ -506,7 +506,7 @@ pub fn convert(
         attempts: 0,
         pass_logs: HashMap::new(),
     };
-    let best = fit::run(&plan, &mut encoder, telegram::MAX_BYTES)?;
+    let best = fit::run(&plan, &mut encoder, plan.target.max_bytes())?;
     cancel.check()?;
     let spoofed = plan.spoofs(encoded_length(best.params.length, best.params.fps));
 
@@ -594,7 +594,7 @@ mod tests {
             (Fit::Bitrate, range(0.0, 100.0)),
             (Fit::Crf, range(10.0, 70.0)),
             (Fit::Fps, range(1.5, 1.7)),
-            (Fit::Fps, range(10.0, 60.0)),
+            (Fit::Fps, range(10.0, 61.0)),
         ] {
             let options = Options { fit: Some(fit), fit_range, ..Default::default() };
             assert!(plan_with(options).is_err(), "{fit:?} {fit_range:?} was accepted");

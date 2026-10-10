@@ -319,11 +319,18 @@ struct Printer {
     verbose: u8,
     quiet: bool,
     bar: Option<ProgressBar>,
+    /// Telegram's size limit for what is being made.
+    limit: u64,
 }
 
 impl Printer {
     fn new(ctx: &Context) -> Self {
-        Self { verbose: ctx.global.verbose, quiet: ctx.global.quiet, bar: None }
+        Self {
+            verbose: ctx.global.verbose,
+            quiet: ctx.global.quiet,
+            bar: None,
+            limit: tgradish_core::telegram::MAX_STICKER_BYTES,
+        }
     }
 
     /// Prints a line above the progress bar.
@@ -341,6 +348,9 @@ impl Printer {
     }
 
     fn event(&mut self, event: Event) {
+        if let Event::Started { plan } = &event {
+            self.limit = plan.target.max_bytes();
+        }
         match event {
             Event::Started { plan } if !self.quiet => {
                 let spoof = if plan.spoofs(plan.length) { ", spoofed" } else { "" };
@@ -380,7 +390,7 @@ impl Printer {
                 eprintln!(
                     "  attempt {attempt}: {} → {}, {mark}",
                     ui::params(&params),
-                    ui::size(bytes)
+                    ui::size_within(bytes, self.limit)
                 );
             }
             Event::Scored { ssim, .. } if self.verbose > 0 => {
@@ -397,7 +407,7 @@ impl Printer {
                     "{} {}: {}, {}{spoofed}",
                     style("done").green().bold(),
                     output.display(),
-                    ui::size(bytes),
+                    ui::size_within(bytes, self.limit),
                     ui::params(&params),
                 );
                 for issue in issues {
@@ -408,9 +418,6 @@ impl Printer {
         }
     }
 }
-
-/// Telegram's limit for `.tgs` files.
-const TGS_LIMIT: u64 = 64 * 1024;
 
 /// Shows `.tgs` conversion events as text.
 struct TgsPrinter {
@@ -489,7 +496,7 @@ impl TgsPrinter {
             TgsEvent::TooLarge { bytes } if !self.quiet => {
                 self.line(format!(
                     "  about {} losslessly, too large; fitting",
-                    ui::size(bytes as u64)
+                    ui::size_within(bytes as u64, tgs::MAX_BYTES)
                 ));
             }
             TgsEvent::Reduced { step } if !self.quiet => {
@@ -516,7 +523,7 @@ impl TgsPrinter {
                     "{} {}: {}{lossy}",
                     style("done").green().bold(),
                     output.display(),
-                    ui::size_within(bytes, TGS_LIMIT),
+                    ui::size_within(bytes, tgs::MAX_BYTES),
                 );
                 for issue in issues {
                     let label = match issue.severity {

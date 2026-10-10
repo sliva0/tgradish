@@ -78,7 +78,7 @@ fn converts_short_clip_without_spoofing() {
         let name = name(backend);
         assert!(outcome.issues.is_empty(), "{name}: {:?}", outcome.issues);
         assert!(!outcome.spoofed);
-        assert!(outcome.bytes <= telegram::MAX_BYTES);
+        assert!(outcome.bytes <= telegram::MAX_STICKER_BYTES);
         assert!(matches!(events.first(), Some(Event::Started { .. })));
         assert!(matches!(events.last(), Some(Event::Finished { .. })));
 
@@ -88,6 +88,30 @@ fn converts_short_clip_without_spoofing() {
         assert_eq!(info.title, None, "{name}: source metadata must be dropped");
         assert_eq!(info.writing_app.as_deref(), Some(tgradish_core::TOOL_ID), "{name}");
         assert!(info.signature.is_some());
+    }
+}
+
+#[test]
+fn fits_emoji_into_their_smaller_limit() {
+    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    for backend in &backends {
+        let dir = tempfile::tempdir().unwrap();
+        let request = Request {
+            output: Some(dir.path().join("out.webm")),
+            options: Options {
+                target: Some(Target::Emoji),
+                length: Some(2.0),
+                ..fast(Fit::Bitrate)
+            },
+            ..Request::new(input.clone())
+        };
+        let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
+
+        let name = name(backend);
+        assert!(outcome.issues.is_empty(), "{name}: {:?}", outcome.issues);
+        assert!(outcome.bytes <= telegram::MAX_EMOJI_BYTES, "{name}: {}", outcome.bytes);
+        // fitting aimed at the emoji limit, not the sticker one
+        assert!(outcome.bytes as f64 > telegram::MAX_EMOJI_BYTES as f64 * 0.8, "{name}");
     }
 }
 
@@ -115,7 +139,7 @@ fn converts_long_clip_with_spoofing() {
         assert!(info.content_duration.unwrap() > 12.0);
         assert_eq!(info.title.as_deref(), Some("pig"), "{name}");
         // fitting got close to the limit
-        assert!(outcome.bytes as f64 > telegram::MAX_BYTES as f64 * 0.9, "{name}");
+        assert!(outcome.bytes as f64 > telegram::MAX_STICKER_BYTES as f64 * 0.9, "{name}");
     }
 }
 

@@ -173,12 +173,14 @@ pub struct OptionArgs {
     /// Length of the result. [default: the rest of the input]
     #[arg(short = 't', long, value_name = "SECONDS", help_heading = "Output")]
     pub length: Option<f64>,
-    /// Frame rate: of the result for WebM [default: the input's, at most
-    /// 30], of sprite sheets and image sequences for .tgs [default: 10].
+    /// Frame rate: of the result for WebM, at most 60 [default: the input's,
+    /// at most 30], of sprite sheets and image sequences for .tgs [default:
+    /// 10].
     #[arg(long, help_heading = "Output")]
     pub fps: Option<f64>,
 
-    /// What to tune to get close to the 256 KB limit. [default: auto]
+    /// What to tune to get close to the size limit: 256 KB for stickers, 64
+    /// KB for emoji. [default: auto]
     #[arg(short, long, value_enum, help_heading = "Size fitting")]
     pub fit: Option<FitArg>,
     /// Maximum number of encodes while fitting. [default: 8]
