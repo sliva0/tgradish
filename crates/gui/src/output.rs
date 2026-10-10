@@ -306,7 +306,7 @@ mod tests {
         let wide = tgs(
             &three,
             3,
-            tgs_bounds(&[three.clone()], 3, Part::of(None, (3, 1), (3, 1)), true),
+            tgs_bounds(std::slice::from_ref(&three), 3, Part::of(None, (3, 1), (3, 1)), true),
             64,
         );
         assert_eq!(wide.pixels[32 * 64].to_srgba_unmultiplied(), [255, 0, 0, 255]);
