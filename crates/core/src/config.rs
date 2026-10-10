@@ -14,6 +14,7 @@
 //! overwrite = false                  # replace existing results
 //! smooth-scrolling = false           # ease scrolling instead of following the wheel
 //! theme = "system"                   # or "light" or "dark"
+//! forget-files = false               # don't reopen the files of last time
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -49,6 +50,9 @@ pub struct GuiConfig {
     pub smooth_scrolling: bool,
     /// Light or dark, or as the system has it.
     pub theme: Theme,
+    /// Start with no files, rather than those open when the window last
+    /// closed.
+    pub forget_files: bool,
 }
 
 /// The window's colours.
