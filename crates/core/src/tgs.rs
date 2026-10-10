@@ -11,8 +11,7 @@ use tgradish_tgs::encode::Effort;
 use tgradish_tgs::frames::{self, DecodeOptions, Limits, Sheet};
 pub use tgradish_tgs::normalise::Long;
 use tgradish_tgs::normalise::{self, Report};
-pub use tgradish_tgs::reduce::Kind;
-pub use tgradish_tgs::reduce::Reduction;
+pub use tgradish_tgs::reduce::{Compromise, Kind, Reduction};
 use tgradish_tgs::sticker::{self, Fit, Progress, Step};
 
 use crate::error::{Error, Result};
@@ -57,6 +56,11 @@ pub struct TgsOptions {
     /// Reductions fitting may use, least visible first. [default: all]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reductions: Option<Vec<Kind>>,
+    /// What fitting gives up first: motion (frames merged and dropped,
+    /// full detail), detail (smooth motion, a coarser picture), or auto,
+    /// whatever changes the art least. [default: auto]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compromise: Option<Compromise>,
     /// The part of the input to use, in input pixels. [default: all of it]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
@@ -114,6 +118,7 @@ impl TgsOptions {
             speed,
             lossless,
             reductions,
+            compromise,
             crop,
             keep_canvas,
             pixel_scale,
@@ -187,6 +192,7 @@ impl TgsOptions {
             },
             fit: if self.lossless.unwrap_or(false) { Fit::Lossless } else { Fit::Auto },
             reductions: self.reductions.clone().unwrap_or_else(|| Kind::ALL.to_vec()),
+            compromise: self.compromise.unwrap_or_default(),
             name,
             ..sticker::Options::default()
         })

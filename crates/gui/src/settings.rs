@@ -537,6 +537,16 @@ const REDUCTIONS: [(Reduction, &str, &str); 6] = [
     (Reduction::Downscale, "Lower the resolution", "Fewer, larger art pixels"),
 ];
 
+const COMPROMISES: [Choice<tgs::Compromise>; 3] = [
+    (tgs::Compromise::Auto, "Either", "Whatever changes the art least for the bytes it saves"),
+    (
+        tgs::Compromise::Motion,
+        "Motion",
+        "Frames merge and drop first: full detail, choppier motion",
+    ),
+    (tgs::Compromise::Detail, "Detail", "The picture coarsens first: smooth motion, less detail"),
+];
+
 fn tgs_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     section(ui, "Size and quality");
     let base = item.choices.tgs_base(context.presets, context.config).unwrap_or_default();
@@ -560,6 +570,16 @@ fn tgs_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         ui.end_row();
 
         let lossless = options.lossless.or(base.lossless).unwrap_or(false);
+        label(ui, "Give up first", "Art that is mostly motion can lose frames or detail");
+        ui.add_enabled_ui(!lossless, |ui| {
+            ui.vertical(|ui| {
+                let base = base.compromise.unwrap_or_default();
+                preset_segments(ui, &mut options.compromise, base, &COMPROMISES);
+                chosen_hint(ui, options.compromise.unwrap_or(base), &COMPROMISES);
+            });
+        });
+        ui.end_row();
+
         label(ui, "May change", "What fitting may give up to make it fit, least visible first");
         ui.add_enabled_ui(!lossless, |ui| {
             let all = base.reductions.clone().unwrap_or_else(|| Reduction::ALL.to_vec());
