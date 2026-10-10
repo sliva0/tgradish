@@ -28,6 +28,9 @@ pub struct Layer {
     /// Shown for frames `from..to`.
     pub from: u32,
     pub to: u32,
+    /// Spans of frames within those where the layer is hidden after all,
+    /// in order.
+    pub hidden: Vec<(u32, u32)>,
     /// Bottom first.
     pub groups: Vec<Group>,
 }
@@ -193,12 +196,23 @@ impl Group {
     }
 }
 
+impl Layer {
+    /// Whether the layer is shown at a frame.
+    pub fn shown(&self, tick: u32) -> bool {
+        (self.from..self.to).contains(&tick)
+            && !self.hidden.iter().any(|&(start, end)| (start..end).contains(&tick))
+    }
+}
+
 impl Scene {
     /// Frames where the set of visible layers changes, from 0 to `ticks`.
     fn changes(&self) -> Vec<u32> {
         let mut ticks = vec![0, self.ticks];
         for layer in &self.layers {
             ticks.extend([layer.from.min(self.ticks), layer.to.min(self.ticks)]);
+            for &(start, end) in &layer.hidden {
+                ticks.extend([start.min(self.ticks), end.min(self.ticks)]);
+            }
         }
         ticks.sort_unstable();
         ticks.dedup();
@@ -207,10 +221,7 @@ impl Scene {
 
     /// Visible groups at a frame, bottom first.
     fn visible(&self, tick: u32) -> impl Iterator<Item = &Group> {
-        self.layers
-            .iter()
-            .filter(move |layer| (layer.from..layer.to).contains(&tick))
-            .flat_map(|layer| &layer.groups)
+        self.layers.iter().filter(move |layer| layer.shown(tick)).flat_map(|layer| &layer.groups)
     }
 
     /// The scene at a frame, with `palette` alpha deciding what blends.
@@ -329,7 +340,12 @@ mod tests {
     }
 
     fn scene(width: u32, height: u32, groups: Vec<Group>) -> Scene {
-        Scene { width, height, ticks: 1, layers: vec![Layer { from: 0, to: 1, groups }] }
+        Scene {
+            width,
+            height,
+            ticks: 1,
+            layers: vec![Layer { from: 0, to: 1, groups, hidden: Vec::new() }],
+        }
     }
 
     fn colours(scene: &Scene) -> Vec<Paint> {

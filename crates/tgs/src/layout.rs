@@ -107,6 +107,7 @@ pub fn lay_out(scene: &Scene, anim: &PixelAnim, name: Option<String>) -> Animati
                     Item::Group(items)
                 })
                 .collect(),
+            hidden: layer.hidden.clone(),
         })
         .collect();
     Animation { name, ticks: scene.ticks, layers }
@@ -146,8 +147,13 @@ mod tests {
             height: 1,
             ticks: 2,
             layers: vec![
-                SceneLayer { from: 0, to: 2, groups: vec![group(0, 3), group(1, 2)] },
-                SceneLayer { from: 1, to: 2, groups: vec![group(0, 8)] },
+                SceneLayer {
+                    from: 0,
+                    to: 2,
+                    groups: vec![group(0, 3), group(1, 2)],
+                    hidden: Vec::new(),
+                },
+                SceneLayer { from: 1, to: 2, groups: vec![group(0, 8)], hidden: Vec::new() },
             ],
         };
         // red and blue in turn, so both are in the palette

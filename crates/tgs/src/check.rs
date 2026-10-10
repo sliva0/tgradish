@@ -547,6 +547,7 @@ mod tests {
             to: 60,
             transform: Transform { position: [0.0, 0.0], scale: 1.0 },
             items: groups,
+            hidden: Vec::new(),
         };
         let animation = Animation {
             name: None,
@@ -639,6 +640,7 @@ mod tests {
             to: 60,
             transform: Transform { position: [0.0, 0.0], scale: 1.0 },
             items: vec![group(rects)],
+            hidden: Vec::new(),
         };
         let animation = |layers, rects| Animation {
             name: None,

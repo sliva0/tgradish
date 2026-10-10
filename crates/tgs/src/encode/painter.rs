@@ -55,12 +55,15 @@ pub struct Settings {
     /// Keep the unchanged part of a colour alive over frames where the
     /// rest changes, when that is cheaper.
     pub split: bool,
+    /// Draw a shape that comes back later once, in a layer hidden in
+    /// between.
+    pub reuse: bool,
     pub effort: Effort,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { lifetimes: true, split: true, effort: Effort::default() }
+        Settings { lifetimes: true, split: true, reuse: true, effort: Effort::default() }
     }
 }
 
@@ -131,6 +134,7 @@ struct Painter<'a> {
     lifetimes: bool,
     /// Split colours into cores and deltas where that is cheaper.
     split: bool,
+    reuse: bool,
 }
 
 impl Painter<'_> {
@@ -479,7 +483,7 @@ impl Painter<'_> {
             width: self.anim.width(),
             height: self.anim.height(),
             ticks: *starts.last().unwrap(),
-            layers: stack(pieces, &starts)?,
+            layers: stack(pieces, &starts, self.reuse)?,
         })
     }
 
@@ -520,7 +524,13 @@ pub fn painter(
         }
         cells.push(by_colour);
     }
-    let mut painter = Painter { anim, cells, lifetimes: settings.lifetimes, split: settings.split };
+    let mut painter = Painter {
+        anim,
+        cells,
+        lifetimes: settings.lifetimes,
+        split: settings.split,
+        reuse: settings.reuse,
+    };
     if settings.lifetimes {
         match painter.search(settings.effort, score) {
             // a layer per frame stays within the limit for up to 180
@@ -529,27 +539,49 @@ pub fn painter(
             Err(EncodeError::TooManyLayers { .. } | EncodeError::TooManyRects { .. }) => {
                 painter.lifetimes = false
             }
-            result => return result,
+            result => return painter.without_reuse_if_smaller(result, score),
         }
     }
-    painter.search(settings.effort, score)
+    let result = painter.search(settings.effort, score);
+    painter.without_reuse_if_smaller(result, score)
 }
 
 impl Painter<'_> {
+    /// The scene `result` holds, or that order stacked without reuse when
+    /// `score` finds that smaller: reused pieces can't share layers with
+    /// others, which sometimes costs more than drawing them again.
+    fn without_reuse_if_smaller(
+        &mut self,
+        result: Result<(Vec<u16>, Scene), EncodeError>,
+        score: Option<&dyn Fn(&Scene) -> usize>,
+    ) -> Result<Scene, EncodeError> {
+        let (order, scene) = result?;
+        let Some(score) = score.filter(|_| self.reuse) else { return Ok(scene) };
+        self.reuse = false;
+        let plain = self.encode(&order);
+        self.reuse = true;
+        match plain {
+            Ok(plain) if score(&plain) < score(&scene) => Ok(plain),
+            _ => Ok(scene),
+        }
+    }
+
+    /// The drawing order `effort` finds, and its scene.
     fn search(
         &self,
         effort: Effort,
         score: Option<&dyn Fn(&Scene) -> usize>,
-    ) -> Result<Scene, EncodeError> {
+    ) -> Result<(Vec<u16>, Scene), EncodeError> {
         let guess = self.guessed_order();
         let searched = || match guess.len() {
             n if n <= EXACT_ORDER => self.exact_order(&guess),
             n if n <= GREEDY_ORDER => self.greedy_order(&guess),
             _ => guess.clone(),
         };
+        let encoded = |order: Vec<u16>| self.encode(&order).map(|scene| (order, scene));
         let score = match (effort, score) {
-            (Effort::Fast, _) => return self.encode(&guess),
-            (Effort::Balanced, _) | (Effort::Best, None) => return self.encode(&searched()),
+            (Effort::Fast, _) => return encoded(guess.clone()),
+            (Effort::Balanced, _) | (Effort::Best, None) => return encoded(searched()),
             (Effort::Best, Some(score)) => score,
         };
         // the better of both starting orders, then neighbours swapped while
@@ -564,7 +596,7 @@ impl Painter<'_> {
         }
         let Some((mut smallest, mut scene)) = best else {
             // no order fits tlottie's limits; report why
-            return self.encode(&order);
+            return encoded(order);
         };
         let mut tries = 2;
         let mut improved = true;
@@ -585,15 +617,23 @@ impl Painter<'_> {
                 }
             }
         }
-        Ok(scene)
+        Ok((order, scene))
     }
 }
+
+/// Spans of frames, `from..to`, in order.
+type Spans = Vec<(usize, usize)>;
 
 /// Puts pieces, in drawing order, into layers: a piece joins the highest
 /// layer with the same lifetime when no layer above that one is shown at
 /// the same time and the per-layer limits allow; otherwise it starts a
-/// layer on top.
-fn stack(pieces: Vec<(usize, u16, Piece)>, starts: &[u32]) -> Result<Vec<Layer>, EncodeError> {
+/// layer on top. With `reuse`, pieces of one colour and place with the same
+/// rectangles become one, shown over all their lifetimes.
+fn stack(
+    pieces: Vec<(usize, u16, Piece)>,
+    starts: &[u32],
+    reuse: bool,
+) -> Result<Vec<Layer>, EncodeError> {
     // tlottie counts every group, rectangle, fill and group transform as a
     // shape, and every rectangle a fill paints as a paint source
     let fits = |groups: usize, rects: usize| {
@@ -601,37 +641,60 @@ fn stack(pieces: Vec<(usize, u16, Piece)>, starts: &[u32]) -> Result<Vec<Layer>,
             && groups <= TLOTTIE.max_paints_per_layer
             && rects + 3 * groups <= MAX_SHAPES
     };
-    // per layer: frames, groups and rectangles so far
-    let mut layers: Vec<(usize, usize, Vec<Group>, usize)> = Vec::new();
-    for (_, colour, piece) in pieces {
+    // pieces with every span of frames they are shown for, in drawing order
+    let mut shown: Vec<(u16, Vec<Rect>, Spans)> = Vec::new();
+    let mut same: std::collections::HashMap<(usize, u16, Vec<Rect>), usize> =
+        std::collections::HashMap::new();
+    for (rank, colour, piece) in pieces {
+        let span = (piece.from, piece.to);
+        if reuse && let Some(&index) = same.get(&(rank, colour, piece.rects.clone())) {
+            let spans = &mut shown[index].2;
+            match spans.last_mut() {
+                Some(last) if last.1 == span.0 => last.1 = span.1,
+                _ => spans.push(span),
+            }
+            continue;
+        }
+        if reuse {
+            same.insert((rank, colour, piece.rects.clone()), shown.len());
+        }
+        shown.push((colour, piece.rects, vec![span]));
+    }
+    let overlap = |a: &[(usize, usize)], b: &[(usize, usize)]| {
+        a.iter().any(|&(from, to)| {
+            b.iter().any(|&(other_from, other_to)| from < other_to && other_from < to)
+        })
+    };
+    // per layer: spans, groups and rectangles so far
+    let mut layers: Vec<(Spans, Vec<Group>, usize)> = Vec::new();
+    for (colour, rects, spans) in shown {
         let mut target = None;
-        for (index, (from, to, groups, rects)) in layers.iter().enumerate().rev() {
-            if (*from, *to) == (piece.from, piece.to) {
-                if fits(groups.len() + 1, rects + piece.rects.len()) {
+        for (index, (layer_spans, groups, count)) in layers.iter().enumerate().rev() {
+            if *layer_spans == spans {
+                if fits(groups.len() + 1, count + rects.len()) {
                     target = Some(index);
                 }
                 break;
             }
-            if *from < piece.to && piece.from < *to {
+            if overlap(layer_spans, &spans) {
                 break;
             }
         }
-        let count = piece.rects.len();
+        let count = rects.len();
         let group = Group {
             colour,
             rule: FillRule::NonZero,
-            shapes: piece
-                .rects
+            shapes: rects
                 .into_iter()
                 .map(|(x, y, width, height)| Shape::Rect { x, y, width, height })
                 .collect(),
         };
         match target {
             Some(index) => {
-                layers[index].2.push(group);
-                layers[index].3 += count;
+                layers[index].1.push(group);
+                layers[index].2 += count;
             }
-            None => layers.push((piece.from, piece.to, vec![group], count)),
+            None => layers.push((spans, vec![group], count)),
         }
     }
     if layers.len() > MAX_LAYERS {
@@ -639,7 +702,12 @@ fn stack(pieces: Vec<(usize, u16, Piece)>, starts: &[u32]) -> Result<Vec<Layer>,
     }
     Ok(layers
         .into_iter()
-        .map(|(from, to, groups, _)| Layer { from: starts[from], to: starts[to], groups })
+        .map(|(spans, groups, _)| Layer {
+            from: starts[spans[0].0],
+            to: starts[spans[spans.len() - 1].1],
+            hidden: spans.windows(2).map(|pair| (starts[pair[0].1], starts[pair[1].0])).collect(),
+            groups,
+        })
         .collect())
 }
 
@@ -681,6 +749,34 @@ mod tests {
             let rects: usize = layer.groups.iter().map(|group| group.shapes.len()).sum();
             assert!(rects + 3 * layer.groups.len() <= MAX_SHAPES);
         }
+    }
+
+    #[test]
+    fn draws_a_shape_that_comes_back_once() {
+        // red and blue halves, then a green cell alone, then the halves
+        // again: nothing can stay alive through the middle frame
+        let frame = |cells: [[u8; 4]; 8]| Frame {
+            rgba: cells.into_iter().flatten().collect(),
+            duration: Duration::from_millis(100),
+        };
+        let (red, blue, green, clear) =
+            ([230, 40, 40, 255], [40, 40, 230, 255], [40, 230, 40, 255], [0; 4]);
+        let halves = [red, red, red, red, blue, blue, blue, blue];
+        let alone = [green, clear, clear, clear, clear, clear, clear, clear];
+        let input = Animation::new(8, 1, vec![frame(halves), frame(alone), frame(halves)]).unwrap();
+        let anim =
+            normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
+        let groups = |settings: &Settings| {
+            let scene = painter(&anim, settings, None).unwrap();
+            assert_eq!(scene.compare(&anim), None);
+            assert_eq!(scene.seams(anim.palette()), []);
+            let hidden = scene.layers.iter().filter(|layer| !layer.hidden.is_empty()).count();
+            (scene.layers.iter().map(|layer| layer.groups.len()).sum::<usize>(), hidden)
+        };
+        let plain = groups(&Settings { reuse: false, ..Settings::default() });
+        let reused = groups(&Settings::default());
+        assert_eq!(plain.1, 0);
+        assert!(reused.0 < plain.0 && reused.1 > 0, "{plain:?} {reused:?}");
     }
 
     #[test]
