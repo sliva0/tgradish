@@ -327,8 +327,9 @@ impl Printer {
     /// Prints a line above the progress bar.
     fn line(&self, text: impl AsRef<str>) {
         match &self.bar {
-            Some(bar) => bar.println(text),
-            None => eprintln!("{}", text.as_ref()),
+            // a hidden bar, when stderr is not a terminal, prints nothing
+            Some(bar) if !bar.is_hidden() => bar.println(text),
+            _ => eprintln!("{}", text.as_ref()),
         }
     }
 
@@ -438,8 +439,9 @@ impl TgsPrinter {
 
     fn line(&self, text: impl AsRef<str>) {
         match &self.bar {
-            Some(bar) => bar.println(text),
-            None => eprintln!("{}", text.as_ref()),
+            // a hidden bar, when stderr is not a terminal, prints nothing
+            Some(bar) if !bar.is_hidden() => bar.println(text),
+            _ => eprintln!("{}", text.as_ref()),
         }
     }
 
