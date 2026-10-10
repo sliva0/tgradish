@@ -11,6 +11,11 @@ release is published (not a draft), since the packages download from it.
 - `packaging/aur/tgradish-bin/PKGBUILD`: the release's
   `*-system-ffmpeg` Linux builds for x86-64 and aarch64, which also use the
   system ffmpeg, so both packages behave the same.
+- `packaging/aur/tgradish-static-bin/PKGBUILD`: the release's Linux builds
+  with ffmpeg linked in, for x86-64 and aarch64, so it needs no ffmpeg
+  package (only for `--extra-args`, which run ffmpeg as a program). It
+  installs the licenses of the ffmpeg build with tgradish's.
+- The three conflict: each provides `tgradish`.
 - `flake.nix` and `packaging/nix/package.nix`: a Nix package built from
   source against nixpkgs' ffmpeg, and a development shell.
 - Both install `tgradish` and a menu entry that opens the window
@@ -44,7 +49,7 @@ publish it.
 
 ### Each release
 
-For each of `tgradish` and `tgradish-bin`, in
+For each of `tgradish`, `tgradish-bin` and `tgradish-static-bin`, in
 `packaging/aur/<package>/`:
 
 1. Set `pkgver` to the release's version and `pkgrel=1`.
@@ -70,7 +75,7 @@ git commit -m "tgradish 2.0.0"
 git push
 ```
 
-Do the same with `tgradish-bin`. The AUR only accepts the `master` branch,
+Do the same with `tgradish-bin` and `tgradish-static-bin`. The AUR only accepts the `master` branch,
 and only `PKGBUILD`, `.SRCINFO` and files the PKGBUILD uses.
 
 For later releases, it is the same steps, starting from step 1, and a

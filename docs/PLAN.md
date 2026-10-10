@@ -166,8 +166,9 @@ Done:
 - **Licenses:** archives list every Rust crate in them with its license
   (cargo-about), besides ffmpeg's licenses and sources.
 - **AUR and Nix:** PKGBUILDs for `tgradish` (from source,
-  `depends=(ffmpeg)`) and `tgradish-bin` (the system-ffmpeg release
-  builds) in `packaging/aur`, and `flake.nix` with the package (built
+  `depends=(ffmpeg)`), `tgradish-bin` (the system-ffmpeg release builds)
+  and `tgradish-static-bin` (the release builds with ffmpeg linked in) in
+  `packaging/aur`, and `flake.nix` with the package (built
   against nixpkgs' ffmpeg, tests run in the sandbox) and a dev shell, built
   by the `nix` workflow. Publishing to the AUR needs the user's account;
   `docs/packaging.md` has the steps. Submitting to nixpkgs can come later.

@@ -110,7 +110,8 @@ libvpx for VP9) from `PATH`, or the ones `--ffmpeg PATH` points at;
 [docs/ffmpeg.md](docs/ffmpeg.md).
 
 On Arch Linux, from the AUR: `tgradish` (built from source) or
-`tgradish-bin`. With Nix: `nix run github:sliva0/tgradish`, or the flake's
+`tgradish-bin`, which use the system's ffmpeg, or `tgradish-static-bin`,
+with ffmpeg built in. With Nix: `nix run github:sliva0/tgradish`, or the flake's
 package in a NixOS configuration.
 
 ## Coming from 1.x
