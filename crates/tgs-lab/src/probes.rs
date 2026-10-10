@@ -76,7 +76,7 @@ fn group(rects: impl IntoIterator<Item = (f64, f64)>, colour: [u8; 4]) -> Item {
     let mut items: Vec<Item> =
         rects.into_iter().map(|(x, y)| Item::Rect { centre: [x, y], size: [1.0, 1.0] }).collect();
     items.push(Item::Fill { colour, rule: FillRule::NonZero });
-    items.push(Item::GroupTransform);
+    items.push(Item::GroupTransform { opacity: Vec::new() });
     Item::Group(items)
 }
 
@@ -358,7 +358,7 @@ fn long_paths(count: u32, points: usize) -> String {
         })
         .collect();
     items.push(Item::Fill { colour: [60, 140, 230, 255], rule: FillRule::NonZero });
-    items.push(Item::GroupTransform);
+    items.push(Item::GroupTransform { opacity: Vec::new() });
     let transform = grid_transform(units, units);
     let layer =
         Layer { from: 0, to: 180, transform, items: vec![Item::Group(items)], hidden: Vec::new() };

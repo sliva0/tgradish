@@ -59,7 +59,7 @@ pub struct Transform {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
-    /// Drawn top first; ends with its fill and [`Item::GroupTransform`].
+    /// Drawn top first; ends with its fill and [`Item::GroupTransform { opacity: Vec::new() }`].
     Group(Vec<Item>),
     Rect {
         centre: [f64; 2],
@@ -72,8 +72,11 @@ pub enum Item {
         colour: [u8; 4],
         rule: FillRule,
     },
-    /// The empty transform every group needs.
-    GroupTransform,
+    /// The transform every group needs, empty but for hold keyframes on
+    /// its opacity, `(frame, percent)`, when the group is hidden at times.
+    GroupTransform {
+        opacity: Vec<(u32, u8)>,
+    },
 }
 
 impl Animation {
@@ -123,14 +126,8 @@ impl Layer {
             for &(start, end) in &self.hidden {
                 keys.extend([(start, 0), (end, 100)]);
             }
-            out.push_str(",\"o\":{\"a\":1,\"k\":[");
-            for (index, (tick, opacity)) in keys.into_iter().enumerate() {
-                if index > 0 {
-                    out.push(',');
-                }
-                write!(out, "{{\"t\":{tick},\"s\":[{opacity}],\"h\":1}}").unwrap();
-            }
-            out.push_str("]}");
+            out.push(',');
+            write_opacity(out, &keys);
         }
         write!(out, "}},\"ip\":{},\"op\":{},", self.from, self.to).unwrap();
         if style.layer_start {
@@ -140,6 +137,18 @@ impl Layer {
         write_items(out, &self.items, style);
         out.push('}');
     }
+}
+
+/// An opacity of hold keyframes, `(frame, percent)`.
+fn write_opacity(out: &mut String, keys: &[(u32, u8)]) {
+    out.push_str("\"o\":{\"a\":1,\"k\":[");
+    for (index, (tick, opacity)) in keys.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        write!(out, "{{\"t\":{tick},\"s\":[{opacity}],\"h\":1}}").unwrap();
+    }
+    out.push_str("]}");
 }
 
 fn write_items(out: &mut String, items: &[Item], style: Style) {
@@ -205,7 +214,14 @@ fn write_items(out: &mut String, items: &[Item], style: Style) {
                 }
                 out.push('}');
             }
-            Item::GroupTransform => out.push_str("{\"ty\":\"tr\"}"),
+            Item::GroupTransform { opacity } if opacity.is_empty() => {
+                out.push_str("{\"ty\":\"tr\"}");
+            }
+            Item::GroupTransform { opacity } => {
+                out.push_str("{\"ty\":\"tr\",");
+                write_opacity(out, opacity);
+                out.push('}');
+            }
         }
     }
     out.push(']');
@@ -309,7 +325,7 @@ mod tests {
                     Item::Rect { centre: [1.5, 2.0], size: [3.0, 4.0] },
                     Item::Path(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]),
                     Item::Fill { colour: [255, 0, 51, 128], rule: FillRule::EvenOdd },
-                    Item::GroupTransform,
+                    Item::GroupTransform { opacity: Vec::new() },
                 ])],
                 hidden: Vec::new(),
             }],

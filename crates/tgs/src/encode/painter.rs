@@ -27,8 +27,15 @@ const RECT_COST: usize = 2;
 const GROUP_COST: usize = 3;
 /// What a layer of its own adds, measured on the corpus.
 const LAYER_COST: usize = 10;
+/// Side of the tiles a colour can be cut into, in cells: 16 and 64 were
+/// both worse.
+const TILE: u32 = 32;
 /// Up to this many colours, the order is searched exactly.
 const EXACT_ORDER: usize = 10;
+/// Above this many colours times cells times frames, the order is only
+/// guessed whatever the effort: searching it would take minutes. The
+/// corpus comes to at most 11 million, `blue_ball_machine` to 1.9 billion.
+const SEARCH_WORK: u64 = 200_000_000;
 /// Above this many colours, the order isn't searched at all.
 const GREEDY_ORDER: usize = 256;
 
@@ -94,6 +101,9 @@ struct Piece {
     from: usize,
     to: usize,
     rects: Vec<Rect>,
+    /// Where the piece's tile comes among its colour's, bottom first; 0
+    /// when the colour isn't tiled.
+    tile: u32,
 }
 
 fn cost(pieces: &[(u8, Piece)]) -> usize {
@@ -105,6 +115,16 @@ fn cost(pieces: &[(u8, Piece)]) -> usize {
 /// The cost of a colour that can't be drawn at all within tlottie's
 /// limits; sums of it saturate.
 const IMPOSSIBLE: usize = usize::MAX;
+
+/// [`cost`] of a tiled colour: tiles with lifetimes of their own need
+/// layers of their own, about one for each piece past the first in each
+/// tile.
+fn tiled_cost(pieces: &[(u8, Piece)]) -> usize {
+    let tiles: std::collections::BTreeSet<u32> =
+        pieces.iter().map(|(_, piece)| piece.tile).collect();
+    let extra = pieces.len().saturating_sub(tiles.len());
+    cost(pieces).saturating_add(extra * LAYER_COST)
+}
 
 /// [`cost`] of a split colour: its deltas mostly need layers of their own,
 /// since its core lies between them and the next colour's.
@@ -192,16 +212,17 @@ impl Painter<'_> {
     /// Pieces drawing, in each frame, the cells `needs[frame]` says it
     /// must (nothing when `None`) within those it may. A piece lives on
     /// while one shape fits every frame.
-    fn lifetime_pieces(&self, needs: Vec<(Option<Mask>, Mask)>) -> Result<Vec<Piece>, EncodeError> {
+    fn lifetime_pieces(
+        &self,
+        needs: Vec<(Option<Mask>, Mask)>,
+        opaque: bool,
+    ) -> Result<Vec<Piece>, EncodeError> {
         let mut pieces = Vec::new();
         // the open piece: its first frame, the cells it must and may cover
         let mut open: Option<(usize, Mask, Mask)> = None;
-        let close = |from, to, must: &Mask, may: &Mask| {
-            let rects = cover(must, may);
-            if rects.len() > MAX_GROUP_RECTS {
-                return Err(EncodeError::TooManyRects { rects: rects.len() });
-            }
-            Ok(Piece { from, to, rects })
+        let close = |from, to, must: &Mask, may: &Mask| -> Result<Vec<Piece>, EncodeError> {
+            let groups = covers(must, may, opaque)?;
+            Ok(groups.into_iter().map(|rects| Piece { from, to, rects, tile: 0 }).collect())
         };
         let frames = needs.len();
         for (frame, (must, may)) in needs.into_iter().enumerate() {
@@ -217,7 +238,7 @@ impl Painter<'_> {
                     *within = narrowed;
                     continue;
                 }
-                pieces.push(close(*start, frame, union, within)?);
+                pieces.extend(close(*start, frame, union, within)?);
                 open = None;
             }
             if let Some(must) = must {
@@ -225,7 +246,7 @@ impl Painter<'_> {
             }
         }
         if let Some((start, union, within)) = open {
-            pieces.push(close(start, frames, &union, &within)?);
+            pieces.extend(close(start, frames, &union, &within)?);
         }
         Ok(pieces)
     }
@@ -250,33 +271,148 @@ impl Painter<'_> {
     /// The pieces of `colour` when `later[frame]` holds the cells of the
     /// opaque colours drawn after it, each with its place under the colour:
     /// 0 for a part drawn below the rest, 1 otherwise.
-    fn pieces(&self, colour: u16, later: &[Mask]) -> Result<Vec<(u8, Piece)>, EncodeError> {
+    fn pieces(
+        &self,
+        colour: u16,
+        later: &[Mask],
+        tiles: bool,
+    ) -> Result<Vec<(u8, Piece)>, EncodeError> {
         let own: Vec<Mask> = (0..self.frames()).map(|f| self.own(colour, f)).collect();
+        // everything but tiles happens within a cell of the colour's cells:
+        // worked out in a window of that, and moved back
+        let mut any = self.empty();
+        own.iter().for_each(|mask| any.union(mask));
+        let Some((x, y, w, h)) = any.bounds() else { return Ok(Vec::new()) };
+        let (left, top) = (x.saturating_sub(1), y.saturating_sub(1));
+        let width = (x + w + 1).min(self.anim.width()) - left;
+        let height = (y + h + 1).min(self.anim.height()) - top;
+        let crop = |masks: &[Mask]| -> Vec<Mask> {
+            masks.iter().map(|mask| mask.crop(left, top, width, height)).collect()
+        };
+        let (own_window, later_window) = (crop(&own), crop(later));
+        let moved = |mut pieces: Vec<(u8, Piece)>| {
+            for (_, piece) in &mut pieces {
+                for rect in &mut piece.rects {
+                    rect.0 += left;
+                    rect.1 += top;
+                }
+            }
+            pieces
+        };
         let whole = self.lifetime_pieces(
-            own.iter()
-                .zip(later)
+            own_window
+                .iter()
+                .zip(&later_window)
                 .map(|(own, later)| self.needs(own, later, self.opaque(colour)))
                 .collect(),
+            self.opaque(colour),
         )?;
-        let whole: Vec<(u8, Piece)> = whole.into_iter().map(|piece| (1, piece)).collect();
-        if !self.lifetimes || !self.split || !self.opaque(colour) {
+        let whole: Vec<(u8, Piece)> = moved(whole.into_iter().map(|piece| (1, piece)).collect());
+        if !self.lifetimes || !self.opaque(colour) {
             return Ok(whole);
         }
-        match self.split_pieces(&own, later) {
-            Ok(split) if split_cost(&split) < cost(&whole) => Ok(split),
-            _ => Ok(whole),
+        let mut best = (cost(&whole), whole);
+        if self.split {
+            for patch in [false, true] {
+                if let Ok(split) = self.split_pieces(&own_window, &later_window, patch)
+                    && split_cost(&split) < best.0
+                {
+                    best = (split_cost(&split), moved(split));
+                }
+            }
         }
+        if tiles
+            && let Ok(tiled) = self.tiled_pieces(&own, later)
+            && tiled_cost(&tiled) < best.0
+        {
+            best = (tiled_cost(&tiled), tiled);
+        }
+        Ok(best.1)
+    }
+
+    /// A colour cut into square tiles of the canvas, each with lifetimes of
+    /// its own, so a change in one tile leaves the others' pieces alone.
+    /// Tiles are drawn in reading order, and a tile also covers the cells
+    /// of its colour in later tiles next to its own: the seam invariant
+    /// between two tiles, which shows every cell in its own tile's group.
+    fn tiled_pieces(&self, own: &[Mask], later: &[Mask]) -> Result<Vec<(u8, Piece)>, EncodeError> {
+        let (width, height) = (self.anim.width(), self.anim.height());
+        let size = TILE;
+        let mut any = self.empty();
+        own.iter().for_each(|mask| any.union(mask));
+        let Some((x0, y0, w, h)) = any.bounds() else { return Ok(Vec::new()) };
+        if w <= size && h <= size {
+            return Err(EncodeError::TooManyRects { rects: 0 });
+        }
+        let mut pieces = Vec::new();
+        let (columns, rows) = (width.div_ceil(size), height.div_ceil(size));
+        for tile in 0..columns * rows {
+            let (left, top) = ((tile % columns) * size, (tile / columns) * size);
+            let (right, bottom) = ((left + size).min(width), (top + size).min(height));
+            if right <= x0 || left >= x0 + w || bottom <= y0 || top >= y0 + h {
+                continue;
+            }
+            // the tile and a cell around it is all its pieces can touch, so
+            // they are worked out in a window of that
+            let (wl, wt) = (left.saturating_sub(1), top.saturating_sub(1));
+            let (ww, wh) = ((right + 1).min(width) - wl, (bottom + 1).min(height) - wt);
+            let mut region = Mask::new(ww, wh);
+            let mut after = Mask::new(ww, wh);
+            for y in 0..wh {
+                for x in 0..ww {
+                    let (cx, cy) = (wl + x, wt + y);
+                    if (left..right).contains(&cx) && (top..bottom).contains(&cy) {
+                        region.set(x, y);
+                    } else if cy >= bottom || (cy >= top && cx >= right) {
+                        after.set(x, y);
+                    }
+                }
+            }
+            let needs: Vec<(Option<Mask>, Mask)> = own
+                .iter()
+                .zip(later)
+                .map(|(own, later)| {
+                    let own = own.crop(wl, wt, ww, wh);
+                    let later = later.crop(wl, wt, ww, wh);
+                    let mut mine = own.clone();
+                    mine.intersect(&region);
+                    let mut theirs = own;
+                    theirs.intersect(&after);
+                    let mut may = mine.clone();
+                    may.union(&later);
+                    may.union(&theirs);
+                    if mine.is_empty() {
+                        return (None, may);
+                    }
+                    let mut reach = later;
+                    reach.union(&theirs);
+                    reach.intersect(&mine.grown());
+                    let mut must = mine;
+                    must.union(&reach);
+                    (Some(must), may)
+                })
+                .collect();
+            for mut piece in self.lifetime_pieces(needs, true)? {
+                piece.tile = tile + 1;
+                for rect in &mut piece.rects {
+                    rect.0 += wl;
+                    rect.1 += wt;
+                }
+                pieces.push((1, piece));
+            }
+        }
+        Ok(pieces)
     }
 
     /// The cores of a colour: for each stretch of frames where most of its
     /// cells keep it, those cells, drawn once for the stretch. `later[frame]`
-    /// holds the cells of the opaque groups drawn above the cores. Returns
-    /// the core pieces and each frame's core cells.
-    fn cores(
-        &self,
-        own: &[Mask],
-        later: &[Mask],
-    ) -> Result<(Vec<Piece>, Vec<Option<Mask>>), EncodeError> {
+    /// holds the cells of the opaque groups drawn above the cores.
+    ///
+    /// A core must have its colour painted under every later colour next
+    /// to it. Without `patch`, it does that itself, so it can only keep
+    /// cells whose neighbours are its own or always hidden; with `patch`,
+    /// the deltas below it do that where the neighbour isn't always hidden.
+    fn cores(&self, own: &[Mask], later: &[Mask], patch: bool) -> Result<Cores, EncodeError> {
         let frames = own.len();
         let mut pieces = Vec::new();
         let mut at = Vec::with_capacity(frames);
@@ -310,20 +446,22 @@ impl Painter<'_> {
             // the core shows exactly its cells, so it must reach under every
             // neighbour that a later colour shows in some frame; that is only
             // possible where the neighbour is the core's or always hidden
-            loop {
-                let reached = |(x, y): (u32, u32)| span.clone().any(|f| later[f].get(x, y));
-                let unsure: Vec<(u32, u32)> = core
-                    .cells()
+            let reached = |(x, y): (u32, u32)| span.clone().any(|f| later[f].get(x, y));
+            let unsure = |core: &Mask| -> Vec<(u32, u32)> {
+                core.cells()
                     .filter(|&cell| {
-                        core_neighbours(cell, &core)
+                        core_neighbours(cell, core)
                             .any(|n| reached(n) && !core.get(n.0, n.1) && !hidden.get(n.0, n.1))
                     })
-                    .collect();
-                if unsure.is_empty() {
-                    break;
-                }
-                for (x, y) in unsure {
-                    core.clear(x, y);
+                    .collect()
+            };
+            if !patch {
+                loop {
+                    let cells = unsure(&core);
+                    if cells.is_empty() {
+                        break;
+                    }
+                    cells.into_iter().for_each(|(x, y)| core.clear(x, y));
                 }
             }
             if core.is_empty() {
@@ -333,17 +471,15 @@ impl Painter<'_> {
             let mut must = core.clone();
             for f in span.clone() {
                 let mut reach = core.grown();
-                reach.intersect(&later[f]);
+                reach.intersect(if patch { &hidden } else { &later[f] });
                 must.union(&reach);
             }
             let mut may = core.clone();
             may.union(&hidden);
-            let rects = cover(&must, &may);
-            if rects.len() > MAX_GROUP_RECTS {
-                return Err(EncodeError::TooManyRects { rects: rects.len() });
+            for rects in covers(&must, &may, true)? {
+                pieces.push(Piece { from: span.start, to: span.end, rects, tile: 0 });
             }
-            pieces.push(Piece { from: span.start, to: span.end, rects });
-            at.extend(span.map(|_| Some(core.clone())));
+            at.extend(span.map(|_| Some((core.clone(), hidden.clone()))));
         }
         Ok((pieces, at))
     }
@@ -354,14 +490,19 @@ impl Painter<'_> {
     /// A delta lies directly under its core, so where they meet the delta
     /// must reach under the core's cells (the seam invariant between two
     /// groups), which is fine: the core paints the same colour over it.
-    fn split_pieces(&self, own: &[Mask], later: &[Mask]) -> Result<Vec<(u8, Piece)>, EncodeError> {
-        let (cores, at) = self.cores(own, later)?;
+    fn split_pieces(
+        &self,
+        own: &[Mask],
+        later: &[Mask],
+        patch: bool,
+    ) -> Result<Vec<(u8, Piece)>, EncodeError> {
+        let (cores, at) = self.cores(own, later, patch)?;
         let deltas = own
             .iter()
             .zip(later)
             .zip(at)
             .map(|((own, later), core)| {
-                let Some(core) = core else {
+                let Some((core, hidden)) = core else {
                     return self.needs(own, later, true);
                 };
                 // the cells the core doesn't draw; the delta must also reach
@@ -370,18 +511,31 @@ impl Painter<'_> {
                 rest.subtract(&core);
                 let mut above = later.clone();
                 above.union(&core);
-                let (must, mut may) = self.needs(&rest, &above, true);
+                let (mut must, mut may) = self.needs(&rest, &above, true);
                 may.union(own);
+                // and paint the colour under later colours next to the core
+                // where the core doesn't, over the core's cells beside them
+                // too, so one group spans each such edge
+                let mut under = core.grown();
+                under.intersect(later);
+                under.subtract(&hidden);
+                if patch && !under.is_empty() {
+                    let mut beside = under.grown();
+                    beside.intersect(&core);
+                    under.union(&beside);
+                    let must = must.get_or_insert_with(|| Mask::new(own.width(), own.height()));
+                    must.union(&under);
+                }
                 (must, may)
             })
             .collect();
         let mut out: Vec<(u8, Piece)> = cores.into_iter().map(|piece| (1, piece)).collect();
-        out.extend(self.lifetime_pieces(deltas)?.into_iter().map(|piece| (0, piece)));
+        out.extend(self.lifetime_pieces(deltas, true)?.into_iter().map(|piece| (0, piece)));
         Ok(out)
     }
 
     fn cost_of(&self, colour: u16, later: &[Mask]) -> usize {
-        self.pieces(colour, later).map_or(IMPOSSIBLE, |pieces| cost(&pieces))
+        self.pieces(colour, later, false).map_or(IMPOSSIBLE, |pieces| cost(&pieces))
     }
 
     /// The cheapest order, by dynamic programming over the sets of colours
@@ -448,16 +602,30 @@ impl Painter<'_> {
                 self.cost_of(colour, &later)
             })
             .collect();
+        // a colour's cost only depends on the colours over it within a cell
+        // of its own, so after each step only the costs of colours next to
+        // the one taken change
+        let union = |colour: u16| {
+            let mut cells = self.empty();
+            (0..self.frames()).for_each(|f| cells.union(&self.own(colour, f)));
+            cells
+        };
+        let cells: Vec<Mask> = colours.iter().map(|&colour| union(colour)).collect();
+        let around: Vec<Mask> = cells.iter().map(Mask::grown).collect();
         let mut remaining: Vec<usize> = (0..colours.len()).collect();
         let mut later = vec![self.empty(); self.frames()];
+        let mut costs: Vec<Option<usize>> = vec![None; colours.len()];
         let mut top_down = Vec::with_capacity(colours.len());
         while !remaining.is_empty() {
+            for &i in &remaining {
+                if costs[i].is_none() {
+                    costs[i] = Some(self.cost_of(colours[i], &later));
+                }
+            }
             let (position, &index) = remaining
                 .iter()
                 .enumerate()
-                .min_by_key(|&(_, &i)| {
-                    (self.cost_of(colours[i], &later) as i128 - at_bottom[i] as i128, i)
-                })
+                .min_by_key(|&(_, &i)| (costs[i].unwrap() as i128 - at_bottom[i] as i128, i))
                 .unwrap();
             remaining.remove(position);
             let colour = colours[index];
@@ -465,6 +633,11 @@ impl Painter<'_> {
             if self.opaque(colour) {
                 for (f, mask) in later.iter_mut().enumerate() {
                     mask.union(&self.own(colour, f));
+                }
+                for &i in &remaining {
+                    if around[i].intersects(&cells[index]) {
+                        costs[i] = None;
+                    }
                 }
             }
         }
@@ -494,7 +667,7 @@ impl Painter<'_> {
         let mut later = vec![self.empty(); self.frames()];
         let mut pieces = Vec::new();
         for (rank, &colour) in order.iter().enumerate().rev() {
-            for (place, piece) in self.pieces(colour, &later)? {
+            for (place, piece) in self.pieces(colour, &later, true)? {
                 pieces.push((rank * 2 + usize::from(place), colour, piece));
             }
             if self.opaque(colour) {
@@ -503,7 +676,7 @@ impl Painter<'_> {
                 }
             }
         }
-        pieces.sort_by_key(|(rank, _, piece)| (*rank, piece.from));
+        pieces.sort_by_key(|(rank, _, piece)| (*rank, piece.tile, piece.from));
         Ok(pieces)
     }
 }
@@ -573,6 +746,10 @@ impl Painter<'_> {
         score: Option<&dyn Fn(&Scene) -> usize>,
     ) -> Result<(Vec<u16>, Scene), EncodeError> {
         let guess = self.guessed_order();
+        // searching the order costs about one encode per colour or more
+        let cells = u64::from(self.anim.width()) * u64::from(self.anim.height());
+        let heavy = guess.len() as u64 * cells * self.frames() as u64 > SEARCH_WORK;
+        let effort = if heavy { Effort::Fast } else { effort };
         let searched = || match guess.len() {
             n if n <= EXACT_ORDER => self.exact_order(&guess),
             n if n <= GREEDY_ORDER => self.greedy_order(&guess),
@@ -621,8 +798,33 @@ impl Painter<'_> {
     }
 }
 
+/// Rectangles covering `must` within `may` (see [`cover`]), in groups a
+/// layer can take: when there are too many, the cells are split into two
+/// bands of rows that share their middle row, recursively. The lower band
+/// covers the shared row too, which keeps the seam invariant between the
+/// two, and painting an opaque colour over itself changes nothing. A
+/// translucent colour would blend with itself there, so it can't be split.
+fn covers(must: &Mask, may: &Mask, opaque: bool) -> Result<Vec<Vec<Rect>>, EncodeError> {
+    let rects = cover(must, may);
+    if rects.len() <= MAX_GROUP_RECTS {
+        return Ok(vec![rects]);
+    }
+    let Some((_, top, _, height)) = must.bounds() else { return Ok(Vec::new()) };
+    if !opaque || height < 3 {
+        return Err(EncodeError::TooManyRects { rects: rects.len() });
+    }
+    let (middle, bottom) = (top + height / 2, top + height);
+    let mut groups = covers(&must.rows(top, middle + 1), &may.rows(top, middle + 1), opaque)?;
+    groups.extend(covers(&must.rows(middle, bottom), &may.rows(middle, bottom), opaque)?);
+    Ok(groups)
+}
+
 /// Spans of frames, `from..to`, in order.
 type Spans = Vec<(usize, usize)>;
+
+/// A colour's core pieces, and each frame's core cells with the cells
+/// hidden under later colours over its stretch (`None` without a core).
+type Cores = (Vec<Piece>, Vec<Option<(Mask, Mask)>>);
 
 /// Puts pieces, in drawing order, into layers: a piece joins the highest
 /// layer with the same lifetime when no layer above that one is shown at
@@ -643,11 +845,12 @@ fn stack(
     };
     // pieces with every span of frames they are shown for, in drawing order
     let mut shown: Vec<(u16, Vec<Rect>, Spans)> = Vec::new();
-    let mut same: std::collections::HashMap<(usize, u16, Vec<Rect>), usize> =
+    let mut same: std::collections::HashMap<(usize, u32, u16, Vec<Rect>), usize> =
         std::collections::HashMap::new();
     for (rank, colour, piece) in pieces {
         let span = (piece.from, piece.to);
-        if reuse && let Some(&index) = same.get(&(rank, colour, piece.rects.clone())) {
+        let key = (rank, piece.tile, colour, piece.rects.clone());
+        if reuse && let Some(&index) = same.get(&key) {
             let spans = &mut shown[index].2;
             match spans.last_mut() {
                 Some(last) if last.1 == span.0 => last.1 = span.1,
@@ -656,7 +859,7 @@ fn stack(
             continue;
         }
         if reuse {
-            same.insert((rank, colour, piece.rects.clone()), shown.len());
+            same.insert(key, shown.len());
         }
         shown.push((colour, piece.rects, vec![span]));
     }
@@ -665,36 +868,67 @@ fn stack(
             b.iter().any(|&(other_from, other_to)| from < other_to && other_from < to)
         })
     };
+    let group = |colour: u16, rects: &[Rect]| Group {
+        colour,
+        rule: FillRule::NonZero,
+        shapes: rects
+            .iter()
+            .map(|&(x, y, width, height)| Shape::Rect { x, y, width, height })
+            .collect(),
+        shown: Vec::new(),
+    };
+    let ticks = |spans: &[(usize, usize)]| -> Vec<(u32, u32)> {
+        spans.iter().map(|&(from, to)| (starts[from], starts[to])).collect()
+    };
     // per layer: spans, groups and rectangles so far
     let mut layers: Vec<(Spans, Vec<Group>, usize)> = Vec::new();
-    for (colour, rects, spans) in shown {
+    for (colour, rects, spans) in &shown {
         let mut target = None;
         for (index, (layer_spans, groups, count)) in layers.iter().enumerate().rev() {
-            if *layer_spans == spans {
+            if layer_spans == spans {
                 if fits(groups.len() + 1, count + rects.len()) {
                     target = Some(index);
                 }
                 break;
             }
-            if overlap(layer_spans, &spans) {
+            if overlap(layer_spans, spans) {
                 break;
             }
         }
-        let count = rects.len();
-        let group = Group {
-            colour,
-            rule: FillRule::NonZero,
-            shapes: rects
-                .into_iter()
-                .map(|(x, y, width, height)| Shape::Rect { x, y, width, height })
-                .collect(),
-        };
         match target {
             Some(index) => {
-                layers[index].1.push(group);
-                layers[index].2 += count;
+                layers[index].1.push(group(*colour, rects));
+                layers[index].2 += rects.len();
             }
-            None => layers.push((spans, vec![group], count)),
+            None => layers.push((spans.clone(), vec![group(*colour, rects)], rects.len())),
+        }
+    }
+    if layers.len() <= MAX_LAYERS {
+        return Ok(layers
+            .into_iter()
+            .map(|(spans, groups, _)| {
+                let shown = ticks(&spans);
+                Layer {
+                    from: shown[0].0,
+                    to: shown[shown.len() - 1].1,
+                    hidden: shown.windows(2).map(|pair| (pair[0].1, pair[1].0)).collect(),
+                    groups,
+                }
+            })
+            .collect());
+    }
+    // A layer for each lifetime is too many: fill layers in drawing order
+    // instead, each group shown over its own spans.
+    let mut layers: Vec<(Vec<Group>, usize)> = Vec::new();
+    for (colour, rects, spans) in &shown {
+        let mut group = group(*colour, rects);
+        group.shown = ticks(spans);
+        match layers.last_mut() {
+            Some((groups, count)) if fits(groups.len() + 1, *count + rects.len()) => {
+                groups.push(group);
+                *count += rects.len();
+            }
+            _ => layers.push((vec![group], rects.len())),
         }
     }
     if layers.len() > MAX_LAYERS {
@@ -702,11 +936,16 @@ fn stack(
     }
     Ok(layers
         .into_iter()
-        .map(|(spans, groups, _)| Layer {
-            from: starts[spans[0].0],
-            to: starts[spans[spans.len() - 1].1],
-            hidden: spans.windows(2).map(|pair| (starts[pair[0].1], starts[pair[1].0])).collect(),
-            groups,
+        .map(|(mut groups, _)| {
+            let from = groups.iter().map(|group| group.shown[0].0).min().unwrap();
+            let to = groups.iter().map(|group| group.shown[group.shown.len() - 1].1).max().unwrap();
+            // groups shown whenever their layer is need no keyframes
+            for group in &mut groups {
+                if group.shown == [(from, to)] {
+                    group.shown.clear();
+                }
+            }
+            Layer { from, to, hidden: Vec::new(), groups }
         })
         .collect())
 }
@@ -721,9 +960,10 @@ mod tests {
     use crate::normalise::{Options, normalise};
 
     #[test]
-    fn draws_frame_by_frame_when_lifetimes_need_too_many_rects() {
+    fn splits_colours_too_big_for_a_layer() {
         // isolated pixels swapping two colours: kept for both frames, a
-        // colour covers every one of them, more than a layer takes
+        // colour covers every one of them, more than a layer takes, so it
+        // is drawn in bands
         let size = 129u32;
         let frames = (0..2)
             .map(|frame| {
@@ -777,6 +1017,77 @@ mod tests {
         let reused = groups(&Settings::default());
         assert_eq!(plain.1, 0);
         assert!(reused.0 < plain.0 && reused.1 > 0, "{plain:?} {reused:?}");
+    }
+
+    #[test]
+    fn fills_layers_in_order_when_lifetimes_need_too_many() {
+        // every piece overlaps the one before in time but not in lifetime,
+        // so each would need a layer of its own
+        let count = MAX_LAYERS + 100;
+        let pieces = (0..count)
+            .map(|i| {
+                let from = i % 2;
+                let piece = Piece { from, to: from + 2, rects: vec![(i as u32, 0, 1, 1)], tile: 0 };
+                (i, (i % 2) as u16 + 1, piece)
+            })
+            .collect();
+        let starts = [0, 10, 20, 30];
+        let layers = stack(pieces, &starts, false).unwrap();
+        assert!(layers.len() < 5, "{}", layers.len());
+        // drawing order is kept, and every group is shown when its piece was
+        let groups: Vec<&Group> = layers.iter().flat_map(|layer| &layer.groups).collect();
+        assert_eq!(groups.len(), count);
+        for (i, group) in groups.iter().enumerate() {
+            assert_eq!(group.shapes, [Shape::Rect { x: i as u32, y: 0, width: 1, height: 1 }]);
+            let (from, to) = (starts[i % 2], starts[i % 2 + 2]);
+            let layer = layers.iter().find(|layer| layer.groups.contains(group)).unwrap();
+            let shown = if group.shown.is_empty() {
+                vec![(layer.from, layer.to)]
+            } else {
+                group.shown.clone()
+            };
+            assert_eq!(shown, [(from, to)]);
+        }
+    }
+
+    #[test]
+    fn keeps_a_track_whole_under_a_rolling_ball() {
+        // a black track, and a blue 2x2 ball rolling along on top of it
+        let (width, height) = (24u32, 4u32);
+        let frames = (0..6)
+            .map(|frame| {
+                let rgba = (0..width * height)
+                    .flat_map(|index| {
+                        let (x, y) = (index % width, index / width);
+                        match (x, y) {
+                            _ if (frame * 3..frame * 3 + 2).contains(&x) && (1..3).contains(&y) => {
+                                [40, 40, 230, 255]
+                            }
+                            (_, 3) => [10, 10, 10, 255],
+                            _ => [0; 4],
+                        }
+                    })
+                    .collect();
+                Frame { rgba, duration: Duration::from_millis(100) }
+            })
+            .collect();
+        let input = Animation::new(width, height, frames).unwrap();
+        let anim =
+            normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
+        let scene = painter(&anim, &Settings::default(), None).unwrap();
+        assert_eq!(scene.compare(&anim), None);
+        assert_eq!(scene.seams(anim.palette()), []);
+        // the track lives through every frame
+        let black = anim.palette().iter().position(|&c| c == [10, 10, 10, 255]).unwrap() as u16;
+        let whole = |layer: &Layer, group: &Group| {
+            group.colour == black
+                && group.shown.is_empty()
+                && layer.hidden.is_empty()
+                && (layer.from, layer.to) == (0, scene.ticks)
+        };
+        assert!(
+            scene.layers.iter().any(|layer| layer.groups.iter().any(|group| whole(layer, group)))
+        );
     }
 
     #[test]
