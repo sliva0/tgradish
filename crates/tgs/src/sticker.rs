@@ -182,7 +182,10 @@ pub fn make(
     // zopfli make of the original
     let calibration = {
         let quick = Settings { effort: Effort::Fast, ..Settings::default() };
-        match (render(&original, &quick, options), render(&original, &settings, options)) {
+        let mut renders =
+            parallel(&[quick, settings.clone()], |settings| render(&original, settings, options))
+                .into_iter();
+        match (renders.next().unwrap(), renders.next().unwrap()) {
             (Ok((_, fast)), Ok((_, real))) => {
                 let (fast, real) =
                     (file::quick_size(fast.as_bytes()), file::quick_size(real.as_bytes()));
@@ -244,6 +247,21 @@ pub fn make(
     }
 }
 
+/// `f` of each item, in threads of their own with the `threads` feature.
+fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    #[cfg(feature = "threads")]
+    {
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = items.iter().map(|item| scope.spawn(|| f(item))).collect();
+            handles.into_iter().map(|handle| handle.join().expect("no panics")).collect()
+        })
+    }
+    #[cfg(not(feature = "threads"))]
+    {
+        items.iter().map(f).collect()
+    }
+}
+
 fn zopfli_iterations(effort: Effort) -> u64 {
     match effort {
         Effort::Fast => 5,
@@ -297,28 +315,35 @@ fn fit(
         if cancelled() {
             return Err(crate::Error::Cancelled);
         }
-        // (value, kind, candidate, size, error)
-        let mut best: Option<(f64, usize, PixelAnim, usize, f64)> = None;
-        let mut tried = false;
-        for (k, ladder) in ladders.iter().enumerate() {
-            let Some(reduction) = ladder.get(next[k]) else { continue };
-            tried = true;
-            let candidate = reduction.apply(&current)?;
+        let kinds: Vec<usize> =
+            (0..ladders.len()).filter(|&k| next[k] < ladders[k].len()).collect();
+        if kinds.is_empty() {
+            // every reduction is used up: as small as it gets
+            break;
+        }
+        // each kind's candidate, its estimate and its error, or `None` when
+        // it doesn't help at this strength
+        let tries = parallel(&kinds, |&k| -> Result<Option<(PixelAnim, usize, f64)>> {
+            let candidate = ladders[k][next[k]].apply(&current)?;
             let candidate_size = size_of(&candidate);
             if candidate == current || candidate_size >= size {
+                return Ok(None);
+            }
+            let candidate_error = error(original, &candidate);
+            Ok(Some((candidate, candidate_size, candidate_error)))
+        });
+        // (value, kind, candidate, size, error)
+        let mut best: Option<(f64, usize, PixelAnim, usize, f64)> = None;
+        for (&k, tried) in kinds.iter().zip(tries) {
+            let Some((candidate, candidate_size, candidate_error)) = tried? else {
                 // no help at this strength; the next round tries stronger
                 next[k] += 1;
                 continue;
-            }
-            let candidate_error = error(original, &candidate);
+            };
             let value = (size - candidate_size) as f64 / (candidate_error - error_now).max(1e-9);
             if best.as_ref().is_none_or(|b| value > b.0) {
                 best = Some((value, k, candidate, candidate_size, candidate_error));
             }
-        }
-        if !tried {
-            // every reduction is used up: as small as it gets
-            break;
         }
         let Some((_, k, candidate, candidate_size, candidate_error)) = best else { continue };
         before_last = Some((current, k));

@@ -20,6 +20,8 @@ zopfli.workspace = true
 [features]
 # JSON Schemas of reports and options, for front-ends
 schema = ["dep:schemars"]
+# Fitting tries its candidates in threads of their own
+threads = []
 
 [lints]
 workspace = true
