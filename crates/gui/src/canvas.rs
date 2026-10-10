@@ -6,7 +6,7 @@ use eframe::egui::{
 };
 use tgradish_core::options::Crop;
 
-use crate::item::View;
+use crate::item::Zoom;
 use crate::media::Clip;
 use crate::widgets;
 
@@ -14,31 +14,93 @@ use crate::widgets;
 #[derive(Default)]
 pub struct Screen {
     texture: Option<egui::TextureHandle>,
-    shows: Option<(u64, usize)>,
+    /// Clip, frame and whether it is drawn sharp.
+    shows: Option<(u64, usize, bool)>,
 }
 
 impl Screen {
     /// The clip whose frame is shown.
     #[cfg(test)]
     pub fn showing(&self) -> Option<u64> {
-        self.shows.map(|(clip, _)| clip)
+        self.shows.map(|(clip, ..)| clip)
     }
 
-    fn texture(&mut self, ctx: &egui::Context, clip: &Clip, index: usize) -> egui::TextureId {
-        let options = if clip.pixelated {
-            egui::TextureOptions::NEAREST
-        } else {
-            egui::TextureOptions::LINEAR
-        };
-        if self.shows != Some((clip.id, index)) || self.texture.is_none() {
+    /// The frame `index` of `clip`, drawn sharp or smooth.
+    fn texture(
+        &mut self,
+        ctx: &egui::Context,
+        clip: &Clip,
+        index: usize,
+        sharp: bool,
+    ) -> egui::TextureId {
+        let options =
+            if sharp { egui::TextureOptions::NEAREST } else { egui::TextureOptions::LINEAR };
+        if self.shows != Some((clip.id, index, sharp)) || self.texture.is_none() {
             let image = clip.image(index);
             match &mut self.texture {
                 Some(texture) => texture.set(image, options),
                 None => self.texture = Some(ctx.load_texture("preview", image, options)),
             }
-            self.shows = Some((clip.id, index));
+            self.shows = Some((clip.id, index, sharp));
         }
         self.texture.as_ref().expect("set above").id()
+    }
+}
+
+/// The small picture of what the result will look like, over the input.
+#[derive(Default)]
+pub struct Inset {
+    texture: Option<egui::TextureHandle>,
+    /// What the texture shows, and whether it is drawn sharp.
+    key: Option<(u64, bool)>,
+}
+
+impl Inset {
+    /// Shows the picture `make` makes, made again only when `key` changes,
+    /// in the bottom right corner of `area`, labelled.
+    pub fn show(
+        &mut self,
+        ui: &egui::Ui,
+        area: Rect,
+        key: u64,
+        label: &str,
+        make: impl FnOnce() -> egui::ColorImage,
+    ) {
+        let ppp = ui.ctx().pixels_per_point();
+        let room = vec2((area.width() * 0.34).max(110.0), (area.height() * 0.42).max(110.0));
+        // the size of the image isn't known before it is made, so the
+        // last one's is used to choose its filtering
+        let last = self.texture.as_ref().map(|texture| texture.size_vec2());
+        let fits = |size: egui::Vec2| (room.x / size.x).min(room.y / size.y).min(1.0 / ppp);
+        let sharp = last.is_some_and(|size| fits(size) * ppp >= 1.0);
+        if self.key != Some((key, sharp)) || self.texture.is_none() {
+            let options =
+                if sharp { egui::TextureOptions::NEAREST } else { egui::TextureOptions::LINEAR };
+            let image = make();
+            match &mut self.texture {
+                Some(texture) => texture.set(image, options),
+                None => self.texture = Some(ui.ctx().load_texture("inset", image, options)),
+            }
+            self.key = Some((key, sharp));
+        }
+        let texture = self.texture.as_ref().expect("set above");
+        let size = texture.size_vec2();
+        let shown = size * fits(size);
+        let frame = Rect::from_min_size(area.right_bottom() - shown - vec2(MARGIN, MARGIN), shown);
+        let painter = ui.painter_at(area);
+        painter.rect_filled(frame.expand(4.0), 4.0, Color32::from_black_alpha(200));
+        widgets::checkerboard(&painter, frame, 6.0);
+        let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+        painter.image(texture.id(), frame, uv, Color32::WHITE);
+        let galley =
+            painter.layout_no_wrap(label.into(), egui::FontId::proportional(12.0), Color32::WHITE);
+        let at = pos2(frame.left(), frame.top() - galley.size().y - 8.0);
+        painter.rect_filled(
+            Rect::from_min_size(at, galley.size()).expand(3.0),
+            3.0,
+            Color32::from_black_alpha(200),
+        );
+        painter.galley(at, galley, Color32::WHITE);
     }
 }
 
@@ -79,14 +141,18 @@ const MAX_ZOOM: f32 = 64.0;
 
 /// Where the picture goes in `rect`, and how many points an input pixel
 /// takes.
-fn layout(rect: Rect, size: (u32, u32), view: &View) -> (Rect, f32) {
+fn layout(rect: Rect, size: (u32, u32), zoom: &Zoom) -> (Rect, f32) {
     let (width, height) = (size.0.max(1) as f32, size.1.max(1) as f32);
     let fit = ((rect.width() - 2.0 * MARGIN) / width).min((rect.height() - 2.0 * MARGIN) / height);
-    let scale = fit.max(1e-3) * view.zoom;
+    let scale = fit.max(1e-3) * zoom.level;
     let shown = vec2(width, height) * scale;
-    let min = rect.center() - vec2(view.centre.x * shown.x, view.centre.y * shown.y);
+    let min = rect.center() - vec2(zoom.centre.x * shown.x, zoom.centre.y * shown.y);
     (Rect::from_min_size(min, shown), scale)
 }
+
+/// Screen pixels to a picture pixel from which pixels show as squares:
+/// a smooth picture blurs them, and you can't put a crop on a pixel's edge.
+const SHARP_FROM: f32 = 2.0;
 
 /// Shows `picture` in `rect`, with `cropping` over it if given. True when
 /// the crop changed.
@@ -95,7 +161,7 @@ pub fn show(
     screen: &mut Screen,
     rect: Rect,
     picture: &Picture,
-    view: &mut View,
+    zoom: &mut Zoom,
     cropping: Option<Cropping>,
 ) -> bool {
     let response = ui.allocate_rect(rect, Sense::click_and_drag());
@@ -104,14 +170,18 @@ pub fn show(
 
     let side = picture.size.0.max(picture.size.1);
     let canvas = if picture.square { (side, side) } else { picture.size };
-    zoom_and_pan(ui, &response, rect, canvas, view);
-    let (whole, scale) = layout(rect, canvas, view);
+    zoom_and_pan(ui, &response, rect, canvas, zoom);
+    let (whole, scale) = layout(rect, canvas, zoom);
     widgets::checkerboard(&painter, whole, 8.0);
     let shown = Rect::from_center_size(
         whole.center(),
         vec2(picture.size.0 as f32, picture.size.1 as f32) * scale,
     );
-    let texture = screen.texture(ui.ctx(), picture.clip, picture.frame);
+    // in the clip's pixels, which may be fewer than the input's
+    let clip_scale = scale * picture.size.0 as f32 / picture.clip.width.max(1) as f32;
+    let device = clip_scale * ui.ctx().pixels_per_point();
+    let sharp = device >= SHARP_FROM || (picture.clip.pixelated && device >= 1.0);
+    let texture = screen.texture(ui.ctx(), picture.clip, picture.frame, sharp);
     let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
     painter.image(texture, shown, uv, Color32::WHITE);
 
@@ -298,30 +368,30 @@ fn zoom_and_pan(
     response: &egui::Response,
     rect: Rect,
     size: (u32, u32),
-    view: &mut View,
+    zoom: &mut Zoom,
 ) {
     if let Some(pointer) = response.hover_pos() {
         let (scroll, pinch) = ui.input(|input| (input.smooth_scroll_delta.y, input.zoom_delta()));
         let factor = pinch * (scroll * 0.002).exp();
         if (factor - 1.0).abs() > 1e-4 {
-            let (shown, _) = layout(rect, size, view);
+            let (shown, _) = layout(rect, size, zoom);
             let at = (pointer - shown.min) / shown.size();
-            let zoom = (view.zoom * factor).clamp(1.0, MAX_ZOOM);
-            let shown = shown.size() * (zoom / view.zoom);
+            let level = (zoom.level * factor).clamp(1.0, MAX_ZOOM);
+            let shown = shown.size() * (level / zoom.level);
             // the picture point under the pointer stays there
             let min = pointer - vec2(at.x * shown.x, at.y * shown.y);
-            view.centre = (rect.center() - min) / shown;
-            view.zoom = zoom;
+            zoom.centre = (rect.center() - min) / shown;
+            zoom.level = level;
         }
     }
     if response.dragged_by(PointerButton::Secondary) || response.dragged_by(PointerButton::Middle) {
-        let (shown, _) = layout(rect, size, view);
-        view.centre -= response.drag_delta() / shown.size();
+        let (shown, _) = layout(rect, size, zoom);
+        zoom.centre -= response.drag_delta() / shown.size();
     }
-    if view.zoom <= 1.0 {
-        view.centre = vec2(0.5, 0.5);
+    if zoom.level <= 1.0 {
+        zoom.centre = vec2(0.5, 0.5);
     }
-    view.centre = view.centre.clamp(vec2(0.0, 0.0), vec2(1.0, 1.0));
+    zoom.centre = zoom.centre.clamp(vec2(0.0, 0.0), vec2(1.0, 1.0));
 }
 
 /// Edges `[left, top, right, bottom]` as numbers.

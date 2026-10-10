@@ -45,7 +45,7 @@ pub fn preset_names(presets: &Presets) -> Vec<(String, Result<String, String>)> 
 }
 
 /// What a built-in preset does for `format`.
-fn builtin(name: &str, format: Format) -> Option<&'static str> {
+pub fn builtin(name: &str, format: Format) -> Option<&'static str> {
     Some(match (name, format) {
         ("fast", Format::Webm) => {
             "Fits only the bitrate, with the fast encoder: seconds, but blurrier"
@@ -559,7 +559,11 @@ fn tgs_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         });
         ui.end_row();
 
-        label(ui, "Too large", "What happens when the art doesn't fit into 64 KB as it is");
+        label(
+            ui,
+            "If output is too large",
+            "What happens when the art doesn't fit into 64 KB as it is",
+        );
         flag(
             ui,
             &mut options.lossless,

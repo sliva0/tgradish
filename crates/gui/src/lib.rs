@@ -9,6 +9,7 @@ mod inspect;
 mod item;
 mod jobs;
 mod media;
+mod output;
 mod prefs;
 mod settings;
 mod timeline;
@@ -22,11 +23,12 @@ use tgradish_core::backend::Backend;
 use tgradish_core::clipboard::Pasted;
 use tgradish_core::config::Config;
 use tgradish_core::ffmpeg::FfmpegChoice;
+use tgradish_core::options::{Resize, Scaling};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::{convert, paths, telegram, tgs};
 
-use crate::canvas::{Cropping, Picture, Screen};
-use crate::item::{Item, Kind, Made, Show};
+use crate::canvas::{Cropping, Inset, Picture, Screen};
+use crate::item::{Framing, Item, Kind, Made, Show, Zoom};
 use crate::jobs::{Job, Plan, Status};
 use crate::media::{Art, Clip, Load, Video};
 
@@ -117,6 +119,7 @@ struct App {
     /// made them, so they may be replaced.
     marked: std::cell::RefCell<HashMap<PathBuf, (FileVersion, bool)>>,
     screen: Screen,
+    inset: Inset,
     prefs: prefs::Prefs,
     inspection: Option<inspect::Inspection>,
     message: Option<String>,
@@ -176,6 +179,7 @@ impl App {
             written: HashMap::new(),
             marked: Default::default(),
             screen: Screen::default(),
+            inset: Inset::default(),
             prefs: prefs::Prefs::default(),
             inspection: None,
             message,
@@ -750,14 +754,16 @@ impl App {
             }
             let mut clicked = None;
             let mut removed = None;
+            let mut again = None;
             for item in &self.items {
                 let selected = self.selected == Some(item.id);
                 let queued = self.queue.iter().position(|&id| id == item.id);
-                let (response, remove) = row(ui, item, selected, queued);
-                if remove {
-                    removed = Some(item.id);
-                } else if response.clicked() {
-                    clicked = Some(item.id);
+                let (response, action) = row(ui, item, selected, queued);
+                match action {
+                    Some(RowAction::Remove) => removed = Some(item.id),
+                    Some(RowAction::Convert) => again = Some(item.id),
+                    None if response.clicked() => clicked = Some(item.id),
+                    None => {}
                 }
                 response.context_menu(|ui| {
                     if ui.button("Remove").clicked() {
@@ -771,6 +777,9 @@ impl App {
             }
             if let Some(id) = removed {
                 self.remove(id);
+            }
+            if let Some(id) = again {
+                self.enqueue(id);
             }
         });
     }
@@ -856,7 +865,7 @@ impl App {
                     vec2(width, ui.available_height()),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
-                        preview(ui, &mut self.screen, item);
+                        preview(ui, &mut self.screen, &mut self.inset, item);
                     },
                 );
                 ui.add_space(8.0);
@@ -1018,8 +1027,14 @@ impl App {
 const SIDE: f32 = 300.0;
 
 /// The big preview of an item, its header and timeline.
-fn preview(ui: &mut egui::Ui, screen: &mut Screen, item: &mut Item) {
+fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut Item) {
     let has_result = item.result_clip.ready().is_some();
+    // a change to what is used or how it is fitted shows on the input
+    let framing = Framing::of(item);
+    if item.view.framing.as_ref().is_some_and(|seen| *seen != framing) {
+        item.view.show = Show::Input;
+    }
+    item.view.framing = Some(framing);
     if !has_result {
         item.view.show = Show::Input;
     }
@@ -1035,11 +1050,16 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, item: &mut Item) {
             ui.colored_label(widgets::WARN, "made with earlier settings");
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if item.view.zoom > 1.0 {
+            if item.view.show == Show::Input {
+                ui.toggle_value(&mut item.view.inset, "Result preview")
+                    .on_hover_text("What the result will look like, small, over the input");
+            }
+            let zoom = item.view.zoom_mut();
+            if zoom.level > 1.0 {
                 if ui.small_button("Fit").clicked() {
-                    item.view.zoom = 1.0;
+                    *zoom = Zoom::default();
                 }
-                ui.label(format!("{:.0}%", item.view.zoom * 100.0));
+                ui.label(format!("{:.0}%", zoom.level * 100.0));
             } else {
                 widgets::note(
                     ui,
@@ -1047,9 +1067,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, item: &mut Item) {
                         (Show::Input, false) => {
                             "Drag to crop · wheel to zoom · right button to pan"
                         }
-                        (Show::Input, true) => {
-                            "Drag the crop or its edges · double-click for the whole picture"
-                        }
+                        (Show::Input, true) => "Drag the crop or its edges · double-click for all",
                         (Show::Result, _) => "Wheel to zoom · right button to pan",
                     },
                 );
@@ -1058,8 +1076,13 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, item: &mut Item) {
     });
 
     let length = item.input_length();
-    let timeline_height =
-        if length.is_some() && item.view.show == Show::Input { 38.0 } else { 0.0 };
+    let result_length =
+        item.result_clip.ready().filter(|clip| clip.is_animated()).map(|clip| clip.end());
+    let timeline_height = match item.view.show {
+        Show::Input if length.is_some() => 38.0,
+        Show::Result if result_length.is_some() => 38.0,
+        _ => 0.0,
+    };
     let size = ui.available_size() - vec2(0.0, timeline_height + 6.0);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let dt = ui.input(|input| f64::from(input.stable_dt.min(0.1)));
@@ -1075,10 +1098,14 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, item: &mut Item) {
         ),
         Format::Tgs => (item.art.ready().map(|art| &art.clip), None, None),
     };
-    let filling = (item.format == Format::Webm
-        && item.choices.webm.resize == Some(tgradish_core::options::Resize::Crop))
-    .then(|| {
-        let (width, height) = item.choices.target.box_size();
+    let target = item.choices.target;
+    let resize = item.choices.webm.resize.unwrap_or(if target.requires_exact_size() {
+        Resize::Pad
+    } else {
+        Resize::Contain
+    });
+    let filling = (item.format == Format::Webm && resize == Resize::Crop).then(|| {
+        let (width, height) = target.box_size();
         f64::from(width) / f64::from(height)
     });
 
@@ -1104,10 +1131,46 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, item: &mut Item) {
                 let still =
                     still.filter(|(at, _)| range.is_none() || (!item.view.playing && *at == time));
                 let clip = still.map(|(_, still)| still).or(part).unwrap_or(clip);
-                let picture = Picture { clip, frame: clip.index_at(time), size, square: false };
+                let frame = clip.index_at(time);
+                let picture = Picture { clip, frame, size, square: false };
                 let ratio = settings::ratio(item.view.aspect, size);
                 let cropping = Cropping { crop: &mut item.choices.crop, ratio, filling };
-                canvas::show(ui, screen, rect, &picture, &mut item.view, Some(cropping));
+                canvas::show(ui, screen, rect, &picture, &mut item.view.input_zoom, Some(cropping));
+                if item.view.inset {
+                    let crop = item.choices.crop;
+                    let where_ = output::Part::of(crop, size, (clip.width, clip.height));
+                    match item.format {
+                        Format::Webm => {
+                            let used = crop.map_or(size, |crop| (crop.width, crop.height));
+                            let scaling = item.choices.webm.scaling.unwrap_or(Scaling::Auto);
+                            let mut sizes = convert::sizes(target, resize, scaling, used);
+                            if scaling == Scaling::Auto && sizes.enlarges(used) >= 2.0 {
+                                let part = tgradish_core::options::Crop {
+                                    x: where_.x as u32,
+                                    y: where_.y as u32,
+                                    width: (where_.width.round() as u32).max(1),
+                                    height: (where_.height.round() as u32).max(1),
+                                };
+                                let frames = &clip.frames[..clip.frames.len().min(3)];
+                                if convert::is_pixel_art(frames, clip.width, Some(part)) {
+                                    sizes.scaling = Scaling::Sharp;
+                                }
+                            }
+                            let key = inset_key((clip.id, frame, where_, sizes));
+                            let label = format!("Result: {} × {} px", sizes.width, sizes.height);
+                            inset.show(ui, rect, key, &label, || {
+                                output::webm(&clip.frames[frame], clip.width, where_, &sizes)
+                            });
+                        }
+                        Format::Tgs => {
+                            let keep = item.choices.tgs.keep_canvas.unwrap_or(false);
+                            let key = inset_key((clip.id, frame, where_, keep));
+                            inset.show(ui, rect, key, "Result: 512 × 512 canvas", || {
+                                output::tgs(&clip.frames, frame, clip.width, where_, keep, 256)
+                            });
+                        }
+                    }
+                }
             } else {
                 message_in(ui, rect, "Reading…", ui.visuals().weak_text_color());
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
@@ -1117,28 +1180,27 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, item: &mut Item) {
             if let Some(clip) = item.result_clip.ready() {
                 let length = clip.end().max(1e-3);
                 if item.view.playing && clip.is_animated() {
-                    item.view.time += dt;
+                    item.view.result_time = (item.view.result_time + dt).rem_euclid(length);
                     ui.ctx().request_repaint();
                 }
-                let start = range.map_or(0.0, |(start, _)| start);
-                let at = (item.view.time - start).rem_euclid(length);
                 let square = item.made.as_ref().is_some_and(|made| made.format == Format::Tgs);
                 let picture = Picture {
                     clip,
-                    frame: clip.index_at(at),
+                    frame: clip.index_at(item.view.result_time.rem_euclid(length)),
                     size: (clip.width, clip.height),
                     square,
                 };
-                canvas::show(ui, screen, rect, &picture, &mut item.view, None);
+                canvas::show(ui, screen, rect, &picture, &mut item.view.result_zoom, None);
             }
         }
     }
 
-    if timeline_height > 0.0
-        && let Some(length) = length
-    {
-        ui.add_space(6.0);
-        timeline::show(
+    if timeline_height == 0.0 {
+        return;
+    }
+    ui.add_space(6.0);
+    match (item.view.show, length, result_length) {
+        (Show::Input, Some(length), _) => timeline::show(
             ui,
             timeline::Timeline {
                 length,
@@ -1148,8 +1210,86 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, item: &mut Item) {
                 playing: &mut item.view.playing,
                 limit: telegram::MAX_SECONDS,
             },
-        );
+        ),
+        (Show::Result, _, Some(length)) => {
+            timeline::player(ui, length, &mut item.view.result_time, &mut item.view.playing);
+        }
+        _ => {}
     }
+}
+
+/// A key that changes when any of `parts` does.
+fn inset_key(parts: impl std::fmt::Debug) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    format!("{parts:?}").hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Scrolls by what the wheel turned this frame, instead of egui's easing
+/// over the next few frames.
+fn direct_scrolling(ctx: &egui::Context) {
+    let (line, page) = (
+        ctx.options(|options| options.input_options.line_scroll_speed),
+        ctx.content_rect().height(),
+    );
+    ctx.input_mut(|input| {
+        // the command key turns the wheel into zooming
+        if input.modifiers.command {
+            return;
+        }
+        let mut delta = egui::Vec2::ZERO;
+        for event in &input.raw.events {
+            if let egui::Event::MouseWheel { unit, delta: turned, .. } = event {
+                delta += match unit {
+                    egui::MouseWheelUnit::Point => *turned,
+                    egui::MouseWheelUnit::Line => *turned * line,
+                    egui::MouseWheelUnit::Page => *turned * page,
+                };
+            }
+        }
+        if input.modifiers.shift {
+            delta = vec2(delta.x + delta.y, 0.0);
+        }
+        input.smooth_scroll_delta = delta;
+    });
+}
+
+/// A message over the bottom of the window, gone when dismissed or after a
+/// while. False once it is gone.
+fn toast(ctx: &egui::Context, message: &str) -> bool {
+    const SHOWN: f64 = 12.0;
+    let now = ctx.input(|input| input.time);
+    let id = egui::Id::new(("toast", message));
+    let since = ctx.data_mut(|data| *data.get_temp_mut_or_insert_with(id, || now));
+    let mut open = true;
+    let area = egui::Area::new(egui::Id::new("toast"))
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -56.0))
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_max_width(560.0);
+                ui.horizontal(|ui| {
+                    ui.colored_label(widgets::WARN, "⚠");
+                    ui.label(message);
+                    if ui.small_button("OK").clicked() {
+                        open = false;
+                    }
+                });
+            });
+        });
+    // hovering keeps it
+    if area.response.contains_pointer() {
+        ctx.data_mut(|data| data.insert_temp(id, now));
+    } else if now - since > SHOWN {
+        open = false;
+    } else {
+        ctx.request_repaint_after(std::time::Duration::from_secs(1));
+    }
+    if !open {
+        ctx.data_mut(|data| data.remove::<f64>(id));
+    }
+    open
 }
 
 /// Whether `value`, kept under `key`, has stayed the same for `wait`
@@ -1229,14 +1369,20 @@ fn message_in(ui: &egui::Ui, rect: egui::Rect, text: &str, colour: Color32) {
     );
 }
 
-/// One file in the list: its input, name and state, and its result. Also
-/// whether its remove button was clicked.
+/// What a row's own buttons ask for.
+enum RowAction {
+    Remove,
+    Convert,
+}
+
+/// One file in the list: its input, name and state, and its result, with
+/// what its buttons asked for.
 fn row(
     ui: &mut egui::Ui,
     item: &Item,
     selected: bool,
     queued: Option<usize>,
-) -> (egui::Response, bool) {
+) -> (egui::Response, Option<RowAction>) {
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(vec2(width, THUMB + 12.0), egui::Sense::click());
     let visuals = ui.visuals();
@@ -1254,23 +1400,38 @@ fn row(
     thumb(ui, input, item.input_thumb.as_ref(), item.input_error().is_some(), false);
     let result =
         egui::Rect::from_min_size(egui::pos2(inner.max.x - THUMB, inner.min.y), vec2(THUMB, THUMB));
+    let mut action = None;
     if item.result_thumb.is_some() {
-        thumb(ui, result, item.result_thumb.as_ref(), false, !item.result_is_current());
+        let stale = !item.result_is_current();
+        thumb(ui, result, item.result_thumb.as_ref(), false, stale);
+        if stale && !item.is_busy() {
+            let badge =
+                egui::Rect::from_min_size(result.right_top() - vec2(20.0, 0.0), vec2(20.0, 20.0));
+            let button = egui::Button::new(RichText::new("⟳").size(13.0).color(Color32::BLACK))
+                .fill(widgets::WARN)
+                .corner_radius(4.0);
+            // placed, so the rows below don't move
+            if ui.place(badge, button).on_hover_text("Settings changed: convert again").clicked() {
+                action = Some(RowAction::Convert);
+            }
+        }
     }
     let mut text = egui::Rect::from_min_max(
         egui::pos2(input.max.x + 10.0, inner.min.y),
         egui::pos2(result.min.x - 8.0, inner.max.y),
     );
-    let mut remove = false;
     if response.hovered() || response.contains_pointer() {
         let button =
             egui::Rect::from_min_size(egui::pos2(text.max.x - 20.0, text.min.y), vec2(20.0, 20.0));
         text.max.x = button.min.x - 4.0;
-        let clicked = ui
-            .put(button, egui::Button::new("✖").small().frame(false))
+        // placed, so the rows below don't move
+        if ui
+            .place(button, egui::Button::new("✖").small().frame(false))
             .on_hover_text("Remove it from the list")
-            .clicked();
-        remove = clicked;
+            .clicked()
+        {
+            action = Some(RowAction::Remove);
+        }
     }
     let mut child = ui.new_child(
         egui::UiBuilder::new().max_rect(text).layout(egui::Layout::top_down(egui::Align::Min)),
@@ -1288,7 +1449,7 @@ fn row(
     let response = response.on_hover_text(
         item.inputs.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n"),
     );
-    (response, remove)
+    (response, action)
 }
 
 /// A thumbnail in `rect`, marked when it is out of date.
@@ -1310,18 +1471,6 @@ fn thumb(
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
             let tint = if stale { Color32::from_gray(140) } else { Color32::WHITE };
             painter.image(texture.id(), shown, uv, tint);
-            if stale {
-                let badge =
-                    egui::Rect::from_min_size(rect.right_top() - vec2(18.0, 0.0), vec2(18.0, 18.0));
-                painter.rect_filled(badge, 4.0, widgets::WARN);
-                painter.text(
-                    badge.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "⟳",
-                    egui::FontId::proportional(13.0),
-                    Color32::BLACK,
-                );
-            }
         }
         None if failed => {
             painter.text(
@@ -1553,18 +1702,11 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if !self.config.gui.smooth_scrolling {
+            direct_scrolling(&ctx);
+        }
         self.take_input(&ctx);
         self.pump(&ctx);
-        if let Some(message) = self.message.clone() {
-            egui::Panel::bottom("message").show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.colored_label(widgets::WARN, &message);
-                    if ui.small_button("OK").clicked() {
-                        self.message = None;
-                    }
-                });
-            });
-        }
         egui::Panel::left("files")
             .resizable(true)
             .default_size(330.0)
@@ -1596,6 +1738,11 @@ impl eframe::App for App {
             if !open {
                 self.inspection = None;
             }
+        }
+        if let Some(message) = &self.message
+            && !toast(&ctx, message)
+        {
+            self.message = None;
         }
         if self.hovering {
             let painter =
