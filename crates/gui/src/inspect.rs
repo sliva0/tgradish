@@ -11,7 +11,6 @@ use tgradish_tgs::limits::{self, telegram as server};
 
 use crate::jobs::Problem;
 use crate::widgets::{self, gauge, label, note, problems};
-use tgradish_core::mark::{Client, Mark};
 
 pub enum Found {
     Webm { info: Box<WebmInfo>, target: Target },
@@ -23,8 +22,6 @@ pub struct Inspection {
     pub path: PathBuf,
     pub found: Found,
     pub problems: Vec<Problem>,
-    /// What tgradish's hidden mark in it says.
-    pub mark: Option<Mark>,
 }
 
 impl Inspection {
@@ -60,8 +57,7 @@ impl Inspection {
                 Err(err) => (Found::Failed(err.to_string()), Vec::new()),
             }
         };
-        let mark = tgradish_core::mark::read_file(path);
-        Inspection { path: path.to_path_buf(), found, problems, mark }
+        Inspection { path: path.to_path_buf(), found, problems }
     }
 }
 
@@ -89,30 +85,14 @@ pub fn show(ui: &mut egui::Ui, inspection: &Inspection) {
             ui.colored_label(widgets::bad(ui), message);
             return;
         }
-        Found::Webm { info, target } => webm(ui, info, *target, inspection.mark),
-        Found::Tgs(stats) => animation(ui, stats, inspection.mark),
+        Found::Webm { info, target } => webm(ui, info, *target),
+        Found::Tgs(stats) => animation(ui, stats),
     }
     ui.add_space(8.0);
     problems(ui, &inspection.problems);
 }
 
-/// Who made it, by the hidden mark.
-fn made_by(ui: &mut egui::Ui, mark: Option<Mark>) {
-    let Some(mark) = mark else { return };
-    label(ui, "Hidden mark", "tgradish hides this in every sticker it makes");
-    let client = match mark.client {
-        Client::Library => "",
-        Client::Cli => ", from the command line",
-        Client::Window => ", in its window",
-        Client::Bot => ", through the bot",
-    };
-    let user = if mark.user == 0 { String::new() } else { format!(", user {}", mark.user_text()) };
-    ui.label(format!("tgradish {}{client}{user}", mark.version_text()))
-        .on_hover_text("The user is a hash of the user's name: stickers by one person share it");
-    ui.end_row();
-}
-
-fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target, mark: Option<Mark>) {
+fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target) {
     note(ui, format!("A video {}", target.name()));
     ui.add_space(6.0);
     grid(ui, "inspect-webm", |ui| {
@@ -170,21 +150,34 @@ fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target, mark: Option<Mark>) 
             ui.label(title);
             ui.end_row();
         }
-        label(ui, "Made with", "");
-        let app = info.writing_app.as_deref().or(info.muxing_app.as_deref()).unwrap_or("unknown");
-        ui.label(app);
+        label(ui, "Made with", "The programs that wrote the file, as it says");
+        let made = match (&info.writing_app, &info.muxing_app) {
+            (Some(writing), Some(muxing)) if writing != muxing => format!("{writing}, {muxing}"),
+            (Some(app), _) | (None, Some(app)) => app.clone(),
+            (None, None) => "unknown".into(),
+        };
+        ui.label(made);
         ui.end_row();
-        made_by(ui, mark);
+        if let Some(signature) = &info.signature {
+            label(ui, "Note", "Text in the file's padding, which players skip");
+            ui.label(signature);
+            ui.end_row();
+        }
     });
 }
 
-fn animation(ui: &mut egui::Ui, stats: &Stats, mark: Option<Mark>) {
+fn animation(ui: &mut egui::Ui, stats: &Stats) {
     note(
         ui,
         format!("A vector animation, {} × {} at {} fps", stats.width, stats.height, stats.fps),
     );
     ui.add_space(6.0);
     grid(ui, "inspect-tgs", |ui| {
+        if let Some(name) = &stats.name {
+            label(ui, "Name", "The animation's own name, which Telegram doesn't show");
+            ui.label(name);
+            ui.end_row();
+        }
         if let Some(bytes) = stats.tgs_bytes {
             let (bytes, limit) = (bytes as u64, server::MAX_BYTES as u64);
             let text = of(widgets::kib(bytes), widgets::kib(limit));
@@ -238,6 +231,5 @@ fn animation(ui: &mut egui::Ui, stats: &Stats, mark: Option<Mark>) {
             ui.label(stats.features.iter().copied().collect::<Vec<_>>().join(", "));
             ui.end_row();
         }
-        made_by(ui, mark);
     });
 }

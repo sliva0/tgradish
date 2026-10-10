@@ -185,7 +185,8 @@ fn user_hash() -> u32 {
     folded.max(1)
 }
 
-/// The mark in a sticker file, if it has one.
+/// The mark in a sticker file, if it has one. tgradish only writes marks
+/// for now: neither the command line nor the window reads them.
 pub fn read_file(path: &std::path::Path) -> Option<Mark> {
     if crate::tgs::is_sticker(path) {
         let json = crate::tgs::read_json(path).ok()?;
@@ -199,14 +200,11 @@ pub fn read_file(path: &std::path::Path) -> Option<Mark> {
     }
 }
 
-/// Whether tgradish made the sticker at `path` for this user, so making it
-/// again may replace it: its hidden mark names this user. Few random bytes
-/// pass a mark's checks, and fewer still name the user too. Stickers from
-/// before marks are known by the metadata tgradish wrote, exactly.
-pub fn made_here(path: &std::path::Path) -> bool {
-    if let Some(mark) = read_file(path) {
-        return mark.user == Mark::current().user;
-    }
+/// Whether tgradish made the sticker at `path`, so making it again may
+/// replace it: by the marks it shows, exactly as tgradish writes them. The
+/// name of `.tgs` stickers; in WebM files both apps and the signature in
+/// padding.
+pub fn made_by_tgradish(path: &std::path::Path) -> bool {
     if crate::tgs::is_sticker(path) {
         let Ok(json) = crate::tgs::read_json(path) else { return false };
         serde_json::from_slice::<serde_json::Value>(&json)
@@ -214,7 +212,6 @@ pub fn made_here(path: &std::path::Path) -> bool {
             .and_then(|value| value.get("nm")?.as_str().map(tgradish_name))
             .unwrap_or(false)
     } else {
-        // both apps and the signature in padding, as tgradish wrote them
         crate::webm::inspect_file(path).is_ok_and(|info| {
             let app = |app: &Option<String>| app.as_deref().is_some_and(is_tool_id);
             app(&info.writing_app)

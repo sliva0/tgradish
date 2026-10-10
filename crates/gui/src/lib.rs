@@ -176,7 +176,7 @@ struct App {
     written: HashMap<PathBuf, Written>,
     /// Files found in the way, by their size and time: whether tgradish
     /// made them, so they may be replaced.
-    marked: std::cell::RefCell<HashMap<PathBuf, (FileVersion, bool)>>,
+    made_by_tgradish: std::cell::RefCell<HashMap<PathBuf, (FileVersion, bool)>>,
     screen: Screen,
     inset: Inset,
     prefs: prefs::Prefs,
@@ -289,7 +289,7 @@ impl App {
             recent: VecDeque::new(),
             queue: VecDeque::new(),
             written: HashMap::new(),
-            marked: Default::default(),
+            made_by_tgradish: Default::default(),
             screen: Screen::default(),
             inset: Inset::default(),
             prefs: prefs::Prefs::default(),
@@ -459,7 +459,7 @@ impl App {
     /// nobody changed since, one tgradish made, or any with the setting
     /// that allows it.
     fn may_replace(&self, item: u64, path: &Path) -> bool {
-        self.config.gui.overwrite || self.wrote(item, path) || self.made_here(path)
+        self.config.gui.overwrite || self.wrote(item, path) || self.made_by_tgradish(path)
     }
 
     fn wrote(&self, item: u64, path: &Path) -> bool {
@@ -472,17 +472,17 @@ impl App {
         })
     }
 
-    /// Whether tgradish made the file at `path` for this user, by its hidden
-    /// mark: read once for each version of the file.
-    fn made_here(&self, path: &Path) -> bool {
+    /// Whether tgradish made the file at `path`, by the marks it shows:
+    /// read once for each version of the file.
+    fn made_by_tgradish(&self, path: &Path) -> bool {
         let Ok(metadata) = std::fs::metadata(path) else { return false };
         let version = (metadata.len(), metadata.modified().ok());
-        let mut marked = self.marked.borrow_mut();
-        match marked.get(path) {
+        let mut known = self.made_by_tgradish.borrow_mut();
+        match known.get(path) {
             Some(&(seen, made)) if seen == version => made,
             _ => {
-                let made = tgradish_core::mark::made_here(path);
-                marked.insert(path.to_path_buf(), (version, made));
+                let made = tgradish_core::mark::made_by_tgradish(path);
+                known.insert(path.to_path_buf(), (version, made));
                 made
             }
         }
