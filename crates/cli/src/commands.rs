@@ -200,6 +200,22 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
     Ok(())
 }
 
+/// Prints every licence notice this build carries.
+pub fn licenses() {
+    #[cfg(feature = "gui")]
+    let notices = tgradish_gui::notices();
+    #[cfg(not(feature = "gui"))]
+    let notices = tgradish_core::licenses::notices();
+    for (index, notice) in notices.iter().enumerate() {
+        if index > 0 {
+            println!();
+        }
+        println!("{}", style(&notice.title).bold());
+        println!("{}\n", "=".repeat(notice.title.chars().count()));
+        println!("{}", notice.text.trim_end());
+    }
+}
+
 /// The presets used when none is given, for WebM and `.tgs`.
 fn default_presets(ctx: &Context) -> [&str; 2] {
     [ctx.config.preset_for(Format::Webm), ctx.config.preset_for(Format::Tgs)]

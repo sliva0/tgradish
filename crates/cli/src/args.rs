@@ -85,6 +85,9 @@ pub enum Command {
     /// Check which ffmpeg is used.
     #[command(subcommand)]
     Ffmpeg(FfmpegCommand),
+    /// Print the licences of tgradish and of what it is built from, which
+    /// every copy carries.
+    Licenses,
     /// Open the tgradish window. It also opens when tgradish is started
     /// without arguments outside a terminal.
     #[cfg(feature = "gui")]

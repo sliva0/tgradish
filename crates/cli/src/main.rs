@@ -77,6 +77,10 @@ fn run(cli: Cli) -> Result<()> {
         Command::Preset(command) => commands::preset(&ctx, command),
         Command::Config(command) => commands::config(&ctx, command, config_path),
         Command::Ffmpeg(command) => commands::ffmpeg(&ctx, command),
+        Command::Licenses => {
+            commands::licenses();
+            Ok(())
+        }
         #[cfg(feature = "gui")]
         Command::Gui => tgradish_gui::run(tgradish_gui::Launch {
             config_path,
