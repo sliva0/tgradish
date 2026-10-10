@@ -1,10 +1,15 @@
 # Fonts of the window
 
-Subsets of three fonts, so the binary carries about 160 KB of fonts
-instead of the 1.4 MB of egui's own set. Each keeps Latin (with its
-extensions), Greek, Cyrillic, punctuation, currency and arrows; the icon
-font keeps the symbols the window uses. Hinting is dropped: egui doesn't
-use it.
+Subsets of three fonts, so the binary carries about 190 KB of fonts
+instead of the 1.4 MB of egui's own set. Each keeps what file names in
+European languages use: Latin with all its extensions (Vietnamese too),
+Greek with polytonic Greek, Cyrillic with its supplements, combining
+accents (macOS writes accented names decomposed), and punctuation,
+currency, arrows, number forms and maths. Text falls back from one font
+to the other, so a character either has shows. Scripts neither font ever
+had, like CJK, Arabic or Hebrew, and emoji show as boxes. The icon font
+keeps the symbols the window uses. Hinting is dropped: egui doesn't use
+it.
 
 | File | From | Licence |
 |---|---|---|
@@ -18,7 +23,7 @@ add to it, so the subset of Ubuntu Light is named "Ubuntu Light tgradish".
 Made with fontTools:
 
 ```console
-ranges="U+0020-007E,U+00A0-024F,U+0370-03FF,U+0400-04FF,U+2000-206F,U+20A0-20CF,U+2100-214F,U+2190-21FF,U+2212,U+2260-2265"
+ranges="U+0020-007E,U+00A0-036F,U+0370-03FF,U+0400-052F,U+1D00-1DBF,U+1E00-1FFF,U+2000-206F,U+2070-209F,U+20A0-20CF,U+2100-214F,U+2150-218F,U+2190-21FF,U+2200-22FF,U+2C60-2C7F,U+2DE0-2DFF,U+A640-A69F,U+A720-A7FF,U+FB00-FB06"
 uvx --from fonttools pyftsubset Ubuntu-Light.ttf --unicodes="$ranges" --no-hinting \
   --output-file=Ubuntu-Light-tgradish.ttf
 uvx --from fonttools pyftsubset JetBrainsMonoNL-Regular.ttf --unicodes="$ranges" \
