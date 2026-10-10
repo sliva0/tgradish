@@ -63,7 +63,7 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
             "Spoofed",
             format!(
                 "{}: header duration {old} → {}",
-                term::link(style(output.display()).bold(), &output),
+                term::link_out(style(output.display()).bold(), &output),
                 ui::seconds(args.duration)
             )
         )
@@ -79,7 +79,7 @@ fn guess_target(info: &WebmInfo) -> Target {
 }
 
 fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
-    println!("{}", style(term::link(path.display(), path)).bold());
+    println!("{}", style(term::link_out(path.display(), path)).bold());
     println!("{}", ui::field("size", ui::size_within(info.file_size, target.max_bytes())));
     let video = match &info.video {
         Some(video) => {
@@ -336,7 +336,7 @@ pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
 }
 
 fn print_sticker(path: &std::path::Path, stats: &tgs::Stats, issues: &[tgs::Issue]) {
-    println!("{}", style(term::link(path.display(), path)).bold());
+    println!("{}", style(term::link_out(path.display(), path)).bold());
     let size = match stats.tgs_bytes {
         Some(bytes) => {
             let packed = ui::size_within(bytes as u64, tgs::MAX_BYTES);

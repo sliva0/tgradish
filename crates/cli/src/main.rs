@@ -151,7 +151,11 @@ fn main() -> ExitCode {
     }
     let cli = Cli::parse();
     term::init(cli.global.color, cli.global.json);
-    if !matches!(cli.command, Command::Gui) {
+    #[cfg(feature = "gui")]
+    let window = matches!(cli.command, Command::Gui);
+    #[cfg(not(feature = "gui"))]
+    let window = false;
+    if !window {
         tgradish_core::mark::set_client(tgradish_core::mark::Client::Cli);
     }
     let json = cli.global.json;

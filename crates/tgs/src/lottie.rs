@@ -38,6 +38,9 @@ pub struct Style {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
+    /// `ln`, a name renderers don't use; carries tgradish's mark in
+    /// stickers too small to hide it elsewhere (see [`crate::mark`]).
+    pub id: Option<String>,
     /// Shown for frames `from..to`: `ip` and `op`.
     pub from: u32,
     pub to: u32,
@@ -113,9 +116,14 @@ impl Layer {
     fn write(&self, out: &mut String, style: Style) {
         let Transform { position: [x, y], scale } = self.transform;
         let scale = number(scale * 100.0, 4);
+        if let Some(id) = &self.id {
+            write!(out, "{{\"ln\":{},", serde_json::Value::from(id.as_str())).unwrap();
+        } else {
+            out.push('{');
+        }
         write!(
             out,
-            "{{\"ty\":4,\"ks\":{{\"p\":{{\"k\":[{},{}]}},\"s\":{{\"k\":[{scale},{scale}]}}",
+            "\"ty\":4,\"ks\":{{\"p\":{{\"k\":[{},{}]}},\"s\":{{\"k\":[{scale},{scale}]}}",
             number(x, 4),
             number(y, 4),
         )
@@ -299,6 +307,7 @@ mod tests {
     #[test]
     fn hides_layers_with_opacity_keys() {
         let layer = Layer {
+            id: None,
             from: 10,
             to: 90,
             transform: Transform { position: [0.0, 0.0], scale: 1.0 },
@@ -318,6 +327,7 @@ mod tests {
             name: Some("made with \"tgradish\"".into()),
             ticks: 30,
             layers: vec![Layer {
+                id: None,
                 from: 0,
                 to: 30,
                 transform: Transform { position: [6.0, 0.0], scale: 10.0 },

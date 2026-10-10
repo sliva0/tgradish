@@ -102,6 +102,7 @@ fn near_2_mib() -> String {
     let layers_json = |count: u32| {
         let layers = (0..count)
             .map(|index| Layer {
+                id: None,
                 from: index * 180 / count,
                 to: (index + 1) * 180 / count,
                 transform: Transform { position: [f64::from(index % 16) * 8.0, 64.0], scale: 16.0 },
@@ -127,6 +128,7 @@ fn many_layers() -> String {
             let (x, y) = (index % columns, index / columns);
             let colour = [(x * 4) as u8, (y * 5) as u8, 255 - (x * 4) as u8, 255];
             Layer {
+                id: None,
                 from: index / 15,
                 to: 180,
                 transform: grid_transform(f64::from(columns), f64::from(rows)),
@@ -147,6 +149,7 @@ fn many_rects() -> String {
         .filter(|(x, y)| (x + y) % 2 == 0)
         .map(|(x, y)| (f64::from(x) + 0.5, f64::from(y) + 0.5));
     let layer = Layer {
+        id: None,
         from: 0,
         to: 180,
         transform: grid_transform(f64::from(columns), f64::from(rows)),
@@ -271,6 +274,7 @@ fn one_square_layers(count: u32) -> String {
             let (x, y) = (index % columns, index / columns);
             let colour = [(x * 255 / columns) as u8, (y * 255 / rows) as u8, 160, 255];
             Layer {
+                id: None,
                 from: index * 90 / count,
                 to: 180,
                 transform: grid_transform(f64::from(columns), f64::from(rows)),
@@ -289,6 +293,7 @@ fn squares_in_one_layer(count: u32) -> String {
     let rows = (2 * count).div_ceil(columns);
     let transform = grid_transform(f64::from(columns), f64::from(rows));
     let board = Layer {
+        id: None,
         from: 0,
         to: 180,
         transform,
@@ -296,6 +301,7 @@ fn squares_in_one_layer(count: u32) -> String {
         hidden: Vec::new(),
     };
     let blink = Layer {
+        id: None,
         from: 0,
         to: 90,
         transform,
@@ -324,6 +330,7 @@ fn checkerboard_layers(count: u32, in_turn: bool) -> String {
             };
             let colour = [(x * 255 / tiles) as u8, (y * 255 / tile_rows) as u8, 160, 255];
             Layer {
+                id: None,
                 from,
                 to,
                 transform: Transform {
@@ -360,9 +367,16 @@ fn long_paths(count: u32, points: usize) -> String {
     items.push(Item::Fill { colour: [60, 140, 230, 255], rule: FillRule::NonZero });
     items.push(Item::GroupTransform { opacity: Vec::new() });
     let transform = grid_transform(units, units);
-    let layer =
-        Layer { from: 0, to: 180, transform, items: vec![Item::Group(items)], hidden: Vec::new() };
+    let layer = Layer {
+        id: None,
+        from: 0,
+        to: 180,
+        transform,
+        items: vec![Item::Group(items)],
+        hidden: Vec::new(),
+    };
     let blink = Layer {
+        id: None,
         from: 0,
         to: 90,
         transform,
@@ -439,6 +453,7 @@ fn single_groups(count: u32) -> String {
         .map(|(index, chunk)| {
             let colour = [(index * 36) as u8, 140, 230, 255];
             Layer {
+                id: None,
                 from: index as u32 * 10,
                 to: 180,
                 transform,

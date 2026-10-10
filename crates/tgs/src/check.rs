@@ -543,6 +543,7 @@ mod tests {
     #[test]
     fn counts_like_tlottie() {
         let layer = |groups: Vec<Item>| Layer {
+            id: None,
             from: 0,
             to: 60,
             transform: Transform { position: [0.0, 0.0], scale: 1.0 },
@@ -636,6 +637,7 @@ mod tests {
             issues.into_iter().map(|issue| issue.message).collect()
         };
         let layer = |rects| Layer {
+            id: None,
             from: 0,
             to: 60,
             transform: Transform { position: [0.0, 0.0], scale: 1.0 },

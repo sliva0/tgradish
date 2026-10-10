@@ -441,7 +441,7 @@ impl Printer {
                 let spoofed = if spoofed { ", duration spoofed" } else { "" };
                 println!(
                     "{} {}, {}{spoofed}",
-                    ui::status("Finished", term::link(style(output.display()).bold(), &output)),
+                    ui::status("Finished", term::link_out(style(output.display()).bold(), &output)),
                     ui::size_within(bytes, self.limit),
                     ui::params(&params),
                 );
@@ -577,7 +577,7 @@ impl TgsPrinter {
                 };
                 println!(
                     "{} {}{lossy}",
-                    ui::status("Finished", term::link(style(output.display()).bold(), &output)),
+                    ui::status("Finished", term::link_out(style(output.display()).bold(), &output)),
                     ui::size_within(bytes, tgs::MAX_BYTES),
                 );
                 for issue in issues {

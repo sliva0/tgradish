@@ -74,6 +74,7 @@ pub fn lay_out(scene: &Scene, anim: &PixelAnim, name: Option<String>) -> Animati
         .iter()
         .rev()
         .map(|layer| Layer {
+            id: None,
             from: layer.from,
             to: layer.to,
             transform: placement.transform,

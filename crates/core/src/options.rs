@@ -194,14 +194,23 @@ pub struct ExactScale {
 impl ExactScale {
     pub const ONE: ExactScale = ExactScale { up: 1, down: 1 };
 
+    /// The largest scale either way: a pixel to a whole sticker side.
+    pub const MAX: u32 = 512;
+
     /// `size` input pixels at this scale, if they make whole result pixels.
     pub fn apply(self, size: u32) -> Option<u32> {
-        size.is_multiple_of(self.down).then(|| size / self.down * self.up)
+        if !size.is_multiple_of(self.down) {
+            return None;
+        }
+        (size / self.down).checked_mul(self.up)
     }
 
     /// The input pixels that make `size` result pixels, if whole.
     pub fn input_for(self, size: u32) -> Option<u32> {
-        size.is_multiple_of(self.up).then(|| size / self.up * self.down)
+        if !size.is_multiple_of(self.up) {
+            return None;
+        }
+        (size / self.up).checked_mul(self.down)
     }
 
     pub fn factor(self) -> f64 {
@@ -213,9 +222,15 @@ impl std::str::FromStr for ExactScale {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let invalid = || format!("{s:?}: expected a whole number like 2, or 1/N like 1/2");
+        let invalid = || {
+            format!(
+                "{s:?}: expected a whole number like 2, or 1/N like 1/2, up to {}",
+                ExactScale::MAX
+            )
+        };
         let text = s.trim().trim_end_matches(['x', '×']);
-        let whole = |v: &str| v.trim().parse::<u32>().ok().filter(|&n| n > 0);
+        let whole =
+            |v: &str| v.trim().parse::<u32>().ok().filter(|&n| (1..=ExactScale::MAX).contains(&n));
         if let Some((one, n)) = text.split_once('/') {
             return match (whole(one), whole(n)) {
                 (Some(1), Some(n)) => Ok(ExactScale { up: 1, down: n }),
@@ -231,7 +246,7 @@ impl std::str::FromStr for ExactScale {
             return Err(invalid());
         }
         let down = (1.0 / value).round();
-        if value < 1.0 && (1.0 / down - value).abs() < 1e-3 {
+        if value < 1.0 && down <= f64::from(ExactScale::MAX) && (1.0 / down - value).abs() < 1e-3 {
             return Ok(ExactScale { up: 1, down: down as u32 });
         }
         Err(invalid())
