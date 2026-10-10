@@ -24,6 +24,17 @@ impl Mask {
         Mask { width, height, words: vec![0; cells.div_ceil(64)] }
     }
 
+    /// A mask with the cells of the rectangle `(x, y, width, height)` set.
+    pub fn filled(width: u32, height: u32, (x, y, w, h): (u32, u32, u32, u32)) -> Mask {
+        let mut mask = Mask::new(width, height);
+        for row in y..y + h {
+            for column in x..x + w {
+                mask.set(column, row);
+            }
+        }
+        mask
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }
