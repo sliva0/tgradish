@@ -163,12 +163,21 @@ impl Backend {
     ) -> Result<crate::tgs::Preview> {
         let probe = self.probe(path, cancel)?;
         let fps = probe.fps.unwrap_or(25.0).clamp(1.0, 60.0);
+        // spoofed stickers say in their header that they are shorter than
+        // they play; their frames tell the truth
+        let played = crate::webm::inspect_file(path).ok().and_then(|info| info.content_duration);
+        let longer = probe.width.max(probe.height).max(1);
+        let scale = (f64::from(max_side) / f64::from(longer)).min(1.0);
+        let frame_bytes = (f64::from(probe.width) * scale).ceil()
+            * (f64::from(probe.height) * scale).ceil()
+            * 4.0;
         let request = FramesRequest {
             start: 0.0,
-            length: Some(probe.duration.unwrap_or(PREVIEW_SECONDS).min(PREVIEW_SECONDS)),
+            length: Some(played.or(probe.duration).unwrap_or(UNKNOWN_SECONDS)),
             fps,
             max_side,
-            max_frames: (PREVIEW_SECONDS * fps).ceil() as usize,
+            // long ones are shown at a lower frame rate
+            max_frames: ((PREVIEW_BYTES as f64 / frame_bytes.max(1.0)) as usize).max(1),
         };
         let frames = self.frames(path, &probe, &request, cancel)?;
         // whole 60 fps frames, rounding where each starts
@@ -199,9 +208,10 @@ impl Backend {
     }
 }
 
-/// How much of a sticker previews show, in seconds: spoofed stickers can
-/// be longer than Telegram plays.
-const PREVIEW_SECONDS: f64 = 3.0;
+/// Memory for a preview's frames.
+const PREVIEW_BYTES: usize = 256 << 20;
+/// How much of a sticker of unknown length previews show, in seconds.
+const UNKNOWN_SECONDS: f64 = 3.0;
 
 /// Which frames of a video to decode, and how small, for showing it.
 #[derive(Debug, Clone, Copy, PartialEq)]
