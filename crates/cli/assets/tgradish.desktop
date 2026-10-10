@@ -4,6 +4,7 @@ Name=tgradish
 GenericName=Telegram sticker maker
 Comment=Make Telegram video stickers, emoji and animated pixel art stickers
 Exec=tgradish gui
+Icon=tgradish
 Terminal=false
 Categories=Graphics;
 Keywords=telegram;sticker;emoji;webm;tgs;lottie;pixel;

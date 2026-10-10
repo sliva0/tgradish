@@ -1,7 +1,9 @@
 fn main() {
-    println!("cargo::rerun-if-changed=tgradish.exe.manifest");
-    if std::env::var_os("CARGO_CFG_WINDOWS").is_some() {
-        embed_manifest::embed_manifest_file("tgradish.exe.manifest")
-            .expect("the Windows manifest should embed");
+    for file in ["tgradish.rc", "tgradish.exe.manifest", "assets/tgradish.ico"] {
+        println!("cargo::rerun-if-changed={file}");
     }
+    // with rc.exe from the Windows SDK, or MinGW's windres
+    embed_resource::compile("tgradish.rc", embed_resource::NONE)
+        .manifest_required()
+        .expect("the Windows resources should compile");
 }

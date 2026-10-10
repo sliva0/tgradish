@@ -39,6 +39,8 @@ jobs:
       # the command line on its own, without the window
       - run: cargo clippy -p tgradish --no-default-features --all-targets -- -D warnings
       - run: cargo test --workspace
+      # the icons for menus and Windows, made from the window's
+      - run: cargo xtask icons --check
 
       # binaries carry the licenses of their crates; they must list today's
       - uses: taiki-e/install-action@v2

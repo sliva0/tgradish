@@ -61,6 +61,7 @@ rustPlatform.buildRustPackage {
 
   postInstall = ''
     install -Dm644 crates/cli/assets/tgradish.desktop -t $out/share/applications
+    cp -r crates/cli/assets/icons $out/share/
   '';
 
   # after the fixup phase has shrunk the rpath to what is linked

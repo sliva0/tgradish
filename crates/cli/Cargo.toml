@@ -40,7 +40,7 @@ toml.workspace = true
 windows-sys = { workspace = true, features = ["Win32_System_Console"] }
 
 [build-dependencies]
-embed-manifest.workspace = true
+embed-resource.workspace = true
 
 [lints]
 workspace = true
