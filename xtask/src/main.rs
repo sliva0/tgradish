@@ -18,6 +18,13 @@
 //! 2.28]` packs a built tgradish into a release archive. With
 //! `--system-ffmpeg` it is a build without ffmpeg, which uses the system's.
 //!
+//! `cargo xtask local-release [--targets linux-x86_64,windows-x86_64]
+//! [--no-asm]` builds and packs every release variant for manual tests,
+//! like the release workflow: with ffmpeg built in, and for Linux also
+//! without. ffmpeg is built first where its libraries are missing or were
+//! built from another recipe. Windows needs mingw-w64. The archives and
+//! binaries end up in `target/release-artifacts`.
+//!
 //! `cargo xtask licenses [--check]` writes the licenses of the Rust crates
 //! in tgradish to `licenses/THIRD-PARTY-CRATES.txt`, which binaries carry;
 //! `--check` fails if it is out of date, as after dependencies change. Needs
@@ -502,7 +509,26 @@ fn build_ffmpeg(args: &[String]) -> Result<()> {
             other => bail!("unknown argument {other:?}"),
         }
     }
+    ffmpeg_for(target, asm)
+}
 
+/// What an ffmpeg build is made of: sources, parts and whether assembly is
+/// in, so a build from another recipe is known to be out of date.
+fn recipe(asm: bool) -> String {
+    let sources: Vec<String> = [&ZLIB, &LIBVPX, &DAV1D, &FFMPEG]
+        .iter()
+        .map(|source| format!("{} {} {}", source.name, source.version, source.sha256))
+        .collect();
+    format!("{sources:?}\n{FFMPEG_COMPONENTS:?}\nasm {asm}\n")
+}
+
+/// Where the static ffmpeg libraries of `target` go.
+fn ffmpeg_prefix(target: Target) -> PathBuf {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    root.join("target/ffmpeg").join(format!("prefix-{}", target.triple()))
+}
+
+fn ffmpeg_for(target: Target, asm: bool) -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("target/ffmpeg");
     let build = Build {
         target,
@@ -535,7 +561,97 @@ fn build_ffmpeg(args: &[String]) -> Result<()> {
         std::fs::copy(entry.path(), carried.join(entry.file_name()))?;
     }
     forget_linked_ffmpeg(target)?;
+    std::fs::write(build.prefix.join("recipe.txt"), recipe(asm))?;
     println!("{}\n{}", build.prefix.display(), licenses.display());
+    Ok(())
+}
+
+/// Builds every release variant of `targets` and packs them into
+/// `target/release-artifacts`, building ffmpeg first where its libraries
+/// are missing or from another recipe.
+fn local_release(args: &[String]) -> Result<()> {
+    let mut targets = vec![Target::host(), Target::WindowsX64];
+    let mut asm = true;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--targets" => {
+                let names = iter
+                    .next()
+                    .context("--targets needs a list, like linux-x86_64,windows-x86_64")?;
+                targets = names
+                    .split(',')
+                    .map(|name| Target::parse(Some(&name.trim().to_owned())))
+                    .collect::<Result<_>>()?;
+            }
+            "--no-asm" => asm = false,
+            other => bail!("unknown argument {other:?}"),
+        }
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    for target in targets {
+        let prefix = ffmpeg_prefix(target);
+        let built = std::fs::read_to_string(prefix.join("recipe.txt")).ok();
+        if built.as_deref() != Some(recipe(asm).as_str()) {
+            eprintln!("building ffmpeg for {}", target.name());
+            ffmpeg_for(target, asm)?;
+        }
+        let triple = target.triple();
+        let mut linked = Command::new(&cargo);
+        linked
+            .current_dir(root)
+            .args(["build", "--release", "--locked", "-p", "tgradish"])
+            .args(["--features", "linked-static", "--target", triple])
+            .env("PKG_CONFIG_PATH", prefix.join("lib/pkgconfig"))
+            .env("PKG_CONFIG_ALL_STATIC", "1");
+        if target.is_windows() {
+            let stubs = root.join("xtask/mingw-stubs");
+            linked
+                .env("PKG_CONFIG_ALLOW_CROSS", "1")
+                .env("CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER", "x86_64-w64-mingw32-gcc")
+                .env("CC_x86_64_pc_windows_gnu", "x86_64-w64-mingw32-gcc")
+                .env("AR_x86_64_pc_windows_gnu", "x86_64-w64-mingw32-ar")
+                // the stubs come last, so they only fill in headers MinGW lacks
+                .env(
+                    "BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_gnu",
+                    format!("-I/usr/x86_64-w64-mingw32/include -I{}", stubs.display()),
+                )
+                .env("CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS", "-C link-arg=-static");
+        }
+        run(&mut linked)?;
+        package_release(&["--target".into(), target.name().into()])?;
+        // the build without ffmpeg goes where the linked one was, so after
+        // that one is packed
+        if !target.is_windows() {
+            run(Command::new(&cargo).current_dir(root).args([
+                "build",
+                "--release",
+                "--locked",
+                "-p",
+                "tgradish",
+                "--target",
+                triple,
+            ]))?;
+            let system = ["--target".into(), target.name().into(), "--system-ffmpeg".into()];
+            package_release(&system)?;
+        }
+    }
+    let out = root.join("target/release-artifacts");
+    println!("\nin {}:", out.display());
+    let mut entries: Vec<_> = std::fs::read_dir(&out)?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_dir())
+        .collect();
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        for name in ["tgradish", "tgradish.exe"] {
+            let binary = entry.path().join(name);
+            if let Ok(metadata) = std::fs::metadata(&binary) {
+                println!("  {} ({:.1} MB)", binary.display(), metadata.len() as f64 / 1e6);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -874,11 +990,13 @@ fn main() -> Result<()> {
         Some("ffmpeg-sources") => package_sources(),
         Some("package") => package_release(&args[1..]),
         Some("licenses") => crate_licenses(&args[1..]),
+        Some("local-release") => local_release(&args[1..]),
         _ => bail!(
             "usage: cargo xtask ffmpeg [--target TARGET] [--no-asm]\n       \
              cargo xtask ffmpeg-sources\n       \
              cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc 2.28]\n       \
-             cargo xtask licenses [--check]\n\
+             cargo xtask licenses [--check]\n       \
+             cargo xtask local-release [--targets TARGET,...] [--no-asm]\n\
              targets: linux-x86_64, linux-aarch64, windows-x86_64"
         ),
     }

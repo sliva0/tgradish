@@ -146,6 +146,10 @@ cargo build --release --no-default-features
 
 # with ffmpeg built in, against the system's ffmpeg libraries
 cargo build --release --features linked
+
+# every release build, ffmpeg linked in statically, Windows too (with
+# mingw-w64), packed like releases into target/release-artifacts
+cargo xtask local-release
 ```
 
 Tests that need ffmpeg or the local test media in `references/` (not in
