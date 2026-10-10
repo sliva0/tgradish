@@ -849,10 +849,10 @@ impl App {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                self.theme_button(ui);
                 if ui.button("⚙").on_hover_text("Settings").clicked() {
                     self.prefs.open = true;
                 }
+                self.theme_button(ui);
                 if ui
                     .button("🔬")
                     .on_hover_text("Inspect a sticker: check a file against Telegram's rules")
@@ -870,7 +870,7 @@ impl App {
                         self.pick_files();
                     }
                 });
-                // the name, where the buttons leave room for it
+                // the icon and name, where the buttons leave room for them
                 let title = egui::WidgetText::from(RichText::new("tgradish").heading().strong());
                 let galley = title.into_galley(
                     ui,
@@ -878,8 +878,11 @@ impl App {
                     f32::INFINITY,
                     egui::TextStyle::Heading,
                 );
-                if galley.size().x + ui.spacing().item_spacing.x <= ui.available_width() {
+                let gap = ui.spacing().item_spacing.x;
+                if ICON_SIDE + gap + galley.size().x + gap <= ui.available_width() {
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        // the app's icon goes here once it has one
+                        ui.allocate_space(vec2(ICON_SIDE, ICON_SIDE));
                         ui.label(galley);
                     });
                 }
@@ -1203,6 +1206,8 @@ impl App {
 
 /// Width of the column beside the preview.
 const SIDE: f32 = 300.0;
+/// Side of the app's icon before its name, above the list of files.
+const ICON_SIDE: f32 = 24.0;
 
 /// The big preview of an item, its header and timeline.
 fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut Item) {
@@ -2168,7 +2173,7 @@ impl eframe::App for App {
         self.find_fonts(&ctx);
         egui::Panel::left("files")
             .resizable(true)
-            .default_size(330.0)
+            .default_size(390.0)
             .size_range(260.0..=520.0)
             .show(ui, |ui| {
                 self.files_panel(ui);
