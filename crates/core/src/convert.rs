@@ -29,7 +29,7 @@ use crate::error::{Error, Result};
 use crate::events::{Event, Params, Rate};
 use crate::ffmpeg::{CancelToken, Output, Probe};
 use crate::fit::{self, Attempt, Encoder};
-use crate::options::{self, Crop, Fit, Options, Range, Resize, Scaling, Speed, Spoof};
+use crate::options::{self, Crop, ExactScale, Fit, Options, Range, Resize, Scaling, Speed, Spoof};
 use crate::telegram::{self, Issue, Target};
 use crate::webm::{self, Patch};
 
@@ -265,6 +265,52 @@ pub fn sizes(target: Target, resize: Resize, scaling: Scaling, used: (u32, u32))
     Sizes { scaled, width, height, scaling }
 }
 
+/// Where a `used` picture lands at an exact `scale`: the picture at that
+/// scale is the result, so it must be a size `target` takes, with even
+/// sides as the video's colour planes need.
+pub fn exact_sizes(
+    target: Target,
+    used: (u32, u32),
+    scale: ExactScale,
+) -> std::result::Result<Sizes, String> {
+    let (box_w, box_h) = target.box_size();
+    let long = box_w.max(box_h);
+    let (Some(width), Some(height)) = (scale.apply(used.0), scale.apply(used.1)) else {
+        return Err(format!(
+            "at scale {scale} the crop's sides must be multiples of {} pixels",
+            scale.down
+        ));
+    };
+    let fits = if target.requires_exact_size() {
+        (width, height) == (box_w, box_h)
+    } else {
+        width.max(height) == long && width <= box_w && height <= box_h
+    };
+    if !fits {
+        return Err(match (scale.input_for(long), target.requires_exact_size()) {
+            (Some(side), true) => format!(
+                "at scale {scale}, {} need a {side}x{side} crop to make {box_w}x{box_h}",
+                target.name()
+            ),
+            (Some(side), false) => format!(
+                "at scale {scale}, crop {side} pixels on the longer side: they make the {long} \
+                 a sticker needs there"
+            ),
+            (None, _) => format!("scale {scale} can't make {long} pixels of whole input pixels"),
+        });
+    }
+    if width % 2 == 1 || height % 2 == 1 {
+        return Err(format!(
+            "at scale {scale}, {width}x{height} has an odd side: the video's colour planes \
+             need even sides, so change the crop's shorter side by {}",
+            scale.down
+        ));
+    }
+    // growing makes whole blocks; shrinking averages whole blocks
+    let scaling = if scale.up > 1 { Scaling::PixelPerfect } else { Scaling::Sharp };
+    Ok(Sizes { scaled: (width, height), width, height, scaling })
+}
+
 /// Whether `frames` of a `width` wide picture look like pixel art within
 /// `crop`: few colours, so it is drawn rather than filmed.
 pub fn is_pixel_art(frames: &[Vec<u8>], width: u32, crop: Option<Crop>) -> bool {
@@ -430,7 +476,10 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         crop.check(source.width, source.height).map_err(invalid)?;
     }
     let used = o.crop.map_or((source.width, source.height), |crop| (crop.width, crop.height));
-    let sizes = sizes(target, resize, o.scaling.unwrap_or(Scaling::Auto), used);
+    let sizes = match o.exact_scale {
+        Some(scale) => exact_sizes(target, used, scale).map_err(invalid)?,
+        None => sizes(target, resize, o.scaling.unwrap_or(Scaling::Auto), used),
+    };
 
     let plan = Plan {
         input: request.input.clone(),
@@ -590,6 +639,7 @@ pub fn convert(
     let source = backend.probe(&request.input, cancel)?;
     let (mut plan, warnings) = plan(request, source)?;
     if request.options.scaling.unwrap_or(Scaling::Auto) == Scaling::Auto
+        && request.options.exact_scale.is_none()
         && plan.enlarges() >= 2.0
         && looks_like_pixel_art(backend, &plan, cancel)?
     {
@@ -828,6 +878,37 @@ mod tests {
             ),
             "{filter}"
         );
+    }
+
+    #[test]
+    fn scales_exactly() {
+        let half: ExactScale = "1/2".parse().unwrap();
+        let twice: ExactScale = "2".parse().unwrap();
+        assert_eq!("0.5".parse::<ExactScale>(), Ok(half));
+        assert_eq!("2x".parse::<ExactScale>(), Ok(twice));
+        assert!("1.5".parse::<ExactScale>().is_err() && "2/3".parse::<ExactScale>().is_err());
+        assert_eq!((half.to_string(), twice.to_string()), ("1/2".into(), "2".into()));
+
+        // 1024 x 576 halved makes a 512 x 288 sticker, pixels in 2x2 blocks
+        let sizes = exact_sizes(Target::Sticker, (1024, 576), half).unwrap();
+        assert_eq!((sizes.scaled, sizes.width, sizes.height), ((512, 288), 512, 288));
+        assert_eq!(sizes.scaling, Scaling::Sharp);
+        let grown = exact_sizes(Target::Sticker, (256, 100), twice).unwrap();
+        assert_eq!((grown.width, grown.height, grown.scaling), (512, 200, Scaling::PixelPerfect));
+        // the longer side must make 512, emoji 100 x 100
+        let wrong = exact_sizes(Target::Sticker, (300, 100), twice).unwrap_err();
+        assert!(wrong.contains("crop 256 pixels"), "{wrong}");
+        assert!(exact_sizes(Target::Emoji, (50, 50), twice).is_ok());
+        assert!(exact_sizes(Target::Emoji, (50, 40), twice).is_err());
+        assert!(exact_sizes(Target::Sticker, (1023, 576), half).is_err());
+        assert!(exact_sizes(Target::Sticker, (512, 101), ExactScale::ONE).is_err());
+
+        let crop = Some(Crop { x: 0, y: 0, width: 256, height: 144 });
+        let options = Options { crop, exact_scale: Some(twice), ..Default::default() };
+        let (plan, _) = plan_with(options).unwrap();
+        assert_eq!((plan.width, plan.height, plan.scaling), (512, 288, Scaling::PixelPerfect));
+        let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuv420p");
+        assert!(filter.contains("scale=512:288:flags=neighbor") && !filter.contains("pad="));
     }
 
     #[test]

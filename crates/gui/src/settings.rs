@@ -3,13 +3,17 @@
 
 use eframe::egui::{self, RichText};
 use tgradish_core::config::Config;
-use tgradish_core::options::{Crop, Fit, Options, Range, Resize, Speed, Spoof};
+use tgradish_core::convert;
+use tgradish_core::options::{
+    Crop, ExactScale, Fit, Options, Range, Resize, Scaling, Speed, Spoof,
+};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::tgs;
 use tgradish_tgs::normalise::Long;
 use tgradish_tgs::reduce::Kind as Reduction;
 
+use crate::canvas::{Exact, Keep};
 use crate::item::{Aspect, Item, Kind};
 use crate::widgets::{
     self, Choice, auto_number, chosen_hint, flag, label, note, preset_segments, section, segments,
@@ -199,11 +203,76 @@ pub fn show(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     }
 }
 
+const SCALINGS: [Choice<Scaling>; 4] = [
+    (
+        Scaling::Auto,
+        "Auto",
+        "Sharp pixels for pixel art made twice as large or more, smooth otherwise",
+    ),
+    (Scaling::Smooth, "Smooth", "Neighbouring pixels blend, in linear light so edges don't darken"),
+    (
+        Scaling::Sharp,
+        "Sharp pixels",
+        "Each pixel becomes a block; only block edges between result pixels blend",
+    ),
+    (
+        Scaling::PixelPerfect,
+        "Pixel-perfect",
+        "Each pixel becomes the same whole number of result pixels; transparent margins fill the rest",
+    ),
+];
+
+/// Exact scales offered, as `1/N` and `N`, for stickers and for emoji,
+/// whose 100 pixels other numbers divide.
+const STICKER_SCALES: [&str; 7] = ["1/4", "1/3", "1/2", "1", "2", "4", "8"];
+const EMOJI_SCALES: [&str; 7] = ["1/4", "1/2", "1", "2", "4", "5", "10"];
+
+/// The size of a result from `crop` of the input, with the item's
+/// settings; `None` when an exact scale can't make it.
+fn result_size(item: &Item, crop: Crop) -> Option<(u32, u32)> {
+    let target = item.choices.target;
+    let used = (crop.width, crop.height);
+    let sizes = match item.choices.webm.exact_scale {
+        Some(scale) => convert::exact_sizes(target, used, scale).ok()?,
+        None => {
+            let scaling = item.choices.webm.scaling.unwrap_or(Scaling::Auto);
+            convert::sizes(target, resize_of(item), scaling, used)
+        }
+    };
+    Some((sizes.width, sizes.height))
+}
+
+/// How the item's WebM result fills its box.
+pub fn resize_of(item: &Item) -> Resize {
+    let target = item.choices.target;
+    item.choices.webm.resize.unwrap_or(if target.requires_exact_size() {
+        Resize::Pad
+    } else {
+        Resize::Contain
+    })
+}
+
+/// The size an exact scale holds the item's crop to, for WebM.
+pub fn exact_of(item: &Item) -> Option<Exact> {
+    let scale = item.choices.webm.exact_scale.filter(|_| item.format == Format::Webm)?;
+    Exact::of(scale, item.choices.target)
+}
+
 fn picture(ui: &mut egui::Ui, item: &mut Item) {
     ui.add_space(4.0);
     ui.label(RichText::new("Picture").strong().size(15.5));
     ui.add_space(4.0);
     let size = item.input_size();
+    let exact = exact_of(item);
+    // an exact scale holds the crop to the size it needs
+    if let (Some(exact), Some(size)) = (exact, size) {
+        let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
+        let ratio = ratio(item.view.aspect, size);
+        let start = (Keep::Start, Keep::Start);
+        if let Some(fitted) = exact.fit(item.choices.crop.unwrap_or(full), start, ratio, size) {
+            item.choices.crop = (fitted != full).then_some(fitted);
+        }
+    }
     grid(ui, "picture", |ui| {
         label(
             ui,
@@ -229,30 +298,90 @@ fn picture(ui: &mut egui::Ui, item: &mut Item) {
             if edited {
                 crop.width = crop.width.min(width - crop.x);
                 crop.height = crop.height.min(height - crop.y);
+                if let Some(exact) = exact {
+                    let ratio = ratio(item.view.aspect, (width, height));
+                    let start = (Keep::Start, Keep::Start);
+                    crop = exact.fit(crop, start, ratio, (width, height)).unwrap_or(crop);
+                }
                 item.choices.crop = (crop != full).then_some(crop);
             }
             ui.add_space(6.0);
+            let whole = if exact.is_some() { "Middle" } else { "Whole picture" };
             if ui
-                .add_enabled(item.choices.crop.is_some(), egui::Button::new("Whole picture"))
+                .add_enabled(item.choices.crop.is_some(), egui::Button::new(whole))
+                .on_hover_text(if exact.is_some() {
+                    "As much of the middle as the exact scale takes"
+                } else {
+                    "All of the picture"
+                })
                 .clicked()
             {
-                item.choices.crop = None;
+                item.choices.crop = match (exact, size) {
+                    (Some(exact), Some(size)) => {
+                        let middle = (Keep::Middle, Keep::Middle);
+                        let ratio = ratio(item.view.aspect, size);
+                        exact.fit(full, middle, ratio, size).filter(|crop| *crop != full)
+                    }
+                    _ => None,
+                };
             }
         });
         ui.end_row();
 
         label(ui, "Crop shape", "The width to height ratio the crop keeps while you drag it");
-        let mut aspect = item.view.aspect;
-        if segments(ui, &mut aspect, &ASPECTS, |_| Ok(())) {
-            item.view.aspect = aspect;
-            if let Some(size) = size
-                && let Some(ratio) = ratio(aspect, size)
-            {
-                let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
-                let cut = to_ratio(item.choices.crop.unwrap_or(full), ratio);
-                item.choices.crop = (cut != full).then_some(cut);
+        ui.vertical(|ui| {
+            // each shape with the size of the result it makes
+            let shown: Vec<String> = ASPECTS
+                .iter()
+                .map(|&(aspect, text, _)| {
+                    let made = size.filter(|_| item.format == Format::Webm).and_then(|size| {
+                        let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
+                        let crop = match ratio(aspect, size) {
+                            Some(r) => to_ratio(item.choices.crop.unwrap_or(full), r),
+                            None => item.choices.crop.unwrap_or(full),
+                        };
+                        let middle = (Keep::Middle, Keep::Middle);
+                        let crop = match exact {
+                            Some(exact) => exact.fit(crop, middle, ratio(aspect, size), size)?,
+                            None => crop,
+                        };
+                        result_size(item, crop)
+                    });
+                    match made {
+                        Some((w, h)) => format!("{text} · {w}×{h}"),
+                        None => text.to_owned(),
+                    }
+                })
+                .collect();
+            let choices: Vec<Choice<Aspect>> = ASPECTS
+                .iter()
+                .zip(&shown)
+                .map(|(&(aspect, _, hint), text)| (aspect, text.as_str(), hint))
+                .collect();
+            let mut aspect = item.view.aspect;
+            if segments(ui, &mut aspect, &choices, |_| Ok(())) {
+                item.view.aspect = aspect;
+                if let Some(size) = size
+                    && let Some(r) = ratio(aspect, size)
+                {
+                    let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
+                    let mut cut = to_ratio(item.choices.crop.unwrap_or(full), r);
+                    if let Some(exact) = exact {
+                        let middle = (Keep::Middle, Keep::Middle);
+                        cut = exact.fit(cut, middle, Some(r), size).unwrap_or(cut);
+                    }
+                    item.choices.crop = (cut != full).then_some(cut);
+                }
             }
-        }
+            let square =
+                item.choices.crop.map_or(size.is_none_or(|(w, h)| w == h), |c| c.width == c.height);
+            if item.format == Format::Tgs && !square {
+                ui.colored_label(
+                    widgets::WARN,
+                    "⚠ TGS stickers are always 512 × 512: other shapes get transparent margins",
+                );
+            }
+        });
         ui.end_row();
 
         match item.format {
@@ -264,33 +393,88 @@ fn picture(ui: &mut egui::Ui, item: &mut Item) {
                     "How the picture is scaled into the sticker's or emoji's size",
                 );
                 let base = if target.requires_exact_size() { Resize::Pad } else { Resize::Contain };
-                ui.vertical(|ui| {
-                    let mut resize = item.choices.webm.resize.unwrap_or(base);
-                    ui.horizontal(|ui| {
-                        let allowed = |option| {
-                            if option == Resize::Contain && target.requires_exact_size() {
-                                Err("Emoji must be square: pad, fill or stretch them")
-                            } else {
-                                Ok(())
+                ui.add_enabled_ui(exact.is_none(), |ui| {
+                    ui.vertical(|ui| {
+                        let mut resize = item.choices.webm.resize.unwrap_or(base);
+                        ui.horizontal(|ui| {
+                            let allowed = |option| {
+                                if option == Resize::Contain && target.requires_exact_size() {
+                                    Err("Emoji must be square: pad, fill or stretch them")
+                                } else {
+                                    Ok(())
+                                }
+                            };
+                            if segments(ui, &mut resize, &RESIZES, allowed) {
+                                item.choices.webm.resize = (resize != base).then_some(resize);
                             }
-                        };
-                        if segments(ui, &mut resize, &RESIZES, allowed) {
-                            item.choices.webm.resize = (resize != base).then_some(resize);
-                        }
-                        if item.choices.webm.resize.is_some() && widgets::reset(ui) {
-                            item.choices.webm.resize = None;
-                            resize = base;
-                        }
-                    });
-                    if let Some((width, height)) = size {
-                        let (w, h) =
-                            item.choices.crop.map_or((width, height), |c| (c.width, c.height));
-                        let (out_w, out_h) = output_size(target, resize, (w, h));
+                            if item.choices.webm.resize.is_some() && widgets::reset(ui) {
+                                item.choices.webm.resize = None;
+                            }
+                        });
                         let hint = RESIZES
                             .iter()
                             .find(|(option, ..)| *option == resize)
                             .map_or("", |c| c.2);
-                        note(ui, format!("{hint}. The result is {out_w} × {out_h} px"));
+                        note(ui, hint);
+                    });
+                });
+                ui.end_row();
+
+                label(ui, "Scaling", "How the input's pixels become the result's");
+                ui.add_enabled_ui(exact.is_none(), |ui| {
+                    ui.vertical(|ui| {
+                        preset_segments(
+                            ui,
+                            &mut item.choices.webm.scaling,
+                            Scaling::Auto,
+                            &SCALINGS,
+                        );
+                        let scaling = item.choices.webm.scaling.unwrap_or(Scaling::Auto);
+                        chosen_hint(ui, scaling, &SCALINGS);
+                    });
+                });
+                ui.end_row();
+
+                label(
+                    ui,
+                    "Exact scale",
+                    "Scale by exactly this much, so input pixels line up with the result's and none are blended in between",
+                );
+                ui.vertical(|ui| {
+                    let numbers =
+                        if target.requires_exact_size() { EMOJI_SCALES } else { STICKER_SCALES };
+                    let offered: Vec<(Option<ExactScale>, String)> = std::iter::once((None, "Off".to_owned()))
+                        .chain(numbers.iter().filter_map(|text| {
+                            let scale: ExactScale = text.parse().ok()?;
+                            Exact::of(scale, target)?;
+                            let label = if scale.down == 1 { format!("{text}×") } else { (*text).to_owned() };
+                            Some((Some(scale), label))
+                        }))
+                        .collect();
+                    let choices: Vec<Choice<Option<ExactScale>>> =
+                        offered.iter().map(|(scale, text)| (*scale, text.as_str(), "")).collect();
+                    let mut chosen = item.choices.webm.exact_scale;
+                    let fits = |scale: Option<ExactScale>| match (scale.and_then(|s| Exact::of(s, target)), size) {
+                        (Some(exact), Some(size)) if !exact.fits(size) => Err("The input is too small for this scale"),
+                        _ => Ok(()),
+                    };
+                    if segments(ui, &mut chosen, &choices, fits) {
+                        item.choices.webm.exact_scale = chosen;
+                    }
+                    match (exact, item.choices.crop.or(size.map(|(width, height)| Crop { x: 0, y: 0, width, height }))) {
+                        (Some(exact), Some(crop)) => {
+                            let made = result_size(item, crop)
+                                .map(|(w, h)| format!(", which make {w} × {h} px"))
+                                .unwrap_or_default();
+                            note(
+                                ui,
+                                format!(
+                                    "The crop keeps {} px on its longer side{made}; move it or change its shape",
+                                    exact.long
+                                ),
+                            );
+                        }
+                        _ => note(ui, "Off: the picture is scaled to fit the box"),
                     }
                 });
                 ui.end_row();
@@ -317,21 +501,6 @@ fn picture(ui: &mut egui::Ui, item: &mut Item) {
             }
         }
     });
-}
-
-/// The size of a WebM result: `target`'s box, filled from a `size` input
-/// the way `resize` does.
-pub fn output_size(target: Target, resize: Resize, (width, height): (u32, u32)) -> (u32, u32) {
-    let (box_w, box_h) = target.box_size();
-    match resize {
-        Resize::Contain => {
-            let scale =
-                (f64::from(box_w) / f64::from(width)).min(f64::from(box_h) / f64::from(height));
-            let even = |side: u32| (((f64::from(side) * scale / 2.0).round() as u32) * 2).max(2);
-            (even(width).min(box_w), even(height).min(box_h))
-        }
-        Resize::Pad | Resize::Crop | Resize::Stretch => (box_w, box_h),
-    }
 }
 
 const SPOOFS: [Choice<Spoof>; 3] = [
@@ -752,13 +921,6 @@ mod tests {
         let crop = Crop { x: 10, y: 10, width: 200, height: 100 };
         assert_eq!(to_ratio(crop, 1.0), Crop { x: 60, y: 10, width: 100, height: 100 });
         assert_eq!(to_ratio(crop, 4.0), Crop { x: 10, y: 35, width: 200, height: 50 });
-    }
-
-    #[test]
-    fn sizes_results_like_planning() {
-        assert_eq!(output_size(Target::Sticker, Resize::Contain, (640, 360)), (512, 288));
-        assert_eq!(output_size(Target::Sticker, Resize::Contain, (300, 100)), (512, 170));
-        assert_eq!(output_size(Target::Emoji, Resize::Pad, (300, 100)), (100, 100));
     }
 
     #[test]
