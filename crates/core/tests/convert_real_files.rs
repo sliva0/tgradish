@@ -134,7 +134,8 @@ fn converts_long_clip_with_spoofing() {
         let video = info.video.unwrap();
         // 258x320 source scaled so the long side is 512
         assert_eq!((video.width, video.height), (412, 512), "{name}");
-        assert_eq!(info.video_frames, 316, "{name}");
+        // ffmpeg 6.0's fps filter leaves out the last frame
+        assert!((315..=316).contains(&info.video_frames), "{name}: {}", info.video_frames);
         assert!(info.header_duration.unwrap() < 1.0);
         assert!(info.content_duration.unwrap() > 12.0);
         assert_eq!(info.title.as_deref(), Some("pig"), "{name}");
@@ -380,10 +381,15 @@ fn pads_pictures_of_odd_size_whole() {
     let Some(backends) = backends() else { return };
     let dir = tempfile::tempdir().unwrap();
     let image = dir.path().join("odd.png");
-    // 511x255, blue but for a red last column and a green last row
+    // 511x255, blue but for a red last column and a green last row; the
+    // source makes RGB itself, as ffmpeg 6 rounds odd 4:2:0 sizes down
     let status = Command::new("ffmpeg")
-        .args(["-v", "error", "-f", "lavfi", "-i", "color=black:s=511x255:d=1", "-frames:v", "1"])
-        .args(["-vf", "format=rgb24,geq=r='255*eq(X,510)':g='255*eq(Y,254)*lt(X,510)':b='255*lt(X,510)*lt(Y,254)'"])
+        .args(["-v", "error", "-f", "lavfi", "-i", "color=black:s=511x255:d=1,format=rgb24"])
+        .args(["-frames:v", "1"])
+        .args([
+            "-vf",
+            "geq=r='255*eq(X,510)':g='255*eq(Y,254)*lt(X,510)':b='255*lt(X,510)*lt(Y,254)'",
+        ])
         .arg(&image)
         .status()
         .unwrap();
