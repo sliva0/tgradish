@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
-use eframe::egui::{self, FontData, FontFamily, FontId};
+use eframe::egui::{self, FontData, FontFamily};
 use skrifa::MetadataProvider;
 
 /// A font found for some characters.
@@ -22,31 +22,87 @@ struct Found {
     bytes: Vec<u8>,
     /// Which font of a collection (`.ttc`) has them.
     index: u32,
+    /// Every character it has.
+    chars: Vec<char>,
+}
+
+/// Every character the font `index` of `bytes` has.
+fn characters(bytes: &[u8], index: u32) -> Vec<char> {
+    skrifa::FontRef::from_index(bytes, index)
+        .map(|font| {
+            font.charmap().mappings().filter_map(|(code, _)| char::from_u32(code)).collect()
+        })
+        .unwrap_or_default()
 }
 
 pub struct Fallbacks {
     fonts: egui::FontDefinitions,
-    /// Blocks of 128 characters already looked for.
-    asked: HashSet<u32>,
+    /// Characters some font has. egui's own check says no for characters
+    /// of the font that also draws its replacement box, so it is kept here.
+    covered: HashSet<char>,
+    /// Characters looked for.
+    asked: HashSet<char>,
+    /// Blocks of 128 characters with a lookup running: one at a time, as
+    /// a font found for one character usually has its neighbours.
+    searching: HashSet<u32>,
     loaded: HashSet<PathBuf>,
-    pending: Vec<Receiver<Option<Found>>>,
+    pending: Vec<(u32, Receiver<Option<Found>>)>,
+}
+
+fn block(c: char) -> u32 {
+    c as u32 >> 7
+}
+
+/// Characters that only shape others and draw nothing themselves: zero
+/// width spaces and joiners, direction marks, variation selectors, tags.
+pub fn formatting(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x00AD
+            | 0x034F
+            | 0x180B..=0x180F
+            | 0x200B..=0x200F
+            | 0x202A..=0x202E
+            | 0x2060..=0x206F
+            | 0xFE00..=0xFE0F
+            | 0xFEFF
+            | 0xE0000..=0xE007F
+            | 0xE0100..=0xE01EF
+    )
 }
 
 impl Fallbacks {
     /// Falls back from `fonts`, the window's own.
     pub fn new(fonts: egui::FontDefinitions) -> Fallbacks {
-        Fallbacks { fonts, asked: HashSet::new(), loaded: HashSet::new(), pending: Vec::new() }
+        let covered =
+            fonts.font_data.values().flat_map(|data| characters(&data.font, data.index)).collect();
+        Fallbacks {
+            fonts,
+            covered,
+            asked: HashSet::new(),
+            searching: HashSet::new(),
+            loaded: HashSet::new(),
+            pending: Vec::new(),
+        }
+    }
+
+    /// Whether no font has `c`, the system's looked through.
+    pub fn missing(&self, c: char) -> bool {
+        self.asked.contains(&c) && !self.searching.contains(&block(c)) && !self.covered.contains(&c)
     }
 
     /// Looks for fonts for the characters of `texts` the window can't show,
     /// and adds those found by now.
     pub fn check<'a>(&mut self, ctx: &egui::Context, texts: impl IntoIterator<Item = &'a str>) {
         let mut added = false;
-        self.pending.retain(|receiver| match receiver.try_recv() {
+        let mut done = Vec::new();
+        self.pending.retain(|(block, receiver)| match receiver.try_recv() {
             Ok(found) => {
+                done.push(*block);
                 if let Some(found) = found
                     && self.loaded.insert(found.path.clone())
                 {
+                    self.covered.extend(found.chars);
                     let name = format!("system {}", found.path.display());
                     let mut data = FontData::from_owned(found.bytes);
                     data.index = found.index;
@@ -59,31 +115,39 @@ impl Fallbacks {
                 false
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => true,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                done.push(*block);
+                false
+            }
         });
+        for block in done {
+            self.searching.remove(&block);
+        }
         if added {
             ctx.set_fonts(self.fonts.clone());
         }
-        let font = FontId::proportional(14.0);
         for text in texts {
-            // most text is covered: skip the lookup per character
-            if text.is_ascii() || ctx.fonts_mut(|fonts| fonts.has_glyphs(&font, text)) {
+            if text.is_ascii() {
                 continue;
             }
             for c in text.chars() {
-                if c.is_control() || !self.asked.insert(c as u32 >> 7) {
+                if c.is_control()
+                    || formatting(c)
+                    || self.asked.contains(&c)
+                    || self.searching.contains(&block(c))
+                    || self.covered.contains(&c)
+                {
                     continue;
                 }
-                if ctx.fonts_mut(|fonts| fonts.has_glyph(&font, c)) {
-                    continue;
-                }
+                self.asked.insert(c);
+                self.searching.insert(block(c));
                 let (sender, receiver) = channel();
                 let ctx = ctx.clone();
                 std::thread::spawn(move || {
                     let _ = sender.send(find(c));
                     ctx.request_repaint();
                 });
-                self.pending.push(receiver);
+                self.pending.push((block(c), receiver));
             }
         }
     }
@@ -103,7 +167,8 @@ fn find(c: char) -> Option<Found> {
                 .is_ok_and(|font| font.charmap().map(c).is_some())
         });
         if let Some(index) = index {
-            return Some(Found { path, bytes, index });
+            let chars = characters(&bytes, index);
+            return Some(Found { path, bytes, index, chars });
         }
     }
     None

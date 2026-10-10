@@ -839,7 +839,7 @@ impl App {
             for item in &self.items {
                 let selected = self.selected == Some(item.id);
                 let queued = self.queue.iter().position(|&id| id == item.id);
-                let (response, action) = row(ui, item, selected, queued);
+                let (response, action) = row(ui, item, selected, queued, &self.fallbacks);
                 match action {
                     Some(RowAction::Remove) => removed = Some(item.id),
                     Some(RowAction::Convert) => again = Some(item.id),
@@ -1075,15 +1075,20 @@ impl App {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 let folder = output.parent().map(|p| p.display().to_string()).unwrap_or_default();
-                ui.label(RichText::new(name).strong()).on_hover_text(output.display().to_string());
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(format!("Saves to {folder}{}", std::path::MAIN_SEPARATOR))
-                            .weak(),
-                    )
-                    .truncate(),
-                )
-                .on_hover_text("Settings chooses where results go");
+                let fallbacks = &self.fallbacks;
+                let strong = text_format(ui, ui.visuals().strong_text_color());
+                let (name, missing) = drawable(ui, fallbacks, &name, strong);
+                ui.label(name).on_hover_ui(|ui| {
+                    let plain = text_format(ui, ui.visuals().text_color());
+                    ui.label(drawable(ui, fallbacks, &output.display().to_string(), plain).0);
+                    if let Some(note) = missing_note(&missing) {
+                        widgets::note(ui, note);
+                    }
+                });
+                let weak = text_format(ui, ui.visuals().weak_text_color());
+                let saves = format!("Saves to {folder}{}", std::path::MAIN_SEPARATOR);
+                ui.add(egui::Label::new(drawable(ui, fallbacks, &saves, weak).0).truncate())
+                    .on_hover_text("Settings chooses where results go");
             });
         });
         let shortcut =
@@ -1541,6 +1546,7 @@ fn row(
     item: &Item,
     selected: bool,
     queued: Option<usize>,
+    fallbacks: &fallback::Fallbacks,
 ) -> (egui::Response, Option<RowAction>) {
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(vec2(width, THUMB + 12.0), egui::Sense::click());
@@ -1596,7 +1602,9 @@ fn row(
         egui::UiBuilder::new().max_rect(text).layout(egui::Layout::top_down(egui::Align::Min)),
     );
     child.spacing_mut().item_spacing.y = 2.0;
-    child.add(egui::Label::new(RichText::new(item.name()).strong()).truncate().selectable(false));
+    let strong = text_format(&child, child.visuals().strong_text_color());
+    let (name, _) = drawable(&child, fallbacks, &item.name(), strong);
+    child.add(egui::Label::new(name).truncate().selectable(false));
     let what = match (item.format, item.choices.target) {
         (Format::Webm, telegram::Target::Sticker) => "WebM sticker",
         (Format::Webm, telegram::Target::Emoji) => "WebM emoji",
@@ -1605,10 +1613,96 @@ fn row(
     };
     child.add(egui::Label::new(RichText::new(what).small().weak()).selectable(false));
     status(&mut child, item, queued);
-    let response = response.on_hover_text(
-        item.inputs.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n"),
-    );
+    let response = response.on_hover_ui(|ui| {
+        let plain = text_format(ui, ui.visuals().text_color());
+        let mut missing = Vec::new();
+        for input in &item.inputs {
+            let (path, lacking) =
+                drawable(ui, fallbacks, &input.display().to_string(), plain.clone());
+            ui.label(path);
+            missing.extend(lacking);
+        }
+        if let Some(note) = missing_note(&missing) {
+            widgets::note(ui, note);
+        }
+    });
     (response, action)
+}
+
+/// Body text in `colour`.
+fn text_format(ui: &egui::Ui, colour: Color32) -> egui::TextFormat {
+    egui::TextFormat::simple(egui::TextStyle::Body.resolve(ui.style()), colour)
+}
+
+/// `text` laid out as the window can draw it: each character no font has,
+/// neither the window's nor the system's, as a small tag of its code, and
+/// formatting characters, which draw nothing, left out. Also the
+/// characters no font has.
+fn drawable(
+    ui: &egui::Ui,
+    fallbacks: &fallback::Fallbacks,
+    text: &str,
+    format: egui::TextFormat,
+) -> (egui::text::LayoutJob, Vec<char>) {
+    drawable_in(fallbacks, text, format, ui.visuals().widgets.inactive.bg_fill)
+}
+
+fn drawable_in(
+    fallbacks: &fallback::Fallbacks,
+    text: &str,
+    format: egui::TextFormat,
+    tag_fill: Color32,
+) -> (egui::text::LayoutJob, Vec<char>) {
+    let mut job = egui::text::LayoutJob::default();
+    let mut missing = Vec::new();
+    if text.is_ascii() {
+        job.append(text, 0.0, format);
+        return (job, missing);
+    }
+    let tag = egui::TextFormat {
+        font_id: egui::FontId::monospace(format.font_id.size * 0.72),
+        color: format.color.gamma_multiply(0.7),
+        background: tag_fill,
+        valign: egui::Align::Center,
+        ..Default::default()
+    };
+    let (mut run, mut gap) = (String::new(), 0.0);
+    for c in text.chars() {
+        if fallback::formatting(c) {
+            continue;
+        }
+        if !fallbacks.missing(c) {
+            run.push(c);
+            continue;
+        }
+        if !run.is_empty() {
+            job.append(&run, gap, format.clone());
+            run.clear();
+        }
+        job.append(&format!("U+{:04X}", c as u32), 2.0, tag.clone());
+        gap = 2.0;
+        missing.push(c);
+    }
+    if !run.is_empty() {
+        job.append(&run, gap, format);
+    }
+    (job, missing)
+}
+
+/// What to say of characters no font has, if there are any.
+fn missing_note(missing: &[char]) -> Option<String> {
+    let mut codes: Vec<String> = missing.iter().map(|c| format!("U+{:04X}", *c as u32)).collect();
+    codes.dedup();
+    let (them, are, their) = match codes.len() {
+        0 => return None,
+        1 => ("it", "is", "its"),
+        _ => ("them", "are", "their"),
+    };
+    Some(format!(
+        "No font was found for {}, neither among the window's own nor the system's, so {them} {are} \
+         shown by {their} code. The file itself is fine.",
+        codes.join(", ")
+    ))
 }
 
 /// A thumbnail in `rect`, marked when it is out of date.
@@ -1982,6 +2076,11 @@ impl eframe::App for App {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
+            let format = egui::TextFormat::simple(
+                egui::TextStyle::Heading.resolve(&ctx.global_style()),
+                ctx.global_style().visuals.text_color(),
+            );
+            let title = drawable_in(&self.fallbacks, &title, format, Color32::GRAY).0;
             egui::Window::new(title).open(&mut open).collapsible(false).default_width(460.0).show(
                 &ctx,
                 |ui| {
@@ -2433,7 +2532,9 @@ mod tests {
             save(&mut harness, "video");
         }
         // names in scripts the window's fonts lack, drawn with the system's
-        let named = dir.path().join("日本語 العربية ภาษาไทย.png");
+        // with characters no font has, an unassigned one and a newer
+        // emoji, and a zero width joiner
+        let named = dir.path().join("日本語 العربية ภาษาไทย \u{2fe0}\u{200d}\u{1faf9}.png");
         square(&named, [0, 160, 0, 255]);
         harness.state_mut().add(vec![named]);
         finish(&mut harness);
@@ -2481,6 +2582,17 @@ mod tests {
         harness.state_mut().about = true;
         harness.run_steps(3);
         save(&mut harness, "about");
+    }
+
+    #[test]
+    fn explains_characters_no_font_has() {
+        assert_eq!(missing_note(&[]), None);
+        let one = missing_note(&['\u{2fe0}']).unwrap();
+        assert!(one.starts_with("No font was found for U+2FE0,") && one.contains("its code"));
+        let two = missing_note(&['\u{2fe0}', '\u{1faf9}', '\u{1faf9}']).unwrap();
+        assert!(two.contains("U+2FE0, U+1FAF9,") && two.contains("their code"), "{two}");
+        assert!(fallback::formatting('\u{200d}') && fallback::formatting('\u{fe0f}'));
+        assert!(!fallback::formatting('a') && !fallback::formatting('日'));
     }
 
     #[test]
