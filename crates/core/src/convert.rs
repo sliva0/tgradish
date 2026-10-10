@@ -24,12 +24,12 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::backend::{Backend, Pass};
+use crate::backend::{Backend, FramesRequest, Pass};
 use crate::error::{Error, Result};
 use crate::events::{Event, Params, Rate};
 use crate::ffmpeg::{CancelToken, Output, Probe};
 use crate::fit::{self, Attempt, Encoder};
-use crate::options::{self, Crop, Fit, Options, Range, Resize, Speed, Spoof};
+use crate::options::{self, Crop, Fit, Options, Range, Resize, Scaling, Speed, Spoof};
 use crate::telegram::{self, Issue, Target};
 use crate::webm::{self, Patch};
 
@@ -70,10 +70,13 @@ pub struct Plan {
     /// The part of the source used, in its display pixels.
     pub crop: Option<Crop>,
     pub resize: Resize,
+    /// How pixels are scaled; never [`Scaling::Auto`].
+    pub scaling: Scaling,
     /// Size of the encoded video.
     pub width: u32,
     pub height: u32,
-    /// Size the source is scaled to before padding or cropping.
+    /// Size the source is scaled to before padding or cropping to the
+    /// encoded size.
     pub scaled_width: u32,
     pub scaled_height: u32,
     pub fit: Fit,
@@ -105,6 +108,18 @@ pub struct Plan {
 }
 
 impl Plan {
+    /// The size of the part of the source used.
+    pub fn used(&self) -> (u32, u32) {
+        self.crop.map_or((self.source.width, self.source.height), |crop| (crop.width, crop.height))
+    }
+
+    /// How many times larger the picture gets, at least.
+    pub fn enlarges(&self) -> f64 {
+        let used = self.used();
+        let along = |scaled: u32, used: u32| f64::from(scaled) / f64::from(used.max(1));
+        along(self.scaled_width, used.0).min(along(self.scaled_height, used.1))
+    }
+
     /// Whether a result of `length` seconds gets its duration spoofed.
     pub fn spoofs(&self, length: f64) -> bool {
         match self.spoof {
@@ -185,6 +200,93 @@ pub fn estimate_bitrate(length: f64, limit: u64) -> f64 {
 pub fn default_output(input: &Path, target: Target) -> PathBuf {
     input.with_extension(format!("{}.webm", target.name()))
 }
+
+/// How a picture lands in the result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sizes {
+    /// What the picture is scaled to.
+    pub scaled: (u32, u32),
+    /// The result, which the scaled picture is cropped or padded to, around
+    /// its middle.
+    pub width: u32,
+    pub height: u32,
+    /// The scaling used: [`Scaling::Auto`] is smooth until the picture
+    /// turns out to be pixel art, and pixel-perfect needs room to grow.
+    pub scaling: Scaling,
+}
+
+impl Sizes {
+    /// Whether transparent margins fill part of the result.
+    pub fn pads(&self) -> bool {
+        self.scaled.0 < self.width || self.scaled.1 < self.height
+    }
+
+    /// How many times larger the picture gets, at least, from `used`.
+    pub fn enlarges(&self, used: (u32, u32)) -> f64 {
+        let along = |scaled: u32, used: u32| f64::from(scaled) / f64::from(used.max(1));
+        along(self.scaled.0, used.0).min(along(self.scaled.1, used.1))
+    }
+}
+
+/// Where a `used` picture (the crop, or all of the input) lands in a result
+/// for `target`, as `resize` and `scaling` place it.
+pub fn sizes(target: Target, resize: Resize, scaling: Scaling, used: (u32, u32)) -> Sizes {
+    let (box_w, box_h) = target.box_size();
+    let (src_w, src_h) = (f64::from(used.0.max(1)), f64::from(used.1.max(1)));
+    let (box_wf, box_hf) = (f64::from(box_w), f64::from(box_h));
+    let contain = (box_wf / src_w).min(box_hf / src_h);
+    let fill = (box_wf / src_w).max(box_hf / src_h);
+    let contained = (even(src_w * contain).min(box_w), even(src_h * contain).min(box_h));
+    let boxed = (box_w, box_h);
+    // whole multiples of each pixel, where the picture can grow
+    let whole = match resize {
+        Resize::Contain | Resize::Pad => Some((contain.floor(), contain.floor())),
+        Resize::Crop => (fill >= 1.0).then(|| (fill.ceil(), fill.ceil())),
+        Resize::Stretch => Some(((box_wf / src_w).floor(), (box_hf / src_h).floor())),
+    }
+    .filter(|&(x, y)| scaling == Scaling::PixelPerfect && x >= 1.0 && y >= 1.0);
+    let (scaled, (width, height)) = match (whole, resize) {
+        (Some((x, y)), _) => {
+            let scaled = ((src_w * x) as u32, (src_h * y) as u32);
+            (scaled, if resize == Resize::Contain { contained } else { boxed })
+        }
+        (None, Resize::Contain) => (contained, contained),
+        (None, Resize::Pad) => (contained, boxed),
+        (None, Resize::Crop) => {
+            ((even(src_w * fill).max(box_w), even(src_h * fill).max(box_h)), boxed)
+        }
+        (None, Resize::Stretch) => (boxed, boxed),
+    };
+    let scaling = match scaling {
+        Scaling::PixelPerfect if whole.is_none() => Scaling::Sharp,
+        Scaling::Auto => Scaling::Smooth,
+        other => other,
+    };
+    Sizes { scaled, width, height, scaling }
+}
+
+/// Whether `frames` of a `width` wide picture look like pixel art within
+/// `crop`: few colours, so it is drawn rather than filmed.
+pub fn is_pixel_art(frames: &[Vec<u8>], width: u32, crop: Option<Crop>) -> bool {
+    let mut colours = std::collections::HashSet::new();
+    for rgba in frames {
+        let height = (rgba.len() / 4) as u32 / width.max(1);
+        let Crop { x, y, width: w, height: h } = crop.unwrap_or(Crop { x: 0, y: 0, width, height });
+        for row in y..(y + h).min(height) {
+            let start = (row * width + x) as usize * 4;
+            let end = (row * width + (x + w).min(width)) as usize * 4;
+            for pixel in rgba[start..end].as_chunks::<4>().0 {
+                if pixel[3] > 0 && colours.insert(*pixel) && colours.len() > PIXEL_ART_COLOURS {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// More colours than this is a photo or a video, not pixel art.
+const PIXEL_ART_COLOURS: usize = 256;
 
 /// Resolves options against the probed input. Returns the plan and warnings
 /// about options that were adjusted or ignored.
@@ -327,28 +429,8 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     if let Some(crop) = o.crop {
         crop.check(source.width, source.height).map_err(invalid)?;
     }
-    let (box_w, box_h) = target.box_size();
-    let (box_w, box_h) = (f64::from(box_w), f64::from(box_h));
-    let (src_w, src_h) = match o.crop {
-        Some(crop) => (f64::from(crop.width), f64::from(crop.height)),
-        None => (f64::from(source.width), f64::from(source.height)),
-    };
-    let ((scaled_width, scaled_height), (width, height)) = match resize {
-        Resize::Contain | Resize::Pad => {
-            let scale = (box_w / src_w).min(box_h / src_h);
-            let scaled =
-                (even(src_w * scale).min(box_w as u32), even(src_h * scale).min(box_h as u32));
-            let out = if resize == Resize::Pad { (box_w as u32, box_h as u32) } else { scaled };
-            (scaled, out)
-        }
-        Resize::Crop => {
-            let scale = (box_w / src_w).max(box_h / src_h);
-            let scaled =
-                (even(src_w * scale).max(box_w as u32), even(src_h * scale).max(box_h as u32));
-            (scaled, (box_w as u32, box_h as u32))
-        }
-        Resize::Stretch => ((box_w as u32, box_h as u32), (box_w as u32, box_h as u32)),
-    };
+    let used = o.crop.map_or((source.width, source.height), |crop| (crop.width, crop.height));
+    let sizes = sizes(target, resize, o.scaling.unwrap_or(Scaling::Auto), used);
 
     let plan = Plan {
         input: request.input.clone(),
@@ -356,10 +438,11 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         target,
         crop: o.crop,
         resize,
-        width,
-        height,
-        scaled_width,
-        scaled_height,
+        scaling: sizes.scaling,
+        width: sizes.width,
+        height: sizes.height,
+        scaled_width: sizes.scaled.0,
+        scaled_height: sizes.scaled.1,
         fit,
         attempts,
         fit_range,
@@ -372,7 +455,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         constant_quality: o.crf.is_some() && o.bitrate.is_none(),
         lossless,
         speed: o.speed.unwrap_or(Speed::Balanced),
-        alpha: source.alpha || resize == Resize::Pad,
+        alpha: source.alpha || sizes.pads(),
         spoof,
         fake_duration,
         title: o.title.clone(),
@@ -382,6 +465,20 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         source,
     };
     Ok((plan, warnings))
+}
+
+/// A few frames of the planned part at full size, to tell pixel art from
+/// filmed pictures.
+fn looks_like_pixel_art(backend: &Backend, plan: &Plan, cancel: &CancelToken) -> Result<bool> {
+    let request = FramesRequest {
+        start: plan.start,
+        length: Some(plan.length.min(telegram::MAX_SECONDS)),
+        fps: plan.fps,
+        max_side: plan.source.width.max(plan.source.height),
+        max_frames: 3,
+    };
+    let frames = backend.frames(&plan.input, &plan.source, &request, cancel)?;
+    Ok(is_pixel_art(&frames.frames, frames.width, plan.crop))
 }
 
 /// Result of a finished conversion.
@@ -491,7 +588,13 @@ pub fn convert(
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Outcome> {
     let source = backend.probe(&request.input, cancel)?;
-    let (plan, warnings) = plan(request, source)?;
+    let (mut plan, warnings) = plan(request, source)?;
+    if request.options.scaling.unwrap_or(Scaling::Auto) == Scaling::Auto
+        && plan.enlarges() >= 2.0
+        && looks_like_pixel_art(backend, &plan, cancel)?
+    {
+        plan.scaling = Scaling::Sharp;
+    }
     if !plan.extra_args.is_empty() && !backend.supports_extra_args() {
         return Err(Error::InvalidOptions(
             "extra-args are ffmpeg command line arguments, so they need ffmpeg as a \
@@ -667,13 +770,74 @@ mod tests {
         assert_eq!((plan.width, plan.height), (512, 170));
         let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuv420p");
         assert!(
+            filter.contains("crop=w=iw*300/640:h=ih*100/480:x=iw*100/640:y=ih*40/480:exact=1,"),
+            "{filter}"
+        );
+        assert!(filter.contains(",scale=512:170:flags=lanczos,"), "{filter}");
+        let outside = Some(Crop { x: 400, y: 0, width: 300, height: 100 });
+        assert!(plan_with(Options { crop: outside, ..Default::default() }).is_err());
+    }
+
+    #[test]
+    fn scales_in_linear_light() {
+        let (plan, _) = plan_with(Options::default()).unwrap();
+        let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuv420p");
+        // no alpha to premultiply in an opaque source
+        let linear = "format=gbrp16le,lutrgb=r='if(lte(val/maxval\\,0.04045)";
+        assert!(filter.contains(linear) && !filter.contains("premultiply"), "{filter}");
+        let lanczos = filter.find("scale=512:384:flags=lanczos").unwrap();
+        assert!(filter[lanczos..].contains("lutrgb=r='if(lte(val/maxval\\,0.0031308)"));
+    }
+
+    #[test]
+    fn keeps_pixels_whole() {
+        let used = (50, 30);
+        let sizes = |resize, scaling| sizes(Target::Sticker, resize, scaling, used);
+        // auto is smooth until the picture turns out to be pixel art
+        let auto = sizes(Resize::Contain, Scaling::Auto);
+        assert_eq!((auto.scaled, auto.width, auto.height), ((512, 308), 512, 308));
+        assert_eq!(auto.scaling, Scaling::Smooth);
+        assert!(auto.enlarges(used) > 10.0);
+        // ten times, with transparent margins up to the sticker's size
+        let whole = sizes(Resize::Contain, Scaling::PixelPerfect);
+        assert_eq!((whole.scaled, whole.width, whole.height), ((500, 300), 512, 308));
+        assert!(whole.pads());
+        let filled = sizes(Resize::Crop, Scaling::PixelPerfect);
+        assert_eq!((filled.scaled, filled.width, filled.height), ((900, 540), 512, 512));
+        // nothing to make whole when the picture shrinks
+        let large =
+            super::sizes(Target::Sticker, Resize::Contain, Scaling::PixelPerfect, (900, 600));
+        assert_eq!(large.scaling, Scaling::Sharp);
+
+        let crop = Some(Crop { x: 0, y: 0, width: 50, height: 30 });
+        let options = Options { crop, scaling: Some(Scaling::Sharp), ..Default::default() };
+        let (plan, _) = plan_with(options).unwrap();
+        let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuv420p");
+        // 11 times as blocks, then down to 512 x 308 blending only edges
+        assert!(filter.contains("scale=550:330:flags=neighbor,format=gbrp16le"), "{filter}");
+        assert!(filter.contains("scale=512:308:flags=area"), "{filter}");
+        let options = Options { crop, scaling: Some(Scaling::PixelPerfect), ..Default::default() };
+        let (plan, _) = plan_with(options).unwrap();
+        assert!(plan.alpha);
+        let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuva420p");
+        assert!(
             filter.contains(
-                "crop=w=iw*300/640:h=ih*100/480:x=iw*100/640:y=ih*40/480:exact=1,scale=512:170"
+                "scale=500:300:flags=neighbor,format=yuva420p,pad=512:308:(ow-iw)/2:(oh-ih)/2"
             ),
             "{filter}"
         );
-        let outside = Some(Crop { x: 400, y: 0, width: 300, height: 100 });
-        assert!(plan_with(Options { crop: outside, ..Default::default() }).is_err());
+    }
+
+    #[test]
+    fn tells_pixel_art_by_its_colours() {
+        let flat = vec![vec![10, 20, 30, 255, 200, 100, 0, 255, 10, 20, 30, 255, 0, 0, 0, 0]];
+        assert!(is_pixel_art(&flat, 2, None));
+        let photo: Vec<u8> =
+            (0..1000u32).flat_map(|i| [i as u8, (i / 256) as u8, 0, 255]).collect();
+        assert!(!is_pixel_art(std::slice::from_ref(&photo), 1000, None));
+        // only the crop counts
+        let crop = Some(Crop { x: 0, y: 0, width: 100, height: 1 });
+        assert!(is_pixel_art(&[photo], 1000, crop));
     }
 
     #[test]
