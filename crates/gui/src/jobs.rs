@@ -105,6 +105,8 @@ enum Message {
 /// One conversion of an item, waiting, running or finished.
 pub struct Job {
     pub output: PathBuf,
+    /// The output replaces a file made at another time.
+    pub replaces: bool,
     pub status: Status,
     pub progress: Progress,
     cancel: CancelToken,
@@ -115,6 +117,7 @@ impl Job {
     pub fn waiting(output: PathBuf) -> Job {
         Job {
             output,
+            replaces: false,
             status: Status::Waiting,
             progress: Progress::default(),
             cancel: CancelToken::new(),
