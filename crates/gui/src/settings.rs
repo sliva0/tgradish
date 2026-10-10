@@ -85,7 +85,9 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             .add_enabled(allowed, egui::RadioButton::new(item.format == format, text))
             .on_hover_text(hint)
             .on_disabled_hover_text(match item.kind {
-                Kind::Video => "Only pixel art can become a TGS animation",
+                Kind::Video => {
+                    "Only pixel art in PNG, GIF, WebP or Aseprite files can become a TGS animation"
+                }
                 _ => "ffmpeg can't read Aseprite files or folders of frames",
             });
         if response.clicked() {

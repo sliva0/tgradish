@@ -10,10 +10,14 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::os::fd::AsFd;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::thread::JoinHandle;
 
 use eframe::egui;
 use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
+use wayland_client::backend::WaylandError;
 use wayland_client::backend::{Backend, ObjectId};
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::wl_data_device::{self, WlDataDevice};
@@ -21,7 +25,7 @@ use wayland_client::protocol::wl_data_device_manager::{DndAction, WlDataDeviceMa
 use wayland_client::protocol::wl_data_offer::{self, WlDataOffer};
 use wayland_client::protocol::wl_registry::WlRegistry;
 use wayland_client::protocol::wl_seat::WlSeat;
-use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, event_created_child};
+use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, event_created_child};
 
 const URI_LIST: &str = "text/uri-list";
 
@@ -34,6 +38,10 @@ pub enum Dropped {
 /// Receives drags on Wayland; `None` elsewhere.
 pub struct Drops {
     receiver: Receiver<Dropped>,
+    /// Tells the worker to stop, which it must before winit closes its
+    /// connection.
+    stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
 }
 
 impl Drops {
@@ -62,15 +70,58 @@ impl Drops {
             over: None,
             _device: device,
         };
-        std::thread::Builder::new()
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = stop.clone();
+        let worker = std::thread::Builder::new()
             .name("drag and drop".into())
-            .spawn(move || while queue.blocking_dispatch(&mut state).is_ok() {})
+            .spawn(move || listen(&mut queue, &mut state, &stopped))
             .ok()?;
-        Some(Drops { receiver })
+        Some(Drops { receiver, stop, worker: Some(worker) })
     }
 
     pub fn poll(&self) -> Vec<Dropped> {
         self.receiver.try_iter().collect()
+    }
+
+    /// Stops listening, waiting for the worker to let go of the connection.
+    pub fn stop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+impl Drop for Drops {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// How long the worker waits for events before looking whether to stop.
+const WAKE: rustix::time::Timespec = rustix::time::Timespec { tv_sec: 0, tv_nsec: 100_000_000 };
+
+/// Dispatches events until told to stop or the connection breaks. Waits
+/// with a timeout rather than blocking, so it notices the stop.
+fn listen(queue: &mut EventQueue<State>, state: &mut State, stop: &AtomicBool) {
+    use rustix::event::{PollFd, PollFlags};
+    while !stop.load(Ordering::Relaxed) {
+        if queue.dispatch_pending(state).is_err() {
+            return;
+        }
+        let _ = queue.flush();
+        let Some(guard) = queue.prepare_read() else { continue };
+        let mut fds = [PollFd::from_borrowed_fd(guard.connection_fd(), PollFlags::IN)];
+        match rustix::event::poll(&mut fds, Some(&WAKE)) {
+            Ok(0) | Err(rustix::io::Errno::INTR) => drop(guard),
+            Ok(_) => match guard.read() {
+                Ok(_) => {}
+                // another thread read them first
+                Err(WaylandError::Io(err)) if err.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(_) => return,
+            },
+            Err(_) => return,
+        }
     }
 }
 

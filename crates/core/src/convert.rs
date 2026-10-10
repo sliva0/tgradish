@@ -667,8 +667,9 @@ mod tests {
         assert_eq!((plan.width, plan.height), (512, 170));
         let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuv420p");
         assert!(
-            filter
-                .contains("crop=w=iw*300/640:h=ih*100/480:x=iw*100/640:y=ih*40/480,scale=512:170"),
+            filter.contains(
+                "crop=w=iw*300/640:h=ih*100/480:x=iw*100/640:y=ih*40/480:exact=1,scale=512:170"
+            ),
             "{filter}"
         );
         let outside = Some(Crop { x: 400, y: 0, width: 300, height: 100 });

@@ -10,7 +10,7 @@ use tgradish_core::backend::{Backend, FramesRequest};
 use tgradish_core::convert::{Request, convert};
 use tgradish_core::events::Event;
 use tgradish_core::ffmpeg::{self, CancelToken, FfmpegChoice};
-use tgradish_core::options::{Fit, Options, Resize, Speed};
+use tgradish_core::options::{Crop, Fit, Options, Resize, Speed};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::{Error, webm};
 
@@ -280,6 +280,50 @@ fn keeps_alpha_of_webm_input() {
         convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
         let rgba = first_frame_rgba(&output);
         assert!(rgba[3] < 16, "{name}: the left side must stay transparent");
+    }
+}
+
+#[test]
+fn crops_odd_sizes_exactly() {
+    let Some(backends) = backends() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("clip.mp4");
+    let status = Command::new("ffmpeg")
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=s=200x100:d=0.5",
+            "-pix_fmt",
+            "yuv420p",
+        ])
+        .arg(&input)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    for backend in &backends {
+        let name = name(backend);
+        // odd sizes and places, which chroma subsampling would round
+        for (crop, size) in [
+            (Crop { x: 1, y: 1, width: 101, height: 51 }, (512, 258)),
+            (Crop { x: 3, y: 5, width: 1, height: 1 }, (512, 512)),
+        ] {
+            let output = dir.path().join(format!("{name}-{}x{}.webm", crop.width, crop.height));
+            let request = Request {
+                output: Some(output.clone()),
+                options: Options { crop: Some(crop), ..fast(Fit::Off) },
+                ..Request::new(input.clone())
+            };
+            convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
+            let video = webm::inspect_file(&output).unwrap().video.unwrap();
+            assert_eq!(
+                (video.width, video.height),
+                (size.0 as u64, size.1 as u64),
+                "{name} {crop}"
+            );
+        }
     }
 }
 

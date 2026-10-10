@@ -109,9 +109,12 @@ cover two formats, which the GUI then builds on.
   the last result's size and Telegram's verdict, the rest of the settings
   under it, and Convert at the bottom.
 - Every file keeps its own settings. Converting again replaces the result
-  this window made; a result made with earlier settings is marked so. A
-  file that is in the way and wasn't made here is only replaced on
-  request, or with the setting that replaces files.
+  this window made for it, if nothing changed the file since; a result
+  made with earlier settings is marked so, and a failed conversion
+  doesn't make an older result current. Any other file in the way is
+  only replaced on request, or with the setting that replaces files. Two
+  files whose results would share a name get numbered ones (`clip
+  2.sticker.webm`).
 - Crop: drawn, moved and resized on the preview (handles, a ratio to keep,
   zoom with the wheel), or typed as numbers; WebM and `.tgs` take it as
   the `crop` option. With WebM's fill mode the preview dims what is cut.
@@ -122,14 +125,16 @@ cover two formats, which the GUI then builds on.
   changing, and while paused the frame shown at full size, to crop small
   parts of large recordings by), pixel art by the `.tgs` reader. Only the selected file and
   the last two keep their frames; the others keep thumbnails.
-- Images start as WebM and switch to `.tgs` once read if they have few
-  colours, like pixel art; Aseprite files and folders are `.tgs` only,
-  videos WebM only.
+- PNG, GIF and WebP images start as WebM and switch to `.tgs` once read
+  if they have few colours, like pixel art; Aseprite files and folders
+  are `.tgs` only, videos and photos WebM only.
 - Drag and drop on Wayland: winit only reports dropped files on X11,
   Windows and macOS. The window adds a data device of its own on winit's
   Wayland connection, read on its own thread like the clipboard's;
-  compositors send drags to every data device of a client. Tested in a
-  nested KWin 6.7 with a drag driven by KWin's fake input. (winit and
+  compositors send drags to every data device of a client. It waits for
+  events with a timeout, so it can stop before the window closes the
+  connection. Tested in a nested KWin 6.7 with a drag driven by KWin's
+  fake input. (winit and
   smithay-clipboard panic when a drag source exits right after starting a
   drag, with or without it.)
 - Also: paste (files, paths, images), folders and several images as the
