@@ -53,16 +53,17 @@ pub(crate) fn video_filter(plan: &Plan, fps: f64, length: f64, pix_fmt: &str) ->
         ));
     }
     filters.extend(scale_filters(plan));
-    // around the middle; pad keeps chroma whole, so pixel blocks stay
-    // apart from their neighbours' colour
+    // around the middle
     if sw > w || sh > h {
         filters.push(format!("crop={}:{}", w.min(sw), h.min(sh)));
     }
     if sw < w || sh < h {
         filters.extend([
-            // padding has to be transparent, so alpha must exist first
-            "format=yuva420p".into(),
-            format!("pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black@0"),
+            // transparent padding needs alpha, and full colour keeps a
+            // picture of odd size whole, which 4:2:0 would trim
+            "format=rgba".into(),
+            // even offsets keep pixel blocks on the colour planes' grid
+            format!("pad={w}:{h}:trunc((ow-iw)/4)*2:trunc((oh-ih)/4)*2:color=black@0"),
         ]);
     }
     filters.extend(["setsar=1".into(), format!("format={pix_fmt}")]);
@@ -114,6 +115,11 @@ fn scale_filters(plan: &Plan) -> Vec<String> {
             }
             if blocks != (sw, sh) {
                 filters.extend(in_linear_light(plan, format!("scale={sw}:{sh}:flags=area")));
+            }
+            // already the size, as shown: the stored pixels may not be
+            // square, and setsar=1 makes them so
+            if filters.is_empty() {
+                filters.push(format!("scale={sw}:{sh}:flags=neighbor"));
             }
             filters
         }

@@ -370,6 +370,47 @@ fn keeps_pixel_art_sharp() {
 }
 
 #[test]
+fn pads_pictures_of_odd_size_whole() {
+    let Some(backends) = backends() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let image = dir.path().join("odd.png");
+    // 511x255, blue but for a red last column and a green last row
+    let status = Command::new("ffmpeg")
+        .args(["-v", "error", "-f", "lavfi", "-i", "color=black:s=511x255:d=1", "-frames:v", "1"])
+        .args(["-vf", "format=rgb24,geq=r='255*eq(X,510)':g='255*eq(Y,254)*lt(X,510)':b='255*lt(X,510)*lt(Y,254)'"])
+        .arg(&image)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    for backend in &backends {
+        let name = name(backend);
+        let output = dir.path().join(format!("{name}.webm"));
+        let request = Request {
+            output: Some(output.clone()),
+            options: Options {
+                scaling: Some(Scaling::PixelPerfect),
+                length: Some(0.2),
+                lossless: Some(true),
+                ..fast(Fit::Off)
+            },
+            ..Request::new(image.clone())
+        };
+        convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
+        let video = webm::inspect_file(&output).unwrap().video.unwrap();
+        assert_eq!((video.width, video.height), (512, 256), "{name}");
+        // the last column and row are there, inside the transparent margin;
+        // half-resolution colour mixes a line of one pixel with its neighbour
+        let rgba = first_frame_rgba(&output);
+        let at = |x: usize, y: usize| &rgba[(y * 512 + x) * 4..][..4];
+        let [r, _, b, a] = at(510, 100).try_into().unwrap();
+        assert!(r > 120 && r > b && a > 200, "{name}: {:?}", at(510, 100));
+        let [_, g, b, a] = at(100, 254).try_into().unwrap();
+        assert!(g > 120 && g > b && a > 200, "{name}: {:?}", at(100, 254));
+        assert!(at(511, 100)[3] < 30, "{name}: {:?}", at(511, 100));
+    }
+}
+
+#[test]
 fn rejects_contain_for_emoji() {
     let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
     let request = Request {

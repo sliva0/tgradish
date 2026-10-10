@@ -189,33 +189,58 @@ fn user_hash() -> u32 {
 pub fn read_file(path: &std::path::Path) -> Option<Mark> {
     if crate::tgs::is_sticker(path) {
         let json = crate::tgs::read_json(path).ok()?;
-        Mark::from_bits(&tgradish_tgs::mark::hidden_bits(&json))
+        Mark::from_bits(&tgradish_tgs::mark::hidden_bits(&json)).or_else(|| {
+            let bytes = tgradish_tgs::mark::layer_name(&json)?;
+            Mark::from_bytes(bytes.try_into().ok()?)
+        })
     } else {
         let info = crate::webm::inspect_file(path).ok()?;
         info.video.and_then(|video| video.uid).and_then(Mark::from_u64)
     }
 }
 
-/// Whether tgradish made the sticker at `path`: its hidden mark, or for
-/// older files the marks in its metadata.
-pub fn made_by_tgradish(path: &std::path::Path) -> bool {
-    if read_file(path).is_some() {
-        return true;
+/// Whether tgradish made the sticker at `path` for this user, so making it
+/// again may replace it: its hidden mark names this user. Few random bytes
+/// pass a mark's checks, and fewer still name the user too. Stickers from
+/// before marks are known by the metadata tgradish wrote, exactly.
+pub fn made_here(path: &std::path::Path) -> bool {
+    if let Some(mark) = read_file(path) {
+        return mark.user == Mark::current().user;
     }
     if crate::tgs::is_sticker(path) {
         let Ok(json) = crate::tgs::read_json(path) else { return false };
         serde_json::from_slice::<serde_json::Value>(&json)
             .ok()
-            .and_then(|value| value.get("nm")?.as_str().map(|name| name.contains("tgradish")))
+            .and_then(|value| value.get("nm")?.as_str().map(tgradish_name))
             .unwrap_or(false)
     } else {
+        // both apps and the signature in padding, as tgradish wrote them
         crate::webm::inspect_file(path).is_ok_and(|info| {
-            info.signature.is_some()
-                || [&info.muxing_app, &info.writing_app]
-                    .iter()
-                    .any(|app| app.as_deref().is_some_and(|app| app.starts_with("tgradish")))
+            let app = |app: &Option<String>| app.as_deref().is_some_and(is_tool_id);
+            app(&info.writing_app)
+                && app(&info.muxing_app)
+                && info.signature.as_deref().is_some_and(|signature| {
+                    signature.ends_with(" https://github.com/sliva0/tgradish")
+                        && is_tool_id(
+                            signature.trim_end_matches(" https://github.com/sliva0/tgradish"),
+                        )
+                })
         })
     }
+}
+
+/// Whether `text` is `tgradish VERSION`, as `crate::TOOL_ID` is.
+fn is_tool_id(text: &str) -> bool {
+    text.strip_prefix("tgradish ").is_some_and(|version| {
+        !version.is_empty() && version.split('.').all(|part| part.parse::<u32>().is_ok())
+    })
+}
+
+/// Whether `name` is one tgradish gives stickers: `made with tgradish
+/// VERSION`, or a title followed by ` (made with tgradish)`.
+fn tgradish_name(name: &str) -> bool {
+    name.strip_prefix("made with ").is_some_and(is_tool_id)
+        || name.ends_with(" (made with tgradish)")
 }
 
 #[cfg(test)]
@@ -250,6 +275,15 @@ mod tests {
         // a single copy, and too few bits
         assert_eq!(Mark::from_bits(&copy), Some(mark));
         assert_eq!(Mark::from_bits(&copy[..63]), None);
+    }
+
+    #[test]
+    fn knows_its_names() {
+        assert!(tgradish_name("made with tgradish 2.0.0"));
+        assert!(tgradish_name("dance (made with tgradish)"));
+        assert!(!tgradish_name("tgradish tutorial"));
+        assert!(!tgradish_name("made with tgradish 2.x"));
+        assert!(is_tool_id(crate::TOOL_ID) && !is_tool_id("tgradish-ish 1.0"));
     }
 
     #[test]

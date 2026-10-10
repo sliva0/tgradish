@@ -94,8 +94,9 @@ name. The hash tells stickers by one person from others' without naming
 them, though a common name can be guessed by hashing it. In WebM files the
 mark is the video track's UID; in `.tgs` files it is the order of
 rectangles that are drawn the same in any order, which costs about 0.6% of
-the size. `tgradish inspect` shows it. The window also uses it to replace
-results tgradish made before rather than numbering new ones.
+the size, or for stickers with too few rectangles the first layer's name.
+`tgradish inspect` shows it. The window also uses it to replace results
+tgradish made for you before, rather than numbering new ones.
 
 ## Installing
 
