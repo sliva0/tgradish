@@ -25,6 +25,7 @@ png = { workspace = true, optional = true }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+shlex.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 toml.workspace = true

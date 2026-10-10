@@ -411,6 +411,61 @@ impl Options {
     }
 }
 
+/// Command line flags that set the values `options` sets: the flag of each
+/// field has its name, as `tgradish convert` has them.
+pub fn flags(options: &impl Serialize) -> Vec<String> {
+    let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(options) else {
+        return Vec::new();
+    };
+    let number = |value: &serde_json::Value| match value.as_f64() {
+        Some(n) if n.fract() == 0.0 && n.abs() < 1e15 => format!("{}", n as i64),
+        Some(n) => format!("{n}"),
+        None => value.to_string(),
+    };
+    let mut flags = Vec::new();
+    for (name, value) in fields {
+        let flag = format!("--{name}");
+        use serde_json::Value;
+        match (name.as_str(), value) {
+            ("crop", value) => {
+                if let Ok(crop) = serde_json::from_value::<Crop>(value) {
+                    flags.extend([flag, crop.to_string()]);
+                }
+            }
+            ("fit-range", value) => {
+                if let Ok(range) = serde_json::from_value::<Range>(value) {
+                    flags.extend([flag, range.to_string()]);
+                }
+            }
+            ("encoder-options", Value::Object(pairs)) => {
+                for (key, value) in pairs {
+                    let value = value.as_str().map_or_else(|| value.to_string(), str::to_owned);
+                    flags.extend([flag.clone(), format!("{key}={value}")]);
+                }
+            }
+            ("extra-args", Value::Array(words)) => {
+                let words: Vec<&str> = words.iter().filter_map(Value::as_str).collect();
+                if let Ok(joined) = shlex::try_join(words) {
+                    flags.push(format!("{flag}={joined}"));
+                }
+            }
+            (_, Value::Array(items)) => {
+                let items: Vec<String> = items
+                    .iter()
+                    .map(|item| item.as_str().map_or_else(|| item.to_string(), str::to_owned))
+                    .collect();
+                flags.extend([flag, items.join(",")]);
+            }
+            (_, Value::Bool(true)) => flags.push(flag),
+            (_, Value::Bool(false)) => flags.push(format!("{flag}=false")),
+            (_, Value::String(text)) => flags.extend([flag, text]),
+            (_, value @ Value::Number(_)) => flags.extend([flag, number(&value)]),
+            _ => {}
+        }
+    }
+    flags
+}
+
 pub const DEFAULT_ATTEMPTS: u32 = 8;
 pub const MAX_ATTEMPTS: u32 = 50;
 pub const DEFAULT_CRF: u8 = 32;

@@ -240,6 +240,18 @@ fn fit_auto(encoder: &mut dyn Encoder, plan: &Plan, limit: u64) -> Result<Search
 
 /// Runs the search configured in `plan` and returns the attempt to keep.
 /// With `fit = off` that is the single attempt, even if it is too big.
+/// Roughly what fitting encodes first: what it then changes depends on the
+/// sizes that come out.
+pub fn first_params(plan: &Plan) -> Params {
+    let quality = if plan.lossless { Rate::Lossless } else { Rate::Crf(plan.crf) };
+    let rate = match plan.fit {
+        Fit::Off if plan.lossless || plan.constant_quality => quality,
+        Fit::Off | Fit::Auto | Fit::Bitrate => Rate::Bitrate(plan.bitrate),
+        Fit::Crf | Fit::Fps | Fit::Length => quality,
+    };
+    Params { fps: plan.fps, length: plan.length, rate }
+}
+
 pub fn run(plan: &Plan, encoder: &mut dyn Encoder, limit: u64) -> Result<Attempt> {
     let (fps, length, budget) = (plan.fps, plan.length, plan.attempts);
     let quality = if plan.lossless { Rate::Lossless } else { Rate::Crf(plan.crf) };
