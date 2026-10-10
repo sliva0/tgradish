@@ -63,6 +63,17 @@ pub fn section(ui: &mut egui::Ui, title: &str) {
 }
 
 /// Weaker text explaining something.
+/// How wide `text` is in buttons' font, plus `padding`.
+pub fn text_width(ui: &egui::Ui, text: &str, padding: f32) -> f32 {
+    let galley = egui::WidgetText::from(text).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    galley.size().x + padding
+}
+
 pub fn note(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(RichText::new(text.into()).weak().size(12.5));
 }

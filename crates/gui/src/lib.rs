@@ -181,8 +181,6 @@ struct App {
     inset: Inset,
     prefs: prefs::Prefs,
     inspection: Option<inspect::Inspection>,
-    /// The About and licenses window is open.
-    about: bool,
     /// The theme Settings showed last, to apply a change made there.
     prefs_theme: Option<tgradish_core::config::Theme>,
     /// Where the open files are kept between runs, and what was written
@@ -294,7 +292,6 @@ impl App {
             inset: Inset::default(),
             prefs: prefs::Prefs::default(),
             inspection: None,
-            about: false,
             prefs_theme: None,
             session: None,
             next_save: 0.0,
@@ -846,37 +843,40 @@ impl App {
     fn files_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("tgradish").heading().strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 self.theme_button(ui);
-                ui.menu_button("⚙", |ui| {
-                    if ui.button("Settings…").clicked() {
-                        self.prefs.open = true;
-                        ui.close();
-                    }
-                    if ui.button("About and licenses…").clicked() {
-                        self.about = true;
-                        ui.close();
-                    }
-                    if ui
-                        .button("Inspect a sticker…")
-                        .on_hover_text("Check a sticker file against Telegram's rules")
-                        .clicked()
-                    {
-                        if let Some(file) = rfd::FileDialog::new()
-                            .add_filter("stickers", &["webm", "tgs"])
-                            .pick_file()
-                        {
-                            self.inspection = Some(inspect::Inspection::of(&file));
-                        }
-                        ui.close();
+                if ui.button("⚙ Settings").clicked() {
+                    self.prefs.open = true;
+                }
+                if ui
+                    .button("Inspect…")
+                    .on_hover_text("Check a sticker file against Telegram's rules")
+                    .clicked()
+                    && let Some(file) =
+                        rfd::FileDialog::new().add_filter("stickers", &["webm", "tgs"]).pick_file()
+                {
+                    self.inspection = Some(inspect::Inspection::of(&file));
+                }
+                // a split button: files, or the rest from its arrow
+                ui.scope(|ui| {
+                    ui.spacing_mut().item_spacing.x = 1.0;
+                    ui.menu_button("⏷", |ui| self.add_menu(ui));
+                    if ui.button("Add files…").clicked() {
+                        self.pick_files();
                     }
                 });
-                // a split button: files, or the rest from its arrow
-                ui.spacing_mut().item_spacing.x = 1.0;
-                ui.menu_button("⏷", |ui| self.add_menu(ui));
-                if ui.button("Add files…").clicked() {
-                    self.pick_files();
+                // the name, where the buttons leave room for it
+                let title = egui::WidgetText::from(RichText::new("tgradish").heading().strong());
+                let galley = title.into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Extend),
+                    f32::INFINITY,
+                    egui::TextStyle::Heading,
+                );
+                if galley.size().x + ui.spacing().item_spacing.x <= ui.available_width() {
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.label(galley);
+                    });
                 }
             });
         });
@@ -1219,31 +1219,36 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
             if show == Show::Result && !has_result { Err("Convert it first") } else { Ok(()) }
         });
         item.view.show = show;
-        if has_result && !item.result_is_current() {
-            ui.colored_label(widgets::warn(ui), "made with earlier settings");
-        }
+        // what doesn't fit is cut short or left out, the hint first
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if item.view.show == Show::Input {
-                ui.toggle_value(&mut item.view.inset, "Result preview")
+                let full = "Result preview";
+                let room = ui.available_width();
+                let text =
+                    if room >= widgets::text_width(ui, full, 8.0) { full } else { "Preview" };
+                ui.toggle_value(&mut item.view.inset, text)
                     .on_hover_text("What the result will look like, small, over the input");
             }
             let zoom = item.view.zoom_mut();
-            if zoom.level > 1.0 {
+            let zoomed = zoom.level > 1.0;
+            if zoomed {
                 if ui.small_button("Fit").clicked() {
                     *zoom = Zoom::default();
                 }
                 ui.label(format!("{:.0}%", zoom.level * 100.0));
-            } else {
-                widgets::note(
-                    ui,
-                    match (item.view.show, item.choices.crop.is_some()) {
-                        (Show::Input, false) => {
-                            "Drag to crop · wheel to zoom · right button to pan"
-                        }
-                        (Show::Input, true) => "Drag the crop or its edges · double-click for all",
-                        (Show::Result, _) => "Wheel to zoom · right button to pan",
-                    },
-                );
+            }
+            if has_result && !item.result_is_current() {
+                let stale = RichText::new("made with earlier settings").color(widgets::warn(ui));
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add(egui::Label::new(stale).truncate());
+                });
+            } else if !zoomed && ui.available_width() > 60.0 {
+                let hint = match (item.view.show, item.choices.crop.is_some()) {
+                    (Show::Input, false) => "Drag to crop · wheel to zoom · right button to pan",
+                    (Show::Input, true) => "Drag the crop or its edges · double-click for all",
+                    (Show::Result, _) => "Wheel to zoom · right button to pan",
+                };
+                ui.add(egui::Label::new(RichText::new(hint).weak().size(12.5)).truncate());
             }
         });
     });
@@ -2197,14 +2202,14 @@ impl eframe::App for App {
                 self.inspection = None;
             }
         }
-        if self.about {
+        if self.prefs.about {
             let mut open = true;
             egui::Window::new("About tgradish")
                 .open(&mut open)
                 .collapsible(false)
                 .default_size([560.0, 480.0])
                 .show(&ctx, about);
-            self.about = open;
+            self.prefs.about = open;
         }
         if let Some(message) = &self.message
             && !toast(&ctx, message)
@@ -2690,14 +2695,21 @@ mod tests {
         item.job = Some((job, Format::Tgs, item.choices.clone()));
         harness.run_steps(3);
         save(&mut harness, "progress");
-        harness.state_mut().about = true;
+        harness.state_mut().prefs.about = true;
         harness.run_steps(3);
         save(&mut harness, "about");
-        harness.state_mut().about = false;
+        harness.state_mut().prefs.about = false;
         set_theme(&harness.ctx, tgradish_core::config::Theme::Light);
-        harness.state_mut().items.last_mut().unwrap().job = None;
+        let item = harness.state_mut().items.last_mut().unwrap();
+        item.job = None;
+        item.view.inset = true;
         harness.run_steps(3);
         save(&mut harness, "light");
+        // the narrowest list, its buttons leaving no room for the name
+        harness.set_size(egui::vec2(900.0, 640.0));
+        harness.ctx.memory_mut(|memory| memory.reset_areas());
+        harness.run_steps(3);
+        save(&mut harness, "narrow");
     }
 
     #[test]

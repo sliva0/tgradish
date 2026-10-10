@@ -111,19 +111,23 @@ impl Inset {
         let shown = size * fits(size);
         let frame = Rect::from_min_size(area.right_bottom() - shown - vec2(MARGIN, MARGIN), shown);
         let painter = ui.painter_at(area);
-        painter.rect_filled(frame.expand(4.0), 4.0, Color32::from_black_alpha(200));
+        let (back, text) = if ui.visuals().dark_mode {
+            (Color32::from_black_alpha(200), Color32::WHITE)
+        } else {
+            (Color32::from_white_alpha(230), Color32::from_gray(20))
+        };
+        let edge = ui.visuals().widgets.noninteractive.bg_stroke;
+        painter.rect(frame.expand(4.0), 4.0, back, edge, egui::StrokeKind::Outside);
         widgets::checkerboard(&painter, frame, 6.0);
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
         painter.image(texture.id(), frame, uv, Color32::WHITE);
-        let galley =
-            painter.layout_no_wrap(label.into(), egui::FontId::proportional(12.0), Color32::WHITE);
-        let at = pos2(frame.left(), frame.top() - galley.size().y - 8.0);
-        painter.rect_filled(
-            Rect::from_min_size(at, galley.size()).expand(3.0),
-            3.0,
-            Color32::from_black_alpha(200),
-        );
-        painter.galley(at, galley, Color32::WHITE);
+        let galley = painter.layout_no_wrap(label.into(), egui::FontId::proportional(12.0), text);
+        // over the picture's left edge, or further left where it would stick out
+        let left = frame.left().min(area.right() - MARGIN - galley.size().x).max(area.left());
+        let at = pos2(left, frame.top() - galley.size().y - 8.0);
+        let behind = Rect::from_min_size(at, galley.size()).expand(3.0);
+        painter.rect(behind, 3.0, back, edge, egui::StrokeKind::Outside);
+        painter.galley(at, galley, text);
     }
 }
 
