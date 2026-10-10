@@ -15,6 +15,7 @@ pub mod fit;
 mod fsutil;
 #[cfg(feature = "linked")]
 mod linked;
+pub mod mark;
 pub mod options;
 pub mod paths;
 pub mod presets;

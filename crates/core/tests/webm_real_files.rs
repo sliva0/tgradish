@@ -75,9 +75,12 @@ fn spoofs_and_watermarks_ffmpeg_output() {
             muxing_app: Some(tgradish_core::TOOL_ID.into()),
             writing_app: Some(tgradish_core::TOOL_ID.into()),
             signature: Some(format!("{} test signature", tgradish_core::TOOL_ID)),
+            track_uid: Some(0x0123_4567_89ab_cdef),
         };
         let report = webm::patch_file(&encoded, &patched, &changes, false).unwrap();
         assert!(report.signature_written);
+        let uid = webm::inspect_file(&patched).unwrap().video.unwrap().uid;
+        assert_eq!(uid, Some(0x0123_4567_89ab_cdef), "{name}");
         assert_eq!(report.duration_tags_patched, 1);
 
         let after = webm::inspect_file(&patched).unwrap();

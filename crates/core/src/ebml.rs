@@ -41,6 +41,7 @@ pub mod ids {
 
     pub const TRACK_ENTRY: u32 = 0xAE;
     pub const TRACK_NUMBER: u32 = 0xD7;
+    pub const TRACK_UID: u32 = 0x73C5;
     pub const TRACK_TYPE: u32 = 0x83;
     pub const CODEC_ID: u32 = 0x86;
     pub const DEFAULT_DURATION: u32 = 0x23_E383;
@@ -57,6 +58,8 @@ pub mod ids {
 
     pub const TAG: u32 = 0x7373;
     pub const SIMPLE_TAG: u32 = 0x67C8;
+    pub const TARGETS: u32 = 0x63C0;
+    pub const TAG_TRACK_UID: u32 = 0x63C5;
     pub const TAG_NAME: u32 = 0x45A3;
     pub const TAG_STRING: u32 = 0x4487;
 

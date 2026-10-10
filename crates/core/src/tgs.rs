@@ -93,7 +93,8 @@ pub struct TgsOptions {
     /// Name stored in the sticker.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// Mark the sticker as made by tgradish. [default: true]
+    /// Name the sticker as made by tgradish. A mark hidden in its shapes
+    /// stays either way. [default: true]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watermark: Option<bool>,
 }
@@ -194,6 +195,7 @@ impl TgsOptions {
             reductions: self.reductions.clone().unwrap_or_else(|| Kind::ALL.to_vec()),
             compromise: self.compromise.unwrap_or_default(),
             name,
+            mark: Some(crate::mark::Mark::current().to_bytes().to_vec()),
             ..sticker::Options::default()
         })
     }
@@ -451,20 +453,30 @@ pub fn is_sticker(path: &Path) -> bool {
         .is_ok_and(|()| start == [0x1f, 0x8b])
 }
 
+/// The Lottie JSON of a `.tgs` (or plain Lottie JSON) file, and the
+/// file's size when it was packed.
+fn read_lottie(path: &Path) -> Result<(Vec<u8>, Option<usize>)> {
+    let bytes = read(path)?;
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        let json = tgradish_tgs::file::unpack(&bytes)
+            .map_err(|err| Error::Probe { path: path.to_path_buf(), message: err.to_string() })?;
+        Ok((json, Some(bytes.len())))
+    } else {
+        Ok((bytes, None))
+    }
+}
+
+/// The Lottie JSON of a `.tgs` (or plain Lottie JSON) file.
+pub fn read_json(path: &Path) -> Result<Vec<u8>> {
+    read_lottie(path).map(|(json, _)| json)
+}
+
 /// Reads a `.tgs` (or plain Lottie JSON) and checks it against Telegram's
 /// rules and renderers.
 pub fn inspect_file(path: &Path) -> Result<(Stats, Vec<Issue>)> {
-    let bytes = read(path)?;
-    let probe = |message: String| Error::Probe { path: path.to_path_buf(), message };
-    let (json, packed) = if bytes.starts_with(&[0x1f, 0x8b]) {
-        (
-            tgradish_tgs::file::unpack(&bytes).map_err(|err| probe(err.to_string()))?,
-            Some(bytes.len()),
-        )
-    } else {
-        (bytes, None)
-    };
-    tgradish_tgs::check::check(&json, packed).map_err(probe)
+    let (json, packed) = read_lottie(path)?;
+    tgradish_tgs::check::check(&json, packed)
+        .map_err(|message| Error::Probe { path: path.to_path_buf(), message })
 }
 
 /// Fails when the output is one of the inputs, even through another path

@@ -253,7 +253,8 @@ pub struct Options {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     /// Mark the file as made by tgradish: writing and muxing app metadata
-    /// and a signature hidden in padding. Default: true.
+    /// and a signature in padding. A mark hidden in the video stays either
+    /// way (see `tgradish_core::mark`). Default: true.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watermark: Option<bool>,
     /// libvpx-vp9 encoder options by name, for tuning beyond what the other

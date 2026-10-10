@@ -39,6 +39,20 @@ pub fn params(params: &Params) -> String {
     format!("{}, {}, {rate}", fps(params.fps), seconds(params.length))
 }
 
+/// What a hidden mark says, like `tgradish 2.0.0 from the command line,
+/// user #3fa9c1`.
+pub fn mark(mark: &tgradish_core::mark::Mark) -> String {
+    use tgradish_core::mark::Client;
+    let client = match mark.client {
+        Client::Library => "",
+        Client::Cli => " from the command line",
+        Client::Window => " in its window",
+        Client::Bot => " through the bot",
+    };
+    let user = if mark.user == 0 { String::new() } else { format!(", user {}", mark.user_text()) };
+    format!("tgradish {}{client}{user}", mark.version_text())
+}
+
 /// Name of a value as used in options and JSON, like `auto` for `Fit::Auto`.
 pub fn name(value: &impl serde::Serialize) -> String {
     match serde_json::to_value(value) {
