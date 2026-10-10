@@ -850,12 +850,12 @@ impl App {
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 self.theme_button(ui);
-                if ui.button("⚙ Settings").clicked() {
+                if ui.button("⚙").on_hover_text("Settings").clicked() {
                     self.prefs.open = true;
                 }
                 if ui
-                    .button("Inspect…")
-                    .on_hover_text("Check a sticker file against Telegram's rules")
+                    .button("🔬")
+                    .on_hover_text("Inspect a sticker: check a file against Telegram's rules")
                     .clicked()
                     && let Some(file) =
                         rfd::FileDialog::new().add_filter("stickers", &["webm", "tgs"]).pick_file()
