@@ -10,7 +10,8 @@ use tgradish_core::ffmpeg::{CancelToken, FfmpegChoice};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::Target;
 
-use crate::widgets::{self, label, note, radios};
+use crate::settings;
+use crate::widgets::{self, label, note, radios, segments};
 
 #[derive(Default)]
 pub struct Prefs {
@@ -115,24 +116,26 @@ pub fn show(
             grid(ui, "prefs-new", |ui| {
                 label(ui, "Make", "");
                 let mut target = config.gui.target.unwrap_or_default();
-                if radios(ui, &mut target, &[(Target::Sticker, "Stickers", ""), (Target::Emoji, "Custom emoji", "")]) {
+                let targets = [(Target::Sticker, "Stickers", ""), (Target::Emoji, "Custom emoji", "")];
+                if segments(ui, &mut target, &targets, |_| Ok(())) {
                     config.gui.target = Some(target);
                 }
                 ui.end_row();
                 for (format, text) in [(Format::Webm, "Preset for WebM"), (Format::Tgs, "Preset for TGS")] {
                     label(ui, text, "");
-                    let mut picked = config.preset_for(format).to_owned();
-                    let names: Vec<(String, &str)> = presets
+                    let names = settings::preset_names(presets);
+                    let labels: Vec<String> = names.iter().map(|(name, _)| settings::capitalised(name)).collect();
+                    let choices: Vec<widgets::Choice<&str>> = names
                         .iter()
-                        .filter(|(_, preset)| preset.is_ok())
-                        .map(|(name, _)| (name.to_owned(), ""))
+                        .zip(&labels)
+                        .map(|((name, description), label)| (name.as_str(), label.as_str(), description.as_deref().unwrap_or("")))
                         .collect();
-                    ui.horizontal_wrapped(|ui| {
-                        for (name, _) in &names {
-                            ui.radio_value(&mut picked, name.clone(), name);
-                        }
-                    });
-                    if picked != config.preset_for(format) {
+                    let current = config.preset_for(format).to_owned();
+                    let mut chosen = current.as_str();
+                    let broken = |name: &str| names.iter().any(|(n, d)| n == name && d.is_err());
+                    segments(ui, &mut chosen, &choices, |name| if broken(name) { Err("This preset's file is broken") } else { Ok(()) });
+                    let picked = chosen.to_owned();
+                    if picked != current {
                         match format {
                             Format::Webm => config.preset = Some(picked),
                             Format::Tgs => config.tgs_preset = Some(picked),

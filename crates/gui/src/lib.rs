@@ -56,12 +56,10 @@ pub fn run(launch: Launch) -> eframe::Result<()> {
         "tgradish",
         options,
         Box::new(|cc| {
-            let mut app = App::new(launch);
+            let app = App::new(launch);
             app.style(&cc.egui_ctx);
             #[cfg(all(unix, not(target_os = "macos")))]
-            {
-                app.drops = dnd::Drops::start(cc, &cc.egui_ctx);
-            }
+            let app = App { drops: dnd::Drops::start(cc, &cc.egui_ctx), ..app };
             Ok(Box::new(app))
         }),
     )
@@ -1747,6 +1745,14 @@ mod tests {
         harness.state_mut().items.last_mut().unwrap().view.show = Show::Input;
         harness.run_steps(3);
         save(&mut harness, "tgs-input");
+        harness.state_mut().prefs.open = true;
+        harness.run_steps(3);
+        save(&mut harness, "settings");
+        harness.state_mut().prefs.open = false;
+        let sticker = dir.path().join("out").join("dance.sticker.tgs");
+        harness.state_mut().inspection = Some(inspect::Inspection::of(&sticker));
+        harness.run_steps(3);
+        save(&mut harness, "inspect");
     }
 
     #[test]
