@@ -5,6 +5,7 @@
 mod canvas;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod dnd;
+mod fallback;
 mod inspect;
 mod item;
 mod jobs;
@@ -171,6 +172,8 @@ struct App {
     inspection: Option<inspect::Inspection>,
     /// The About and licenses window is open.
     about: bool,
+    /// The system's fonts for what the window's own lack.
+    fallbacks: fallback::Fallbacks,
     message: Option<String>,
     /// The clipboard was read for the Ctrl+V being held.
     pasted: bool,
@@ -232,6 +235,7 @@ impl App {
             prefs: prefs::Prefs::default(),
             inspection: None,
             about: false,
+            fallbacks: fallback::Fallbacks::new(fonts()),
             message,
             pasted: false,
             #[cfg(all(unix, not(target_os = "macos")))]
@@ -615,6 +619,28 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Looks for the system's fonts for characters in names the window's
+    /// own fonts lack.
+    fn find_fonts(&mut self, ctx: &egui::Context) {
+        let mut texts: Vec<String> = Vec::new();
+        for item in &self.items {
+            texts.push(item.name());
+            texts.extend(item.inputs.iter().map(|path| path.display().to_string()));
+            if let Some(made) = &item.made {
+                texts.push(made.job.output.display().to_string());
+            }
+        }
+        if let Some(item) = self.selected.and_then(|id| self.item(id)) {
+            texts.push(self.output_for(item).display().to_string());
+        }
+        texts.extend(self.message.clone());
+        texts.extend(
+            self.inspection.as_ref().map(|inspection| inspection.path.display().to_string()),
+        );
+        texts.extend(self.config.gui.output_dir.as_ref().map(|dir| dir.display().to_string()));
+        self.fallbacks.check(ctx, texts.iter().map(String::as_str));
     }
 
     /// Files dropped on the window, pasted, and keys.
@@ -1926,6 +1952,7 @@ impl eframe::App for App {
         }
         self.take_input(&ctx);
         self.pump(&ctx);
+        self.find_fonts(&ctx);
         egui::Panel::left("files")
             .resizable(true)
             .default_size(330.0)
@@ -2397,6 +2424,15 @@ mod tests {
             harness.state_mut().items[0].view.playing = false;
             harness.run_steps(3);
             save(&mut harness, "video");
+        }
+        // names in scripts the window's fonts lack, drawn with the system's
+        let named = dir.path().join("日本語 العربية ภาษาไทย.png");
+        square(&named, [0, 160, 0, 255]);
+        harness.state_mut().add(vec![named]);
+        finish(&mut harness);
+        for _ in 0..200 {
+            harness.step();
+            std::thread::sleep(Duration::from_millis(10));
         }
         harness.state_mut().add(vec![frames]);
         finish(&mut harness);
