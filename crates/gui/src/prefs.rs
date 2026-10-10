@@ -123,6 +123,12 @@ pub fn show(
                 ];
                 segments(ui, &mut config.gui.theme, &themes, |_| Ok(()));
                 ui.end_row();
+                label(ui, "Files", "");
+                let mut reopen = !config.gui.forget_files;
+                if ui.checkbox(&mut reopen, "Reopen the files of last time, with their settings").changed() {
+                    config.gui.forget_files = !reopen;
+                }
+                ui.end_row();
                 label(ui, "Scrolling", "");
                 ui.checkbox(&mut config.gui.smooth_scrolling, "Smooth: ease it over a few frames");
                 ui.end_row();

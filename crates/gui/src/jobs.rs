@@ -10,6 +10,7 @@ use tgradish_core::convert::{Request, convert};
 use tgradish_core::events::{Event, Params};
 use tgradish_core::ffmpeg::CancelToken;
 use tgradish_core::options::Options;
+use tgradish_core::presets::Format;
 use tgradish_core::tgs::{self, Preview, TgsEvent, TgsOptions, TgsRequest};
 use tgradish_core::{Error, telegram};
 use tgradish_tgs::check::Severity;
@@ -127,6 +128,55 @@ pub struct Done {
     pub problems: Vec<Problem>,
     /// `.tgs` results' frames; WebM ones are decoded from the file.
     pub preview: Option<Preview>,
+}
+
+impl Done {
+    /// What a result made earlier is, read from the file, for a window
+    /// that didn't make it; `None` when it is gone.
+    pub fn of_file(path: &Path, format: Format, target: telegram::Target) -> Option<Done> {
+        match format {
+            Format::Webm => {
+                let info = tgradish_core::webm::inspect_file(path).ok()?;
+                let spoofed = matches!(
+                    (info.header_duration, info.content_duration),
+                    (Some(header), Some(content)) if content > header + 0.05
+                );
+                Some(Done {
+                    output: path.to_path_buf(),
+                    bytes: info.file_size,
+                    limit: target.max_bytes(),
+                    lossy: false,
+                    kept: None,
+                    spoofed,
+                    json_bytes: None,
+                    shapes: None,
+                    problems: telegram::check(&info, target).iter().map(problem).collect(),
+                    preview: None,
+                })
+            }
+            Format::Tgs => {
+                let (stats, issues) = tgs::inspect_file(path).ok()?;
+                Some(Done {
+                    output: path.to_path_buf(),
+                    bytes: stats.tgs_bytes.unwrap_or_default() as u64,
+                    limit: tgs::MAX_BYTES,
+                    lossy: false,
+                    kept: None,
+                    spoofed: false,
+                    json_bytes: Some(stats.json_bytes as u64),
+                    shapes: Some((stats.layers, stats.shapes)),
+                    problems: issues
+                        .into_iter()
+                        .map(|issue| Problem {
+                            refused: issue.severity == Severity::Error,
+                            text: issue.message,
+                        })
+                        .collect(),
+                    preview: None,
+                })
+            }
+        }
+    }
 }
 
 #[derive(Debug)]

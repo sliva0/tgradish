@@ -3549,6 +3549,8 @@ dependencies = [
  "raw-window-handle",
  "rfd",
  "rustix 1.1.5",
+ "serde",
+ "serde_json",
  "shlex 2.0.1",
  "skrifa",
  "tempfile",

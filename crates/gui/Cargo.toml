@@ -12,6 +12,8 @@ tgradish-core = { workspace = true, features = ["clipboard"] }
 tgradish-tgs.workspace = true
 
 eframe.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 skrifa.workspace = true
 rfd.workspace = true
 shlex.workspace = true
