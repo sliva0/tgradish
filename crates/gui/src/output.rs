@@ -117,11 +117,14 @@ pub fn webm(frame: &[u8], width: u32, part: Part, sizes: &Sizes) -> egui::ColorI
                         area(from + at * per, from + (at + 1.0) * per, size)
                     }
                     Scaling::Smooth | Scaling::Auto => {
-                        // growing: between the two nearest pixel centres
+                        // growing: between the two nearest pixel centres,
+                        // within the part, which is cropped before scaling
+                        let lowest = from.floor().clamp(0.0, size as f64 - 1.0);
+                        let highest = ((from + used).ceil() - 1.0).clamp(lowest, size as f64 - 1.0);
                         let centre = from + (at + 0.5) * per - 0.5;
-                        let first = centre.floor().clamp(0.0, size as f64 - 1.0);
+                        let first = centre.floor().clamp(lowest, highest);
                         let t = (centre - first).clamp(0.0, 1.0) as f32;
-                        let second_weight = if (first as usize) + 1 < size { t } else { 0.0 };
+                        let second_weight = if first < highest { t } else { 0.0 };
                         (first as usize, vec![1.0 - second_weight, second_weight])
                     }
                 })
@@ -177,38 +180,39 @@ pub fn webm(frame: &[u8], width: u32, part: Part, sizes: &Sizes) -> egui::ColorI
 /// visible in any frame unless `keep_canvas`, and scaled to fill the
 /// 512 x 512 canvas along its longer side, pixel for pixel. Shown on a
 /// smaller canvas of `side`, which keeps the art pixels whole when it can.
-pub fn tgs(
-    frames: &[Vec<u8>],
-    frame: usize,
-    width: u32,
-    part: Part,
-    keep_canvas: bool,
-    side: usize,
-) -> egui::ColorImage {
+/// Left, top, right and bottom of what a `.tgs` result shows of `frames`:
+/// `part`, cut to what is visible in any frame unless `keep_canvas`. Looks
+/// at every pixel of every frame, so the caller keeps it.
+pub fn tgs_bounds(frames: &[Vec<u8>], width: u32, part: Part, keep_canvas: bool) -> [usize; 4] {
     let height = (frames[0].len() / 4) as u32 / width.max(1);
     // a crop may lie outside the picture until it is fixed
     let (width_px, height_px) = (width as usize, height as usize);
-    let (mut x0, mut y0) =
+    let (x0, y0) =
         ((part.x.round() as usize).min(width_px), (part.y.round() as usize).min(height_px));
-    let mut x1 = ((part.x + part.width).round() as usize).clamp(x0, width_px);
-    let mut y1 = ((part.y + part.height).round() as usize).clamp(y0, height_px);
-    if !keep_canvas {
-        // the visible pixels of every frame
-        let (mut left, mut top, mut right, mut bottom) = (x1, y1, x0, y0);
-        for rgba in frames {
-            for y in y0..y1 {
-                for x in x0..x1 {
-                    if rgba[(y * width as usize + x) * 4 + 3] > 0 {
-                        (left, top) = (left.min(x), top.min(y));
-                        (right, bottom) = (right.max(x + 1), bottom.max(y + 1));
-                    }
+    let x1 = ((part.x + part.width).round() as usize).clamp(x0, width_px);
+    let y1 = ((part.y + part.height).round() as usize).clamp(y0, height_px);
+    if keep_canvas {
+        return [x0, y0, x1, y1];
+    }
+    let (mut left, mut top, mut right, mut bottom) = (x1, y1, x0, y0);
+    for rgba in frames {
+        for y in y0..y1 {
+            for x in x0..x1 {
+                if rgba[(y * width_px + x) * 4 + 3] > 0 {
+                    (left, top) = (left.min(x), top.min(y));
+                    (right, bottom) = (right.max(x + 1), bottom.max(y + 1));
                 }
             }
         }
-        if right > left && bottom > top {
-            (x0, y0, x1, y1) = (left, top, right, bottom);
-        }
     }
+    if right > left && bottom > top { [left, top, right, bottom] } else { [x0, y0, x1, y1] }
+}
+
+/// The `.tgs` result of `rgba`, a frame `width` pixels wide: `bounds` of
+/// it scaled to fill the canvas along its longer side, pixel for pixel,
+/// shown on a smaller canvas of `side` that keeps art pixels whole when it
+/// can.
+pub fn tgs(rgba: &[u8], width: u32, [x0, y0, x1, y1]: [usize; 4], side: usize) -> egui::ColorImage {
     let (w, h) = ((x1 - x0).max(1), (y1 - y0).max(1));
     // whole canvas pixels per art pixel, when the canvas is large enough
     let fit = side as f64 / w.max(h) as f64;
@@ -216,7 +220,6 @@ pub fn tgs(
     let (shown_w, shown_h) =
         ((w as f64 * scale).round() as usize, (h as f64 * scale).round() as usize);
     let (left, top) = ((side - shown_w.min(side)) / 2, (side - shown_h.min(side)) / 2);
-    let rgba = &frames[frame.min(frames.len() - 1)];
     let mut pixels = vec![egui::Color32::TRANSPARENT; side * side];
     for y in 0..shown_h.min(side) {
         let sy = y0 + ((y as f64 + 0.5) / scale) as usize;
@@ -275,15 +278,29 @@ mod tests {
     }
 
     #[test]
+    fn blends_only_within_the_crop() {
+        // red, blue, green: the blue one alone, grown, stays blue
+        let row = vec![255, 0, 0, 255, 0, 0, 255, 255, 0, 255, 0, 255];
+        let part = Part { x: 1.0, y: 0.0, width: 1.0, height: 1.0 };
+        let sizes =
+            tgradish_core::convert::sizes(Target::Emoji, Resize::Pad, Scaling::Smooth, (1, 1));
+        let image = webm(&row, 3, part, &sizes);
+        for x in [0, 50, 99] {
+            assert_eq!(image.pixels[50 * 100 + x].to_srgba_unmultiplied(), [0, 0, 255, 255]);
+        }
+    }
+
+    #[test]
     fn fills_the_canvas_with_pixel_art() {
         // 2x1 art, the right pixel transparent: only the red one shows
         let mut art = pair();
         art[7] = 0;
         let part = Part::of(None, (2, 1), (2, 1));
-        let image = tgs(&[art.clone()], 0, 2, part, false, 64);
+        let frames = [art.clone()];
+        let image = tgs(&art, 2, tgs_bounds(&frames, 2, part, false), 64);
         assert_eq!(image.pixels[32 * 64 + 32].to_srgba_unmultiplied(), [255, 0, 0, 255]);
         // with its canvas, the art is twice as wide as high
-        let kept = tgs(&[art], 0, 2, part, true, 64);
+        let kept = tgs(&art, 2, tgs_bounds(&frames, 2, part, true), 64);
         assert_eq!(kept.pixels[8 * 64 + 2], egui::Color32::TRANSPARENT);
         assert_eq!(kept.pixels[32 * 64 + 2].to_srgba_unmultiplied(), [255, 0, 0, 255]);
     }
