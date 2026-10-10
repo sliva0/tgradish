@@ -1099,11 +1099,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
         Format::Tgs => (item.art.ready().map(|art| &art.clip), None, None),
     };
     let target = item.choices.target;
-    let resize = item.choices.webm.resize.unwrap_or(if target.requires_exact_size() {
-        Resize::Pad
-    } else {
-        Resize::Contain
-    });
+    let resize = settings::resize_of(item);
     let filling = (item.format == Format::Webm && resize == Resize::Crop).then(|| {
         let (width, height) = target.box_size();
         f64::from(width) / f64::from(height)
@@ -1134,7 +1130,8 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
                 let frame = clip.index_at(time);
                 let picture = Picture { clip, frame, size, square: false };
                 let ratio = settings::ratio(item.view.aspect, size);
-                let cropping = Cropping { crop: &mut item.choices.crop, ratio, filling };
+                let exact = settings::exact_of(item);
+                let cropping = Cropping { crop: &mut item.choices.crop, ratio, filling, exact };
                 canvas::show(ui, screen, rect, &picture, &mut item.view.input_zoom, Some(cropping));
                 if item.view.inset {
                     let crop = item.choices.crop;
@@ -1143,24 +1140,35 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
                         Format::Webm => {
                             let used = crop.map_or(size, |crop| (crop.width, crop.height));
                             let scaling = item.choices.webm.scaling.unwrap_or(Scaling::Auto);
-                            let mut sizes = convert::sizes(target, resize, scaling, used);
-                            if scaling == Scaling::Auto && sizes.enlarges(used) >= 2.0 {
-                                let part = tgradish_core::options::Crop {
-                                    x: where_.x as u32,
-                                    y: where_.y as u32,
-                                    width: (where_.width.round() as u32).max(1),
-                                    height: (where_.height.round() as u32).max(1),
-                                };
-                                let frames = &clip.frames[..clip.frames.len().min(3)];
-                                if convert::is_pixel_art(frames, clip.width, Some(part)) {
-                                    sizes.scaling = Scaling::Sharp;
+                            // a crop that doesn't suit the exact scale yet is made to
+                            // fit on the next frame
+                            let sizes = match item.choices.webm.exact_scale {
+                                Some(scale) => convert::exact_sizes(target, used, scale).ok(),
+                                None => Some(convert::sizes(target, resize, scaling, used)),
+                            };
+                            if let Some(mut sizes) = sizes {
+                                if scaling == Scaling::Auto
+                                    && item.choices.webm.exact_scale.is_none()
+                                    && sizes.enlarges(used) >= 2.0
+                                {
+                                    let part = tgradish_core::options::Crop {
+                                        x: where_.x as u32,
+                                        y: where_.y as u32,
+                                        width: (where_.width.round() as u32).max(1),
+                                        height: (where_.height.round() as u32).max(1),
+                                    };
+                                    let frames = &clip.frames[..clip.frames.len().min(3)];
+                                    if convert::is_pixel_art(frames, clip.width, Some(part)) {
+                                        sizes.scaling = Scaling::Sharp;
+                                    }
                                 }
+                                let key = inset_key((clip.id, frame, where_, sizes));
+                                let label =
+                                    format!("Result: {} × {} px", sizes.width, sizes.height);
+                                inset.show(ui, rect, key, &label, || {
+                                    output::webm(&clip.frames[frame], clip.width, where_, &sizes)
+                                });
                             }
-                            let key = inset_key((clip.id, frame, where_, sizes));
-                            let label = format!("Result: {} × {} px", sizes.width, sizes.height);
-                            inset.show(ui, rect, key, &label, || {
-                                output::webm(&clip.frames[frame], clip.width, where_, &sizes)
-                            });
                         }
                         Format::Tgs => {
                             let keep = item.choices.tgs.keep_canvas.unwrap_or(false);

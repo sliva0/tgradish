@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use tgradish_core::ffmpeg::FfmpegChoice;
-use tgradish_core::options::{self, Crop, Options, Range};
+use tgradish_core::options::{self, Crop, ExactScale, Options, Range};
 use tgradish_core::presets::Format;
 use tgradish_core::telegram::Target;
 use tgradish_core::tgs::{self, TgsOptions};
@@ -177,6 +177,11 @@ pub struct OptionArgs {
     /// auto, sharp for pixel art made at least twice as large]
     #[arg(long, value_enum, help_heading = "Output")]
     pub scaling: Option<ScalingArg>,
+    /// Scale by exactly N (or 1/N), so input pixels line up with the
+    /// result's; the crop must make 512 pixels on the longer side, or 100 x
+    /// 100 for emoji: with 2, crop 256 pixels.
+    #[arg(long, value_name = "N", help_heading = "Output")]
+    pub exact_scale: Option<ExactScale>,
     /// Seconds to skip at the start of the input.
     #[arg(short = 's', long, value_name = "SECONDS", help_heading = "Output")]
     pub start: Option<f64>,
@@ -298,6 +303,7 @@ impl OptionArgs {
             Format::Tgs => vec![
                 given(self.resize.is_some(), "--resize"),
                 given(self.scaling.is_some(), "--scaling"),
+                given(self.exact_scale.is_some(), "--exact-scale"),
                 given(self.fit.is_some(), "--fit"),
                 given(self.attempts.is_some(), "--attempts"),
                 given(self.fit_range.is_some(), "--fit-range"),
@@ -341,6 +347,7 @@ impl OptionArgs {
             crop: self.crop,
             resize: self.resize.map(Into::into),
             scaling: self.scaling.map(Into::into),
+            exact_scale: self.exact_scale,
             fit: self.fit.map(Into::into),
             attempts: self.attempts,
             fit_range: self.fit_range,
