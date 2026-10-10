@@ -680,6 +680,8 @@ fn time(ui: &mut egui::Ui, item: &mut Item) {
         return;
     }
     section(ui, "Time");
+    // how long the used part lasts
+    let used = item.range().map(|(start, end)| end - start);
     grid(ui, "time", |ui| match item.format {
         Format::Webm => {
             let options = &mut item.choices.webm;
@@ -695,11 +697,24 @@ fn time(ui: &mut egui::Ui, item: &mut Item) {
             );
             ui.vertical(|ui| {
                 preset_segments(ui, &mut options.spoof, Spoof::Auto, &SPOOFS);
-                chosen_hint(ui, options.spoof.unwrap_or(Spoof::Auto), &SPOOFS);
+                let spoof = options.spoof.unwrap_or(Spoof::Auto);
+                chosen_hint(ui, spoof, &SPOOFS);
+                if let Some(used) = used
+                    && spoof == Spoof::Auto
+                    && used > telegram::MAX_SECONDS + 1e-3
+                {
+                    ui.colored_label(
+                        widgets::WARN,
+                        format!(
+                            "⚠ The part used lasts {}, so its duration will be spoofed",
+                            widgets::seconds(used)
+                        ),
+                    );
+                }
                 if options.spoof != Some(Spoof::Never) {
                     ui.horizontal(|ui| {
                         ui.label("Duration written:");
-                        auto_number(ui, &mut options.fake_duration, "0.42069 s", 1.0, |value| {
+                        auto_number(ui, &mut options.fake_duration, "Default", 1.0, |value| {
                             value
                                 .range(0.01..=telegram::MAX_SECONDS)
                                 .speed(0.01)

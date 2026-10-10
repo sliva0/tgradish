@@ -2224,6 +2224,11 @@ mod tests {
     }
 
     fn video(dir: &Path, size: &str) -> Option<PathBuf> {
+        video_of(dir, size, 1)
+    }
+
+    /// A test video of `size` lasting `seconds`.
+    fn video_of(dir: &Path, size: &str, seconds: u32) -> Option<PathBuf> {
         let video = dir.join("clip.mp4");
         let made = std::process::Command::new("ffmpeg")
             .args([
@@ -2232,7 +2237,7 @@ mod tests {
                 "-f",
                 "lavfi",
                 "-i",
-                &format!("testsrc2=s={size}:d=1"),
+                &format!("testsrc2=s={size}:d={seconds}"),
                 "-pix_fmt",
                 "yuv420p",
             ])
@@ -2582,6 +2587,28 @@ mod tests {
         harness.state_mut().about = true;
         harness.run_steps(3);
         save(&mut harness, "about");
+    }
+
+    #[test]
+    fn warns_before_spoofing() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video_of(dir.path(), "64x48", 4) else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        harness.get_by_label_contains("will be spoofed");
+        harness.get_by_label("Default");
+        // cut to 3 seconds, or not spoofed at all: no warning
+        harness.state_mut().items[0].choices.length = Some(3.0);
+        harness.run_steps(2);
+        assert!(harness.query_by_label_contains("will be spoofed").is_none());
+        harness.state_mut().items[0].choices.length = None;
+        harness.state_mut().items[0].choices.webm.spoof =
+            Some(tgradish_core::options::Spoof::Never);
+        harness.run_steps(2);
+        assert!(harness.query_by_label_contains("will be spoofed").is_none());
     }
 
     #[test]
