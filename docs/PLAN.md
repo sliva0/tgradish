@@ -59,7 +59,8 @@ Done on `rewrite-v2`, with CI on Linux and Windows:
   publishing steps for the user in `docs/packaging.md`;
 - T9 probes (`docs/probes.md`): the `.tgs` and WebM rounds are done;
   Telegram's limits (shapes and layers, path tangents and points, 64 KiB
-  video emoji, 60 fps) are in the encoders and checks. Still open: iOS,
+  video emoji, 60 fps) are in the encoders and checks, and the server
+  accepts every Lottie feature, forbidden or not. Still open: iOS,
   and whether every app plays 60 fps WebM. Then the release.
 
 ## Roadmap

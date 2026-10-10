@@ -72,7 +72,12 @@ From <https://core.telegram.org/stickers> and
   strokes, repeaters, time stretching, time remapping, auto-oriented layers.
 
 1.x put a merge paths item (`"ty":"mm"`) in every group and Telegram
-accepted it anyway, so the server doesn't check everything on that list.
+accepted it anyway. T9 found that the server checks nothing on that list:
+a sticker with each of those features was accepted, and @Stickers takes
+them into packs. tlottie draws masks, mattes, solids, stars, gradient
+strokes, repeaters, time remapping and auto-orient, and ignores
+expressions, effects, images, texts, 3D, merge paths and time stretching
+(`docs/probes.md`, fifth round).
 The stickers in `references/pixelart/1x-uploaded/` were accepted in 2022
 with merge paths, strokes, no `"tgs":1` key and non-integer `op` values
 like 39.6. Today the server refuses them, but only for the empty tangents
@@ -721,9 +726,10 @@ The web app there may also replace the "Web page" and "Bot" items under
   round (`tgs-lab sizes`): the large-sticker limit counts shapes and
   layers, not bytes; empty path tangents are refused, which is why 1.x
   stickers are refused now; path points have a cap. WebM: emoji may be
-  at most 64 KiB (tgradish made them 256 KiB), 60 fps is accepted. Still
-  open: how stickers look on iOS, and whether every app plays 60 fps
-  WebM.
+  at most 64 KiB (tgradish made them 256 KiB), 60 fps is accepted. Fifth
+  round (`tgs-lab features`): the server accepts every Lottie feature,
+  forbidden or not; `check` warns about them. Still open: how stickers
+  look on iOS, and whether every app plays 60 fps WebM.
 - **T10:** release as part of tgradish 2.0, which waits for the whole
   roadmap.
 
@@ -731,6 +737,12 @@ Later (2.x):
 - **Encoder:** motion as position keyframes for shaking or bobbing
   sprites; colour orders that avoid fringes (see T4's notes); precomps
   for repeated sprites, palette cycling, if a corpus shows them.
+- **Features Telegram accepts and tlottie draws** (T9's fifth round),
+  each to be measured for size and seams: even-odd fills, which make a
+  checkerboard or dithering from rows and columns instead of a square per
+  cell; repeaters, for rows of equal cells; masks and mattes, for holes;
+  hold keyframes on fill colours (palette cycling) and on opacity; null
+  layers as parents, for whole-sprite motion.
 - **Outlines against the shape limit:** the server limits shapes (24 000,
   layers counting about 9), and a group's outline is one shape however
   many points (up to 8000 under a fill), where its rectangles are one

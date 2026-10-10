@@ -54,7 +54,8 @@ pub struct Stats {
 pub enum Severity {
     /// Telegram refuses the sticker, or some client can't play it.
     Error,
-    /// Against the rules, but Telegram has accepted it before.
+    /// Against the rules, or ignored by Telegram's apps, though Telegram
+    /// accepts it.
     Warning,
 }
 
@@ -65,27 +66,32 @@ pub struct Issue {
     pub message: String,
 }
 
-/// Features Telegram's rules forbid, by the names [`Stats::features`] uses.
-const FORBIDDEN: &[&str] = &[
-    "expressions",
-    "masks",
-    "mattes",
-    "effects",
-    "images",
-    "solids",
-    "texts",
-    "3D layers",
-    "merge paths",
-    "stars",
-    "gradient strokes",
-    "repeaters",
-    "time stretching",
-    "time remapping",
-    "auto-orient",
+/// Lottie features Telegram's rules forbid or its apps ignore, by the names
+/// [`Stats::features`] uses: whether the rules forbid each, and whether
+/// tlottie (the renderer of Android, Desktop and web) draws it. Telegram's
+/// server accepted a sticker with each of them (T9, `docs/probes.md`).
+const FEATURES: &[(&str, bool, bool)] = &[
+    ("expressions", true, false),
+    ("masks", true, true),
+    ("mattes", true, true),
+    ("effects", true, false),
+    ("images", true, false),
+    ("solids", true, true),
+    ("texts", true, false),
+    ("3D layers", true, false),
+    ("merge paths", true, false),
+    ("stars", true, true),
+    ("gradient strokes", true, true),
+    ("repeaters", true, true),
+    ("time stretching", true, false),
+    ("time remapping", true, true),
+    ("auto-orient", true, true),
+    ("blend modes", false, false),
+    ("offset paths", false, false),
+    ("zig-zags", false, false),
+    ("pucker and bloat", false, false),
+    ("twists", false, false),
 ];
-
-/// Accepted in stickers made by pixelart2tgs 1.x despite the rules.
-const TOLERATED: &[&str] = &["merge paths"];
 
 #[derive(Default)]
 struct ShapeCounts {
@@ -278,18 +284,23 @@ fn rules(stats: &Stats) -> Vec<Issue> {
     if stats.fps == 30.0 {
         issues.push(Issue {
             severity: Severity::Warning,
-            message: "30 fps is against the rules, though Telegram accepted it".into(),
+            message: "30 fps: against the rules, but Telegram accepts this".into(),
         });
     }
-    for feature in FORBIDDEN.iter().filter(|feature| stats.features.contains(*feature)) {
-        issues.push(if TOLERATED.contains(feature) {
-            Issue {
-                severity: Severity::Warning,
-                message: format!("{feature} are against the rules, though Telegram accepted them"),
+    for &(feature, forbidden, drawn) in FEATURES {
+        if !stats.features.contains(feature) {
+            continue;
+        }
+        let message = match (forbidden, drawn) {
+            (true, true) => {
+                format!("{feature}: against the rules, but Telegram accepts this")
             }
-        } else {
-            error(format!("Telegram doesn't allow {feature}"))
-        });
+            (true, false) => format!(
+                "{feature}: against the rules; Telegram accepts this, but its apps ignore it"
+            ),
+            (false, _) => format!("{feature}: Telegram's apps ignore this"),
+        };
+        issues.push(Issue { severity: Severity::Warning, message });
     }
     issues
 }
@@ -355,6 +366,9 @@ impl<'a> Walker<'a> {
         if present("parent") {
             features.insert("parenting");
         }
+        if layer.get("bm").and_then(Value::as_f64).is_some_and(|bm| bm != 0.0) {
+            features.insert("blend modes");
+        }
         if ty == 4 {
             let mut counts = ShapeCounts::default();
             if let Some(shapes) = layer.get("shapes").and_then(Value::as_array) {
@@ -419,6 +433,10 @@ impl<'a> Walker<'a> {
                 "rp" => Some("repeaters"),
                 "tm" => Some("trim paths"),
                 "rd" => Some("rounded corners"),
+                "op" => Some("offset paths"),
+                "zz" => Some("zig-zags"),
+                "pb" => Some("pucker and bloat"),
+                "tw" => Some("twists"),
                 _ => None,
             };
             if let Some(feature) = feature {
@@ -564,22 +582,24 @@ mod tests {
             .filter(|issue| issue.severity == Severity::Error)
             .map(|issue| issue.message.as_str())
             .collect();
-        for expected in [
-            "512x256",
-            "25 fps",
-            "200 frames at 25 fps last 8.00 s",
-            "70000 bytes",
-            "165389",
-            "masks",
-            "solids",
-            "expressions",
-        ] {
+        for expected in
+            ["512x256", "25 fps", "200 frames at 25 fps last 8.00 s", "70000 bytes", "165389"]
+        {
             assert!(errors.iter().any(|e| e.contains(expected)), "{expected} in {errors:?}");
         }
-        assert!(
-            issues
-                .iter()
-                .any(|i| i.severity == Severity::Warning && i.message.contains("merge paths"))
+        let warnings: Vec<&str> = issues
+            .iter()
+            .filter(|issue| issue.severity == Severity::Warning)
+            .map(|issue| issue.message.as_str())
+            .collect();
+        assert_eq!(
+            warnings,
+            [
+                "expressions: against the rules; Telegram accepts this, but its apps ignore it",
+                "masks: against the rules, but Telegram accepts this",
+                "solids: against the rules, but Telegram accepts this",
+                "merge paths: against the rules; Telegram accepts this, but its apps ignore it",
+            ]
         );
         assert_eq!(stats.max_keyframes, 2);
         assert_eq!((stats.max_paints_per_layer, stats.max_paint_sources_per_layer), (2, 2));
@@ -598,7 +618,7 @@ mod tests {
             issues,
             [Issue {
                 severity: Severity::Warning,
-                message: "30 fps is against the rules, though Telegram accepted it".into()
+                message: "30 fps: against the rules, but Telegram accepts this".into()
             }]
         );
         let (_, issues) = check(sticker(180).as_bytes(), None).unwrap();

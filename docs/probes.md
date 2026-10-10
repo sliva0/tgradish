@@ -240,3 +240,56 @@ So:
   bytes per frame. Whether every app plays 60 fps stickers smoothly is
   still to be seen.
 - Emoji must be exactly 100x100, as tgradish makes them.
+
+## Fifth round: Lottie features
+
+Telegram's rules say stickers must not use auto-bezier keys, expressions,
+masks, mattes, layer effects, images, solids, texts, 3D layers, merge
+paths, star shapes, gradient strokes, repeaters, time stretching, time
+remapping or auto-oriented layers, yet stickers in the wild use some of
+them. Each probe is a plain blue square with one feature added, so a
+refusal would name the feature; a few features on no list, which the
+encoder could use, are probed too.
+
+```console
+cargo run --release -p tgs-lab -- features references/t9-probes-4
+```
+
+Uploaded 2026-10-10 through Telegram Web: the server accepted all 41, and
+@Stickers took two of them (the image and the alpha matte) into a pack.
+So the server doesn't look at features at all, only at the limits above.
+
+What tlottie (Android, Desktop and web; tgs-lab renders with it) makes of
+them:
+
+| Feature | Rules | tlottie |
+| --- | --- | --- |
+| expression (`wiggle` on the position) | forbidden | ignored: the static value is used |
+| masks: add, subtract, intersect, inverted | forbidden | drawn |
+| mattes: alpha, inverted alpha, luma | forbidden | drawn |
+| effects: slider control, fill | forbidden | ignored |
+| image layer (a PNG asset) | forbidden | not drawn |
+| solid layer | forbidden | drawn |
+| text layer, without glyph shapes | forbidden | not drawn |
+| 3D layer turned about y | forbidden | drawn flat |
+| merge paths (subtract) | forbidden | ignored: both shapes drawn |
+| star, polygon | forbidden | drawn |
+| gradient stroke | forbidden | drawn |
+| repeater | forbidden | drawn |
+| time stretching (`sr` 2) | forbidden | ignored |
+| time remapping | forbidden | drawn |
+| auto-orient | forbidden | drawn |
+| spatial tangents on position keyframes (auto-bezier keys export as these) | forbidden | drawn |
+| ellipse, rounded corners, trim paths, gradient fill | | drawn |
+| dashed stroke | | drawn, but one side of the square is missing |
+| even-odd fill | | drawn |
+| hold keyframes on a fill's colour, on a layer's opacity | | drawn |
+| null layer as parent | | drawn |
+| skew and rotation in a group transform | | drawn |
+| blend mode multiply | | ignored |
+| offset path, zig-zag, pucker and bloat, twist | | ignored |
+| hidden layer, markers | | hidden, fine |
+
+`check` now treats every feature as a warning, saying whether the rules
+forbid it and whether Telegram's apps ignore it. How they look on iOS is
+still to be seen: the probes are in the chat with @Stickers.
