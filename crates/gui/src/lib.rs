@@ -852,8 +852,9 @@ impl App {
             self.actions(ui, id);
             ui.add_space(6.0);
         });
+        let output = self.item(id).map(|item| self.output_for(item));
         let context =
-            settings::Context { presets: &self.presets, config: &self.config, extra_args };
+            settings::Context { presets: &self.presets, config: &self.config, extra_args, output };
         let height = ui.available_height();
         let preview_height =
             (height * self.preview_share).clamp(240.0, (height - 140.0).max(240.0));
@@ -1146,17 +1147,9 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
                                 if scaling == Scaling::Auto
                                     && item.choices.webm.exact_scale.is_none()
                                     && sizes.enlarges(used) >= 2.0
+                                    && output::looks_like_art(clip, where_)
                                 {
-                                    let part = tgradish_core::options::Crop {
-                                        x: where_.x as u32,
-                                        y: where_.y as u32,
-                                        width: (where_.width.round() as u32).max(1),
-                                        height: (where_.height.round() as u32).max(1),
-                                    };
-                                    let frames = &clip.frames[..clip.frames.len().min(3)];
-                                    if convert::is_pixel_art(frames, clip.width, Some(part)) {
-                                        sizes.scaling = Scaling::Sharp;
-                                    }
+                                    sizes.scaling = Scaling::Sharp;
                                 }
                                 let key = inset_key((clip.id, frame, where_, sizes));
                                 let label =

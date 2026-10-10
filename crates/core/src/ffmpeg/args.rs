@@ -121,6 +121,24 @@ fn scale_filters(plan: &Plan) -> Vec<String> {
     }
 }
 
+/// The ffmpeg commands of one encode with `params`, as tgradish runs them
+/// with ffmpeg as a separate program: both passes, or one when lossless.
+/// The built-in ffmpeg does the same. The pass log and the output are
+/// placeholders: tgradish encodes into a folder of its own, then writes
+/// the result.
+pub fn commands(plan: &Plan, params: &Params) -> Vec<Vec<OsString>> {
+    let log = Path::new("tgradish-pass");
+    let output = plan.output.as_path();
+    let with_name = |args: Vec<OsString>| std::iter::once("ffmpeg".into()).chain(args).collect();
+    if params.rate == Rate::Lossless {
+        return vec![with_name(encode_args(plan, params, None, Some(output)))];
+    }
+    vec![
+        with_name(encode_args(plan, params, Some((1, log)), None)),
+        with_name(encode_args(plan, params, Some((2, log)), Some(output))),
+    ]
+}
+
 /// Arguments for one libvpx-vp9 encode. `pass` is the pass number and log
 /// file prefix for two-pass encoding. Without `output` the result is
 /// discarded, as needed for the first pass.

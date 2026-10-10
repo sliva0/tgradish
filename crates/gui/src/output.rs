@@ -35,6 +35,19 @@ impl Part {
     }
 }
 
+/// Whether `part` of `clip` looks like pixel art, as conversions decide
+/// when scaling is automatic.
+pub fn looks_like_art(clip: &crate::media::Clip, part: Part) -> bool {
+    let crop = Crop {
+        x: part.x as u32,
+        y: part.y as u32,
+        width: (part.width.round() as u32).max(1),
+        height: (part.height.round() as u32).max(1),
+    };
+    let frames = &clip.frames[..clip.frames.len().min(3)];
+    tgradish_core::convert::is_pixel_art(frames, clip.width, Some(crop))
+}
+
 /// sRGB channel values in linear light.
 fn to_linear() -> &'static [f32; 256] {
     static TABLE: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();

@@ -3527,6 +3527,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "shlex 2.0.1",
  "tempfile",
  "tgradish-tgs",
  "thiserror 2.0.21",

@@ -562,6 +562,62 @@ mod tests {
         assert!(Cli::try_parse_from(["tgradish", "convert", "a", "--extra-args", "'x"]).is_err());
     }
 
+    /// Options parsed from the flags `options::flags` writes.
+    fn parsed(flags: Vec<String>) -> OptionArgs {
+        let mut args = vec!["tgradish".to_owned(), "convert".into(), "a.mp4".into()];
+        args.extend(flags);
+        let Command::Convert(convert) = Cli::parse_from(args).command else { panic!() };
+        convert.conversion.options
+    }
+
+    #[test]
+    fn writes_flags_that_read_back() {
+        let webm = Options {
+            target: Some(Target::Emoji),
+            crop: Some(Crop { x: 1, y: 2, width: 30, height: 40 }),
+            resize: Some(options::Resize::Pad),
+            scaling: Some(options::Scaling::PixelPerfect),
+            exact_scale: Some("1/2".parse().unwrap()),
+            fit: Some(options::Fit::Crf),
+            attempts: Some(5),
+            fit_range: Some(Range { min: 4.0, max: 40.5 }),
+            start: Some(1.25),
+            length: Some(2.0),
+            fps: Some(24.0),
+            bitrate: Some(600.0),
+            crf: Some(30),
+            speed: Some(options::Speed::Best),
+            lossless: Some(false),
+            spoof: Some(options::Spoof::Never),
+            fake_duration: Some(0.5),
+            title: Some("a pig's \"sticker\"".into()),
+            watermark: Some(false),
+            encoder_options: Some([("tune-content".into(), "screen".into())].into()),
+            extra_args: Some(vec!["-x".into(), "a b".into()]),
+        };
+        assert_eq!(parsed(options::flags(&webm)).to_options(), webm);
+        let tgs = TgsOptions {
+            target: Some(Target::Emoji),
+            start: Some(0.5),
+            length: Some(1.5),
+            long: Some(tgs::Long::Trim),
+            speed: Some(options::Speed::Fast),
+            lossless: Some(true),
+            reductions: Some(vec![tgs::Kind::MergeColours, tgs::Kind::DropFrames]),
+            compromise: Some(tgs::Compromise::Detail),
+            crop: Some(Crop { x: 0, y: 0, width: 8, height: 8 }),
+            keep_canvas: Some(true),
+            pixel_scale: Some(2),
+            tag: Some("run".into()),
+            sheet: Some("4x2".into()),
+            sheet_frames: Some(7),
+            fps: Some(12.5),
+            title: Some("walk".into()),
+            watermark: Some(true),
+        };
+        assert_eq!(parsed(options::flags(&tgs)).to_tgs_options(), tgs);
+    }
+
     #[test]
     fn collects_encoder_options() {
         let cli = Cli::parse_from([

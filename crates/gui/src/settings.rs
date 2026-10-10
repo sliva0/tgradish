@@ -25,6 +25,8 @@ pub struct Context<'a> {
     pub config: &'a Config,
     /// ffmpeg is a separate program, so raw arguments can be passed.
     pub extra_args: bool,
+    /// Where the result goes.
+    pub output: Option<std::path::PathBuf>,
 }
 
 const LABELS: f32 = 128.0;
@@ -201,6 +203,142 @@ pub fn show(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     if item.format == Format::Webm {
         advanced(ui, item, context);
     }
+    commands(ui, item, context);
+}
+
+/// libvpx-vp9 options worth knowing, offered to add with a click.
+const ENCODER_EXAMPLES: [(&str, &str, &str); 7] = [
+    ("tune-content", "screen", "Flat graphics and screen recordings: sharper edges"),
+    ("aq-mode", "2", "Spends bits where the picture is complex"),
+    ("sharpness", "4", "Keeps more fine detail, at some cost in smoothness"),
+    ("arnr-strength", "3", "Less noise reduction across frames"),
+    ("lag-in-frames", "25", "Looks further ahead to spend bits where they count"),
+    ("g", "60", "A keyframe at least every 60 frames"),
+    ("qmax", "50", "Never worse than quality 50 anywhere"),
+];
+
+/// Text in a monospace box that can be selected and copied.
+fn code(ui: &mut egui::Ui, text: &str) {
+    ui.horizontal_top(|ui| {
+        let width = (ui.available_width() - 60.0).max(200.0);
+        let mut shown = text;
+        ui.add(
+            egui::TextEdit::multiline(&mut shown)
+                .code_editor()
+                .desired_rows(1)
+                .desired_width(width),
+        );
+        if ui.small_button("Copy").clicked() {
+            ui.ctx().copy_text(text.to_owned());
+        }
+    });
+}
+
+/// `args` as a shell would take them.
+fn shell_line<S: AsRef<str>>(args: &[S]) -> String {
+    shlex::try_join(args.iter().map(AsRef::as_ref))
+        .unwrap_or_else(|_| args.iter().map(AsRef::as_ref).collect::<Vec<_>>().join(" "))
+}
+
+/// The `tgradish` command that makes the same result, and for WebM the
+/// ffmpeg commands that encode it.
+fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
+    ui.add_space(10.0);
+    egui::CollapsingHeader::new(RichText::new("Commands").strong()).id_salt("commands").show(ui, |ui| {
+        note(ui, "The same conversion on the command line:");
+        let mut args = vec!["tgradish".to_owned(), "convert".into()];
+        if item.sequence {
+            args.push("--sequence".into());
+        }
+        args.extend(item.inputs.iter().map(|path| path.display().to_string()));
+        if let Some(output) = &context.output {
+            args.extend(["-o".into(), output.display().to_string()]);
+        }
+        if item.format == Format::Tgs {
+            args.extend(["--format".into(), "tgs".into()]);
+        }
+        if let Some(preset) = &item.choices.preset {
+            args.extend(["--preset".into(), preset.clone()]);
+        }
+        let choices = &item.choices;
+        args.extend(match item.format {
+            Format::Webm => tgradish_core::options::flags(&choices.webm.clone().merged(&Options {
+                target: Some(choices.target),
+                crop: choices.crop,
+                start: choices.start,
+                length: choices.length,
+                ..Options::default()
+            })),
+            Format::Tgs => tgradish_core::options::flags(&choices.tgs.clone().merged(&tgs::TgsOptions {
+                target: Some(choices.target),
+                crop: choices.crop,
+                start: choices.start,
+                length: choices.length,
+                ..tgs::TgsOptions::default()
+            })),
+        });
+        code(ui, &shell_line(&args));
+        if item.pasted.is_some() {
+            note(ui, "A pasted image is kept in a temporary folder, gone when the window closes");
+        }
+        if item.format != Format::Webm {
+            return;
+        }
+        ui.add_space(6.0);
+        match ffmpeg_commands(item, context) {
+            Ok(lines) => {
+                note(
+                    ui,
+                    if context.extra_args {
+                        "The ffmpeg commands of the first encode; fitting changes the rate, and \
+                         maybe the frame rate, between encodes:"
+                    } else {
+                        "What the built-in ffmpeg does for the first encode, as commands for the \
+                         system's ffmpeg; fitting changes the rate, and maybe the frame rate, \
+                         between encodes:"
+                    },
+                );
+                for line in lines {
+                    code(ui, &line);
+                }
+            }
+            Err(why) => note(ui, format!("No ffmpeg commands: {why}")),
+        }
+    });
+}
+
+fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String> {
+    let video = item.video.ready().ok_or("the input isn't read yet")?;
+    let options = item.choices.webm_options(context.presets, context.config)?;
+    let auto =
+        options.scaling.unwrap_or(Scaling::Auto) == Scaling::Auto && options.exact_scale.is_none();
+    let request = convert::Request {
+        input: item.inputs[0].clone(),
+        output: context.output.clone(),
+        options,
+        overwrite: true,
+        keep_temp: false,
+    };
+    let (mut plan, _) =
+        convert::plan(&request, video.probe.clone()).map_err(|err| err.to_string())?;
+    // as converting decides it, on the input's frames
+    if auto && plan.enlarges() >= 2.0 {
+        let size = (video.probe.width, video.probe.height);
+        let clip = &video.overview;
+        let part = crate::output::Part::of(plan.crop, size, (clip.width, clip.height));
+        if crate::output::looks_like_art(clip, part) {
+            plan.scaling = Scaling::Sharp;
+        }
+    }
+    let params = tgradish_core::fit::first_params(&plan);
+    Ok(tgradish_core::ffmpeg::commands(&plan, &params)
+        .iter()
+        .map(|args| {
+            let words: Vec<String> =
+                args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
+            shell_line(&words)
+        })
+        .collect())
 }
 
 const SCALINGS: [Choice<Scaling>; 4] = [
@@ -890,6 +1028,18 @@ fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                     pairs.push((String::new(), String::new()));
                     changed = true;
                 }
+                ui.horizontal_wrapped(|ui| {
+                    widgets::note(ui, "Examples:");
+                    for (name, value, hint) in ENCODER_EXAMPLES {
+                        if ui.small_button(format!("{name}={value}")).on_hover_text(hint).clicked() {
+                            match pairs.iter_mut().find(|(other, _)| other == name) {
+                                Some(pair) => pair.1 = value.to_owned(),
+                                None => pairs.push((name.to_owned(), value.to_owned())),
+                            }
+                            changed = true;
+                        }
+                    }
+                });
                 if changed {
                     options.encoder_options = (!pairs.is_empty()).then(|| pairs.into_iter().collect());
                 }
