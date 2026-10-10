@@ -21,7 +21,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: cachix/install-nix-action@v31
-      - run: nix flake check -L
+      # fails when flake.lock is missing an input
+      - run: nix flake check -L --no-update-lock-file
       - name: Run the package
         run: |
           nix build .#tgradish
