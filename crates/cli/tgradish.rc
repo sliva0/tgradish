@@ -1,0 +1,4 @@
+// tgradish.exe's manifest (24 is RT_MANIFEST), and the icon Explorer shows
+// for it, made by `cargo xtask icons`
+1 24 "tgradish.exe.manifest"
+1 ICON "assets/tgradish.ico"

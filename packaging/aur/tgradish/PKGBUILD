@@ -56,6 +56,9 @@ package() {
   cd "$pkgname-$pkgver"
   install -Dm755 target/release/tgradish -t "$pkgdir/usr/bin/"
   install -Dm644 crates/cli/assets/tgradish.desktop -t "$pkgdir/usr/share/applications/"
+  for icon in crates/cli/assets/icons/hicolor/*/apps/tgradish.png; do
+    install -Dm644 "$icon" "$pkgdir/usr/share/${icon#crates/cli/assets/}"
+  done
   install -Dm644 README.md -t "$pkgdir/usr/share/doc/$pkgname/"
   install -Dm644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

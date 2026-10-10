@@ -21,7 +21,7 @@ clap = { version = "4.6.7", features = ["derive", "env", "wrap_help"] }
 console = "0.16.6"
 ctrlc = "3.5.2"
 directories = "6.0.0"
-embed-manifest = "1.5.1"
+embed-resource = "3.0.12"
 eframe = { version = "0.36.2", default-features = false, features = ["glow", "wayland", "x11"] }
 flate2 = "1.1.10"
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }

@@ -39,6 +39,9 @@ package() {
   cd "$_pkgname-$pkgver-$CARCH-unknown-linux-gnu"
   install -Dm755 tgradish -t "$pkgdir/usr/bin/"
   install -Dm644 tgradish.desktop -t "$pkgdir/usr/share/applications/"
+  for icon in icons/hicolor/*/apps/tgradish.png; do
+    install -Dm644 "$icon" "$pkgdir/usr/share/$icon"
+  done
   install -Dm644 README.md THIRD-PARTY.txt THIRD-PARTY-CRATES.txt -t "$pkgdir/usr/share/doc/$_pkgname/"
   install -Dm644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   # ffmpeg's and its libraries' licenses, and where their sources are
