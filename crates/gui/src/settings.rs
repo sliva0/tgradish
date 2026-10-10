@@ -672,9 +672,9 @@ fn parse_sheet(sheet: Option<&str>) -> Option<(u32, u32)> {
 
 fn metadata(ui: &mut egui::Ui, item: &mut Item) {
     section(ui, "In the file");
-    let (title, watermark) = match item.format {
-        Format::Webm => (&mut item.choices.webm.title, &mut item.choices.webm.watermark),
-        Format::Tgs => (&mut item.choices.tgs.title, &mut item.choices.tgs.watermark),
+    let title = match item.format {
+        Format::Webm => &mut item.choices.webm.title,
+        Format::Tgs => &mut item.choices.tgs.title,
     };
     grid(ui, "metadata", |ui| {
         label(ui, "Title", "A name stored in the file");
@@ -685,15 +685,6 @@ fn metadata(ui: &mut egui::Ui, item: &mut Item) {
         {
             *title = (!text.is_empty()).then_some(text);
         }
-        ui.end_row();
-        label(ui, "Watermark", "");
-        flag(
-            ui,
-            watermark,
-            true,
-            "Mark it as made by tgradish",
-            "In the file's metadata, never in the picture",
-        );
         ui.end_row();
     });
 }

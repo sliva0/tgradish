@@ -43,6 +43,7 @@ pub struct Launch {
 
 /// Opens the window and runs until it is closed.
 pub fn run(launch: Launch) -> eframe::Result<()> {
+    tgradish_core::mark::set_client(tgradish_core::mark::Client::Window);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("tgradish")
@@ -89,6 +90,9 @@ impl Written {
     }
 }
 
+/// A file's size and modification time, which change when it is written.
+type FileVersion = (u64, Option<std::time::SystemTime>);
+
 /// How many items keep their big frames: the selected one and the last few.
 const KEPT: usize = 3;
 /// How many items read their inputs at once, besides the selected one.
@@ -109,6 +113,9 @@ struct App {
     queue: VecDeque<u64>,
     /// Results this window wrote, which it replaces when making them again.
     written: HashMap<PathBuf, Written>,
+    /// Files found in the way, by their size and time: whether tgradish
+    /// made them, so they may be replaced.
+    marked: std::cell::RefCell<HashMap<PathBuf, (FileVersion, bool)>>,
     screen: Screen,
     prefs: prefs::Prefs,
     inspection: Option<inspect::Inspection>,
@@ -167,6 +174,7 @@ impl App {
             recent: VecDeque::new(),
             queue: VecDeque::new(),
             written: HashMap::new(),
+            marked: Default::default(),
             screen: Screen::default(),
             prefs: prefs::Prefs::default(),
             inspection: None,
@@ -317,20 +325,44 @@ impl App {
             .collect();
         let suffix = format!(".{}.{}", item.choices.target.name(), item.format.extension());
         let own = item.made.as_ref().map(|made| made.job.output.as_path());
-        free_name(&first, &suffix, &claimed, own, item.pasted.is_some())
+        // pasted images all have one name: theirs never replace a file
+        let blocked = |path: &Path| {
+            path.exists() && (item.pasted.is_some() || !self.may_replace(item.id, path))
+        };
+        free_name(&first, &suffix, &claimed, own, &blocked)
     }
 
     /// Whether the item may replace the file at `path`: one it wrote and
-    /// nobody changed since, or any with the setting that allows it.
+    /// nobody changed since, one tgradish made, or any with the setting
+    /// that allows it.
     fn may_replace(&self, item: u64, path: &Path) -> bool {
-        self.config.gui.overwrite
-            || self.written.get(path).is_some_and(|written| {
-                Written::of(item, path).is_some_and(|now| {
-                    now.item == written.item
-                        && now.len == written.len
-                        && now.modified == written.modified
-                })
+        self.config.gui.overwrite || self.wrote(item, path) || self.made_by_tgradish(path)
+    }
+
+    fn wrote(&self, item: u64, path: &Path) -> bool {
+        self.written.get(path).is_some_and(|written| {
+            Written::of(item, path).is_some_and(|now| {
+                now.item == written.item
+                    && now.len == written.len
+                    && now.modified == written.modified
             })
+        })
+    }
+
+    /// Whether tgradish made the file at `path`, by its hidden mark: read
+    /// once for each version of the file.
+    fn made_by_tgradish(&self, path: &Path) -> bool {
+        let Ok(metadata) = std::fs::metadata(path) else { return false };
+        let version = (metadata.len(), metadata.modified().ok());
+        let mut marked = self.marked.borrow_mut();
+        match marked.get(path) {
+            Some(&(seen, made)) if seen == version => made,
+            _ => {
+                let made = tgradish_core::mark::made_by_tgradish(path);
+                marked.insert(path.to_path_buf(), (version, made));
+                made
+            }
+        }
     }
 
     /// Queues the item for converting with its settings as they are now.
@@ -512,11 +544,14 @@ impl App {
                     .map(|options| Plan::Tgs { options }),
             };
             let overwrite = self.may_replace(id, &job.output);
+            // a result of another time, rather than this item's own
+            let replaces = job.output.exists() && !self.wrote(id, &job.output);
             let (inputs, sequence) = (item.inputs.clone(), item.sequence);
             let item = self.item_mut(id).expect("found above");
             let (job, ..) = item.job.as_mut().expect("found above");
             match plan {
                 Ok(plan) => {
+                    job.replaces = replaces;
                     job.start(plan, inputs, sequence, overwrite, ctx);
                     return;
                 }
@@ -1393,6 +1428,9 @@ fn summary(ui: &mut egui::Ui, item: &Item) {
             if done.lossy {
                 widgets::note(ui, "Changed to fit: see Details below");
             }
+            if made.job.replaces {
+                ui.colored_label(widgets::WARN, "⚠ Replaced an earlier result made by tgradish");
+            }
         }
         Status::Failed(message) => {
             ui.colored_label(widgets::BAD, message);
@@ -1478,15 +1516,14 @@ fn reduction(reduction: &tgradish_tgs::reduce::Reduction) -> String {
 }
 
 /// `first`, or the first of `first` numbered before `suffix` (`clip
-/// 2.sticker.webm`) that no other file claims: the item's `own` earlier
-/// result if it is one of them, and for pasted images, which all share a
-/// name, one that doesn't exist yet.
+/// 2.sticker.webm`) that no other item claims and no `blocked` file is
+/// at: the item's `own` earlier result if it is one of them.
 fn free_name(
     first: &Path,
     suffix: &str,
     claimed: &HashSet<&Path>,
     own: Option<&Path>,
-    fresh: bool,
+    blocked: &dyn Fn(&Path) -> bool,
 ) -> PathBuf {
     let name = first.file_name().unwrap_or_default().to_string_lossy().into_owned();
     let stem = name.strip_suffix(suffix).unwrap_or(&name).to_owned();
@@ -1497,11 +1534,12 @@ fn free_name(
             .filter(|path| !claimed.contains(path.as_path()))
     };
     if let Some(own) = own
+        && !blocked(own)
         && names().take(1000).any(|path| path == own)
     {
         return own.to_path_buf();
     }
-    names().find(|path| !fresh || !path.exists()).expect("some name is free")
+    names().find(|path| !blocked(path)).expect("some name is free")
 }
 
 impl eframe::App for App {
@@ -1799,9 +1837,32 @@ mod tests {
         convert(&harness);
         harness.run_steps(2);
         finish(&mut harness);
+        // the result goes next to it, under a number
         let item = &harness.state().items[0];
-        assert!(matches!(item.failed.as_ref().unwrap().job.status, Status::Exists(_)));
+        let made = &item.made.as_ref().unwrap().job;
+        assert_eq!(made.output, dir.path().join("art 2.sticker.tgs"));
+        assert!(made.output.exists() && !made.replaces);
         assert_eq!(std::fs::read(&output).unwrap(), b"mine");
+    }
+
+    #[test]
+    fn replaces_results_tgradish_made_earlier() {
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        let output = dir.path().join("art.sticker.tgs");
+        // made by an earlier window, which this one knows nothing of
+        for earlier in [true, false] {
+            let mut harness = harness(Config::default());
+            harness.state_mut().add(vec![art.clone()]);
+            finish(&mut harness);
+            convert(&harness);
+            harness.run_steps(2);
+            finish(&mut harness);
+            let made = &harness.state().items[0].made.as_ref().unwrap().job;
+            assert_eq!(made.output, output);
+            assert_eq!(made.replaces, !earlier);
+        }
     }
 
     #[test]
@@ -1990,15 +2051,17 @@ mod tests {
         let second = dir.path().join("clipboard 2.sticker.tgs");
         let none = HashSet::new();
         let suffix = ".sticker.tgs";
-        assert_eq!(free_name(&first, suffix, &none, None, true), first);
-        // pasted images all have the same name, so they take new ones
+        let existing = |path: &Path| path.exists();
+        let free = |_: &Path| false;
+        assert_eq!(free_name(&first, suffix, &none, None, &existing), first);
+        // a file in the way that may not be replaced
         std::fs::write(&first, b"").unwrap();
-        assert_eq!(free_name(&first, suffix, &none, None, true), second);
-        assert_eq!(free_name(&first, suffix, &none, None, false), first);
+        assert_eq!(free_name(&first, suffix, &none, None, &existing), second);
+        assert_eq!(free_name(&first, suffix, &none, None, &free), first);
         // another file's name is taken; an item's own stays its own
         let claimed = HashSet::from([first.as_path()]);
-        assert_eq!(free_name(&first, suffix, &claimed, None, false), second);
-        assert_eq!(free_name(&first, suffix, &none, Some(&second), false), second);
-        assert_eq!(free_name(&first, suffix, &claimed, Some(&first), false), second);
+        assert_eq!(free_name(&first, suffix, &claimed, None, &free), second);
+        assert_eq!(free_name(&first, suffix, &none, Some(&second), &free), second);
+        assert_eq!(free_name(&first, suffix, &claimed, Some(&first), &free), second);
     }
 }
