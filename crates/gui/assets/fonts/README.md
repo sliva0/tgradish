@@ -6,8 +6,9 @@ European languages use: Latin with all its extensions (Vietnamese too),
 Greek with polytonic Greek, Cyrillic with its supplements, combining
 accents (macOS writes accented names decomposed), and punctuation,
 currency, arrows, number forms and maths. Text falls back from one font
-to the other, so a character either has shows. Scripts neither font ever
-had, like CJK, Arabic or Hebrew, and emoji show as boxes. The icon font
+to the other, so a character either has shows. Scripts neither font
+has, like CJK, Arabic or Hebrew, are drawn with the system's fonts when
+it has them (see `src/fallback.rs`); colour emoji can't be. The icon font
 keeps the symbols the window uses. Hinting is dropped: egui doesn't use
 it.
 
