@@ -45,10 +45,11 @@ pub(crate) fn video_filter(plan: &Plan, fps: f64, length: f64, pix_fmt: &str) ->
         vec![format!("fps={}", num(fps)), format!("trim=end_frame={}", frame_count(length, fps))];
     if let Some(crop) = plan.crop {
         // in display pixels, which differ from stored ones by the sample
-        // aspect ratio
+        // aspect ratio; exact, or odd sizes and places are rounded to the
+        // chroma planes' (a 1x1 crop to nothing)
         let (width, height) = (plan.source.width, plan.source.height);
         filters.push(format!(
-            "crop=w=iw*{}/{width}:h=ih*{}/{height}:x=iw*{}/{width}:y=ih*{}/{height}",
+            "crop=w=iw*{}/{width}:h=ih*{}/{height}:x=iw*{}/{width}:y=ih*{}/{height}:exact=1",
             crop.width, crop.height, crop.x, crop.y
         ));
     }

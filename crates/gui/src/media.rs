@@ -278,7 +278,7 @@ impl Video {
 }
 
 impl Video {
-    /// The frame at `time`, at full size.
+    /// The frame shown at `time`, at full size.
     pub fn load_still(
         &self,
         ctx: &egui::Context,
@@ -289,9 +289,12 @@ impl Video {
         let probe = self.probe.clone();
         Task::spawn(ctx, move |cancel| {
             let fps = probe.fps.unwrap_or(25.0);
+            // from just before the frame starts: reading from `time`
+            // would skip to the next one
+            let start = (((time * fps + 1e-6).floor() - 0.25) / fps).max(0.0);
             let request = FramesRequest {
-                start: time,
-                length: Some(1.5 / fps),
+                start,
+                length: Some(1.0 / fps),
                 fps,
                 max_side: probe.width.max(probe.height),
                 max_frames: 1,

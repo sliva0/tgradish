@@ -18,6 +18,12 @@ pub struct Screen {
 }
 
 impl Screen {
+    /// The clip whose frame is shown.
+    #[cfg(test)]
+    pub fn showing(&self) -> Option<u64> {
+        self.shows.map(|(clip, _)| clip)
+    }
+
     fn texture(&mut self, ctx: &egui::Context, clip: &Clip, index: usize) -> egui::TextureId {
         let options = if clip.pixelated {
             egui::TextureOptions::NEAREST
