@@ -30,7 +30,7 @@ fn grid(ui: &mut egui::Ui, id: &str, rows: impl FnOnce(&mut egui::Ui)) {
 }
 
 /// The built-in presets in the order of their speed, then the user's own.
-fn preset_names(presets: &Presets) -> Vec<(String, Result<String, String>)> {
+pub fn preset_names(presets: &Presets) -> Vec<(String, Result<String, String>)> {
     const BUILTIN: [&str; 3] = ["fast", "balanced", "best"];
     let mut names: Vec<(String, Result<String, String>)> = presets
         .iter()
@@ -61,7 +61,7 @@ fn builtin(name: &str, format: Format) -> Option<&'static str> {
     })
 }
 
-fn capitalised(name: &str) -> String {
+pub fn capitalised(name: &str) -> String {
     let mut chars = name.chars();
     chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
