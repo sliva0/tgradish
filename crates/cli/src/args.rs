@@ -248,6 +248,11 @@ pub struct OptionArgs {
     /// all]
     #[arg(long, value_enum, value_delimiter = ',', help_heading = TGS)]
     pub reductions: Vec<KindArg>,
+    /// What fitting gives up first: motion (frames merged and dropped, full
+    /// detail), detail (smooth motion, a coarser picture), or auto, whatever
+    /// changes the art least. [default: auto]
+    #[arg(long, value_enum, help_heading = TGS)]
+    pub compromise: Option<CompromiseArg>,
     /// Keep the input's canvas instead of cropping to the visible pixels.
     #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
           default_missing_value = "true", help_heading = TGS)]
@@ -277,6 +282,7 @@ impl OptionArgs {
             Format::Webm => vec![
                 given(self.long.is_some(), "--long"),
                 given(!self.reductions.is_empty(), "--reductions"),
+                given(self.compromise.is_some(), "--compromise"),
                 given(self.keep_canvas.is_some(), "--keep-canvas"),
                 given(self.pixel_scale.is_some(), "--pixel-scale"),
                 given(self.tag.is_some(), "--tag"),
@@ -309,6 +315,7 @@ impl OptionArgs {
             lossless: self.lossless,
             reductions: (!self.reductions.is_empty())
                 .then(|| self.reductions.iter().map(|&kind| kind.into()).collect()),
+            compromise: self.compromise.map(Into::into),
             crop: self.crop,
             keep_canvas: self.keep_canvas,
             pixel_scale: self.pixel_scale,
@@ -393,6 +400,7 @@ value_enum!(KindArg => tgs::Kind {
     Despeckle,
     Downscale,
 });
+value_enum!(CompromiseArg => tgs::Compromise { Auto, Motion, Detail });
 
 #[derive(Debug, Args)]
 pub struct SpoofArgs {
@@ -493,6 +501,8 @@ mod tests {
             "20",
             "--reductions",
             "merge-colours,drop-frames",
+            "--compromise",
+            "motion",
             "--keep-canvas",
             "--fps",
             "12",
@@ -500,9 +510,13 @@ mod tests {
         let Command::Convert(args) = cli.command else { panic!() };
         let options = &args.conversion.options;
         assert_eq!(options.foreign(Format::Tgs), ["--crf"]);
-        assert_eq!(options.foreign(Format::Webm), ["--reductions", "--keep-canvas"]);
+        assert_eq!(
+            options.foreign(Format::Webm),
+            ["--reductions", "--compromise", "--keep-canvas"]
+        );
         let tgs = options.to_tgs_options();
         assert_eq!(tgs.reductions.unwrap(), [tgs::Kind::MergeColours, tgs::Kind::DropFrames]);
+        assert_eq!(tgs.compromise, Some(tgs::Compromise::Motion));
         assert_eq!((tgs.keep_canvas, tgs.fps), (Some(true), Some(12.0)));
     }
 
