@@ -1,6 +1,6 @@
 //! Checks any Lottie JSON against Telegram's sticker rules, the limits
-//! its server has beyond them and the parse limits of tlottie, Telegram's
-//! renderer. Shapes, paints and their sources are counted the way tlottie's
+//! its server has beyond them, Telegram Desktop's limit on JSON and the
+//! parse limits of tlottie, Telegram's renderer. Shapes, paints and their sources are counted the way tlottie's
 //! parser counts them (`src/composition/parse.rs`).
 
 use std::collections::{BTreeSet, HashMap};
@@ -8,7 +8,7 @@ use std::collections::{BTreeSet, HashMap};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::limits::{TLOTTIE, telegram};
+use crate::limits::{MAX_RAW_JSON, TLOTTIE, telegram};
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -24,11 +24,18 @@ pub struct Stats {
     /// All layers, including those of precomps.
     pub layers: usize,
     pub painted_shape_layers: usize,
+    /// In all layers, counted like `max_shapes_per_layer`.
+    pub shapes: usize,
     pub max_shapes_per_layer: usize,
     pub max_paints_per_layer: usize,
     pub max_paint_sources_per_layer: usize,
     pub max_path_points: usize,
+    /// Path vertices one fill or stroke paints: those of the paths before
+    /// it in its group, nested groups included.
+    pub max_paint_points: usize,
     pub max_path_coordinate: f64,
+    /// Paths with an empty tangent (`[]`), as pixelart2tgs 1.x wrote them.
+    pub empty_tangent_paths: usize,
     pub max_keyframes: usize,
     pub assets: usize,
     /// Layers once precomps are expanded where they are used.
@@ -190,11 +197,18 @@ fn rules(stats: &Stats) -> Vec<Issue> {
     if (stats.width, stats.height) != (canvas, canvas) {
         fail(format!("the canvas is {}x{}, stickers are 512x512", stats.width, stats.height));
     }
-    if stats.fps != f64::from(telegram::FPS) {
+    // T9: 30 fps was accepted too, and the limit is in seconds
+    if stats.fps != f64::from(telegram::FPS) && stats.fps != 30.0 {
         fail(format!("{} fps, stickers are 60 fps", stats.fps));
     }
-    if stats.frames > f64::from(telegram::MAX_FRAMES) {
-        fail(format!("{} frames, at most 180 (3 seconds) are allowed", stats.frames));
+    let max_seconds = f64::from(telegram::MAX_FRAMES) / f64::from(telegram::FPS);
+    if stats.fps > 0.0 && stats.frames / stats.fps > max_seconds + 1e-9 {
+        fail(format!(
+            "{} frames at {} fps last {:.2} s, at most {max_seconds} s are allowed",
+            stats.frames,
+            stats.fps,
+            stats.frames / stats.fps
+        ));
     }
     if stats.frames <= 0.0 {
         fail("the animation has no frames".into());
@@ -202,16 +216,39 @@ fn rules(stats: &Stats) -> Vec<Issue> {
     if let Some(bytes) = stats.tgs_bytes.filter(|&bytes| bytes > telegram::MAX_BYTES) {
         fail(format!("the file is {bytes} bytes, at most {} are allowed", telegram::MAX_BYTES));
     }
+    let cost = telegram::cost(stats.shapes, stats.layers);
+    if cost > telegram::MAX_COST {
+        fail(format!(
+            "{} shapes in {} layers count {cost}, a layer as {}; Telegram takes at most {}",
+            stats.shapes,
+            stats.layers,
+            telegram::LAYER_COST,
+            telegram::MAX_COST
+        ));
+    }
     // Telegram's own limits are below tlottie's for these
     let server = [
-        ("bytes of JSON", stats.json_bytes, telegram::MAX_JSON),
         ("layers", stats.layers, telegram::MAX_LAYERS),
         ("shapes in a layer", stats.max_shapes_per_layer, telegram::MAX_SHAPES_PER_LAYER),
+        ("path points under one fill", stats.max_paint_points, telegram::MAX_PAINT_POINTS),
     ];
     for (what, count, limit) in server {
         if count > limit {
             fail(format!("{count} {what}; Telegram takes at most {limit}"));
         }
+    }
+    if stats.empty_tangent_paths > 0 {
+        fail(format!(
+            "{} paths have empty tangents (`[]`, as pixelart2tgs 1.x wrote them); Telegram \
+             refuses those now, `[0,0]` works",
+            stats.empty_tangent_paths
+        ));
+    }
+    if stats.json_bytes > MAX_RAW_JSON {
+        fail(format!(
+            "{} bytes of JSON; Telegram Desktop plays at most {MAX_RAW_JSON}",
+            stats.json_bytes
+        ));
     }
     let limits = [
         ("fills and strokes in a layer", stats.max_paints_per_layer, TLOTTIE.max_paints_per_layer),
@@ -237,6 +274,12 @@ fn rules(stats: &Stats) -> Vec<Issue> {
             "a path point at {}; Telegram's renderer allows up to {}",
             stats.max_path_coordinate, TLOTTIE.max_path_coordinate_abs
         ));
+    }
+    if stats.fps == 30.0 {
+        issues.push(Issue {
+            severity: Severity::Warning,
+            message: "30 fps is against the rules, though Telegram accepted it".into(),
+        });
     }
     for feature in FORBIDDEN.iter().filter(|feature| stats.features.contains(*feature)) {
         issues.push(if TOLERATED.contains(feature) {
@@ -318,6 +361,7 @@ impl<'a> Walker<'a> {
                 self.shapes(shapes, &mut counts, 0);
             }
             let stats = &mut self.stats;
+            stats.shapes += counts.items;
             stats.max_shapes_per_layer = stats.max_shapes_per_layer.max(counts.items);
             stats.max_paints_per_layer = stats.max_paints_per_layer.max(counts.paints);
             stats.max_paint_sources_per_layer =
@@ -330,23 +374,26 @@ impl<'a> Walker<'a> {
 
     /// One list of shape items. A paint covers the geometry before it in
     /// its list, and a group counts as one piece of geometry in its parent.
-    fn shapes(&mut self, items: &[Value], counts: &mut ShapeCounts, depth: usize) {
+    /// Returns the path points in the list, groups inside it included,
+    /// which a paint after the list's group paints too.
+    fn shapes(&mut self, items: &[Value], counts: &mut ShapeCounts, depth: usize) -> usize {
         self.stats.group_depth = self.stats.group_depth.max(depth);
-        let mut sources = 0;
+        let (mut sources, mut points) = (0, 0);
         for item in items {
             counts.items += 1;
             let ty = item.get("ty").and_then(Value::as_str).unwrap_or("");
             let feature = match ty {
                 "gr" => {
                     let children = item.get("it").and_then(Value::as_array);
-                    self.shapes(children.map_or(&[][..], Vec::as_slice), counts, depth + 1);
+                    points +=
+                        self.shapes(children.map_or(&[][..], Vec::as_slice), counts, depth + 1);
                     sources += 1;
                     None
                 }
                 "rc" | "el" | "sh" | "sr" => {
                     sources += 1;
                     if ty == "sh" {
-                        self.path(item);
+                        points += self.path(item);
                     }
                     match ty {
                         "el" => Some("ellipses"),
@@ -357,6 +404,7 @@ impl<'a> Walker<'a> {
                 "fl" | "st" | "gf" | "gs" => {
                     counts.paints += 1;
                     counts.paint_sources += sources;
+                    self.stats.max_paint_points = self.stats.max_paint_points.max(points);
                     if item.get("r").and_then(Value::as_f64) == Some(2.0) {
                         self.stats.features.insert("even-odd fills");
                     }
@@ -377,9 +425,12 @@ impl<'a> Walker<'a> {
                 self.stats.features.insert(feature);
             }
         }
+        points
     }
 
-    fn path(&mut self, item: &Value) {
+    /// Reads a path; returns its vertices, of its largest keyframe when
+    /// it is animated.
+    fn path(&mut self, item: &Value) -> usize {
         let shape = item.get("ks").and_then(|ks| ks.get("k"));
         // a static shape, or the start and end shapes of keyframes
         let shapes: Vec<&Value> = match shape {
@@ -393,6 +444,16 @@ impl<'a> Walker<'a> {
             None => Vec::new(),
         };
         let stats = &mut self.stats;
+        let empty_tangent = shapes.iter().any(|shape| {
+            ["i", "o"].iter().any(|name| {
+                let tangents = shape.get(*name).and_then(Value::as_array);
+                tangents.into_iter().flatten().any(|t| t.as_array().is_some_and(Vec::is_empty))
+            })
+        });
+        stats.empty_tangent_paths += usize::from(empty_tangent);
+        let vertices =
+            |shape: &&Value| shape.get("v").and_then(Value::as_array).map_or(0, Vec::len);
+        let points = shapes.iter().map(vertices).max().unwrap_or(0);
         for shape in shapes {
             // vertices and both tangents
             for name in ["v", "i", "o"] {
@@ -404,6 +465,7 @@ impl<'a> Walker<'a> {
                 }
             }
         }
+        points
     }
 
     /// Layers counted once for every place a precomp is used, up to just
@@ -479,6 +541,7 @@ mod tests {
         assert_eq!((stats.layers, stats.painted_shape_layers), (3, 2));
         // 2 groups + 5 rectangles + 2 fills + 2 transforms
         assert_eq!(stats.max_shapes_per_layer, 11);
+        assert_eq!(stats.shapes, 11 + 4);
         assert_eq!((stats.max_paints_per_layer, stats.max_paint_sources_per_layer), (2, 5));
         assert_eq!(
             (stats.width, stats.height, stats.fps, stats.frames),
@@ -489,7 +552,7 @@ mod tests {
 
     #[test]
     fn finds_broken_rules() {
-        let json = br#"{"fr":30,"ip":0,"op":200,"w":512,"h":256,"layers":[
+        let json = br#"{"fr":25,"ip":0,"op":200,"w":512,"h":256,"layers":[
             {"ty":4,"masksProperties":[{}],"shapes":[{"ty":"gr","it":[
                 {"ty":"sh","ks":{"k":{"v":[[0,0],[200000,1]]}}},{"ty":"mm"},
                 {"ty":"st"},{"ty":"fl"},{"ty":"tr"}]}]},
@@ -503,8 +566,8 @@ mod tests {
             .collect();
         for expected in [
             "512x256",
-            "30 fps",
-            "200 frames",
+            "25 fps",
+            "200 frames at 25 fps last 8.00 s",
             "70000 bytes",
             "165389",
             "masks",
@@ -521,6 +584,92 @@ mod tests {
         assert_eq!(stats.max_keyframes, 2);
         assert_eq!((stats.max_paints_per_layer, stats.max_paint_sources_per_layer), (2, 2));
         assert!(stats.features.contains("strokes") && stats.features.contains("keyframes"));
+    }
+
+    #[test]
+    fn takes_30_fps_for_3_seconds() {
+        let sticker = |op: u32| {
+            format!(
+                r#"{{"fr":30,"ip":0,"op":{op},"w":512,"h":512,"layers":[{{"ty":4,"shapes":[]}}]}}"#
+            )
+        };
+        let (_, issues) = check(sticker(90).as_bytes(), None).unwrap();
+        assert_eq!(
+            issues,
+            [Issue {
+                severity: Severity::Warning,
+                message: "30 fps is against the rules, though Telegram accepted it".into()
+            }]
+        );
+        let (_, issues) = check(sticker(180).as_bytes(), None).unwrap();
+        assert!(issues.iter().any(
+            |issue| issue.severity == Severity::Error && issue.message.contains("last 6.00 s")
+        ));
+    }
+
+    #[test]
+    fn finds_the_limits_of_telegrams_server() {
+        let errors = |animation: &Animation| -> Vec<String> {
+            let json = animation.to_json(Style::default());
+            let (_, issues) = check(json.as_bytes(), None).unwrap();
+            issues.into_iter().map(|issue| issue.message).collect()
+        };
+        let layer = |rects| Layer {
+            from: 0,
+            to: 60,
+            transform: Transform { position: [0.0, 0.0], scale: 1.0 },
+            items: vec![group(rects)],
+        };
+        let animation = |layers, rects| Animation {
+            name: None,
+            ticks: 60,
+            layers: (0..layers).map(|_| layer(rects)).collect(),
+        };
+        // 6 layers of 4003 shapes: 24 018, with the layers 24 072
+        assert_eq!(
+            errors(&animation(6, 4000)),
+            ["24018 shapes in 6 layers count 24072, a layer as 9; Telegram takes at most 24000"]
+        );
+        assert_eq!(errors(&animation(6, 3980)), Vec::<String>::new());
+        let named = Animation { name: Some("x".repeat(MAX_RAW_JSON)), ..animation(1, 1) };
+        assert!(errors(&named)[0].contains("Telegram Desktop plays at most"));
+
+        let path = |tangent: &str| {
+            format!(
+                r#"{{"fr":60,"ip":0,"op":10,"w":512,"h":512,"layers":[{{"ty":4,"shapes":[{{"ty":"sh","ks":{{"k":{{"v":[[0,0],[1,0],[1,1]],"i":[{tangent},{tangent},{tangent}],"o":[[0,0],[0,0],[0,0]]}}}}}}]}}]}}"#
+            )
+        };
+        let (stats, issues) = check(path("[]").as_bytes(), None).unwrap();
+        assert_eq!(stats.empty_tangent_paths, 1);
+        assert!(issues.iter().any(|issue| issue.message.contains("empty tangents")), "{issues:?}");
+        let (stats, issues) = check(path("[0,0]").as_bytes(), None).unwrap();
+        assert_eq!((stats.empty_tangent_paths, issues), (0, Vec::new()));
+
+        // 6 paths of 1334 points, 1335 as written: one fill paints 8010
+        // of them, or each of three paints 2670
+        let points: Vec<[f64; 2]> =
+            (0..1334).map(|i| [f64::from(i % 2), f64::from(i / 2)]).collect();
+        let group = |paths: usize| {
+            let mut items = vec![Item::Path(points.clone()); paths];
+            items.push(Item::Fill { colour: [1, 2, 3, 255], rule: FillRule::NonZero });
+            items.push(Item::GroupTransform);
+            Item::Group(items)
+        };
+        let one_fill = Animation {
+            name: None,
+            ticks: 60,
+            layers: vec![Layer { items: vec![group(6)], ..layer(0) }],
+        };
+        assert_eq!(
+            errors(&one_fill),
+            ["8010 path points under one fill; Telegram takes at most 8000"]
+        );
+        let three_fills = Animation {
+            name: None,
+            ticks: 60,
+            layers: vec![Layer { items: vec![group(2), group(2), group(2)], ..layer(0) }],
+        };
+        assert_eq!(errors(&three_fills), Vec::<String>::new());
     }
 
     #[test]

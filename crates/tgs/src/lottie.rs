@@ -3,7 +3,8 @@
 //! The default output has only what pixelart2tgs 1.x's stickers (accepted
 //! by Telegram) had, plus rectangles without a corner radius, which both
 //! renderers draw correctly; Telegram accepted it in the T9 upload probes.
-//! [`Style`] adds optional fields back, for the probes.
+//! Paths have zero tangents where 1.x's were empty, which Telegram now
+//! refuses. [`Style`] adds optional fields back, for the probes.
 
 use std::fmt::Write;
 
@@ -152,9 +153,10 @@ fn write_items(out: &mut String, items: &[Item], style: Style) {
                 out.push('}');
             }
             Item::Path(points) => {
-                // the 1.x format: no "c", the first point repeated to close
-                // the outline, empty tangents (rlottie misdraws paths
-                // without them)
+                // like 1.x: no "c", the first point repeated to close the
+                // outline; but zero tangents, since Telegram's server now
+                // refuses 1.x's empty ones (and rlottie misdraws paths
+                // without any)
                 let mut vertices = String::new();
                 for &[x, y] in points.iter().chain(points.first()) {
                     if !vertices.is_empty() {
@@ -162,7 +164,7 @@ fn write_items(out: &mut String, items: &[Item], style: Style) {
                     }
                     write!(vertices, "[{},{}]", number(x, 6), number(y, 6)).unwrap();
                 }
-                let tangents = vec!["[]"; points.len() + 1].join(",");
+                let tangents = vec!["[0,0]"; points.len() + 1].join(",");
                 write!(
                     out,
                     "{{\"ty\":\"sh\",\"ks\":{{\"k\":{{\"i\":[{tangents}],\"o\":[{tangents}],\"v\":[{vertices}]}}}}}}"
@@ -281,7 +283,7 @@ mod tests {
         let json = animation.to_json(Style::default());
         assert_eq!(
             json,
-            r#"{"v":"5.7.2","fr":60,"ip":0,"op":30,"w":512,"h":512,"nm":"made with \"tgradish\"","layers":[{"ty":4,"ks":{"p":{"k":[6,0]},"s":{"k":[1000,1000]}},"ip":0,"op":30,"shapes":[{"ty":"gr","it":[{"ty":"rc","p":{"k":[1.5,2]},"s":{"k":[3,4]}},{"ty":"sh","ks":{"k":{"i":[[],[],[],[]],"o":[[],[],[],[]],"v":[[0,0],[1,0],[1,1],[0,0]]}}},{"ty":"fl","c":{"k":[1,0,0.201]},"o":{"k":50.3},"r":2},{"ty":"tr"}]}]}]}"#
+            r#"{"v":"5.7.2","fr":60,"ip":0,"op":30,"w":512,"h":512,"nm":"made with \"tgradish\"","layers":[{"ty":4,"ks":{"p":{"k":[6,0]},"s":{"k":[1000,1000]}},"ip":0,"op":30,"shapes":[{"ty":"gr","it":[{"ty":"rc","p":{"k":[1.5,2]},"s":{"k":[3,4]}},{"ty":"sh","ks":{"k":{"i":[[0,0],[0,0],[0,0],[0,0]],"o":[[0,0],[0,0],[0,0],[0,0]],"v":[[0,0],[1,0],[1,1],[0,0]]}}},{"ty":"fl","c":{"k":[1,0,0.201]},"o":{"k":50.3},"r":2},{"ty":"tr"}]}]}]}"#
         );
         serde_json::from_str::<serde_json::Value>(&json).unwrap();
         let bare = Style { tgs_key: true, layer_start: false, rect_roundness: false };

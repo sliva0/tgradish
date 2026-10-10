@@ -115,7 +115,128 @@ Uploaded 2026-10-08 through Telegram Web:
 | 20 paths of 4000 points, 962 KB | | refused |
 | `susie_fortnite` as tgradish encodes it: 49 layers, 7716 shapes | accepted | |
 
-So the server has limits like a parser's: about 1 MB of JSON (names may
-not count), at most 1500 to 2000 layers and 4096 shapes in a layer.
-tgradish now keeps under 1 000 000 bytes, 1500 layers and 4096 shapes
-(`limits::telegram`), and `inspect` reports files over them.
+So the server has limits like a parser's: at most 1500 to 2000 layers and
+4096 shapes in a layer, and something near 1 MB of rectangles. Round 3
+found that this last one counts shapes and layers, not bytes, and that the
+paths were refused for their empty tangents, not their length.
+
+## Third round: what the limits count
+
+The second round left open whether the limit near 1 MB counts bytes or
+something else, and why paths were refused with less JSON. Each probe here
+is made so the candidates (bytes, numbers, arrays, objects, shapes,
+layers, points) disagree about it, and later probes narrowed what was left.
+Also: the packed size, exactly.
+
+```console
+X=references/pixelart/1x-uploaded
+cargo run --release -p tgs-lab -- sizes references/t9-probes-3 \
+  $X/banana.tgs $X/Kris_battle.tgs
+```
+
+Uploaded the same way as round 2. Not every file was uploaded: the
+ladders stopped once the answer was clear.
+
+### Results
+
+Uploaded 2026-10-10 through Telegram Web:
+
+| Probe | Shapes | Layers | Result |
+| --- | ---: | ---: | --- |
+| `packed-65536`: 01 packed to exactly 64 KiB by a long name | | | accepted |
+| `packed-65537` | | | refused |
+| `boards-in-turn-101` (1 MB of JSON) | 20 503 | 101 | accepted |
+| `boards-in-turn-100-long-sizes`: the accepted round 2 probe, sizes written as `1.00001` (1.24 MB) | 20 300 | 100 | accepted |
+| `boards-in-turn-110`, `-115` (1.15 MB) | 22 330, 23 345 | 110, 115 | accepted |
+| `boards-in-turn-116`, `-117`, `-118` | 23 548 and up | 116 and up | refused |
+| `groups-5000`: one square per group, 1000 groups to a layer | 20 000 | 5 | accepted |
+| `groups-5800` | 23 200 | 6 | accepted |
+| `groups-6500` (790 KB) | 26 000 | 7 | refused |
+| `layers-1000-and-boards-50`, `-55`: layers of one square and of 200 | 14 150, 15 165 | 1050, 1055 | accepted |
+| `layers-1000-and-boards-60` | 16 180 | 1060 | refused |
+| `layers-1400-and-boards-74`, `layers-1300-and-boards-83`, `layers-1000-and-boards-95` | 20 622 to 23 285 | 1095 to 1474 | refused |
+| `layers-1750`: one square each | 7000 | 1750 | refused |
+| `path-4`, `paths-1`, `paths-8`, `short-paths-170`: paths with empty tangents, as 1.x and round 2 wrote them | | | refused, even 4 points |
+| `path-standard`: `"c":true`, `[0,0]` tangents, no repeated point | | | accepted |
+| `path-empty-tangents`: the same with `[]` tangents | | | refused |
+| `path-no-c`, `path-repeated-point`: the same without `c`, or with the first point repeated | | | accepted |
+| `path-4000-standard`: one path of 4000 points | | | accepted |
+| `paths-standard-3`, `-5`, `-10`: 12 000 points and more under one fill | | | refused |
+| `paths-2-and-boards-40`: 8000 points under one fill, over 8120 shapes in 42 layers | | | accepted |
+| `path-4000-and-boards-60`: 4000 points over 12 180 shapes in 62 layers | | | accepted |
+| `path-4000-in-3-groups`: 12 000 points under three fills in one layer | | | accepted |
+| `path-4000-in-3-layers`: the same in three layers, shown together | | | accepted |
+| `path-4000-in-10-layers`: 40 000 points under ten fills | | | accepted |
+| `1x-banana-zero-tangents`: 1.x's `banana.tgs` with `[0,0]` tangents, keeping merge paths, strokes and a fractional `op` | | | accepted (the original is refused) |
+| `1x-kris-battle-zero-tangents`: 1.x's `Kris_battle.tgs` the same way, 18 376 points in 30 layers | | | accepted (the original is refused) |
+
+So:
+
+- The `.tgs` may be exactly 64 KiB (65 536 bytes).
+- Bytes of JSON don't count. The limit is on the whole animation's
+  shapes, counted like tlottie (each group, rectangle, fill and transform
+  is one), where a layer weighs like 8.2 to 8.9 shapes; the total must
+  stay between 24 300 and 24 580 or below. One linear rule fits every
+  upload of rounds 2 and 3. tgradish counts a layer as 9 and allows
+  24 000 (`limits::telegram::cost`).
+- Layers are capped on their own too: 1750 one-square layers cost less
+  than that and were refused; 1500 were accepted.
+- Paths need numbers for their tangents. pixelart2tgs 1.x wrote `[]`, so
+  Telegram refuses its stickers now; with `[0,0]` they pass.
+- The path points one fill paints (the paths before it in its group) have
+  a cap of their own, between 8000 and 12 000. Spread over fills there can
+  be many more, and they add less than 0.6 shapes a point to the size
+  limit, maybe nothing. So outlines, one shape however many points, could
+  fit more under that limit than rectangles, though they pack larger.
+
+## Fourth round: WebM
+
+The first round's WebM probes, and some more around the limits, uploaded
+through `/newvideo` and `/newemojipack` (video emoji). @Stickers checks
+WebM itself, with its own messages; the file keeps its name.
+
+```console
+D=references/t9-probes-3
+ffmpeg -f lavfi -i testsrc2=size=512x512:rate=60:duration=3 -c:v libvpx-vp9 \
+  -pix_fmt yuva420p -b:v 450k -an $D/w-fps-60.webm
+ffmpeg -stream_loop 4 -i references/pig.mp4 -c copy pig-63s.mp4
+tgradish convert pig-63s.mp4 -o $D/w-long-63s-spoofed.webm
+ffmpeg -t 3 -i references/uhh.mp4 -vf scale=100:100 -c:v libvpx-vp9 \
+  -pix_fmt yuva420p -b:v 120k -an $D/e-100-3s.webm
+ffmpeg -i references/uhh.mp4 -vf scale=100:100 -c:v libvpx-vp9 \
+  -pix_fmt yuva420p -b:v 80k -an e-100-long.webm
+tgradish spoof e-100-long.webm -o $D/e-100-spoofed.webm
+ffmpeg -t 3 -i references/uhh.mp4 -vf scale=512:512 -c:v libvpx-vp9 \
+  -pix_fmt yuva420p -b:v 140k -an $D/e-512-3s.webm
+```
+
+The `pad` files are `w1-sticker.webm` or `e-100-3s.webm` grown to an exact
+size by an EBML Void element at the end of the Segment, whose size is
+raised to match.
+
+Uploaded 2026-10-10 through Telegram Web:
+
+| File | Pack | Result |
+| --- | --- | --- |
+| `w1-sticker.webm`: 3 s | video stickers | accepted |
+| `w2-spoofed.webm`: 4.8 s spoofed | video stickers | accepted |
+| `w-long-63s-spoofed.webm`: 63 s spoofed | video stickers | accepted |
+| `w-pad-262144.webm`: exactly 256 KiB | video stickers | accepted |
+| `w-pad-262145.webm` | video stickers | "File is too big. Video stickers may not exceed 256 KB." |
+| `w-fps-60.webm`: 60 fps | video stickers | accepted |
+| `w5-emoji-spoofed.webm`: 246 KB | video emoji | "File is too big. Video emoji may not exceed 64 KB." |
+| `e-100-pad-65536.webm`: exactly 64 KiB | video emoji | accepted |
+| `e-100-pad-65537.webm` | video emoji | "File is too big. Video emoji may not exceed 64 KB." |
+| `e-100-spoofed.webm`: 4.8 s spoofed | video emoji | accepted |
+| `e-512-3s.webm`: 512x512 | video emoji | "Video dimensions are invalid. Please check that the video is a square of exactly 100x100 pixels." |
+
+So:
+
+- Spoofing works for stickers and emoji, also for a minute.
+- Stickers may be exactly 256 KiB, emoji exactly 64 KiB. tgradish made
+  emoji up to 256 KiB, which Telegram refuses; it now fits them to 64 KiB.
+- 60 fps is accepted, though the rules say 30. tgradish allows up to 60
+  when asked and still picks at most 30 on its own, since that leaves more
+  bytes per frame. Whether every app plays 60 fps stickers smoothly is
+  still to be seen.
+- Emoji must be exactly 100x100, as tgradish makes them.

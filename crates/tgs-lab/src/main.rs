@@ -10,6 +10,8 @@
 //! cargo run -p tgs-lab -- encode art.gif out.tgs [--runs]
 //! cargo run -p tgs-lab -- verify art.gif [out.tgs]
 //! cargo run --release -p tgs-lab -- probes DIR [ART]
+//! cargo run --release -p tgs-lab -- limits DIR [ART...]
+//! cargo run --release -p tgs-lab -- sizes DIR [1X.tgs...]
 //! cargo run --release -p tgs-lab -- bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]
 //! ```
 
@@ -255,6 +257,17 @@ fn main() -> Result<()> {
                 .collect::<Result<_>>()?;
             probes::write_limits(Path::new(&args[1]), art)
         }
+        Some("sizes") if args.len() > 1 => {
+            let one_x = args[2..]
+                .iter()
+                .map(|path| -> Result<(String, String)> {
+                    let path = Path::new(path);
+                    let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                    Ok((name, String::from_utf8(read_lottie(path)?)?))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            probes::write_sizes(Path::new(&args[1]), &one_x)
+        }
         Some("bench") => {
             let (paths, rest) = options(&args[1..], &["--save", "--against"])?;
             let flag = |name: &str| rest.contains(&name);
@@ -297,6 +310,7 @@ fn main() -> Result<()> {
              tgs-lab verify SOURCE [STICKER.tgs] [--sizes 100,160,237,512] [--frames 0,4] [--picture PREFIX] [--explain N] [--runs]\n       \
              tgs-lab probes DIR [ART]\n       \
              tgs-lab limits DIR [ART...]\n       \
+             tgs-lab sizes DIR [1X.tgs...]\n       \
              tgs-lab bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]"
         ),
     }

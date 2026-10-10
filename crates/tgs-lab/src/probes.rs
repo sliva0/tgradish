@@ -331,16 +331,19 @@ fn checkerboard_layers(count: u32, in_turn: bool) -> String {
     animation(layers)
 }
 
-/// `count` paths in one layer, each going round its own square 1000
-/// times: 4000 points, much JSON from few shapes, and it packs small.
-fn long_paths(count: u32) -> String {
+/// `count` paths in one layer, each going round its own square until it
+/// has `points` points; with 4000, much JSON from few shapes, and it packs
+/// small. Their tangents are empty, as pixelart2tgs 1.x wrote them and as
+/// rounds 2 and 3 uploaded them; Telegram refuses that (see
+/// [`path_form`]).
+fn long_paths(count: u32, points: usize) -> String {
     let columns = f64::from(count).sqrt().ceil() as u32;
     let units = f64::from(columns * 2);
     let mut items: Vec<Item> = (0..count)
         .map(|path| {
             let (x, y) = (f64::from(path % columns * 2), f64::from(path / columns * 2));
             let square = [[x, y], [x + 1.0, y], [x + 1.0, y + 1.0], [x, y + 1.0]];
-            Item::Path(square.iter().copied().cycle().take(4000).collect())
+            Item::Path(square.iter().copied().cycle().take(points).collect())
         })
         .collect();
     items.push(Item::Fill { colour: [60, 140, 230, 255], rule: FillRule::NonZero });
@@ -349,7 +352,14 @@ fn long_paths(count: u32) -> String {
     let layer = Layer { from: 0, to: 180, transform, items: vec![Item::Group(items)] };
     let blink =
         Layer { from: 0, to: 90, transform, items: vec![group([(1.5, 1.5)], [230, 90, 60, 255])] };
-    animation(vec![layer, blink])
+    // the writer repeats the first point
+    let list = |tangent| vec![tangent; points + 1].join(",");
+    let mut json = animation(vec![layer, blink]);
+    for key in ["i", "o"] {
+        let written = format!("\"{key}\":[{}]", list("[0,0]"));
+        json = json.replace(&written, &format!("\"{key}\":[{}]", list("[]")));
+    }
+    json
 }
 
 /// The sprite with its name padded until the JSON is `bytes` long: size
@@ -360,6 +370,333 @@ fn padded(sprite: &str, bytes: usize) -> String {
     let name = lottie["nm"].as_str().unwrap_or_default().to_owned();
     lottie["nm"] = json!(format!("{name} {}", ".".repeat(bytes.saturating_sub(unpadded + 1))));
     lottie.to_string()
+}
+
+/// `json` with its paths rewritten: `"c":true` or no `c`, zero or empty
+/// tangents, the first point repeated at the end or not. The writer
+/// leaves out `c`, writes empty tangents and repeats the first point.
+fn path_form(json: &str, closed: bool, zero_tangents: bool, repeat: bool) -> String {
+    fn visit(value: &mut Value, form: &dyn Fn(&mut Value)) {
+        match value {
+            Value::Object(map) if map.get("ty") == Some(&json!("sh")) => form(&mut map["ks"]["k"]),
+            Value::Object(map) => map.values_mut().for_each(|value| visit(value, form)),
+            Value::Array(items) => items.iter_mut().for_each(|value| visit(value, form)),
+            _ => {}
+        }
+    }
+    let mut lottie = parse(json);
+    visit(&mut lottie, &|path| {
+        let mut points = path["v"].as_array().unwrap().clone();
+        if !repeat {
+            points.pop();
+        }
+        let tangent = if zero_tangents { json!([0, 0]) } else { json!([]) };
+        let tangents = json!(vec![tangent; points.len()]);
+        *path = if closed {
+            json!({ "c": true, "i": tangents, "o": tangents, "v": points })
+        } else {
+            json!({ "i": tangents, "o": tangents, "v": points })
+        };
+    });
+    lottie.to_string()
+}
+
+/// The layers of `top` drawn over those of `bottom`.
+fn merged(top: &str, bottom: &str) -> String {
+    let mut lottie = parse(top);
+    let under = parse(bottom)["layers"].as_array().unwrap().clone();
+    layers(&mut lottie).extend(under);
+    lottie.to_string()
+}
+
+/// `count` squares of a checkerboard, each in a group of its own, 1000
+/// groups to a layer: four shapes for each square instead of about one.
+fn single_groups(count: u32) -> String {
+    let columns = f64::from(2 * count).sqrt().ceil() as u32;
+    let rows = (2 * count).div_ceil(columns);
+    let transform = grid_transform(f64::from(columns), f64::from(rows));
+    let cells: Vec<(f64, f64)> = checker_cells(count, columns).collect();
+    let layers = cells
+        .chunks(1000)
+        .enumerate()
+        .map(|(index, chunk)| {
+            let colour = [(index * 36) as u8, 140, 230, 255];
+            Layer {
+                from: index as u32 * 10,
+                to: 180,
+                transform,
+                items: chunk.iter().map(|&cell| group([cell], colour)).collect(),
+            }
+        })
+        .collect();
+    animation(layers)
+}
+
+/// The sprite with a name of incompressible characters, packed by
+/// `gzip -9` to exactly `bytes`.
+fn packed_to(sprite: &str, bytes: usize) -> Result<Vec<u8>> {
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let noise: String = (0..bytes * 2)
+        .map(|_| {
+            // xorshift: the same characters every run
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            const CHARS: &[u8] =
+                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            CHARS[(state % 64) as usize] as char
+        })
+        .collect();
+    let mut lottie = parse(sprite);
+    let mut with = |length: usize, last: char| {
+        lottie["nm"] = json!(format!("tgradish probe {}{last}", &noise[..length]));
+        gzip(lottie.to_string().as_bytes())
+    };
+    // the shortest noise reaching `bytes`, then its last character varied
+    // until the size is exact
+    let (mut low, mut high) = (0, noise.len() - 1);
+    while low < high {
+        let middle = (low + high) / 2;
+        if with(middle, '.').len() < bytes { low = middle + 1 } else { high = middle }
+    }
+    for length in low.saturating_sub(4)..low + 4 {
+        for last in ['.', '-', '_', '~', ' ', '!', '*', '\'', '(', ')'] {
+            let packed = with(length, last);
+            if packed.len() == bytes {
+                return Ok(packed);
+            }
+        }
+    }
+    anyhow::bail!("no name packs to exactly {bytes} bytes")
+}
+
+fn gzip(json: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    encoder.write_all(json).expect("compressing into memory can't fail");
+    encoder.finish().expect("compressing into memory can't fail")
+}
+
+/// `json` with every rectangle's size written with more digits: the same
+/// shapes and numbers, more bytes.
+fn long_sizes(json: &str) -> String {
+    json.replace("\"s\":{\"k\":[1,1]}", "\"s\":{\"k\":[1.00001,1.00001]}")
+}
+
+/// `json` with zero tangents written out instead of left empty: more
+/// numbers per point.
+fn zero_tangents(json: &str) -> String {
+    json.replace("[]", "[0,0]")
+}
+
+/// The third round: whether Telegram's limit on large stickers counts
+/// bytes, numbers, arrays or points, and the limit on the packed size.
+/// Each probe's JSON or file is made so the candidates disagree about it.
+/// `one_x` adds stickers pixelart2tgs 1.x made, by name, with their
+/// tangents fixed.
+fn size_probes(one_x: &[(String, String)]) -> Result<Vec<(Probe, Option<Vec<u8>>)>> {
+    let sprite = sprite_json(Style::default())?;
+    let mut probes = Vec::new();
+    let mut add = |name: &str, tests: String, json: String, packed: Option<Vec<u8>>| {
+        let file = format!("{:02}-{name}.tgs", probes.len() + 1);
+        probes.push((Probe { file, pack: "sticker", tests, expect: "", json }, packed));
+    };
+    for bytes in [65_000, 65_536, 65_537, 66_000, 80_000] {
+        add(
+            &format!("packed-{bytes}"),
+            format!("01 packed to exactly {bytes} bytes by a long name"),
+            sprite.clone(),
+            Some(packed_to(&sprite, bytes)?),
+        );
+    }
+    add(
+        "boards-in-turn-101",
+        "101 layers of 200 squares, one at a time: 80 800 points".into(),
+        checkerboard_layers(101, true),
+        None,
+    );
+    add(
+        "boards-in-turn-100-long-sizes",
+        "round 2's accepted boards-in-turn-100 with sizes written as 1.00001: 240 KB more".into(),
+        long_sizes(&checkerboard_layers(100, true)),
+        None,
+    );
+    for count in [8, 19] {
+        add(
+            &format!("paths-{count}"),
+            format!("{count} paths of 4000 points in one layer"),
+            long_paths(count, 4000),
+            None,
+        );
+    }
+    add(
+        "paths-5-zero-tangents",
+        "5 paths of 4000 points with tangents written as [0,0]: 6 numbers per point".into(),
+        zero_tangents(&long_paths(5, 4000)),
+        None,
+    );
+    add("layers-1750", "1750 layers of one square".into(), one_square_layers(1750), None);
+    add("paths-1", "one path of 4000 points".into(), long_paths(1, 4000), None);
+    for count in [170, 300] {
+        add(
+            &format!("short-paths-{count}"),
+            format!("{count} paths of 100 points in one layer: {} points", count * 100),
+            long_paths(count, 100),
+            None,
+        );
+    }
+    for points in [4, 100] {
+        add(
+            &format!("path-{points}"),
+            format!("one path of {points} points"),
+            long_paths(1, points),
+            None,
+        );
+    }
+    for (name, closed, zero, repeat) in [
+        ("path-standard", true, true, false),
+        ("path-empty-tangents", true, false, false),
+        ("path-no-c", false, true, false),
+        ("path-repeated-point", true, true, true),
+    ] {
+        add(
+            name,
+            format!(
+                "one path of 4 points: \"c\" {}, tangents {}, first point {}",
+                if closed { "true" } else { "left out" },
+                if zero { "[0,0]" } else { "empty" },
+                if repeat { "repeated at the end" } else { "not repeated" }
+            ),
+            path_form(&long_paths(1, 4), closed, zero, repeat),
+            None,
+        );
+    }
+    add(
+        "groups-6500",
+        "6500 groups of one square, 1000 to a layer: 26 000 shapes, 26 000 arrays".into(),
+        single_groups(6500),
+        None,
+    );
+    add(
+        "path-4000-standard",
+        "one path of 4000 points in the standard form".into(),
+        path_form(&long_paths(1, 4000), true, true, false),
+        None,
+    );
+    for count in [110, 115, 118, 117, 116] {
+        add(
+            &format!("boards-in-turn-{count}"),
+            format!("{count} layers of 200 squares, one at a time: {} shapes", count * 203),
+            checkerboard_layers(count, true),
+            None,
+        );
+    }
+    add(
+        "layers-1000-and-boards-95",
+        "1000 layers of one square and 95 of 200: 23 285 shapes in 1095 layers".into(),
+        merged(&one_square_layers(1000), &checkerboard_layers(95, true)),
+        None,
+    );
+    add(
+        "layers-1300-and-boards-83",
+        "1300 layers of one square and 83 of 200: 22 049 shapes in 1383 layers".into(),
+        merged(&one_square_layers(1300), &checkerboard_layers(83, true)),
+        None,
+    );
+    add(
+        "groups-5000",
+        "5000 groups of one square, 1000 to a layer".into(),
+        single_groups(5000),
+        None,
+    );
+    add(
+        "layers-1400-and-boards-74",
+        "1400 layers of one square and 74 of 200: 20 622 shapes in 1474 layers".into(),
+        merged(&one_square_layers(1400), &checkerboard_layers(74, true)),
+        None,
+    );
+    add(
+        "layers-1000-and-boards-60",
+        "1000 layers of one square and 60 of 200: 16 180 shapes in 1060 layers".into(),
+        merged(&one_square_layers(1000), &checkerboard_layers(60, true)),
+        None,
+    );
+    add(
+        "layers-1000-and-boards-50",
+        "1000 layers of one square and 50 of 200: 14 150 shapes in 1050 layers".into(),
+        merged(&one_square_layers(1000), &checkerboard_layers(50, true)),
+        None,
+    );
+    add(
+        "groups-5800",
+        "5800 groups of one square, 1000 to a layer: 23 200 shapes".into(),
+        single_groups(5800),
+        None,
+    );
+    add(
+        "layers-1000-and-boards-55",
+        "1000 layers of one square and 55 of 200: 15 165 shapes in 1055 layers".into(),
+        merged(&one_square_layers(1000), &checkerboard_layers(55, true)),
+        None,
+    );
+    for count in [10, 5, 3] {
+        add(
+            &format!("paths-standard-{count}"),
+            format!("{count} paths of 4000 points in the standard form: {count}000 points"),
+            path_form(&long_paths(count, 4000), true, true, false),
+            None,
+        );
+    }
+    add(
+        "path-4000-and-boards-60",
+        "one standard path of 4000 points over 60 layers of 200 squares, one at a time".into(),
+        merged(&path_form(&long_paths(1, 4000), true, true, false), &checkerboard_layers(60, true)),
+        None,
+    );
+    add(
+        "paths-2-and-boards-40",
+        "two standard paths of 4000 points over 40 layers of 200 squares, one at a time".into(),
+        merged(&path_form(&long_paths(2, 4000), true, true, false), &checkerboard_layers(40, true)),
+        None,
+    );
+    let path = || path_form(&long_paths(1, 4000), true, true, false);
+    add(
+        "path-4000-in-3-layers",
+        "three layers of one standard path of 4000 points, shown together".into(),
+        merged(&merged(&path(), &path()), &path()),
+        None,
+    );
+    add(
+        "path-4000-in-3-groups",
+        "one layer of three groups of one standard path of 4000 points".into(),
+        {
+            let mut lottie = parse(&path());
+            let shapes = &mut layers(&mut lottie)[0]["shapes"];
+            let group = shapes[0].clone();
+            *shapes = json!([group.clone(), group.clone(), group]);
+            lottie.to_string()
+        },
+        None,
+    );
+    add(
+        "path-4000-in-10-layers",
+        "ten layers of one standard path of 4000 points: 40 000 points, 4000 under a fill".into(),
+        (0..9).fold(path(), |json, _| merged(&json, &path())),
+        None,
+    );
+    for (name, json) in one_x {
+        let stem = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem);
+        add(
+            &format!("1x-{}-zero-tangents", stem.to_lowercase().replace('_', "-")),
+            format!(
+                "{name} from pixelart2tgs 1.x with zero tangents instead of empty ones; it \
+                 keeps merge paths, strokes and a fractional end"
+            ),
+            path_form(json, false, true, true),
+            None,
+        );
+    }
+    Ok(probes)
 }
 
 /// The second round: what made Telegram refuse 03, 04 and 05. Each
@@ -404,7 +741,7 @@ fn limit_probes(art: Vec<(String, String)>) -> Result<Vec<Probe>> {
         add(
             format!("paths-{count}"),
             format!("{count} paths of 4000 points in one layer: much JSON, few shapes"),
-            long_paths(count),
+            long_paths(count, 4000),
         );
     }
     for kb in [700, 1000, 1100, 1500, 1900] {
@@ -562,6 +899,23 @@ pub fn write_limits(dir: &Path, art: Vec<(String, String)>) -> Result<()> {
     })
 }
 
+const ROUND_THREE: &str = "# Telegram probes, round 3\n\n\
+    Made by `tgs-lab sizes`; `docs/probes.md` says how to use them. Upload them one \
+    at a time through @Stickers after `/newanimated`, and write down which are \
+    accepted.\n\n\
+    | File | Tests | JSON | .tgs | Accepted | Bot's answer |\n\
+    | --- | --- | ---: | ---: | --- | --- |\n";
+
+/// Writes the third round, finding what Telegram's limits count, into `dir`;
+/// `one_x` are stickers pixelart2tgs 1.x made: file names and JSON.
+pub fn write_sizes(dir: &Path, one_x: &[(String, String)]) -> Result<()> {
+    let (probes, packed): (Vec<Probe>, Vec<Option<Vec<u8>>>) =
+        size_probes(one_x)?.into_iter().unzip();
+    save_packed(dir, &probes, &packed, ROUND_THREE, |probe, sizes| {
+        format!("| {} | {} | {sizes} |  |  |", probe.file, probe.tests)
+    })
+}
+
 /// Packs the probes into `dir`, with `CHECKLIST.md`: `intro` and a `row`
 /// for each, given its sizes as table cells.
 fn save(
@@ -570,14 +924,35 @@ fn save(
     intro: &str,
     row: impl Fn(&Probe, &str) -> String,
 ) -> Result<()> {
+    save_packed(dir, probes, &vec![None; probes.len()], intro, row)
+}
+
+/// [`save`], with some probes already packed; only those may be over 64
+/// KiB.
+fn save_packed(
+    dir: &Path,
+    probes: &[Probe],
+    packed: &[Option<Vec<u8>>],
+    intro: &str,
+    row: impl Fn(&Probe, &str) -> String,
+) -> Result<()> {
     std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
     let mut checklist = String::from(intro);
-    for probe in probes {
-        let tgs = file::pack(probe.json.as_bytes(), 15);
-        let (stats, issues) = check(probe.json.as_bytes(), Some(tgs.len()))
+    for (probe, packed) in probes.iter().zip(packed) {
+        let json = match packed {
+            Some(packed) => file::unpack(packed).map_err(anyhow::Error::msg)?,
+            None => probe.json.clone().into_bytes(),
+        };
+        let tgs = packed.clone().unwrap_or_else(|| file::pack(&json, 15));
+        let (stats, issues) = check(&json, Some(tgs.len()))
             .map_err(anyhow::Error::msg)
             .with_context(|| probe.file.clone())?;
-        ensure!(tgs.len() <= MAX_TGS, "{} is {} bytes, over 64 KiB", probe.file, tgs.len());
+        ensure!(
+            packed.is_some() || tgs.len() <= MAX_TGS,
+            "{} is {} bytes, over 64 KiB",
+            probe.file,
+            tgs.len()
+        );
         std::fs::write(dir.join(&probe.file), &tgs)?;
         let sizes = format!(
             "{:.0} KiB | {:.1} KiB",
@@ -660,5 +1035,20 @@ mod tests {
         for probe in &probes {
             assert_ne!(pixels(probe, 0), pixels(probe, 100), "{} doesn't move", probe.file);
         }
+    }
+
+    #[test]
+    fn size_probes_hit_their_numbers() {
+        let sprite = sprite_json(Style::default()).unwrap();
+        assert_eq!(packed_to(&sprite, 65_536).unwrap().len(), 65_536);
+        let stats = |json: &str| check(json.as_bytes(), None).unwrap().0;
+        let groups = stats(&single_groups(5800));
+        assert_eq!((groups.shapes, groups.layers), (23_200, 6));
+        let mixed = stats(&merged(&one_square_layers(1000), &checkerboard_layers(55, true)));
+        assert_eq!((mixed.shapes, mixed.layers), (15_165, 1055));
+        // as uploaded: empty tangents, and the standard form
+        assert_eq!(stats(&long_paths(1, 4)).empty_tangent_paths, 1);
+        let standard = stats(&path_form(&long_paths(1, 4), true, true, false));
+        assert_eq!((standard.empty_tangent_paths, standard.max_path_points), (0, 4));
     }
 }

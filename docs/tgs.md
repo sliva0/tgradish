@@ -34,7 +34,8 @@ structure, all can go.
   reductions are allowed, but the result must clearly say it is lossy and
   what was lost (CLI text and `--json` events).
 - The 1 MB limit on uncompressed JSON in 1.x was a guess. Use the real
-  limits below (T9 found Telegram's is about 1 MB after all).
+  limits below (T9 found that Telegram's counts shapes and layers, not
+  bytes).
 - The user will upload test stickers to Telegram and check them on iOS when
   asked (step T9).
 
@@ -74,7 +75,9 @@ From <https://core.telegram.org/stickers> and
 accepted it anyway, so the server doesn't check everything on that list.
 The stickers in `references/pixelart/1x-uploaded/` were accepted in 2022
 with merge paths, strokes, no `"tgs":1` key and non-integer `op` values
-like 39.6.
+like 39.6. Today the server refuses them, but only for the empty tangents
+(`[]`) of their paths: with `[0,0]` instead, merge paths, strokes and all,
+one was accepted (T9 round 3).
 T9 found (see `docs/probes.md`): the 3 seconds are counted in seconds,
 not frames, and 30 fps is allowed too; custom emoji are 512x512 like
 stickers, and a 100x100 one is refused.
@@ -87,15 +90,21 @@ them; otherwise it stays a plain file and @Stickers answers "File type is
 invalid. Please convert your image to the .TGS format." They look like a
 parser's limits, like tlottie's but lower:
 
-- about 1 MB of JSON: 996 KB of rectangles was accepted, 1.2 MB refused
-  (a 1.9 MB file made long by a padded name was accepted, so names may
-  not count);
-- layers: 1500 accepted, 2000 refused;
-- 4096 shapes in a layer, counted like tlottie (groups, fills, transforms
-  and what they draw): 4093 accepted, 4103 refused;
-- 20 paths of 4000 points were refused in 962 KB, less JSON than the
-  rectangles that got through; maybe a limit on points. tgradish writes
-  no paths that long, so this wasn't narrowed down.
+- the packed file: exactly 64 KiB accepted, a byte more refused;
+- the size of the whole animation in shapes, counted like tlottie (groups,
+  fills, transforms and what they draw), where a layer counts as about 8.5
+  shapes: the limit is between 24 300 and 24 580. Bytes of JSON don't
+  count: the same shapes passed in 1.24 MB as in 1 MB, and a name padded
+  to 1.9 MB passed. tgradish keeps shapes + 9 per layer at most 24 000;
+- layers: 1500 accepted, 1750 refused, though they cost less;
+- 4096 shapes in a layer: 4093 accepted, 4103 refused;
+- paths need numbers for their tangents: empty ones (`[]`, as 1.x wrote
+  them) are refused, even in a path of 4 points, while a path of 4000
+  points with `[0,0]` tangents passes. `c` can be left out and the first
+  point repeated;
+- path points one fill paints (the paths before it in its group): 8000
+  accepted, 12 000 refused; 40 000 under ten fills passed. They add less
+  than 0.6 shapes a point to the size above, maybe nothing.
 
 `limits::telegram` has them; the encoder keeps under them and `check`
 reports them. The fitter now has to reduce some large animations more
@@ -452,8 +461,9 @@ Measure each idea on the corpus and keep only what wins:
 - Watermark: top-level `nm` with tgradish's signature (1.x had a `--label`
   option for this). The user also likes marks that are harder to strip
   (WebM got some); any hidden mark must pass both renderers and T9.
-- Final check: ≤ 64 KB, Telegram's server limits (raw ≤ 1 MB), tlottie
-  limits, ≤ 180 frames, no forbidden features.
+- Final check: ≤ 64 KB, Telegram's server limits (shapes and layers, see
+  above), Telegram Desktop's 2 MiB of JSON, tlottie limits, ≤ 180 frames,
+  no forbidden features.
 
 ### Fit (when lossless doesn't fit)
 
@@ -478,9 +488,10 @@ Measure loss as a perceptual error weighted by frame duration. Greedily
 pick the step with the best bytes saved per unit of error, and bisect the
 strength of the last step. Report every applied step in a `finished` event
 (`lossy: true` plus the list of steps and their sizes) and as a visible
-warning in text mode. Fitting must also respect the raw JSON limit (1 MB,
-Telegram's server). Paths don't help there: they write more JSON than
-rectangles (see T6).
+warning in text mode. Fitting must also respect the server's limit on
+shapes and layers. Paths could help there: an outline is one shape however
+many points it has (up to 8000 under a fill), though it packs larger than
+rectangles (see T6 and Later).
 
 Options to expose (names should fit the WebM side; reuse `speed`
 fast/balanced/best as the effort setting): target (sticker/emoji), fit, the
@@ -637,8 +648,9 @@ The web app there may also replace the "Web page" and "Bot" items under
   or 2 and compresses well. Paths only for groups with few corners per
   rectangle never paid off (at most 2: no change; 2.5: 1% larger), nor
   did outlining the widest shape a group may take where that has fewer
-  corners. Paths would only save shapes against the per-layer limit,
-  which the fallback to a layer per frame already handles.
+  corners. Against the server's limit on shapes they could help, though:
+  T9 found that points add little or nothing to it, only that a fill may
+  paint at most 8000 to 12 000 of them (see Later).
 
   Left for later (see Later): motion as position keyframes, which only
   files like `Spamton_trembling` would gain from; fringe-aware colour
@@ -705,8 +717,13 @@ The web app there may also replace the "Web page" and "Bot" items under
   longer than 3 s and 100x100 emoji are refused, and so were the three
   probes with very many layers, rectangles or JSON. Second round
   (`tgs-lab limits`, uploaded through Telegram Web): found the server's
-  limits above; the encoder, fitting and `check` now keep to them. Still
-  open: the WebM probes, and how stickers look on iOS.
+  limits above; the encoder, fitting and `check` now keep to them. Third
+  round (`tgs-lab sizes`): the large-sticker limit counts shapes and
+  layers, not bytes; empty path tangents are refused, which is why 1.x
+  stickers are refused now; path points have a cap. WebM: emoji may be
+  at most 64 KiB (tgradish made them 256 KiB), 60 fps is accepted. Still
+  open: how stickers look on iOS, and whether every app plays 60 fps
+  WebM.
 - **T10:** release as part of tgradish 2.0, which waits for the whole
   roadmap.
 
@@ -714,6 +731,14 @@ Later (2.x):
 - **Encoder:** motion as position keyframes for shaking or bobbing
   sprites; colour orders that avoid fringes (see T4's notes); precomps
   for repeated sprites, palette cycling, if a corpus shows them.
+- **Outlines against the shape limit:** the server limits shapes (24 000,
+  layers counting about 9), and a group's outline is one shape however
+  many points (up to 8000 under a fill), where its rectangles are one
+  each. Packed bytes and shapes run out at about the same point for art
+  like `susie_fortnite` (2.9 packed bytes a shape), so when fitting is
+  held back by shapes, writing the largest groups as outlines could keep
+  more of an animation than reducing it. Measure on stickers that hit the
+  shape limit first.
 - **Pixelate mode:** video or any image (through ffmpeg) to pixel art,
   then to TGS.
 - **Web page:** GIF to TGS in the browser. `tgs` is pure Rust, so this is

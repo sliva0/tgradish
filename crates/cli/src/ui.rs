@@ -3,7 +3,6 @@
 
 use console::style;
 use tgradish_core::events::{Params, Rate};
-use tgradish_core::telegram;
 
 pub fn error_label() -> console::StyledObject<&'static str> {
     style("error:").red().bold()
@@ -13,13 +12,7 @@ pub fn warning_label() -> console::StyledObject<&'static str> {
     style("warning:").yellow().bold()
 }
 
-/// Size in KiB with the share of Telegram's limit, like `252.4 KiB (98.6%)`.
-/// A WebM's size, and how much of Telegram's limit it uses.
-pub fn size(bytes: u64) -> String {
-    size_within(bytes, telegram::MAX_BYTES)
-}
-
-/// A size, and how much of `limit` it uses.
+/// A size, and how much of `limit` it uses, like `252.4 KiB (98.6%)`.
 pub fn size_within(bytes: u64, limit: u64) -> String {
     format!("{} ({:.1}%)", kib(bytes), bytes as f64 / limit as f64 * 100.0)
 }

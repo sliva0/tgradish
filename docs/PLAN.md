@@ -57,9 +57,10 @@ Done on `rewrite-v2`, with CI on Linux and Windows:
 - GUI: `tgradish gui`, or tgradish started outside a terminal;
 - distribution: the targets above, AUR packages and a Nix flake, with
   publishing steps for the user in `docs/packaging.md`;
-- T9 probes (`docs/probes.md`): both `.tgs` rounds are done; Telegram's
-  server limits on JSON, layers and shapes per layer are in the encoder.
-  Still open: the WebM probes and iOS. Then the release.
+- T9 probes (`docs/probes.md`): the `.tgs` and WebM rounds are done;
+  Telegram's limits (shapes and layers, path tangents and points, 64 KiB
+  video emoji, 60 fps) are in the encoders and checks. Still open: iOS,
+  and whether every app plays 60 fps WebM. Then the release.
 
 ## Roadmap
 
@@ -229,8 +230,9 @@ stickers and emoji unless noted:
 - sticker: one side exactly 512 px, the other at most 512 px;
 - emoji: exactly 100x100 px;
 - at most 3 seconds (this is what duration spoofing gets around);
-- at most 30 fps;
-- at most 256 KB.
+- at most 30 fps (@Stickers accepts 60, see `docs/probes.md`);
+- at most 256 KB for stickers, 64 KB for emoji (exactly 262 144 and 65 536
+  bytes, found by uploading).
 
 `.tgs` limits are in `docs/tgs.md`.
 
@@ -252,7 +254,7 @@ stickers and emoji unless noted:
 
 ### Size fitting
 
-`--fit` picks what is tuned to get as close to 256 KB as possible:
+`--fit` picks what is tuned to get as close to the size limit as possible:
 
 - `auto` (default): tries a few frame rates, fits bitrate for each, scores
   them with SSIM against the source and keeps the best;

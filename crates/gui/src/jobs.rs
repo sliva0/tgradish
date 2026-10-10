@@ -201,6 +201,7 @@ fn run(
     }
     match plan {
         Plan::Webm { options, backend } => {
+            let limit = options.target.unwrap_or_default().max_bytes();
             let request = Request {
                 input: inputs[0].clone(),
                 output: Some(output),
@@ -246,7 +247,7 @@ fn run(
             });
             Ok(Done {
                 bytes: outcome.bytes,
-                limit: tgradish_core::telegram::MAX_BYTES,
+                limit,
                 lossy: false,
                 issues: outcome.issues.iter().map(ToString::to_string).collect(),
                 preview: preview.ok(),
@@ -291,7 +292,7 @@ fn run(
             .map_err(|err| err.to_string())?;
             Ok(Done {
                 bytes: outcome.bytes,
-                limit: 64 * 1024,
+                limit: tgradish_core::tgs::MAX_BYTES,
                 lossy: outcome.lossy,
                 issues,
                 preview: Some(outcome.preview),

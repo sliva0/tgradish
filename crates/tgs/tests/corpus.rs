@@ -129,9 +129,11 @@ fn checks_stickers_from_1x() {
     for path in entries.map(|entry| entry.unwrap().path()) {
         let tgs = std::fs::read(&path).unwrap();
         let (stats, issues) = check(&unpack(&tgs).unwrap(), Some(tgs.len())).unwrap();
-        // Telegram accepted these, with merge paths and strokes in every group
+        // Telegram accepted these in 2021, with merge paths and strokes in
+        // every group; now it refuses their empty tangents, and only those
+        let errors: Vec<_> = issues.iter().filter(|i| i.severity == Severity::Error).collect();
         assert!(
-            issues.iter().all(|issue| issue.severity == Severity::Warning),
+            errors.len() == 1 && errors[0].message.contains("empty tangents"),
             "{}: {issues:?}",
             name(&path)
         );

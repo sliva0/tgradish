@@ -12,7 +12,8 @@ with the ability to bypass the 3 second limit, and pixel art into animated
 ## What it does
 
 - scales and encodes to WebM/VP9, keeping transparency;
-- tunes the encoder until the file is just under Telegram's 256 KB limit;
+- tunes the encoder until the file is just under Telegram's size limit
+  (256 KB for stickers, 64 KB for emoji);
   by default it also tries lower frame rates and keeps whichever version
   looks closest to the source;
 - spoofs the duration in the file header when the video is longer than

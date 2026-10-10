@@ -7,8 +7,8 @@ use tgradish_frames::Animation;
 
 use crate::check::{self, Issue, Severity};
 use crate::encode::{Effort, Settings, painter};
-use crate::layout::lay_out;
-use crate::limits::telegram;
+use crate::layout::{self, lay_out};
+use crate::limits::{MAX_RAW_JSON, telegram};
 use crate::lottie::Style;
 use crate::normalise::{self, PixelAnim, Report, normalise};
 use crate::reduce::{Kind, Reduction, error};
@@ -126,8 +126,6 @@ impl Sticker {
 /// zopfli packs about this much smaller than `gzip -9`; estimates lean
 /// high.
 const ZOPFLI_SHARE: f64 = 0.93;
-/// Raw JSON past this counts as too large.
-const MAX_JSON: usize = telegram::MAX_JSON;
 /// When the real size misses an estimate, the next target is this much
 /// lower.
 const RETARGET: f64 = 0.96;
@@ -144,17 +142,26 @@ fn render(anim: &PixelAnim, settings: &Settings, options: &Options) -> Result<(S
     Ok((scene, json))
 }
 
+/// Whether Telegram's server and every app take a sticker this large,
+/// leaving its packed size to the caller.
+fn within_limits(scene: &Scene, json: &str) -> bool {
+    layout::cost(scene) <= telegram::MAX_COST && json.len() <= MAX_RAW_JSON
+}
+
 /// Estimates what a `.tgs` of `anim` comes to: quickly encoded, then
-/// scaled by `calibration`. JSON near its own limit counts as that share
-/// of `max_bytes` when that is more, so reductions that shrink the JSON
-/// count as progress even before it fits. `None` when it can't be made at
-/// all.
+/// scaled by `calibration`. A cost near the server's limit, or JSON near
+/// Telegram Desktop's, counts as that share of `max_bytes` when that is
+/// more, so reductions that shrink either count as progress even before
+/// it fits. `None` when it can't be made at all.
 fn estimate(anim: &PixelAnim, options: &Options, calibration: f64) -> Option<usize> {
     let quick = Settings { effort: Effort::Fast, ..Settings::default() };
-    let (_, json) = render(anim, &quick, options).ok()?;
+    let (scene, json) = render(anim, &quick, options).ok()?;
     let packed = file::quick_size(json.as_bytes()) as f64 * calibration;
-    let raw = json.len() as f64 / MAX_JSON as f64 * options.max_bytes as f64;
-    Some(packed.max(raw) as usize)
+    let share = f64::max(
+        layout::cost(&scene) as f64 / telegram::MAX_COST as f64,
+        json.len() as f64 / MAX_RAW_JSON as f64,
+    );
+    Some(packed.max(share * options.max_bytes as f64) as usize)
 }
 
 /// Makes a sticker of `animation`, reporting `progress`. `cancelled` is
@@ -204,7 +211,7 @@ pub fn make(
         progress(Progress::Packing);
         let (scene, json) = render(&current, &settings, options)?;
         let tgs = file::pack(json.as_bytes(), zopfli_iterations(options.effort));
-        let fits = tgs.len() <= options.max_bytes && json.len() <= MAX_JSON;
+        let fits = tgs.len() <= options.max_bytes && within_limits(&scene, &json);
         // the estimate was off; aim lower and reduce some more
         if !fits && options.fit == Fit::Auto && target > options.max_bytes / 4 {
             let reachable = estimate(&current, options, calibration).is_some();
@@ -376,7 +383,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn estimates_json_over_its_limit_as_too_large() {
+    fn estimates_json_over_desktops_limit_as_too_large() {
         let input = Animation::new(
             2,
             2,
@@ -388,8 +395,37 @@ mod tests {
         let small = estimate(&anim, &named(0), 1.0).unwrap();
         assert!(small < 1000, "{small}");
         // the name packs to almost nothing, but the JSON is too large
-        let over = estimate(&anim, &named(MAX_JSON + 100_000), 1.0).unwrap();
-        let further = estimate(&anim, &named(MAX_JSON + 200_000), 1.0).unwrap();
+        let over = estimate(&anim, &named(MAX_RAW_JSON + 100_000), 1.0).unwrap();
+        let further = estimate(&anim, &named(MAX_RAW_JSON + 200_000), 1.0).unwrap();
         assert!(telegram::MAX_BYTES < over && over < further, "{over} {further}");
+    }
+
+    #[test]
+    fn estimates_shapes_over_the_servers_limit_as_too_large() {
+        // isolated pixels, on even cells in even frames and odd cells in odd
+        // ones: 3969 rectangles a frame that nothing can merge
+        const SIDE: u32 = 126;
+        let frames = (0..7)
+            .map(|frame| {
+                let rgba = (0..SIDE * SIDE)
+                    .flat_map(|index| {
+                        let (x, y) = (index % SIDE, index / SIDE);
+                        let on = x % 2 == frame % 2 && y % 2 == frame % 2;
+                        if on { [230, 40, 40, 255] } else { [0; 4] }
+                    })
+                    .collect();
+                Frame { rgba, duration: Duration::from_millis(100) }
+            })
+            .collect();
+        let input = Animation::new(SIDE, SIDE, frames).unwrap();
+        let normalise_options = normalise::Options { keep_canvas: true, ..Default::default() };
+        let (anim, _) = normalise(&input, &normalise_options).unwrap();
+        let options = Options::default();
+        let quick = Settings { effort: Effort::Fast, ..Settings::default() };
+        let (scene, json) = render(&anim, &quick, &options).unwrap();
+        assert!(layout::cost(&scene) > telegram::MAX_COST, "{}", layout::cost(&scene));
+        assert!(!within_limits(&scene, &json));
+        // with no weight on the packed size, what is left is the cost
+        assert!(estimate(&anim, &options, 0.0).unwrap() > telegram::MAX_BYTES);
     }
 }

@@ -1,17 +1,24 @@
 //! Telegram requirements for video stickers and emoji.
 //!
-//! Source: <https://core.telegram.org/stickers>, checked 2026-10-08.
+//! Source: <https://core.telegram.org/stickers>, checked 2026-10-08, and
+//! uploads to @Stickers (`docs/probes.md`), which found the exact limits.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::webm::WebmInfo;
 
-/// Largest file Telegram accepts, in bytes.
-pub const MAX_BYTES: u64 = 256 * 1024;
+/// Largest video sticker @Stickers accepts, in bytes; one more is "too big".
+pub const MAX_STICKER_BYTES: u64 = 256 * 1024;
+/// Largest video emoji @Stickers accepts, in bytes; one more is "too big".
+pub const MAX_EMOJI_BYTES: u64 = 64 * 1024;
 /// Longest allowed duration in seconds, as read from the file header.
 pub const MAX_SECONDS: f64 = 3.0;
-pub const MAX_FPS: f64 = 30.0;
+/// The rules say 30 fps, but @Stickers accepted a 60 fps sticker.
+pub const MAX_FPS: f64 = 60.0;
+/// The frame rate chosen when none is given: the one the rules allow,
+/// which every app is sure to play, and which leaves more bytes per frame.
+pub const DEFAULT_MAX_FPS: f64 = 30.0;
 
 /// What kind of Telegram media to make.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -37,6 +44,14 @@ impl Target {
     /// one side.
     pub fn requires_exact_size(self) -> bool {
         matches!(self, Target::Emoji)
+    }
+
+    /// Largest file Telegram accepts, in bytes.
+    pub fn max_bytes(self) -> u64 {
+        match self {
+            Target::Sticker => MAX_STICKER_BYTES,
+            Target::Emoji => MAX_EMOJI_BYTES,
+        }
     }
 
     pub fn name(self) -> &'static str {
@@ -123,8 +138,8 @@ pub fn check(info: &WebmInfo, target: Target) -> Vec<Issue> {
     if info.audio_tracks > 0 {
         issues.push(Issue::HasAudio);
     }
-    if info.file_size > MAX_BYTES {
-        issues.push(Issue::TooBig { bytes: info.file_size, max: MAX_BYTES });
+    if info.file_size > target.max_bytes() {
+        issues.push(Issue::TooBig { bytes: info.file_size, max: target.max_bytes() });
     }
     if let Some(seconds) = info.header_duration
         && seconds > MAX_SECONDS + 1e-3
@@ -137,4 +152,60 @@ pub fn check(info: &WebmInfo, target: Target) -> Vec<Issue> {
         issues.push(Issue::TooManyFps { fps, max: MAX_FPS });
     }
     issues
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::webm::VideoTrack;
+
+    fn info(size: u64, file_size: u64, fps: f64) -> WebmInfo {
+        WebmInfo {
+            doc_type: "webm".into(),
+            file_size,
+            timestamp_scale_ns: 1_000_000,
+            header_duration: Some(3.0),
+            content_duration: Some(3.0),
+            title: None,
+            muxing_app: None,
+            writing_app: None,
+            duration_tags: Vec::new(),
+            signature: None,
+            video: Some(VideoTrack {
+                number: 1,
+                codec_id: "V_VP9".into(),
+                width: size,
+                height: size,
+                alpha: true,
+                default_duration_ns: Some((1e9 / fps) as u64),
+            }),
+            video_frames: (3.0 * fps) as u64,
+            audio_tracks: 0,
+            other_tracks: 0,
+            truncated: false,
+        }
+    }
+
+    #[test]
+    fn emoji_have_a_smaller_size_limit() {
+        assert!(check(&info(512, MAX_STICKER_BYTES, 30.0), Target::Sticker).is_empty());
+        assert_eq!(
+            check(&info(512, MAX_STICKER_BYTES + 1, 30.0), Target::Sticker),
+            [Issue::TooBig { bytes: MAX_STICKER_BYTES + 1, max: MAX_STICKER_BYTES }]
+        );
+        assert!(check(&info(100, MAX_EMOJI_BYTES, 30.0), Target::Emoji).is_empty());
+        assert_eq!(
+            check(&info(100, MAX_EMOJI_BYTES + 1, 30.0), Target::Emoji),
+            [Issue::TooBig { bytes: MAX_EMOJI_BYTES + 1, max: MAX_EMOJI_BYTES }]
+        );
+    }
+
+    #[test]
+    fn allows_60_fps() {
+        assert!(check(&info(512, 1000, 60.0), Target::Sticker).is_empty());
+        assert!(matches!(
+            check(&info(512, 1000, 75.0), Target::Sticker)[..],
+            [Issue::TooManyFps { .. }]
+        ));
+    }
 }

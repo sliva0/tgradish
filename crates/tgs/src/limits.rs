@@ -13,24 +13,45 @@ pub mod telegram {
     pub const FPS: u32 = 60;
     /// At most 3 seconds at 60 fps: `op - ip <= 180`.
     pub const MAX_FRAMES: u32 = 180;
-    /// Size of the gzipped file.
+    /// Size of the gzipped file: exactly 64 KiB was accepted, a byte more
+    /// refused.
     pub const MAX_BYTES: usize = 64 * 1024;
 
     // Found by uploading probes (`docs/probes.md`): past these, the server
     // keeps a `.tgs` as a plain file instead of making it a sticker, and
     // @Stickers answers "File type is invalid".
 
-    /// Raw JSON: 996 KB of rectangles was accepted, 1.2 MB refused. A 1.9
-    /// MB file made long by a padded name was accepted, so names may not
-    /// count; this counts everything. Telegram Desktop's own limit is 2 MiB.
-    pub const MAX_JSON: usize = 1_000_000;
-    /// 1500 layers were accepted, 2000 refused.
+    /// The size of the whole animation, as [`cost`] counts it. Bytes of
+    /// JSON don't count: the same shapes were accepted in 1.24 MB as in 1
+    /// MB. Probes put a layer at 8.2 to 8.9 shapes and the limit between
+    /// 24 300 and 24 580; this and [`LAYER_COST`] round towards refusing.
+    pub const MAX_COST: usize = 24_000;
+    /// What a layer counts for in [`cost`], in shapes.
+    pub const LAYER_COST: usize = 9;
+    /// 1500 layers were accepted, 1750 refused, though both cost less than
+    /// [`MAX_COST`].
     pub const MAX_LAYERS: usize = 1_500;
     /// Shapes in one layer, counted like tlottie counts them (groups, their
     /// fills and transforms, and what they draw): 4093 were accepted, 4103
     /// refused.
     pub const MAX_SHAPES_PER_LAYER: usize = 4_096;
+    /// Path vertices one fill paints (the paths before it in its group):
+    /// 8000 were accepted, 12 000 refused, while 12 000 under three fills
+    /// passed, in one layer or three, and so did 40 000 under ten. Points
+    /// add little or nothing to [`MAX_COST`]: those 40 000 would have come
+    /// to 24 000 at 0.6 shapes a point.
+    pub const MAX_PAINT_POINTS: usize = 8_000;
+
+    /// `shapes` in all layers, counted like [`MAX_SHAPES_PER_LAYER`], and
+    /// `layers`, as Telegram's server weighs them against [`MAX_COST`].
+    pub const fn cost(shapes: usize, layers: usize) -> usize {
+        shapes + LAYER_COST * layers
+    }
 }
+
+/// Telegram Desktop refuses Lottie JSON larger than this (`kMaxFileSize` in
+/// desktop-app/lib_lottie). Output stays well below it.
+pub const MAX_RAW_JSON: usize = 2 * 1024 * 1024;
 
 /// Default parse limits of tlottie, the renderer in Telegram's current
 /// clients; Telegram Android passes no limits of its own. From tlottie's
