@@ -172,6 +172,11 @@ pub struct OptionArgs {
     /// pad for emoji]
     #[arg(long, value_enum, help_heading = "Output")]
     pub resize: Option<ResizeArg>,
+    /// How pixels are scaled: smooth, sharp blocks for pixel art, or
+    /// pixel-perfect whole multiples with transparent margins. [default:
+    /// auto, sharp for pixel art made at least twice as large]
+    #[arg(long, value_enum, help_heading = "Output")]
+    pub scaling: Option<ScalingArg>,
     /// Seconds to skip at the start of the input.
     #[arg(short = 's', long, value_name = "SECONDS", help_heading = "Output")]
     pub start: Option<f64>,
@@ -291,6 +296,7 @@ impl OptionArgs {
             ],
             Format::Tgs => vec![
                 given(self.resize.is_some(), "--resize"),
+                given(self.scaling.is_some(), "--scaling"),
                 given(self.fit.is_some(), "--fit"),
                 given(self.attempts.is_some(), "--attempts"),
                 given(self.fit_range.is_some(), "--fit-range"),
@@ -333,6 +339,7 @@ impl OptionArgs {
             target: self.target.map(Into::into),
             crop: self.crop,
             resize: self.resize.map(Into::into),
+            scaling: self.scaling.map(Into::into),
             fit: self.fit.map(Into::into),
             attempts: self.attempts,
             fit_range: self.fit_range,
@@ -387,6 +394,7 @@ macro_rules! value_enum {
 
 value_enum!(TargetArg => Target { Sticker, Emoji });
 value_enum!(ResizeArg => options::Resize { Contain, Pad, Crop, Stretch });
+value_enum!(ScalingArg => options::Scaling { Auto, Smooth, Sharp, PixelPerfect });
 value_enum!(FitArg => options::Fit { Auto, Bitrate, Crf, Fps, Length, Off });
 value_enum!(SpeedArg => options::Speed { Fast, Balanced, Best });
 value_enum!(SpoofArg => options::Spoof { Auto, Always, Never });

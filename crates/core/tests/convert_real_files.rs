@@ -10,7 +10,7 @@ use tgradish_core::backend::{Backend, FramesRequest};
 use tgradish_core::convert::{Request, convert};
 use tgradish_core::events::Event;
 use tgradish_core::ffmpeg::{self, CancelToken, FfmpegChoice};
-use tgradish_core::options::{Crop, Fit, Options, Resize, Speed};
+use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Speed};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::{Error, webm};
 
@@ -324,6 +324,45 @@ fn crops_odd_sizes_exactly() {
                 "{name} {crop}"
             );
         }
+    }
+}
+
+#[test]
+fn keeps_pixel_art_sharp() {
+    let Some(backends) = backends() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let image = dir.path().join("art.png");
+    // 8x8 art pixels of red and blue by turns
+    let status = Command::new("ffmpeg")
+        .args(["-v", "error", "-f", "lavfi", "-i", "color=black:s=8x8:d=1", "-frames:v", "1"])
+        .args(["-vf", "format=rgb24,geq=r='255*mod(X+Y,2)':g='0':b='255*(1-mod(X+Y,2))'"])
+        .arg(&image)
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    for backend in &backends {
+        let name = name(backend);
+        let output = dir.path().join(format!("{name}.webm"));
+        let request = Request {
+            output: Some(output.clone()),
+            options: Options { length: Some(0.2), crf: Some(10), ..fast(Fit::Off) },
+            ..Request::new(image.clone())
+        };
+        let mut scaling = None;
+        convert(backend, &request, &CancelToken::new(), &mut |event| {
+            if let Event::Started { plan } = event {
+                scaling = Some(plan.scaling);
+            }
+        })
+        .unwrap();
+        assert_eq!(scaling, Some(Scaling::Sharp), "{name}: few colours, made 64 times larger");
+        // 64 output pixels to an art pixel: blocks meet without blending
+        let rgba = first_frame_rgba(&output);
+        let at = |x: usize, y: usize| &rgba[(y * 512 + x) * 4..][..3];
+        let (blue, red) = (at(62, 32), at(65, 32));
+        assert!(blue[2] > 200 && blue[0] < 60, "{name}: {blue:?}");
+        assert!(red[0] > 200 && red[2] < 60, "{name}: {red:?}");
     }
 }
 

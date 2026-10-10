@@ -145,6 +145,10 @@ const FFMPEG_COMPONENTS: &[(&str, &[&str])] = &[
         "filter",
         &[
             "scale",
+            // scaling in linear light, with premultiplied alpha
+            "lutrgb",
+            "premultiply",
+            "unpremultiply",
             "fps",
             "format",
             "pad",
