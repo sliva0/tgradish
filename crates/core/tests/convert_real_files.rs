@@ -170,16 +170,22 @@ fn previews_results() {
         ..Request::new(input)
     };
     convert(&backends[0], &request, &CancelToken::new(), &mut |_| {}).unwrap();
+    // spoofed, it still plays for a second
+    let spoofed = dir.path().join("spoofed.webm");
+    let changes = webm::Patch { duration: Some(0.25), ..Default::default() };
+    webm::patch_file(&output, &spoofed, &changes, false).unwrap();
     for backend in &backends {
         let name = name(backend);
-        let preview = backend.preview(&output, 320, &CancelToken::new()).unwrap();
-        // the sticker is 512 px on its longer side; previews are 320
-        assert_eq!(preview.width.max(preview.height), 320, "{name}");
-        assert!(!preview.frames.is_empty(), "{name}");
-        let ticks: u32 = preview.frames.iter().map(|(_, ticks)| ticks).sum();
-        assert!((55..=65).contains(&ticks), "{name}: one second is {ticks} ticks");
-        for (rgba, _) in &preview.frames {
-            assert_eq!(rgba.len(), (preview.width * preview.height * 4) as usize, "{name}");
+        for path in [&output, &spoofed] {
+            let preview = backend.preview(path, 320, &CancelToken::new()).unwrap();
+            // the sticker is 512 px on its longer side; previews are 320
+            assert_eq!(preview.width.max(preview.height), 320, "{name}");
+            assert!(!preview.frames.is_empty(), "{name}");
+            let ticks: u32 = preview.frames.iter().map(|(_, ticks)| ticks).sum();
+            assert!((55..=65).contains(&ticks), "{name}: one second is {ticks} ticks");
+            for (rgba, _) in &preview.frames {
+                assert_eq!(rgba.len(), (preview.width * preview.height * 4) as usize, "{name}");
+            }
         }
     }
 }
