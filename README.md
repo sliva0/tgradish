@@ -36,7 +36,10 @@ files, sprite sheets or image sequences of pixel art ([docs/tgs.md](docs/tgs.md)
 Started from a file manager or the Start menu, tgradish opens a window:
 drop or paste files, crop and trim each in a preview, choose a sticker or
 an emoji and how hard to work on it, convert, look at the result, change
-something and convert again. `tgradish gui` opens it from a terminal.
+something and convert again. `tgradish gui` opens it from a terminal. The
+files open when it closes, with their settings, are open again next time
+(kept in `~/.local/state/tgradish` on Linux, the local application data
+folder on Windows and macOS).
 
 On the command line:
 

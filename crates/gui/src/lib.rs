@@ -12,6 +12,7 @@ mod jobs;
 mod media;
 mod output;
 mod prefs;
+mod session;
 mod settings;
 mod timeline;
 mod widgets;
@@ -184,6 +185,11 @@ struct App {
     about: bool,
     /// The theme Settings showed last, to apply a change made there.
     prefs_theme: Option<tgradish_core::config::Theme>,
+    /// Where the open files are kept between runs, and what was written
+    /// there last.
+    session: Option<(PathBuf, String)>,
+    /// When to see whether the session changed.
+    next_save: f64,
     /// The system's fonts for what the window's own lack.
     fallbacks: fallback::Fallbacks,
     message: Option<String>,
@@ -222,7 +228,49 @@ impl App {
             message = Some(format!("Your presets couldn't be read: {err}"));
             Presets::builtin()
         });
-        App::with(config, config_path, presets, message)
+        let mut app = App::with(config, config_path, presets, message);
+        if let Some(dir) = paths::state_dir() {
+            app.reopen(dir.join("session.json"));
+        }
+        app
+    }
+
+    /// Opens the files of last time from the session at `path`, unless the
+    /// settings say not to, and keeps the session there from now on.
+    fn reopen(&mut self, path: PathBuf) {
+        let session = session::Session::load(&path).filter(|_| !self.config.gui.forget_files);
+        let saved = session.as_ref().map(session::Session::to_json).unwrap_or_default();
+        if let Some(session) = session {
+            let (items, selected, gone) = session.restore(&path, self.next_id);
+            self.next_id += items.len() as u64;
+            self.items = items;
+            if let Some(id) = selected.or(self.items.last().map(|item| item.id)) {
+                self.select(id);
+            }
+            if gone > 0 {
+                let files = if gone == 1 { "file is" } else { "files are" };
+                self.message = Some(format!("{gone} {files} gone since last time"));
+            }
+        }
+        self.session = Some((path, saved));
+    }
+
+    /// Keeps the open files and their settings, if they changed.
+    fn save_session(&mut self) {
+        let Some((path, saved)) = &self.session else { return };
+        let session = session::Session::of(&self.items, self.selected, path);
+        let json = session.to_json();
+        if json == *saved {
+            return;
+        }
+        match session.save(&json, path) {
+            Ok(()) => self.session = Some((path.clone(), json)),
+            Err(err) => {
+                self.message = Some(format!("The open files couldn't be kept: {err}"));
+                // once is enough
+                self.session = None;
+            }
+        }
     }
 
     fn with(
@@ -248,6 +296,8 @@ impl App {
             inspection: None,
             about: false,
             prefs_theme: None,
+            session: None,
+            next_save: 0.0,
             fallbacks: fallback::Fallbacks::new(fonts()),
             message,
             pasted: false,
@@ -520,7 +570,7 @@ impl App {
                 };
                 reading += 1;
             }
-            if is_selected && item.result_clip.is_idle() && item.result_thumb.is_some() {
+            if is_selected && item.result_clip.is_idle() && item.made.is_some() {
                 load_result_clip(ctx, item, &backend);
             }
         }
@@ -2084,6 +2134,7 @@ fn free_name(
 
 impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.save_session();
         // the listener shares winit's Wayland connection, which closes next
         #[cfg(all(unix, not(target_os = "macos")))]
         if let Some(drops) = &mut self.drops {
@@ -2099,6 +2150,12 @@ impl eframe::App for App {
         self.take_input(&ctx);
         self.pump(&ctx);
         self.find_fonts(&ctx);
+        // every few seconds, so a crash loses little
+        let now = ctx.input(|input| input.time);
+        if now >= self.next_save {
+            self.next_save = now + 2.0;
+            self.save_session();
+        }
         egui::Panel::left("files")
             .resizable(true)
             .default_size(330.0)
@@ -2663,6 +2720,51 @@ mod tests {
             Some(tgradish_core::options::Spoof::Never);
         harness.run_steps(2);
         assert!(harness.query_by_label_contains("will be spoofed").is_none());
+    }
+
+    #[test]
+    fn reopens_the_files_of_last_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let (art, gone) = (dir.path().join("art.png"), dir.path().join("gone.png"));
+        square(&art, [255, 0, 0, 255]);
+        square(&gone, [0, 0, 255, 255]);
+        let state = dir.path().join("state").join("session.json");
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut first = harness(config.clone());
+        first.state_mut().reopen(state.clone());
+        first.state_mut().add(vec![gone.clone(), art.clone()]);
+        finish(&mut first);
+        {
+            let item = &mut first.state_mut().items[1];
+            item.format = Format::Tgs;
+            item.format_guessed = false;
+            item.choices.target = telegram::Target::Emoji;
+            item.choices.tgs.keep_canvas = Some(true);
+        }
+        first.run_steps(2);
+        convert(&first);
+        first.run_steps(2);
+        finish(&mut first);
+        first.state_mut().save_session();
+        assert!(state.exists());
+        drop(first);
+
+        // a file goes before the window opens again
+        std::fs::remove_file(&gone).unwrap();
+        let mut second = harness(config);
+        second.state_mut().reopen(state);
+        second.run_steps(2);
+        let app = second.state();
+        assert_eq!(app.items.len(), 1);
+        let item = &app.items[0];
+        assert_eq!((item.inputs.as_slice(), item.format), (&[art][..], Format::Tgs));
+        assert_eq!(item.choices.target, telegram::Target::Emoji);
+        assert_eq!(item.choices.tgs.keep_canvas, Some(true));
+        assert_eq!(app.selected, Some(item.id));
+        // the result made with these settings is still the current one
+        assert!(item.result_is_current());
+        assert!(app.message.as_deref().is_some_and(|m| m.contains("1 file is gone")));
     }
 
     #[test]
