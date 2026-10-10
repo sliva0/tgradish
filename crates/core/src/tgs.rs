@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub use tgradish_tgs::check::{Issue, Severity, Stats};
 use tgradish_tgs::encode::Effort;
 use tgradish_tgs::frames::{self, DecodeOptions, Limits, Sheet};
+pub use tgradish_tgs::limits;
 pub use tgradish_tgs::normalise::Long;
 use tgradish_tgs::normalise::{self, Report};
 pub use tgradish_tgs::reduce::{Compromise, Kind, Reduction};

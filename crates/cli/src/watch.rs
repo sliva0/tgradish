@@ -194,13 +194,14 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
     let mut unreadable: HashSet<PathBuf> = HashSet::new();
 
     if !ctx.global.json && !ctx.global.quiet {
-        eprintln!("watching {}, press Ctrl-C to stop", args.dir.display());
+        let dir = crate::term::link(args.dir.display(), &args.dir);
+        eprintln!("{}", crate::ui::status("Watching", format!("{dir}, Ctrl-C stops")));
     }
     loop {
         sleep(ctx, args.interval);
         if ctx.cancel.is_cancelled() {
             if !ctx.global.json {
-                eprintln!("stopped watching");
+                eprintln!("{}", crate::ui::status("Stopped", "watching"));
             }
             return Ok(());
         }

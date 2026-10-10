@@ -15,7 +15,7 @@ use tgradish_core::tgs::{self, TgsEvent, TgsOptions, TgsRequest};
 
 use crate::Context;
 use crate::args::{ConversionArgs, ConvertArgs};
-use crate::ui;
+use crate::{term, ui};
 
 /// Options of the format a command converts to.
 enum Resolved {
@@ -185,7 +185,17 @@ impl<'a> Converter<'a> {
                 if let Some(dir) = &outcome.temp_dir
                     && !json
                 {
-                    eprintln!("intermediate files kept in {}", dir.display());
+                    eprintln!(
+                        "{}",
+                        ui::status("Kept", format!("intermediate files in {}", dir.display()))
+                    );
+                }
+                if !json
+                    && !self.ctx.global.quiet
+                    && term::shows_pictures()
+                    && let Ok(preview) = backend.preview(&outcome.output, 256, cancel)
+                {
+                    show_result(&preview);
                 }
             }
             Resolved::Tgs { options } => {
@@ -204,7 +214,10 @@ impl<'a> Converter<'a> {
                     let mut printer = TgsPrinter::new(self.ctx);
                     let result = tgs::convert(&request, cancel, &mut |e| printer.event(e));
                     printer.finish();
-                    result?;
+                    let outcome = result?;
+                    if !self.ctx.global.quiet && term::shows_pictures() {
+                        show_result(&outcome.preview);
+                    }
                 }
             }
         }
@@ -218,7 +231,8 @@ impl<'a> Converter<'a> {
         if self.ctx.global.json {
             crate::print_json_error(&err, Some(input));
         } else {
-            eprintln!("{} {}: {err:#}", ui::error_label(), input.display());
+            let input = term::link(input.display(), input);
+            eprintln!("{}", ui::status_bad("Failed", format!("{input}: {err:#}")));
         }
     }
 }
@@ -305,6 +319,24 @@ fn listen_for_cancel(ctx: &Context) {
     });
 }
 
+/// A progress bar on stderr, cargo-like: `verb` coloured on the left.
+fn progress_bar(verb: &str, length: Option<u64>) -> ProgressBar {
+    let bar = ProgressBar::with_draw_target(length, ProgressDrawTarget::stderr());
+    let template = match length {
+        Some(_) => "{prefix:>12.green.bold} {msg} {bar:30.green/dim} {percent:>3}%",
+        None => "{prefix:>12.green.bold} {spinner:.green} {msg}",
+    };
+    bar.set_style(
+        ProgressStyle::with_template(template)
+            .expect("valid template")
+            .progress_chars("━╸─")
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ "),
+    );
+    bar.set_prefix(verb.to_owned());
+    bar.enable_steady_tick(Duration::from_millis(100));
+    bar
+}
+
 /// Shows conversion events as text with a progress bar.
 struct Printer {
     verbose: u8,
@@ -337,6 +369,7 @@ impl Printer {
         if let Some(bar) = self.bar.take() {
             bar.finish_and_clear();
         }
+        term::progress(None);
     }
 
     fn event(&mut self, event: Event) {
@@ -345,60 +378,70 @@ impl Printer {
         }
         match event {
             Event::Started { plan } if !self.quiet => {
+                self.line(ui::status(
+                    "Converting",
+                    format!(
+                        "{} → {}",
+                        term::link(plan.input.display(), &plan.input),
+                        term::link(style(plan.output.display()).bold(), &plan.output)
+                    ),
+                ));
                 let spoof = if plan.spoofs(plan.length) { ", spoofed" } else { "" };
-                self.line(format!(
-                    "{} → {}\n  {} {}x{}, {}, {}, fit {}{spoof}",
-                    plan.input.display(),
-                    style(plan.output.display()).bold(),
-                    plan.target.name(),
-                    plan.width,
-                    plan.height,
-                    ui::fps(plan.fps),
-                    ui::seconds(plan.length),
-                    ui::name(&plan.fit),
+                self.line(ui::status(
+                    "Planned",
+                    ui::dim(format!(
+                        "{} {}×{}, {}, {}, fit {}{spoof}",
+                        plan.target.name(),
+                        plan.width,
+                        plan.height,
+                        ui::fps(plan.fps),
+                        ui::seconds(plan.length),
+                        ui::name(&plan.fit),
+                    )),
                 ));
             }
             Event::AttemptStarted { attempt, params } if !self.quiet => {
-                self.finish();
-                let bar = ProgressBar::with_draw_target(Some(1000), ProgressDrawTarget::stderr());
-                bar.set_style(
-                    ProgressStyle::with_template("  {msg} [{bar:30}] {percent:>3}%")
-                        .expect("valid template")
-                        .progress_chars("=> "),
-                );
-                bar.set_message(format!("attempt {attempt}: {}", ui::params(&params)));
-                bar.enable_steady_tick(Duration::from_millis(200));
+                if let Some(bar) = self.bar.take() {
+                    bar.finish_and_clear();
+                }
+                let bar = progress_bar("Encoding", Some(1000));
+                bar.set_message(format!("{attempt}: {}", ui::params(&params)));
                 self.bar = Some(bar);
             }
             Event::Progress { pass, passes, fraction, .. } => {
+                let done = (f64::from(pass - 1) + fraction) / f64::from(passes);
                 if let Some(bar) = &self.bar {
-                    let done = (f64::from(pass - 1) + fraction) / f64::from(passes);
                     bar.set_position((done * 1000.0) as u64);
                 }
+                term::progress(Some(done));
             }
             Event::AttemptFinished { attempt, params, bytes, fits } if !self.quiet => {
-                self.finish();
-                let mark = if fits { style("fits").green() } else { style("too big").red() };
-                eprintln!(
-                    "  attempt {attempt}: {} → {}, {mark}",
-                    ui::params(&params),
-                    ui::size_within(bytes, self.limit)
-                );
+                if let Some(bar) = self.bar.take() {
+                    bar.finish_and_clear();
+                }
+                let mark = if fits { style("fits").green() } else { style("too large").red() };
+                self.line(ui::status(
+                    "Encoded",
+                    format!(
+                        "{attempt}: {} → {}, {mark}",
+                        ui::params(&params),
+                        ui::size_within(bytes, self.limit)
+                    ),
+                ));
             }
             Event::Scored { ssim, .. } if self.verbose > 0 => {
-                self.line(format!("    similarity to source (SSIM): {ssim:.4}"));
+                self.line(ui::status("Compared", ui::dim(format!("likeness (SSIM) {ssim:.4}"))));
             }
             Event::Warning { message } => {
                 self.line(format!("{} {message}", ui::warning_label()));
             }
-            Event::Log { line } if self.verbose > 1 => self.line(format!("    {line}")),
+            Event::Log { line } if self.verbose > 1 => self.line(ui::dim(format!("    {line}"))),
             Event::Finished { output, bytes, params, spoofed, issues, .. } => {
                 self.finish();
                 let spoofed = if spoofed { ", duration spoofed" } else { "" };
                 println!(
-                    "{} {}: {}, {}{spoofed}",
-                    style("done").green().bold(),
-                    output.display(),
+                    "{} {}, {}{spoofed}",
+                    ui::status("Finished", term::link(style(output.display()).bold(), &output)),
                     ui::size_within(bytes, self.limit),
                     ui::params(&params),
                 );
@@ -415,26 +458,25 @@ impl Printer {
 struct TgsPrinter {
     quiet: bool,
     bar: Option<ProgressBar>,
+    /// The lossless size, to show how much fitting has taken off.
+    lossless: Option<usize>,
 }
 
 impl TgsPrinter {
     fn new(ctx: &Context) -> Self {
-        Self { quiet: ctx.global.quiet, bar: None }
+        Self { quiet: ctx.global.quiet, bar: None, lossless: None }
     }
 
-    fn spinner(&mut self, message: String) {
+    fn spinner(&mut self, verb: &str, message: String) {
         if self.quiet {
             return;
         }
-        let bar = self.bar.get_or_insert_with(|| {
-            let bar = ProgressBar::with_draw_target(None, ProgressDrawTarget::stderr());
-            bar.set_style(
-                ProgressStyle::with_template("  {spinner} {msg}").expect("valid template"),
-            );
-            bar.enable_steady_tick(Duration::from_millis(120));
-            bar
-        });
+        if let Some(bar) = self.bar.take() {
+            bar.finish_and_clear();
+        }
+        let bar = progress_bar(verb, None);
         bar.set_message(message);
+        self.bar = Some(bar);
     }
 
     fn line(&self, text: impl AsRef<str>) {
@@ -449,18 +491,19 @@ impl TgsPrinter {
         if let Some(bar) = self.bar.take() {
             bar.finish_and_clear();
         }
+        term::progress(None);
     }
 
     fn event(&mut self, event: TgsEvent) {
         match event {
             TgsEvent::Started { input, report } if !self.quiet => {
+                self.line(ui::status("Converting", term::link(input.display(), &input)));
                 let scale = match report.scale {
                     1 => String::new(),
                     scale => format!(" at {scale}x"),
                 };
                 let mut line = format!(
-                    "{}\n  {}x{} cells{scale}, {} colours, {} frames, {}",
-                    input.display(),
+                    "{}x{} cells{scale}, {} colours, {} frames, {}",
                     report.width,
                     report.height,
                     report.colours,
@@ -473,10 +516,10 @@ impl TgsPrinter {
                 if report.trimmed {
                     line.push_str(", trimmed to 3 s");
                 }
-                self.line(line);
+                self.line(ui::status("Read", ui::dim(line)));
                 if let Some(likely) = report.likely_scale {
                     self.line(format!(
-                        "  {} the art looks like {}x with {:.1}% of its edges off that grid; \
+                        "{} the art looks like {}x with {:.1}% of its edges off that grid; \
                          --pixel-scale {} snaps them",
                         ui::warning_label(),
                         likely.scale,
@@ -484,38 +527,57 @@ impl TgsPrinter {
                         likely.scale
                     ));
                 }
-                self.spinner("encoding".into());
+                term::progress(Some(0.1));
+                self.spinner("Drawing", "the art as shapes".into());
             }
             TgsEvent::TooLarge { bytes } if !self.quiet => {
-                self.line(format!(
-                    "  about {} losslessly, too large; fitting",
-                    ui::size_within(bytes as u64, tgs::MAX_BYTES)
+                self.lossless = Some(bytes);
+                self.line(ui::status(
+                    "Fitting",
+                    format!(
+                        "about {} losslessly, too large",
+                        ui::size_within(bytes as u64, tgs::MAX_BYTES)
+                    ),
                 ));
+                term::progress(Some(0.3));
+                self.spinner("Fitting", "into 64 KiB".into());
             }
             TgsEvent::Reduced { step } if !self.quiet => {
-                self.line(format!(
-                    "  {} → about {}",
-                    reduction_text(&step.reduction),
-                    ui::kib(step.bytes as u64)
+                self.line(ui::status(
+                    "Reduced",
+                    format!(
+                        "{} → about {}",
+                        reduction_text(&step.reduction),
+                        ui::kib(step.bytes as u64)
+                    ),
                 ));
+                // how much of the excess is gone, on a log scale
+                if let Some(lossless) = self.lossless {
+                    let (lossless, now) = (lossless as f64, step.bytes as f64);
+                    let target = tgs::MAX_BYTES as f64;
+                    let gone = ((lossless / now).ln() / (lossless / target).ln()).clamp(0.0, 1.0);
+                    term::progress(Some(0.3 + 0.5 * gone));
+                }
             }
-            TgsEvent::Packing => self.spinner("compressing".into()),
+            TgsEvent::Packing => {
+                term::progress(Some(0.85));
+                self.spinner("Compressing", "with zopfli".into());
+            }
             TgsEvent::Warning { message } => {
                 self.line(format!("{} {message}", ui::warning_label()));
             }
             TgsEvent::Finished { output, bytes, lossy, steps, issues, .. } => {
                 self.finish();
                 let lossy = if lossy && !steps.is_empty() {
-                    format!(", {} lossy", style("changed to fit:").yellow())
+                    format!(", {}", style("changed to fit").yellow())
                 } else if lossy {
                     ", lossy".to_string()
                 } else {
                     ", lossless".to_string()
                 };
                 println!(
-                    "{} {}: {}{lossy}",
-                    style("done").green().bold(),
-                    output.display(),
+                    "{} {}{lossy}",
+                    ui::status("Finished", term::link(style(output.display()).bold(), &output)),
                     ui::size_within(bytes, tgs::MAX_BYTES),
                 );
                 for issue in issues {
@@ -529,6 +591,12 @@ impl TgsPrinter {
             _ => {}
         }
     }
+}
+
+/// A frame of a finished sticker, shown in terminals that show pictures.
+fn show_result(preview: &tgradish_core::tgs::Preview) {
+    let Some((rgba, _)) = preview.frames.get(preview.frames.len() / 3) else { return };
+    term::picture(rgba, preview.width, preview.height, 8);
 }
 
 fn reduction_text(reduction: &tgradish_core::tgs::Reduction) -> String {
