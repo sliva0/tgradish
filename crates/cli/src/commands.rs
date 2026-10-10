@@ -7,9 +7,9 @@ use tgradish_core::backend::BackendInfo;
 use tgradish_core::config::Config;
 use tgradish_core::presets::{self, Format, Presets};
 use tgradish_core::telegram::{self, Target};
+use tgradish_core::tgs;
 use tgradish_core::webm::{self, Patch, WebmInfo};
 use tgradish_core::{TOOL_ID, protocol};
-use tgradish_core::{mark, tgs};
 
 use crate::term;
 
@@ -114,9 +114,6 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
     if !apps.is_empty() {
         println!("{}", ui::field("made", apps.join(", ")));
     }
-    if let Some(mark) = mark::read_file(path) {
-        println!("{}", ui::field("marked", ui::mark(&mark)));
-    }
     if let Some(signature) = &info.signature {
         println!("{}", ui::field("signature", signature));
     }
@@ -143,10 +140,8 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
         if tgs::is_sticker(path) {
             match tgs::inspect_file(path) {
                 Ok((stats, issues)) if ctx.global.json => {
-                    let mark = mark::read_file(path);
-                    let line = json!({
-                        "file": path, "format": "tgs", "stats": stats, "issues": issues, "mark": mark
-                    });
+                    let line =
+                        json!({ "file": path, "format": "tgs", "stats": stats, "issues": issues });
                     println!("{line}");
                 }
                 Ok((stats, issues)) => {
@@ -189,11 +184,9 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
                 target: Target,
                 info: &'a WebmInfo,
                 issues: Vec<telegram::Issue>,
-                mark: Option<mark::Mark>,
             }
             let issues = telegram::check(&info, target);
-            let mark = mark::read_file(path);
-            let line = Line { file: path, format: "webm", target, info: &info, issues, mark };
+            let line = Line { file: path, format: "webm", target, info: &info, issues };
             println!("{}", serde_json::to_string(&line)?);
         } else {
             if i > 0 {
@@ -337,6 +330,9 @@ pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
 
 fn print_sticker(path: &std::path::Path, stats: &tgs::Stats, issues: &[tgs::Issue]) {
     println!("{}", style(term::link_out(path.display(), path)).bold());
+    if let Some(name) = &stats.name {
+        println!("{}", ui::field("name", name));
+    }
     let size = match stats.tgs_bytes {
         Some(bytes) => {
             let packed = ui::size_within(bytes as u64, tgs::MAX_BYTES);
@@ -366,9 +362,6 @@ fn print_sticker(path: &std::path::Path, stats: &tgs::Stats, issues: &[tgs::Issu
     if !stats.features.is_empty() {
         let features: Vec<&str> = stats.features.iter().copied().collect();
         println!("{}", ui::field("uses", features.join(", ")));
-    }
-    if let Some(mark) = mark::read_file(path) {
-        println!("{}", ui::field("marked", ui::mark(&mark)));
     }
     if issues.is_empty() {
         println!("{}", ui::field("telegram", style("✔ accepts it").green()));

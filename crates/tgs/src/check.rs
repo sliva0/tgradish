@@ -13,6 +13,8 @@ use crate::limits::{MAX_RAW_JSON, TLOTTIE, telegram};
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Stats {
+    /// The animation's name (`nm`).
+    pub name: Option<String>,
     pub width: f64,
     pub height: f64,
     pub fps: f64,
@@ -150,6 +152,7 @@ pub fn check(json: &[u8], tgs_bytes: Option<usize>) -> Result<(Stats, Vec<Issue>
     let number = |key: &str| root.get(key).and_then(Value::as_f64).unwrap_or(0.0);
     let mut walker = Walker {
         stats: Stats {
+            name: root.get("nm").and_then(Value::as_str).map(str::to_owned),
             width: number("w"),
             height: number("h"),
             fps: number("fr"),
