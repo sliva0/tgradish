@@ -161,6 +161,21 @@ pub enum Aspect {
     Ratio(f64, f64),
 }
 
+/// How close a picture is looked at.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Zoom {
+    /// 1 shows all of the picture.
+    pub level: f32,
+    /// The picture point in the middle of the view, from 0 to 1.
+    pub centre: egui::Vec2,
+}
+
+impl Default for Zoom {
+    fn default() -> Zoom {
+        Zoom { level: 1.0, centre: egui::vec2(0.5, 0.5) }
+    }
+}
+
 /// How the preview of an item is looked at: not part of the conversion.
 #[derive(Debug, Clone)]
 pub struct View {
@@ -168,11 +183,26 @@ pub struct View {
     pub aspect: Aspect,
     /// Seconds into the input.
     pub time: f64,
+    /// Seconds into the result.
+    pub result_time: f64,
     pub playing: bool,
-    /// 1 shows all of the picture.
-    pub zoom: f32,
-    /// The picture point in the middle of the view, from 0 to 1.
-    pub centre: egui::Vec2,
+    pub input_zoom: Zoom,
+    pub result_zoom: Zoom,
+    /// The small picture of what the result will look like, over the input.
+    pub inset: bool,
+    /// What the framing was when last shown, to show the input when it
+    /// changes.
+    pub framing: Option<Framing>,
+}
+
+impl View {
+    /// The zoom of the picture shown.
+    pub fn zoom_mut(&mut self) -> &mut Zoom {
+        match self.show {
+            Show::Input => &mut self.input_zoom,
+            Show::Result => &mut self.result_zoom,
+        }
+    }
 }
 
 impl Default for View {
@@ -181,9 +211,49 @@ impl Default for View {
             show: Show::Input,
             aspect: Aspect::Free,
             time: 0.0,
+            result_time: 0.0,
             playing: true,
-            zoom: 1.0,
-            centre: egui::vec2(0.5, 0.5),
+            input_zoom: Zoom::default(),
+            result_zoom: Zoom::default(),
+            inset: true,
+            framing: None,
+        }
+    }
+}
+
+/// The choices that change which part of the input is used and how it is
+/// fitted: changing them is something to look at on the input.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Framing {
+    format: Format,
+    target: Target,
+    crop: Option<Crop>,
+    start: Option<f64>,
+    length: Option<f64>,
+    webm: Options,
+    tgs: TgsOptions,
+}
+
+impl Framing {
+    pub fn of(item: &Item) -> Framing {
+        let (webm, tgs) = (&item.choices.webm, &item.choices.tgs);
+        Framing {
+            format: item.format,
+            target: item.choices.target,
+            crop: item.choices.crop,
+            start: item.choices.start,
+            length: item.choices.length,
+            webm: Options { resize: webm.resize, scaling: webm.scaling, ..Options::default() },
+            tgs: TgsOptions {
+                keep_canvas: tgs.keep_canvas,
+                pixel_scale: tgs.pixel_scale,
+                tag: tgs.tag.clone(),
+                sheet: tgs.sheet.clone(),
+                sheet_frames: tgs.sheet_frames,
+                fps: tgs.fps,
+                long: tgs.long,
+                ..TgsOptions::default()
+            },
         }
     }
 }

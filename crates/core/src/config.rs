@@ -12,6 +12,7 @@
 //! [gui]
 //! output-dir = "/home/me/stickers"  # results go here instead of next to inputs
 //! overwrite = false                  # replace existing results
+//! smooth-scrolling = false           # ease scrolling instead of following the wheel
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -43,6 +44,8 @@ pub struct GuiConfig {
     pub overwrite: bool,
     /// What new files become: stickers or emoji.
     pub target: Option<crate::telegram::Target>,
+    /// Ease scrolling over a few frames instead of following the wheel.
+    pub smooth_scrolling: bool,
 }
 
 impl Config {

@@ -107,8 +107,15 @@ pub fn show(
                     }
                 });
                 ui.end_row();
-                label(ui, "Existing files", "Results this window made are always replaced when made again");
-                ui.checkbox(&mut gui.overwrite, "Replace files that are in the way");
+                label(ui, "Existing files", "Results tgradish made are always replaced when made again");
+                ui.checkbox(&mut gui.overwrite, "Replace any file that is in the way");
+                ui.end_row();
+            });
+
+            widgets::section(ui, "Window");
+            grid(ui, "prefs-window", |ui| {
+                label(ui, "Scrolling", "");
+                ui.checkbox(&mut config.gui.smooth_scrolling, "Smooth: ease it over a few frames");
                 ui.end_row();
             });
 
@@ -125,15 +132,23 @@ pub fn show(
                     label(ui, text, "");
                     let names = settings::preset_names(presets);
                     let labels: Vec<String> = names.iter().map(|(name, _)| settings::capitalised(name)).collect();
+                    // what built-in presets do differs by format
                     let choices: Vec<widgets::Choice<&str>> = names
                         .iter()
                         .zip(&labels)
-                        .map(|((name, description), label)| (name.as_str(), label.as_str(), description.as_deref().unwrap_or("")))
+                        .map(|((name, description), label)| {
+                            let builtin = presets.get(name).is_ok_and(|preset| preset.path.is_none());
+                            let hint = settings::builtin(name, format).filter(|_| builtin);
+                            (name.as_str(), label.as_str(), hint.unwrap_or(description.as_deref().unwrap_or("")))
+                        })
                         .collect();
                     let current = config.preset_for(format).to_owned();
                     let mut chosen = current.as_str();
                     let broken = |name: &str| names.iter().any(|(n, d)| n == name && d.is_err());
-                    segments(ui, &mut chosen, &choices, |name| if broken(name) { Err("This preset's file is broken") } else { Ok(()) });
+                    ui.vertical(|ui| {
+                        segments(ui, &mut chosen, &choices, |name| if broken(name) { Err("This preset's file is broken") } else { Ok(()) });
+                        widgets::chosen_hint(ui, chosen, &choices);
+                    });
                     let picked = chosen.to_owned();
                     if picked != current {
                         match format {

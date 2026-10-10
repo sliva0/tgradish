@@ -42,14 +42,7 @@ fn set_part(length: f64, (from, to): (f64, f64), start: &mut Option<f64>, used: 
 pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
     let Timeline { length, start, used, time, playing, limit } = timeline;
     ui.horizontal(|ui| {
-        let icon = if *playing { "⏸" } else { "▶" };
-        if ui
-            .add(egui::Button::new(egui::RichText::new(icon).size(15.0)).min_size(vec2(30.0, 26.0)))
-            .on_hover_text(if *playing { "Pause (Space)" } else { "Play (Space)" })
-            .clicked()
-        {
-            *playing = !*playing;
-        }
+        play_button(ui, playing);
         let (mut from, to) = part(length, *start, *used);
         fn seconds(value: &mut f64, length: f64) -> egui::DragValue<'_> {
             egui::DragValue::new(value).range(0.0..=length).speed(0.01).max_decimals(2).suffix(" s")
@@ -201,4 +194,54 @@ fn bar(
         Color32::WHITE,
         Stroke::NONE,
     ));
+}
+
+/// Plays a result: a play button and a bar to seek in it.
+pub fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &mut bool) {
+    let length = length.max(1e-6);
+    ui.horizontal(|ui| {
+        play_button(ui, playing);
+        let text = format!("{} / {}", widgets::seconds(*time), widgets::seconds(length));
+        let label_width = 120.0;
+        let width = (ui.available_width() - label_width).max(80.0);
+        let (rect, response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click_and_drag());
+        let track = Rect::from_min_max(
+            pos2(rect.left() + 8.0, rect.top() + 11.0),
+            pos2(rect.right() - 8.0, rect.bottom() - 11.0),
+        );
+        let seconds_at =
+            |x: f32| (f64::from((x - track.left()) / track.width()) * length).clamp(0.0, length);
+        if let Some(pointer) = response.interact_pointer_pos()
+            && (response.dragged() || response.clicked())
+        {
+            *time = seconds_at(pointer.x).min(length - 1e-6);
+        }
+        if let Some(pointer) = response.hover_pos() {
+            response.clone().on_hover_text_at_pointer(widgets::seconds(seconds_at(pointer.x)));
+        }
+        let painter = ui.painter_at(rect);
+        let visuals = ui.visuals();
+        painter.rect_filled(track, 3.0, visuals.extreme_bg_color);
+        let x = track.left() + (*time / length) as f32 * track.width();
+        let played = Rect::from_min_max(track.min, pos2(x, track.max.y));
+        // clipped rather than shrunk, so the start of the bar keeps its shape
+        ui.painter_at(played).rect_filled(
+            track,
+            3.0,
+            visuals.selection.bg_fill.gamma_multiply(0.7),
+        );
+        painter.circle_filled(pos2(x, track.center().y), 6.0, Color32::WHITE);
+        ui.label(text);
+    });
+}
+
+fn play_button(ui: &mut egui::Ui, playing: &mut bool) {
+    let icon = if *playing { "⏸" } else { "▶" };
+    if ui
+        .add(egui::Button::new(egui::RichText::new(icon).size(15.0)).min_size(vec2(30.0, 26.0)))
+        .on_hover_text(if *playing { "Pause (Space)" } else { "Play (Space)" })
+        .clicked()
+    {
+        *playing = !*playing;
+    }
 }
