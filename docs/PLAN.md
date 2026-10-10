@@ -119,7 +119,8 @@ cover two formats, which the GUI then builds on.
   where Telegram's 3 seconds end.
 - Inputs are read on worker threads: videos by the backend (all of it at
   a few frames a second, the used part at up to 30 fps once it stops
-  changing), pixel art by the `.tgs` reader. Only the selected file and
+  changing, and while paused the frame shown at full size, to crop small
+  parts of large recordings by), pixel art by the `.tgs` reader. Only the selected file and
   the last two keep their frames; the others keep thumbnails.
 - Images start as WebM and switch to `.tgs` once read if they have few
   colours, like pixel art; Aseprite files and folders are `.tgs` only,
