@@ -41,6 +41,9 @@ pub struct Layer {
     /// Shown for frames `from..to`: `ip` and `op`.
     pub from: u32,
     pub to: u32,
+    /// Spans of frames within those where the layer is hidden after all,
+    /// in order: hold keyframes on its opacity.
+    pub hidden: Vec<(u32, u32)>,
     pub transform: Transform,
     /// Top first.
     pub items: Vec<Item>,
@@ -109,13 +112,27 @@ impl Layer {
         let scale = number(scale * 100.0, 4);
         write!(
             out,
-            "{{\"ty\":4,\"ks\":{{\"p\":{{\"k\":[{},{}]}},\"s\":{{\"k\":[{scale},{scale}]}}}},\"ip\":{},\"op\":{},",
+            "{{\"ty\":4,\"ks\":{{\"p\":{{\"k\":[{},{}]}},\"s\":{{\"k\":[{scale},{scale}]}}",
             number(x, 4),
             number(y, 4),
-            self.from,
-            self.to
         )
         .unwrap();
+        if !self.hidden.is_empty() {
+            // shown from `from`, then hidden and shown again by turns
+            let mut keys = vec![(self.from, 100)];
+            for &(start, end) in &self.hidden {
+                keys.extend([(start, 0), (end, 100)]);
+            }
+            out.push_str(",\"o\":{\"a\":1,\"k\":[");
+            for (index, (tick, opacity)) in keys.into_iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                write!(out, "{{\"t\":{tick},\"s\":[{opacity}],\"h\":1}}").unwrap();
+            }
+            out.push_str("]}");
+        }
+        write!(out, "}},\"ip\":{},\"op\":{},", self.from, self.to).unwrap();
         if style.layer_start {
             out.push_str("\"st\":0,");
         }
@@ -264,6 +281,22 @@ mod tests {
     }
 
     #[test]
+    fn hides_layers_with_opacity_keys() {
+        let layer = Layer {
+            from: 10,
+            to: 90,
+            transform: Transform { position: [0.0, 0.0], scale: 1.0 },
+            items: Vec::new(),
+            hidden: vec![(30, 50), (60, 70)],
+        };
+        let json =
+            Animation { name: None, ticks: 90, layers: vec![layer] }.to_json(Style::default());
+        assert!(json.contains(
+            r#""ks":{"p":{"k":[0,0]},"s":{"k":[100,100]},"o":{"a":1,"k":[{"t":10,"s":[100],"h":1},{"t":30,"s":[0],"h":1},{"t":50,"s":[100],"h":1},{"t":60,"s":[0],"h":1},{"t":70,"s":[100],"h":1}]}},"ip":10,"op":90"#
+        ), "{json}");
+    }
+
+    #[test]
     fn writes_compact_json() {
         let animation = Animation {
             name: Some("made with \"tgradish\"".into()),
@@ -278,6 +311,7 @@ mod tests {
                     Item::Fill { colour: [255, 0, 51, 128], rule: FillRule::EvenOdd },
                     Item::GroupTransform,
                 ])],
+                hidden: Vec::new(),
             }],
         };
         let json = animation.to_json(Style::default());

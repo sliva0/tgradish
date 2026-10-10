@@ -382,7 +382,7 @@ mod tests {
             width: anim.width(),
             height: anim.height(),
             ticks: anim.ticks(),
-            layers: vec![Layer { from: 0, to: anim.ticks(), groups }],
+            layers: vec![Layer { from: 0, to: anim.ticks(), groups, hidden: Vec::new() }],
         };
         assert_eq!(scene.compare(anim), None, "the scene itself is wrong");
         let json = lay_out(&scene, anim, None).to_json(Style::default());
@@ -507,6 +507,7 @@ mod tests {
                         shapes: vec![Shape::Rect { x, y, width: size, height: size }],
                     },
                 ],
+                hidden: Vec::new(),
             }],
         };
         assert!(painted.seams(anim.palette()).is_empty());
@@ -561,6 +562,7 @@ mod tests {
                         rule: FillRule::NonZero,
                         shapes: vec![Shape::Rect { x: 0, y: 0, width: 1, height: 1 }],
                     }],
+                    hidden: Vec::new(),
                 }],
             };
             let json = lay_out(&scene, &anim, None).to_json(Style::default());

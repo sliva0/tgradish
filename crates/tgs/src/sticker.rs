@@ -402,16 +402,21 @@ mod tests {
 
     #[test]
     fn estimates_shapes_over_the_servers_limit_as_too_large() {
-        // isolated pixels, on even cells in even frames and odd cells in odd
-        // ones: 3969 rectangles a frame that nothing can merge
-        const SIDE: u32 = 126;
-        let frames = (0..7)
+        // isolated pixels on one of the four cells of every 2x2 block, a
+        // different one in each frame, red and blue by turns: 8100
+        // rectangles a frame that nothing can merge or reuse
+        const SIDE: u32 = 180;
+        let frames = (0..4)
             .map(|frame| {
                 let rgba = (0..SIDE * SIDE)
                     .flat_map(|index| {
                         let (x, y) = (index % SIDE, index / SIDE);
-                        let on = x % 2 == frame % 2 && y % 2 == frame % 2;
-                        if on { [230, 40, 40, 255] } else { [0; 4] }
+                        let on = x % 2 == frame % 2 && y % 2 == frame / 2;
+                        match (on, (x / 2 + y / 2) % 2) {
+                            (false, _) => [0; 4],
+                            (true, 0) => [230, 40, 40, 255],
+                            (true, _) => [40, 40, 230, 255],
+                        }
                     })
                     .collect();
                 Frame { rgba, duration: Duration::from_millis(100) }

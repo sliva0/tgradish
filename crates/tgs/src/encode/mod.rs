@@ -40,7 +40,7 @@ pub fn runs(anim: &PixelAnim) -> Scene {
         }
         groups.retain(|group| !group.shapes.is_empty());
         let end = start + frame.ticks;
-        layers.push(Layer { from: start, to: end, groups });
+        layers.push(Layer { from: start, to: end, groups, hidden: Vec::new() });
         start = end;
     }
     Scene { width, height: anim.height(), ticks: start, layers }

@@ -657,6 +657,18 @@ The web app there may also replace the "Web page" and "Bot" items under
   T9 found that points add little or nothing to it, only that a fill may
   paint at most 8000 to 12 000 of them (see Later).
 
+  Kept after T9 (`Settings::reuse`): a piece that comes back later with
+  the same colour, place and rectangles is drawn once, in a layer hidden
+  in between by hold keyframes on its opacity, which Telegram accepts and
+  tlottie draws. Such pieces held 12.7% of the corpus's rectangles (84 of
+  708 frames repeat an earlier one). Reused pieces can't share a layer
+  with others, which sometimes costs more, so with a score the encoder
+  keeps whichever stacking is smaller. 2.5% smaller over the corpus at
+  balanced effort, 2.7% at best (4.5% against best without it), up to
+  34% on `Spamton_trembling` and 25% on
+  `Spamton_overworld_glitched_laugh`. It also saves shapes against the
+  server's limit.
+
   Left for later (see Later): motion as position keyframes, which only
   files like `Spamton_trembling` would gain from; fringe-aware colour
   orders, which are about looks rather than size. Precomps, palette
@@ -738,11 +750,13 @@ Later (2.x):
   sprites; colour orders that avoid fringes (see T4's notes); precomps
   for repeated sprites, palette cycling, if a corpus shows them.
 - **Features Telegram accepts and tlottie draws** (T9's fifth round),
-  each to be measured for size and seams: even-odd fills, which make a
-  checkerboard or dithering from rows and columns instead of a square per
-  cell; repeaters, for rows of equal cells; masks and mattes, for holes;
-  hold keyframes on fill colours (palette cycling) and on opacity; null
-  layers as parents, for whole-sprite motion.
+  for art that needs them: even-odd fills, which make a checkerboard or
+  dithering from rows and columns instead of a square per cell, and
+  repeaters, for rows of equal cells (dithered cells are 0.84% of the
+  corpus's visible cells); hold keyframes on fill colours, for palette
+  cycling (shapes that come back in another colour are 0.3% of the
+  rectangles); masks and mattes, for holes; null layers as parents, for
+  whole-sprite motion. Hidden spans of layers came of this (see T6).
 - **Outlines against the shape limit:** the server limits shapes (24 000,
   layers counting about 9), and a group's outline is one shape however
   many points (up to 8000 under a fill), where its rectangles are one

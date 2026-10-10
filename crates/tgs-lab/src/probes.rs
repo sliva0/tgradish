@@ -106,6 +106,7 @@ fn near_2_mib() -> String {
                 to: (index + 1) * 180 / count,
                 transform: Transform { position: [f64::from(index % 16) * 8.0, 64.0], scale: 16.0 },
                 items: vec![checker()],
+                hidden: Vec::new(),
             })
             .collect();
         Animation { name: Some("tgradish probe".into()), ticks: 180, layers }
@@ -130,6 +131,7 @@ fn many_layers() -> String {
                 to: 180,
                 transform: grid_transform(f64::from(columns), f64::from(rows)),
                 items: vec![group([(f64::from(x) + 0.5, f64::from(y) + 0.5)], colour)],
+                hidden: Vec::new(),
             }
         })
         .collect();
@@ -149,6 +151,7 @@ fn many_rects() -> String {
         to: 180,
         transform: grid_transform(f64::from(columns), f64::from(rows)),
         items: vec![group(cells, [40, 40, 60, 255])],
+        hidden: Vec::new(),
     };
     Animation { name: Some("tgradish probe".into()), ticks: 180, layers: vec![layer] }
         .to_json(Style::default())
@@ -272,6 +275,7 @@ fn one_square_layers(count: u32) -> String {
                 to: 180,
                 transform: grid_transform(f64::from(columns), f64::from(rows)),
                 items: vec![group([(f64::from(x) + 0.5, f64::from(y) + 0.5)], colour)],
+                hidden: Vec::new(),
             }
         })
         .collect();
@@ -289,9 +293,15 @@ fn squares_in_one_layer(count: u32) -> String {
         to: 180,
         transform,
         items: vec![group(checker_cells(count, columns), [40, 40, 60, 255])],
+        hidden: Vec::new(),
     };
-    let blink =
-        Layer { from: 0, to: 90, transform, items: vec![group([(1.5, 0.5)], [230, 90, 60, 255])] };
+    let blink = Layer {
+        from: 0,
+        to: 90,
+        transform,
+        items: vec![group([(1.5, 0.5)], [230, 90, 60, 255])],
+        hidden: Vec::new(),
+    };
     animation(vec![board, blink])
 }
 
@@ -325,6 +335,7 @@ fn checkerboard_layers(count: u32, in_turn: bool) -> String {
                     scale,
                 },
                 items: vec![group(checker_cells(SIDE * SIDE / 2, SIDE), colour)],
+                hidden: Vec::new(),
             }
         })
         .collect();
@@ -349,9 +360,15 @@ fn long_paths(count: u32, points: usize) -> String {
     items.push(Item::Fill { colour: [60, 140, 230, 255], rule: FillRule::NonZero });
     items.push(Item::GroupTransform);
     let transform = grid_transform(units, units);
-    let layer = Layer { from: 0, to: 180, transform, items: vec![Item::Group(items)] };
-    let blink =
-        Layer { from: 0, to: 90, transform, items: vec![group([(1.5, 1.5)], [230, 90, 60, 255])] };
+    let layer =
+        Layer { from: 0, to: 180, transform, items: vec![Item::Group(items)], hidden: Vec::new() };
+    let blink = Layer {
+        from: 0,
+        to: 90,
+        transform,
+        items: vec![group([(1.5, 1.5)], [230, 90, 60, 255])],
+        hidden: Vec::new(),
+    };
     // the writer repeats the first point
     let list = |tangent| vec![tangent; points + 1].join(",");
     let mut json = animation(vec![layer, blink]);
@@ -426,6 +443,7 @@ fn single_groups(count: u32) -> String {
                 to: 180,
                 transform,
                 items: chunk.iter().map(|&cell| group([cell], colour)).collect(),
+                hidden: Vec::new(),
             }
         })
         .collect();

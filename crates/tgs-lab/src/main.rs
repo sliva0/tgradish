@@ -13,7 +13,7 @@
 //! cargo run --release -p tgs-lab -- limits DIR [ART...]
 //! cargo run --release -p tgs-lab -- sizes DIR [1X.tgs...]
 //! cargo run --release -p tgs-lab -- features DIR
-//! cargo run --release -p tgs-lab -- bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]
+//! cargo run --release -p tgs-lab -- bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--no-reuse] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]
 //! ```
 
 mod bench;
@@ -289,6 +289,7 @@ fn main() -> Result<()> {
                     settings: encode::Settings {
                         lifetimes: !flag("--no-lifetimes"),
                         split: !flag("--no-split"),
+                        reuse: !flag("--no-reuse"),
                         effort: match () {
                             _ if flag("--fast-effort") => encode::Effort::Fast,
                             _ if flag("--best") => encode::Effort::Best,
@@ -315,7 +316,7 @@ fn main() -> Result<()> {
              tgs-lab limits DIR [ART...]\n       \
              tgs-lab sizes DIR [1X.tgs...]\n       \
              tgs-lab features DIR\n       \
-             tgs-lab bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]"
+             tgs-lab bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--no-reuse] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]"
         ),
     }
 }
