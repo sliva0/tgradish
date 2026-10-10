@@ -55,6 +55,10 @@ pub enum Format {
     Png,
     WebP,
     Aseprite,
+    /// Still images, which pixel art is rarely kept as, but screenshots
+    /// and photos of it are.
+    Jpeg,
+    Bmp,
 }
 
 impl fmt::Display for Format {
@@ -64,6 +68,8 @@ impl fmt::Display for Format {
             Format::Png => "PNG",
             Format::WebP => "WebP",
             Format::Aseprite => "Aseprite",
+            Format::Jpeg => "JPEG",
+            Format::Bmp => "BMP",
         })
     }
 }
@@ -79,6 +85,10 @@ impl Format {
             Some(Format::WebP)
         } else if bytes.get(4..6) == Some(&[0xe0, 0xa5]) {
             Some(Format::Aseprite)
+        } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+            Some(Format::Jpeg)
+        } else if bytes.len() >= 18 && bytes.starts_with(b"BM") {
+            Some(Format::Bmp)
         } else {
             None
         }

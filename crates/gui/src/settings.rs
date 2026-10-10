@@ -86,7 +86,7 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             .on_hover_text(hint)
             .on_disabled_hover_text(match item.kind {
                 Kind::Video => {
-                    "Only pixel art in PNG, GIF, WebP or Aseprite files can become a TGS animation"
+                    "Only pictures in PNG, GIF, WebP, JPEG, BMP or Aseprite files can become a TGS animation"
                 }
                 _ => "ffmpeg can't read Aseprite files or folders of frames",
             });

@@ -203,3 +203,24 @@ fn counts_the_rgba_copy_of_still_images() {
         DecodeOptions { tag: None, limits: Limits { max_dimension: 4096, max_bytes: 500_000 } };
     assert_eq!(decode(&bytes, &roomy).unwrap().frames().len(), 1);
 }
+
+#[test]
+fn reads_jpeg_and_bmp_stills() {
+    // 16x8: red on the left, blue on the right; JPEG keeps them roughly
+    let pixel = |x: u32, _| if x < 8 { [255, 0, 0, 255] } else { [0, 0, 255, 255] };
+    let image = image::RgbImage::from_fn(16, 8, |x, y| {
+        let [r, g, b, _] = pixel(x, y);
+        image::Rgb([r, g, b])
+    });
+    for format in [image::ImageFormat::Jpeg, image::ImageFormat::Bmp] {
+        let mut bytes = Vec::new();
+        image.write_to(&mut std::io::Cursor::new(&mut bytes), format).unwrap();
+        let animation = decode(&bytes, &DecodeOptions::default()).unwrap();
+        assert_eq!((animation.width(), animation.height()), (16, 8), "{format:?}");
+        assert_eq!(animation.frames().len(), 1);
+        let [r, _, b, a] = animation.pixel(0, 2, 4).unwrap();
+        assert!(r > 200 && b < 60 && a == 255, "{format:?}: {r} {b} {a}");
+        let [r, _, b, _] = animation.pixel(0, 13, 4).unwrap();
+        assert!(b > 200 && r < 60, "{format:?}: {r} {b}");
+    }
+}
