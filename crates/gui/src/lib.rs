@@ -395,7 +395,7 @@ impl App {
     /// nobody changed since, one tgradish made, or any with the setting
     /// that allows it.
     fn may_replace(&self, item: u64, path: &Path) -> bool {
-        self.config.gui.overwrite || self.wrote(item, path) || self.made_by_tgradish(path)
+        self.config.gui.overwrite || self.wrote(item, path) || self.made_here(path)
     }
 
     fn wrote(&self, item: u64, path: &Path) -> bool {
@@ -408,16 +408,16 @@ impl App {
         })
     }
 
-    /// Whether tgradish made the file at `path`, by its hidden mark: read
-    /// once for each version of the file.
-    fn made_by_tgradish(&self, path: &Path) -> bool {
+    /// Whether tgradish made the file at `path` for this user, by its hidden
+    /// mark: read once for each version of the file.
+    fn made_here(&self, path: &Path) -> bool {
         let Ok(metadata) = std::fs::metadata(path) else { return false };
         let version = (metadata.len(), metadata.modified().ok());
         let mut marked = self.marked.borrow_mut();
         match marked.get(path) {
             Some(&(seen, made)) if seen == version => made,
             _ => {
-                let made = tgradish_core::mark::made_by_tgradish(path);
+                let made = tgradish_core::mark::made_here(path);
                 marked.insert(path.to_path_buf(), (version, made));
                 made
             }
@@ -1225,10 +1225,13 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
                                 None => Some(convert::sizes(target, resize, scaling, used)),
                             };
                             if let Some(mut sizes) = sizes {
+                                let art_key = inset_key((clip.id, where_));
                                 if scaling == Scaling::Auto
                                     && item.choices.webm.exact_scale.is_none()
                                     && sizes.enlarges(used) >= 2.0
-                                    && output::looks_like_art(clip, where_)
+                                    && inset.looks_like_art(art_key, || {
+                                        output::looks_like_art(clip, where_)
+                                    })
                                 {
                                     sizes.scaling = Scaling::Sharp;
                                 }
@@ -1242,9 +1245,13 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
                         }
                         Format::Tgs => {
                             let keep = item.choices.tgs.keep_canvas.unwrap_or(false);
-                            let key = inset_key((clip.id, frame, where_, keep));
+                            let bounds = inset
+                                .tgs_bounds(inset_key((clip.id, where_, keep)), || {
+                                    output::tgs_bounds(&clip.frames, clip.width, where_, keep)
+                                });
+                            let key = inset_key((clip.id, frame, bounds));
                             inset.show(ui, rect, key, "Result: 512 × 512 canvas", || {
-                                output::tgs(&clip.frames, frame, clip.width, where_, keep, 256)
+                                output::tgs(&clip.frames[frame], clip.width, bounds, 256)
                             });
                         }
                     }

@@ -54,9 +54,31 @@ pub struct Inset {
     texture: Option<egui::TextureHandle>,
     /// What the texture shows, and whether it is drawn sharp.
     key: Option<(u64, bool)>,
+    /// Whether a part of a clip looks like pixel art, by their key.
+    art: Option<(u64, bool)>,
+    /// What a `.tgs` result shows of a clip, by its key.
+    bounds: Option<(u64, [usize; 4])>,
 }
 
 impl Inset {
+    /// Whether the part of a clip `key` names looks like pixel art, worked
+    /// out by `find` when the key changes rather than every frame.
+    pub fn looks_like_art(&mut self, key: u64, find: impl FnOnce() -> bool) -> bool {
+        match self.art {
+            Some((seen, art)) if seen == key => art,
+            _ => self.art.insert((key, find())).1,
+        }
+    }
+
+    /// What a `.tgs` result shows of the clip `key` names, worked out by
+    /// `find` when the key changes rather than every frame.
+    pub fn tgs_bounds(&mut self, key: u64, find: impl FnOnce() -> [usize; 4]) -> [usize; 4] {
+        match self.bounds {
+            Some((seen, bounds)) if seen == key => bounds,
+            _ => self.bounds.insert((key, find())).1,
+        }
+    }
+
     /// Shows the picture `make` makes, made again only when `key` changes,
     /// in the bottom right corner of `area`, labelled.
     pub fn show(

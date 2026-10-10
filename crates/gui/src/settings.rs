@@ -234,10 +234,26 @@ fn code(ui: &mut egui::Ui, text: &str) {
     });
 }
 
-/// `args` as a shell would take them.
+/// The shell commands are written for: PowerShell on Windows, a POSIX
+/// shell elsewhere.
+const SHELL: &str = if cfg!(windows) { "PowerShell" } else { "a POSIX shell" };
+
+/// `args` as [`SHELL`] takes them.
 fn shell_line<S: AsRef<str>>(args: &[S]) -> String {
-    shlex::try_join(args.iter().map(AsRef::as_ref))
-        .unwrap_or_else(|_| args.iter().map(AsRef::as_ref).collect::<Vec<_>>().join(" "))
+    let args: Vec<&str> = args.iter().map(AsRef::as_ref).collect();
+    if cfg!(windows) {
+        args.iter().map(|arg| powershell_word(arg)).collect::<Vec<_>>().join(" ")
+    } else {
+        shlex::try_join(args.iter().copied()).unwrap_or_else(|_| args.join(" "))
+    }
+}
+
+/// `word` for PowerShell: as it is when nothing in it is special, else in
+/// single quotes, which keep everything but a single quote, doubled.
+fn powershell_word(word: &str) -> String {
+    let plain =
+        !word.is_empty() && word.chars().all(|c| c.is_alphanumeric() || "-_./\\:=+".contains(c));
+    if plain { word.to_owned() } else { format!("'{}'", word.replace('\'', "''")) }
 }
 
 /// The `tgradish` command that makes the same result, and for WebM the
@@ -245,7 +261,7 @@ fn shell_line<S: AsRef<str>>(args: &[S]) -> String {
 fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     ui.add_space(10.0);
     egui::CollapsingHeader::new(RichText::new("Commands").strong()).id_salt("commands").show(ui, |ui| {
-        note(ui, "The same conversion on the command line:");
+        note(ui, format!("The same conversion on the command line, for {SHELL}:"));
         let mut args = vec!["tgradish".to_owned(), "convert".into()];
         if item.sequence {
             args.push("--sequence".into());
@@ -1071,6 +1087,15 @@ mod tests {
         let crop = Crop { x: 10, y: 10, width: 200, height: 100 };
         assert_eq!(to_ratio(crop, 1.0), Crop { x: 60, y: 10, width: 100, height: 100 });
         assert_eq!(to_ratio(crop, 4.0), Crop { x: 10, y: 35, width: 200, height: 50 });
+    }
+
+    #[test]
+    fn quotes_words_for_powershell() {
+        assert_eq!(powershell_word("C:\\stickers\\pig.webm"), "C:\\stickers\\pig.webm");
+        assert_eq!(powershell_word("my sticker"), "'my sticker'");
+        assert_eq!(powershell_word("it's"), "'it''s'");
+        assert_eq!(powershell_word("a,b"), "'a,b'");
+        assert_eq!(powershell_word(""), "''");
     }
 
     #[test]
