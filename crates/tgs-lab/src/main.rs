@@ -11,10 +11,12 @@
 //! cargo run --release -p tgs-lab -- probes DIR [ART]
 //! cargo run --release -p tgs-lab -- limits DIR [ART...]
 //! cargo run --release -p tgs-lab -- sizes DIR [1X.tgs...]
+//! cargo run --release -p tgs-lab -- features DIR
 //! cargo run --release -p tgs-lab -- bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]
 //! ```
 
 mod bench;
+mod features;
 mod probes;
 mod verify;
 
@@ -267,6 +269,7 @@ fn main() -> Result<()> {
                 .collect::<Result<Vec<_>>>()?;
             probes::write_sizes(Path::new(&args[1]), &one_x)
         }
+        Some("features") if args.len() == 2 => features::write(Path::new(&args[1])),
         Some("bench") => {
             let (paths, rest) = options(&args[1..], &["--save", "--against"])?;
             let flag = |name: &str| rest.contains(&name);
@@ -310,6 +313,7 @@ fn main() -> Result<()> {
              tgs-lab probes DIR [ART]\n       \
              tgs-lab limits DIR [ART...]\n       \
              tgs-lab sizes DIR [1X.tgs...]\n       \
+             tgs-lab features DIR\n       \
              tgs-lab bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]"
         ),
     }
