@@ -536,7 +536,7 @@ mod tests {
             .map(|i| Item::Rect { centre: [i as f64 + 0.5, 0.5], size: [1.0, 1.0] })
             .collect();
         items.push(Item::Fill { colour: [1, 2, 3, 255], rule: FillRule::NonZero });
-        items.push(Item::GroupTransform);
+        items.push(Item::GroupTransform { opacity: Vec::new() });
         Item::Group(items)
     }
 
@@ -674,7 +674,7 @@ mod tests {
         let group = |paths: usize| {
             let mut items = vec![Item::Path(points.clone()); paths];
             items.push(Item::Fill { colour: [1, 2, 3, 255], rule: FillRule::NonZero });
-            items.push(Item::GroupTransform);
+            items.push(Item::GroupTransform { opacity: Vec::new() });
             Item::Group(items)
         };
         let one_fill = Animation {
