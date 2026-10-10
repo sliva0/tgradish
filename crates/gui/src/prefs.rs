@@ -16,6 +16,8 @@ use crate::widgets::{self, label, note, radios, segments};
 #[derive(Default)]
 pub struct Prefs {
     pub open: bool,
+    /// Whether the window of tgradish's version and licences is open.
+    pub about: bool,
     ffmpeg_status: Option<(bool, String)>,
     saved: Option<String>,
 }
@@ -114,7 +116,7 @@ pub fn show(
 
             widgets::section(ui, "Window");
             grid(ui, "prefs-window", |ui| {
-                label(ui, "Theme", "The button beside ⚙ switches between light and dark too");
+                label(ui, "Theme", "The button beside Settings switches between light and dark too");
                 use tgradish_core::config::Theme;
                 let themes = [
                     (Theme::System, "As the system", ""),
@@ -191,6 +193,11 @@ pub fn show(
                     Some(saved) => note(ui, saved.clone()),
                     None => note(ui, "Changes apply now; Save keeps them"),
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("About and licenses…").clicked() {
+                        prefs.about = true;
+                    }
+                });
             });
         });
     prefs.open = open;
