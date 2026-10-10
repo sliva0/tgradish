@@ -730,6 +730,14 @@ The web app there may also replace the "Web page" and "Bot" items under
     plan's `off` mode isn't needed: reductions only run when asked to fit.
   - susie_fortnite tiled 2x2 (77 KB lossless) fits at 62 KB after
     despeckling and dropping a tenth of the frames, in 5.5 s.
+  - Later, `--compromise motion|detail` (`compromise` in options): which
+    reductions fitting uses first, frames (merge, drop) or the picture
+    (snap, colours, specks, resolution); the other kind only once the
+    first stops helping. The error measure undervalues motion: on
+    `blue_ball_machine` it merges frames down to two, since few cells
+    change per frame, and halving the resolution erases its 1-pixel
+    lines. Which loss looks worse depends on the art, so `auto` stays the
+    default and the choice is the user's.
 - **T8 (done):** CLI: `convert` to `.tgs`, `describe`/protocol, presets (sticker
   and emoji for `.tgs`), `inspect` for `.tgs`.
 

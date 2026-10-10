@@ -69,6 +69,9 @@ tgradish convert dance.gif --format tgs
 # from an Aseprite tag, or from numbered frames at 8 fps
 tgradish convert walk.aseprite -o walk.tgs --tag run
 tgradish convert frames/ --sequence -o walk.tgs --fps 8
+
+# too large to fit as it is: keep the detail, drop frames first
+tgradish convert machine.gif --format tgs --compromise motion
 ```
 
 `tgradish convert --help` lists every option. Presets say how hard to work

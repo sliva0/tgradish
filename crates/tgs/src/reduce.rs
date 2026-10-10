@@ -56,6 +56,11 @@ impl Kind {
         Kind::Downscale,
     ];
 
+    /// Whether this reduction gives up motion rather than detail.
+    pub fn motion(self) -> bool {
+        matches!(self, Kind::MergeFrames | Kind::DropFrames)
+    }
+
     /// The strengths tried, weakest first. `likely_scale` is the scale
     /// snapping would use, if the art has one.
     pub fn ladder(self, likely_scale: Option<u32>) -> Vec<Reduction> {
@@ -76,6 +81,35 @@ impl Kind {
             Kind::Downscale => {
                 [0.85, 0.7, 0.5, 0.35, 0.25].map(|factor| Reduction::Downscale { factor }).to_vec()
             }
+        }
+    }
+}
+
+/// What fitting gives up first. Art that is mostly motion, such as a
+/// machine of moving parts, can lose either frames or detail: which looks
+/// better depends on the art.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Compromise {
+    /// Whatever changes the animation least for the bytes it saves.
+    #[default]
+    Auto,
+    /// Frames are merged and dropped before the picture changes: full
+    /// detail, choppier motion.
+    Motion,
+    /// The picture changes (grid, colours, specks, resolution) before any
+    /// frame goes: smooth motion, less detail.
+    Detail,
+}
+
+impl Compromise {
+    /// Whether fitting uses `kind` before the others, as long as it helps.
+    pub fn first(self, kind: Kind) -> bool {
+        match self {
+            Compromise::Auto => true,
+            Compromise::Motion => kind.motion(),
+            Compromise::Detail => !kind.motion(),
         }
     }
 }

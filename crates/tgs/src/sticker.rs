@@ -11,7 +11,7 @@ use crate::layout::{self, lay_out};
 use crate::limits::{MAX_RAW_JSON, telegram};
 use crate::lottie::Style;
 use crate::normalise::{self, PixelAnim, Report, normalise};
-use crate::reduce::{Kind, Reduction, error};
+use crate::reduce::{Compromise, Kind, Reduction, error};
 use crate::scene::Scene;
 use crate::{Result, file};
 
@@ -35,6 +35,8 @@ pub struct Options {
     pub fit: Fit,
     /// The reductions fitting may use.
     pub reductions: Vec<Kind>,
+    /// Which of them fitting uses first.
+    pub compromise: Compromise,
     /// The largest `.tgs` to make.
     pub max_bytes: usize,
     /// Written into the sticker as its name.
@@ -49,6 +51,7 @@ impl Default for Options {
             effort: Effort::default(),
             fit: Fit::default(),
             reductions: Kind::ALL.to_vec(),
+            compromise: Compromise::default(),
             max_bytes: telegram::MAX_BYTES,
             name: None,
             style: Style::default(),
@@ -272,7 +275,8 @@ fn zopfli_iterations(effort: Effort) -> u64 {
 
 /// Reduces `current` until its estimate is at most `target`: each round
 /// takes the reduction that saves the most bytes for the least change,
-/// then the last one is weakened as far as it still fits.
+/// among those the compromise puts first while any of them help, then the
+/// last one is weakened as far as it still fits.
 fn fit(
     original: &PixelAnim,
     mut current: PixelAnim,
@@ -315,12 +319,17 @@ fn fit(
         if cancelled() {
             return Err(crate::Error::Cancelled);
         }
-        let kinds: Vec<usize> =
-            (0..ladders.len()).filter(|&k| next[k] < ladders[k].len()).collect();
-        if kinds.is_empty() {
+        let open: Vec<usize> = (0..ladders.len()).filter(|&k| next[k] < ladders[k].len()).collect();
+        if open.is_empty() {
             // every reduction is used up: as small as it gets
             break;
         }
+        let first: Vec<usize> = open
+            .iter()
+            .copied()
+            .filter(|&k| options.compromise.first(options.reductions[k]))
+            .collect();
+        let kinds = if first.is_empty() { open } else { first };
         // each kind's candidate, its estimate and its error, or `None` when
         // it doesn't help at this strength
         let tries = parallel(&kinds, |&k| -> Result<Option<(PixelAnim, usize, f64)>> {
@@ -423,6 +432,49 @@ mod tests {
         let over = estimate(&anim, &named(MAX_RAW_JSON + 100_000), 1.0).unwrap();
         let further = estimate(&anim, &named(MAX_RAW_JSON + 200_000), 1.0).unwrap();
         assert!(telegram::MAX_BYTES < over && over < further, "{over} {further}");
+    }
+
+    #[test]
+    fn gives_up_what_the_compromise_puts_first() {
+        // speckled art of six colours sliding right a pixel a frame: both
+        // fewer frames and a coarser picture make it smaller
+        const SIDE: u32 = 32;
+        let colours = [[230, 40, 40], [40, 40, 230], [40, 200, 60], [240, 220, 40], [20, 20, 20]];
+        let frames = (0..16)
+            .map(|frame| {
+                let rgba = (0..SIDE * SIDE)
+                    .flat_map(|index| {
+                        let (x, y) = ((index % SIDE + SIDE - frame) % SIDE, index / SIDE);
+                        let hash = (x * 7 + y * 13 + x * y * 3) % 11;
+                        match colours.get(hash as usize) {
+                            Some(&[r, g, b]) => [r, g, b, 255],
+                            None => [255; 4],
+                        }
+                    })
+                    .collect();
+                Frame { rgba, duration: Duration::from_millis(100) }
+            })
+            .collect();
+        let input = Animation::new(SIDE, SIDE, frames).unwrap();
+        let normalise_options = normalise::Options { keep_canvas: true, ..Default::default() };
+        let (anim, _) = normalise(&input, &normalise_options).unwrap();
+        let lossless = estimate(&anim, &Options::default(), 1.0).unwrap();
+        let fitted = |compromise: Compromise| {
+            let options = Options { compromise, ..Options::default() };
+            let mut steps = Vec::new();
+            let target = (lossless / 20, 1.0);
+            fit(&anim, anim.clone(), &mut steps, target, &options, &mut |_| {}, &|| false).unwrap();
+            assert!(!steps.is_empty());
+            steps.iter().map(|step| step.reduction.kind().motion()).collect::<Vec<bool>>()
+        };
+        // left to itself, fitting coarsens this picture; asked to, it gives
+        // up frames, and detail only once fewer frames stop helping
+        assert!(!fitted(Compromise::Auto)[0]);
+        let motion = fitted(Compromise::Motion);
+        assert!(motion[0] && motion.is_sorted_by_key(|&motion| !motion), "{motion:?}");
+        assert!(motion.contains(&false), "{motion:?}");
+        let detail = fitted(Compromise::Detail);
+        assert!(!detail[0] && detail.is_sorted(), "{detail:?}");
     }
 
     #[test]
