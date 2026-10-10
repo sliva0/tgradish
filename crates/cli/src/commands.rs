@@ -11,6 +11,8 @@ use tgradish_core::webm::{self, Patch, WebmInfo};
 use tgradish_core::{TOOL_ID, protocol};
 use tgradish_core::{mark, tgs};
 
+use crate::term;
+
 use crate::Context;
 use crate::args::{ConfigCommand, FfmpegCommand, InspectArgs, PresetCommand, SpoofArgs};
 use crate::ui;
@@ -56,10 +58,15 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
     }
     let old = report.old_duration.map_or("unknown".into(), ui::seconds);
     println!(
-        "{} {}: header duration {old} → {}",
-        style("done").green().bold(),
-        output.display(),
-        ui::seconds(args.duration)
+        "{}",
+        ui::status(
+            "Spoofed",
+            format!(
+                "{}: header duration {old} → {}",
+                term::link(style(output.display()).bold(), &output),
+                ui::seconds(args.duration)
+            )
+        )
     );
     Ok(())
 }
@@ -72,21 +79,22 @@ fn guess_target(info: &WebmInfo) -> Target {
 }
 
 fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
-    println!("{}", style(path.display()).bold());
-    println!("  size        {}", ui::size_within(info.file_size, target.max_bytes()));
-    match &info.video {
+    println!("{}", style(term::link(path.display(), path)).bold());
+    println!("{}", ui::field("size", ui::size_within(info.file_size, target.max_bytes())));
+    let video = match &info.video {
         Some(video) => {
             let fps = info.fps().map(ui::fps).unwrap_or_else(|| "unknown fps".into());
             let alpha = if video.alpha { ", transparent" } else { "" };
-            println!(
-                "  video       {} {}x{}, {fps}, {} frames{alpha}",
+            format!(
+                "{} {}x{}, {fps}, {} frames{alpha}",
                 video.codec_id, video.width, video.height, info.video_frames
-            );
+            )
         }
-        None => println!("  video       none"),
-    }
+        None => "none".to_owned(),
+    };
+    println!("{}", ui::field("video", video));
     if info.audio_tracks > 0 {
-        println!("  audio       {} tracks", info.audio_tracks);
+        println!("{}", ui::field("audio", format!("{} tracks", info.audio_tracks)));
     }
     let header = info.header_duration.map_or("none".into(), ui::seconds);
     let content = info.content_duration.map_or("unknown".into(), ui::seconds);
@@ -94,22 +102,23 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
         (Some(header), Some(content)) if content - header > 0.1 => " (spoofed)",
         _ => "",
     };
-    println!("  duration    {header} in header, {content} of video{spoofed}");
+    let duration = format!("{header} in header, {content} of video{spoofed}");
+    println!("{}", ui::field("duration", duration));
     if let Some(title) = &info.title {
-        println!("  title       {title}");
+        println!("{}", ui::field("title", title));
     }
     let apps: Vec<_> = [("written by", &info.writing_app), ("muxed by", &info.muxing_app)]
         .into_iter()
         .filter_map(|(label, app)| app.as_ref().map(|app| format!("{label} {app}")))
         .collect();
     if !apps.is_empty() {
-        println!("  made        {}", apps.join(", "));
+        println!("{}", ui::field("made", apps.join(", ")));
     }
     if let Some(mark) = mark::read_file(path) {
-        println!("  marked      {}", ui::mark(&mark));
+        println!("{}", ui::field("marked", ui::mark(&mark)));
     }
     if let Some(signature) = &info.signature {
-        println!("  signature   {signature}");
+        println!("{}", ui::field("signature", signature));
     }
     if info.truncated {
         println!("  {}", style("the file is truncated").red());
@@ -117,11 +126,13 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
 
     let issues = telegram::check(info, target);
     if issues.is_empty() {
-        println!("  telegram    {} as {}", style("ok").green(), target.name());
+        let accepted = format!("{} as {}", style("✔ accepts it").green(), target.name());
+        println!("{}", ui::field("telegram", accepted));
     } else {
-        println!("  telegram    {} as {}:", style("rejected").red(), target.name());
+        let refused = format!("{} as {}:", style("✖ refuses it").red(), target.name());
+        println!("{}", ui::field("telegram", refused));
         for issue in issues {
-            println!("              - {issue}");
+            println!("              {} {issue}", style("-").red());
         }
     }
 }
@@ -325,7 +336,7 @@ pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
 }
 
 fn print_sticker(path: &std::path::Path, stats: &tgs::Stats, issues: &[tgs::Issue]) {
-    println!("{}", style(path.display()).bold());
+    println!("{}", style(term::link(path.display(), path)).bold());
     let size = match stats.tgs_bytes {
         Some(bytes) => {
             let packed = ui::size_within(bytes as u64, tgs::MAX_BYTES);
@@ -333,27 +344,34 @@ fn print_sticker(path: &std::path::Path, stats: &tgs::Stats, issues: &[tgs::Issu
         }
         None => format!("{} of JSON", ui::kib(stats.json_bytes as u64)),
     };
-    println!(
-        "  animated sticker, {}x{}, {} fps, {} frames ({}), {size}",
+    println!("{}", ui::field("size", size));
+    let animation = format!(
+        "{}x{}, {} fps, {} frames ({})",
         stats.width,
         stats.height,
         stats.fps,
         stats.frames,
         ui::seconds(stats.frames / stats.fps.max(1.0)),
     );
-    println!(
-        "  {} layers, up to {} shapes and {} fills in one",
-        stats.layers, stats.max_shapes_per_layer, stats.max_paints_per_layer
+    println!("{}", ui::field("animation", animation));
+    let cost = tgs::limits::telegram::cost(stats.shapes, stats.layers);
+    let drawing = format!(
+        "{} layers, up to {} shapes and {} fills in one; cost {cost} of {}",
+        stats.layers,
+        stats.max_shapes_per_layer,
+        stats.max_paints_per_layer,
+        tgs::limits::telegram::MAX_COST
     );
+    println!("{}", ui::field("drawing", drawing));
     if !stats.features.is_empty() {
         let features: Vec<&str> = stats.features.iter().copied().collect();
-        println!("  uses {}", features.join(", "));
+        println!("{}", ui::field("uses", features.join(", ")));
     }
     if let Some(mark) = mark::read_file(path) {
-        println!("  marked as made by {}", ui::mark(&mark));
+        println!("{}", ui::field("marked", ui::mark(&mark)));
     }
     if issues.is_empty() {
-        println!("  {}", style("Telegram should accept it").green());
+        println!("{}", ui::field("telegram", style("✔ accepts it").green()));
     }
     for issue in issues {
         let label = match issue.severity {

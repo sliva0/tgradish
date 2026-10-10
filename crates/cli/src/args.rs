@@ -7,12 +7,14 @@ use tgradish_core::presets::Format;
 use tgradish_core::telegram::Target;
 use tgradish_core::tgs::{self, TgsOptions};
 
+pub use crate::term::ColorChoice;
+
 const TGS: &str = "Animated stickers (.tgs)";
 
 /// Converts videos into Telegram video stickers and emoji, with the ability
 /// to bypass the 3 second limit, and pixel art into animated stickers.
 #[derive(Debug, Parser)]
-#[command(version, max_term_width = 100)]
+#[command(version, max_term_width = 100, styles = crate::ui::help_styles())]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -42,6 +44,11 @@ pub struct Global {
     /// Config file to use instead of the default one.
     #[arg(long, global = true, env = "TGRADISH_CONFIG", value_name = "FILE")]
     pub config: Option<PathBuf>,
+    /// Colours, links on file names, progress in the terminal's tab or
+    /// taskbar and pictures of results, where the terminal shows them.
+    /// NO_COLOR and CLICOLOR_FORCE are heeded with auto.
+    #[arg(long, global = true, value_enum, default_value_t = ColorChoice::Auto, value_name = "WHEN")]
+    pub color: ColorChoice,
 }
 
 /// [`FfmpegChoice`] for clap.
