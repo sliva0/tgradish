@@ -12,6 +12,7 @@ tgradish-core = { workspace = true, features = ["clipboard"] }
 tgradish-tgs.workspace = true
 
 eframe.workspace = true
+png.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 skrifa.workspace = true
@@ -32,4 +33,3 @@ workspace = true
 [dev-dependencies]
 egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
 egui-wgpu = "0.36.2"
-png.workspace = true

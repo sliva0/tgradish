@@ -6,6 +6,7 @@ mod canvas;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod dnd;
 mod fallback;
+mod icon;
 mod inspect;
 mod item;
 mod jobs;
@@ -52,6 +53,7 @@ pub fn run(launch: Launch) -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title("tgradish")
             .with_app_id("tgradish")
+            .with_icon(std::sync::Arc::new(icon::window()))
             .with_inner_size([1280.0, 820.0])
             .with_min_inner_size([900.0, 560.0])
             .with_drag_and_drop(true),
@@ -847,46 +849,50 @@ impl App {
 
     fn files_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("⚙").on_hover_text("Settings").clicked() {
-                    self.prefs.open = true;
-                }
-                self.theme_button(ui);
-                if ui
-                    .button("🔬")
-                    .on_hover_text("Inspect a sticker: check a file against Telegram's rules")
-                    .clicked()
-                    && let Some(file) =
-                        rfd::FileDialog::new().add_filter("stickers", &["webm", "tgs"]).pick_file()
-                {
-                    self.inspection = Some(inspect::Inspection::of(&file));
-                }
-                // a split button: files, or the rest from its arrow
-                ui.scope(|ui| {
-                    ui.spacing_mut().item_spacing.x = 1.0;
-                    ui.menu_button("⏷", |ui| self.add_menu(ui));
-                    if ui.button("Add files…").clicked() {
-                        self.pick_files();
-                    }
-                });
-                // the icon and name, where the buttons leave room for them
-                let title = egui::WidgetText::from(RichText::new("tgradish").heading().strong());
-                let galley = title.into_galley(
-                    ui,
-                    Some(egui::TextWrapMode::Extend),
-                    f32::INFINITY,
-                    egui::TextStyle::Heading,
-                );
-                let gap = ui.spacing().item_spacing.x;
-                if ICON_SIDE + gap + galley.size().x + gap <= ui.available_width() {
-                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        // the app's icon goes here once it has one
-                        ui.allocate_space(vec2(ICON_SIDE, ICON_SIDE));
-                        ui.label(galley);
-                    });
+        let icon_side = icon::side(ui.ctx(), ICON_ROOM);
+        // as tall as the icon, with the buttons beside its middle
+        let header = vec2(ui.available_width(), icon_side);
+        let layout = egui::Layout::right_to_left(egui::Align::Center);
+        ui.allocate_ui_with_layout(header, layout, |ui| {
+            if ui.button("⚙").on_hover_text("Settings").clicked() {
+                self.prefs.open = true;
+            }
+            self.theme_button(ui);
+            if ui
+                .button("🔬")
+                .on_hover_text("Inspect a sticker: check a file against Telegram's rules")
+                .clicked()
+                && let Some(file) =
+                    rfd::FileDialog::new().add_filter("stickers", &["webm", "tgs"]).pick_file()
+            {
+                self.inspection = Some(inspect::Inspection::of(&file));
+            }
+            // a split button: files, or the rest from its arrow
+            ui.scope(|ui| {
+                ui.spacing_mut().item_spacing.x = 1.0;
+                ui.menu_button("⏷", |ui| self.add_menu(ui));
+                if ui.button("Add files…").clicked() {
+                    self.pick_files();
                 }
             });
+            // the icon and name, where the buttons leave room for them
+            let title = egui::WidgetText::from(RichText::new("tgradish").heading().strong());
+            let galley = title.into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::TextStyle::Heading,
+            );
+            let gap = ui.spacing().item_spacing.x;
+            let room = ui.available_width() - gap;
+            if icon_side <= room {
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    icon::show(ui, ICON_ROOM);
+                    if icon_side + gap + galley.size().x <= room {
+                        ui.label(galley);
+                    }
+                });
+            }
         });
         ui.add_space(4.0);
         ui.separator();
@@ -1206,8 +1212,8 @@ impl App {
 
 /// Width of the column beside the preview.
 const SIDE: f32 = 300.0;
-/// Side of the app's icon before its name, above the list of files.
-const ICON_SIDE: f32 = 24.0;
+/// Points for the app's icon before its name, above the list of files.
+const ICON_ROOM: f32 = 48.0;
 
 /// The big preview of an item, its header and timeline.
 fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut Item) {
@@ -1429,10 +1435,15 @@ fn inset_key(parts: impl std::fmt::Debug) -> u64 {
 
 /// tgradish's version and the licences of what it is made of.
 fn about(ui: &mut egui::Ui) {
-    ui.label(RichText::new(format!("tgradish {}", env!("CARGO_PKG_VERSION"))).heading());
     ui.horizontal(|ui| {
-        ui.label("Telegram stickers from videos and pixel art. MIT licence;");
-        ui.hyperlink_to("source code", "https://github.com/sliva0/tgradish");
+        icon::show(ui, 96.0);
+        ui.vertical(|ui| {
+            ui.label(RichText::new(format!("tgradish {}", env!("CARGO_PKG_VERSION"))).heading());
+            ui.horizontal(|ui| {
+                ui.label("Telegram stickers from videos and pixel art. MIT licence;");
+                ui.hyperlink_to("source code", "https://github.com/sliva0/tgradish");
+            });
+        });
     });
     ui.add_space(6.0);
     widgets::note(
@@ -2173,7 +2184,7 @@ impl eframe::App for App {
         self.find_fonts(&ctx);
         egui::Panel::left("files")
             .resizable(true)
-            .default_size(390.0)
+            .default_size(410.0)
             .size_range(260.0..=520.0)
             .show(ui, |ui| {
                 self.files_panel(ui);
@@ -2729,6 +2740,19 @@ mod tests {
         harness.ctx.memory_mut(|memory| memory.reset_areas());
         harness.run_steps(3);
         save(&mut harness, "narrow");
+        // a fractional scale, where the icon keeps to whole screen pixels
+        let mut harness = Harness::builder()
+            .with_size([1280.0, 820.0])
+            .with_pixels_per_point(1.25)
+            .with_render_options(filtering)
+            .wgpu()
+            .build_eframe(|cc| {
+                let app = App::with(Config::default(), None, Presets::builtin(), None);
+                app.style(&cc.egui_ctx);
+                app
+            });
+        harness.run_steps(3);
+        save(&mut harness, "scaled");
     }
 
     #[test]
