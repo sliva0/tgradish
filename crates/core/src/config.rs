@@ -13,6 +13,7 @@
 //! output-dir = "/home/me/stickers"  # results go here instead of next to inputs
 //! overwrite = false                  # replace existing results
 //! smooth-scrolling = false           # ease scrolling instead of following the wheel
+//! theme = "system"                   # or "light" or "dark"
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -46,6 +47,19 @@ pub struct GuiConfig {
     pub target: Option<crate::telegram::Target>,
     /// Ease scrolling over a few frames instead of following the wheel.
     pub smooth_scrolling: bool,
+    /// Light or dark, or as the system has it.
+    pub theme: Theme,
+}
+
+/// The window's colours.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum Theme {
+    /// As the system has it.
+    #[default]
+    System,
+    Light,
+    Dark,
 }
 
 impl Config {

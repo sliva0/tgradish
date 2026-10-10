@@ -1,9 +1,7 @@
 //! The bar under the preview: where playback is, and which part of the
 //! input is used, with handles and numbers to change it.
 
-use eframe::egui::{
-    self, Color32, CursorIcon, PointerButton, Rect, Sense, Shape, Stroke, pos2, vec2,
-};
+use eframe::egui::{self, CursorIcon, PointerButton, Rect, Sense, Shape, Stroke, pos2, vec2};
 
 use crate::widgets;
 
@@ -160,18 +158,19 @@ fn bar(
         let x = x_of(from + limit);
         painter.line_segment(
             [pos2(x, track.top()), pos2(x, track.bottom())],
-            Stroke::new(1.5, widgets::WARN),
+            Stroke::new(1.5, widgets::warn(ui)),
         );
         painter.text(
             pos2(x + 3.0, rect.top()),
             egui::Align2::LEFT_TOP,
             "3 s",
             egui::FontId::proportional(10.5),
-            widgets::WARN,
+            widgets::warn(ui),
         );
     }
     // brackets at both ends of the used part
-    let bracket = Stroke::new(2.5, Color32::WHITE);
+    let marks = ui.visuals().strong_text_color();
+    let bracket = Stroke::new(2.5, marks);
     for (x, inward) in [(x_of(from), 4.0), (x_of(to), -4.0)] {
         let (top, bottom) = (track.top() - 3.0, track.bottom() + 3.0);
         painter.add(Shape::line(
@@ -183,7 +182,7 @@ fn bar(
     let x = x_of(time.clamp(0.0, length));
     painter.line_segment(
         [pos2(x, track.top() - 2.0), pos2(x, rect.bottom())],
-        Stroke::new(1.0, Color32::WHITE),
+        Stroke::new(1.0, marks),
     );
     painter.add(Shape::convex_polygon(
         vec![
@@ -191,7 +190,7 @@ fn bar(
             pos2(x + 4.5, track.top() - 7.0),
             pos2(x, track.top() - 1.0),
         ],
-        Color32::WHITE,
+        marks,
         Stroke::NONE,
     ));
 }
@@ -230,7 +229,7 @@ pub fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &mut bool
             3.0,
             visuals.selection.bg_fill.gamma_multiply(0.7),
         );
-        painter.circle_filled(pos2(x, track.center().y), 6.0, Color32::WHITE);
+        painter.circle_filled(pos2(x, track.center().y), 6.0, visuals.strong_text_color());
         ui.label(text);
     });
 }

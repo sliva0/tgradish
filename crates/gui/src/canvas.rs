@@ -276,7 +276,7 @@ pub fn show(
 ) -> bool {
     let response = ui.allocate_rect(rect, Sense::click_and_drag());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, Color32::from_gray(24));
+    painter.rect_filled(rect, 0.0, widgets::stage(ui.visuals().dark_mode));
 
     let side = picture.size.0.max(picture.size.1);
     let canvas = if picture.square { (side, side) } else { picture.size };
