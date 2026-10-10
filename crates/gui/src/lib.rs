@@ -69,6 +69,16 @@ pub fn run(launch: Launch) -> eframe::Result<()> {
     )
 }
 
+/// Makes the window light or dark.
+fn set_theme(ctx: &egui::Context, theme: tgradish_core::config::Theme) {
+    use tgradish_core::config::Theme;
+    ctx.set_theme(match theme {
+        Theme::System => egui::ThemePreference::System,
+        Theme::Light => egui::ThemePreference::Light,
+        Theme::Dark => egui::ThemePreference::Dark,
+    });
+}
+
 /// The window's fonts: Ubuntu Light for text, JetBrains Mono NL for
 /// commands, and a few symbols; small subsets, see `assets/fonts`.
 fn fonts() -> egui::FontDefinitions {
@@ -172,6 +182,8 @@ struct App {
     inspection: Option<inspect::Inspection>,
     /// The About and licenses window is open.
     about: bool,
+    /// The theme Settings showed last, to apply a change made there.
+    prefs_theme: Option<tgradish_core::config::Theme>,
     /// The system's fonts for what the window's own lack.
     fallbacks: fallback::Fallbacks,
     message: Option<String>,
@@ -235,6 +247,7 @@ impl App {
             prefs: prefs::Prefs::default(),
             inspection: None,
             about: false,
+            prefs_theme: None,
             fallbacks: fallback::Fallbacks::new(fonts()),
             message,
             pasted: false,
@@ -247,6 +260,7 @@ impl App {
 
     fn style(&self, ctx: &egui::Context) {
         ctx.set_fonts(fonts());
+        set_theme(ctx, self.config.gui.theme);
         ctx.all_styles_mut(|style| {
             use egui::{FontFamily, FontId, TextStyle};
             style.text_styles = [
@@ -711,6 +725,31 @@ impl App {
         }
     }
 
+    /// Switches between light and dark, and keeps the choice in the config
+    /// file at once, without the rest of what Settings changed.
+    fn theme_button(&mut self, ui: &mut egui::Ui) {
+        let dark = ui.visuals().dark_mode;
+        let (icon, hint, theme) = if dark {
+            ("☀", "Light theme", tgradish_core::config::Theme::Light)
+        } else {
+            ("🌓", "Dark theme", tgradish_core::config::Theme::Dark)
+        };
+        if !ui.button(icon).on_hover_text(hint).clicked() {
+            return;
+        }
+        self.config.gui.theme = theme;
+        set_theme(ui.ctx(), theme);
+        if let Some(path) = &self.config_path {
+            let saved = Config::load(path).and_then(|mut saved| {
+                saved.gui.theme = theme;
+                saved.save(path)
+            });
+            if let Err(err) = saved {
+                self.message = Some(format!("The theme couldn't be saved: {err}"));
+            }
+        }
+    }
+
     fn add_menu(&mut self, ui: &mut egui::Ui) {
         if ui
             .button("A folder of frames…")
@@ -759,6 +798,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label(RichText::new("tgradish").heading().strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.theme_button(ui);
                 ui.menu_button("⚙", |ui| {
                     if ui.button("Settings…").clicked() {
                         self.prefs.open = true;
@@ -1048,11 +1088,11 @@ impl App {
                     if let Some(failed) = &item.failed {
                         match &failed.job.status {
                             Status::Failed(message) => {
-                                ui.colored_label(widgets::BAD, format!("Failed: {message}"));
+                                ui.colored_label(widgets::bad(ui), format!("Failed: {message}"));
                             }
                             Status::Exists(path) => {
                                 ui.colored_label(
-                                    widgets::WARN,
+                                    widgets::warn(ui),
                                     "A file not made here is in the way:",
                                 );
                                 if ui.button("Replace it").clicked() {
@@ -1130,7 +1170,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
         });
         item.view.show = show;
         if has_result && !item.result_is_current() {
-            ui.colored_label(widgets::WARN, "made with earlier settings");
+            ui.colored_label(widgets::warn(ui), "made with earlier settings");
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if item.view.show == Show::Input {
@@ -1191,7 +1231,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
     match item.view.show {
         Show::Input => {
             if let Some(message) = error {
-                message_in(ui, rect, &format!("Couldn't read it: {message}"), widgets::BAD);
+                message_in(ui, rect, &format!("Couldn't read it: {message}"), widgets::bad(ui));
             } else if let (Some(clip), Some(size)) = (overview, input_size) {
                 // play within the used part
                 if let Some((start, end)) = range {
@@ -1434,7 +1474,7 @@ fn toast(ctx: &egui::Context, message: &str) -> bool {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.set_max_width(560.0);
                 ui.horizontal(|ui| {
-                    ui.colored_label(widgets::WARN, "⚠");
+                    ui.colored_label(widgets::warn(ui), "⚠");
                     ui.label(message);
                     if ui.small_button("OK").clicked() {
                         open = false;
@@ -1523,7 +1563,7 @@ fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backe
 
 fn message_in(ui: &egui::Ui, rect: egui::Rect, text: &str, colour: Color32) {
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, Color32::from_gray(24));
+    painter.rect_filled(rect, 0.0, widgets::stage(ui.visuals().dark_mode));
     painter.text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -1573,7 +1613,7 @@ fn row(
             let badge =
                 egui::Rect::from_min_size(result.right_top() - vec2(20.0, 0.0), vec2(20.0, 20.0));
             let button = egui::Button::new(RichText::new("⟳").size(13.0).color(Color32::BLACK))
-                .fill(widgets::WARN)
+                .fill(widgets::warn(ui))
                 .corner_radius(4.0);
             // placed, so the rows below don't move
             if ui.place(badge, button).on_hover_text("Settings changed: convert again").clicked() {
@@ -1714,7 +1754,9 @@ fn thumb(
     stale: bool,
 ) {
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 4.0, Color32::from_gray(34));
+    let back =
+        if ui.visuals().dark_mode { Color32::from_gray(34) } else { Color32::from_gray(214) };
+    painter.rect_filled(rect, 4.0, back);
     match texture {
         Some(texture) => {
             let size = texture.size_vec2();
@@ -1731,7 +1773,7 @@ fn thumb(
                 egui::Align2::CENTER_CENTER,
                 "✖",
                 egui::FontId::proportional(16.0),
-                widgets::BAD,
+                widgets::bad(ui),
             );
         }
         None => {}
@@ -1759,7 +1801,7 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
         (None, Some(made)) => match &made.job.status {
             Status::Done(done) => {
                 let refused = done.problems.iter().any(|p| p.refused);
-                let colour = if refused { widgets::BAD } else { widgets::GOOD };
+                let colour = if refused { widgets::bad(ui) } else { widgets::good(ui) };
                 let mark = if refused { "✖" } else { "✔" };
                 let stale = if item.result_is_current() { "" } else { " · settings changed" };
                 ui.colored_label(
@@ -1768,10 +1810,10 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
                 );
             }
             Status::Failed(_) => {
-                ui.colored_label(widgets::BAD, small("✖ failed".into()));
+                ui.colored_label(widgets::bad(ui), small("✖ failed".into()));
             }
             Status::Exists(_) => {
-                ui.colored_label(widgets::WARN, small("a file is in the way".into()));
+                ui.colored_label(widgets::warn(ui), small("a file is in the way".into()));
             }
             Status::Cancelled => {
                 ui.label(small("stopped".into()).weak());
@@ -1792,10 +1834,10 @@ fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
         widgets::section(ui, "Last conversion");
         match &failed.job.status {
             Status::Failed(message) => {
-                ui.colored_label(widgets::BAD, message);
+                ui.colored_label(widgets::bad(ui), message);
             }
             Status::Exists(path) => {
-                ui.colored_label(widgets::WARN, format!("{} is in the way", path.display()));
+                ui.colored_label(widgets::warn(ui), format!("{} is in the way", path.display()));
             }
             Status::Cancelled => widgets::note(ui, "Stopped before it was done"),
             Status::Done(_) | Status::Waiting | Status::Running => {}
@@ -1833,14 +1875,17 @@ fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
                 widgets::note(ui, "Changed to fit: see Details below");
             }
             if made.job.replaces {
-                ui.colored_label(widgets::WARN, "⚠ Replaced an earlier result made by tgradish");
+                ui.colored_label(
+                    widgets::warn(ui),
+                    "⚠ Replaced an earlier result made by tgradish",
+                );
             }
         }
         Status::Failed(message) => {
-            ui.colored_label(widgets::BAD, message);
+            ui.colored_label(widgets::bad(ui), message);
         }
         Status::Exists(path) => {
-            ui.colored_label(widgets::WARN, format!("{} is in the way", path.display()));
+            ui.colored_label(widgets::warn(ui), format!("{} is in the way", path.display()));
         }
         Status::Cancelled => widgets::note(ui, "Stopped before it was done"),
         Status::Waiting | Status::Running => {}
@@ -1863,7 +1908,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     }
     let progress = &job.progress;
     let running = ui.visuals().selection.bg_fill;
-    let done = widgets::GOOD.gamma_multiply(0.45);
+    let done = widgets::good(ui).gamma_multiply(0.45);
     if let Some(stage) = progress.tgs {
         use jobs::TgsStage;
         let fits = progress.lossless_bytes.is_none() && stage > TgsStage::Fitting;
@@ -1919,7 +1964,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
                 let (mark, colour) = if attempt.fits {
                     ("fits", done)
                 } else {
-                    ("too large", widgets::BAD.gamma_multiply(0.45))
+                    ("too large", widgets::bad(ui).gamma_multiply(0.45))
                 };
                 let text = format!("{text} → {}, {mark}", widgets::kib(bytes));
                 widgets::bar(ui, Some(1.0), &text, colour);
@@ -1980,7 +2025,7 @@ fn details(ui: &mut egui::Ui, item: &Item) {
                         tgradish_core::events::Rate::Lossless => "lossless".into(),
                     });
                     match attempt.bytes {
-                        Some(bytes) => ui.colored_label(if attempt.fits { widgets::GOOD } else { widgets::BAD }, widgets::kib(bytes)),
+                        Some(bytes) => ui.colored_label(if attempt.fits { widgets::good(ui) } else { widgets::bad(ui) }, widgets::kib(bytes)),
                         None => ui.label("—"),
                     };
                     ui.label(attempt.ssim.map(|ssim| format!("{:.1}%", ssim * 100.0)).unwrap_or_default());
@@ -1989,7 +2034,7 @@ fn details(ui: &mut egui::Ui, item: &Item) {
             });
         }
         for warning in &progress.warnings {
-            ui.colored_label(widgets::WARN, format!("⚠ {warning}"));
+            ui.colored_label(widgets::warn(ui), format!("⚠ {warning}"));
         }
     });
 }
@@ -2062,6 +2107,10 @@ impl eframe::App for App {
                 self.files_panel(ui);
             });
         egui::CentralPanel::default().show(ui, |ui| self.main_panel(ui));
+        if self.prefs.open && self.prefs_theme != Some(self.config.gui.theme) {
+            set_theme(&ctx, self.config.gui.theme);
+        }
+        self.prefs_theme = Some(self.config.gui.theme);
         prefs::show(
             &ctx,
             &mut self.prefs,
@@ -2587,6 +2636,11 @@ mod tests {
         harness.state_mut().about = true;
         harness.run_steps(3);
         save(&mut harness, "about");
+        harness.state_mut().about = false;
+        set_theme(&harness.ctx, tgradish_core::config::Theme::Light);
+        harness.state_mut().items.last_mut().unwrap().job = None;
+        harness.run_steps(3);
+        save(&mut harness, "light");
     }
 
     #[test]

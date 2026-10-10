@@ -73,7 +73,7 @@ pub fn show(
                         prefs.ffmpeg_status = Some(check_ffmpeg(config));
                     }
                     if let Some((ok, status)) = &prefs.ffmpeg_status {
-                        ui.colored_label(if *ok { widgets::GOOD } else { widgets::BAD }, status);
+                        ui.colored_label(if *ok { widgets::good(ui) } else { widgets::bad(ui) }, status);
                     }
                 });
                 ui.end_row();
@@ -114,6 +114,15 @@ pub fn show(
 
             widgets::section(ui, "Window");
             grid(ui, "prefs-window", |ui| {
+                label(ui, "Theme", "The button beside ⚙ switches between light and dark too");
+                use tgradish_core::config::Theme;
+                let themes = [
+                    (Theme::System, "As the system", ""),
+                    (Theme::Light, "Light", ""),
+                    (Theme::Dark, "Dark", ""),
+                ];
+                segments(ui, &mut config.gui.theme, &themes, |_| Ok(()));
+                ui.end_row();
                 label(ui, "Scrolling", "");
                 ui.checkbox(&mut config.gui.smooth_scrolling, "Smooth: ease it over a few frames");
                 ui.end_row();
