@@ -520,7 +520,33 @@ fn build_ffmpeg(args: &[String]) -> Result<()> {
         build.static_pthread()?;
     }
     let licenses = build.stage_licenses(&dirs)?;
+    forget_linked_ffmpeg(target)?;
     println!("{}\n{}", build.prefix.display(), licenses.display());
+    Ok(())
+}
+
+/// Makes cargo build ffmpeg-sys-next again. It bundles the static
+/// libraries into its rlib, and nothing tells cargo they changed, so builds
+/// (and CI caches of them) would keep linking the ffmpeg built before.
+fn forget_linked_ffmpeg(target: Target) -> Result<()> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("target");
+    let mut dirs = vec![root.join(target.triple())];
+    // builds without --target, for the machine itself
+    if target == Target::host() {
+        dirs.push(root.clone());
+    }
+    for dir in dirs {
+        for profile in ["debug", "release"] {
+            let fingerprints = dir.join(profile).join(".fingerprint");
+            let Ok(entries) = std::fs::read_dir(&fingerprints) else { continue };
+            for entry in entries {
+                let entry = entry?;
+                if entry.file_name().to_string_lossy().starts_with("ffmpeg-sys-next-") {
+                    std::fs::remove_dir_all(entry.path())?;
+                }
+            }
+        }
+    }
     Ok(())
 }
 
