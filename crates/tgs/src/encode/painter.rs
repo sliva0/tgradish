@@ -157,7 +157,25 @@ struct Painter<'a> {
     reuse: bool,
 }
 
-impl Painter<'_> {
+impl<'a> Painter<'a> {
+    fn new(anim: &'a PixelAnim, settings: &Settings) -> Painter<'a> {
+        let mut cells = Vec::with_capacity(anim.frames().len());
+        for frame in anim.frames() {
+            let mut by_colour = vec![Vec::new(); anim.palette().len()];
+            for (index, &colour) in frame.pixels.iter().enumerate() {
+                by_colour[colour as usize].push(index as u32);
+            }
+            cells.push(by_colour);
+        }
+        Painter {
+            anim,
+            cells,
+            lifetimes: settings.lifetimes,
+            split: settings.split,
+            reuse: settings.reuse,
+        }
+    }
+
     fn opaque(&self, colour: u16) -> bool {
         self.anim.palette()[colour as usize][3] == 255
     }
@@ -299,35 +317,45 @@ impl Painter<'_> {
             }
             pieces
         };
-        let whole = self.lifetime_pieces(
-            own_window
-                .iter()
-                .zip(&later_window)
-                .map(|(own, later)| self.needs(own, later, self.opaque(colour)))
-                .collect(),
-            self.opaque(colour),
-        )?;
-        let whole: Vec<(u8, Piece)> = moved(whole.into_iter().map(|piece| (1, piece)).collect());
+        let whole = self
+            .lifetime_pieces(
+                own_window
+                    .iter()
+                    .zip(&later_window)
+                    .map(|(own, later)| self.needs(own, later, self.opaque(colour)))
+                    .collect(),
+                self.opaque(colour),
+            )
+            .map(|whole| moved(whole.into_iter().map(|piece| (1, piece)).collect()));
         if !self.lifetimes || !self.opaque(colour) {
-            return Ok(whole);
+            return whole;
         }
-        let mut best = (cost(&whole), whole);
+        // a colour too large to draw whole may still fit split or tiled
+        let (mut best, failed) = match whole {
+            Ok(whole) => (Some((cost(&whole), whole)), None),
+            Err(err) => (None, Some(err)),
+        };
+        let cheaper =
+            |best: &Option<(usize, _)>, cost: usize| best.as_ref().is_none_or(|b| cost < b.0);
         if self.split {
             for patch in [false, true] {
                 if let Ok(split) = self.split_pieces(&own_window, &later_window, patch)
-                    && split_cost(&split) < best.0
+                    && cheaper(&best, split_cost(&split))
                 {
-                    best = (split_cost(&split), moved(split));
+                    best = Some((split_cost(&split), moved(split)));
                 }
             }
         }
         if tiles
             && let Ok(tiled) = self.tiled_pieces(&own, later)
-            && tiled_cost(&tiled) < best.0
+            && cheaper(&best, tiled_cost(&tiled))
         {
-            best = (tiled_cost(&tiled), tiled);
+            best = Some((tiled_cost(&tiled), tiled));
         }
-        Ok(best.1)
+        match (best, failed) {
+            (Some((_, pieces)), _) => Ok(pieces),
+            (None, failed) => Err(failed.expect("the whole colour failed")),
+        }
     }
 
     /// A colour cut into square tiles of the canvas, each with lifetimes of
@@ -579,6 +607,12 @@ impl Painter<'_> {
     /// Builds the order from the top: each step places the colour that
     /// loses the least by being drawn there rather than at the bottom.
     fn greedy_order(&self, colours: &[u16]) -> Vec<u16> {
+        self.greedy(colours, true)
+    }
+
+    /// [`Painter::greedy_order`], working out only the costs a step can
+    /// change when `cached`.
+    fn greedy(&self, colours: &[u16], cached: bool) -> Vec<u16> {
         let mut everything = vec![self.empty(); self.frames()];
         for &colour in colours.iter().filter(|&&c| self.opaque(c)) {
             for (f, mask) in everything.iter_mut().enumerate() {
@@ -602,16 +636,26 @@ impl Painter<'_> {
                 self.cost_of(colour, &later)
             })
             .collect();
-        // a colour's cost only depends on the colours over it within a cell
-        // of its own, so after each step only the costs of colours next to
-        // the one taken change
+        // a colour's pieces are worked out in a window of its cells and a
+        // cell around them, where rectangles can reach over any later
+        // colour: after each step only the costs of colours whose window
+        // holds the one taken change
         let union = |colour: u16| {
             let mut cells = self.empty();
             (0..self.frames()).for_each(|f| cells.union(&self.own(colour, f)));
             cells
         };
         let cells: Vec<Mask> = colours.iter().map(|&colour| union(colour)).collect();
-        let around: Vec<Mask> = cells.iter().map(Mask::grown).collect();
+        let around: Vec<Mask> = cells
+            .iter()
+            .map(|cells| {
+                let (width, height) = (self.anim.width(), self.anim.height());
+                let Some((x, y, w, h)) = cells.bounds() else { return self.empty() };
+                let (left, top) = (x.saturating_sub(1), y.saturating_sub(1));
+                let (right, bottom) = ((x + w + 1).min(width), (y + h + 1).min(height));
+                Mask::filled(width, height, (left, top, right - left, bottom - top))
+            })
+            .collect();
         let mut remaining: Vec<usize> = (0..colours.len()).collect();
         let mut later = vec![self.empty(); self.frames()];
         let mut costs: Vec<Option<usize>> = vec![None; colours.len()];
@@ -635,7 +679,7 @@ impl Painter<'_> {
                     mask.union(&self.own(colour, f));
                 }
                 for &i in &remaining {
-                    if around[i].intersects(&cells[index]) {
+                    if !cached || around[i].intersects(&cells[index]) {
                         costs[i] = None;
                     }
                 }
@@ -689,21 +733,7 @@ pub fn painter(
     settings: &Settings,
     score: Option<&dyn Fn(&Scene) -> usize>,
 ) -> Result<Scene, EncodeError> {
-    let mut cells = Vec::with_capacity(anim.frames().len());
-    for frame in anim.frames() {
-        let mut by_colour = vec![Vec::new(); anim.palette().len()];
-        for (index, &colour) in frame.pixels.iter().enumerate() {
-            by_colour[colour as usize].push(index as u32);
-        }
-        cells.push(by_colour);
-    }
-    let mut painter = Painter {
-        anim,
-        cells,
-        lifetimes: settings.lifetimes,
-        split: settings.split,
-        reuse: settings.reuse,
-    };
+    let mut painter = Painter::new(anim, settings);
     if settings.lifetimes {
         match painter.search(settings.effort, score) {
             // a layer per frame stays within the limit for up to 180
@@ -989,6 +1019,45 @@ mod tests {
             let rects: usize = layer.groups.iter().map(|group| group.shapes.len()).sum();
             assert!(rects + 3 * layer.groups.len() <= MAX_SHAPES);
         }
+    }
+
+    #[test]
+    fn draws_a_colour_too_large_for_a_group_in_tiles() {
+        // alternating red and transparent cells: one group would need more
+        // rectangles than tlottie draws
+        let width = 2 * MAX_SHAPES as u32;
+        let rgba = (0..width).flat_map(|x| if x % 2 == 0 { [230, 40, 40, 255] } else { [0; 4] });
+        let frame = Frame { rgba: rgba.collect(), duration: Duration::from_millis(100) };
+        let input = Animation::new(width, 1, vec![frame]).unwrap();
+        let anim =
+            normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
+        let scene = painter(&anim, &Settings::default(), None).unwrap();
+        assert_eq!(scene.compare(&anim), None);
+        assert_eq!(scene.seams(anim.palette()), []);
+    }
+
+    #[test]
+    fn caches_only_costs_that_stay_the_same() {
+        // 2x2 blocks of 10 colours, where taking a colour changes the cost
+        // of another that it doesn't touch: rectangles reach over any
+        // colour drawn later within a colour's bounds
+        let blocks = [
+            9, 3, 7, 9, 4, 2, 2, 5, 3, 2, 6, 1, 5, 2, 2, 7, 6, 3, 3, 8, 8, 4, 8, 8, 3, 6, 7, 6, 7,
+            7, 1, 4, 5, 2, 3, 0, 2, 6, 4, 0,
+        ];
+        let rgba = (0..80u32)
+            .flat_map(|i| {
+                let n = blocks[((i / 10 / 2) * 10 + i % 10 / 2) as usize];
+                [(n * 30) as u8, (n * 70 % 256) as u8, (255 - n * 25) as u8, 255]
+            })
+            .collect();
+        let frame = Frame { rgba, duration: Duration::from_millis(100) };
+        let input = Animation::new(10, 8, vec![frame]).unwrap();
+        let anim =
+            normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
+        let painter = Painter::new(&anim, &Settings::default());
+        let colours = painter.guessed_order();
+        assert_eq!(painter.greedy(&colours, true), painter.greedy(&colours, false));
     }
 
     #[test]
