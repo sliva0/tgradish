@@ -22,13 +22,13 @@ const CANVAS: f64 = 512.0;
 const NEAR_2_MIB: usize = 2_000_000;
 const MAX_TGS: usize = 64 * 1024;
 
-struct Probe {
-    file: String,
+pub(crate) struct Probe {
+    pub(crate) file: String,
     /// Where to upload it: a sticker pack or a custom emoji pack.
-    pack: &'static str,
-    tests: String,
-    expect: &'static str,
-    json: String,
+    pub(crate) pack: &'static str,
+    pub(crate) tests: String,
+    pub(crate) expect: &'static str,
+    pub(crate) json: String,
 }
 
 /// The test sprite: 32x32 art pixels, 10 frames of 18 ticks. A bordered
@@ -918,7 +918,7 @@ pub fn write_sizes(dir: &Path, one_x: &[(String, String)]) -> Result<()> {
 
 /// Packs the probes into `dir`, with `CHECKLIST.md`: `intro` and a `row`
 /// for each, given its sizes as table cells.
-fn save(
+pub(crate) fn save(
     dir: &Path,
     probes: &[Probe],
     intro: &str,
