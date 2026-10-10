@@ -667,9 +667,8 @@ The web app there may also replace the "Web page" and "Bot" items under
   708 frames repeat an earlier one). Reused pieces can't share a layer
   with others, which sometimes costs more, so with a score the encoder
   keeps whichever stacking is smaller. 2.5% smaller over the corpus at
-  balanced effort, 2.7% at best (4.5% against best without it), up to
-  34% on `Spamton_trembling` and 25% on
-  `Spamton_overworld_glitched_laugh`. It also saves shapes against the
+  balanced effort, 2.7% at best, up to 34% on `Spamton_trembling` and
+  25% on `Spamton_overworld_glitched_laugh`. It also saves shapes against the
   server's limit.
 
   Kept after T9, for large animations like
@@ -694,7 +693,8 @@ The web app there may also replace the "Web page" and "Bot" items under
     drawn again in every frame.
   - Each colour takes the cheapest of whole, split, split with patches
     and tiled.
-  Corpus: 3.0% smaller at balanced effort, 3.2% at best.
+  On the corpus this is neutral (+0.03% at balanced effort, -0.2% at
+  best), since its animations are small.
   `blue_ball_machine`, lossless at fast effort: 1.85 MB with `gzip -9`
   (frame by frame, 423 000 rectangles) to 671 KB (206 000).
 
