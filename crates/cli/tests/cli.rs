@@ -58,6 +58,18 @@ fn describes_protocol() {
 }
 
 #[test]
+fn carries_licences() {
+    let output = tgradish(&["licenses"]);
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    for title in ["tgradish", "Font: Ubuntu Light, a subset", "Rust crates"] {
+        assert!(text.lines().any(|line| line == title), "no {title:?}");
+    }
+    // each crate's own license file, with who holds its copyright
+    assert!(text.matches("used by:").count() > 40);
+}
+
+#[test]
 fn reports_errors_as_json() {
     let output = tgradish(&["--json", "convert", "missing.mp4", "--preset", "nope"]);
     assert_eq!(output.status.code(), Some(1));

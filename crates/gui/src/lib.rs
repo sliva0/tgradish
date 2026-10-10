@@ -68,6 +68,53 @@ pub fn run(launch: Launch) -> eframe::Result<()> {
     )
 }
 
+/// The window's fonts: Ubuntu Light for text, JetBrains Mono NL for
+/// commands, and a few symbols; small subsets, see `assets/fonts`.
+fn fonts() -> egui::FontDefinitions {
+    use egui::{FontData, FontFamily};
+    let mut fonts = egui::FontDefinitions::empty();
+    for (name, bytes) in [
+        ("ubuntu", &include_bytes!("../assets/fonts/Ubuntu-Light-tgradish.ttf")[..]),
+        ("mono", &include_bytes!("../assets/fonts/JetBrainsMonoNL-Regular-tgradish.ttf")[..]),
+        ("icons", &include_bytes!("../assets/fonts/emoji-icon-font-tgradish.ttf")[..]),
+    ] {
+        fonts.font_data.insert(name.into(), std::sync::Arc::new(FontData::from_static(bytes)));
+    }
+    // each falls back on the others for what it lacks
+    fonts
+        .families
+        .insert(FontFamily::Proportional, vec!["ubuntu".into(), "icons".into(), "mono".into()]);
+    fonts
+        .families
+        .insert(FontFamily::Monospace, vec!["mono".into(), "icons".into(), "ubuntu".into()]);
+    fonts
+}
+
+/// The licence notices of this build: tgradish's, its fonts', and those
+/// [`tgradish_core::licenses`] has.
+pub fn notices() -> Vec<tgradish_core::licenses::Notice> {
+    use tgradish_core::licenses::Notice;
+    let fonts = [
+        ("Font: Ubuntu Light, a subset", include_str!("../assets/fonts/Ubuntu-LICENCE.txt")),
+        (
+            "Font: JetBrains Mono NL, a subset",
+            include_str!("../assets/fonts/JetBrainsMono-OFL.txt"),
+        ),
+        (
+            "Font: emoji-icon-font, a subset",
+            include_str!("../assets/fonts/emoji-icon-font-LICENSE.txt"),
+        ),
+    ];
+    let mut notices = tgradish_core::licenses::notices();
+    // before the long list of crates
+    let at =
+        notices.iter().position(|notice| notice.title == "Rust crates").unwrap_or(notices.len());
+    for (offset, (title, text)) in fonts.into_iter().enumerate() {
+        notices.insert(at + offset, Notice { title: title.into(), text: text.into() });
+    }
+    notices
+}
+
 /// Shows an error in a dialog, for when there is no terminal to print to.
 pub fn show_error(message: &str) {
     rfd::MessageDialog::new()
@@ -122,6 +169,8 @@ struct App {
     inset: Inset,
     prefs: prefs::Prefs,
     inspection: Option<inspect::Inspection>,
+    /// The About and licenses window is open.
+    about: bool,
     message: Option<String>,
     /// The clipboard was read for the Ctrl+V being held.
     pasted: bool,
@@ -182,6 +231,7 @@ impl App {
             inset: Inset::default(),
             prefs: prefs::Prefs::default(),
             inspection: None,
+            about: false,
             message,
             pasted: false,
             #[cfg(all(unix, not(target_os = "macos")))]
@@ -192,6 +242,7 @@ impl App {
     }
 
     fn style(&self, ctx: &egui::Context) {
+        ctx.set_fonts(fonts());
         ctx.all_styles_mut(|style| {
             use egui::{FontFamily, FontId, TextStyle};
             style.text_styles = [
@@ -685,6 +736,10 @@ impl App {
                 ui.menu_button("⚙", |ui| {
                     if ui.button("Settings…").clicked() {
                         self.prefs.open = true;
+                        ui.close();
+                    }
+                    if ui.button("About and licenses…").clicked() {
+                        self.about = true;
                         ui.close();
                     }
                     if ui
@@ -1221,6 +1276,80 @@ fn inset_key(parts: impl std::fmt::Debug) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
     format!("{parts:?}").hash(&mut hasher);
     hasher.finish()
+}
+
+/// tgradish's version and the licences of what it is made of.
+fn about(ui: &mut egui::Ui) {
+    ui.label(RichText::new(format!("tgradish {}", env!("CARGO_PKG_VERSION"))).heading());
+    ui.horizontal(|ui| {
+        ui.label("Telegram stickers from videos and pixel art. MIT licence;");
+        ui.hyperlink_to("source code", "https://github.com/sliva0/tgradish");
+    });
+    ui.add_space(6.0);
+    widgets::note(
+        ui,
+        "tgradish is built from other people's work too. Their licences ask for these notices \
+         to go with every copy, so the program carries them:",
+    );
+    ui.add_space(4.0);
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        let notices = ui.ctx().memory_mut(|memory| {
+            memory
+                .data
+                .get_temp_mut_or_insert_with(egui::Id::new("notices"), || {
+                    std::sync::Arc::new(notices())
+                })
+                .clone()
+        });
+        for notice in notices.iter() {
+            egui::CollapsingHeader::new(&notice.title).id_salt(("notice", &notice.title)).show(
+                ui,
+                |ui| {
+                    if notice.title.starts_with("ffmpeg: what") {
+                        ui.hyperlink_to(
+                            "The exact sources of the ffmpeg built in, with this release",
+                            format!(
+                                "https://github.com/sliva0/tgradish/releases/tag/v{}",
+                                env!("CARGO_PKG_VERSION")
+                            ),
+                        );
+                    }
+                    // the crates' list is long: a section for each licence
+                    let rule = format!("\n{}\n", "-".repeat(80));
+                    let blocks: Vec<&str> = notice.text.split(rule.as_str()).collect();
+                    if blocks.len() > 1 {
+                        widgets::note(ui, blocks[0].trim());
+                        for block in &blocks[1..] {
+                            let (head, body) = block.split_once("\n\n").unwrap_or((block, ""));
+                            let crates = head.lines().count().saturating_sub(1);
+                            let name =
+                                head.lines().next().unwrap_or("").trim_end_matches(", used by:");
+                            let title = format!(
+                                "{name}, {crates} crate{}",
+                                if crates == 1 { "" } else { "s" }
+                            );
+                            egui::CollapsingHeader::new(title).id_salt(("crates", *block)).show(
+                                ui,
+                                |ui| {
+                                    widgets::note(
+                                        ui,
+                                        head.lines()
+                                            .skip(1)
+                                            .map(str::trim)
+                                            .collect::<Vec<_>>()
+                                            .join(", "),
+                                    );
+                                    ui.label(RichText::new(body.trim()).monospace().size(11.5));
+                                },
+                            );
+                        }
+                    } else {
+                        ui.label(RichText::new(notice.text.trim()).monospace().size(11.5));
+                    }
+                },
+            );
+        }
+    });
 }
 
 /// Scrolls by what the wheel turned this frame, instead of egui's easing
@@ -1829,6 +1958,15 @@ impl eframe::App for App {
                 self.inspection = None;
             }
         }
+        if self.about {
+            let mut open = true;
+            egui::Window::new("About tgradish")
+                .open(&mut open)
+                .collapsible(false)
+                .default_size([560.0, 480.0])
+                .show(&ctx, about);
+            self.about = open;
+        }
         if let Some(message) = &self.message
             && !toast(&ctx, message)
         {
@@ -2297,6 +2435,9 @@ mod tests {
         item.job = Some((job, Format::Tgs, item.choices.clone()));
         harness.run_steps(3);
         save(&mut harness, "progress");
+        harness.state_mut().about = true;
+        harness.run_steps(3);
+        save(&mut harness, "about");
     }
 
     #[test]

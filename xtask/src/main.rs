@@ -17,7 +17,14 @@
 //! `cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc
 //! 2.28]` packs a built tgradish into a release archive. With
 //! `--system-ffmpeg` it is a build without ffmpeg, which uses the system's.
-//! Needs cargo-about, which lists the licenses of the crates built in.
+//!
+//! `cargo xtask licenses [--check]` writes the licenses of the Rust crates
+//! in tgradish to `licenses/THIRD-PARTY-CRATES.txt`, which binaries carry;
+//! `--check` fails if it is out of date, as after dependencies change. Needs
+//! cargo-about. cargo-about skips files a `.gitignore` above the crates'
+//! sources ignores, such as one of a home directory kept in git: then set
+//! `CARGO_HOME` to a directory outside it. `cargo xtask ffmpeg` keeps
+//! `licenses/ffmpeg` up to date the same way.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -520,6 +527,13 @@ fn build_ffmpeg(args: &[String]) -> Result<()> {
         build.static_pthread()?;
     }
     let licenses = build.stage_licenses(&dirs)?;
+    // what binaries carry, see crates/core/build.rs
+    let carried = root.parent().unwrap().parent().unwrap().join("licenses/ffmpeg");
+    std::fs::create_dir_all(&carried)?;
+    for entry in std::fs::read_dir(&licenses)? {
+        let entry = entry?;
+        std::fs::copy(entry.path(), carried.join(entry.file_name()))?;
+    }
     forget_linked_ffmpeg(target)?;
     println!("{}\n{}", build.prefix.display(), licenses.display());
     Ok(())
@@ -751,16 +765,11 @@ fn package_release(args: &[String]) -> Result<()> {
         stage.join("THIRD-PARTY.txt"),
         third_party + "\nThe Rust crates in it and their licenses are in THIRD-PARTY-CRATES.txt.\n",
     )?;
-    // the crates differ by target and by whether ffmpeg is linked in
-    let mut about = Command::new("cargo");
-    about
-        .current_dir(root)
-        .args(["about", "generate", "--locked", "--fail", "-c", "xtask/about.toml"])
-        .args(["-m", "crates/cli/Cargo.toml", "--target", triple]);
-    if !system_ffmpeg {
-        about.args(["--features", "linked-static"]);
-    }
-    run(about.arg("xtask/about.hbs").arg("-o").arg(stage.join("THIRD-PARTY-CRATES.txt")))?;
+    // the crates of every build, as the binary carries them
+    std::fs::copy(
+        root.join("licenses/THIRD-PARTY-CRATES.txt"),
+        stage.join("THIRD-PARTY-CRATES.txt"),
+    )?;
 
     if target.is_windows() {
         check_dll_imports(&binary)?;
@@ -818,16 +827,58 @@ fn check_glibc(exe: &Path, max: (u32, u32)) -> Result<()> {
     Ok(())
 }
 
+/// Writes or checks `licenses/THIRD-PARTY-CRATES.txt`: the crates of
+/// every target and build, ffmpeg linked in or not.
+fn crate_licenses(args: &[String]) -> Result<()> {
+    let check = match args {
+        [] => false,
+        [flag] if flag == "--check" => true,
+        _ => bail!("usage: cargo xtask licenses [--check]"),
+    };
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let file = root.join("licenses/THIRD-PARTY-CRATES.txt");
+    let fresh = root.join("target/THIRD-PARTY-CRATES.txt");
+    run(Command::new("cargo")
+        .current_dir(root)
+        .args(["about", "generate", "--locked", "--fail", "-c", "xtask/about.toml"])
+        .args(["-m", "crates/cli/Cargo.toml", "--features", "linked-static"])
+        .arg("xtask/about.hbs")
+        .arg("-o")
+        .arg(&fresh))?;
+    let text = std::fs::read_to_string(&fresh)?;
+    // crates' own license files say who holds the copyright; without them
+    // (see the module's notes) every crate gets the bare license text
+    ensure!(
+        text.matches("\n----").count() > 40,
+        "cargo-about found almost no license files: is a .gitignore hiding CARGO_HOME?"
+    );
+    if check {
+        let committed = std::fs::read_to_string(&file).unwrap_or_default();
+        ensure!(
+            committed == text,
+            "{} is out of date: run cargo xtask licenses and commit it",
+            file.display()
+        );
+        println!("{} is up to date", file.display());
+    } else {
+        std::fs::write(&file, text)?;
+        println!("{}", file.display());
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("ffmpeg") => build_ffmpeg(&args[1..]),
         Some("ffmpeg-sources") => package_sources(),
         Some("package") => package_release(&args[1..]),
+        Some("licenses") => crate_licenses(&args[1..]),
         _ => bail!(
             "usage: cargo xtask ffmpeg [--target TARGET] [--no-asm]\n       \
              cargo xtask ffmpeg-sources\n       \
-             cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc 2.28]\n\
+             cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc 2.28]\n       \
+             cargo xtask licenses [--check]\n\
              targets: linux-x86_64, linux-aarch64, windows-x86_64"
         ),
     }
