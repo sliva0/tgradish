@@ -6,9 +6,10 @@
 //! Two properties are checked here rather than in a renderer:
 //! - rasterising the scene reproduces the normalised frames exactly;
 //! - the seam invariant (see `docs/tgs.md`): wherever two 8-adjacent
-//!   opaque cells show different paint groups, the lower group also covers
-//!   the other cell, so anti-aliased inner edges are drawn over the right
-//!   colour instead of over transparency.
+//!   opaque cells show different paint groups, one group of the lower
+//!   one's colour, under the upper one, covers both cells (usually the
+//!   lower group itself), so anti-aliased inner edges are drawn over the
+//!   right colour instead of over transparency.
 
 use crate::normalise::PixelAnim;
 
@@ -48,6 +49,9 @@ pub struct Group {
     pub colour: u16,
     pub rule: FillRule,
     pub shapes: Vec<Shape>,
+    /// Spans of frames the group is shown in, in order, while its layer is;
+    /// empty for all of them.
+    pub shown: Vec<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,7 +93,7 @@ pub struct Mismatch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seam {
     pub tick: u32,
-    /// The cell the lower group should also cover.
+    /// The cell where the lower group's colour should also be painted.
     pub cell: (u32, u32),
     /// Its neighbour, which shows the lower group.
     pub neighbour: (u32, u32),
@@ -210,7 +214,8 @@ impl Scene {
         let mut ticks = vec![0, self.ticks];
         for layer in &self.layers {
             ticks.extend([layer.from.min(self.ticks), layer.to.min(self.ticks)]);
-            for &(start, end) in &layer.hidden {
+            let groups = layer.groups.iter().flat_map(|group| &group.shown);
+            for &(start, end) in layer.hidden.iter().chain(groups) {
                 ticks.extend([start.min(self.ticks), end.min(self.ticks)]);
             }
         }
@@ -221,7 +226,14 @@ impl Scene {
 
     /// Visible groups at a frame, bottom first.
     fn visible(&self, tick: u32) -> impl Iterator<Item = &Group> {
-        self.layers.iter().filter(move |layer| layer.shown(tick)).flat_map(|layer| &layer.groups)
+        self.layers
+            .iter()
+            .filter(move |layer| layer.shown(tick))
+            .flat_map(|layer| &layer.groups)
+            .filter(move |group| {
+                group.shown.is_empty()
+                    || group.shown.iter().any(|&(start, end)| (start..end).contains(&tick))
+            })
     }
 
     /// The scene at a frame, with `palette` alpha deciding what blends.
@@ -307,7 +319,16 @@ impl Scene {
                         }
                         let (low, high) = if top[a] < top[b] { (a, b) } else { (b, a) };
                         let (hx, hy) = ((high % w) as u32, (high / w) as u32);
-                        if !coverage[top[low].unwrap()].contains(hx, hy) {
+                        // one group of the lower colour, under the upper group,
+                        // painted over both cells
+                        let (lx, ly) = ((low % w) as u32, (low / w) as u32);
+                        let colour = groups[top[low].unwrap()].colour;
+                        let under = (0..top[high].unwrap()).any(|g| {
+                            groups[g].colour == colour
+                                && coverage[g].contains(hx, hy)
+                                && coverage[g].contains(lx, ly)
+                        });
+                        if !under {
                             let at = |cell: usize| ((cell % w) as u32, (cell / w) as u32);
                             out.push(Seam { tick, cell: at(high), neighbour: at(low) });
                         }
@@ -336,7 +357,7 @@ mod tests {
     }
 
     fn group(colour: u16, shapes: Vec<Shape>) -> Group {
-        Group { colour, rule: FillRule::NonZero, shapes }
+        Group { colour, rule: FillRule::NonZero, shapes, shown: Vec::new() }
     }
 
     fn scene(width: u32, height: u32, groups: Vec<Group>) -> Scene {

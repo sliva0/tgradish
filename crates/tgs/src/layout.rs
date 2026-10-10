@@ -10,7 +10,7 @@
 use crate::limits::telegram::CANVAS;
 use crate::lottie::{Animation, Item, Layer, Transform};
 use crate::normalise::{Grid, PixelAnim};
-use crate::scene::{Scene, Shape};
+use crate::scene::{Group, Layer as SceneLayer, Scene, Shape};
 
 /// How far Lottie coordinates start before the art pixel grid, in art
 /// pixels.
@@ -103,7 +103,7 @@ pub fn lay_out(scene: &Scene, anim: &PixelAnim, name: Option<String>) -> Animati
                         colour: anim.palette()[group.colour as usize],
                         rule: group.rule,
                     });
-                    items.push(Item::GroupTransform);
+                    items.push(Item::GroupTransform { opacity: opacity(layer, group) });
                     Item::Group(items)
                 })
                 .collect(),
@@ -111,6 +111,23 @@ pub fn lay_out(scene: &Scene, anim: &PixelAnim, name: Option<String>) -> Animati
         })
         .collect();
     Animation { name, ticks: scene.ticks, layers }
+}
+
+/// Hold keyframes on a group's opacity that show it only over its spans
+/// of frames, within its layer's.
+fn opacity(layer: &SceneLayer, group: &Group) -> Vec<(u32, u8)> {
+    let Some(&(first, _)) = group.shown.first() else { return Vec::new() };
+    let mut keys = Vec::new();
+    if first > layer.from {
+        keys.push((layer.from, 0));
+    }
+    for &(start, end) in &group.shown {
+        keys.push((start, 100));
+        if end < layer.to {
+            keys.push((end, 0));
+        }
+    }
+    keys
 }
 
 /// What [`lay_out`] makes of `scene` comes to on Telegram's server
@@ -141,6 +158,7 @@ mod tests {
             colour,
             rule: FillRule::NonZero,
             shapes: rects(count).collect(),
+            shown: Vec::new(),
         };
         let scene = Scene {
             width: 8,

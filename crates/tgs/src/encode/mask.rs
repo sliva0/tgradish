@@ -71,6 +71,10 @@ impl Mask {
         self.words.iter_mut().zip(&other.words).for_each(|(a, b)| *a &= b);
     }
 
+    pub fn intersects(&self, other: &Mask) -> bool {
+        self.words.iter().zip(&other.words).any(|(a, b)| a & b != 0)
+    }
+
     pub fn is_subset(&self, other: &Mask) -> bool {
         self.words.iter().zip(&other.words).all(|(a, b)| a & !b == 0)
     }
@@ -104,6 +108,34 @@ impl Mask {
         out
     }
 
+    /// The cells in a window of `width` by `height` from `(left, top)`, as
+    /// a mask of the window's size.
+    pub fn crop(&self, left: u32, top: u32, width: u32, height: u32) -> Mask {
+        let mut out = Mask::new(width, height);
+        for y in 0..height {
+            for x in 0..width {
+                if self.get(left + x, top + y) {
+                    out.set(x, y);
+                }
+            }
+        }
+        out
+    }
+
+    /// The set cells in rows `top..bottom`.
+    pub fn rows(&self, top: u32, bottom: u32) -> Mask {
+        let mut out = Mask::new(self.width, self.height);
+        let (start, end) = (self.index(0, top), self.index(0, bottom.min(self.height)));
+        for word in start / 64..end.div_ceil(64) {
+            let low = (word * 64).max(start) - word * 64;
+            let high = ((word + 1) * 64).min(end) - word * 64;
+            let keep =
+                if high - low == 64 { u64::MAX } else { ((1u64 << (high - low)) - 1) << low };
+            out.words[word] = self.words[word] & keep;
+        }
+        out
+    }
+
     /// The smallest rectangle holding every set cell: `(x, y, width, height)`.
     pub fn bounds(&self) -> Option<(u32, u32, u32, u32)> {
         let (mut left, mut top, mut right, mut bottom) = (u32::MAX, u32::MAX, 0, 0);
@@ -120,6 +152,20 @@ impl Mask {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keeps_rows() {
+        let mut mask = Mask::new(70, 3);
+        for y in 0..3 {
+            for x in [0, 63, 64, 69] {
+                mask.set(x, y);
+            }
+        }
+        let middle = mask.rows(1, 2);
+        assert_eq!(middle.cells().collect::<Vec<_>>(), [(0, 1), (63, 1), (64, 1), (69, 1)]);
+        assert_eq!(mask.rows(0, 3), mask);
+        assert!(mask.rows(2, 2).is_empty());
+    }
 
     #[test]
     fn sets_and_grows() {

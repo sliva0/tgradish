@@ -376,7 +376,10 @@ silhouettes and holes disappear.
 pair of 8-adjacent opaque pixels whose visible paint groups differ, the
 lower of the two groups must also cover the other pixel. A paint group is
 one fill with its geometry in one group, which renderers rasterise as one
-path.
+path. (Since T9's follow-up: or another group of the lower one's colour,
+below the upper group, covers both pixels. What matters is one group
+spanning the edge underneath; two groups that each cover part of a pixel
+leave it partly transparent, which measured as leaks.)
 
 Why it works:
 - every anti-aliased inner edge is then drawn over a fully opaque, correct
@@ -668,6 +671,39 @@ The web app there may also replace the "Web page" and "Bot" items under
   34% on `Spamton_trembling` and 25% on
   `Spamton_overworld_glitched_laugh`. It also saves shapes against the
   server's limit.
+
+  Kept after T9, for large animations like
+  `references/blue-ball-machine` (500x500, 30 frames, 250 colours, a
+  hundred balls rolling over a static machine), which drew every frame
+  in full:
+  - A group with more rectangles than a layer takes is cut into bands
+    of rows that share a row (the lower band covers it, an opaque colour
+    over itself changes nothing). Before, any such colour switched the
+    whole animation to a layer per frame.
+  - When a layer per lifetime would be more than Telegram's 1500, layers
+    are filled in drawing order instead and each group is shown over its
+    own spans by hold keyframes on its transform's opacity, which tlottie
+    draws.
+  - A colour can be cut into 32-cell tiles with lifetimes of their own
+    (16 and 64 were worse); a tile also covers its colour in later tiles
+    next to it, so every cell shows its own tile's group.
+  - Cores can keep cells next to later colours that move ("patches"):
+    the delta under the core paints the colour beneath the later colour
+    there, over the core's cells beside it too. Before, a ball rolling
+    along a track took the track out of its core, so the whole track was
+    drawn again in every frame.
+  - Each colour takes the cheapest of whole, split, split with patches
+    and tiled.
+  Corpus: 3.0% smaller at balanced effort, 3.2% at best.
+  `blue_ball_machine`, lossless at fast effort: 1.85 MB with `gzip -9`
+  (frame by frame, 423 000 rectangles) to 671 KB (206 000).
+
+  Speed: the greedy order only recomputes the costs of colours next to
+  the one it took (same order); the order is only guessed above 200
+  million colours times cells times frames (the corpus reaches 11
+  million, `blue_ball_machine` 1.9 billion); colours and tiles are
+  worked out in windows around their cells. `blue_ball_machine` takes
+  about 10 seconds at any effort; its balanced order took 18 minutes.
 
   Left for later (see Later): motion as position keyframes, which only
   files like `Spamton_trembling` would gain from; fringe-aware colour

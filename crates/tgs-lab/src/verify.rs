@@ -419,11 +419,13 @@ mod tests {
                 colour: blue,
                 rule: FillRule::NonZero,
                 shapes: vec![Shape::Rect { x: left, y: top, width: 1, height: bottom - top }],
+                shown: Vec::new(),
             });
             groups.push(Group {
                 colour: green,
                 rule: FillRule::NonZero,
                 shapes: vec![Shape::Rect { x: column(5), y: row(1), width: 1, height: 1 }],
+                shown: Vec::new(),
             });
         };
 
@@ -432,13 +434,18 @@ mod tests {
             colour: red,
             rule: FillRule::NonZero,
             shapes: vec![outer.clone(), hole_ccw],
+            shown: Vec::new(),
         }];
         extras(&mut groups);
         assert_eq!(render_and_compare(&anim, groups), 0);
 
         // even-odd: any second outline cuts a hole
-        let mut groups =
-            vec![Group { colour: red, rule: FillRule::EvenOdd, shapes: vec![outer, hole_cw] }];
+        let mut groups = vec![Group {
+            colour: red,
+            rule: FillRule::EvenOdd,
+            shapes: vec![outer, hole_cw],
+            shown: Vec::new(),
+        }];
         extras(&mut groups);
         assert_eq!(render_and_compare(&anim, groups), 0);
 
@@ -451,6 +458,7 @@ mod tests {
             colour: red,
             rule: FillRule::NonZero,
             shapes: vec![top_band, bottom_band, sides, right_side],
+            shown: Vec::new(),
         }];
         extras(&mut groups);
         assert_eq!(render_and_compare(&anim, groups), 0);
@@ -500,11 +508,13 @@ mod tests {
                         colour: colour([255, 0, 0, 255]),
                         rule: FillRule::NonZero,
                         shapes: vec![Shape::Rect { x: 0, y: 0, width: w, height: h }],
+                        shown: Vec::new(),
                     },
                     Group {
                         colour: colour([0, 255, 0, 255]),
                         rule: FillRule::NonZero,
                         shapes: vec![Shape::Rect { x, y, width: size, height: size }],
+                        shown: Vec::new(),
                     },
                 ],
                 hidden: Vec::new(),
@@ -561,6 +571,7 @@ mod tests {
                         colour: 1,
                         rule: FillRule::NonZero,
                         shapes: vec![Shape::Rect { x: 0, y: 0, width: 1, height: 1 }],
+                        shown: Vec::new(),
                     }],
                     hidden: Vec::new(),
                 }],
