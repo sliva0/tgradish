@@ -97,16 +97,44 @@ cover two formats, which the GUI then builds on.
 - egui (eframe), in this repo, linked against the libraries rather than
   driving the CLI.
 - One binary that is both CLI and GUI, see "Shipping one binary" below.
-- Forms are generated from the options' JSON Schema, so `.webm` and `.tgs`
-  options show up without hand-written UI for each.
-- Done: files by dialog, drag and drop or paste (files, paths, images);
-  folders and several images as the frames of one `.tgs`; presets with the
-  form showing what differs from them; a queue run one job at a time with
-  progress, log and cancelling; a looping preview of the result over a
-  checkerboard (`.tgs` from the final animation, WebM decoded by the
-  backend); an inspect view; settings (output folder, overwriting, default
-  presets, ffmpeg) saved to `config.toml`. Headless tests drive it with
-  egui_kittest.
+- Rebuilt after a first version with forms generated from the options'
+  JSON Schema and a queue of files, which was hard to use. Now every
+  setting has its own control, chosen for it: segmented buttons or radios
+  that show every option at once rather than dropdowns, numbers where
+  numbers are needed, and nothing shows JSON.
+- Layout: the files on the left, each with a thumbnail of its input and,
+  once converted, of its result. On the right the selected file: a big
+  preview (input or result) with the crop drawn on it and a timeline
+  below, what to make beside it (format, sticker or emoji, preset) with
+  the last result's size and Telegram's verdict, the rest of the settings
+  under it, and Convert at the bottom.
+- Every file keeps its own settings. Converting again replaces the result
+  this window made; a result made with earlier settings is marked so. A
+  file that is in the way and wasn't made here is only replaced on
+  request, or with the setting that replaces files.
+- Crop: drawn, moved and resized on the preview (handles, a ratio to keep,
+  zoom with the wheel), or typed as numbers; WebM and `.tgs` take it as
+  the `crop` option. With WebM's fill mode the preview dims what is cut.
+  The timeline sets start and end with handles or numbers, and marks
+  where Telegram's 3 seconds end.
+- Inputs are read on worker threads: videos by the backend (all of it at
+  a few frames a second, the used part at up to 30 fps once it stops
+  changing), pixel art by the `.tgs` reader. Only the selected file and
+  the last two keep their frames; the others keep thumbnails.
+- Images start as WebM and switch to `.tgs` once read if they have few
+  colours, like pixel art; Aseprite files and folders are `.tgs` only,
+  videos WebM only.
+- Drag and drop on Wayland: winit only reports dropped files on X11,
+  Windows and macOS. The window adds a data device of its own on winit's
+  Wayland connection, read on its own thread like the clipboard's;
+  compositors send drags to every data device of a client. Tested in a
+  nested KWin 6.7 with a drag driven by KWin's fake input. (winit and
+  smithay-clipboard panic when a drag source exits right after starting a
+  drag, with or without it.)
+- Also: paste (files, paths, images), folders and several images as the
+  frames of one `.tgs`, a structured inspect window, settings (ffmpeg,
+  where results go, overwriting, what new files start as) saved to
+  `config.toml`. Headless tests drive it with egui_kittest.
 - glow rather than wgpu, as eframe's docs say it is much smaller. The
   window adds about 8 MB to the Linux binary (4.4 MB without it); the
   window's dependencies are built for size (`opt-level = "s"`), which

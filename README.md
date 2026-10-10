@@ -32,8 +32,9 @@ sheets or image sequences of pixel art ([docs/tgs.md](docs/tgs.md)):
 ## Usage
 
 Started from a file manager or the Start menu, tgradish opens a window:
-drop or paste files, pick a preset, adjust options and convert, with a
-preview of each result. `tgradish gui` opens it from a terminal.
+drop or paste files, crop and trim each in a preview, choose a sticker or
+an emoji and how hard to work on it, convert, look at the result, change
+something and convert again. `tgradish gui` opens it from a terminal.
 
 On the command line:
 
@@ -42,7 +43,10 @@ On the command line:
 tgradish convert pig.mp4
 
 # custom emoji, cut to 2 seconds starting at 1.5 s
-tgradish convert pig.mp4 --preset emoji --start 1.5 --length 2
+tgradish convert pig.mp4 --target emoji --start 1.5 --length 2
+
+# a sticker from part of a screen recording: 640x360 from (100, 50)
+tgradish convert recording.mkv --crop 640x360+100+50
 
 # quick result: bitrate fitting only, fast encoder
 tgradish convert pig.mp4 --preset fast
@@ -67,9 +71,10 @@ tgradish convert walk.aseprite -o walk.tgs --tag run
 tgradish convert frames/ --sequence -o walk.tgs --fps 8
 ```
 
-`tgradish convert --help` lists every option. Presets are TOML files in the
-directory printed by `tgradish preset path`, see `tgradish preset show
-sticker` for the format of options.
+`tgradish convert --help` lists every option. Presets say how hard to work
+(`fast`, `balanced`, `best`) for both formats; your own are TOML files in
+the directory printed by `tgradish preset path`, see `tgradish preset show
+balanced` for the format of options.
 
 ## Installing
 

@@ -5,17 +5,19 @@ front-end can use the `tgradish-core` crate directly instead; the types are
 the same.
 
 tgradish makes two formats: WebM video stickers and emoji, and `.tgs`
-animated stickers from pixel art. Each has its own options, presets and
-events, all described by `describe`.
+animated stickers from pixel art. Each has its own options and events;
+presets hold options for both. All of it is described by `describe`.
 
 ## Version
 
-`tgradish describe` prints `"protocol": 2`. It changes when the description,
+`tgradish describe` prints `"protocol": 3`. It changes when the description,
 events or the flags below change incompatibly. Adding options, presets or
 event fields is not an incompatible change, so front-ends should ignore
 what they don't know. Protocol 2 added `.tgs`: `formats` replaced the
 top-level `options`, `events`, `output_extension` and `default_preset`, and
-presets got a `format`.
+presets got a `format`. Protocol 3 made presets say how to convert rather
+than what to make: each has `webm` and `tgs` options instead of `format`
+and `options`, and the built-in ones are `fast`, `balanced` and `best`.
 
 ## Describe
 
@@ -23,7 +25,7 @@ presets got a `format`.
 
 ```jsonc
 {
-  "protocol": 2,
+  "protocol": 3,
   "tool": "tgradish",
   "version": "2.0.0",
   // the format made when nothing asks for another
@@ -34,23 +36,23 @@ presets got a `format`.
       "description": "Video sticker or emoji, from any video or image",
       "output_extension": "webm",
       // used when no preset is given; config.toml can change it
-      "default_preset": "sticker",
+      "default_preset": "balanced",
       // JSON Schema (2020-12) of this format's options object
       "options": { "type": "object", "properties": { "fit": { "...": "..." } } },
       // JSON Schema of the events `convert --json` prints for it
       "events": { "oneOf": [ "..." ] }
     },
-    { "format": "tgs", "output_extension": "tgs", "default_preset": "tgs-sticker", "...": "..." }
+    { "format": "tgs", "output_extension": "tgs", "default_preset": "best", "...": "..." }
   ],
   "presets": [
     {
-      "name": "emoji",
-      "description": "Custom emoji, 100x100 px",
+      "name": "fast",
+      "description": "Quick: WebM fits only the bitrate, ...",
       "builtin": true,
-      // the format the preset is for; null if broken
-      "format": "webm",
-      // options with everything the preset extends applied; null if broken
-      "options": { "target": "emoji" },
+      // options for each format with everything the preset extends
+      // applied; null if broken for that format
+      "webm": { "fit": "bitrate", "speed": "fast" },
+      "tgs": { "speed": "fast" },
       // why the preset is broken, null otherwise
       "error": null
     }
@@ -74,11 +76,10 @@ tgradish --json convert INPUT... [-o OUTPUT] [-y] [--format webm|tgs]
     [--preset NAME] [--options-json JSON] [--sequence]
 ```
 
-The format is `--format`, or else the extension of `-o`, or else the
-preset's format, or else `webm`. Options are applied in this order, later
-ones winning: built-in defaults, the preset (which must be for the same
-format), `--options-json` (that format's options), then any `--<property>`
-flags. Every property of both options schemas exists as a flag with the
+The format is `--format`, or else the extension of `-o`, or else `webm`.
+Options are applied in this order, later ones winning: built-in defaults,
+the preset's options for that format, `--options-json` (that format's
+options), then any `--<property>` flags. Every property of both options schemas exists as a flag with the
 same name, so a front-end can pass either a JSON object or flags; flags
 that only the other format has are an error. `--sequence` (`.tgs` only)
 joins the inputs, image files or directories of them, into one sticker.
@@ -153,7 +154,8 @@ All of these accept `--json`:
 - `spoof FILE [-o OUT | --in-place] [--duration S]`: `output` and a
   `report` of what changed;
 - `preset list`: the `presets` array from `describe`;
-- `preset show NAME`: the preset's options with what it extends applied;
+- `preset show NAME`: the preset's `webm` and `tgs` options with what it
+  extends applied;
 - `ffmpeg status`: `ffmpeg` (paths and where it came from) and
   `capabilities` (`version`, and `libvpx_vp9`: whether it can encode
   stickers; if not, the exit status is 1).

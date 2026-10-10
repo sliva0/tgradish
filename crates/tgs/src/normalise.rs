@@ -40,6 +40,9 @@ pub enum Long {
 pub struct Options {
     /// Keep the input's canvas instead of cropping to the visible pixels.
     pub keep_canvas: bool,
+    /// The part of the input to use, in input pixels; all of it if `None`.
+    /// The canvas kept with `keep_canvas` is this part.
+    pub crop: Option<Rect>,
     /// Size of one art pixel in input pixels. Detected when not given;
     /// forcing one moves pixels that are off its grid onto it (lossy).
     pub pixel_scale: Option<u32>,
@@ -235,6 +238,14 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
         Some(length) => start.saturating_add(nanos(length)).min(input_length),
         None => input_length,
     };
+    let (input_width, input_height) = (animation.width(), animation.height());
+    let area =
+        options.crop.unwrap_or(Rect { x: 0, y: 0, width: input_width, height: input_height });
+    let outside = u64::from(area.x) + u64::from(area.width) > u64::from(input_width)
+        || u64::from(area.y) + u64::from(area.height) > u64::from(input_height);
+    if area.width == 0 || area.height == 0 || outside {
+        return Err(Error::CropOutside { crop: area, width: input_width, height: input_height });
+    }
     let (mut speed, mut trimmed) = (1.0, false);
     if end - start > MAX_NANOS {
         match options.long {
@@ -254,7 +265,10 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
         if shown == 0 {
             continue;
         }
-        let pixels = pack(&frame.rgba);
+        let mut pixels = pack(&frame.rgba);
+        if options.crop.is_some() {
+            pixels = cut(&pixels, input_width, area);
+        }
         match timed.last_mut() {
             Some((last, duration)) if *last == pixels => {
                 *duration += shown;
@@ -301,14 +315,13 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
         }
     }
 
-    let (input_width, input_height) = (animation.width(), animation.height());
     let crop = if options.keep_canvas {
-        Rect { x: 0, y: 0, width: input_width, height: input_height }
+        Rect { x: 0, y: 0, width: area.width, height: area.height }
     } else {
-        visible_area(&frames, input_width).ok_or(Error::Invisible)?
+        visible_area(&frames, area.width).ok_or(Error::Invisible)?
     };
     let mut pixels: Vec<Vec<u32>> =
-        frames.iter().map(|(pixels, _)| cut(pixels, input_width, crop)).collect();
+        frames.iter().map(|(pixels, _)| cut(pixels, area.width, crop)).collect();
     let mut edges = Edges::count(&pixels, crop.width, crop.height);
 
     let mut snapped_pixels = 0;
@@ -350,7 +363,7 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
         input_height,
         input_frames: animation.frames().len(),
         input_length: input_length as f64 / NANOS as f64,
-        crop,
+        crop: Rect { x: area.x + crop.x, y: area.y + crop.y, ..crop },
         width,
         height,
         scale,
@@ -653,6 +666,29 @@ mod tests {
         // the transparent margins become cells of their own
         assert_eq!((anim.width(), anim.height(), report.scale), (7, 6, 3));
         assert_lossless(&input, &anim, &report);
+    }
+
+    #[test]
+    fn uses_only_the_crop() {
+        // the same art, of which the crop holds the top left 2x2 art pixels
+        let input = animation(30, 20, &[ms(100), ms(100)], |frame, x, y| {
+            match (x.checked_sub(4).map(|x| x / 3), y.checked_sub(5).map(|y| y / 3)) {
+                (Some(x @ 0..5), Some(y @ 0..4)) => art(frame, x, y),
+                _ => CLEAR,
+            }
+        });
+        let crop = Some(Rect { x: 2, y: 3, width: 8, height: 8 });
+        let (anim, report) = normalise(&input, &Options { crop, ..Options::default() }).unwrap();
+        assert_eq!(report.crop, Rect { x: 4, y: 5, width: 6, height: 6 });
+        assert_eq!((anim.width(), anim.height(), report.scale), (2, 2, 3));
+        assert_lossless(&input, &anim, &report);
+
+        let options = Options { crop, keep_canvas: true, ..Options::default() };
+        let (_, report) = normalise(&input, &options).unwrap();
+        assert_eq!(Some(report.crop), crop);
+        let outside = Some(Rect { x: 25, y: 0, width: 8, height: 8 });
+        let options = Options { crop: outside, ..Options::default() };
+        assert!(matches!(normalise(&input, &options), Err(Error::CropOutside { .. })));
     }
 
     #[test]

@@ -32,6 +32,11 @@ pub enum Error {
     ZeroLength,
     #[error("every pixel is transparent")]
     Invisible,
+    #[error(
+        "the crop {}x{}+{}+{} is not within the {width}x{height} input",
+        crop.width, crop.height, crop.x, crop.y
+    )]
+    CropOutside { crop: normalise::Rect, width: u32, height: u32 },
     #[error("the pixel scale must be at least 1")]
     ZeroScale,
     #[error("more than 65535 colours: this is not pixel art")]

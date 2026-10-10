@@ -9,18 +9,23 @@ repository.workspace = true
 
 [dependencies]
 tgradish-core = { workspace = true, features = ["clipboard"] }
+tgradish-tgs.workspace = true
 
 eframe.workspace = true
 rfd.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-schemars.workspace = true
 shlex.workspace = true
 tempfile.workspace = true
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+raw-window-handle.workspace = true
+wayland-client.workspace = true
+# libwayland's own client, which can share winit's connection
+wayland-backend = { workspace = true, features = ["client_system"] }
 
 [lints]
 workspace = true
 
 [dev-dependencies]
 egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
+egui-wgpu = "0.36.2"
 png.workspace = true

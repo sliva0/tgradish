@@ -1,4 +1,4 @@
-//! Conversions, run one at a time on a worker thread.
+//! Conversions, run on a worker thread, reporting what they do as they go.
 
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
@@ -6,12 +6,15 @@ use std::sync::mpsc::{Receiver, channel};
 
 use eframe::egui;
 use tgradish_core::backend::Backend;
-use tgradish_core::convert::{Request, convert, default_output};
-use tgradish_core::events::Event;
+use tgradish_core::convert::{Request, convert};
+use tgradish_core::events::{Event, Params};
 use tgradish_core::ffmpeg::CancelToken;
 use tgradish_core::options::Options;
-use tgradish_core::presets::Format;
 use tgradish_core::tgs::{self, Preview, TgsEvent, TgsOptions, TgsRequest};
+use tgradish_core::{Error, telegram};
+use tgradish_tgs::check::Severity;
+use tgradish_tgs::normalise::Report;
+use tgradish_tgs::sticker::Step;
 
 /// What a job converts with, fixed when it starts.
 pub enum Plan {
@@ -19,127 +22,143 @@ pub enum Plan {
     Tgs { options: TgsOptions },
 }
 
-impl Plan {
-    /// Where the result for `input` goes: in `dir`, or next to the input.
-    pub fn output(&self, input: &Path, dir: Option<&Path>) -> PathBuf {
-        let next_to_input = match self {
-            Plan::Webm { options, .. } => default_output(input, options.target.unwrap_or_default()),
-            Plan::Tgs { options } => tgs::default_output(input, options.target.unwrap_or_default()),
-        };
-        match (dir, next_to_input.file_name()) {
-            (Some(dir), Some(name)) => dir.join(name),
-            _ => next_to_input,
-        }
-    }
+/// One encode while fitting a WebM sticker.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Attempt {
+    pub number: u32,
+    pub params: Params,
+    /// Size, once it is done.
+    pub bytes: Option<u64>,
+    pub fits: bool,
+    /// How much it looks like the source, from 0 to 1, when measured.
+    pub ssim: Option<f64>,
 }
 
+/// What a WebM conversion was planned to make.
 #[derive(Debug, Clone, PartialEq)]
+pub struct WebmPlan {
+    pub width: u32,
+    pub height: u32,
+    pub fps: f64,
+    pub length: f64,
+    pub spoofs: bool,
+}
+
+/// What a conversion is doing or did, besides its result.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Progress {
+    pub stage: String,
+    /// How far along the stage is, when that is known.
+    pub fraction: Option<f32>,
+    pub webm: Option<WebmPlan>,
+    pub attempts: Vec<Attempt>,
+    /// What reading the pixel art found.
+    pub report: Option<Box<Report>>,
+    /// The lossless `.tgs` size estimate, when that was too large.
+    pub lossless_bytes: Option<usize>,
+    pub steps: Vec<Step>,
+    pub warnings: Vec<String>,
+}
+
+/// A problem Telegram would have with a result.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Problem {
+    /// Telegram refuses it, rather than only frowning on it.
+    pub refused: bool,
+    pub text: String,
+}
+
+#[derive(Debug)]
+pub struct Done {
+    pub output: PathBuf,
+    pub bytes: u64,
+    pub limit: u64,
+    /// Changed to fit: frames or colours given up for `.tgs`.
+    pub lossy: bool,
+    /// For WebM: the attempt kept and whether its duration is spoofed.
+    pub kept: Option<u32>,
+    pub spoofed: bool,
+    /// For `.tgs`: its Lottie's size, layers and rectangles.
+    pub json_bytes: Option<u64>,
+    pub shapes: Option<(usize, usize)>,
+    pub problems: Vec<Problem>,
+    /// `.tgs` results' frames; WebM ones are decoded from the file.
+    pub preview: Option<Preview>,
+}
+
+#[derive(Debug)]
 pub enum Status {
     Waiting,
-    Running {
-        stage: String,
-        /// How far along the current stage is, when that is known.
-        fraction: Option<f32>,
-    },
-    Done {
-        bytes: u64,
-        limit: u64,
-        lossy: bool,
-        /// Problems Telegram would still have, worst first.
-        issues: Vec<String>,
-    },
+    Running,
+    Done(Box<Done>),
     Failed(String),
+    /// The output exists and isn't one of ours.
+    Exists(PathBuf),
     Cancelled,
 }
 
 enum Message {
-    Stage(String, Option<f32>),
-    Log(String),
-    Done(Result<Done, String>),
+    Progress(Box<dyn FnOnce(&mut Progress) + Send>),
+    Finished(Result<Done, Error>),
 }
 
-struct Done {
-    bytes: u64,
-    limit: u64,
-    lossy: bool,
-    issues: Vec<String>,
-    preview: Option<Preview>,
-}
-
+/// One conversion of an item, waiting, running or finished.
 pub struct Job {
-    /// One file, or the frames of one sticker.
-    pub inputs: Vec<PathBuf>,
-    pub sequence: bool,
-    /// What it makes, fixed when it is added.
-    pub format: Format,
-    pub output: Option<PathBuf>,
+    pub output: PathBuf,
     pub status: Status,
-    pub log: Vec<String>,
-    pub preview: Option<Preview>,
-    /// Where a pasted image is kept until it is converted.
-    pub pasted: Option<tempfile::TempDir>,
+    pub progress: Progress,
     cancel: CancelToken,
     messages: Option<Receiver<Message>>,
 }
 
-fn kib(bytes: u64) -> String {
-    format!("{:.1} KiB", bytes as f64 / 1024.0)
-}
-
 impl Job {
-    pub fn new(inputs: Vec<PathBuf>, sequence: bool, format: Format) -> Job {
+    pub fn waiting(output: PathBuf) -> Job {
         Job {
-            inputs,
-            sequence,
-            format,
-            output: None,
+            output,
             status: Status::Waiting,
-            log: Vec::new(),
-            preview: None,
-            pasted: None,
+            progress: Progress::default(),
             cancel: CancelToken::new(),
             messages: None,
         }
     }
 
-    pub fn name(&self) -> String {
-        let first = self
-            .inputs
-            .first()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned());
-        let first = first.unwrap_or_default();
-        match self.inputs.len() {
-            1 if self.sequence => format!("{first} (frames)"),
-            1 => first,
-            n => format!("{first} and {} more, as one sticker", n - 1),
-        }
+    pub fn is_running(&self) -> bool {
+        matches!(self.status, Status::Running)
     }
 
-    pub fn is_running(&self) -> bool {
-        matches!(self.status, Status::Running { .. })
+    pub fn is_waiting(&self) -> bool {
+        matches!(self.status, Status::Waiting)
     }
 
     pub fn is_finished(&self) -> bool {
-        matches!(self.status, Status::Done { .. } | Status::Failed(_) | Status::Cancelled)
+        !self.is_running() && !self.is_waiting()
     }
 
     /// Starts converting on a worker thread, which repaints `ctx` as it goes.
-    pub fn start(&mut self, plan: Plan, output: PathBuf, overwrite: bool, ctx: egui::Context) {
+    pub fn start(
+        &mut self,
+        plan: Plan,
+        inputs: Vec<PathBuf>,
+        sequence: bool,
+        overwrite: bool,
+        ctx: &egui::Context,
+    ) {
         let (sender, receiver) = channel();
         self.messages = Some(receiver);
-        self.output = Some(output.clone());
-        self.status = Status::Running { stage: "starting".into(), fraction: None };
-        let inputs = self.inputs.clone();
-        let sequence = self.sequence;
+        self.status = Status::Running;
+        self.progress = Progress { stage: "starting".into(), ..Progress::default() };
+        let output = self.output.clone();
         let cancel = self.cancel.clone();
+        let ctx = ctx.clone();
         std::thread::spawn(move || {
             let send = |message| {
                 let _ = sender.send(message);
                 ctx.request_repaint();
             };
+            let update =
+                |change: Box<dyn FnOnce(&mut Progress) + Send>| send(Message::Progress(change));
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                run(plan, inputs, sequence, output, overwrite, &cancel, &send)
+                run(plan, inputs, sequence, output, overwrite, &cancel, &update)
             }));
             let result = result.unwrap_or_else(|panic| {
                 let message = panic
@@ -147,9 +166,9 @@ impl Job {
                     .copied()
                     .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
                     .unwrap_or("no details");
-                Err(format!("tgradish crashed: {message}"))
+                Err(Error::InvalidOptions(format!("tgradish crashed: {message}")))
             });
-            send(Message::Done(result));
+            send(Message::Finished(result));
         });
     }
 
@@ -157,34 +176,35 @@ impl Job {
         self.cancel.cancel();
     }
 
-    /// Takes in what the worker reported.
-    pub fn poll(&mut self) {
-        let Some(messages) = &self.messages else { return };
+    /// Takes in what the worker reported; true when it just finished.
+    pub fn poll(&mut self) -> bool {
+        let Some(messages) = &self.messages else { return false };
+        let mut finished = false;
         while let Ok(message) = messages.try_recv() {
             match message {
-                Message::Stage(stage, fraction) => {
-                    self.status = Status::Running { stage, fraction }
-                }
-                Message::Log(line) => self.log.push(line),
-                Message::Done(Ok(done)) => {
-                    self.status = Status::Done {
-                        bytes: done.bytes,
-                        limit: done.limit,
-                        lossy: done.lossy,
-                        issues: done.issues,
+                Message::Progress(change) => change(&mut self.progress),
+                Message::Finished(result) => {
+                    finished = true;
+                    self.status = match result {
+                        Ok(done) => Status::Done(Box::new(done)),
+                        Err(Error::Cancelled) => Status::Cancelled,
+                        Err(Error::OutputExists(path)) => Status::Exists(path),
+                        Err(err) => Status::Failed(err.to_string()),
                     };
-                    self.preview = done.preview;
                 }
-                Message::Done(Err(message)) if message == "cancelled" => {
-                    self.status = Status::Cancelled
-                }
-                Message::Done(Err(message)) => self.status = Status::Failed(message),
             }
         }
-        if self.is_finished() {
+        if finished {
             self.messages = None;
         }
+        finished
     }
+}
+
+type Update<'a> = &'a dyn Fn(Box<dyn FnOnce(&mut Progress) + Send>);
+
+fn kib(bytes: u64) -> String {
+    format!("{:.1} KiB", bytes as f64 / 1024.0)
 }
 
 fn run(
@@ -194,122 +214,156 @@ fn run(
     output: PathBuf,
     overwrite: bool,
     cancel: &CancelToken,
-    send: &dyn Fn(Message),
-) -> Result<Done, String> {
+    update: Update,
+) -> Result<Done, Error> {
     if let Some(dir) = output.parent().filter(|dir| !dir.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir).map_err(|err| err.to_string())?;
+        std::fs::create_dir_all(dir)?;
     }
     match plan {
         Plan::Webm { options, backend } => {
-            let limit = options.target.unwrap_or_default().max_bytes();
-            let request = Request {
-                input: inputs[0].clone(),
-                output: Some(output),
-                options,
-                overwrite,
-                keep_temp: false,
-            };
-            let mut attempt_name = String::new();
-            let outcome = convert(&backend, &request, cancel, &mut |event| match event {
-                Event::Started { plan } => send(Message::Log(format!(
-                    "{} {}x{}, {:.0} fps, {:.2} s",
-                    plan.target.name(),
-                    plan.width,
-                    plan.height,
-                    plan.fps,
-                    plan.length
-                ))),
-                Event::AttemptStarted { attempt, params } => {
-                    attempt_name =
-                        format!("attempt {attempt}: {:.0} fps, {:?}", params.fps, params.rate);
-                    send(Message::Stage(attempt_name.clone(), Some(0.0)));
-                }
-                Event::Progress { pass, passes, fraction, .. } => {
-                    let done = (f64::from(pass - 1) + fraction) / f64::from(passes);
-                    send(Message::Stage(attempt_name.clone(), Some(done as f32)));
-                }
-                Event::AttemptFinished { attempt, bytes, fits, .. } => send(Message::Log(format!(
-                    "attempt {attempt}: {}, {}",
-                    kib(bytes),
-                    if fits { "fits" } else { "too big" }
-                ))),
-                Event::Scored { attempt, ssim } => {
-                    send(Message::Log(format!("attempt {attempt}: similarity {ssim:.4}")))
-                }
-                Event::Warning { message } => send(Message::Log(format!("warning: {message}"))),
-                _ => {}
-            })
-            .map_err(|err| err.to_string())?;
-            send(Message::Stage("loading the preview".into(), None));
-            // the sticker is done either way
-            let preview = backend.preview(&outcome.output, cancel).map_err(|err| {
-                send(Message::Log(format!("no preview: {err}")));
-            });
-            Ok(Done {
-                bytes: outcome.bytes,
-                limit,
-                lossy: false,
-                issues: outcome.issues.iter().map(ToString::to_string).collect(),
-                preview: preview.ok(),
-            })
+            webm(options, backend, &inputs[0], output, overwrite, cancel, update)
         }
         Plan::Tgs { options } => {
             let request = TgsRequest { inputs, sequence, output, options, overwrite };
-            let mut issues = Vec::new();
+            let mut found = Vec::new();
+            let mut finished = None;
             let outcome = tgs::convert(&request, cancel, &mut |event| match event {
-                TgsEvent::Started { report, .. } => {
-                    let scale = if report.scale > 1 { format!(" at {}x", report.scale) } else { String::new() };
-                    send(Message::Log(format!(
-                        "{}x{} cells{scale}, {} colours, {} frames, {:.2} s",
-                        report.width,
-                        report.height,
-                        report.colours,
-                        report.frames,
-                        f64::from(report.ticks) / 60.0
-                    )));
-                    if let Some(likely) = report.likely_scale {
-                        send(Message::Log(format!(
-                            "looks like {}x art with some pixels off the grid; a pixel scale of {} snaps them",
-                            likely.scale, likely.scale
-                        )));
-                    }
-                    send(Message::Stage("encoding".into(), None));
-                }
-                TgsEvent::TooLarge { bytes } => {
-                    send(Message::Log(format!("about {} losslessly, too large; fitting", kib(bytes as u64))));
-                    send(Message::Stage("fitting".into(), None));
-                }
-                TgsEvent::Reduced { step } => {
-                    send(Message::Log(format!("{:?} → about {}", step.reduction, kib(step.bytes as u64))))
-                }
-                TgsEvent::Packing => send(Message::Stage("compressing".into(), None)),
-                TgsEvent::Warning { message } => send(Message::Log(format!("warning: {message}"))),
-                TgsEvent::Finished { issues: found, .. } => {
-                    issues = found.iter().map(|issue| issue.message.clone()).collect();
+                TgsEvent::Started { report, .. } => update(Box::new(move |progress| {
+                    progress.report = Some(report);
+                    progress.stage = "encoding".into();
+                })),
+                TgsEvent::TooLarge { bytes } => update(Box::new(move |progress| {
+                    progress.lossless_bytes = Some(bytes);
+                    progress.stage = format!("about {} losslessly; fitting", kib(bytes as u64));
+                })),
+                TgsEvent::Reduced { step } => update(Box::new(move |progress| {
+                    progress.steps.push(step);
+                })),
+                TgsEvent::Packing => update(Box::new(|progress| {
+                    progress.stage = "compressing".into();
+                })),
+                TgsEvent::Warning { message } => update(Box::new(move |progress| {
+                    progress.warnings.push(message);
+                })),
+                TgsEvent::Finished { issues, json_bytes, layers, rectangles, .. } => {
+                    found = issues
+                        .into_iter()
+                        .map(|issue| Problem {
+                            refused: issue.severity == Severity::Error,
+                            text: issue.message,
+                        })
+                        .collect();
+                    finished = Some((json_bytes, layers, rectangles));
                 }
                 TgsEvent::Error { .. } => {}
-            })
-            .map_err(|err| err.to_string())?;
+            })?;
             Ok(Done {
+                output: outcome.output,
                 bytes: outcome.bytes,
-                limit: tgradish_core::tgs::MAX_BYTES,
+                limit: tgs::MAX_BYTES,
                 lossy: outcome.lossy,
-                issues,
+                kept: None,
+                spoofed: false,
+                json_bytes: finished.map(|(json, _, _)| json),
+                shapes: finished.map(|(_, layers, rectangles)| (layers, rectangles)),
+                problems: found,
                 preview: Some(outcome.preview),
             })
         }
     }
 }
 
-/// Opens a file with the system's default program.
+fn webm(
+    options: Options,
+    backend: Backend,
+    input: &Path,
+    output: PathBuf,
+    overwrite: bool,
+    cancel: &CancelToken,
+    update: Update,
+) -> Result<Done, Error> {
+    let limit = options.target.unwrap_or_default().max_bytes();
+    let request = Request {
+        input: input.to_path_buf(),
+        output: Some(output),
+        options,
+        overwrite,
+        keep_temp: false,
+    };
+    let mut kept = None;
+    let outcome = convert(&backend, &request, cancel, &mut |event| match event {
+        Event::Started { plan } => {
+            let planned = WebmPlan {
+                width: plan.width,
+                height: plan.height,
+                fps: plan.fps,
+                length: plan.length,
+                spoofs: plan.spoofs(plan.length),
+            };
+            update(Box::new(move |progress| progress.webm = Some(planned)));
+        }
+        Event::AttemptStarted { attempt, params } => update(Box::new(move |progress| {
+            progress.stage = format!("encoding, attempt {attempt}");
+            progress.fraction = Some(0.0);
+            progress.attempts.push(Attempt {
+                number: attempt,
+                params,
+                bytes: None,
+                fits: false,
+                ssim: None,
+            });
+        })),
+        Event::Progress { pass, passes, fraction, .. } => {
+            let done = ((f64::from(pass - 1) + fraction) / f64::from(passes)) as f32;
+            update(Box::new(move |progress| progress.fraction = Some(done)));
+        }
+        Event::AttemptFinished { attempt, bytes, fits, .. } => update(Box::new(move |progress| {
+            if let Some(entry) = progress.attempts.iter_mut().find(|a| a.number == attempt) {
+                (entry.bytes, entry.fits) = (Some(bytes), fits);
+            }
+            progress.fraction = None;
+        })),
+        Event::Scored { attempt, ssim } => update(Box::new(move |progress| {
+            if let Some(entry) = progress.attempts.iter_mut().find(|a| a.number == attempt) {
+                entry.ssim = Some(ssim);
+            }
+        })),
+        Event::Warning { message } => {
+            update(Box::new(move |progress| progress.warnings.push(message)))
+        }
+        Event::Finished { attempt, .. } => kept = Some(attempt),
+        _ => {}
+    })?;
+    Ok(Done {
+        output: outcome.output,
+        bytes: outcome.bytes,
+        limit,
+        lossy: false,
+        kept,
+        spoofed: outcome.spoofed,
+        json_bytes: None,
+        shapes: None,
+        problems: outcome.issues.iter().map(problem).collect(),
+        preview: None,
+    })
+}
+
+fn problem(issue: &telegram::Issue) -> Problem {
+    Problem { refused: true, text: issue.to_string() }
+}
+
+/// Opens the folder holding `path`, with the file selected where the
+/// system can do that.
 pub fn reveal(path: &Path) {
-    // the folder, since the result itself may open in something unhelpful
-    let target = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let folder = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     #[cfg(target_os = "windows")]
-    let command = std::process::Command::new("explorer").arg(target).spawn();
+    let command = std::process::Command::new("explorer").arg("/select,").arg(path).spawn();
     #[cfg(target_os = "macos")]
-    let command = std::process::Command::new("open").arg(target).spawn();
+    let command = std::process::Command::new("open").arg("-R").arg(path).spawn();
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let command = std::process::Command::new("xdg-open").arg(target).spawn();
-    let _ = command;
+    let command = {
+        let _ = path;
+        std::process::Command::new("xdg-open").arg(folder).spawn()
+    };
+    let _ = (command, folder);
 }

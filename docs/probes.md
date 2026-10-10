@@ -22,8 +22,8 @@ D=references/t9-probes
 tgradish convert references/uhh.mp4 --length 3 -o $D/w1-sticker.webm
 tgradish convert references/uhh.mp4 -o $D/w2-spoofed.webm
 tgradish convert references/pig.mp4 -o $D/w3-long-spoofed.webm
-tgradish convert references/uhh.mp4 --preset emoji --length 3 -o $D/w4-emoji.webm
-tgradish convert references/uhh.mp4 --preset emoji -o $D/w5-emoji-spoofed.webm
+tgradish convert references/uhh.mp4 --target emoji --length 3 -o $D/w4-emoji.webm
+tgradish convert references/uhh.mp4 --target emoji -o $D/w5-emoji-spoofed.webm
 ```
 
 | File | Pack | Tests | Expected |

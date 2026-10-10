@@ -41,6 +41,8 @@ pub struct GuiConfig {
     pub output_dir: Option<PathBuf>,
     /// Replace existing results.
     pub overwrite: bool,
+    /// What new files become: stickers or emoji.
+    pub target: Option<crate::telegram::Target>,
 }
 
 impl Config {

@@ -738,16 +738,18 @@ The web app there may also replace the "Web page" and "Bot" items under
     like WebM's), events and file handling (inputs, sequences with numbers
     sorted as numbers, sheets, atomic output); `tgradish-tgs` gained a
     `schema` feature for the JSON Schemas and cancellation between steps.
-  - Format: `--format`, else `-o`'s extension, else the preset's, else
-    webm. Shared flags where the meaning matches (target, start, length,
+  - Format: `--format`, else `-o`'s extension, else webm. Shared flags where the meaning matches (target, start, length,
     speed as effort, title, watermark; `--lossless` means "never reduce";
     `--fps` is the frame rate of sheets and sequences); flags of the other
     format are an error. New: `--long`, `--reductions`, `--keep-canvas`,
     `--pixel-scale`, `--tag`, `--sheet`, `--sheet-frames`, `--sequence`.
-  - Presets have a format (`tgs-sticker`, `tgs-emoji`, `tgs-fast` built
-    in; files set `format` or take their base's); `config.toml` has
-    `tgs-preset`. Protocol 2 describes both formats, see
-    `docs/protocol.md`. `inspect` reads `.tgs` with `check`.
+  - Presets had a format (`tgs-sticker`, `tgs-emoji`, `tgs-fast` built
+    in); `config.toml` has `tgs-preset`. Protocol 2 described both
+    formats, see `docs/protocol.md`. `inspect` reads `.tgs` with `check`.
+    Later (with the new window) presets became format-independent: they
+    say how hard to work (`fast`, `balanced`, `best`), with `[webm]` and
+    `[tgs]` options, and what to make is chosen with `--target` and
+    `--format` alone (protocol 3).
   - The default effort for `.tgs` is best: seconds, for the smallest
     stickers. The sticker's name is "made with tgradish VERSION", or the
     title with that added; `--watermark=false` leaves only the title.

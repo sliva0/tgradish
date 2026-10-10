@@ -106,6 +106,63 @@ impl std::fmt::Display for Range {
     }
 }
 
+/// The part of the input to use, in its pixels as shown (after rotation),
+/// from the top left.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Crop {
+    pub x: u32,
+    pub y: u32,
+    #[schemars(range(min = 1))]
+    pub width: u32,
+    #[schemars(range(min = 1))]
+    pub height: u32,
+}
+
+impl Crop {
+    /// Whether the crop lies within a `width` by `height` picture.
+    pub fn fits(&self, width: u32, height: u32) -> bool {
+        self.width > 0
+            && self.height > 0
+            && u64::from(self.x) + u64::from(self.width) <= u64::from(width)
+            && u64::from(self.y) + u64::from(self.height) <= u64::from(height)
+    }
+
+    /// An error message unless the crop lies within a `width` by `height`
+    /// input.
+    pub fn check(&self, width: u32, height: u32) -> Result<(), String> {
+        if self.fits(width, height) {
+            Ok(())
+        } else {
+            Err(format!("crop {self} is not within the {width}x{height} input"))
+        }
+    }
+}
+
+impl std::str::FromStr for Crop {
+    type Err = String;
+
+    /// Parses `WIDTHxHEIGHT+X+Y`, or `WIDTHxHEIGHT` for the top left.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let invalid = || format!("{s:?}: expected WIDTHxHEIGHT+X+Y, for example 640x360+100+50");
+        let (size, offset) = s.split_once('+').unwrap_or((s, "0+0"));
+        let (width, height) = size.split_once('x').ok_or_else(invalid)?;
+        let (x, y) = offset.split_once('+').ok_or_else(invalid)?;
+        let number = |v: &str| v.trim().parse::<u32>().map_err(|_| invalid());
+        let crop =
+            Crop { x: number(x)?, y: number(y)?, width: number(width)?, height: number(height)? };
+        if crop.width == 0 || crop.height == 0 {
+            return Err(format!("{s:?}: the crop must be at least 1x1"));
+        }
+        Ok(crop)
+    }
+}
+
+impl std::fmt::Display for Crop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}x{}+{}+{}", self.width, self.height, self.x, self.y)
+    }
+}
+
 /// Settings for one conversion. `None` means "use the default".
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
@@ -113,6 +170,9 @@ pub struct Options {
     /// What to make. Default: sticker.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<Target>,
+    /// The part of the picture to use, in input pixels. Default: all of it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crop: Option<Crop>,
     /// How to scale the video into the target size. Default: contain for
     /// stickers, pad for emoji.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -205,6 +265,7 @@ impl Options {
         }
         merge!(
             target,
+            crop,
             resize,
             fit,
             attempts,
@@ -253,6 +314,17 @@ mod tests {
         assert!("400..100".parse::<Range>().is_err());
         assert!("100".parse::<Range>().is_err());
         assert!("a..b".parse::<Range>().is_err());
+    }
+
+    #[test]
+    fn parses_crops() {
+        let crop = Crop { x: 100, y: 50, width: 640, height: 360 };
+        assert_eq!("640x360+100+50".parse(), Ok(crop));
+        assert_eq!(crop.to_string(), "640x360+100+50");
+        assert_eq!("64x32".parse(), Ok(Crop { x: 0, y: 0, width: 64, height: 32 }));
+        assert!("0x32".parse::<Crop>().is_err());
+        assert!("64x32+1".parse::<Crop>().is_err());
+        assert!(crop.fits(740, 410) && !crop.fits(739, 410));
     }
 
     #[test]
