@@ -272,6 +272,8 @@ pub struct Item {
     pub sequence: bool,
     /// Where a pasted image is kept.
     pub pasted: Option<tempfile::TempDir>,
+    /// The name of the pasted image's copy kept with the session.
+    pub kept: Option<String>,
     pub kind: Kind,
     pub format: Format,
     /// The format was not picked by the user yet, so finding pixel art may
@@ -310,6 +312,7 @@ impl Item {
             inputs,
             sequence,
             pasted: None,
+            kept: None,
             kind,
             format: kind.first_format(),
             format_guessed: kind == Kind::Image,

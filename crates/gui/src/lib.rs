@@ -237,7 +237,7 @@ impl App {
     /// settings say not to, and keeps the session there from now on.
     fn reopen(&mut self, path: PathBuf) {
         let session = session::Session::load(&path).filter(|_| !self.config.gui.forget_files);
-        let saved = session.as_ref().map(session::Session::to_json).unwrap_or_default();
+        let saved = session.as_ref().and_then(|session| session.to_json().ok()).unwrap_or_default();
         if let Some(session) = session {
             let (items, selected, gone) = session.restore(&path, self.next_id);
             self.next_id += items.len() as u64;
@@ -256,13 +256,18 @@ impl App {
     /// Keeps the open files and their settings, if they changed.
     fn save_session(&mut self) {
         let Some((path, saved)) = &self.session else { return };
-        let session = session::Session::of(&self.items, self.selected, path);
-        let json = session.to_json();
-        if json == *saved {
-            return;
-        }
-        match session.save(&json, path) {
-            Ok(()) => self.session = Some((path.clone(), json)),
+        // with the setting off, nothing is kept: an empty session
+        let items: &mut [Item] =
+            if self.config.gui.forget_files { &mut [] } else { &mut self.items };
+        let session = session::Session::of(items, self.selected, path);
+        let saved_now = session.to_json().map_err(std::io::Error::other).and_then(|json| {
+            if json != *saved {
+                session.save(&json, path)?;
+            }
+            Ok(json)
+        });
+        match saved_now {
+            Ok(json) => self.session = Some((path.clone(), json)),
             Err(err) => {
                 self.message = Some(format!("The open files couldn't be kept: {err}"));
                 // once is enough
@@ -1215,8 +1220,14 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
     ui.horizontal(|ui| {
         let mut show = item.view.show;
         let choices = [(Show::Input, "Input", ""), (Show::Result, "Result", "")];
+        // .tgs results of before a restart, which tgradish can't draw
+        let unseen = if item.made.as_ref().is_some_and(|made| made.format == Format::Tgs) {
+            "This window can only show .tgs results it made itself; convert again to see it"
+        } else {
+            "Convert it first"
+        };
         widgets::segments(ui, &mut show, &choices, |show| {
-            if show == Show::Result && !has_result { Err("Convert it first") } else { Ok(()) }
+            if show == Show::Result && !has_result { Err(unseen) } else { Ok(()) }
         });
         item.view.show = show;
         // what doesn't fit is cut short or left out, the hint first
@@ -2155,12 +2166,6 @@ impl eframe::App for App {
         self.take_input(&ctx);
         self.pump(&ctx);
         self.find_fonts(&ctx);
-        // every few seconds, so a crash loses little
-        let now = ctx.input(|input| input.time);
-        if now >= self.next_save {
-            self.next_save = now + 2.0;
-            self.save_session();
-        }
         egui::Panel::left("files")
             .resizable(true)
             .default_size(330.0)
@@ -2236,6 +2241,15 @@ impl eframe::App for App {
             if !reported {
                 self.hovering = false;
             }
+        }
+        // every few seconds, so a crash loses little; what changed is kept
+        // even if nothing draws the window again before then
+        let now = ctx.input(|input| input.time);
+        if now >= self.next_save {
+            self.next_save = now + 2.0;
+            self.save_session();
+        } else if self.session.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(self.next_save - now));
         }
     }
 }
