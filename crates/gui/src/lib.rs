@@ -14,7 +14,7 @@ mod settings;
 mod timeline;
 mod widgets;
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32, RichText, vec2};
@@ -74,6 +74,21 @@ pub fn show_error(message: &str) {
         .show();
 }
 
+/// A result this window wrote: for which item, and the file as written,
+/// so a file put there since isn't taken for it.
+struct Written {
+    item: u64,
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+impl Written {
+    fn of(item: u64, path: &Path) -> Option<Written> {
+        let metadata = std::fs::metadata(path).ok()?;
+        Some(Written { item, len: metadata.len(), modified: metadata.modified().ok() })
+    }
+}
+
 /// How many items keep their big frames: the selected one and the last few.
 const KEPT: usize = 3;
 /// How many items read their inputs at once, besides the selected one.
@@ -93,7 +108,7 @@ struct App {
     /// Items waiting to be converted, in order.
     queue: VecDeque<u64>,
     /// Results this window wrote, which it replaces when making them again.
-    written: HashSet<PathBuf>,
+    written: HashMap<PathBuf, Written>,
     screen: Screen,
     prefs: prefs::Prefs,
     inspection: Option<inspect::Inspection>,
@@ -151,7 +166,7 @@ impl App {
             selected: None,
             recent: VecDeque::new(),
             queue: VecDeque::new(),
-            written: HashSet::new(),
+            written: HashMap::new(),
             screen: Screen::default(),
             prefs: prefs::Prefs::default(),
             inspection: None,
@@ -275,7 +290,8 @@ impl App {
         }
     }
 
-    /// Where an item's result goes.
+    /// Where an item's result goes: next to its input or in the folder
+    /// for results, numbered if another file in the window has the name.
     fn output_for(&self, item: &Item) -> PathBuf {
         let dir = self.config.gui.output_dir.clone().filter(|dir| !dir.as_os_str().is_empty());
         let input = &item.inputs[0];
@@ -283,16 +299,38 @@ impl App {
             Format::Webm => convert::default_output(input, item.choices.target),
             Format::Tgs => tgs::default_output(input, item.choices.target),
         };
-        if item.pasted.is_some() {
+        let name = next_to_input.file_name().unwrap_or_default();
+        let first = match (&item.pasted, dir) {
             // not next to the image, which is in a temporary directory
-            let dir = dir.or_else(paths::pictures_dir).unwrap_or_default();
-            let own = item.made.as_ref().map(|made| made.job.output.as_path());
-            return pasted_output(&next_to_input, input, &dir, own);
-        }
-        match (dir, next_to_input.file_name()) {
-            (Some(dir), Some(name)) => dir.join(name),
-            _ => next_to_input,
-        }
+            (Some(_), dir) => dir.or_else(paths::pictures_dir).unwrap_or_default().join(name),
+            (None, Some(dir)) => dir.join(name),
+            (None, None) => next_to_input.clone(),
+        };
+        let claimed: HashSet<&Path> = self
+            .items
+            .iter()
+            .filter(|other| other.id != item.id)
+            .flat_map(|other| {
+                let waiting = other.job.as_ref().map(|(job, ..)| job.output.as_path());
+                waiting.into_iter().chain(other.made.as_ref().map(|made| made.job.output.as_path()))
+            })
+            .collect();
+        let suffix = format!(".{}.{}", item.choices.target.name(), item.format.extension());
+        let own = item.made.as_ref().map(|made| made.job.output.as_path());
+        free_name(&first, &suffix, &claimed, own, item.pasted.is_some())
+    }
+
+    /// Whether the item may replace the file at `path`: one it wrote and
+    /// nobody changed since, or any with the setting that allows it.
+    fn may_replace(&self, item: u64, path: &Path) -> bool {
+        self.config.gui.overwrite
+            || self.written.get(path).is_some_and(|written| {
+                Written::of(item, path).is_some_and(|now| {
+                    now.item == written.item
+                        && now.len == written.len
+                        && now.modified == written.modified
+                })
+            })
     }
 
     /// Queues the item for converting with its settings as they are now.
@@ -353,11 +391,11 @@ impl App {
             }
             let reads_art =
                 item.format == Format::Tgs || (item.format_guessed && item.kind == Kind::Image);
+            let read_with = item.choices.reading(&self.presets, &self.config);
             if reads_art
-                && (item.art.is_idle()
-                    || (item.art_reading != item.choices.reading() && !item.art.is_loading()))
+                && (item.art.is_idle() || (item.art_reading != read_with && !item.art.is_loading()))
             {
-                item.art_reading = item.choices.reading();
+                item.art_reading = read_with;
                 item.art = Load::Loading(Art::load(
                     ctx,
                     item.inputs.clone(),
@@ -433,24 +471,27 @@ impl App {
             let selected = self.selected == Some(id);
             let item = self.item_mut(id).expect("just found");
             let (job, format, choices) = item.job.take().expect("just found");
-            if let Status::Done(done) = &job.status {
-                let output = done.output.clone();
-                item.result_thumb = None;
-                item.result_clip = match &done.preview {
-                    Some(preview) => Load::Ready(Clip::from_preview(preview.clone(), true)),
-                    None => Load::Idle,
-                };
-                if selected {
-                    item.view.show = Show::Result;
-                }
-                self.written.insert(output);
+            let made = Made { job, format, choices };
+            let Status::Done(done) = &made.job.status else {
+                item.failed = Some(made);
+                continue;
+            };
+            let output = done.output.clone();
+            item.result_thumb = None;
+            item.result_clip = match &done.preview {
+                Some(preview) => Load::Ready(Clip::from_preview(preview.clone(), true)),
+                None => Load::Idle,
+            };
+            if selected {
+                item.view.show = Show::Result;
             }
-            let item = self.item_mut(id).expect("just found");
-            item.made = Some(Made { job, format, choices });
-            if item.result_clip.is_idle()
-                && matches!(item.made.as_ref().map(|made| &made.job.status), Some(Status::Done(_)))
-            {
+            item.made = Some(made);
+            item.failed = None;
+            if item.result_clip.is_idle() {
                 load_result_clip(ctx, item, backend);
+            }
+            if let Some(written) = Written::of(id, &output) {
+                self.written.insert(output, written);
             }
         }
         if self.items.iter().any(|item| item.job.as_ref().is_some_and(|(job, ..)| job.is_running()))
@@ -470,7 +511,7 @@ impl App {
                     .tgs_options(&self.presets, &self.config)
                     .map(|options| Plan::Tgs { options }),
             };
-            let overwrite = self.config.gui.overwrite || self.written.contains(&job.output);
+            let overwrite = self.may_replace(id, &job.output);
             let (inputs, sequence) = (item.inputs.clone(), item.sequence);
             let item = self.item_mut(id).expect("found above");
             let (job, ..) = item.job.as_mut().expect("found above");
@@ -879,18 +920,18 @@ impl App {
                     if ui.add(button).on_hover_text(hint).clicked() {
                         convert = true;
                     }
-                    if let Some(made) = &item.made {
-                        match &made.job.status {
+                    if let Some(failed) = &item.failed {
+                        match &failed.job.status {
                             Status::Failed(message) => {
                                 ui.colored_label(widgets::BAD, format!("Failed: {message}"));
                             }
-                            Status::Exists(_) => {
+                            Status::Exists(path) => {
                                 ui.colored_label(
                                     widgets::WARN,
                                     "A file not made here is in the way:",
                                 );
                                 if ui.button("Replace it").clicked() {
-                                    replace = Some(made.job.output.clone());
+                                    replace = Some(path.clone());
                                 }
                             }
                             Status::Cancelled => widgets::note(ui, "Stopped"),
@@ -922,8 +963,11 @@ impl App {
         });
         let shortcut =
             ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::Enter));
+        // the user lets this item replace the file that is there now
         if let Some(path) = replace {
-            self.written.insert(path);
+            if let Some(written) = Written::of(id, &path) {
+                self.written.insert(path, written);
+            }
             convert = true;
         }
         if convert || (shortcut && self.item(id).is_some_and(|item| item.job.is_none())) {
@@ -1018,8 +1062,9 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, item: &mut Item) {
                 let time = item.view.time;
                 let part = part.filter(|part| part.start() <= time && time < part.end() + 0.05);
                 // paused: the sharp frame, once it is there
+                // and still images, which don't play, always
                 let still =
-                    still.filter(|(at, _)| !item.view.playing && (*at == time || range.is_none()));
+                    still.filter(|(at, _)| range.is_none() || (!item.view.playing && *at == time));
                 let clip = still.map(|(_, still)| still).or(part).unwrap_or(clip);
                 let picture = Picture { clip, frame: clip.index_at(time), size, square: false };
                 let ratio = settings::ratio(item.view.aspect, size);
@@ -1255,7 +1300,7 @@ fn thumb(
 
 fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
     let small = |text: String| RichText::new(text).small();
-    match (&item.job, &item.made) {
+    match (&item.job, item.failed.as_ref().or(item.made.as_ref())) {
         (Some((job, ..)), _) if job.is_running() => {
             let bar = match job.progress.fraction {
                 Some(fraction) => egui::ProgressBar::new(fraction),
@@ -1301,6 +1346,19 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
 /// The last result of an item in short: its size and what Telegram would
 /// say, beside the preview.
 fn summary(ui: &mut egui::Ui, item: &Item) {
+    if let Some(failed) = &item.failed {
+        widgets::section(ui, "Last conversion");
+        match &failed.job.status {
+            Status::Failed(message) => {
+                ui.colored_label(widgets::BAD, message);
+            }
+            Status::Exists(path) => {
+                ui.colored_label(widgets::WARN, format!("{} is in the way", path.display()));
+            }
+            Status::Cancelled => widgets::note(ui, "Stopped before it was done"),
+            Status::Done(_) | Status::Waiting | Status::Running => {}
+        }
+    }
     let Some(made) = &item.made else { return };
     widgets::section(
         ui,
@@ -1416,20 +1474,42 @@ fn reduction(reduction: &tgradish_tgs::reduce::Reduction) -> String {
     }
 }
 
-/// Where the result of a pasted image goes: in `dir`, under a name nothing
-/// has yet, since every pasted image has the same name, or the one its
-/// `own` earlier result has.
-fn pasted_output(next_to_input: &Path, image: &Path, dir: &Path, own: Option<&Path>) -> PathBuf {
-    let stem = image.file_stem().unwrap_or_default().to_string_lossy();
-    let name = next_to_input.file_name().unwrap_or_default().to_string_lossy();
-    let rest = name.strip_prefix(&*stem).unwrap_or(&name);
-    std::iter::once(dir.join(&*name))
-        .chain((2..).map(|n| dir.join(format!("{stem} {n}{rest}"))))
-        .find(|path| !path.exists() || Some(path.as_path()) == own)
-        .expect("some name is free")
+/// `first`, or the first of `first` numbered before `suffix` (`clip
+/// 2.sticker.webm`) that no other file claims: the item's `own` earlier
+/// result if it is one of them, and for pasted images, which all share a
+/// name, one that doesn't exist yet.
+fn free_name(
+    first: &Path,
+    suffix: &str,
+    claimed: &HashSet<&Path>,
+    own: Option<&Path>,
+    fresh: bool,
+) -> PathBuf {
+    let name = first.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let stem = name.strip_suffix(suffix).unwrap_or(&name).to_owned();
+    let dir = first.parent().map(Path::to_path_buf).unwrap_or_default();
+    let names = || {
+        std::iter::once(first.to_path_buf())
+            .chain((2..).map(|n| dir.join(format!("{stem} {n}{suffix}"))))
+            .filter(|path| !claimed.contains(path.as_path()))
+    };
+    if let Some(own) = own
+        && names().take(1000).any(|path| path == own)
+    {
+        return own.to_path_buf();
+    }
+    names().find(|path| !fresh || !path.exists()).expect("some name is free")
 }
 
 impl eframe::App for App {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // the listener shares winit's Wayland connection, which closes next
+        #[cfg(all(unix, not(target_os = "macos")))]
+        if let Some(drops) = &mut self.drops {
+            drops.stop();
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.take_input(&ctx);
@@ -1675,6 +1755,151 @@ mod tests {
     }
 
     #[test]
+    fn numbers_results_of_files_with_the_same_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        square(&a.join("same.png"), [255, 0, 0, 255]);
+        square(&b.join("same.png"), [0, 0, 255, 255]);
+        let out = dir.path().join("out");
+        let mut config = Config::default();
+        config.gui.output_dir = Some(out.clone());
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![a.join("same.png"), b.join("same.png")]);
+        finish(&mut harness);
+        harness.get_by_label_contains("Convert all").click();
+        harness.run_steps(2);
+        finish(&mut harness);
+        for item in &harness.state().items {
+            assert!(matches!(item.made.as_ref().unwrap().job.status, Status::Done(_)));
+        }
+        assert!(out.join("same.sticker.tgs").exists() && out.join("same 2.sticker.tgs").exists());
+    }
+
+    #[test]
+    fn keeps_files_put_where_a_result_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        let mut harness = harness(Config::default());
+        harness.state_mut().add(vec![art]);
+        finish(&mut harness);
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let output = dir.path().join("art.sticker.tgs");
+        assert!(output.exists());
+        // someone else's file where the result was
+        std::fs::remove_file(&output).unwrap();
+        std::fs::write(&output, b"mine").unwrap();
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let item = &harness.state().items[0];
+        assert!(matches!(item.failed.as_ref().unwrap().job.status, Status::Exists(_)));
+        assert_eq!(std::fs::read(&output).unwrap(), b"mine");
+    }
+
+    #[test]
+    fn keeps_a_result_old_when_converting_again_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        let mut harness = harness(Config::default());
+        harness.state_mut().add(vec![art]);
+        finish(&mut harness);
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        assert!(harness.state().items[0].result_is_current());
+        // a crop outside the picture fails
+        harness.state_mut().items[0].choices.crop =
+            Some(Crop { x: 10, y: 10, width: 4, height: 4 });
+        harness.run_steps(2);
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let item = &harness.state().items[0];
+        assert!(matches!(item.failed.as_ref().unwrap().job.status, Status::Failed(_)));
+        assert!(item.made.is_some() && !item.result_is_current());
+    }
+
+    #[test]
+    fn shows_the_frame_paused_on_at_full_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let video = dir.path().join("red-blue.mp4");
+        // red until 0.48 s, then blue
+        let graph = "color=c=red:s=1280x720:r=25:d=0.48[a];color=c=blue:s=1280x720:r=25:d=0.52[b];[a][b]concat=n=2:v=1:a=0";
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-filter_complex", graph, "-pix_fmt", "yuv420p"])
+            .arg(&video)
+            .status();
+        if !made.is_ok_and(|status| status.success()) {
+            eprintln!("skipped: needs ffmpeg on PATH");
+            return;
+        }
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        let item = &mut harness.state_mut().items[0];
+        (item.view.playing, item.view.time) = (false, 0.45);
+        for _ in 0..500 {
+            harness.step();
+            let ready = |item: &Item| {
+                item.still.as_ref().and_then(|(_, still)| still.ready().map(|clip| clip.id))
+            };
+            if let Some(id) = ready(&harness.state().items[0]) {
+                harness.run_steps(2);
+                assert_eq!(harness.state().screen.showing(), Some(id));
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let (_, still) = harness.state().items[0].still.as_ref().expect("asked for");
+        let clip = still.ready().expect("read");
+        assert_eq!(clip.width, 1280);
+        let pixel = &clip.frames[0][..4];
+        assert!(pixel[0] > 200 && pixel[2] < 60, "the frame at 0.45 s is red, not {pixel:?}");
+    }
+
+    #[test]
+    fn shows_still_images_at_full_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let photo = dir.path().join("photo.jpg");
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-f", "lavfi", "-i", "testsrc2=s=1280x720", "-frames:v", "1"])
+            .arg(&photo)
+            .status();
+        if !made.is_ok_and(|status| status.success()) {
+            eprintln!("skipped: needs ffmpeg on PATH");
+            return;
+        }
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![photo]);
+        finish(&mut harness);
+        for _ in 0..500 {
+            harness.step();
+            if harness.state().items[0]
+                .still
+                .as_ref()
+                .is_some_and(|(_, still)| still.ready().is_some())
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        harness.run_steps(2);
+        let (_, still) = harness.state().items[0].still.as_ref().expect("asked for");
+        let clip = still.ready().expect("read");
+        assert_eq!((clip.width, harness.state().screen.showing()), (1280, Some(clip.id)));
+    }
+
+    #[test]
     fn guesses_pixel_art_and_photos_apart() {
         let dir = tempfile::tempdir().unwrap();
         let art = dir.path().join("art.png");
@@ -1756,18 +1981,21 @@ mod tests {
     }
 
     #[test]
-    fn names_pasted_results_apart() {
+    fn names_results_apart() {
         let dir = tempfile::tempdir().unwrap();
-        let image = Path::new("/tmp/somewhere/clipboard.png");
-        let next_to = tgs::default_output(image, telegram::Target::Sticker);
-        let first = pasted_output(&next_to, image, dir.path(), None);
-        assert_eq!(first, dir.path().join("clipboard.sticker.tgs"));
+        let first = dir.path().join("clipboard.sticker.tgs");
+        let second = dir.path().join("clipboard 2.sticker.tgs");
+        let none = HashSet::new();
+        let suffix = ".sticker.tgs";
+        assert_eq!(free_name(&first, suffix, &none, None, true), first);
+        // pasted images all have the same name, so they take new ones
         std::fs::write(&first, b"").unwrap();
-        assert_eq!(
-            pasted_output(&next_to, image, dir.path(), None),
-            dir.path().join("clipboard 2.sticker.tgs")
-        );
-        // its own result it replaces
-        assert_eq!(pasted_output(&next_to, image, dir.path(), Some(&first)), first);
+        assert_eq!(free_name(&first, suffix, &none, None, true), second);
+        assert_eq!(free_name(&first, suffix, &none, None, false), first);
+        // another file's name is taken; an item's own stays its own
+        let claimed = HashSet::from([first.as_path()]);
+        assert_eq!(free_name(&first, suffix, &claimed, None, false), second);
+        assert_eq!(free_name(&first, suffix, &none, Some(&second), false), second);
+        assert_eq!(free_name(&first, suffix, &claimed, Some(&first), false), second);
     }
 }

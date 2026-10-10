@@ -15,16 +15,16 @@ use crate::media::{Art, Clip, Load, Video};
 /// What kind of input an item is, which limits what it can become.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// Videos, read by ffmpeg: WebM only.
+    /// Videos and photos, which only ffmpeg reads: WebM only.
     Video,
-    /// Images and GIFs: either format.
+    /// Images and GIFs the pixel art reader reads too: either format.
     Image,
     /// Aseprite files, folders of frames and several images as one
     /// animation: `.tgs` only.
     Frames,
 }
 
-const IMAGES: [&str; 8] = ["png", "apng", "gif", "webp", "jpg", "jpeg", "bmp", "avif"];
+const IMAGES: [&str; 4] = ["png", "apng", "gif", "webp"];
 const ASEPRITE: [&str; 2] = ["ase", "aseprite"];
 
 fn extension(path: &Path) -> String {
@@ -131,13 +131,15 @@ impl Choices {
         Ok(self.tgs_base(presets, config)?.merged(&self.tgs).merged(&shared))
     }
 
-    /// The options that change what pixel art is read as.
-    pub fn reading(&self) -> TgsOptions {
+    /// The options that change what pixel art is read as, the preset's
+    /// included.
+    pub fn reading(&self, presets: &Presets, config: &Config) -> TgsOptions {
+        let options = self.tgs_options(presets, config).unwrap_or_else(|_| self.tgs.clone());
         TgsOptions {
-            tag: self.tgs.tag.clone(),
-            sheet: self.tgs.sheet.clone(),
-            sheet_frames: self.tgs.sheet_frames,
-            fps: self.tgs.fps,
+            tag: options.tag,
+            sheet: options.sheet,
+            sheet_frames: options.sheet_frames,
+            fps: options.fps,
             ..TgsOptions::default()
         }
     }
@@ -186,7 +188,7 @@ impl Default for View {
     }
 }
 
-/// A finished result: the job that made it and what it was made from.
+/// A finished conversion: the job and what it was made from.
 pub struct Made {
     pub job: Job,
     pub format: Format,
@@ -220,8 +222,11 @@ pub struct Item {
     pub input_thumb: Option<egui::TextureHandle>,
     /// The conversion waiting or running.
     pub job: Option<(Job, Format, Choices)>,
-    /// The last finished conversion.
+    /// The last conversion that made a sticker.
     pub made: Option<Made>,
+    /// The last conversion, if it failed, was stopped or found a file in
+    /// the way: newer than `made`.
+    pub failed: Option<Made>,
     /// A finished WebM result, decoded.
     pub result_clip: Load<Clip>,
     pub result_thumb: Option<egui::TextureHandle>,
@@ -248,6 +253,7 @@ impl Item {
             input_thumb: None,
             job: None,
             made: None,
+            failed: None,
             result_clip: Load::Idle,
             result_thumb: None,
         }
@@ -315,7 +321,7 @@ impl Item {
         Some((start, end))
     }
 
-    /// Whether the last result was made with what is chosen now.
+    /// Whether the last sticker was made with what is chosen now.
     pub fn result_is_current(&self) -> bool {
         self.made
             .as_ref()
@@ -337,10 +343,23 @@ mod tests {
         let path = |name: &str| vec![PathBuf::from(name)];
         assert_eq!(Kind::of(&path("a.MP4"), false), Kind::Video);
         assert_eq!(Kind::of(&path("a.gif"), false), Kind::Image);
+        assert_eq!(Kind::of(&path("photo.JPG"), false), Kind::Video);
         assert_eq!(Kind::of(&path("a.aseprite"), false), Kind::Frames);
         assert_eq!(Kind::of(&[dir.path().to_path_buf()], false), Kind::Frames);
         assert_eq!(Kind::of(&[PathBuf::from("1.png"), PathBuf::from("2.png")], true), Kind::Frames);
         assert!(!Kind::Video.allows(Format::Tgs) && !Kind::Frames.allows(Format::Webm));
+    }
+
+    #[test]
+    fn reads_art_with_the_presets_sheet() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("sheets.toml"), "[tgs]\nsheet = '4x1'\nfps = 2.0\n")
+            .unwrap();
+        let presets = Presets::load(Some(dir.path())).unwrap();
+        let mut choices = Choices::new(Target::Sticker);
+        choices.preset = Some("sheets".into());
+        let reading = choices.reading(&presets, &Config::default());
+        assert_eq!((reading.sheet.as_deref(), reading.fps), (Some("4x1"), Some(2.0)));
     }
 
     #[test]

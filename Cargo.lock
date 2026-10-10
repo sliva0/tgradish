@@ -3551,6 +3551,7 @@ dependencies = [
  "png",
  "raw-window-handle",
  "rfd",
+ "rustix 1.1.5",
  "shlex 2.0.1",
  "tempfile",
  "tgradish-core",
