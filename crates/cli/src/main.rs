@@ -1,6 +1,7 @@
 mod args;
 mod commands;
 mod convert;
+mod term;
 mod ui;
 mod watch;
 
@@ -141,7 +142,15 @@ fn main() -> ExitCode {
             }
         };
     }
+    // `tgradish` alone, in a terminal: what it does, and that a window opens
+    // too
+    if std::env::args_os().len() == 1 {
+        term::init(args::ColorChoice::Auto, false);
+        ui::introduce();
+        return ExitCode::SUCCESS;
+    }
     let cli = Cli::parse();
+    term::init(cli.global.color, cli.global.json);
     if !matches!(cli.command, Command::Gui) {
         tgradish_core::mark::set_client(tgradish_core::mark::Client::Cli);
     }
