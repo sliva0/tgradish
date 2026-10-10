@@ -4,7 +4,8 @@
 use eframe::egui::{
     self, Color32, CursorIcon, PointerButton, Pos2, Rect, Sense, Stroke, pos2, vec2,
 };
-use tgradish_core::options::Crop;
+use tgradish_core::options::{Crop, ExactScale};
+use tgradish_core::telegram::Target;
 
 use crate::item::Zoom;
 use crate::media::Clip;
@@ -120,6 +121,93 @@ pub struct Cropping<'a> {
     pub ratio: Option<f64>,
     /// The ratio of a box the crop fills, cutting off the rest of it.
     pub filling: Option<f64>,
+    /// The size an exact scale holds the crop to.
+    pub exact: Option<Exact>,
+}
+
+/// Which edge of a crop stays put when its size changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Keep {
+    Start,
+    End,
+    Middle,
+}
+
+/// A crop held to an exact scale: its longer side is `long` input pixels,
+/// its shorter one a multiple of `step` so the result's sides are even,
+/// and both `long` for square results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Exact {
+    pub long: u32,
+    pub step: u32,
+    pub square: bool,
+}
+
+impl Exact {
+    /// The crop size `scale` needs for `target`, if whole input pixels make
+    /// it.
+    pub fn of(scale: ExactScale, target: Target) -> Option<Exact> {
+        let (width, height) = target.box_size();
+        let long = scale.input_for(width.max(height))?;
+        let step = match (scale.up, scale.down) {
+            (_, down) if down > 1 => 2 * down,
+            (up, _) if up % 2 == 0 => 1,
+            _ => 2,
+        };
+        Some(Exact { long, step, square: target.requires_exact_size() })
+    }
+
+    /// Whether a `size` picture is large enough.
+    pub fn fits(self, size: (u32, u32)) -> bool {
+        let (long, short) = (size.0.max(size.1), size.0.min(size.1));
+        long >= self.long && (!self.square || short >= self.long) && short >= self.step
+    }
+
+    /// `crop` held to this size within a `size` picture, its orientation
+    /// and shorter side kept where it can, or as `ratio` says; `keep` says
+    /// which edges stay put, across and down.
+    pub fn fit(
+        self,
+        crop: Crop,
+        keep: (Keep, Keep),
+        ratio: Option<f64>,
+        size: (u32, u32),
+    ) -> Option<Crop> {
+        if !self.fits(size) {
+            return None;
+        }
+        let landscape = self.square || ratio.map_or(crop.width >= crop.height, |r| r >= 1.0);
+        let (room_long, room_short) = if landscape { size } else { (size.1, size.0) };
+        if room_long < self.long {
+            return None;
+        }
+        let wanted = match (self.square, ratio) {
+            (true, _) => f64::from(self.long),
+            (false, Some(r)) => f64::from(self.long) / if landscape { r } else { 1.0 / r },
+            (false, None) => f64::from(if landscape { crop.height } else { crop.width }),
+        };
+        let most = self.long.min(room_short);
+        let short = ((wanted.round() as u32).min(most) / self.step * self.step).max(self.step);
+        if self.square && short != self.long {
+            return None;
+        }
+        let (width, height) = if landscape { (self.long, short) } else { (short, self.long) };
+        let place = |start: u32, old: u32, new: u32, keep: Keep, room: u32| -> u32 {
+            let (start, old, new) = (i64::from(start), i64::from(old), i64::from(new));
+            let at = match keep {
+                Keep::Start => start,
+                Keep::End => start + old - new,
+                Keep::Middle => start + (old - new) / 2,
+            };
+            at.clamp(0, i64::from(room) - new) as u32
+        };
+        Some(Crop {
+            x: place(crop.x, crop.width, width, keep.0, size.0),
+            y: place(crop.y, crop.height, height, keep.1, size.1),
+            width,
+            height,
+        })
+    }
 }
 
 /// What dragging on the picture does, decided when it starts.
@@ -253,10 +341,23 @@ pub fn show(
         && let Some(point) = response.interact_pointer_pos()
     {
         let point = to_pixels(point);
-        let new = match drag {
-            Drag::Edges(edges, start) => resized(start, edges, point, cropping.ratio, size),
-            Drag::Move(start, from) => Some(moved(start, point - from, size)),
-            Drag::New(corner) => drawn(corner, point, cropping.ratio, size),
+        let side = |end: bool| if end { Keep::End } else { Keep::Start };
+        let (new, keep) = match drag {
+            Drag::Edges(edges, start) => (
+                resized(start, edges, point, cropping.ratio, size),
+                (side(edges[0]), side(edges[1])),
+            ),
+            Drag::Move(start, from) => {
+                (Some(moved(start, point - from, size)), (Keep::Start, Keep::Start))
+            }
+            Drag::New(corner) => (
+                drawn(corner, point, cropping.ratio, size),
+                (side(point.x < corner.x), side(point.y < corner.y)),
+            ),
+        };
+        let new = match cropping.exact {
+            Some(exact) => new.and_then(|new| exact.fit(new, keep, cropping.ratio, size)),
+            None => new,
         };
         if let Some(new) = new {
             let new = (new != full).then_some(new);
@@ -270,7 +371,14 @@ pub fn show(
         ui.data_mut(|data| data.remove::<Drag>(id));
     }
     if response.double_clicked() && cropping.crop.is_some() {
-        *cropping.crop = None;
+        // all of the picture, or as much of it as the exact scale takes
+        let middle = (Keep::Middle, Keep::Middle);
+        *cropping.crop = match cropping.exact {
+            Some(exact) => {
+                exact.fit(full, middle, cropping.ratio, size).filter(|crop| *crop != full)
+            }
+            None => None,
+        };
         changed = true;
     }
 
@@ -537,5 +645,44 @@ mod tests {
         assert_eq!(drawn(pos2(50.0, 50.0), pos2(51.0, 50.5), None, SIZE), None);
         let drawn = drawn(pos2(100.0, 80.0), pos2(60.0, 20.0), Some(1.0), SIZE).unwrap();
         assert_eq!(drawn, Crop { x: 40, y: 20, width: 60, height: 60 });
+    }
+}
+
+#[cfg(test)]
+mod exact_tests {
+    use super::*;
+
+    #[test]
+    fn holds_crops_to_an_exact_scale() {
+        let size = (1920, 1080);
+        // twice as large: 256 on the longer side, any shorter one
+        let twice = Exact::of("2".parse().unwrap(), Target::Sticker).unwrap();
+        assert_eq!((twice.long, twice.step), (256, 1));
+        let crop = Crop { x: 100, y: 100, width: 300, height: 101 };
+        let start = (Keep::Start, Keep::Start);
+        assert_eq!(twice.fit(crop, start, None, size), Some(Crop { width: 256, ..crop }));
+        // a left edge dragged keeps the right one
+        let end = (Keep::End, Keep::Start);
+        assert_eq!(twice.fit(crop, end, None, size).unwrap().x, 144);
+        // halved: 1024 on the longer side, the shorter in steps of 4 so the
+        // result's sides stay even
+        let half = Exact::of("1/2".parse().unwrap(), Target::Sticker).unwrap();
+        let tall = Crop { x: 0, y: 0, width: 501, height: 1070 };
+        assert_eq!(
+            half.fit(tall, start, None, size),
+            Some(Crop { width: 500, height: 1024, ..tall })
+        );
+        // a shape kept: 16:9 at 1x is 512 x 288
+        let one = Exact::of("1".parse().unwrap(), Target::Sticker).unwrap();
+        let wide = one.fit(crop, start, Some(16.0 / 9.0), size).unwrap();
+        assert_eq!((wide.width, wide.height), (512, 288));
+        // emoji are square; too small a picture takes no exact scale
+        let emoji = Exact::of("1/4".parse().unwrap(), Target::Emoji).unwrap();
+        assert_eq!(
+            emoji.fit(crop, start, None, size).map(|c| (c.width, c.height)),
+            Some((400, 400))
+        );
+        assert_eq!(half.fit(crop, start, None, (800, 600)), None);
+        assert!(Exact::of("3".parse().unwrap(), Target::Sticker).is_none());
     }
 }

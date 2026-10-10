@@ -179,6 +179,101 @@ impl std::fmt::Display for Crop {
     }
 }
 
+/// A scale that lines input pixels up with the result's: a whole number of
+/// result pixels for each input pixel (`2`), or the other way round
+/// (`1/2`). Written as `N`, `1/N` or a decimal like `0.5`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ExactScale {
+    /// Result pixels along an input pixel; 1 when shrinking.
+    pub up: u32,
+    /// Input pixels along a result pixel; 1 when growing.
+    pub down: u32,
+}
+
+impl ExactScale {
+    pub const ONE: ExactScale = ExactScale { up: 1, down: 1 };
+
+    /// `size` input pixels at this scale, if they make whole result pixels.
+    pub fn apply(self, size: u32) -> Option<u32> {
+        size.is_multiple_of(self.down).then(|| size / self.down * self.up)
+    }
+
+    /// The input pixels that make `size` result pixels, if whole.
+    pub fn input_for(self, size: u32) -> Option<u32> {
+        size.is_multiple_of(self.up).then(|| size / self.up * self.down)
+    }
+
+    pub fn factor(self) -> f64 {
+        f64::from(self.up) / f64::from(self.down)
+    }
+}
+
+impl std::str::FromStr for ExactScale {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let invalid = || format!("{s:?}: expected a whole number like 2, or 1/N like 1/2");
+        let text = s.trim().trim_end_matches(['x', '×']);
+        let whole = |v: &str| v.trim().parse::<u32>().ok().filter(|&n| n > 0);
+        if let Some((one, n)) = text.split_once('/') {
+            return match (whole(one), whole(n)) {
+                (Some(1), Some(n)) => Ok(ExactScale { up: 1, down: n }),
+                _ => Err(invalid()),
+            };
+        }
+        if let Some(n) = whole(text) {
+            return Ok(ExactScale { up: n, down: 1 });
+        }
+        // a decimal: whole, or one over a whole number
+        let value: f64 = text.parse().map_err(|_| invalid())?;
+        if !(value > 0.0 && value.is_finite()) {
+            return Err(invalid());
+        }
+        let down = (1.0 / value).round();
+        if value < 1.0 && (1.0 / down - value).abs() < 1e-3 {
+            return Ok(ExactScale { up: 1, down: down as u32 });
+        }
+        Err(invalid())
+    }
+}
+
+impl std::fmt::Display for ExactScale {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.down {
+            1 => write!(f, "{}", self.up),
+            down => write!(f, "{}/{down}", self.up),
+        }
+    }
+}
+
+impl TryFrom<String> for ExactScale {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl From<ExactScale> for String {
+    fn from(value: ExactScale) -> String {
+        value.to_string()
+    }
+}
+
+impl JsonSchema for ExactScale {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ExactScale".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "pattern": r"^([1-9][0-9]*|1/[1-9][0-9]*)$",
+            "description": "N result pixels for each input pixel, or 1/N"
+        })
+    }
+}
+
 /// Settings for one conversion. `None` means "use the default".
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
@@ -197,6 +292,11 @@ pub struct Options {
     /// auto, sharp for pixel art made at least twice as large.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scaling: Option<Scaling>,
+    /// Scale by exactly this much, so input and result pixels line up: the
+    /// crop must make the result's size (512 pixels on a sticker's longer
+    /// side, 100 x 100 for emoji). Overrides `resize` and `scaling`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exact_scale: Option<ExactScale>,
     /// What to tune to get close to the size limit: 256 KB for stickers, 64
     /// KB for emoji. Default: auto.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -289,6 +389,7 @@ impl Options {
             crop,
             resize,
             scaling,
+            exact_scale,
             fit,
             attempts,
             fit_range,
