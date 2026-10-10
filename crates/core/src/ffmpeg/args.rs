@@ -43,6 +43,15 @@ pub(crate) fn video_filter(plan: &Plan, fps: f64, length: f64, pix_fmt: &str) ->
     let scale = format!("scale={sw}:{sh}:flags=lanczos");
     let mut filters =
         vec![format!("fps={}", num(fps)), format!("trim=end_frame={}", frame_count(length, fps))];
+    if let Some(crop) = plan.crop {
+        // in display pixels, which differ from stored ones by the sample
+        // aspect ratio
+        let (width, height) = (plan.source.width, plan.source.height);
+        filters.push(format!(
+            "crop=w=iw*{}/{width}:h=ih*{}/{height}:x=iw*{}/{width}:y=ih*{}/{height}",
+            crop.width, crop.height, crop.x, crop.y
+        ));
+    }
     match plan.resize {
         Resize::Contain | Resize::Stretch => filters.push(scale),
         Resize::Crop => filters.extend([scale, format!("crop={w}:{h}")]),

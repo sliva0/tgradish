@@ -420,45 +420,64 @@ pub(crate) fn encode(
 
 /// Linked version of [`crate::ffmpeg::ssim`], averaging the per-frame SSIM
 /// the filter reports.
-/// Up to `count` frames of `input`, scaled to `size`, as straight RGBA.
-pub(crate) fn preview_frames(
+/// Up to `count` frames of `input` from `start` seconds on, at `fps`,
+/// scaled to `size`, as straight RGBA.
+pub(crate) fn frames(
     input: &Path,
     probe: &Probe,
+    (start, fps): (f64, f64),
     (width, height): (u32, u32),
     count: usize,
     cancel: &CancelToken,
 ) -> Result<Vec<Vec<u8>>> {
-    use ff::software::scaling;
     init()?;
-    let mut source = Source::open_file(input, probe.decoder.as_deref(), cancel)?;
+    let read = (count + 1) as f64 / fps;
+    let mut source = Source::open_window(input, probe, start, read, cancel)?;
     let mut frame = frame::Video::empty();
-    let mut scaler: Option<scaling::Context> = None;
+    if !source.next(&mut frame)? {
+        return Ok(Vec::new());
+    }
+    let resample = if probe.still_image { String::new() } else { format!("fps={fps},") };
+    let spec = format!(
+        "[in]{}{resample}scale={width}:{height}:flags=bilinear,setsar=1,format=rgba[out]",
+        probe.orientation.filters()
+    );
+    let mut graph = filter_graph(&[("in", source.buffer_args(&frame))], &spec)?;
+    let mut filtered = frame::Video::empty();
     let mut out = Vec::new();
-    while out.len() < count && source.next(&mut frame)? {
-        let scaler = match &mut scaler {
-            Some(scaler) => scaler,
-            None => scaler.insert(
-                scaling::Context::get(
-                    frame.format(),
-                    frame.width(),
-                    frame.height(),
-                    ff::format::Pixel::RGBA,
-                    width,
-                    height,
-                    scaling::Flags::BILINEAR,
-                )
-                .map_err(libav("scaling"))?,
-            ),
-        };
-        let mut rgba = frame::Video::empty();
-        scaler.run(&frame, &mut rgba).map_err(libav("scaling"))?;
-        // rows can be padded
-        let (stride, data, row) = (rgba.stride(0), rgba.data(0), width as usize * 4);
-        let mut pixels = Vec::with_capacity(row * height as usize);
-        for y in 0..height as usize {
-            pixels.extend_from_slice(&data[y * stride..y * stride + row]);
+    let mut input_open = true;
+    while out.len() < count {
+        cancel.check()?;
+        if input_open {
+            let mut source_filter = graph.get("in").expect("added");
+            let mut source_filter = source_filter.source();
+            source_filter.add(&frame).map_err(libav("filtering"))?;
+            if !source.next(&mut frame)? {
+                source_filter.flush().map_err(libav("filtering"))?;
+                input_open = false;
+            }
         }
-        out.push(pixels);
+        loop {
+            match graph.get("out").expect("added").sink().frame(&mut filtered) {
+                Ok(()) => {}
+                Err(ff::Error::Eof) => break,
+                Err(err) if is_again(&err) => break,
+                Err(err) => return Err(libav("filtering")(err)),
+            }
+            if out.len() == count {
+                break;
+            }
+            // rows can be padded
+            let (stride, data, row) = (filtered.stride(0), filtered.data(0), width as usize * 4);
+            let mut pixels = Vec::with_capacity(row * height as usize);
+            for y in 0..height as usize {
+                pixels.extend_from_slice(&data[y * stride..y * stride + row]);
+            }
+            out.push(pixels);
+        }
+        if !input_open {
+            break;
+        }
     }
     Ok(out)
 }

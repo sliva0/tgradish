@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tgradish_core::backend::Backend;
+use tgradish_core::backend::{Backend, FramesRequest};
 use tgradish_core::convert::{Request, convert};
 use tgradish_core::events::Event;
 use tgradish_core::ffmpeg::{self, CancelToken, FfmpegChoice};
@@ -172,7 +172,7 @@ fn previews_results() {
     convert(&backends[0], &request, &CancelToken::new(), &mut |_| {}).unwrap();
     for backend in &backends {
         let name = name(backend);
-        let preview = backend.preview(&output, &CancelToken::new()).unwrap();
+        let preview = backend.preview(&output, 320, &CancelToken::new()).unwrap();
         // the sticker is 512 px on its longer side; previews are 320
         assert_eq!(preview.width.max(preview.height), 320, "{name}");
         assert!(!preview.frames.is_empty(), "{name}");
@@ -180,6 +180,30 @@ fn previews_results() {
         assert!((55..=65).contains(&ticks), "{name}: one second is {ticks} ticks");
         for (rgba, _) in &preview.frames {
             assert_eq!(rgba.len(), (preview.width * preview.height * 4) as usize, "{name}");
+        }
+    }
+}
+
+#[test]
+fn decodes_frames_of_a_part_of_a_video() {
+    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let request =
+        FramesRequest { start: 1.0, length: Some(1.0), fps: 10.0, max_side: 200, max_frames: 5 };
+    let mut decoded = Vec::new();
+    for backend in &backends {
+        let name = name(backend);
+        let probe = backend.probe(&input, &CancelToken::new()).unwrap();
+        let frames = backend.frames(&input, &probe, &request, &CancelToken::new()).unwrap();
+        assert_eq!(frames.width.max(frames.height), 200, "{name}");
+        // ten frames a second would be too many
+        assert_eq!((frames.fps, frames.frames.len()), (5.0, 5), "{name}");
+        decoded.push(frames.frames);
+    }
+    // the backends decode the same frames
+    for pair in decoded.windows(2) {
+        for (a, b) in pair[0].iter().zip(&pair[1]) {
+            let difference: u64 = a.iter().zip(b).map(|(a, b)| u64::from(a.abs_diff(*b))).sum();
+            assert!(difference / (a.len() as u64) < 8, "frames differ by {difference}");
         }
     }
 }

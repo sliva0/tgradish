@@ -211,13 +211,13 @@ pub fn preset(ctx: &Context, command: PresetCommand) -> Result<()> {
             print_json(&protocol::describe(&presets, default_presets(ctx)).presets);
         }
         PresetCommand::List => {
+            let [webm, tgs] = default_presets(ctx);
             for (name, preset) in presets.iter() {
-                let format = presets.format(name).ok();
-                let default = match format {
-                    Some(format) if default_presets(ctx).contains(&name) => {
-                        format!(" (default for {})", format.extension())
-                    }
-                    _ => String::new(),
+                let default = match (name == webm, name == tgs) {
+                    (true, true) => " (default)",
+                    (true, false) => " (default for webm)",
+                    (false, true) => " (default for tgs)",
+                    (false, false) => "",
                 };
                 match preset {
                     Ok(preset) => {
@@ -225,20 +225,19 @@ pub fn preset(ctx: &Context, command: PresetCommand) -> Result<()> {
                             .path
                             .as_ref()
                             .map_or("built-in".to_string(), |p| p.display().to_string());
-                        let format = format.map_or("?", Format::extension);
                         println!("{}{default}  {}", style(name).bold(), preset.description);
-                        println!("    {}, {}", format, style(origin).dim());
+                        println!("    {}", style(origin).dim());
                     }
                     Err(err) => println!("{}  {} {err}", style(name).bold(), ui::error_label()),
                 }
             }
         }
         PresetCommand::Show { name } => {
-            let options = presets.resolve(&name)?;
+            let (webm, tgs) = (presets.webm(&name)?, presets.tgs(&name)?);
             if ctx.global.json {
-                print_json(&options);
+                print_json(&json!({ "webm": webm, "tgs": tgs }));
             } else {
-                print!("{}", toml::to_string(&options)?);
+                println!("[webm]\n{}\n[tgs]\n{}", toml::to_string(&webm)?, toml::to_string(&tgs)?);
             }
         }
         PresetCommand::Path => match presets::user_dir() {

@@ -6,12 +6,13 @@ use serde::Serialize;
 
 use crate::events::Event;
 use crate::options::Options;
-use crate::presets::{Format, FormatOptions, Presets};
+use crate::presets::{Format, Presets};
 use crate::tgs::{TgsEvent, TgsOptions};
 
 /// Bumped on incompatible changes to the description, events or CLI flags
-/// used by front-ends. 2: `.tgs` output, formats and preset formats.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// used by front-ends. 2: `.tgs` output, formats and preset formats. 3:
+/// presets hold options for both formats, and say nothing about the target.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Description {
@@ -44,11 +45,12 @@ pub struct PresetDescription {
     pub name: String,
     pub description: String,
     pub builtin: bool,
-    /// The format the preset is for; `None` if it is broken.
-    pub format: Option<Format>,
-    /// Options with everything the preset extends applied.
-    pub options: Option<FormatOptions>,
-    /// Why the preset cannot be used, if it is broken.
+    /// Options for WebM results, with everything the preset extends
+    /// applied; `None` if broken.
+    pub webm: Option<Options>,
+    /// The same for `.tgs` results.
+    pub tgs: Option<TgsOptions>,
+    /// Why the preset cannot be used, if it is broken for either format.
     pub error: Option<String>,
 }
 
@@ -58,14 +60,18 @@ pub fn describe(presets: &Presets, default_presets: [&str; 2]) -> Description {
     let presets = presets
         .iter()
         .map(|(name, preset)| {
-            let resolved = presets.resolve(name);
+            let (webm, tgs) = (presets.webm(name), presets.tgs(name));
+            let error = match (&webm, &tgs) {
+                (Err(err), _) | (_, Err(err)) => Some(err.to_string()),
+                _ => None,
+            };
             PresetDescription {
                 name: name.to_string(),
                 description: preset.map(|p| p.description.clone()).unwrap_or_default(),
                 builtin: preset.is_ok_and(|p| p.path.is_none()),
-                format: resolved.as_ref().ok().map(FormatOptions::format),
-                error: resolved.as_ref().err().map(ToString::to_string),
-                options: resolved.ok(),
+                webm: webm.ok(),
+                tgs: tgs.ok(),
+                error,
             }
         })
         .collect();
