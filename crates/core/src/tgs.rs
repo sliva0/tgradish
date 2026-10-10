@@ -330,7 +330,7 @@ fn sequence_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>> {
             found.retain(|path| {
                 let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                 path.is_file()
-                    && ["png", "gif", "webp", "ase", "aseprite"]
+                    && ["png", "gif", "webp", "jpg", "jpeg", "bmp", "ase", "aseprite"]
                         .contains(&extension.to_ascii_lowercase().as_str())
             });
             files.extend(found);

@@ -24,7 +24,7 @@ pub enum Kind {
     Frames,
 }
 
-const IMAGES: [&str; 4] = ["png", "apng", "gif", "webp"];
+const IMAGES: [&str; 7] = ["png", "apng", "gif", "webp", "jpg", "jpeg", "bmp"];
 const ASEPRITE: [&str; 2] = ["ase", "aseprite"];
 
 fn extension(path: &Path) -> String {
@@ -343,7 +343,8 @@ mod tests {
         let path = |name: &str| vec![PathBuf::from(name)];
         assert_eq!(Kind::of(&path("a.MP4"), false), Kind::Video);
         assert_eq!(Kind::of(&path("a.gif"), false), Kind::Image);
-        assert_eq!(Kind::of(&path("photo.JPG"), false), Kind::Video);
+        assert_eq!(Kind::of(&path("photo.JPG"), false), Kind::Image);
+        assert_eq!(Kind::of(&path("a.mkv"), false), Kind::Video);
         assert_eq!(Kind::of(&path("a.aseprite"), false), Kind::Frames);
         assert_eq!(Kind::of(&[dir.path().to_path_buf()], false), Kind::Frames);
         assert_eq!(Kind::of(&[PathBuf::from("1.png"), PathBuf::from("2.png")], true), Kind::Frames);

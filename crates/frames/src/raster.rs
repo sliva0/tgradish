@@ -1,10 +1,13 @@
-//! GIF, PNG/APNG and WebP through the `image` crate, which composites
-//! frames (disposal, blending, sub-rectangles) into full-size RGBA.
+//! GIF, PNG/APNG, WebP, JPEG and BMP through the `image` crate, which
+//! composites frames (disposal, blending, sub-rectangles) into full-size
+//! RGBA.
 
 use std::io::Cursor;
 use std::time::Duration;
 
+use image::codecs::bmp::BmpDecoder;
 use image::codecs::gif::GifDecoder;
+use image::codecs::jpeg::JpegDecoder;
 use image::codecs::png::PngDecoder;
 use image::codecs::webp::WebPDecoder;
 use image::{AnimationDecoder, DynamicImage, Frames, ImageDecoder, ImageError};
@@ -45,6 +48,16 @@ pub(crate) fn decode(bytes: &[u8], format: Format, limits: &Limits) -> Result<An
             } else {
                 return still(decoder, format, limits);
             }
+        }
+        Format::Jpeg => {
+            let mut decoder = JpegDecoder::new(reader).map_err(error)?;
+            decoder.set_limits(codec_limits).map_err(error)?;
+            return still(decoder, format, limits);
+        }
+        Format::Bmp => {
+            let mut decoder = BmpDecoder::new(reader).map_err(error)?;
+            decoder.set_limits(codec_limits).map_err(error)?;
+            return still(decoder, format, limits);
         }
         Format::Aseprite => unreachable!("Aseprite files are decoded by aseprite/mod.rs"),
     };
@@ -89,7 +102,7 @@ fn collect(
     Animation::new(width, height, out).map(Some)
 }
 
-fn still(decoder: impl ImageDecoder, format: Format, limits: &Limits) -> Result<Animation> {
+fn still(mut decoder: impl ImageDecoder, format: Format, limits: &Limits) -> Result<Animation> {
     // the decoded image and its RGBA copy are both alive for a moment
     let (width, height) = decoder.dimensions();
     limits.check(width, height, 1)?;
@@ -97,9 +110,12 @@ fn still(decoder: impl ImageDecoder, format: Format, limits: &Limits) -> Result<
     if decoder.total_bytes().saturating_add(rgba) > limits.max_bytes as u64 {
         return Err(Error::TooLarge(format!("a {width}x{height} image")));
     }
-    let image = DynamicImage::from_decoder(decoder)
-        .map_err(|err| Error::Decode { format, message: err.to_string() })?
-        .into_rgba8();
+    let error = |err: ImageError| Error::Decode { format, message: err.to_string() };
+    // photos are often stored sideways, with the way up in their metadata
+    let orientation = decoder.orientation().map_err(error)?;
+    let mut image = DynamicImage::from_decoder(decoder).map_err(error)?;
+    image.apply_orientation(orientation);
+    let image = image.into_rgba8();
     let (width, height) = image.dimensions();
     Animation::new(
         width,

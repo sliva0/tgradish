@@ -18,10 +18,12 @@ with the ability to bypass the 3 second limit, and pixel art into animated
   looks closest to the source;
 - spoofs the duration in the file header when the video is longer than
   3 seconds, so Telegram accepts it;
+- scales in linear light, so edges don't darken, and keeps small pixel
+  art crisp when it grows (`--scaling`);
 - checks the result against Telegram's requirements.
 
-For `.tgs` animated stickers, from GIF, APNG, WebP, Aseprite files, sprite
-sheets or image sequences of pixel art ([docs/tgs.md](docs/tgs.md)):
+For `.tgs` animated stickers, from GIF, APNG, WebP, JPEG, BMP or Aseprite
+files, sprite sheets or image sequences of pixel art ([docs/tgs.md](docs/tgs.md)):
 
 - finds the art's own pixel grid and draws it pixel-exact, without the
   seams 1.x had, at about half 1.x's size;
@@ -47,6 +49,9 @@ tgradish convert pig.mp4 --target emoji --start 1.5 --length 2
 
 # a sticker from part of a screen recording: 640x360 from (100, 50)
 tgradish convert recording.mkv --crop 640x360+100+50
+
+# 50x50 pixel art as a WebM sticker, every pixel 10x10, centred
+tgradish convert sprite.png --scaling pixel-perfect
 
 # quick result: bitrate fitting only, fast encoder
 tgradish convert pig.mp4 --preset fast
