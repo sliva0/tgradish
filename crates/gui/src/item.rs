@@ -211,6 +211,9 @@ pub struct Item {
     pub video: Load<Video>,
     /// The part of the video that is played: where it starts and how long.
     pub part: Option<((f64, f64), Load<Clip>)>,
+    /// The frame shown while paused, at the input's full size, and its
+    /// time: sharp enough to crop by.
+    pub still: Option<(f64, Load<Clip>)>,
     /// The input read as pixel art, for `.tgs`, with what it was read with.
     pub art: Load<Art>,
     pub art_reading: TgsOptions,
@@ -239,6 +242,7 @@ impl Item {
             view: View::default(),
             video: Load::Idle,
             part: None,
+            still: None,
             art: Load::Idle,
             art_reading: TgsOptions::default(),
             input_thumb: None,
