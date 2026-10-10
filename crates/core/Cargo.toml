@@ -16,7 +16,7 @@ linked-static = ["linked", "ffmpeg-next/static"]
 clipboard = ["dep:arboard", "dep:png"]
 
 [dependencies]
-tgradish-tgs = { workspace = true, features = ["schema"] }
+tgradish-tgs = { workspace = true, features = ["schema", "threads"] }
 
 arboard = { workspace = true, optional = true }
 directories.workspace = true

@@ -7,7 +7,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
-tgradish-tgs.workspace = true
+tgradish-tgs = { workspace = true, features = ["threads"] }
 
 anyhow.workspace = true
 flate2.workspace = true
