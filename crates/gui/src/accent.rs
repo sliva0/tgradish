@@ -106,6 +106,7 @@ mod portal {
         dbus_connection_read_write: fn(*mut Connection, c_int) -> u32;
         dbus_connection_pop_message: fn(*mut Connection) -> *mut Message;
         dbus_connection_close: fn(*mut Connection);
+        dbus_connection_set_exit_on_disconnect: fn(*mut Connection, u32);
         dbus_connection_unref: fn(*mut Connection);
         dbus_message_new_method_call:
             fn(*const c_char, *const c_char, *const c_char, *const c_char) -> *mut Message;
@@ -137,12 +138,15 @@ mod portal {
             if connection.is_null() {
                 return;
             }
+            // libdbus ends the process when the bus goes away, unless told
+            (dbus.dbus_connection_set_exit_on_disconnect)(connection, 0);
             // listening first, so a change while reading isn't missed
             let rule = c"type='signal',interface='org.freedesktop.portal.Settings',member='SettingChanged'";
             (dbus.dbus_bus_add_match)(connection, rule.as_ptr(), &mut error);
             (dbus.dbus_error_free)(&mut error);
             set(read(&dbus, connection));
-            while (dbus.dbus_connection_read_write)(connection, -1) != 0 {
+            loop {
+                // what came while reading, then while waiting
                 loop {
                     let message = (dbus.dbus_connection_pop_message)(connection);
                     if message.is_null() {
@@ -155,6 +159,9 @@ mod portal {
                         set(accent);
                     }
                     (dbus.dbus_message_unref)(message);
+                }
+                if (dbus.dbus_connection_read_write)(connection, -1) == 0 {
+                    break;
                 }
             }
             (dbus.dbus_connection_close)(connection);
