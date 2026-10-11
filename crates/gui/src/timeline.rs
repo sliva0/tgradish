@@ -234,6 +234,13 @@ pub fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &mut bool
     });
 }
 
+/// Where the frame `step` long that shows at `time` starts, in a video
+/// `length` long: the last frame's start at most.
+pub fn frame_at(time: f64, length: f64, step: f64) -> f64 {
+    let last = ((length / step - 1e-6).ceil() - 1.0).max(0.0);
+    (time / step + 1e-6).floor().clamp(0.0, last) * step
+}
+
 /// Picks a frame of a video for a still picture: a frame's step either way,
 /// its time, and a bar to click or drag along. `step` is a frame's length.
 pub fn frame_picker(ui: &mut egui::Ui, length: f64, frame: &mut Option<f64>, step: f64) {
@@ -273,7 +280,8 @@ pub fn frame_picker(ui: &mut egui::Ui, length: f64, frame: &mut Option<f64>, ste
             response.clone().on_hover_text_at_pointer(widgets::seconds(seconds_at(pointer.x)));
         }
         if let Some(new) = picked {
-            at = new.clamp(0.0, length);
+            // where its frame starts, as the picture is made of it
+            at = frame_at(new, length, step);
             *frame = (at > 1e-6).then_some(at);
         }
         let painter = ui.painter_at(rect);
@@ -306,5 +314,20 @@ fn play_button(ui: &mut egui::Ui, playing: &mut bool) {
         .clicked()
     {
         *playing = !*playing;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn picks_where_frames_start() {
+        // 25 fps, 1 s: frames start every 0.04 s, the last at 0.96
+        assert!((frame_at(0.5, 1.0, 0.04) - 0.48).abs() < 1e-9);
+        assert!((frame_at(0.48, 1.0, 0.04) - 0.48).abs() < 1e-9);
+        assert!((frame_at(1.0, 1.0, 0.04) - 0.96).abs() < 1e-9);
+        assert!((frame_at(0.99, 0.98, 0.04) - 0.96).abs() < 1e-9);
+        assert_eq!(frame_at(-1.0, 1.0, 0.04), 0.0);
     }
 }

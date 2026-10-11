@@ -166,12 +166,11 @@ impl Done {
                 })
             }
             Format::Image => {
-                let (width, height) = still::dimensions(path).ok()?;
-                let bytes = std::fs::metadata(path).ok()?.len();
-                let issues = telegram::check_still(width, height, bytes, target);
+                let info = still::inspect_file(path).ok()?;
+                let issues = info.issues(target);
                 Some(Done {
                     output: path.to_path_buf(),
-                    bytes,
+                    bytes: info.bytes,
                     limit: telegram::MAX_STILL_BYTES,
                     lossy: false,
                     kept: None,

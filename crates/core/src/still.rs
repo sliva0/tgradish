@@ -67,10 +67,20 @@ pub fn picture_options(options: &Options) -> Options {
     }
 }
 
+/// Where the frame that shows at `time` starts, at `fps`.
+pub fn frame_start(time: f64, fps: f64) -> f64 {
+    (time * fps + 1e-6).floor() / fps
+}
+
 /// Plans the picture: its frame, a sticker's or emoji's size, and the
 /// output, `.webp` unless `request` names one.
 pub fn plan(request: &Request, source: crate::ffmpeg::Probe) -> Result<(Plan, Vec<String>)> {
-    let options = picture_options(&request.options);
+    let mut options = picture_options(&request.options);
+    // the frame that shows at `start`, from where it starts, as previews
+    // show it
+    if let (Some(start), Some(fps)) = (options.start, source.fps.filter(|_| !source.still_image)) {
+        options.start = Some(frame_start(start, fps));
+    }
     let target = options.target.unwrap_or_default();
     let output = request.output.clone().unwrap_or_else(|| default_output(&request.input, target));
     let request = Request { output: Some(output), options, ..request.clone() };
@@ -94,12 +104,14 @@ pub fn convert(backend: &Backend, request: &Request, cancel: &CancelToken) -> Re
     }
     let rgba = backend.still(&plan, cancel)?;
     cancel.check()?;
-    let (mut webp, encoding) = fit(&rgba, plan.width, plan.height)?;
-    if plan.watermark || plan.title.is_some() {
-        let alpha = rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] < 255);
-        let xmp = xmp(plan.title.as_deref(), plan.watermark);
-        webp = with_xmp(&webp, &xmp, (plan.width, plan.height), alpha);
-    }
+    let alpha = rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] < 255);
+    let xmp = (plan.watermark || plan.title.is_some())
+        .then(|| xmp(plan.title.as_deref(), plan.watermark));
+    let finish = |webp: Vec<u8>| match &xmp {
+        Some(xmp) => with_xmp(&webp, xmp, (plan.width, plan.height), alpha),
+        None => webp,
+    };
+    let (webp, encoding) = fit(&rgba, plan.width, plan.height, finish)?;
     crate::fsutil::write_file(&plan.output, &webp, request.overwrite).map_err(|err| {
         match err.kind() {
             std::io::ErrorKind::AlreadyExists => Error::OutputExists(plan.output.clone()),
@@ -127,11 +139,13 @@ pub fn encode(rgba: &[u8], width: u32, height: u32, quality: Option<f32>) -> Res
     assert_eq!(rgba.len(), width as usize * height as usize * 4, "a whole picture");
     let failed = |what: &str| Error::Webp(what.to_owned());
     let abi = webp::WEBP_ENCODER_ABI_VERSION as i32;
-    // SAFETY: libwebp initialises the config, picture and writer before
-    // they are read; the picture reads `rgba` only while importing it, and
-    // is freed; the writer's memory is copied out, then freed
+    // SAFETY: the config, picture and writer start zeroed, which suits
+    // their integers, pointers and optional functions, padding fields
+    // included, which libwebp's initialisers leave as they are; the picture
+    // reads `rgba` only while importing it, and is freed; the writer's
+    // memory is copied out, then freed
     unsafe {
-        let mut config = MaybeUninit::<webp::WebPConfig>::uninit();
+        let mut config = MaybeUninit::<webp::WebPConfig>::zeroed();
         let preset = webp::WebPPreset::WEBP_PRESET_DEFAULT;
         if webp::WebPConfigInitInternal(config.as_mut_ptr(), preset, 100.0, abi) == 0 {
             return Err(failed("libwebp's version doesn't match"));
@@ -150,14 +164,14 @@ pub fn encode(rgba: &[u8], width: u32, height: u32, quality: Option<f32>) -> Res
         if webp::WebPValidateConfig(&config) == 0 {
             return Err(failed("invalid settings"));
         }
-        let mut picture = MaybeUninit::<webp::WebPPicture>::uninit();
+        let mut picture = MaybeUninit::<webp::WebPPicture>::zeroed();
         if webp::WebPPictureInitInternal(picture.as_mut_ptr(), abi) == 0 {
             return Err(failed("libwebp's version doesn't match"));
         }
         let mut picture = picture.assume_init();
         picture.use_argb = i32::from(quality.is_none());
         (picture.width, picture.height) = (width as i32, height as i32);
-        let mut writer = MaybeUninit::<webp::WebPMemoryWriter>::uninit();
+        let mut writer = MaybeUninit::<webp::WebPMemoryWriter>::zeroed();
         webp::WebPMemoryWriterInit(writer.as_mut_ptr());
         let mut writer = writer.assume_init();
         picture.writer = Some(webp::WebPMemoryWrite);
@@ -194,11 +208,17 @@ pub enum Encoding {
     },
 }
 
-/// [`encode`]d within the size limit: lossless, or lossy at the highest
-/// quality that fits, which photos need. Returns the smallest try if none
-/// fits.
-fn fit(rgba: &[u8], width: u32, height: u32) -> Result<(Vec<u8>, Encoding)> {
-    let lossless = encode(rgba, width, height, None)?;
+/// [`encode`]d within the size limit, as `finish` makes the file of it:
+/// lossless, or lossy at the highest quality that fits, which photos need.
+/// Returns the smallest try if none fits.
+fn fit(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    finish: impl Fn(Vec<u8>) -> Vec<u8>,
+) -> Result<(Vec<u8>, Encoding)> {
+    let encode = |quality| encode(rgba, width, height, quality).map(&finish);
+    let lossless = encode(None)?;
     let fits = |webp: &[u8]| webp.len() as u64 <= telegram::MAX_STILL_BYTES;
     if fits(&lossless) {
         return Ok((lossless, Encoding::Lossless));
@@ -208,7 +228,7 @@ fn fit(rgba: &[u8], width: u32, height: u32) -> Result<(Vec<u8>, Encoding)> {
     let mut best = None;
     while low <= high {
         let quality = low + (high - low) / 2;
-        let lossy = encode(rgba, width, height, Some(f32::from(quality)))?;
+        let lossy = encode(Some(f32::from(quality)))?;
         if fits(&lossy) {
             best = Some((lossy, Encoding::Lossy { quality }));
             low = quality + 1;
@@ -218,9 +238,7 @@ fn fit(rgba: &[u8], width: u32, height: u32) -> Result<(Vec<u8>, Encoding)> {
             high = quality - 1;
         }
     }
-    let smallest = || {
-        encode(rgba, width, height, Some(0.0)).map(|webp| (webp, Encoding::Lossy { quality: 0 }))
-    };
+    let smallest = || encode(Some(0.0)).map(|webp| (webp, Encoding::Lossy { quality: 0 }));
     best.map_or_else(smallest, Ok)
 }
 
@@ -312,6 +330,7 @@ pub struct Info {
     pub bytes: u64,
     pub alpha: bool,
     pub lossy: bool,
+    pub animated: bool,
     /// The tool its metadata names as its maker.
     pub made_with: Option<String>,
 }
@@ -320,6 +339,15 @@ impl Info {
     /// What it would be: emoji are the only square 100 px stickers.
     pub fn target(&self) -> Target {
         if (self.width, self.height) == (100, 100) { Target::Emoji } else { Target::Sticker }
+    }
+
+    /// Everything that would make Telegram refuse it as `target`.
+    pub fn issues(&self, target: Target) -> Vec<Issue> {
+        let mut issues = telegram::check_still(self.width, self.height, self.bytes, target);
+        if self.animated {
+            issues.push(Issue::Animated);
+        }
+        issues
     }
 }
 
@@ -335,12 +363,17 @@ pub fn inspect_file(path: &Path) -> Result<Info> {
     let mut decoder = image_webp::WebPDecoder::new(Cursor::new(&bytes))
         .map_err(|err| invalid(err.to_string()))?;
     let (width, height) = decoder.dimensions();
+    let (alpha, lossy, animated) = (decoder.has_alpha(), decoder.is_lossy(), decoder.is_animated());
+    // the headers alone can be whole while the picture isn't
+    let size = decoder.output_buffer_size().ok_or_else(|| invalid("too large".into()))?;
+    decoder.read_image(&mut vec![0; size]).map_err(|err| invalid(err.to_string()))?;
     Ok(Info {
         width,
         height,
         bytes: bytes.len() as u64,
-        alpha: decoder.has_alpha(),
-        lossy: decoder.is_lossy(),
+        alpha,
+        lossy,
+        animated,
         made_with: creator_tool(&bytes),
     })
 }
@@ -391,7 +424,7 @@ mod tests {
         let rgba: Vec<u8> = (0..64u32 * 32)
             .flat_map(|i| if i % 64 < 32 { [0; 4] } else { [i as u8, 0, 200, 255] })
             .collect();
-        let (webp, encoding) = fit(&rgba, 64, 32).unwrap();
+        let (webp, encoding) = fit(&rgba, 64, 32, |webp| webp).unwrap();
         assert_eq!(encoding, Encoding::Lossless);
         let marked = with_xmp(&webp, &xmp(Some("a <pig>"), true), (64, 32), true);
         for webp in [&webp, &marked] {
@@ -415,6 +448,15 @@ mod tests {
         assert_eq!(creator_tool(&webp), None);
         assert_eq!(&marked[12..16], b"VP8X");
         assert_eq!(u32::from_le_bytes(marked[4..8].try_into().unwrap()) as usize + 8, marked.len());
+        // whole headers on a cut picture aren't a picture
+        let dir = tempfile::tempdir().unwrap();
+        let (whole, cut) = (dir.path().join("whole.webp"), dir.path().join("cut.webp"));
+        std::fs::write(&whole, &marked).unwrap();
+        std::fs::write(&cut, &webp[..webp.len() / 2]).unwrap();
+        let info = inspect_file(&whole).unwrap();
+        assert_eq!((info.width, info.animated, info.made_with.is_some()), (64, false, true));
+        assert!(info.issues(Target::Sticker).iter().any(|i| matches!(i, Issue::WrongSize { .. })));
+        assert!(inspect_file(&cut).is_err());
         // no title, no mark: no tool named
         assert!(!String::from_utf8_lossy(&xmp(None, false)).contains("tgradish"));
     }
@@ -429,7 +471,10 @@ mod tests {
                 if i % 4 == 3 { 255 } else { (seed >> 24) as u8 }
             })
             .collect();
-        let (webp, encoding) = fit(&noise, 512, 512).unwrap();
+        // with metadata, which counts too
+        let xmp = vec![b'x'; 20_000];
+        let finish = |webp: Vec<u8>| with_xmp(&webp, &xmp, (512, 512), false);
+        let (webp, encoding) = fit(&noise, 512, 512, finish).unwrap();
         assert!(matches!(encoding, Encoding::Lossy { quality } if quality > 50), "{encoding:?}");
         assert!(webp.len() as u64 <= telegram::MAX_STILL_BYTES);
         assert_eq!(read_back(&webp).0, 512);

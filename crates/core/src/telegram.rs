@@ -65,14 +65,33 @@ impl Target {
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "issue", rename_all = "snake_case")]
 pub enum Issue {
-    NotWebm { doc_type: String },
+    NotWebm {
+        doc_type: String,
+    },
     NoVideo,
-    NotVp9 { codec_id: String },
+    NotVp9 {
+        codec_id: String,
+    },
     HasAudio,
-    WrongSize { width: u64, height: u64, expected: String },
-    TooBig { bytes: u64, max: u64 },
-    TooLong { seconds: f64, max: f64 },
-    TooManyFps { fps: f64, max: f64 },
+    WrongSize {
+        width: u64,
+        height: u64,
+        expected: String,
+    },
+    TooBig {
+        bytes: u64,
+        max: u64,
+    },
+    TooLong {
+        seconds: f64,
+        max: f64,
+    },
+    TooManyFps {
+        fps: f64,
+        max: f64,
+    },
+    /// An animated image, where image stickers are one picture.
+    Animated,
 }
 
 impl std::fmt::Display for Issue {
@@ -92,6 +111,7 @@ impl std::fmt::Display for Issue {
             Issue::TooManyFps { fps, max } => {
                 write!(f, "frame rate is {fps:.2} fps, limit is {max}")
             }
+            Issue::Animated => write!(f, "it is animated; image stickers are one picture"),
         }
     }
 }

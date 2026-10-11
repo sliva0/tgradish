@@ -805,6 +805,17 @@ fn makes_image_stickers_from_a_frame() {
         assert_eq!((made.width, made.height), (100, 100), "{name}");
         let corner = &tgradish_core::still::preview(&made.output).unwrap().frames[0].0[..4];
         assert_eq!(corner[3], 0, "{name}: the padding is transparent");
+        // the frame that shows at a time, from where it starts, and the last
+        let at = |start| {
+            let options = Options { start: Some(start), ..Options::default() };
+            let output = Some(dir.path().join(format!("at-{start}.webp")));
+            let request = Request { options, output, overwrite: true, ..request.clone() };
+            let made = tgradish_core::still::convert(backend, &request, &CancelToken::new());
+            tgradish_core::still::preview(&made.unwrap().output).unwrap().frames[0].0.clone()
+        };
+        assert_eq!(at(0.5), at(0.48), "{name}");
+        assert_ne!(at(0.5), at(0.52), "{name}");
+        at(4.83);
         // past the end
         let late = Options { start: Some(60.0), ..Options::default() };
         let request = Request { options: late, ..request };
