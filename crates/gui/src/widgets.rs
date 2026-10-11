@@ -244,16 +244,17 @@ pub fn auto_number<T: egui::emath::Numeric>(
             changed = true;
         }
         let set = value.is_some();
+        // greyed out here or around: shown as it is, even outside the range
+        // a set value keeps to, and never stored, as egui would clamp it
+        // and say it changed
+        let live = set && ui.is_enabled();
         let mut number = value.or(shown).unwrap_or(start);
-        // an automatic value shows as it is, even outside the range a set
-        // one keeps to, and is never stored: egui would clamp it, and say
-        // it changed
-        let mut field = edit(egui::DragValue::new(&mut number)).clamp_existing_to_range(set);
+        let mut field = edit(egui::DragValue::new(&mut number)).clamp_existing_to_range(live);
         if !set && shown.is_none() {
             field = field.custom_formatter(|_, _| "—".to_owned());
         }
         let response = ui.add_enabled(set, field).on_disabled_hover_text("Pick Custom to set it");
-        if set && response.changed() {
+        if live && response.changed() {
             *value = Some(number);
             changed = true;
         }
@@ -371,6 +372,18 @@ mod tests {
         );
         harness.run();
         assert_eq!(*harness.state(), None);
+        // a set value, greyed out with all around it, outside the range
+        // the row has now
+        let mut greyed = egui_kittest::Harness::new_ui_state(
+            |ui, value: &mut Option<u32>| {
+                ui.add_enabled_ui(false, |ui| {
+                    auto_number(ui, value, "All", Some(4), 4, |field| field.range(1..=4));
+                });
+            },
+            Some(20),
+        );
+        greyed.run();
+        assert_eq!(*greyed.state(), Some(20));
         // shown as it is, not clamped to the range
         use egui_kittest::kittest::Queryable;
         harness.get(egui_kittest::kittest::by().value("20"));
