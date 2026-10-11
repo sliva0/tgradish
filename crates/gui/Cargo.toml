@@ -29,6 +29,12 @@ wayland-backend = { workspace = true, features = ["client_system"] }
 # the window's icon, which winit doesn't set on Wayland
 wayland-protocols = { workspace = true, features = ["client", "staging"] }
 winit = { workspace = true, features = ["wayland"] }
+# the accent colour, from the desktop portal
+zbus.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# the accent colour, from the registry
+windows-sys = { workspace = true, features = ["Win32_System_Registry"] }
 
 [lints]
 workspace = true

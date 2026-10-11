@@ -5,7 +5,7 @@ use eframe::egui::{self, RichText};
 use tgradish_core::config::Config;
 use tgradish_core::convert;
 use tgradish_core::options::{
-    Crop, ExactScale, Fit, Options, Range, Resize, Scaling, Speed, Spoof,
+    Crop, DEFAULT_FAKE_DURATION, ExactScale, Fit, Options, Range, Resize, Scaling, Speed, Spoof,
 };
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::{self, Target};
@@ -15,7 +15,7 @@ use tgradish_tgs::reduce::Kind as Reduction;
 use crate::canvas::{Exact, Keep};
 use crate::item::{Aspect, Item, Kind};
 use crate::widgets::{
-    self, Choice, auto_number, chosen_hint, flag, label, note, preset_segments, section, segments,
+    self, Choice, auto_number, chosen_hint, flag, note, preset_segments, row, section, segments,
 };
 
 /// What the settings depend on besides the item.
@@ -26,12 +26,6 @@ pub struct Context<'a> {
     pub extra_args: bool,
     /// Where the result goes.
     pub output: Option<std::path::PathBuf>,
-}
-
-const LABELS: f32 = 128.0;
-
-fn grid(ui: &mut egui::Ui, id: &str, rows: impl FnOnce(&mut egui::Ui)) {
-    egui::Grid::new(id).num_columns(2).min_col_width(LABELS).spacing([14.0, 10.0]).show(ui, rows);
 }
 
 /// The built-in presets in the order of their speed, then the user's own.
@@ -77,76 +71,95 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     ui.label(RichText::new("Make").strong().size(15.5));
     ui.add_space(4.0);
     let formats = [
-        (Format::Webm, "Video sticker (WebM)", "A VP9 video, from any video or image"),
+        (Format::Webm, "Video", "A video sticker: VP9 in WebM, from any video or picture"),
         (
             Format::Tgs,
-            "Vector animation (TGS)",
-            "Pixel art drawn as shapes: sharp at any size, and small",
+            "Animation",
+            "An animated sticker: pixel art drawn as vector shapes, sharp at any size, and small",
         ),
-        (Format::Image, "Image sticker (WebP)", "One frame of a video, or a picture, as it is"),
+        (Format::Image, "Image", "A static sticker: one frame of a video, or a picture, as WebP"),
     ];
-    for (format, text, hint) in formats {
-        let allowed = item.kind.allows(format);
-        let response = ui
-            .add_enabled(allowed, egui::RadioButton::new(item.format == format, text))
-            .on_hover_text(hint)
-            .on_disabled_hover_text(match item.kind {
-                Kind::Video => {
-                    "Only pictures in PNG, GIF, WebP, JPEG, BMP or Aseprite files can become a TGS animation"
-                }
-                _ => "ffmpeg can't read Aseprite files or folders of frames",
-            });
-        if response.clicked() {
-            item.format = format;
-            item.format_guessed = false;
+    let refused = match item.kind {
+        Kind::Video => {
+            "Only pictures in PNG, GIF, WebP, JPEG, BMP or Aseprite files can become a TGS animation"
         }
-    }
-    ui.add_space(8.0);
-    // .tgs animations are vectors: square, but of no size in pixels
-    let (sticker, emoji) = match item.format {
-        Format::Webm => ("512 px on the longer side, up to 256 KB", "100 × 100 px, up to 64 KB"),
-        Format::Tgs => ("Square, up to 64 KB", "Square, up to 64 KB"),
-        Format::Image => ("512 px on the longer side, up to 512 KB", "100 × 100 px"),
+        _ => "ffmpeg can't read Aseprite files or folders of frames",
     };
-    let targets = [(Target::Sticker, "Sticker", sticker), (Target::Emoji, "Custom emoji", emoji)];
+    let mut format = item.format;
+    let allowed = |format| if item.kind.allows(format) { Ok(()) } else { Err(refused) };
+    if segments(ui, &mut format, &formats, allowed) {
+        item.format = format;
+        item.format_guessed = false;
+    }
+    let targets = [(Target::Sticker, "Sticker", ""), (Target::Emoji, "Custom emoji", "")];
     segments(ui, &mut item.choices.target, &targets, |_| Ok(()));
-    chosen_hint(ui, item.choices.target, &targets);
+    // .tgs animations are vectors: square, but of no size in pixels
+    note(
+        ui,
+        match (item.format, item.choices.target) {
+            (Format::Webm, Target::Sticker) => "WebM, 512 px on the longer side, up to 256 KiB",
+            (Format::Webm, Target::Emoji) => "WebM, 100 × 100 px, up to 64 KiB",
+            (Format::Tgs, _) => "TGS, square, up to 64 KiB",
+            (Format::Image, Target::Sticker) => "WebP, 512 px on the longer side, up to 512 KiB",
+            (Format::Image, Target::Emoji) => "WebP, 100 × 100 px",
+        },
+    );
 
     // presets say how to encode videos and animations; a picture has
     // nothing to choose there
-    if item.format == Format::Image {
-        return;
-    }
     ui.add_space(8.0);
-    ui.label("Preset")
-        .on_hover_text("How hard to work on the result; your own values below go on top");
-    let current = item.choices.preset_name(item.format, context.config).to_owned();
-    let default = context.config.preset_for(item.format).to_owned();
-    let names = preset_names(context.presets);
-    let mut picked = current.clone();
-    let labels: Vec<String> = names.iter().map(|(name, _)| capitalised(name)).collect();
-    let choices: Vec<Choice<&str>> = names
-        .iter()
-        .zip(&labels)
-        .map(|((name, description), label)| {
-            (name.as_str(), label.as_str(), description.as_deref().unwrap_or(""))
-        })
-        .collect();
-    let broken = |name: &str| {
-        names.iter().find(|(n, _)| n == name).and_then(|(_, d)| d.as_ref().err()).is_some()
-    };
-    let mut chosen = picked.as_str();
-    if segments(ui, &mut chosen, &choices, |name| {
-        if broken(name) { Err("This preset's file is broken") } else { Ok(()) }
-    }) {
-        picked = chosen.to_owned();
-        item.choices.preset = (picked != default).then(|| picked.clone());
-    }
-    match (builtin(&picked, item.format), context.presets.get(&picked)) {
-        (Some(text), Ok(preset)) if preset.path.is_none() => note(ui, text),
-        (_, Ok(preset)) => note(ui, preset.description.clone()),
-        _ => {}
-    }
+    let image = item.format == Format::Image;
+    let nothing = "Pictures are saved as they are: there is nothing to encode";
+    ui.add_enabled_ui(!image, |ui| {
+        ui.label("Preset")
+            .on_hover_text("How hard to work on the result; your own values below go on top")
+            .on_disabled_hover_text(nothing);
+        let current = item.choices.preset_name(item.format, context.config).to_owned();
+        let default = context.config.preset_for(item.format).to_owned();
+        let names = preset_names(context.presets);
+        let labels: Vec<String> = names.iter().map(|(name, _)| capitalised(name)).collect();
+        let choices: Vec<Choice<&str>> = names
+            .iter()
+            .zip(&labels)
+            .map(|((name, description), label)| {
+                (name.as_str(), label.as_str(), description.as_deref().unwrap_or(""))
+            })
+            .collect();
+        let broken = |name: &str| {
+            names.iter().find(|(n, _)| n == name).and_then(|(_, d)| d.as_ref().err()).is_some()
+        };
+        let mut chosen = current.as_str();
+        // the built-in three fit side by side; more go in a list
+        if choices.len() <= 3 {
+            segments(ui, &mut chosen, &choices, |name| {
+                if broken(name) { Err("This preset's file is broken") } else { Ok(()) }
+            });
+        } else {
+            let shown = choices.iter().find(|(name, ..)| *name == chosen).map_or("", |c| c.1);
+            egui::ComboBox::from_id_salt("preset").selected_text(shown).show_ui(ui, |ui| {
+                for &(name, label, hint) in &choices {
+                    let option = egui::Button::selectable(chosen == name, label);
+                    let response = ui
+                        .add_enabled(!broken(name), option)
+                        .on_disabled_hover_text("This preset's file is broken");
+                    let response =
+                        if hint.is_empty() { response } else { response.on_hover_text(hint) };
+                    if response.clicked() {
+                        chosen = name;
+                    }
+                }
+            });
+        }
+        if chosen != current {
+            item.choices.preset = (chosen != default).then(|| chosen.to_owned());
+        }
+        match (builtin(chosen, item.format), context.presets.get(chosen)) {
+            _ if image => note(ui, nothing),
+            (Some(text), Ok(preset)) if preset.path.is_none() => note(ui, text),
+            (_, Ok(preset)) => note(ui, preset.description.clone()),
+            _ => {}
+        }
+    });
 }
 
 /// The shapes the crop can keep.
@@ -512,12 +525,8 @@ fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             item.choices.crop = (fitted != full).then_some(fitted);
         }
     }
-    grid(ui, "picture", |ui| {
-        label(
-            ui,
-            "Crop",
-            "The part of the input to use, in its pixels. Drag on the preview to change it",
-        );
+    let crop_hint = "The part of the input to use, in its pixels. Drag on the preview to change it";
+    row(ui, "Crop", crop_hint, Ok(()), |ui| {
         ui.horizontal_wrapped(|ui| {
             let Some((width, height)) = size else {
                 note(ui, "once the input is read");
@@ -565,96 +574,89 @@ fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 };
             }
         });
-        ui.end_row();
-
-        label(ui, "Aspect ratio", "The width to height ratio the crop keeps while you drag it");
-        ui.vertical(|ui| aspect_ratio(ui, item, size, exact));
-        ui.end_row();
-
-        match item.format {
-            Format::Webm | Format::Image => {
-                let target = item.choices.target;
-                label(
-                    ui,
-                    "Force into square",
-                    "How the result becomes square: stickers needn't be, emoji must",
-                );
-                ui.vertical(|ui| {
-                    let base =
-                        if target.requires_exact_size() { Resize::Pad } else { Resize::Contain };
-                    let mut resize = resize_of(item);
-                    ui.horizontal(|ui| {
-                        let allowed = |option| match option {
-                            Resize::Contain if target.requires_exact_size() => {
-                                Err("Emoji must be square")
-                            }
-                            Resize::Crop | Resize::Stretch if exact.is_some() => Err(
-                                "A fixed integer scale keeps all of the picture: pad it instead",
-                            ),
-                            _ => Ok(()),
-                        };
-                        if segments(ui, &mut resize, &SQUARES, allowed) {
-                            item.choices.webm.resize = (resize != base).then_some(resize);
-                        }
-                        if item.choices.webm.resize.is_some() && widgets::reset(ui) {
-                            item.choices.webm.resize = None;
-                        }
-                    });
-                    chosen_hint(ui, resize, &SQUARES);
-                });
-                ui.end_row();
-
-                label(ui, "Scaling", "How the input's pixels become the result's");
-                ui.vertical(|ui| {
-                    preset_segments(ui, &mut item.choices.webm.scaling, Scaling::Auto, &SCALINGS);
-                    let scaling = item.choices.webm.scaling.unwrap_or(Scaling::Auto);
-                    chosen_hint(ui, scaling, &SCALINGS);
-                });
-                ui.end_row();
-                if item.choices.webm.scaling == Some(Scaling::PixelPerfect) {
-                    label(
-                        ui,
-                        "Integer scale",
-                        "How many result pixels each input pixel becomes, or how many input pixels make one",
-                    );
-                    ui.vertical(|ui| integer_scale(ui, item, size));
-                    ui.end_row();
-                }
-            }
-            Format::Tgs => {
-                let base = item
-                    .choices
-                    .tgs_base(context.presets, context.config)
-                    .ok()
-                    .and_then(|base| base.keep_canvas)
-                    .unwrap_or(false);
-                label(ui, "Margins", "Rows and columns that are transparent in every frame");
-                ui.vertical(|ui| {
-                    let mut auto = item.choices.tgs.keep_canvas.map(|keep| !keep);
-                    if flag(
-                        ui,
-                        &mut auto,
-                        !base,
-                        "Auto crop empty margins",
-                        "Cuts the art to the smallest rectangle with visible pixels in any frame, so it fills the square",
-                    ) {
-                        item.choices.tgs.keep_canvas = auto.map(|auto| !auto);
-                    }
-                    note(ui, "Applies on top of the manual crop");
-                });
-                ui.end_row();
-                label(
-                    ui,
-                    "Art pixel size",
-                    "How many input pixels one pixel of the art takes. Pixels off its grid are moved onto it",
-                );
-                auto_number(ui, &mut item.choices.tgs.pixel_scale, "Detected", 2, |value| {
-                    value.range(1..=64).suffix(" px")
-                });
-                ui.end_row();
-            }
-        }
     });
+
+    let aspect_hint = "The width to height ratio the crop keeps while you drag it";
+    row(ui, "Aspect ratio", aspect_hint, Ok(()), |ui| aspect_ratio(ui, item, size, exact));
+
+    match item.format {
+        Format::Webm | Format::Image => {
+            let target = item.choices.target;
+            let hint = "How the result becomes square: stickers needn't be, emoji must";
+            row(ui, "Force into square", hint, Ok(()), |ui| {
+                let base = if target.requires_exact_size() { Resize::Pad } else { Resize::Contain };
+                let mut resize = resize_of(item);
+                ui.horizontal(|ui| {
+                    let allowed = |option| match option {
+                        Resize::Contain if target.requires_exact_size() => {
+                            Err("Emoji must be square")
+                        }
+                        Resize::Crop | Resize::Stretch if exact.is_some() => {
+                            Err("A fixed integer scale keeps all of the picture: pad it instead")
+                        }
+                        _ => Ok(()),
+                    };
+                    if segments(ui, &mut resize, &SQUARES, allowed) {
+                        item.choices.webm.resize = (resize != base).then_some(resize);
+                    }
+                    if item.choices.webm.resize.is_some() && widgets::reset(ui) {
+                        item.choices.webm.resize = None;
+                    }
+                });
+                chosen_hint(ui, resize, &SQUARES);
+            });
+
+            row(ui, "Scaling", "How the input's pixels become the result's", Ok(()), |ui| {
+                preset_segments(ui, &mut item.choices.webm.scaling, Scaling::Auto, &SCALINGS);
+                let scaling = item.choices.webm.scaling.unwrap_or(Scaling::Auto);
+                chosen_hint(ui, scaling, &SCALINGS);
+            });
+            let integer = item.choices.webm.scaling == Some(Scaling::PixelPerfect);
+            let allowed = if integer { Ok(()) } else { Err("Only with Integer scaling") };
+            let hint = "How many result pixels each input pixel becomes, or how many input pixels make one";
+            row(ui, "Integer scale", hint, allowed, |ui| integer_scale(ui, item, size, integer));
+        }
+        Format::Tgs => {
+            let base = item
+                .choices
+                .tgs_base(context.presets, context.config)
+                .ok()
+                .and_then(|base| base.keep_canvas)
+                .unwrap_or(false);
+            let hint = "Rows and columns that are transparent in every frame";
+            row(ui, "Margins", hint, Ok(()), |ui| {
+                let mut auto = item.choices.tgs.keep_canvas.map(|keep| !keep);
+                if flag(
+                    ui,
+                    &mut auto,
+                    !base,
+                    "Auto crop empty margins",
+                    "Cuts the art to the smallest rectangle with visible pixels in any frame, so it fills the square",
+                ) {
+                    item.choices.tgs.keep_canvas = auto.map(|auto| !auto);
+                }
+                note(ui, "Applies on top of the manual crop");
+            });
+            // what the last conversion found, if it looked for it
+            let detected = item
+                .made
+                .as_ref()
+                .filter(|made| made.format == Format::Tgs && made.choices.tgs.pixel_scale.is_none())
+                .and_then(|made| made.job.progress.report.as_ref())
+                .map(|report| report.scale);
+            let hint = "How many input pixels one pixel of the art takes. Pixels off its grid are moved onto it";
+            row(ui, "Art pixel size", hint, Ok(()), |ui| {
+                auto_number(
+                    ui,
+                    &mut item.choices.tgs.pixel_scale,
+                    "Detected",
+                    detected,
+                    2,
+                    |value| value.range(1..=64).suffix(" px"),
+                );
+            });
+        }
+    }
 }
 
 /// The shape the crop keeps: none, the input's, or one typed as a ratio
@@ -684,8 +686,15 @@ fn aspect_ratio(
         };
         keep_aspect(item, size, exact);
     }
-    if let Aspect::Ratio(mut width, mut height) = item.view.aspect {
-        let mut typed = false;
+    // the ratio kept, or for the other shapes the crop's own, greyed out
+    let custom = matches!(item.view.aspect, Aspect::Ratio(..));
+    let (mut width, mut height) = match item.view.aspect {
+        Aspect::Ratio(width, height) => (width, height),
+        _ => crop.map_or((1.0, 1.0), |c| reduced(c.width, c.height)),
+    };
+    let mut typed = false;
+    let pick = "Pick Custom to type a shape";
+    ui.add_enabled_ui(custom, |ui| {
         ui.horizontal(|ui| {
             fn side(value: &mut f64) -> egui::DragValue<'_> {
                 egui::DragValue::new(value)
@@ -697,39 +706,46 @@ fn aspect_ratio(
                         text.trim_end_matches('0').trim_end_matches('.').to_owned()
                     })
             }
-            typed |= ui.add(side(&mut width)).on_hover_text("Width").changed();
+            let across = ui.add(side(&mut width)).on_hover_text("Width");
+            typed |= across.on_disabled_hover_text(pick).changed();
             ui.label(":");
-            typed |= ui.add(side(&mut height)).on_hover_text("Height").changed();
-        });
-        // the result's size, where the result takes the crop's shape: not
-        // squared, nor with margins
-        let sizes = crop.and_then(|crop| webm_sizes(item, crop)).filter(|sizes| !sizes.pads());
-        let follows = item.format != Format::Tgs && resize_of(item) == Resize::Contain;
-        if follows && let Some(sizes) = sizes {
-            ui.horizontal(|ui| {
-                ui.label("Result size");
-                let (box_w, box_h) = item.choices.target.box_size();
-                let (mut result_w, mut result_h) = (sizes.width, sizes.height);
+            let down = ui.add(side(&mut height)).on_hover_text("Height");
+            typed |= down.on_disabled_hover_text(pick).changed();
+            if item.format == Format::Tgs {
+                return;
+            }
+            // the result's size, where the result takes the crop's shape:
+            // not squared, nor with margins
+            let sizes = crop.and_then(|crop| webm_sizes(item, crop));
+            let follows = resize_of(item) == Resize::Contain && sizes.is_some_and(|s| !s.pads());
+            let (box_w, box_h) = item.choices.target.box_size();
+            let (mut result_w, mut result_h) =
+                sizes.map_or((box_w, box_h), |s| (s.width, s.height));
+            ui.add_space(14.0);
+            ui.add_enabled_ui(follows, |ui| {
+                let why =
+                    "The result is squared or has margins, so its size doesn't follow the crop";
+                ui.label("Result").on_disabled_hover_text(why);
                 let across = ui.add(egui::DragValue::new(&mut result_w).range(1..=box_w));
                 ui.label("×");
-                let down = ui.add(egui::DragValue::new(&mut result_h).range(1..=box_h));
-                ui.label("px");
+                let down =
+                    ui.add(egui::DragValue::new(&mut result_h).range(1..=box_h).suffix(" px"));
                 if across.changed() || down.changed() {
                     (width, height) = reduced(result_w, result_h);
                     typed = true;
                 }
             });
-        }
-        if typed {
-            item.view.aspect = Aspect::Ratio(width, height);
-            keep_aspect(item, size, exact);
-        }
+        });
+    });
+    if typed && custom {
+        item.view.aspect = Aspect::Ratio(width, height);
+        keep_aspect(item, size, exact);
     }
     let square =
         item.choices.crop.map_or(size.is_none_or(|(w, h)| w == h), |c| c.width == c.height);
     if item.format == Format::Tgs && !square {
         ui.colored_label(
-            widgets::warn(ui),
+            widgets::WARN,
             "⚠ TGS stickers are always square: other shapes get transparent margins",
         );
     }
@@ -748,8 +764,9 @@ fn keep_aspect(item: &mut Item, size: Option<(u32, u32)>, exact: Option<Exact>) 
 }
 
 /// Integer scaling: the largest whole multiple that fits, or a scale of
-/// your own, with what it makes.
-fn integer_scale(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>) {
+/// your own, with what it makes. Without integer scaling, only the
+/// controls, greyed out.
+fn integer_scale(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, integer: bool) {
     let full = size.map(|(width, height)| Crop { x: 0, y: 0, width, height });
     let Some(crop) = item.choices.crop.or(full) else {
         note(ui, "once the input is read");
@@ -764,20 +781,17 @@ fn integer_scale(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>) {
     let lowest = 1 - i64::from(size.map_or(1, |(w, h)| w.min(h)).max(1));
     let mut chosen = scale;
     ui.horizontal(|ui| {
-        if ui
-            .radio(scale.is_none(), "Largest that fits")
-            .on_hover_text("The largest whole multiple that keeps the crop within the result")
-            .clicked()
-        {
-            chosen = None;
-        }
-        if ui
-            .radio(scale.is_some(), "Fixed")
-            .on_hover_text("This scale; the crop can be at most what it fits into the result")
-            .clicked()
-            && scale.is_none()
-        {
-            chosen = Some(guess);
+        let mut fixed = scale.is_some();
+        let choices = [
+            (
+                false,
+                "Largest that fits",
+                "The largest whole multiple that keeps the crop within the result",
+            ),
+            (true, "Fixed", "This scale; the crop can be at most what it fits into the result"),
+        ];
+        if segments(ui, &mut fixed, &choices, |_| Ok(())) {
+            chosen = fixed.then_some(guess);
         }
         ui.add_enabled_ui(scale.is_some(), |ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
@@ -793,7 +807,8 @@ fn integer_scale(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>) {
                     .custom_formatter(|n, _| scale_text(step_scale(n as i64)))
                     .custom_parser(|text| parse_scale(text).map(|s| scale_step(s) as f64)),
             )
-            .on_hover_text("Type 3 for three times as large, or 1/3 for a third");
+            .on_hover_text("Type 3 for three times as large, or 1/3 for a third")
+            .on_disabled_hover_text("Pick Fixed to choose a scale");
             if ui.small_button("+").on_hover_text("Larger").clicked() {
                 step += 1;
             }
@@ -805,6 +820,10 @@ fn integer_scale(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>) {
     });
     if chosen != scale {
         item.choices.webm.exact_scale = chosen;
+        return;
+    }
+    if !integer {
+        note(ui, "Whole scales apply with Integer scaling only");
         return;
     }
     let Some(sizes) = webm_sizes(item, crop) else {
@@ -842,17 +861,6 @@ const SPOOFS: [Choice<Spoof>; 3] = [
     (Spoof::Never, "Cut at 3 s", "Keep the file honest and cut it at 3 seconds"),
 ];
 
-/// A number with at most two decimals, as short as it goes: 2, 1.5.
-fn preset_number(value: f64) -> String {
-    let text = format!("{value:.2}");
-    text.trim_end_matches('0').trim_end_matches('.').to_owned()
-}
-
-/// A frame rate as short as it goes: 25 fps, 29.97 fps.
-fn fps_text(fps: f64) -> String {
-    format!("{} fps", preset_number(fps))
-}
-
 fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let animated = item.input_length().is_some();
     let sequence =
@@ -881,142 +889,131 @@ fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             item.choices.tgs_base(context.presets, context.config).ok().and_then(|base| base.tempo)
         }
     };
-    grid(ui, "time", |ui| {
-        if animated {
-            label(ui, "Speed", "How many times as fast as the input the result plays");
-            ui.vertical(|ui| {
-                ui.horizontal(|ui| {
-                    let (tempo, automatic) = match (item.format, preset_tempo) {
-                        (_, Some(preset)) => (
-                            match item.format {
-                                Format::Webm | Format::Image => &mut item.choices.webm.tempo,
-                                Format::Tgs => &mut item.choices.tgs.tempo,
-                            },
-                            format!("The preset's: ×{}", preset_number(preset)),
-                        ),
-                        (Format::Webm | Format::Image, None) => {
-                            (&mut item.choices.webm.tempo, "As the input".into())
-                        }
-                        (Format::Tgs, None) => {
-                            (&mut item.choices.tgs.tempo, "Fit into 3 s if longer".into())
-                        }
-                    };
-                    auto_number(ui, tempo, &automatic, 1.0, |value| {
-                        value.range(0.1..=10.0).speed(0.01).max_decimals(2).prefix("×")
-                    });
-                    if item.format == Format::Webm
-                        && let Some(used) = used
-                        && ui
-                            .button("Fit 3 s")
-                            .on_hover_text("Plays the used part in 3 seconds")
-                            .clicked()
-                    {
-                        item.choices.webm.tempo =
-                            Some((used / telegram::MAX_SECONDS).clamp(0.1, 10.0));
-                    }
-                });
-                // .tgs results, and honest WebM ones, last 3 seconds at most
-                let cut =
-                    item.format == Format::Tgs || item.choices.webm.spoof == Some(Spoof::Never);
-                match played {
-                    Some(played) if cut && played > telegram::MAX_SECONDS + 1e-3 => note(
-                        ui,
-                        format!(
-                            "Plays {} of the {}: the rest is cut off",
-                            widgets::seconds(telegram::MAX_SECONDS * tempo),
-                            widgets::seconds(used.unwrap_or_default())
-                        ),
+    if animated {
+        let hint = "How many times as fast as the input the result plays";
+        row(ui, "Speed", hint, Ok(()), |ui| {
+            ui.horizontal(|ui| {
+                let (value, automatic) = match (item.format, preset_tempo) {
+                    (Format::Webm | Format::Image, _) => (
+                        &mut item.choices.webm.tempo,
+                        if preset_tempo.is_some() { "Preset's" } else { "As the input" },
                     ),
-                    Some(played) => note(ui, format!("Plays {}", widgets::seconds(played))),
-                    None => {}
+                    (Format::Tgs, Some(_)) => (&mut item.choices.tgs.tempo, "Preset's"),
+                    (Format::Tgs, None) => (&mut item.choices.tgs.tempo, "Fit into 3 s"),
+                };
+                auto_number(ui, value, automatic, Some(tempo), 1.0, |value| {
+                    value.range(0.1..=10.0).speed(0.01).max_decimals(2).prefix("×")
+                });
+                if item.format == Format::Webm
+                    && let Some(used) = used
+                    && ui
+                        .button("Fit 3 s")
+                        .on_hover_text("Plays the used part in 3 seconds")
+                        .clicked()
+                {
+                    item.choices.webm.tempo = Some((used / telegram::MAX_SECONDS).clamp(0.1, 10.0));
                 }
             });
-            ui.end_row();
-        }
-        match item.format {
-            Format::Webm | Format::Image => {
-                let options = &mut item.choices.webm;
-                // as converting chooses it, and more would repeat the
-                // input's frames
-                let (average, base) = input_fps.unwrap_or_default();
-                let chosen = average.map(|fps| (fps * tempo).clamp(1.0, telegram::MAX_FPS));
-                let peak = match (average, base) {
-                    (Some(average), Some(base)) => Some(average.max(base)),
-                    (average, base) => average.or(base),
-                };
-                let most = peak.map(|fps| (fps * tempo).clamp(1.0, telegram::MAX_FPS));
-                let automatic = match chosen {
-                    Some(chosen) => format!("Input's: {}", fps_text(chosen)),
-                    None => format!("Input's, at most {}", fps_text(telegram::MAX_FPS)),
-                };
-                label(
+            // .tgs results, and honest WebM ones, last 3 seconds at most
+            let cut = item.format == Format::Tgs || item.choices.webm.spoof == Some(Spoof::Never);
+            match played {
+                Some(played) if cut && played > telegram::MAX_SECONDS + 1e-3 => note(
                     ui,
-                    "Frame rate",
-                    "Fewer frames a second leave more bytes for each; more than the input's would only repeat them",
-                );
-                let highest = most.unwrap_or(telegram::MAX_FPS);
-                auto_number(ui, &mut options.fps, &automatic, highest.min(30.0), |value| {
+                    format!(
+                        "Plays {} of the {}: the rest is cut off",
+                        widgets::seconds(telegram::MAX_SECONDS * tempo),
+                        widgets::seconds(used.unwrap_or_default())
+                    ),
+                ),
+                Some(played) => note(ui, format!("Plays {}", widgets::seconds(played))),
+                None => {}
+            }
+        });
+    }
+    match item.format {
+        Format::Webm | Format::Image => {
+            let options = &mut item.choices.webm;
+            // as converting chooses it, and more would repeat the input's
+            // frames
+            let (average, base) = input_fps.unwrap_or_default();
+            let chosen = average.map(|fps| (fps * tempo).clamp(1.0, telegram::MAX_FPS));
+            let peak = match (average, base) {
+                (Some(average), Some(base)) => Some(average.max(base)),
+                (average, base) => average.or(base),
+            };
+            let most = peak.map(|fps| (fps * tempo).clamp(1.0, telegram::MAX_FPS));
+            let hint = "Fewer frames a second leave more bytes for each; more than the input's \
+                        would only repeat them. Automatic is the input's, at most 60";
+            let highest = most.unwrap_or(telegram::MAX_FPS);
+            row(ui, "Frame rate", hint, Ok(()), |ui| {
+                auto_number(ui, &mut options.fps, "Input's", chosen, highest.min(30.0), |value| {
                     value.range(1.0..=highest).speed(0.1).max_decimals(2).suffix(" fps")
                 });
-                ui.end_row();
-                label(
+            });
+            let hint = "Telegram refuses stickers that say they last longer than 3 seconds";
+            row(ui, "Over 3 seconds", hint, Ok(()), |ui| {
+                preset_segments(ui, &mut options.spoof, Spoof::Auto, &SPOOFS);
+                let spoof = options.spoof.unwrap_or(Spoof::Auto);
+                chosen_hint(ui, spoof, &SPOOFS);
+                if let Some(played) = played
+                    && spoof == Spoof::Auto
+                    && played > telegram::MAX_SECONDS + 1e-3
+                {
+                    ui.colored_label(
+                        widgets::WARN,
+                        format!(
+                            "⚠ The result plays {}, so its duration will be spoofed",
+                            widgets::seconds(played)
+                        ),
+                    );
+                }
+            });
+            let honest = options.spoof == Some(Spoof::Never);
+            let allowed = if honest { Err("Nothing is spoofed when cut at 3 s") } else { Ok(()) };
+            let hint = "The duration written into the file, which Telegram reads";
+            row(ui, "Spoof to", hint, allowed, |ui| {
+                let default = DEFAULT_FAKE_DURATION;
+                auto_number(
                     ui,
-                    "Over 3 seconds",
-                    "Telegram refuses stickers that say they last longer than 3 seconds",
+                    &mut options.fake_duration,
+                    "Default",
+                    Some(default),
+                    1.0,
+                    |value| {
+                        value
+                            .range(0.01..=telegram::MAX_SECONDS)
+                            .speed(0.01)
+                            .max_decimals(5)
+                            .suffix(" s")
+                    },
                 );
-                ui.vertical(|ui| {
-                    preset_segments(ui, &mut options.spoof, Spoof::Auto, &SPOOFS);
-                    let spoof = options.spoof.unwrap_or(Spoof::Auto);
-                    chosen_hint(ui, spoof, &SPOOFS);
-                    if let Some(played) = played
-                        && spoof == Spoof::Auto
-                        && played > telegram::MAX_SECONDS + 1e-3
-                    {
-                        ui.colored_label(
-                            widgets::warn(ui),
-                            format!(
-                                "⚠ The result plays {}, so its duration will be spoofed",
-                                widgets::seconds(played)
-                            ),
-                        );
-                    }
-                    if options.spoof != Some(Spoof::Never) {
-                        ui.horizontal(|ui| {
-                            ui.label("Spoof to:");
-                            auto_number(ui, &mut options.fake_duration, "Default", 1.0, |value| {
-                                value
-                                    .range(0.01..=telegram::MAX_SECONDS)
-                                    .speed(0.01)
-                                    .max_decimals(5)
-                                    .suffix(" s")
-                            });
-                        });
-                    }
-                });
-                ui.end_row();
-            }
-            Format::Tgs if sequence => {
-                label(ui, "Frame rate", "How fast the frames of a sequence or sprite sheet play");
-                auto_number(ui, &mut item.choices.tgs.fps, "10 fps", tgs::DEFAULT_FPS, |value| {
-                    value.range(0.1..=60.0).speed(0.1).max_decimals(2).suffix(" fps")
-                });
-                ui.end_row();
-            }
-            Format::Tgs => {}
+            });
         }
-    });
+        Format::Tgs if sequence => {
+            let hint = "How fast the frames of a sequence or sprite sheet play";
+            row(ui, "Frame rate", hint, Ok(()), |ui| {
+                let default = Some(tgs::DEFAULT_FPS);
+                auto_number(
+                    ui,
+                    &mut item.choices.tgs.fps,
+                    "Default",
+                    default,
+                    tgs::DEFAULT_FPS,
+                    |value| value.range(0.1..=60.0).speed(0.1).max_decimals(2).suffix(" fps"),
+                );
+            });
+        }
+        Format::Tgs => {}
+    }
 }
 
 /// Which frame of a video an image sticker is made of.
 fn frame(ui: &mut egui::Ui, item: &mut Item) {
     let Some(length) = item.input_length() else { return };
     section(ui, "Frame");
-    grid(ui, "frame", |ui| {
-        label(
-            ui,
-            "Frame at",
-            "The time of the frame the picture is made of; the bar under the preview picks it too",
-        );
+    let hint =
+        "The time of the frame the picture is made of; the bar under the preview picks it too";
+    row(ui, "Frame at", hint, Ok(()), |ui| {
         let fps = item.video.ready().and_then(|video| video.probe.fps).unwrap_or(25.0);
         let mut at = item.choices.frame.unwrap_or(0.0);
         let field = egui::DragValue::new(&mut at).range(0.0..=length).speed(0.01).max_decimals(3);
@@ -1025,7 +1022,6 @@ fn frame(ui: &mut egui::Ui, item: &mut Item) {
             let at = crate::timeline::frame_at(at, length, 1.0 / fps.max(1.0));
             item.choices.frame = (at > 1e-6).then_some(at);
         }
-        ui.end_row();
     });
 }
 
@@ -1053,92 +1049,89 @@ fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let base = item.choices.webm_base(context.presets, context.config).unwrap_or_default();
     let options = &mut item.choices.webm;
     let fit = options.fit.or(base.fit).unwrap_or(Fit::Auto);
-    grid(ui, "webm-quality", |ui| {
-        label(
-            ui,
-            "Getting under the limit",
-            "What tgradish changes to land just under the size limit",
-        );
-        ui.vertical(|ui| {
-            preset_segments(ui, &mut options.fit, base.fit.unwrap_or(Fit::Auto), &FITS);
-            chosen_hint(ui, fit, &FITS);
-        });
-        ui.end_row();
+    let hint = "What tgradish changes to land just under the size limit";
+    row(ui, "Getting under the limit", hint, Ok(()), |ui| {
+        preset_segments(ui, &mut options.fit, base.fit.unwrap_or(Fit::Auto), &FITS);
+        chosen_hint(ui, fit, &FITS);
+    });
+    let hint = "Faster encoding looks worse at the same size";
+    row(ui, "VP9 encoder", hint, Ok(()), |ui| {
+        let base = base.speed.unwrap_or(Speed::Balanced);
+        preset_segments(ui, &mut options.speed, base, &WEBM_SPEEDS);
+    });
 
-        label(ui, "VP9 encoder", "Faster encoding looks worse at the same size");
-        preset_segments(
-            ui,
-            &mut options.speed,
-            base.speed.unwrap_or(Speed::Balanced),
-            &WEBM_SPEEDS,
-        );
-        ui.end_row();
-
-        if fit != Fit::Off {
-            label(ui, "Encodes at most", "How many times fitting may encode");
-            auto_number(ui, &mut options.attempts, "8", 8, |value| value.range(1..=50));
-            ui.end_row();
-            let unit = match fit {
-                Fit::Auto | Fit::Bitrate => " kbit/s",
-                Fit::Fps => " fps",
-                Fit::Length => " s",
-                Fit::Crf | Fit::Off => "",
+    // every row stays, greyed out where this way of fitting has no use
+    // for it
+    let fitting = if fit == Fit::Off { Err("Off encodes once") } else { Ok(()) };
+    row(ui, "Encodes at most", "How many times fitting may encode", fitting, |ui| {
+        auto_number(ui, &mut options.attempts, "Default", Some(8), 8, |value| value.range(1..=50));
+    });
+    let unit = match fit {
+        Fit::Auto | Fit::Bitrate | Fit::Off => " kbit/s",
+        Fit::Fps => " fps",
+        Fit::Length => " s",
+        Fit::Crf => "",
+    };
+    let hint = "The range fitting searches, in the fitted value's unit";
+    row(ui, "Search within", hint, fitting, |ui| {
+        ui.horizontal(|ui| {
+            let mut range = options.fit_range;
+            let start = match fit {
+                Fit::Crf => Range { min: 4.0, max: 63.0 },
+                Fit::Fps => Range { min: 1.0, max: 30.0 },
+                Fit::Length => Range { min: 0.1, max: 3.0 },
+                _ => Range { min: 8.0, max: 2000.0 },
             };
-            label(ui, "Search within", "The range fitting searches, in the fitted value's unit");
-            ui.horizontal(|ui| {
-                let mut range = options.fit_range;
-                if ui.radio(range.is_none(), "Automatic").clicked() {
-                    range = None;
-                }
-                if ui.radio(range.is_some(), "").clicked() && range.is_none() {
-                    range = Some(match fit {
-                        Fit::Crf => Range { min: 4.0, max: 63.0 },
-                        Fit::Fps => Range { min: 1.0, max: 30.0 },
-                        Fit::Length => Range { min: 0.1, max: 3.0 },
-                        _ => Range { min: 8.0, max: 2000.0 },
-                    });
-                }
-                let mut shown = range.unwrap_or(Range { min: 0.0, max: 0.0 });
-                let enabled = range.is_some();
-                let low = ui.add_enabled(
+            let mut custom = range.is_some();
+            let choices = [(false, "Automatic", ""), (true, "Custom", "")];
+            if segments(ui, &mut custom, &choices, |_| Ok(())) {
+                range = custom.then_some(start);
+            }
+            let mut shown = range.unwrap_or(start);
+            let enabled = range.is_some();
+            let pick = "Pick Custom to set it";
+            let low = ui
+                .add_enabled(
                     enabled,
                     egui::DragValue::new(&mut shown.min).speed(0.5).max_decimals(2),
-                );
-                ui.label("to");
-                let high = ui.add_enabled(
+                )
+                .on_disabled_hover_text(pick);
+            ui.label("to");
+            let high = ui
+                .add_enabled(
                     enabled,
                     egui::DragValue::new(&mut shown.max).speed(0.5).max_decimals(2).suffix(unit),
-                );
-                if low.changed() || high.changed() {
-                    shown.max = shown.max.max(shown.min);
-                    range = Some(shown);
-                }
-                options.fit_range = range;
-            });
-            ui.end_row();
-        }
-
-        if matches!(fit, Fit::Fps | Fit::Length | Fit::Off) {
-            label(ui, "Quality (CRF)", "Constant quality from 0, the best, to 63");
-            auto_number(ui, &mut options.crf, "32", 32, |value| value.range(0..=63));
-            ui.end_row();
-            label(ui, "Lossless", "");
-            flag(
-                ui,
-                &mut options.lossless,
-                false,
-                "Lossless encoding",
-                "Only small for tiny or still pictures",
-            );
-            ui.end_row();
-        }
-        if fit == Fit::Off {
-            label(ui, "Bitrate", "Used unless only a quality is set");
-            auto_number(ui, &mut options.bitrate, "From the size limit", 600.0, |value| {
-                value.range(1.0..=50_000.0).speed(5.0).max_decimals(0).suffix(" kbit/s")
-            });
-            ui.end_row();
-        }
+                )
+                .on_disabled_hover_text(pick);
+            if low.changed() || high.changed() {
+                shown.max = shown.max.max(shown.min);
+                range = Some(shown);
+            }
+            options.fit_range = range;
+        });
+    });
+    let quality = match fit {
+        Fit::Fps | Fit::Length | Fit::Off => Ok(()),
+        Fit::Crf => Err("Fitting finds the quality"),
+        Fit::Auto | Fit::Bitrate => Err("Fitting finds a bitrate, not a quality"),
+    };
+    let hint = "Constant quality from 0, the best, to 63";
+    row(ui, "Quality (CRF)", hint, quality, |ui| {
+        auto_number(ui, &mut options.crf, "Default", Some(32), 32, |value| value.range(0..=63));
+    });
+    row(ui, "Lossless", "", quality, |ui| {
+        let hint = "Only small for tiny or still pictures";
+        flag(ui, &mut options.lossless, false, "Lossless encoding", hint);
+    });
+    let bitrate = match fit {
+        Fit::Off => Ok(()),
+        Fit::Auto | Fit::Bitrate => Err("Fitting finds the bitrate"),
+        Fit::Crf | Fit::Fps | Fit::Length => Err("Encoded at a constant quality, not a bitrate"),
+    };
+    row(ui, "Bitrate", "Used unless only a quality is set", bitrate, |ui| {
+        auto_number(ui, &mut options.bitrate, "From the size limit", None, 600.0, |value| {
+            value.range(1.0..=50_000.0).speed(5.0).max_decimals(0).suffix(" kbit/s")
+        });
     });
 }
 
@@ -1171,70 +1164,53 @@ fn tgs_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     section(ui, "Size and quality");
     let base = item.choices.tgs_base(context.presets, context.config).unwrap_or_default();
     let options = &mut item.choices.tgs;
-    grid(ui, "tgs-quality", |ui| {
-        label(ui, "TGS encoder", "How hard to look for a small encoding");
-        ui.vertical(|ui| {
-            preset_segments(ui, &mut options.speed, base.speed.unwrap_or(Speed::Best), &TGS_SPEEDS);
-            chosen_hint(ui, options.speed.or(base.speed).unwrap_or(Speed::Best), &TGS_SPEEDS);
-        });
-        ui.end_row();
+    row(ui, "TGS encoder", "How hard to look for a small encoding", Ok(()), |ui| {
+        preset_segments(ui, &mut options.speed, base.speed.unwrap_or(Speed::Best), &TGS_SPEEDS);
+        chosen_hint(ui, options.speed.or(base.speed).unwrap_or(Speed::Best), &TGS_SPEEDS);
+    });
+    let hint = "What happens when the art doesn't fit into 64 KiB as it is";
+    row(ui, "If output is too large", hint, Ok(()), |ui| {
+        let text = "Never change the art; report it instead";
+        flag(ui, &mut options.lossless, base.lossless.unwrap_or(false), text, "");
+    });
 
-        label(
-            ui,
-            "If output is too large",
-            "What happens when the art doesn't fit into 64 KB as it is",
-        );
-        flag(
-            ui,
-            &mut options.lossless,
-            base.lossless.unwrap_or(false),
-            "Never change the art; report it instead",
-            "",
-        );
-        ui.end_row();
-
-        let lossless = options.lossless.or(base.lossless).unwrap_or(false);
-        label(ui, "Give up first", "Art that is mostly motion can lose frames or detail");
-        ui.add_enabled_ui(!lossless, |ui| {
-            ui.vertical(|ui| {
-                let base = base.compromise.unwrap_or_default();
-                preset_segments(ui, &mut options.compromise, base, &COMPROMISES);
-                chosen_hint(ui, options.compromise.unwrap_or(base), &COMPROMISES);
-            });
-        });
-        ui.end_row();
-
-        label(ui, "May change", "What fitting may give up to make it fit, least visible first");
-        ui.add_enabled_ui(!lossless, |ui| {
-            let all = base.reductions.clone().unwrap_or_else(|| Reduction::ALL.to_vec());
-            let mut chosen = options.reductions.clone().unwrap_or_else(|| all.clone());
-            let mut changed = false;
-            ui.horizontal_wrapped(|ui| {
-                for (kind, text, hint) in REDUCTIONS {
-                    let mut on = chosen.contains(&kind);
-                    let response = ui.checkbox(&mut on, text);
-                    let response =
-                        if hint.is_empty() { response } else { response.on_hover_text(hint) };
-                    if response.changed() {
-                        if on {
-                            chosen.push(kind);
-                        } else {
-                            chosen.retain(|&other| other != kind);
-                        }
-                        changed = true;
+    let lossless = options.lossless.or(base.lossless).unwrap_or(false);
+    let changes = if lossless { Err("The art is never changed, as set above") } else { Ok(()) };
+    let hint = "Art that is mostly motion can lose frames or detail";
+    row(ui, "Give up first", hint, changes, |ui| {
+        let base = base.compromise.unwrap_or_default();
+        preset_segments(ui, &mut options.compromise, base, &COMPROMISES);
+        chosen_hint(ui, options.compromise.unwrap_or(base), &COMPROMISES);
+    });
+    let hint = "What fitting may give up to make it fit, least visible first";
+    row(ui, "May change", hint, changes, |ui| {
+        let all = base.reductions.clone().unwrap_or_else(|| Reduction::ALL.to_vec());
+        let mut chosen = options.reductions.clone().unwrap_or_else(|| all.clone());
+        let mut changed = false;
+        ui.horizontal_wrapped(|ui| {
+            for (kind, text, hint) in REDUCTIONS {
+                let mut on = chosen.contains(&kind);
+                let response = ui.checkbox(&mut on, text);
+                let response =
+                    if hint.is_empty() { response } else { response.on_hover_text(hint) };
+                if response.changed() {
+                    if on {
+                        chosen.push(kind);
+                    } else {
+                        chosen.retain(|&other| other != kind);
                     }
+                    changed = true;
                 }
-                if options.reductions.is_some() && widgets::reset(ui) {
-                    options.reductions = None;
-                }
-            });
-            if changed {
-                // in fitting's order
-                chosen.sort_by_key(|kind| Reduction::ALL.iter().position(|other| other == kind));
-                options.reductions = (chosen != all).then_some(chosen);
+            }
+            if options.reductions.is_some() && widgets::reset(ui) {
+                options.reductions = None;
             }
         });
-        ui.end_row();
+        if changed {
+            // in fitting's order
+            chosen.sort_by_key(|kind| Reduction::ALL.iter().position(|other| other == kind));
+            options.reductions = (chosen != all).then_some(chosen);
+        }
     });
 }
 
@@ -1246,9 +1222,10 @@ fn reading(ui: &mut egui::Ui, item: &mut Item) {
     }
     section(ui, "Reading the art");
     let options = &mut item.choices.tgs;
-    grid(ui, "reading", |ui| {
-        if !tags.is_empty() {
-            label(ui, "Aseprite tag", "Only the frames of one tag, in its direction");
+    if !tags.is_empty() {
+        let hint = "Only the frames of one tag, in its direction";
+        row(ui, "Aseprite tag", hint, Ok(()), |ui| {
+            // as many as the file has, and as long: radios wrap
             ui.horizontal_wrapped(|ui| {
                 if ui.radio(options.tag.is_none(), "All frames").clicked() {
                     options.tag = None;
@@ -1259,34 +1236,35 @@ fn reading(ui: &mut egui::Ui, item: &mut Item) {
                     }
                 }
             });
-            ui.end_row();
-        }
-        if single && tags.is_empty() {
-            label(ui, "Sprite sheet", "Frames laid out in a grid of equal cells, row by row");
-            ui.horizontal_wrapped(|ui| {
-                let mut sheet = options.sheet.is_some();
-                if ui.checkbox(&mut sheet, "Read as a sprite sheet of").changed() {
-                    options.sheet = sheet.then(|| "4x1".to_owned());
-                }
-                let (mut columns, mut rows) =
-                    parse_sheet(options.sheet.as_deref()).unwrap_or((4, 1));
-                let a = ui.add_enabled(sheet, egui::DragValue::new(&mut columns).range(1..=256));
-                ui.label("×");
-                let b = ui.add_enabled(sheet, egui::DragValue::new(&mut rows).range(1..=256));
-                ui.label("cells");
-                if sheet && (a.changed() || b.changed()) {
-                    options.sheet = Some(format!("{columns}x{rows}"));
-                }
-                if sheet {
-                    ui.label(", frames:");
-                    auto_number(ui, &mut options.sheet_frames, "All", columns * rows, |value| {
-                        value.range(1..=columns * rows)
+        });
+    }
+    if single && tags.is_empty() {
+        let hint = "Frames laid out in a grid of equal cells, row by row";
+        row(ui, "Sprite sheet", hint, Ok(()), |ui| {
+            let mut sheet = options.sheet.is_some();
+            if ui.checkbox(&mut sheet, "Read as a sprite sheet").changed() {
+                options.sheet = sheet.then(|| "4x1".to_owned());
+            }
+            let (mut columns, mut rows) = parse_sheet(options.sheet.as_deref()).unwrap_or((4, 1));
+            ui.add_enabled_ui(sheet, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Cells");
+                    let a = ui.add(egui::DragValue::new(&mut columns).range(1..=256));
+                    ui.label("×");
+                    let b = ui.add(egui::DragValue::new(&mut rows).range(1..=256));
+                    if sheet && (a.changed() || b.changed()) {
+                        options.sheet = Some(format!("{columns}x{rows}"));
+                    }
+                    ui.add_space(14.0);
+                    ui.label("Frames");
+                    let all = columns * rows;
+                    auto_number(ui, &mut options.sheet_frames, "All", Some(all), all, |value| {
+                        value.range(1..=all)
                     });
-                }
+                });
             });
-            ui.end_row();
-        }
-    });
+        });
+    }
 }
 
 fn parse_sheet(sheet: Option<&str>) -> Option<(u32, u32)> {
@@ -1300,8 +1278,7 @@ fn metadata(ui: &mut egui::Ui, item: &mut Item) {
         Format::Webm | Format::Image => &mut item.choices.webm.title,
         Format::Tgs => &mut item.choices.tgs.title,
     };
-    grid(ui, "metadata", |ui| {
-        label(ui, "Title", "A name stored in the file");
+    row(ui, "Title", "A name stored in the file", Ok(()), |ui| {
         let mut text = title.clone().unwrap_or_default();
         if ui
             .add(egui::TextEdit::singleline(&mut text).hint_text("none").desired_width(260.0))
@@ -1309,7 +1286,6 @@ fn metadata(ui: &mut egui::Ui, item: &mut Item) {
         {
             *title = (!text.is_empty()).then_some(text);
         }
-        ui.end_row();
     });
 }
 
@@ -1317,9 +1293,9 @@ fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     ui.add_space(10.0);
     egui::CollapsingHeader::new(RichText::new("Encoder options").strong()).id_salt("advanced").show(ui, |ui| {
         let options: &mut Options = &mut item.choices.webm;
-        grid(ui, "advanced", |ui| {
-            label(ui, "libvpx-vp9", "Encoder options by name, like tune-content = screen for flat graphics. ffmpeg -h encoder=libvpx-vp9 lists them");
-            ui.vertical(|ui| {
+        {
+            let hint = "Encoder options by name, like tune-content = screen for flat graphics. ffmpeg -h encoder=libvpx-vp9 lists them";
+            row(ui, "libvpx-vp9", hint, Ok(()), |ui| {
                 let mut pairs: Vec<(String, String)> = options.encoder_options.clone().unwrap_or_default().into_iter().collect();
                 let mut changed = false;
                 let mut remove = None;
@@ -1357,20 +1333,20 @@ fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                     options.encoder_options = (!pairs.is_empty()).then(|| pairs.into_iter().collect());
                 }
             });
-            ui.end_row();
+        }
 
-            label(ui, "ffmpeg arguments", "Raw arguments added before the output, split like a shell would");
-            ui.vertical(|ui| {
-                let mut text = options.extra_args.as_ref().map(|words| shlex::try_join(words.iter().map(String::as_str)).unwrap_or_default()).unwrap_or_default();
-                let edit = ui.add_enabled(context.extra_args, egui::TextEdit::singleline(&mut text).hint_text("none").desired_width(300.0));
-                if edit.changed() {
-                    options.extra_args = shlex::split(&text).filter(|words| !words.is_empty());
-                }
-                if !context.extra_args {
-                    note(ui, "Only with the system's ffmpeg, see Settings");
-                }
-            });
-            ui.end_row();
+        let system = "Only with the system's ffmpeg, which Settings can pick";
+        let allowed = if context.extra_args { Ok(()) } else { Err(system) };
+        let hint = "Raw arguments added before the output, split like a shell would";
+        row(ui, "ffmpeg arguments", hint, allowed, |ui| {
+            let mut text = options.extra_args.as_ref().map(|words| shlex::try_join(words.iter().map(String::as_str)).unwrap_or_default()).unwrap_or_default();
+            let edit = ui.add(egui::TextEdit::singleline(&mut text).hint_text("none").desired_width(300.0));
+            if edit.changed() {
+                options.extra_args = shlex::split(&text).filter(|words| !words.is_empty());
+            }
+            if !context.extra_args {
+                note(ui, system);
+            }
         });
     });
 }

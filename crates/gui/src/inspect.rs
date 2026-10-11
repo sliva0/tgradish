@@ -96,7 +96,7 @@ fn of(used: impl std::fmt::Display, limit: impl std::fmt::Display) -> String {
 pub fn show(ui: &mut egui::Ui, inspection: &Inspection) {
     match &inspection.found {
         Found::Failed(message) => {
-            ui.colored_label(widgets::bad(ui), message);
+            ui.colored_label(widgets::BAD, message);
             return;
         }
         Found::Webm { info, target } => webm(ui, info, *target),
