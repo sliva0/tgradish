@@ -165,8 +165,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # the oldest and the newest of each family, roughly
-          - { target: linux-x86_64, runner: ubuntu-24.04, image: "debian:11" }
+          # the oldest supported and the newest of each family, roughly
+          - { target: linux-x86_64, runner: ubuntu-24.04, image: "ubuntu:22.04" }
           - { target: linux-x86_64, runner: ubuntu-24.04, image: "ubuntu:24.04" }
           - { target: linux-x86_64, runner: ubuntu-24.04, image: "fedora:latest" }
           - { target: linux-x86_64, runner: ubuntu-24.04, image: "opensuse/tumbleweed" }
