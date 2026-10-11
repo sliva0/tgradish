@@ -26,7 +26,7 @@ use tgradish_core::backend::Backend;
 use tgradish_core::clipboard::Pasted;
 use tgradish_core::config::Config;
 use tgradish_core::ffmpeg::FfmpegChoice;
-use tgradish_core::options::{Resize, Scaling};
+use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::{convert, paths, telegram, tgs};
 
@@ -1287,6 +1287,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let dt = ui.input(|input| f64::from(input.stable_dt.min(0.1)));
     let range = item.range();
+    let tempo = item.tempo();
     let input_size = item.input_size();
     let error = item.input_error().map(str::to_owned);
     // fields rather than methods, so the view and crop can change
@@ -1310,10 +1311,10 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
             if let Some(message) = error {
                 message_in(ui, rect, &format!("Couldn't read it: {message}"), widgets::bad(ui));
             } else if let (Some(clip), Some(size)) = (overview, input_size) {
-                // play within the used part
+                // play within the used part, as fast as the result will
                 if let Some((start, end)) = range {
                     if item.view.playing {
-                        item.view.time += dt;
+                        item.view.time += dt * tempo;
                         ui.ctx().request_repaint();
                     }
                     if item.view.time < start || item.view.time >= end {
@@ -1329,27 +1330,40 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
                 let clip = still.map(|(_, still)| still).or(part).unwrap_or(clip);
                 let frame = clip.index_at(time);
                 let picture = Picture { clip, frame, size, square: false };
+                // the result's small picture beside the input, not over it
+                let shape = inset_shape(item, size).filter(|_| item.view.inset);
+                let (input_area, inset_area) = match &shape {
+                    Some((result, label)) => {
+                        let text = ui.visuals().text_color();
+                        let label =
+                            ui.painter().layout_no_wrap(label.clone(), canvas::INSET_LABEL, text);
+                        let zoomed = item.view.input_zoom.level > 1.0;
+                        canvas::split(rect, size, *result, label.size() + vec2(6.0, 0.0), zoomed)
+                    }
+                    None => (rect, (rect, vec2(0.0, 0.0))),
+                };
+                ui.painter().rect_filled(rect, 0.0, widgets::stage(ui.visuals().dark_mode));
                 let ratio = settings::ratio(item.view.aspect, size);
                 let exact = settings::exact_of(item);
                 let cropping = Cropping { crop: &mut item.choices.crop, ratio, filling, exact };
-                canvas::show(ui, screen, rect, &picture, &mut item.view.input_zoom, Some(cropping));
-                if item.view.inset {
+                let zoom = &mut item.view.input_zoom;
+                canvas::show(ui, screen, input_area, &picture, zoom, Some(cropping));
+                // after the crop moved
+                if let Some((_, label)) = inset_shape(item, size).filter(|_| item.view.inset) {
                     let crop = item.choices.crop;
                     let where_ = output::Part::of(crop, size, (clip.width, clip.height));
                     match item.format {
                         Format::Webm => {
                             let used = crop.map_or(size, |crop| (crop.width, crop.height));
-                            let scaling = item.choices.webm.scaling.unwrap_or(Scaling::Auto);
+                            let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
                             // a crop that doesn't suit the exact scale yet is made to
                             // fit on the next frame
-                            let sizes = match item.choices.webm.exact_scale {
-                                Some(scale) => convert::exact_sizes(target, used, scale).ok(),
-                                None => Some(convert::sizes(target, resize, scaling, used)),
-                            };
-                            if let Some(mut sizes) = sizes {
+                            if let Some(mut sizes) =
+                                settings::webm_sizes(item, crop.unwrap_or(full))
+                            {
                                 let art_key = inset_key((clip.id, where_));
+                                let scaling = item.choices.webm.scaling.unwrap_or(Scaling::Auto);
                                 if scaling == Scaling::Auto
-                                    && item.choices.webm.exact_scale.is_none()
                                     && sizes.enlarges(used) >= 2.0
                                     && inset.looks_like_art(art_key, || {
                                         output::looks_like_art(clip, where_)
@@ -1358,9 +1372,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
                                     sizes.scaling = Scaling::Sharp;
                                 }
                                 let key = inset_key((clip.id, frame, where_, sizes));
-                                let label =
-                                    format!("Result: {} × {} px", sizes.width, sizes.height);
-                                inset.show(ui, rect, key, &label, || {
+                                inset.show(ui, inset_area, key, &label, || {
                                     output::webm(&clip.frames[frame], clip.width, where_, &sizes)
                                 });
                             }
@@ -1372,7 +1384,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
                                     output::tgs_bounds(&clip.frames, clip.width, where_, keep)
                                 });
                             let key = inset_key((clip.id, frame, bounds));
-                            inset.show(ui, rect, key, "Result: 512 × 512 canvas", || {
+                            inset.show(ui, inset_area, key, &label, || {
                                 output::tgs(&clip.frames[frame], clip.width, bounds, 256)
                             });
                         }
@@ -1415,13 +1427,31 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
                 used: &mut item.choices.length,
                 time: &mut item.view.time,
                 playing: &mut item.view.playing,
-                limit: telegram::MAX_SECONDS,
+                // in the input's seconds, which the tempo makes 3 of the result's
+                limit: telegram::MAX_SECONDS * tempo,
             },
         ),
         (Show::Result, _, Some(length)) => {
             timeline::player(ui, length, &mut item.view.result_time, &mut item.view.playing);
         }
         _ => {}
+    }
+}
+
+/// The size of an item's result, `.tgs` ones square, and the label of its
+/// small picture: what the preview needs to place it.
+fn inset_shape(item: &Item, size: (u32, u32)) -> Option<((u32, u32), String)> {
+    match item.format {
+        Format::Webm => {
+            let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
+            let sizes = settings::webm_sizes(item, item.choices.crop.unwrap_or(full))?;
+            Some((
+                (sizes.width, sizes.height),
+                format!("Result\n{} × {} px", sizes.width, sizes.height),
+            ))
+        }
+        // vectors: square, but of no size in pixels
+        Format::Tgs => Some(((1, 1), "Result".to_owned())),
     }
 }
 
@@ -2075,8 +2105,8 @@ fn details(ui: &mut egui::Ui, item: &Item) {
         if let Some(report) = &progress.report {
             let scale = if report.scale > 1 { format!(", each {0} × {0} input pixels", report.scale) } else { String::new() };
             widgets::note(ui, format!("{} × {} art pixels{scale}; {} colours, {} frames", report.width, report.height, report.colours, report.frames));
-            if report.speed > 1.0 {
-                widgets::note(ui, format!("Plays {:.2}× faster to last 3 seconds", report.speed));
+            if report.tempo != 1.0 {
+                widgets::note(ui, format!("Plays {:.2}× as fast as the input", report.tempo));
             }
             if let Some(likely) = report.likely_scale {
                 widgets::note(ui, format!("Most of it looks like {0}× art with some pixels off the grid; an art pixel size of {0} snaps them", likely.scale));
@@ -2676,6 +2706,20 @@ mod tests {
             harness.state_mut().items[0].view.playing = false;
             harness.run_steps(3);
             save(&mut harness, "video");
+            // every setting of a picture and its time, on a tall window: a
+            // typed shape, a fixed integer scale, and a faster tempo
+            let item = &mut harness.state_mut().items[0];
+            item.view.aspect = item::Aspect::Ratio(4.0, 3.0);
+            item.choices.webm.scaling = Some(Scaling::PixelPerfect);
+            item.choices.webm.exact_scale = Some("1/2".parse().unwrap());
+            item.choices.webm.tempo = Some(2.0);
+            harness.set_size(egui::vec2(1280.0, 1500.0));
+            harness.run_steps(3);
+            save(&mut harness, "settings-webm");
+            harness.set_size(egui::vec2(1280.0, 820.0));
+            let item = &mut harness.state_mut().items[0];
+            (item.view.aspect, item.choices.webm) = (item::Aspect::Free, Default::default());
+            harness.run_steps(3);
         }
         // names in scripts the window's fonts lack, drawn with the system's
         // with characters no font has, an unassigned one and a newer

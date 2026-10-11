@@ -52,7 +52,7 @@ fn normalises_losslessly() {
         let input = decode(&std::fs::read(&path).unwrap(), &DecodeOptions::default()).unwrap();
         let (anim, report) = normalise(&input, &Options::default()).unwrap();
         assert!(report.ticks <= 180 && report.ticks > 0, "{}", name(&path));
-        if report.speed == 1.0 && report.dropped_frames == 0 {
+        if report.tempo == 1.0 && report.dropped_frames == 0 {
             let actual: Vec<Vec<u8>> = (0..anim.frames().len()).map(|i| anim.rgba(i)).collect();
             assert!(actual == expected_frames(&input, &report), "{} isn't lossless", name(&path));
         }

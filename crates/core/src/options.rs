@@ -205,12 +205,9 @@ impl ExactScale {
         (size / self.down).checked_mul(self.up)
     }
 
-    /// The input pixels that make `size` result pixels, if whole.
-    pub fn input_for(self, size: u32) -> Option<u32> {
-        if !size.is_multiple_of(self.up) {
-            return None;
-        }
-        (size / self.up).checked_mul(self.down)
+    /// The most input pixels that make at most `size` result pixels.
+    pub fn most_input(self, size: u32) -> u32 {
+        (size / self.up).saturating_mul(self.down)
     }
 
     pub fn factor(self) -> f64 {
@@ -307,9 +304,9 @@ pub struct Options {
     /// auto, sharp for pixel art made at least twice as large.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scaling: Option<Scaling>,
-    /// Scale by exactly this much, so input and result pixels line up: the
-    /// crop must make the result's size (512 pixels on a sticker's longer
-    /// side, 100 x 100 for emoji). Overrides `resize` and `scaling`.
+    /// Scale by exactly this much, so input and result pixels line up. The
+    /// crop must fit the result at this scale; transparent margins fill the
+    /// rest. Overrides `scaling`, and `resize` must be contain or pad.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exact_scale: Option<ExactScale>,
     /// What to tune to get close to the size limit: 256 KB for stickers, 64
@@ -328,13 +325,19 @@ pub struct Options {
     #[schemars(range(min = 0.0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start: Option<f64>,
-    /// Length of the result in seconds. Default: the rest of the input, or
-    /// at most 3 seconds when not spoofing.
+    /// Seconds of the input to use, from `start`. Default: the rest of the
+    /// input, or as much as plays for 3 seconds when not spoofing.
     #[schemars(extend("exclusiveMinimum" = 0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub length: Option<f64>,
-    /// Frame rate of the result, at most 60. Default: the input frame rate,
-    /// at most 30.
+    /// How many times as fast as the input the result plays, 0.1 to 10: 2
+    /// plays it in half the time. Default: 1.
+    #[schemars(range(min = 0.1, max = 10.0))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tempo: Option<f64>,
+    /// Frame rate of the result, at most 60, and at most the input's at the
+    /// tempo: more would only repeat frames. Default: the input's, at most
+    /// 60.
     #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 60))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<f64>,
@@ -410,6 +413,7 @@ impl Options {
             fit_range,
             start,
             length,
+            tempo,
             fps,
             bitrate,
             crf,
@@ -485,6 +489,8 @@ pub const DEFAULT_ATTEMPTS: u32 = 8;
 pub const MAX_ATTEMPTS: u32 = 50;
 pub const DEFAULT_CRF: u8 = 32;
 pub const DEFAULT_FAKE_DURATION: f64 = 0.42069;
+/// The slowest and fastest tempos, for WebM and .tgs alike.
+pub const TEMPOS: std::ops::RangeInclusive<f64> = 0.1..=10.0;
 
 #[cfg(test)]
 mod tests {

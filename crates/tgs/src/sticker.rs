@@ -114,12 +114,9 @@ pub struct Sticker {
 
 impl Sticker {
     /// Whether anything visible was given up: fitting reductions, a forced
-    /// pixel scale, or a long input sped up or cut.
+    /// pixel scale, or the end of a long input.
     pub fn lossy(&self) -> bool {
-        !self.steps.is_empty()
-            || self.report.snapped_pixels > 0
-            || self.report.trimmed
-            || self.report.speed > 1.0
+        !self.steps.is_empty() || self.report.snapped_pixels > 0 || self.report.trimmed
     }
 
     /// Whether Telegram takes it.

@@ -510,8 +510,8 @@ impl TgsPrinter {
                     report.frames,
                     ui::seconds(f64::from(report.ticks) / 60.0),
                 );
-                if report.speed > 1.0 {
-                    line.push_str(&format!(", sped up {:.2}x", report.speed));
+                if report.tempo != 1.0 {
+                    line.push_str(&format!(", played {:.2}x as fast", report.tempo));
                 }
                 if report.trimmed {
                     line.push_str(", trimmed to 3 s");

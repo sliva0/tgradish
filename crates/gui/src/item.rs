@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use eframe::egui;
 use tgradish_core::config::Config;
-use tgradish_core::options::{Crop, Options};
+use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Spoof};
 use tgradish_core::presets::{Format, Presets};
-use tgradish_core::telegram::Target;
+use tgradish_core::telegram::{self, Target};
 use tgradish_core::tgs::TgsOptions;
 
 use crate::jobs::Job;
@@ -116,7 +116,8 @@ impl Choices {
             length: self.length,
             ..Options::default()
         };
-        Ok(self.webm_base(presets, config)?.merged(&self.webm).merged(&shared))
+        let options = self.webm_base(presets, config)?.merged(&self.webm).merged(&shared);
+        Ok(shown(options.clone(), &options))
     }
 
     /// Everything a `.tgs` conversion gets.
@@ -145,6 +146,39 @@ impl Choices {
     }
 }
 
+/// `options` without the values of settings that are hidden or greyed
+/// out, as `effective`, everything a conversion gets, shows them: they are
+/// kept for when they show again, but have no say until then.
+pub fn shown(mut options: Options, effective: &Options) -> Options {
+    let fit = effective.fit.unwrap_or(Fit::Auto);
+    let constant_quality = matches!(fit, Fit::Fps | Fit::Length | Fit::Off);
+    let lossless = constant_quality && effective.lossless == Some(true);
+    if fit == Fit::Off {
+        (options.attempts, options.fit_range) = (None, None);
+    }
+    if !constant_quality {
+        (options.crf, options.lossless) = (None, None);
+    }
+    if fit != Fit::Off || lossless {
+        options.bitrate = None;
+    }
+    if lossless {
+        options.crf = None;
+    }
+    if effective.spoof == Some(Spoof::Never) {
+        options.fake_duration = None;
+    }
+    // a scale of whole multiples, which keeps the whole picture
+    if effective.scaling != Some(Scaling::PixelPerfect) {
+        options.exact_scale = None;
+    } else if effective.exact_scale.is_some()
+        && matches!(effective.resize, Some(Resize::Crop | Resize::Stretch))
+    {
+        options.resize = None;
+    }
+    options
+}
+
 /// Which picture the preview shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Show {
@@ -158,6 +192,7 @@ pub enum Aspect {
     Free,
     /// The input's own.
     Input,
+    /// Width to height, as typed.
     Ratio(f64, f64),
 }
 
@@ -243,7 +278,13 @@ impl Framing {
             crop: item.choices.crop,
             start: item.choices.start,
             length: item.choices.length,
-            webm: Options { resize: webm.resize, scaling: webm.scaling, ..Options::default() },
+            webm: Options {
+                resize: webm.resize,
+                scaling: webm.scaling,
+                exact_scale: webm.exact_scale,
+                tempo: webm.tempo,
+                ..Options::default()
+            },
             tgs: TgsOptions {
                 keep_canvas: tgs.keep_canvas,
                 pixel_scale: tgs.pixel_scale,
@@ -251,7 +292,7 @@ impl Framing {
                 sheet: tgs.sheet.clone(),
                 sheet_frames: tgs.sheet_frames,
                 fps: tgs.fps,
-                long: tgs.long,
+                tempo: tgs.tempo,
                 ..TgsOptions::default()
             },
         }
@@ -394,6 +435,19 @@ impl Item {
         Some((start, end))
     }
 
+    /// How many times as fast as the input the result plays: the item's
+    /// own tempo, or for `.tgs` as fast as fits the used part into 3
+    /// seconds.
+    pub fn tempo(&self) -> f64 {
+        match self.format {
+            Format::Webm => self.choices.webm.tempo.unwrap_or(1.0),
+            Format::Tgs => self.choices.tgs.tempo.unwrap_or_else(|| {
+                let used = self.range().map_or(0.0, |(start, end)| end - start);
+                (used / telegram::MAX_SECONDS).max(1.0)
+            }),
+        }
+    }
+
     /// Whether the last sticker was made with what is chosen now.
     pub fn result_is_current(&self) -> bool {
         self.made
@@ -446,8 +500,19 @@ mod tests {
         choices.start = Some(1.0);
         let options = choices.webm_options(&presets, &config).unwrap();
         assert_eq!(options.target, Some(Target::Emoji));
-        assert_eq!((options.crf, options.start), (Some(20), Some(1.0)));
         assert_eq!(options.speed, presets.webm("fast").unwrap().speed);
+        // fast fits the bitrate, which hides the quality: it has no say
+        assert_eq!((options.crf, options.start), (None, Some(1.0)));
+        choices.webm.fit = Some(Fit::Length);
+        let options = choices.webm_options(&presets, &config).unwrap();
+        assert_eq!(options.crf, Some(20));
+        choices.webm.lossless = Some(true);
+        let options = choices.webm_options(&presets, &config).unwrap();
+        assert_eq!((options.crf, options.lossless), (None, Some(true)));
+        // and lossless has no say once fitting hides it again
+        choices.webm.fit = None;
+        let options = choices.webm_options(&presets, &config).unwrap();
+        assert_eq!((options.fit, options.lossless), (Some(Fit::Bitrate), None));
         let tgs = choices.tgs_options(&presets, &config).unwrap();
         assert_eq!((tgs.target, tgs.start), (Some(Target::Emoji), Some(1.0)));
     }

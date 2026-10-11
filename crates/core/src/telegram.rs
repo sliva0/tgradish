@@ -16,9 +16,6 @@ pub const MAX_EMOJI_BYTES: u64 = 64 * 1024;
 pub const MAX_SECONDS: f64 = 3.0;
 /// The rules say 30 fps, but @Stickers accepted a 60 fps sticker.
 pub const MAX_FPS: f64 = 60.0;
-/// The frame rate chosen when none is given: the one the rules allow,
-/// which every app is sure to play, and which leaves more bytes per frame.
-pub const DEFAULT_MAX_FPS: f64 = 30.0;
 
 /// What kind of Telegram media to make.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]

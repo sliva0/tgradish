@@ -24,12 +24,14 @@ pub mod sticker;
 pub use normalise::{PixelAnim, normalise};
 pub use tgradish_frames as frames;
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, PartialEq, Error)]
 pub enum Error {
     #[error("the start ({start:?}) is not before the end of the input ({length:?})")]
     StartPastEnd { start: Duration, length: Duration },
     #[error("the length is zero")]
     ZeroLength,
+    #[error("the tempo {0} is not a positive number")]
+    Tempo(f64),
     #[error("every pixel is transparent")]
     Invisible,
     #[error(

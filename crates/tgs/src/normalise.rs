@@ -3,12 +3,13 @@
 //! pixels.
 //!
 //! Everything here is lossless except what the options ask for: a time
-//! window, trimming or speeding up long inputs, and a forced pixel scale.
+//! window, playing faster or slower, cutting at 3 seconds, and a forced
+//! pixel scale.
 
 use std::collections::HashMap;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tgradish_frames::Animation;
 
 use crate::limits::telegram::{FPS, MAX_FRAMES};
@@ -24,19 +25,7 @@ const LIKELY_FIT: f64 = 0.8;
 /// More colours than this and the input probably isn't pixel art.
 const MANY_COLOURS: usize = 256;
 
-/// What to do with inputs longer than Telegram's 3 seconds.
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Long {
-    /// Play everything faster.
-    #[default]
-    SpeedUp,
-    /// Keep the first 3 seconds.
-    Trim,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Options {
     /// Keep the input's canvas instead of cropping to the visible pixels.
     pub keep_canvas: bool,
@@ -50,7 +39,10 @@ pub struct Options {
     pub start: Duration,
     /// How much of the input to use, from `start`.
     pub length: Option<Duration>,
-    pub long: Long,
+    /// How many times as fast as the input it plays. When `None`, inputs
+    /// longer than 3 seconds play as fast as fits them in. Whatever still
+    /// lasts longer is cut at 3 seconds.
+    pub tempo: Option<f64>,
 }
 
 /// One frame of palette indices, row by row, and how many 60 fps frames
@@ -191,8 +183,8 @@ pub struct Report {
     pub dropped_frames: usize,
     /// Length in 60 fps frames.
     pub ticks: u32,
-    /// How much faster than the input it plays (1 when not sped up).
-    pub speed: f64,
+    /// How many times as fast as the input it plays.
+    pub tempo: f64,
     /// Whether a long input was cut at 3 seconds.
     pub trimmed: bool,
     pub warnings: Vec<Warning>,
@@ -246,12 +238,17 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
     if area.width == 0 || area.height == 0 || outside {
         return Err(Error::CropOutside { crop: area, width: input_width, height: input_height });
     }
-    let (mut speed, mut trimmed) = (1.0, false);
-    if end - start > MAX_NANOS {
-        match options.long {
-            Long::SpeedUp => speed = (end - start) as f64 / MAX_NANOS as f64,
-            Long::Trim => (end, trimmed) = (start + MAX_NANOS, true),
-        }
+    let (tempo, fitted) = match options.tempo {
+        Some(tempo) if !(tempo > 0.0 && tempo.is_finite()) => return Err(Error::Tempo(tempo)),
+        Some(tempo) => (tempo, false),
+        None if end - start > MAX_NANOS => ((end - start) as f64 / MAX_NANOS as f64, true),
+        None => (1.0, false),
+    };
+    // what still plays longer than 3 seconds is cut
+    let most = (MAX_NANOS as f64 * tempo).round() as u64;
+    let trimmed = !fitted && end - start > most;
+    if trimmed {
+        end = start + most;
     }
 
     // frames within the window, joined while identical
@@ -280,10 +277,12 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
 
     // whole 60 fps frames, rounding where each frame starts so the total
     // stays right
-    let (numer, denom) = if speed > 1.0 {
+    let (numer, denom) = if fitted {
         (u128::from(MAX_FRAMES), u128::from(end - start))
     } else {
-        (u128::from(FPS), u128::from(NANOS))
+        // the tempo in millionths, to stay in whole numbers
+        let millionths = (tempo * 1e6).round() as u128;
+        (u128::from(FPS) * 1_000_000, u128::from(NANOS) * millionths)
     };
     let tick = |at: u64| ((u128::from(at) * numer + denom / 2) / denom) as u32;
     let mut elapsed = 0;
@@ -374,7 +373,7 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
         merged_frames,
         dropped_frames,
         ticks: anim.ticks(),
-        speed,
+        tempo,
         trimmed,
         warnings,
     };
@@ -749,7 +748,7 @@ mod tests {
         let ticks: Vec<u32> = anim.frames().iter().map(|frame| frame.ticks).collect();
         // starts rounded from 0, 4.2, 8.4, 12.6, ... 29.4
         assert_eq!(ticks, [4, 4, 5, 4, 4, 4, 4]);
-        assert_eq!((report.ticks, report.speed, report.trimmed), (29, 1.0, false));
+        assert_eq!((report.ticks, report.tempo, report.trimmed), (29, 1.0, false));
     }
 
     #[test]
@@ -780,12 +779,24 @@ mod tests {
         let input = flat(&[(RED, ms(1500)), (GREEN, ms(1500)), (BLUE, ms(1500)), (RED, ms(1500))]);
         let (anim, report) = normalise(&input, &Options::default()).unwrap();
         assert!(anim.frames().iter().all(|frame| frame.ticks == 45));
-        assert_eq!((report.ticks, report.speed), (180, 2.0));
+        assert_eq!((report.ticks, report.tempo, report.trimmed), (180, 2.0, false));
 
-        let trim = Options { long: Long::Trim, ..Options::default() };
+        let trim = Options { tempo: Some(1.0), ..Options::default() };
         let (anim, report) = normalise(&input, &trim).unwrap();
         assert!(anim.frames().iter().all(|frame| frame.ticks == 90));
-        assert_eq!((anim.frames().len(), report.trimmed, report.speed), (2, true, 1.0));
+        assert_eq!((anim.frames().len(), report.trimmed, report.tempo), (2, true, 1.0));
+
+        // faster than it needs, or slower and cut
+        let fast = Options { tempo: Some(3.0), ..Options::default() };
+        let (anim, report) = normalise(&input, &fast).unwrap();
+        assert!(anim.frames().iter().all(|frame| frame.ticks == 30));
+        assert_eq!((report.ticks, report.trimmed), (120, false));
+        let slow = Options { tempo: Some(0.5), ..Options::default() };
+        let (anim, report) = normalise(&input, &slow).unwrap();
+        let ticks: Vec<u32> = anim.frames().iter().map(|frame| frame.ticks).collect();
+        assert_eq!((ticks, report.trimmed), (vec![180], true));
+        let wrong = Options { tempo: Some(0.0), ..Options::default() };
+        assert!(matches!(normalise(&input, &wrong), Err(Error::Tempo(_))));
     }
 
     #[test]

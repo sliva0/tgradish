@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 
 pub use args::commands;
 pub(crate) use args::encode_args;
+#[cfg(test)]
+pub(crate) use args::input_args;
 #[cfg(any(feature = "linked", test))]
 pub(crate) use args::video_filter;
 pub use locate::locate;
