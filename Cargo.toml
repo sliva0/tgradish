@@ -25,6 +25,7 @@ embed-resource = "3.0.12"
 eframe = { version = "0.36.2", default-features = false, features = ["glow", "wayland", "x11"] }
 flate2 = "1.1.10"
 image-webp = "0.2.4"
+libloading = "0.8.9"
 libwebp-sys = { version = "0.14.4", default-features = false, features = ["std", "parallel"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec", "filter", "format", "software-scaling"] }
@@ -47,8 +48,6 @@ wayland-protocols = "0.32.13"
 which = "8.0.6"
 windows-sys = "0.61.2"
 winit = { version = "0.30.13", default-features = false }
-# with the features accesskit's already have, and the blocking API
-zbus = { version = "5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
 zopfli = { version = "0.8.3", default-features = false, features = ["gzip", "std"] }
 
 [workspace.lints.rust]
