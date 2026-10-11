@@ -10,7 +10,6 @@ pub use tgradish_tgs::check::{Issue, Severity, Stats};
 use tgradish_tgs::encode::Effort;
 use tgradish_tgs::frames::{self, DecodeOptions, Limits, Sheet};
 pub use tgradish_tgs::limits;
-pub use tgradish_tgs::normalise::Long;
 use tgradish_tgs::normalise::{self, Report};
 pub use tgradish_tgs::reduce::{Compromise, Kind, Reduction};
 use tgradish_tgs::sticker::{self, Fit, Progress, Step};
@@ -32,20 +31,24 @@ pub const MAX_BYTES: u64 = tgradish_tgs::limits::telegram::MAX_BYTES as u64;
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct TgsOptions {
-    /// What to make. Both are 512x512 animations. [default: sticker]
+    /// What to make. Both are square animations. [default: sticker]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<Target>,
     /// Seconds to skip at the start of the input.
     #[schemars(range(min = 0.0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start: Option<f64>,
-    /// Length of the result in seconds. [default: the rest of the input]
+    /// Seconds of the input to use, from `start`. [default: the rest of
+    /// the input]
     #[schemars(extend("exclusiveMinimum" = 0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub length: Option<f64>,
-    /// What to do with more than 3 seconds. [default: speed-up]
+    /// How many times as fast as the input it plays, 0.1 to 10; what still
+    /// lasts longer than 3 seconds is cut. [default: as fast as fits a long
+    /// input into 3 seconds]
+    #[schemars(range(min = 0.1, max = 10.0))]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub long: Option<Long>,
+    pub tempo: Option<f64>,
     /// How hard to look for a small encoding; best takes a few seconds.
     /// [default: best]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -116,7 +119,7 @@ impl TgsOptions {
             target,
             start,
             length,
-            long,
+            tempo,
             speed,
             lossless,
             reductions,
@@ -185,7 +188,14 @@ impl TgsOptions {
                 pixel_scale: self.pixel_scale,
                 start: Self::seconds(self.start, "start")?.unwrap_or_default(),
                 length: Self::seconds(self.length, "length")?,
-                long: self.long.unwrap_or_default(),
+                tempo: match self.tempo {
+                    Some(tempo) if !crate::options::TEMPOS.contains(&tempo) => {
+                        return Err(Error::InvalidOptions(format!(
+                            "tempo {tempo} is not from 0.1 to 10"
+                        )));
+                    }
+                    tempo => tempo,
+                },
             },
             effort: match self.speed.unwrap_or(Speed::Best) {
                 Speed::Fast => Effort::Fast,
@@ -232,7 +242,7 @@ pub enum TgsEvent {
         /// Size of the Lottie JSON inside.
         json_bytes: u64,
         /// Whether anything visible was given up: reductions, a forced pixel
-        /// scale, a long input sped up or cut.
+        /// scale, the end of a long input.
         lossy: bool,
         /// Reductions fitting applied, in order.
         steps: Vec<Step>,

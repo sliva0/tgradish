@@ -21,7 +21,8 @@ pub(crate) fn input_args(plan: &Plan, length: f64, fps: f64) -> Vec<OsString> {
     } else if plan.start > 0.0 {
         args.extend(["-ss".into(), num(plan.start).into()]);
     }
-    let read = (frame_count(length, fps) + 1) as f64 / fps;
+    // in the input's time, which the tempo stretches or squeezes
+    let read = (frame_count(length, fps) + 1) as f64 / fps * plan.tempo;
     args.extend(["-t".into(), num(read).into()]);
     if let Some(decoder) = &plan.source.decoder {
         args.extend(["-c:v".into(), decoder.into()]);
@@ -40,8 +41,14 @@ pub(crate) fn input_args(plan: &Plan, length: f64, fps: f64) -> Vec<OsString> {
 pub(crate) fn video_filter(plan: &Plan, fps: f64, length: f64, pix_fmt: &str) -> String {
     let (w, h) = (plan.width, plan.height);
     let (sw, sh) = (plan.scaled_width, plan.scaled_height);
-    let mut filters =
-        vec![format!("fps={}", num(fps)), format!("trim=end_frame={}", frame_count(length, fps))];
+    let mut filters = Vec::new();
+    if plan.tempo != 1.0 {
+        filters.push(format!("setpts=(PTS-STARTPTS)/{}", num(plan.tempo)));
+    }
+    filters.extend([
+        format!("fps={}", num(fps)),
+        format!("trim=end_frame={}", frame_count(length, fps)),
+    ]);
     if let Some(crop) = plan.crop {
         // in display pixels, which differ from stored ones by the sample
         // aspect ratio; exact, or odd sizes and places are rounded to the

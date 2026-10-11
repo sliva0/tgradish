@@ -188,19 +188,24 @@ pub struct OptionArgs {
     #[arg(long, value_enum, help_heading = "Output")]
     pub scaling: Option<ScalingArg>,
     /// Scale by exactly N (or 1/N), so input pixels line up with the
-    /// result's; the crop must make 512 pixels on the longer side, or 100 x
-    /// 100 for emoji: with 2, crop 256 pixels.
+    /// result's; transparent margins fill the rest. The crop must fit: with
+    /// 3, at most 170 pixels on the longer side for stickers, 33 for emoji.
     #[arg(long, value_name = "N", help_heading = "Output")]
     pub exact_scale: Option<ExactScale>,
     /// Seconds to skip at the start of the input.
     #[arg(short = 's', long, value_name = "SECONDS", help_heading = "Output")]
     pub start: Option<f64>,
-    /// Length of the result. [default: the rest of the input]
+    /// Seconds of the input to use. [default: the rest of it]
     #[arg(short = 't', long, value_name = "SECONDS", help_heading = "Output")]
     pub length: Option<f64>,
-    /// Frame rate: of the result for WebM, at most 60 [default: the input's,
-    /// at most 30], of sprite sheets and image sequences for .tgs [default:
-    /// 10].
+    /// How many times as fast as the input the result plays, 0.1 to 10.
+    /// [default: 1 for WebM; for .tgs, as fast as fits a long input into 3
+    /// seconds; what still lasts longer is cut]
+    #[arg(long, value_name = "TIMES", help_heading = "Output")]
+    pub tempo: Option<f64>,
+    /// Frame rate: of the result for WebM, at most 60 and at most the
+    /// input's at the tempo [default: the input's, at most 60], of sprite
+    /// sheets and image sequences for .tgs [default: 10].
     #[arg(long, help_heading = "Output")]
     pub fps: Option<f64>,
 
@@ -262,9 +267,6 @@ pub struct OptionArgs {
           default_missing_value = "true", help_heading = "Metadata")]
     pub watermark: Option<bool>,
 
-    /// What to do with more than 3 seconds. [default: speed-up]
-    #[arg(long, value_enum, help_heading = TGS)]
-    pub long: Option<LongArg>,
     /// Reductions that may make a sticker fit, comma-separated. [default:
     /// all]
     #[arg(long, value_enum, value_delimiter = ',', help_heading = TGS)]
@@ -301,7 +303,6 @@ impl OptionArgs {
         let given = |set: bool, name: &'static str| set.then_some(name);
         let flags = match format {
             Format::Webm => vec![
-                given(self.long.is_some(), "--long"),
                 given(!self.reductions.is_empty(), "--reductions"),
                 given(self.compromise.is_some(), "--compromise"),
                 given(self.keep_canvas.is_some(), "--keep-canvas"),
@@ -333,7 +334,7 @@ impl OptionArgs {
             target: self.target.map(Into::into),
             start: self.start,
             length: self.length,
-            long: self.long.map(Into::into),
+            tempo: self.tempo,
             speed: self.speed.map(Into::into),
             lossless: self.lossless,
             reductions: (!self.reductions.is_empty())
@@ -363,6 +364,7 @@ impl OptionArgs {
             fit_range: self.fit_range,
             start: self.start,
             length: self.length,
+            tempo: self.tempo,
             fps: self.fps,
             bitrate: self.bitrate,
             crf: self.crf,
@@ -417,7 +419,6 @@ value_enum!(FitArg => options::Fit { Auto, Bitrate, Crf, Fps, Length, Off });
 value_enum!(SpeedArg => options::Speed { Fast, Balanced, Best });
 value_enum!(SpoofArg => options::Spoof { Auto, Always, Never });
 value_enum!(FormatArg => Format { Webm, Tgs });
-value_enum!(LongArg => tgs::Long { SpeedUp, Trim });
 value_enum!(KindArg => tgs::Kind {
     SnapToGrid,
     MergeColours,
@@ -593,6 +594,7 @@ mod tests {
             fit_range: Some(Range { min: 4.0, max: 40.5 }),
             start: Some(1.25),
             length: Some(2.0),
+            tempo: Some(1.5),
             fps: Some(24.0),
             bitrate: Some(600.0),
             crf: Some(30),
@@ -610,7 +612,7 @@ mod tests {
             target: Some(Target::Emoji),
             start: Some(0.5),
             length: Some(1.5),
-            long: Some(tgs::Long::Trim),
+            tempo: Some(0.5),
             speed: Some(options::Speed::Fast),
             lossless: Some(true),
             reductions: Some(vec![tgs::Kind::MergeColours, tgs::Kind::DropFrames]),

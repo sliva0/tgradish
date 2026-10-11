@@ -471,7 +471,7 @@ fn stays_under_three_seconds_without_spoofing() {
             output: Some(dir.path().join("out.webm")),
             options: Options {
                 length: Some(3.0),
-                fps: Some(29.97),
+                fps: Some(23.976),
                 spoof: Some(tgradish_core::options::Spoof::Never),
                 ..fast(Fit::Bitrate)
             },
@@ -482,8 +482,28 @@ fn stays_under_three_seconds_without_spoofing() {
         assert!(outcome.issues.is_empty(), "{name}: {:?}", outcome.issues);
         let header = webm::inspect_file(&outcome.output).unwrap().header_duration.unwrap();
         assert!(header <= telegram::MAX_SECONDS, "{name}: header duration {header}");
-        // 89 frames at 29.97 fps
-        assert!((header - 89.0 / 29.97).abs() < 2e-3, "{name}: header duration {header}");
+        // 71 frames at 23.976 fps
+        assert!((header - 71.0 / 23.976).abs() < 2e-3, "{name}: header duration {header}");
+    }
+}
+
+#[test]
+fn plays_at_a_tempo() {
+    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    for backend in &backends {
+        let dir = tempfile::tempdir().unwrap();
+        let request = Request {
+            output: Some(dir.path().join("out.webm")),
+            options: Options { length: Some(4.0), tempo: Some(2.0), ..fast(Fit::Bitrate) },
+            ..Request::new(input.clone())
+        };
+        let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
+        let name = name(backend);
+        let info = webm::inspect_file(&outcome.output).unwrap();
+        // 4 seconds at 25 fps play in 2, every frame of them
+        assert_eq!(info.video_frames, 100, "{name}");
+        let header = info.header_duration.unwrap();
+        assert!((header - 2.0).abs() < 2e-3, "{name}: header duration {header}");
     }
 }
 

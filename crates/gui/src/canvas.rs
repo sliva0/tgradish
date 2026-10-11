@@ -2,7 +2,7 @@
 //! or the result. The wheel zooms, the right or middle button pans.
 
 use eframe::egui::{
-    self, Color32, CursorIcon, PointerButton, Pos2, Rect, Sense, Stroke, pos2, vec2,
+    self, Color32, CursorIcon, PointerButton, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2,
 };
 use tgradish_core::options::{Crop, ExactScale};
 use tgradish_core::telegram::Target;
@@ -80,17 +80,17 @@ impl Inset {
     }
 
     /// Shows the picture `make` makes, made again only when `key` changes,
-    /// in the bottom right corner of `area`, labelled.
+    /// in the bottom right corner of `area`, at most `room` large,
+    /// labelled.
     pub fn show(
         &mut self,
         ui: &egui::Ui,
-        area: Rect,
+        (area, room): (Rect, Vec2),
         key: u64,
         label: &str,
         make: impl FnOnce() -> egui::ColorImage,
     ) {
         let ppp = ui.ctx().pixels_per_point();
-        let room = vec2((area.width() * 0.34).max(110.0), (area.height() * 0.42).max(110.0));
         // the size of the image isn't known before it is made, so the
         // last one's is used to choose its filtering
         let last = self.texture.as_ref().map(|texture| texture.size_vec2());
@@ -121,13 +121,95 @@ impl Inset {
         widgets::checkerboard(&painter, frame, 6.0);
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
         painter.image(texture.id(), frame, uv, Color32::WHITE);
-        let galley = painter.layout_no_wrap(label.into(), egui::FontId::proportional(12.0), text);
+        let galley = painter.layout_no_wrap(label.into(), INSET_LABEL, text);
         // over the picture's left edge, or further left where it would stick out
         let left = frame.left().min(area.right() - MARGIN - galley.size().x).max(area.left());
         let at = pos2(left, frame.top() - galley.size().y - 8.0);
         let behind = Rect::from_min_size(at, galley.size()).expand(3.0);
         painter.rect(behind, 3.0, back, edge, egui::StrokeKind::Outside);
         painter.galley(at, galley, text);
+    }
+}
+
+/// The font of the label over the result's small picture.
+pub const INSET_LABEL: egui::FontId = egui::FontId::proportional(12.0);
+/// Height the label takes over the small picture, besides its text.
+const LABEL_GAP: f32 = 12.0;
+/// The frame around the small picture, beyond it.
+const FRAME: f32 = 5.0;
+/// The smallest the small picture gets beside the input, on its longer
+/// side.
+const SMALLEST_INSET: f32 = 64.0;
+/// The least share of its size the input keeps to make room for it.
+const LEAST_SHARE: f32 = 0.75;
+
+/// Where the input and the result's small picture go in `view` so the small
+/// picture covers none of the input: in a strip along the side where the
+/// input shrinks least to make room, as large as fits there and at most a
+/// share of the view. The input shrinks by up to a quarter to give it
+/// [`SMALLEST_INSET`]; where even that is too little, and when zoomed in,
+/// the small picture goes over the input's corner. `input` and `result`
+/// are their sizes in pixels, `label` the size of the small picture's
+/// label. Returns the input's area, and the small picture's area and room
+/// for [`Inset::show`].
+pub fn split(
+    view: Rect,
+    input: (u32, u32),
+    result: (u32, u32),
+    label: Vec2,
+    zoomed: bool,
+) -> (Rect, (Rect, Vec2)) {
+    let most = vec2((view.width() * 0.34).max(110.0), (view.height() * 0.42).max(110.0));
+    let over = (view, (view, most));
+    let input = vec2(input.0.max(1) as f32, input.1.max(1) as f32);
+    let result = vec2(result.0.max(1) as f32, result.1.max(1) as f32);
+    let inset_in = |room: Vec2| {
+        let room = room.min(most).max(Vec2::ZERO);
+        result * (room.x / result.x).min(room.y / result.y)
+    };
+    let fit =
+        ((view.width() - 2.0 * MARGIN) / input.x).min((view.height() - 2.0 * MARGIN) / input.y);
+    if zoomed || fit <= 0.0 {
+        return over;
+    }
+    let shown = input * fit;
+    let label_height = label.y + LABEL_GAP;
+    let smallest = inset_in(Vec2::splat(SMALLEST_INSET));
+    let strip = vec2(smallest.x.max(label.x) + FRAME, smallest.y + label_height);
+    // the share of its size the input keeps beside a strip for the
+    // smallest, or above it
+    let share_right = ((view.width() - 3.0 * MARGIN - strip.x) / shown.x).min(1.0);
+    let share_below = ((view.height() - 3.0 * MARGIN - strip.y) / shown.y).min(1.0);
+    let right =
+        (share_right >= LEAST_SHARE && view.height() - 2.0 * MARGIN >= strip.y).then(|| {
+            let beside = view.width() - shown.x * share_right - 3.0 * MARGIN;
+            inset_in(vec2(beside, view.height() - 2.0 * MARGIN - label_height))
+        });
+    let below = (share_below >= LEAST_SHARE && view.width() - 2.0 * MARGIN >= strip.x).then(|| {
+        let under = view.height() - shown.y * share_below - 3.0 * MARGIN - label_height;
+        inset_in(vec2(view.width() - 2.0 * MARGIN, under))
+    });
+    let on_right = match (right, below) {
+        (Some(right), Some(below)) if share_right == share_below => {
+            right.x * right.y >= below.x * below.y
+        }
+        (Some(_), Some(_)) => share_right > share_below,
+        (right, _) => right.is_some(),
+    };
+    match (on_right, right, below) {
+        (true, Some(inset), _) => {
+            let strip = inset.x.max(label.x) + FRAME + MARGIN;
+            let input = Rect::from_min_size(view.min, vec2(view.width() - strip, view.height()));
+            let area = Rect::from_min_max(pos2(input.right(), view.top()), view.max);
+            (input, (area, inset))
+        }
+        (false, _, Some(inset)) => {
+            let strip = inset.y + label_height + FRAME + MARGIN;
+            let input = Rect::from_min_size(view.min, vec2(view.width(), view.height() - strip));
+            let area = Rect::from_min_max(pos2(view.left(), input.bottom()), view.max);
+            (input, (area, inset))
+        }
+        _ => over,
     }
 }
 
@@ -159,34 +241,27 @@ pub enum Keep {
     Middle,
 }
 
-/// A crop held to an exact scale: its longer side is `long` input pixels,
-/// its shorter one a multiple of `step` so the result's sides are even,
-/// and both `long` for square results.
+/// A crop held to an exact scale: its longer side `long` input pixels, the
+/// most the scale fits into the result, or all the picture has of them;
+/// its sides whole blocks of `step` pixels, which shrinking averages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Exact {
     pub long: u32,
     pub step: u32,
-    pub square: bool,
 }
 
 impl Exact {
-    /// The crop size `scale` needs for `target`, if whole input pixels make
-    /// it.
+    /// The crop `scale` takes for `target`, if a pixel at that scale isn't
+    /// larger than the result.
     pub fn of(scale: ExactScale, target: Target) -> Option<Exact> {
         let (width, height) = target.box_size();
-        let long = scale.input_for(width.max(height))?;
-        let step = match (scale.up, scale.down) {
-            (_, down) if down > 1 => 2 * down,
-            (up, _) if up % 2 == 0 => 1,
-            _ => 2,
-        };
-        Some(Exact { long, step, square: target.requires_exact_size() })
+        let long = scale.most_input(width.max(height));
+        (long > 0).then_some(Exact { long, step: scale.down })
     }
 
-    /// Whether a `size` picture is large enough.
+    /// Whether a `size` picture has a whole block.
     pub fn fits(self, size: (u32, u32)) -> bool {
-        let (long, short) = (size.0.max(size.1), size.0.min(size.1));
-        long >= self.long && (!self.square || short >= self.long) && short >= self.step
+        size.0.min(size.1) >= self.step
     }
 
     /// `crop` held to this size within a `size` picture, its orientation
@@ -202,22 +277,22 @@ impl Exact {
         if !self.fits(size) {
             return None;
         }
-        let landscape = self.square || ratio.map_or(crop.width >= crop.height, |r| r >= 1.0);
+        let landscape = ratio.map_or(crop.width >= crop.height, |r| r >= 1.0);
         let (room_long, room_short) = if landscape { size } else { (size.1, size.0) };
-        if room_long < self.long {
-            return None;
-        }
-        let wanted = match (self.square, ratio) {
-            (true, _) => f64::from(self.long),
-            (false, Some(r)) => f64::from(self.long) / if landscape { r } else { 1.0 / r },
-            (false, None) => f64::from(if landscape { crop.height } else { crop.width }),
+        let blocks = |side: u32| (side / self.step * self.step).max(self.step);
+        // shorter than it could be, where the picture is too narrow for
+        // the shape
+        let shaped = ratio.map_or(room_long, |r| {
+            let r = if landscape { r } else { 1.0 / r };
+            (f64::from(room_short) * r).floor() as u32
+        });
+        let long = blocks(self.long.min(room_long).min(shaped));
+        let wanted = match ratio {
+            Some(r) => f64::from(long) / if landscape { r } else { 1.0 / r },
+            None => f64::from(if landscape { crop.height } else { crop.width }),
         };
-        let most = self.long.min(room_short);
-        let short = ((wanted.round() as u32).min(most) / self.step * self.step).max(self.step);
-        if self.square && short != self.long {
-            return None;
-        }
-        let (width, height) = if landscape { (self.long, short) } else { (short, self.long) };
+        let short = blocks((wanted.round() as u32).min(long).min(room_short));
+        let (width, height) = if landscape { (long, short) } else { (short, long) };
         let place = |start: u32, old: u32, new: u32, keep: Keep, room: u32| -> u32 {
             let (start, old, new) = (i64::from(start), i64::from(old), i64::from(new));
             let at = match keep {
@@ -278,7 +353,9 @@ pub fn show(
     zoom: &mut Zoom,
     cropping: Option<Cropping>,
 ) -> bool {
-    let response = ui.allocate_rect(rect, Sense::click_and_drag());
+    // a part of the space the caller took: taking it again would move
+    // what comes next
+    let response = ui.interact(rect, ui.id().with("canvas"), Sense::click_and_drag());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, widgets::stage(ui.visuals().dark_mode));
 
@@ -690,8 +767,10 @@ mod exact_tests {
         // a left edge dragged keeps the right one
         let end = (Keep::End, Keep::Start);
         assert_eq!(twice.fit(crop, end, None, size).unwrap().x, 144);
-        // halved: 1024 on the longer side, the shorter in steps of 4 so the
-        // result's sides stay even
+        // three times: 170, which make 510, and margins fill the rest
+        let thrice = Exact::of("3".parse().unwrap(), Target::Sticker).unwrap();
+        assert_eq!(thrice.fit(crop, start, None, size), Some(Crop { width: 170, ..crop }));
+        // halved: 1024 on the longer side, both in whole 2x2 blocks
         let half = Exact::of("1/2".parse().unwrap(), Target::Sticker).unwrap();
         let tall = Crop { x: 0, y: 0, width: 501, height: 1070 };
         assert_eq!(
@@ -702,13 +781,14 @@ mod exact_tests {
         let one = Exact::of("1".parse().unwrap(), Target::Sticker).unwrap();
         let wide = one.fit(crop, start, Some(16.0 / 9.0), size).unwrap();
         assert_eq!((wide.width, wide.height), (512, 288));
-        // emoji are square; too small a picture takes no exact scale
-        let emoji = Exact::of("1/4".parse().unwrap(), Target::Emoji).unwrap();
+        // a smaller picture gives what it has, in whole blocks
+        let quarter = Exact::of("1/4".parse().unwrap(), Target::Emoji).unwrap();
         assert_eq!(
-            emoji.fit(crop, start, None, size).map(|c| (c.width, c.height)),
-            Some((400, 400))
+            quarter.fit(crop, start, Some(1.0), (390, 400)).map(|c| (c.width, c.height)),
+            Some((388, 388))
         );
-        assert_eq!(half.fit(crop, start, None, (800, 600)), None);
-        assert!(Exact::of("3".parse().unwrap(), Target::Sticker).is_none());
+        assert_eq!(quarter.fit(crop, start, None, (3, 600)), None);
+        // no pixel larger than the result
+        assert!(Exact::of(ExactScale { up: 513, down: 1 }, Target::Sticker).is_none());
     }
 }

@@ -85,8 +85,13 @@ pub struct Plan {
     /// Whether `fit = auto` may lower the frame rate. False when the frame
     /// rate was set explicitly.
     pub auto_fps: bool,
+    /// Where the part used starts in the input, in seconds.
     pub start: f64,
+    /// How long the result plays, in seconds.
     pub length: f64,
+    /// How many times as fast as the input the result plays: it uses
+    /// `length * tempo` seconds of the input.
+    pub tempo: f64,
     pub fps: f64,
     /// Bitrate in kbit/s to use or to start fitting from.
     pub bitrate: f64,
@@ -265,50 +270,45 @@ pub fn sizes(target: Target, resize: Resize, scaling: Scaling, used: (u32, u32))
     Sizes { scaled, width, height, scaling }
 }
 
-/// Where a `used` picture lands at an exact `scale`: the picture at that
-/// scale is the result, so it must be a size `target` takes, with even
-/// sides as the video's colour planes need.
+/// Where a `used` picture lands at an exact `scale`, which must keep it
+/// within the box. Transparent margins fill the rest of what `target` and
+/// `resize` need: the box for emoji and padded stickers, otherwise 512 on
+/// the longer side and even sides, as the video's colour planes need.
 pub fn exact_sizes(
     target: Target,
+    resize: Resize,
     used: (u32, u32),
     scale: ExactScale,
 ) -> std::result::Result<Sizes, String> {
     let (box_w, box_h) = target.box_size();
-    let long = box_w.max(box_h);
     let (Some(width), Some(height)) = (scale.apply(used.0), scale.apply(used.1)) else {
         return Err(format!(
             "at scale {scale} the crop's sides must be multiples of {} pixels",
             scale.down
         ));
     };
-    let fits = if target.requires_exact_size() {
-        (width, height) == (box_w, box_h)
-    } else {
-        width.max(height) == long && width <= box_w && height <= box_h
-    };
-    if !fits {
-        return Err(match (scale.input_for(long), target.requires_exact_size()) {
-            (Some(side), true) => format!(
-                "at scale {scale}, {} need a {side}x{side} crop to make {box_w}x{box_h}",
-                target.name()
-            ),
-            (Some(side), false) => format!(
-                "at scale {scale}, crop {side} pixels on the longer side: they make the {long} \
-                 a sticker needs there"
-            ),
-            (None, _) => format!("scale {scale} can't make {long} pixels of whole input pixels"),
+    if width > box_w || height > box_h {
+        let most = scale.most_input(box_w.max(box_h));
+        return Err(match most {
+            0 => format!("scale {scale} makes a pixel larger than a whole {}", target.name()),
+            most => {
+                format!("at scale {scale} the crop can be at most {most} pixels on its longer side")
+            }
         });
     }
-    if width % 2 == 1 || height % 2 == 1 {
-        return Err(format!(
-            "at scale {scale}, {width}x{height} has an odd side: the video's colour planes \
-             need even sides, so change the crop's shorter side by {}",
-            scale.down
-        ));
-    }
+    let even = |side: u32| side.next_multiple_of(2);
+    let result = match resize {
+        Resize::Crop | Resize::Stretch => {
+            return Err("an exact scale keeps all of the picture: use contain or pad".into());
+        }
+        Resize::Pad => (box_w, box_h),
+        _ if target.requires_exact_size() => (box_w, box_h),
+        Resize::Contain if width >= height => (box_w, even(height)),
+        Resize::Contain => (even(width), box_h),
+    };
     // growing makes whole blocks; shrinking averages whole blocks
     let scaling = if scale.up > 1 { Scaling::PixelPerfect } else { Scaling::Sharp };
-    Ok(Sizes { scaled: (width, height), width, height, scaling })
+    Ok(Sizes { scaled: (width, height), width: result.0, height: result.1, scaling })
 }
 
 /// Whether `frames` of a `width` wide picture look like pixel art within
@@ -383,7 +383,15 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         Some(duration) => duration - start,
         None => f64::INFINITY,
     };
-    let mut length = match o.length {
+    let tempo = o.tempo.unwrap_or(1.0);
+    if !options::TEMPOS.contains(&tempo) {
+        return Err(invalid(format!(
+            "tempo must be from {} to {}",
+            options::TEMPOS.start(),
+            options::TEMPOS.end()
+        )));
+    }
+    let used = match o.length {
         Some(length) if !(length > 0.0 && length.is_finite()) => {
             return Err(invalid("length must be more than 0 seconds"));
         }
@@ -393,8 +401,10 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         }
         Some(length) => length,
         None if available.is_finite() => available,
-        None => telegram::MAX_SECONDS,
+        None => telegram::MAX_SECONDS * tempo,
     };
+    // how long the result plays
+    let mut length = used / tempo;
     if spoof == Spoof::Never && length > telegram::MAX_SECONDS {
         warnings.push(format!(
             "cutting to {} s because spoofing is off; Telegram rejects longer videos",
@@ -402,7 +412,9 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         ));
         length = telegram::MAX_SECONDS;
     }
-    let source_fps = source.fps.unwrap_or(25.0);
+    // the input's frames a second of the result shows; a still picture has
+    // as many as asked
+    let source_fps = source.fps.filter(|_| !source.still_image).map(|fps| fps * tempo);
     let fps = match o.fps {
         Some(fps) if !(fps > 0.0 && fps <= telegram::MAX_FPS) => {
             return Err(invalid(format!(
@@ -410,8 +422,17 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
                 telegram::MAX_FPS
             )));
         }
-        Some(fps) => fps,
-        None => source_fps.min(telegram::DEFAULT_MAX_FPS),
+        Some(fps) => match source_fps {
+            Some(most) if fps > most + 0.01 => {
+                let most = most.min(telegram::MAX_FPS);
+                warnings.push(format!(
+                    "{fps} fps would repeat the input's frames: using its {most:.2} fps"
+                ));
+                most
+            }
+            _ => fps,
+        },
+        None => source_fps.unwrap_or(25.0).min(telegram::MAX_FPS),
     };
 
     let crf = o.crf.unwrap_or(options::DEFAULT_CRF);
@@ -477,7 +498,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     }
     let used = o.crop.map_or((source.width, source.height), |crop| (crop.width, crop.height));
     let sizes = match o.exact_scale {
-        Some(scale) => exact_sizes(target, used, scale).map_err(invalid)?,
+        Some(scale) => exact_sizes(target, resize, used, scale).map_err(invalid)?,
         None => sizes(target, resize, o.scaling.unwrap_or(Scaling::Auto), used),
     };
 
@@ -498,6 +519,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         auto_fps: o.fps.is_none(),
         start,
         length,
+        tempo,
         fps,
         bitrate,
         crf,
@@ -521,7 +543,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
 fn looks_like_pixel_art(backend: &Backend, plan: &Plan, cancel: &CancelToken) -> Result<bool> {
     let request = FramesRequest {
         start: plan.start,
-        length: Some(plan.length.min(telegram::MAX_SECONDS)),
+        length: Some((plan.length * plan.tempo).min(telegram::MAX_SECONDS)),
         fps: plan.fps,
         max_side: plan.source.width.max(plan.source.height),
         max_frames: 3,
@@ -889,22 +911,31 @@ mod tests {
         assert!("1.5".parse::<ExactScale>().is_err() && "2/3".parse::<ExactScale>().is_err());
         assert!("4294967295".parse::<ExactScale>().is_err());
         let huge = ExactScale { up: u32::MAX, down: 1 };
-        assert!(exact_sizes(Target::Sticker, (2, 2), huge).is_err());
+        let exact = |target, used, scale| exact_sizes(target, Resize::Contain, used, scale);
+        assert!(exact(Target::Sticker, (2, 2), huge).is_err());
         assert_eq!((half.to_string(), twice.to_string()), ("1/2".into(), "2".into()));
 
         // 1024 x 576 halved makes a 512 x 288 sticker, pixels in 2x2 blocks
-        let sizes = exact_sizes(Target::Sticker, (1024, 576), half).unwrap();
+        let sizes = exact(Target::Sticker, (1024, 576), half).unwrap();
         assert_eq!((sizes.scaled, sizes.width, sizes.height), ((512, 288), 512, 288));
         assert_eq!(sizes.scaling, Scaling::Sharp);
-        let grown = exact_sizes(Target::Sticker, (256, 100), twice).unwrap();
+        let grown = exact(Target::Sticker, (256, 100), twice).unwrap();
         assert_eq!((grown.width, grown.height, grown.scaling), (512, 200, Scaling::PixelPerfect));
-        // the longer side must make 512, emoji 100 x 100
-        let wrong = exact_sizes(Target::Sticker, (300, 100), twice).unwrap_err();
-        assert!(wrong.contains("crop 256 pixels"), "{wrong}");
-        assert!(exact_sizes(Target::Emoji, (50, 50), twice).is_ok());
-        assert!(exact_sizes(Target::Emoji, (50, 40), twice).is_err());
-        assert!(exact_sizes(Target::Sticker, (1023, 576), half).is_err());
-        assert!(exact_sizes(Target::Sticker, (512, 101), ExactScale::ONE).is_err());
+        // scales that don't make 512 leave transparent margins
+        let thrice: ExactScale = "3".parse().unwrap();
+        let margins = exact(Target::Sticker, (170, 101), thrice).unwrap();
+        assert_eq!((margins.scaled, margins.width, margins.height), ((510, 303), 512, 304));
+        assert!(margins.pads());
+        let padded = exact_sizes(Target::Sticker, Resize::Pad, (170, 101), thrice).unwrap();
+        assert_eq!((padded.width, padded.height), (512, 512));
+        let emoji = exact(Target::Emoji, (33, 20), thrice).unwrap();
+        assert_eq!((emoji.scaled, emoji.width, emoji.height), ((99, 60), 100, 100));
+        // never larger than the box, and only whole blocks when shrinking
+        let wrong = exact(Target::Sticker, (300, 100), twice).unwrap_err();
+        assert!(wrong.contains("at most 256 pixels"), "{wrong}");
+        assert!(exact(Target::Emoji, (51, 40), twice).is_err());
+        assert!(exact(Target::Sticker, (1023, 576), half).is_err());
+        assert!(exact_sizes(Target::Sticker, Resize::Crop, (256, 100), twice).is_err());
 
         let crop = Some(Crop { x: 0, y: 0, width: 256, height: 144 });
         let options = Options { crop, exact_scale: Some(twice), ..Default::default() };
@@ -931,5 +962,34 @@ mod tests {
         let (plan, _) = plan_with(Options::default()).unwrap();
         assert_eq!(plan.spoof, Spoof::Auto);
         assert!(plan.spoofs(4.84) && !plan.spoofs(3.0));
+    }
+
+    #[test]
+    fn plays_at_a_tempo() {
+        // the input's frames, all of them up to 60 a second
+        let (plan, _) = plan_with(Options::default()).unwrap();
+        assert_eq!((plan.length, plan.tempo, plan.fps), (4.84, 1.0, 30.0));
+        assert!(!crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuv420p").contains("setpts"));
+        let twice = Options { tempo: Some(2.0), ..Options::default() };
+        let (plan, _) = plan_with(twice).unwrap();
+        assert_eq!((plan.length, plan.fps), (2.42, 60.0));
+        let filter = crate::ffmpeg::video_filter(&plan, 60.0, 2.42, "yuv420p");
+        assert!(filter.starts_with("setpts=(PTS-STARTPTS)/2,fps=60,"), "{filter}");
+        // reads the input's seconds that play for the result's, and a frame
+        let args = crate::ffmpeg::input_args(&plan, 1.0, 60.0);
+        let read = args.iter().position(|arg| arg == "-t").unwrap() + 1;
+        assert_eq!(args[read].to_str(), Some("2.033333"));
+
+        // more frames than the input has would repeat them
+        let slow = Options { tempo: Some(0.5), fps: Some(30.0), ..Options::default() };
+        let (plan, warnings) = plan_with(slow).unwrap();
+        assert_eq!((plan.length, plan.fps), (9.68, 15.0));
+        assert!(warnings.iter().any(|w| w.contains("repeat")), "{warnings:?}");
+        // without spoofing, as much as plays for 3 seconds
+        let honest = Options { tempo: Some(0.5), spoof: Some(Spoof::Never), ..Options::default() };
+        assert_eq!(plan_with(honest).unwrap().0.length, 3.0);
+        for tempo in [0.0, 0.05, 11.0, f64::NAN] {
+            assert!(plan_with(Options { tempo: Some(tempo), ..Options::default() }).is_err());
+        }
     }
 }

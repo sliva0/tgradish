@@ -149,9 +149,10 @@ impl Source {
         })
     }
 
-    /// Opens the planned input, limited to `read` seconds after the start.
+    /// Opens the planned input, limited to what plays for `read` seconds
+    /// of the result after the start.
     pub(super) fn open(plan: &Plan, read: f64, cancel: &CancelToken) -> Result<Source> {
-        Self::open_window(&plan.input, &plan.source, plan.start, read, cancel)
+        Self::open_window(&plan.input, &plan.source, plan.start, read * plan.tempo, cancel)
     }
 
     /// Opens `path`, probed as `probe`, limited to `read` seconds after
