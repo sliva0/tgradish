@@ -18,7 +18,11 @@ pub struct Probe {
     /// Display size, after applying rotation and sample aspect ratio.
     pub width: u32,
     pub height: u32,
+    /// The average frame rate.
     pub fps: Option<f64>,
+    /// The stream's base frame rate, which a video of variable frame rate
+    /// reaches where it changes fastest.
+    pub base_fps: Option<f64>,
     /// Duration in seconds, missing for still images.
     pub duration: Option<f64>,
     pub alpha: bool,
@@ -112,6 +116,7 @@ pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Prob
         height: height.round() as u32,
         fps: parse_ratio(&stream["avg_frame_rate"])
             .or_else(|| parse_ratio(&stream["r_frame_rate"])),
+        base_fps: parse_ratio(&stream["r_frame_rate"]),
         duration: if still_image {
             None
         } else {

@@ -412,9 +412,9 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         ));
         length = telegram::MAX_SECONDS;
     }
-    // the input's frames a second of the result shows; a still picture has
-    // as many as asked
-    let source_fps = source.fps.filter(|_| !source.still_image).map(|fps| fps * tempo);
+    // by default the input's frames a second at the tempo, the average of
+    // a video whose rate varies; at least one a second, so a slow tempo
+    // doesn't make a single frame outlast the result
     let fps = match o.fps {
         Some(fps) if !(fps > 0.0 && fps <= telegram::MAX_FPS) => {
             return Err(invalid(format!(
@@ -422,17 +422,12 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
                 telegram::MAX_FPS
             )));
         }
-        Some(fps) => match source_fps {
-            Some(most) if fps > most + 0.01 => {
-                let most = most.min(telegram::MAX_FPS);
-                warnings.push(format!(
-                    "{fps} fps would repeat the input's frames: using its {most:.2} fps"
-                ));
-                most
-            }
-            _ => fps,
-        },
-        None => source_fps.unwrap_or(25.0).min(telegram::MAX_FPS),
+        Some(fps) => fps,
+        None => {
+            let source_fps = source.fps.unwrap_or(25.0);
+            let played = if source.still_image { source_fps } else { source_fps * tempo };
+            played.clamp(1.0, telegram::MAX_FPS)
+        }
     };
 
     let crf = o.crf.unwrap_or(options::DEFAULT_CRF);
@@ -746,6 +741,7 @@ mod tests {
             width: 640,
             height: 480,
             fps: Some(30.0),
+            base_fps: Some(30.0),
             duration: Some(duration),
             alpha: false,
             still_image: false,
@@ -974,17 +970,22 @@ mod tests {
         let (plan, _) = plan_with(twice).unwrap();
         assert_eq!((plan.length, plan.fps), (2.42, 60.0));
         let filter = crate::ffmpeg::video_filter(&plan, 60.0, 2.42, "yuv420p");
-        assert!(filter.starts_with("setpts=(PTS-STARTPTS)/2,fps=60,"), "{filter}");
+        assert!(filter.starts_with("settb=AVTB,setpts=(PTS-STARTPTS)/2,fps=60,"), "{filter}");
         // reads the input's seconds that play for the result's, and a frame
         let args = crate::ffmpeg::input_args(&plan, 1.0, 60.0);
         let read = args.iter().position(|arg| arg == "-t").unwrap() + 1;
         assert_eq!(args[read].to_str(), Some("2.033333"));
 
-        // more frames than the input has would repeat them
-        let slow = Options { tempo: Some(0.5), fps: Some(30.0), ..Options::default() };
-        let (plan, warnings) = plan_with(slow).unwrap();
+        let slow = Options { tempo: Some(0.5), ..Options::default() };
+        let (plan, _) = plan_with(slow).unwrap();
         assert_eq!((plan.length, plan.fps), (9.68, 15.0));
-        assert!(warnings.iter().any(|w| w.contains("repeat")), "{warnings:?}");
+        // at least a frame a second, and what is asked for
+        let slowest = Options { tempo: Some(0.1), spoof: Some(Spoof::Never), ..Options::default() };
+        let request = Request { options: slowest, ..Request::new("in.mp4".into()) };
+        let (plan, _) = super::plan(&request, Probe { fps: Some(1.0), ..source(4.84) }).unwrap();
+        assert_eq!((plan.fps, plan.length), (1.0, 3.0));
+        let asked = Options { tempo: Some(0.1), fps: Some(30.0), ..Options::default() };
+        assert_eq!(plan_with(asked).unwrap().0.fps, 30.0);
         // without spoofing, as much as plays for 3 seconds
         let honest = Options { tempo: Some(0.5), spoof: Some(Spoof::Never), ..Options::default() };
         assert_eq!(plan_with(honest).unwrap().0.length, 3.0);

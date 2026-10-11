@@ -30,7 +30,7 @@ pub enum Error {
     StartPastEnd { start: Duration, length: Duration },
     #[error("the length is zero")]
     ZeroLength,
-    #[error("the tempo {0} is not a positive number")]
+    #[error("the tempo {0} is not from 0.1 to 10")]
     Tempo(f64),
     #[error("every pixel is transparent")]
     Invisible,

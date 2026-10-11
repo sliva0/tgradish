@@ -210,7 +210,7 @@ const SQUARES: [Choice<Resize>; 4] = [
 /// Shows the settings under the preview.
 pub fn show(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     picture(ui, item, context);
-    time(ui, item);
+    time(ui, item, context);
     match item.format {
         Format::Webm => webm_quality(ui, item, context),
         Format::Tgs => tgs_quality(ui, item, context),
@@ -297,8 +297,8 @@ fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         }
         let choices = &item.choices;
         // what is set over the preset, as far as it has a say
-        let effective = choices.webm_options(context.presets, context.config).unwrap_or_default();
-        let webm = crate::item::shown(choices.webm.clone(), &effective);
+        let merged = choices.webm_merged(context.presets, context.config).unwrap_or_default();
+        let webm = crate::item::shown(choices.webm.clone(), &merged);
         args.extend(match item.format {
             Format::Webm => tgradish_core::options::flags(&webm.merged(&Options {
                 target: Some(choices.target),
@@ -677,8 +677,11 @@ fn aspect_ratio(
             ui.label(":");
             typed |= ui.add(side(&mut height)).on_hover_text("Height").changed();
         });
+        // the result's size, where the result takes the crop's shape: not
+        // squared, nor with margins
+        let sizes = crop.and_then(|crop| webm_sizes(item, crop)).filter(|sizes| !sizes.pads());
         let follows = item.format == Format::Webm && resize_of(item) == Resize::Contain;
-        if follows && let Some(sizes) = crop.and_then(|crop| webm_sizes(item, crop)) {
+        if follows && let Some(sizes) = sizes {
             ui.horizontal(|ui| {
                 ui.label("Result size");
                 let (box_w, box_h) = item.choices.target.box_size();
@@ -815,13 +818,18 @@ const SPOOFS: [Choice<Spoof>; 3] = [
     (Spoof::Never, "Cut at 3 s", "Keep the file honest and cut it at 3 seconds"),
 ];
 
-/// A frame rate as short as it goes: 25 fps, 29.97 fps.
-fn fps_text(fps: f64) -> String {
-    let text = format!("{fps:.2}");
-    format!("{} fps", text.trim_end_matches('0').trim_end_matches('.'))
+/// A number with at most two decimals, as short as it goes: 2, 1.5.
+fn preset_number(value: f64) -> String {
+    let text = format!("{value:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
-fn time(ui: &mut egui::Ui, item: &mut Item) {
+/// A frame rate as short as it goes: 25 fps, 29.97 fps.
+fn fps_text(fps: f64) -> String {
+    format!("{} fps", preset_number(fps))
+}
+
+fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let animated = item.input_length().is_some();
     let sequence =
         item.format == Format::Tgs && (item.sequence || item.choices.tgs.sheet.is_some());
@@ -831,22 +839,43 @@ fn time(ui: &mut egui::Ui, item: &mut Item) {
     section(ui, "Time");
     // how long the used part lasts, and plays
     let used = item.range().map(|(start, end)| end - start);
-    let tempo = item.tempo();
+    let tempo = item.tempo(context.presets, context.config);
     let played = used.map(|used| used / tempo);
+    // the average rate, and the most a video of variable rate reaches
     let input_fps = match item.format {
-        Format::Webm => item.video.ready().and_then(|video| video.probe.fps),
+        Format::Webm => item.video.ready().map(|video| (video.probe.fps, video.probe.base_fps)),
         Format::Tgs => None,
+    };
+    // a preset's tempo is what the automatic choice stands for
+    let preset_tempo = match item.format {
+        Format::Webm => {
+            item.choices.webm_base(context.presets, context.config).ok().and_then(|base| base.tempo)
+        }
+        Format::Tgs => {
+            item.choices.tgs_base(context.presets, context.config).ok().and_then(|base| base.tempo)
+        }
     };
     grid(ui, "time", |ui| {
         if animated {
             label(ui, "Speed", "How many times as fast as the input the result plays");
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    let (tempo, automatic) = match item.format {
-                        Format::Webm => (&mut item.choices.webm.tempo, "As the input"),
-                        Format::Tgs => (&mut item.choices.tgs.tempo, "Fit into 3 s if longer"),
+                    let (tempo, automatic) = match (item.format, preset_tempo) {
+                        (_, Some(preset)) => (
+                            match item.format {
+                                Format::Webm => &mut item.choices.webm.tempo,
+                                Format::Tgs => &mut item.choices.tgs.tempo,
+                            },
+                            format!("The preset's: ×{}", preset_number(preset)),
+                        ),
+                        (Format::Webm, None) => {
+                            (&mut item.choices.webm.tempo, "As the input".into())
+                        }
+                        (Format::Tgs, None) => {
+                            (&mut item.choices.tgs.tempo, "Fit into 3 s if longer".into())
+                        }
                     };
-                    auto_number(ui, tempo, automatic, 1.0, |value| {
+                    auto_number(ui, tempo, &automatic, 1.0, |value| {
                         value.range(0.1..=10.0).speed(0.01).max_decimals(2).prefix("×")
                     });
                     if item.format == Format::Webm
@@ -881,10 +910,17 @@ fn time(ui: &mut egui::Ui, item: &mut Item) {
         match item.format {
             Format::Webm => {
                 let options = &mut item.choices.webm;
-                // more would repeat the input's frames
-                let most = input_fps.map(|fps| (fps * tempo).min(telegram::MAX_FPS));
-                let automatic = match most {
-                    Some(most) => format!("Input's: {}", fps_text(most)),
+                // as converting chooses it, and more would repeat the
+                // input's frames
+                let (average, base) = input_fps.unwrap_or_default();
+                let chosen = average.map(|fps| (fps * tempo).clamp(1.0, telegram::MAX_FPS));
+                let peak = match (average, base) {
+                    (Some(average), Some(base)) => Some(average.max(base)),
+                    (average, base) => average.or(base),
+                };
+                let most = peak.map(|fps| (fps * tempo).clamp(1.0, telegram::MAX_FPS));
+                let automatic = match chosen {
+                    Some(chosen) => format!("Input's: {}", fps_text(chosen)),
                     None => format!("Input's, at most {}", fps_text(telegram::MAX_FPS)),
                 };
                 label(

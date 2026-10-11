@@ -43,7 +43,9 @@ pub(crate) fn video_filter(plan: &Plan, fps: f64, length: f64, pix_fmt: &str) ->
     let (sw, sh) = (plan.scaled_width, plan.scaled_height);
     let mut filters = Vec::new();
     if plan.tempo != 1.0 {
-        filters.push(format!("setpts=(PTS-STARTPTS)/{}", num(plan.tempo)));
+        // in a fine time base, as a coarse one like 1/25 rounds frames
+        // played faster onto each other
+        filters.extend(["settb=AVTB".into(), format!("setpts=(PTS-STARTPTS)/{}", num(plan.tempo))]);
     }
     filters.extend([
         format!("fps={}", num(fps)),

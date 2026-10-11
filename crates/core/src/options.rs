@@ -490,7 +490,7 @@ pub const MAX_ATTEMPTS: u32 = 50;
 pub const DEFAULT_CRF: u8 = 32;
 pub const DEFAULT_FAKE_DURATION: f64 = 0.42069;
 /// The slowest and fastest tempos, for WebM and .tgs alike.
-pub const TEMPOS: std::ops::RangeInclusive<f64> = 0.1..=10.0;
+pub const TEMPOS: std::ops::RangeInclusive<f64> = tgradish_tgs::normalise::TEMPOS;
 
 #[cfg(test)]
 mod tests {

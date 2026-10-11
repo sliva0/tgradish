@@ -128,6 +128,7 @@ pub(crate) fn probe(input: &Path, cancel: &CancelToken) -> Result<Probe> {
         width: width.round() as u32,
         height: height.round() as u32,
         fps: ratio(stream.avg_frame_rate()).or_else(|| ratio(stream.rate())),
+        base_fps: ratio(stream.rate()),
         duration,
         alpha: pix_fmt_has_alpha(&pix_fmt) || webm_alpha,
         still_image,
