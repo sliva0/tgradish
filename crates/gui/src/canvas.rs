@@ -148,25 +148,17 @@ const LEAST_SHARE: f32 = 0.75;
 /// input shrinks least to make room, as large as fits there and at most a
 /// share of the view. The input shrinks by up to a quarter to give it
 /// [`SMALLEST_INSET`]; where even that is too little, and when zoomed in,
-/// the small picture goes over the input's corner. `input` and `result`
-/// are their sizes in pixels, `label` the size of the small picture's
-/// label. Returns the input's area, and the small picture's area and room
-/// for [`Inset::show`].
-pub fn split(
-    view: Rect,
-    input: (u32, u32),
-    result: (u32, u32),
-    label: Vec2,
-    zoomed: bool,
-) -> (Rect, (Rect, Vec2)) {
+/// the small picture goes over the input's corner. `input` is the input's
+/// size in pixels, `label` the size of the small picture's longest label.
+///
+/// The room is a square, whatever shape the result has, so changing the
+/// crop never moves the input it is changed on. Returns the input's area,
+/// and the small picture's area and room for [`Inset::show`].
+pub fn split(view: Rect, input: (u32, u32), label: Vec2, zoomed: bool) -> (Rect, (Rect, Vec2)) {
     let most = vec2((view.width() * 0.34).max(110.0), (view.height() * 0.42).max(110.0));
     let over = (view, (view, most));
     let input = vec2(input.0.max(1) as f32, input.1.max(1) as f32);
-    let result = vec2(result.0.max(1) as f32, result.1.max(1) as f32);
-    let inset_in = |room: Vec2| {
-        let room = room.min(most).max(Vec2::ZERO);
-        result * (room.x / result.x).min(room.y / result.y)
-    };
+    let inset_in = |room: Vec2| Vec2::splat(room.min(most).max(Vec2::ZERO).min_elem());
     let fit =
         ((view.width() - 2.0 * MARGIN) / input.x).min((view.height() - 2.0 * MARGIN) / input.y);
     if zoomed || fit <= 0.0 {
@@ -241,9 +233,9 @@ pub enum Keep {
     Middle,
 }
 
-/// A crop held to an exact scale: its longer side `long` input pixels, the
-/// most the scale fits into the result, or all the picture has of them;
-/// its sides whole blocks of `step` pixels, which shrinking averages.
+/// A crop held to an exact scale: its longer side at most `long` input
+/// pixels, the most the scale fits into the result, and its sides whole
+/// blocks of `step` pixels, which shrinking averages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Exact {
     pub long: u32,
@@ -264,9 +256,9 @@ impl Exact {
         size.0.min(size.1) >= self.step
     }
 
-    /// `crop` held to this size within a `size` picture, its orientation
-    /// and shorter side kept where it can, or as `ratio` says; `keep` says
-    /// which edges stay put, across and down.
+    /// `crop` held to this size within a `size` picture: no larger than the
+    /// scale takes, in whole blocks, and as `ratio` says; `keep` says which
+    /// edges stay put, across and down.
     pub fn fit(
         self,
         crop: Crop,
@@ -286,7 +278,8 @@ impl Exact {
             let r = if landscape { r } else { 1.0 / r };
             (f64::from(room_short) * r).floor() as u32
         });
-        let long = blocks(self.long.min(room_long).min(shaped));
+        let current = if landscape { crop.width } else { crop.height };
+        let long = blocks(current.min(self.long).min(room_long).min(shaped));
         let wanted = match ratio {
             Some(r) => f64::from(long) / if landscape { r } else { 1.0 / r },
             None => f64::from(if landscape { crop.height } else { crop.width }),
@@ -758,7 +751,7 @@ mod exact_tests {
     #[test]
     fn holds_crops_to_an_exact_scale() {
         let size = (1920, 1080);
-        // twice as large: 256 on the longer side, any shorter one
+        // twice as large: at most 256 on the longer side
         let twice = Exact::of("2".parse().unwrap(), Target::Sticker).unwrap();
         assert_eq!((twice.long, twice.step), (256, 1));
         let crop = Crop { x: 100, y: 100, width: 300, height: 101 };
@@ -767,25 +760,31 @@ mod exact_tests {
         // a left edge dragged keeps the right one
         let end = (Keep::End, Keep::Start);
         assert_eq!(twice.fit(crop, end, None, size).unwrap().x, 144);
-        // three times: 170, which make 510, and margins fill the rest
+        // a smaller crop stays as it is: margins fill the rest
+        let small = Crop { width: 200, ..crop };
+        assert_eq!(twice.fit(small, start, None, size), Some(small));
+        // three times: at most 170, which make 510
         let thrice = Exact::of("3".parse().unwrap(), Target::Sticker).unwrap();
         assert_eq!(thrice.fit(crop, start, None, size), Some(Crop { width: 170, ..crop }));
-        // halved: 1024 on the longer side, both in whole 2x2 blocks
+        // halved: at most 1024 on the longer side, both in whole 2x2 blocks
         let half = Exact::of("1/2".parse().unwrap(), Target::Sticker).unwrap();
         let tall = Crop { x: 0, y: 0, width: 501, height: 1070 };
         assert_eq!(
             half.fit(tall, start, None, size),
             Some(Crop { width: 500, height: 1024, ..tall })
         );
-        // a shape kept: 16:9 at 1x is 512 x 288
+        // a shape kept, the crop resized within the most
         let one = Exact::of("1".parse().unwrap(), Target::Sticker).unwrap();
         let wide = one.fit(crop, start, Some(16.0 / 9.0), size).unwrap();
-        assert_eq!((wide.width, wide.height), (512, 288));
-        // a smaller picture gives what it has, in whole blocks
+        assert_eq!((wide.width, wide.height), (300, 169));
+        let full = Crop { x: 0, y: 0, width: 1920, height: 1080 };
+        let middle = one.fit(full, (Keep::Middle, Keep::Middle), Some(16.0 / 9.0), size).unwrap();
+        assert_eq!(middle, Crop { x: 704, y: 396, width: 512, height: 288 });
+        // in whole blocks, within a smaller picture
         let quarter = Exact::of("1/4".parse().unwrap(), Target::Emoji).unwrap();
         assert_eq!(
             quarter.fit(crop, start, Some(1.0), (390, 400)).map(|c| (c.width, c.height)),
-            Some((388, 388))
+            Some((300, 300))
         );
         assert_eq!(quarter.fit(crop, start, None, (3, 600)), None);
         // no pixel larger than the result

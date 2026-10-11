@@ -749,7 +749,7 @@ fn integer_scale(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>) {
         }
         if ui
             .radio(scale.is_some(), "Fixed")
-            .on_hover_text("This scale, the crop held to what it fits into the result")
+            .on_hover_text("This scale; the crop can be at most what it fits into the result")
             .clicked()
             && scale.is_none()
         {
