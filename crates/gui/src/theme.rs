@@ -21,9 +21,6 @@ struct Scheme {
     /// Foreground inactive: weaker text.
     inactive: Color32,
     link: Color32,
-    /// Selection's alternate background, which Breeze puts under normal
-    /// text, for Breeze's accent.
-    selected: Color32,
 }
 
 const LIGHT: Scheme = Scheme {
@@ -35,7 +32,6 @@ const LIGHT: Scheme = Scheme {
     text: Color32::from_rgb(35, 38, 41),
     inactive: Color32::from_rgb(112, 125, 138),
     link: Color32::from_rgb(41, 128, 185),
-    selected: Color32::from_rgb(163, 212, 250),
 };
 
 const DARK: Scheme = Scheme {
@@ -47,7 +43,6 @@ const DARK: Scheme = Scheme {
     text: Color32::from_rgb(252, 252, 252),
     inactive: Color32::from_rgb(161, 169, 177),
     link: Color32::from_rgb(29, 153, 243),
-    selected: Color32::from_rgb(30, 87, 116),
 };
 
 /// Text that says how things went, the same in both schemes.
@@ -57,6 +52,10 @@ pub const NEGATIVE: Color32 = Color32::from_rgb(218, 68, 83);
 
 /// Breeze's frame radius, for buttons, fields and dialogs.
 const RADIUS: u8 = 5;
+
+/// How much of the accent Breeze lets through where it marks something,
+/// as opacity or as a mix (its `Blend_Value`).
+const BLEND: f32 = 0.3;
 
 /// `from` moved `amount` of the way to `to`.
 fn mix(from: Color32, to: Color32, amount: f32) -> Color32 {
@@ -69,14 +68,28 @@ fn mix(from: Color32, to: Color32, amount: f32) -> Color32 {
     )
 }
 
-/// The background of selected things under normal text: Breeze's own for
-/// its accent, and as Breeze makes it for others.
-fn selected(scheme: &Scheme, dark: bool, accent: Color32) -> Color32 {
-    match (accent == BREEZE_ACCENT, dark) {
-        (true, _) => scheme.selected,
-        (false, true) => mix(accent, Color32::BLACK, 0.5),
-        (false, false) => mix(accent, Color32::WHITE, 0.5),
-    }
+/// `accent` at `opacity`, over whatever is under it, as Breeze lays it on
+/// what it highlights.
+pub fn tint(accent: Color32, opacity: f32) -> Color32 {
+    let alpha = (opacity * 255.0).round() as u8;
+    Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), alpha)
+}
+
+/// The accent of `visuals`, which hovered widgets are outlined in.
+pub fn accent(visuals: &egui::Visuals) -> Color32 {
+    visuals.widgets.hovered.bg_stroke.color
+}
+
+/// The outline of what is on: half the accent, as Breeze outlines a
+/// dialog's default button.
+pub fn on_outline(visuals: &egui::Visuals) -> Stroke {
+    Stroke::new(1.0, mix(accent(visuals), visuals.widgets.inactive.bg_stroke.color, 0.5))
+}
+
+/// `button` as the one to press, like Breeze's default button: its
+/// colour mixed a fifth of the way to the accent.
+pub fn primary<'a>(visuals: &egui::Visuals, button: egui::Button<'a>) -> egui::Button<'a> {
+    button.fill(mix(visuals.widgets.inactive.weak_bg_fill, accent(visuals), 0.2))
 }
 
 /// The background of stages pictures are shown on.
@@ -100,17 +113,18 @@ pub fn visuals(dark: bool, accent: Color32) -> egui::Visuals {
         corner_radius: radius,
         expansion: 0.0,
     };
+    // hovering outlines in the accent; pressing mixes it in
     let hover = Stroke::new(1.0, accent);
     visuals.widgets = egui::style::Widgets {
         noninteractive: state(scheme.window, scheme.window, Stroke::new(1.0, separator)),
         // fill for checkboxes and the like, weak fill for buttons
         inactive: state(scheme.view, scheme.button, Stroke::new(1.0, outline)),
-        hovered: state(scheme.view, mix(scheme.button, accent, 0.12), hover),
-        active: state(scheme.view, mix(scheme.button, accent, 0.3), hover),
-        open: state(scheme.view, mix(scheme.button, accent, 0.12), hover),
+        hovered: state(scheme.view, scheme.button, hover),
+        active: state(scheme.view, mix(scheme.button, accent, BLEND), hover),
+        open: state(scheme.view, scheme.button, hover),
     };
     visuals.selection = egui::style::Selection {
-        bg_fill: selected(scheme, dark, accent),
+        bg_fill: tint(accent, BLEND),
         stroke: Stroke::new(1.0, scheme.text),
     };
     visuals.weak_text_color = Some(scheme.inactive);
@@ -159,11 +173,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn makes_selections_like_breeze() {
-        // Breeze's own for its accent; others the way Breeze Dark's is made
-        assert_eq!(selected(&DARK, true, BREEZE_ACCENT), DARK.selected);
-        assert_eq!(mix(BREEZE_ACCENT, Color32::BLACK, 0.5), Color32::from_rgb(31, 87, 117));
+    fn lays_on_the_accent_like_breeze() {
         let orange = Color32::from_rgb(246, 116, 0);
-        assert_eq!(selected(&LIGHT, false, orange), Color32::from_rgb(251, 186, 128));
+        for (dark, scheme) in [(false, &LIGHT), (true, &DARK)] {
+            let visuals = visuals(dark, orange);
+            assert_eq!(accent(&visuals), orange);
+            // selections let 30% of it through, over what is under them
+            assert_eq!(visuals.selection.bg_fill, Color32::from_rgba_unmultiplied(246, 116, 0, 77));
+            // pressed buttons mix it in; hovered ones only outline in it
+            assert_eq!(visuals.widgets.active.weak_bg_fill, mix(scheme.button, orange, 0.3));
+            assert_eq!(visuals.widgets.hovered.weak_bg_fill, scheme.button);
+        }
     }
 }

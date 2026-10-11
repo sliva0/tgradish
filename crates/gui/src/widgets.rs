@@ -139,8 +139,7 @@ pub fn segments<T: PartialEq + Copy>(
                 .corner_radius(corners)
                 .min_size(vec2(0.0, height));
             button = if selected {
-                // outlined in the accent, as Breeze marks what is on
-                button.stroke(ui.visuals().widgets.hovered.bg_stroke)
+                button.stroke(theme::on_outline(ui.visuals()))
             } else {
                 button.frame_when_inactive(true)
             };

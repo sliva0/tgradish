@@ -1053,7 +1053,7 @@ impl App {
     fn empty(&mut self, ui: &mut egui::Ui) {
         let zone = ui.max_rect().shrink(28.0);
         let colour = if self.hovering {
-            ui.visuals().selection.stroke.color
+            theme::accent(ui.visuals())
         } else {
             ui.visuals().widgets.noninteractive.bg_stroke.color
         };
@@ -1083,8 +1083,8 @@ impl App {
                 let width = 400.0;
                 ui.add_space((ui.available_width() - width).max(0.0) / 2.0);
                 let add = egui::Button::new(RichText::new("Add files…").strong())
-                    .min_size(vec2(130.0, 34.0))
-                    .fill(ui.visuals().selection.bg_fill);
+                    .min_size(vec2(130.0, 34.0));
+                let add = theme::primary(ui.visuals(), add);
                 if ui.add(add).clicked() {
                     self.pick_files();
                 }
@@ -1221,7 +1221,7 @@ impl App {
                         .min_size(vec2(140.0, 32.0))
                         .shortcut_text("Ctrl+Enter");
                     if !current {
-                        button = button.fill(ui.visuals().selection.bg_fill);
+                        button = theme::primary(ui.visuals(), button);
                     }
                     let hint = if current {
                         "Makes it again with the same settings"
@@ -1808,10 +1808,15 @@ fn row(
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(vec2(width, THUMB + 12.0), egui::Sense::click());
     let visuals = ui.visuals();
+    // as Breeze marks items: the accent let through, more for the
+    // selected one, which is outlined in it too
+    let accent = theme::accent(visuals);
     if selected {
         ui.painter().rect_filled(rect, 6.0, visuals.selection.bg_fill);
+        let outline = egui::Stroke::new(1.0, accent);
+        ui.painter().rect_stroke(rect, 6.0, outline, egui::StrokeKind::Inside);
     } else if response.hovered() {
-        ui.painter().rect_filled(rect, 6.0, visuals.widgets.hovered.weak_bg_fill);
+        ui.painter().rect_filled(rect, 6.0, theme::tint(accent, 0.15));
     }
     let inner = rect.shrink2(vec2(6.0, 6.0));
     let input = egui::Rect::from_min_size(inner.min, vec2(THUMB, THUMB));
@@ -1999,7 +2004,7 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
         (Some((job, ..)), _) if job.is_running() => {
             ui.add_space(3.0);
             let size = vec2(ui.available_width(), 6.0);
-            let colour = ui.visuals().selection.bg_fill;
+            let colour = theme::accent(ui.visuals());
             widgets::bar_sized(ui, size, job.progress.overall(), "", colour);
         }
         (Some(_), _) => {
@@ -2117,7 +2122,8 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
         return;
     }
     let progress = &job.progress;
-    let running = ui.visuals().selection.bg_fill;
+    // the accent, half let through, so the text over it stays readable
+    let running = theme::tint(theme::accent(ui.visuals()), 0.5);
     let done = widgets::GOOD.gamma_multiply(0.45);
     if let Some(stage) = progress.tgs {
         use jobs::TgsStage;
