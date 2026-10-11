@@ -3,7 +3,7 @@
 
 use eframe::egui::{self, CursorIcon, PointerButton, Rect, Sense, Shape, Stroke, pos2, vec2};
 
-use crate::widgets;
+use crate::{theme, widgets};
 
 /// What the timeline changes.
 pub struct Timeline<'a> {
@@ -140,8 +140,7 @@ fn bar(
     let (from, to) = part(length, *start, *used);
     let painter = ui.painter_at(rect);
     let visuals = ui.visuals();
-    let accent = visuals.selection.bg_fill;
-    painter.rect_filled(track, 3.0, accent.gamma_multiply(0.55));
+    painter.rect_filled(track, 3.0, theme::tint(theme::accent(visuals), 0.5));
     // the unused parts, dimmed
     painter.rect_filled(
         Rect::from_min_max(track.min, pos2(x_of(from), track.max.y)),
@@ -224,11 +223,7 @@ pub fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &mut bool
         let x = track.left() + (*time / length) as f32 * track.width();
         let played = Rect::from_min_max(track.min, pos2(x, track.max.y));
         // clipped rather than shrunk, so the start of the bar keeps its shape
-        ui.painter_at(played).rect_filled(
-            track,
-            3.0,
-            visuals.selection.bg_fill.gamma_multiply(0.7),
-        );
+        ui.painter_at(played).rect_filled(track, 3.0, theme::tint(theme::accent(visuals), 0.5));
         painter.circle_filled(pos2(x, track.center().y), 6.0, visuals.strong_text_color());
         ui.label(text);
     });
