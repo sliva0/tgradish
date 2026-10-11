@@ -31,11 +31,11 @@ impl Inspection {
             match still::inspect_file(path) {
                 Ok(info) => {
                     let target = info.target();
-                    let problems =
-                        telegram::check_still(info.width, info.height, info.bytes, target)
-                            .iter()
-                            .map(|issue| Problem { refused: true, text: issue.to_string() })
-                            .collect();
+                    let problems = info
+                        .issues(target)
+                        .iter()
+                        .map(|issue| Problem { refused: true, text: issue.to_string() })
+                        .collect();
                     (Found::Image { info, target }, problems)
                 }
                 Err(err) => (Found::Failed(err.to_string()), Vec::new()),

@@ -165,7 +165,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
             match still::inspect_file(path) {
                 Ok(info) => {
                     let target = args.target.map_or_else(|| info.target(), Into::into);
-                    let issues = telegram::check_still(info.width, info.height, info.bytes, target);
+                    let issues = info.issues(target);
                     if ctx.global.json {
                         let line = json!({
                             "file": path, "format": "image", "target": target,
