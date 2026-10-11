@@ -1,0 +1,18 @@
+[package]
+name = "tgradish-corpus"
+description = "Synthetic pixel art and video clips for tgradish's tests and benchmarks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+flate2.workspace = true
+gif.workspace = true
+image.workspace = true
+png.workspace = true
+
+[lints]
+workspace = true

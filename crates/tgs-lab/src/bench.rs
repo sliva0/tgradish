@@ -1,5 +1,8 @@
-//! Runs the corpus through the encoder and compares sizes with pixelart2tgs
-//! 1.x (the "1.x now" column of the corpus README).
+//! Runs pixel art through the encoder: the synthetic corpus of
+//! `tgradish-corpus`, or the GIF, WebP and Aseprite files of a folder. A
+//! folder's `README.md` may give older sizes to compare with, in a
+//! Markdown table with the file name in backticks in its first column and
+//! the size in its seventh, like pixelart2tgs 1.x's.
 
 use std::path::Path;
 use std::time::Instant;
@@ -27,7 +30,7 @@ pub struct Bench {
     pub against: Option<std::path::PathBuf>,
 }
 
-/// "1.x now" sizes by file name, from the README's table.
+/// Older sizes by file name, from a README's table.
 fn sizes_from_1x(readme: &str) -> Vec<(String, u64)> {
     readme
         .lines()
@@ -39,17 +42,39 @@ fn sizes_from_1x(readme: &str) -> Vec<(String, u64)> {
         .collect()
 }
 
-pub fn run(dir: &Path, bench: &Bench) -> Result<()> {
+/// Files by name, with their bytes.
+type Files = Vec<(String, Vec<u8>)>;
+
+/// The files of `dir`, and the older sizes its README gives.
+fn folder(dir: &Path) -> Result<(Files, Vec<(String, u64)>)> {
     let readme = std::fs::read_to_string(dir.join("README.md")).unwrap_or_default();
-    let reference = sizes_from_1x(&readme);
-    let mut files: Vec<_> = std::fs::read_dir(dir)
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
         .with_context(|| format!("cannot read {}", dir.display()))?
         .map(|entry| entry.map(|entry| entry.path()))
         .collect::<Result<_, _>>()?;
-    files.retain(|path| {
+    paths.retain(|path| {
         matches!(path.extension().and_then(|e| e.to_str()), Some("gif" | "webp" | "ase"))
     });
-    files.sort();
+    paths.sort();
+    let files = paths
+        .iter()
+        .map(|path| {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            Ok((name, std::fs::read(path)?))
+        })
+        .collect::<Result<_>>()?;
+    Ok((files, sizes_from_1x(&readme)))
+}
+
+/// Benchmarks the files of `dir`, or the synthetic corpus without one.
+pub fn run(dir: Option<&Path>, bench: &Bench) -> Result<()> {
+    let (files, reference) = match dir {
+        Some(dir) => folder(dir)?,
+        None => {
+            let corpus = tgradish_corpus::files().into_iter();
+            (corpus.map(|file| (file.name, file.bytes)).collect(), Vec::new())
+        }
+    };
 
     let earlier: Vec<(String, u64)> = match &bench.against {
         Some(path) => std::fs::read_to_string(path)
@@ -79,11 +104,10 @@ pub fn run(dir: &Path, bench: &Bench) -> Result<()> {
     );
     let (mut ours, mut theirs, mut over) = (0u64, 0u64, 0);
     let (mut misses, mut leaks, mut fringes) = (0, 0, 0);
-    for path in &files {
-        let name = path.file_name().unwrap().to_string_lossy();
+    let mut total = 0u64;
+    for (name, bytes) in &files {
         let started = Instant::now();
-        let input = decode(&std::fs::read(path)?, &DecodeOptions::default())
-            .with_context(|| name.to_string())?;
+        let input = decode(bytes, &DecodeOptions::default()).with_context(|| name.clone())?;
         let (anim, _) = normalise(&input, &Options::default())?;
         let name_tag = Some("tgradish".to_owned());
         let score = |scene: &tgradish_tgs::scene::Scene| {
@@ -91,8 +115,7 @@ pub fn run(dir: &Path, bench: &Bench) -> Result<()> {
                 lay_out(scene, &anim, name_tag.clone()).to_json(bench.style).as_bytes(),
             )
         };
-        let scene =
-            painter(&anim, &bench.settings, Some(&score)).with_context(|| name.to_string())?;
+        let scene = painter(&anim, &bench.settings, Some(&score)).with_context(|| name.clone())?;
         let json = lay_out(&scene, &anim, name_tag.clone()).to_json(bench.style);
         let packed = if bench.fast {
             use std::io::Write;
@@ -111,10 +134,11 @@ pub fn run(dir: &Path, bench: &Bench) -> Result<()> {
             .flat_map(|layer| &layer.groups)
             .map(|group| group.shapes.len())
             .sum();
-        let old = reference.iter().find(|(file, _)| *file == name).map(|(_, size)| *size);
+        total += packed.len() as u64;
+        let old = reference.iter().find(|(file, _)| file == name).map(|(_, size)| *size);
         let ratio = old.map(|old| format!("{:.2}", old as f64 / packed.len() as f64));
         saved.push_str(&format!("{name}\t{}\n", packed.len()));
-        let change = earlier.iter().find(|(file, _)| *file == name).map(|&(_, then)| {
+        let change = earlier.iter().find(|(file, _)| file == name).map(|&(_, then)| {
             now_total += packed.len() as u64;
             then_total += then;
             format!("  {:+.1}%", (packed.len() as f64 / then as f64 - 1.0) * 100.0)
@@ -152,10 +176,14 @@ pub fn run(dir: &Path, bench: &Bench) -> Result<()> {
             }
         }
     }
-    println!(
-        "total: {ours} bytes against {theirs} for 1.x ({:.2}x smaller); {over} over 64 KiB",
-        theirs as f64 / ours.max(1) as f64
-    );
+    if theirs > 0 {
+        println!(
+            "total: {ours} bytes against {theirs} for 1.x ({:.2}x smaller); {over} over 64 KiB",
+            theirs as f64 / ours.max(1) as f64
+        );
+    } else {
+        println!("total: {total} bytes; {over} over 64 KiB");
+    }
     if bench.verify {
         println!("rendered: {misses} wrong cells, {leaks} leaks, {fringes} fringes");
     }

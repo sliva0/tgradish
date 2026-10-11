@@ -1,7 +1,6 @@
 //! End-to-end conversions with a real ffmpeg, through every backend: the
 //! system ffmpeg and, with the `linked` feature, the built-in one. Skipped
-//! when ffmpeg is not on PATH, since it also makes test input; tests using
-//! `references/` media skip when it is missing.
+//! when ffmpeg is not on PATH, since it also makes test input.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -13,6 +12,7 @@ use tgradish_core::ffmpeg::{self, CancelToken, FfmpegChoice};
 use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Speed};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::{Error, webm};
+use tgradish_corpus::Clip;
 
 /// Backends to test, or `None` without a system ffmpeg.
 fn backends() -> Option<Vec<Backend>> {
@@ -27,13 +27,10 @@ fn backends() -> Option<Vec<Backend>> {
     Some(backends)
 }
 
-fn reference(name: &str) -> Option<PathBuf> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../references").join(name);
-    if !path.exists() {
-        eprintln!("skipped: needs references/{name}");
-        return None;
-    }
-    Some(path)
+/// A clip like phone footage, made once with ffmpeg and kept for later
+/// runs.
+fn clip(kind: Clip) -> Option<PathBuf> {
+    tgradish_corpus::clip(kind, Path::new(env!("CARGO_TARGET_TMPDIR")))
 }
 
 fn fast(fit: Fit) -> Options {
@@ -63,7 +60,7 @@ fn name(backend: &Backend) -> &'static str {
 
 #[test]
 fn converts_short_clip_without_spoofing() {
-    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     for backend in &backends {
         let dir = tempfile::tempdir().unwrap();
         let request = Request {
@@ -93,7 +90,7 @@ fn converts_short_clip_without_spoofing() {
 
 #[test]
 fn fits_emoji_into_their_smaller_limit() {
-    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     for backend in &backends {
         let dir = tempfile::tempdir().unwrap();
         let request = Request {
@@ -117,12 +114,12 @@ fn fits_emoji_into_their_smaller_limit() {
 
 #[test]
 fn converts_long_clip_with_spoofing() {
-    let (Some(backends), Some(input)) = (backends(), reference("pig.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Tall)) else { return };
     for backend in &backends {
         let dir = tempfile::tempdir().unwrap();
         let request = Request {
             output: Some(dir.path().join("out.webm")),
-            options: Options { title: Some("pig".into()), ..fast(Fit::Bitrate) },
+            options: Options { title: Some("tall".into()), ..fast(Fit::Bitrate) },
             ..Request::new(input.clone())
         };
         let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
@@ -132,13 +129,13 @@ fn converts_long_clip_with_spoofing() {
         assert!(outcome.issues.is_empty(), "{name}: {:?}", outcome.issues);
         let info = webm::inspect_file(&outcome.output).unwrap();
         let video = info.video.unwrap();
-        // 258x320 source scaled so the long side is 512
+        // 258x320 scaled so the long side is 512
         assert_eq!((video.width, video.height), (412, 512), "{name}");
         // ffmpeg 6.0's fps filter leaves out the last frame
         assert!((315..=316).contains(&info.video_frames), "{name}: {}", info.video_frames);
         assert!(info.header_duration.unwrap() < 1.0);
         assert!(info.content_duration.unwrap() > 12.0);
-        assert_eq!(info.title.as_deref(), Some("pig"), "{name}");
+        assert_eq!(info.title.as_deref(), Some("tall"), "{name}");
         // fitting got close to the limit
         assert!(outcome.bytes as f64 > telegram::MAX_STICKER_BYTES as f64 * 0.9, "{name}");
     }
@@ -146,7 +143,7 @@ fn converts_long_clip_with_spoofing() {
 
 #[test]
 fn starts_at_offset() {
-    let (Some(backends), Some(input)) = (backends(), reference("pig.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Tall)) else { return };
     for backend in &backends {
         let dir = tempfile::tempdir().unwrap();
         let request = Request {
@@ -162,7 +159,7 @@ fn starts_at_offset() {
 
 #[test]
 fn previews_results() {
-    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("preview.webm");
     let request = Request {
@@ -193,7 +190,7 @@ fn previews_results() {
 
 #[test]
 fn decodes_frames_of_a_part_of_a_video() {
-    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     let request =
         FramesRequest { start: 1.0, length: Some(1.0), fps: 10.0, max_side: 200, max_frames: 5 };
     let mut decoded = Vec::new();
@@ -424,7 +421,7 @@ fn pads_pictures_of_odd_size_whole() {
 
 #[test]
 fn rejects_contain_for_emoji() {
-    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     let request = Request {
         options: Options {
             target: Some(Target::Emoji),
@@ -441,7 +438,7 @@ fn rejects_contain_for_emoji() {
 
 #[test]
 fn cancels_running_conversion() {
-    let (Some(backends), Some(input)) = (backends(), reference("pig.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Tall)) else { return };
     for backend in &backends {
         let dir = tempfile::tempdir().unwrap();
         let output = dir.path().join("out.webm");
@@ -464,7 +461,7 @@ fn cancels_running_conversion() {
 
 #[test]
 fn stays_under_three_seconds_without_spoofing() {
-    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     for backend in &backends {
         let dir = tempfile::tempdir().unwrap();
         let request = Request {
@@ -489,7 +486,7 @@ fn stays_under_three_seconds_without_spoofing() {
 
 #[test]
 fn plays_at_a_tempo() {
-    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     for backend in &backends {
         let dir = tempfile::tempdir().unwrap();
         let request = Request {
@@ -509,7 +506,7 @@ fn plays_at_a_tempo() {
 
 #[test]
 fn cancelled_before_start_runs_nothing() {
-    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     for backend in &backends {
         let cancel = CancelToken::new();
         cancel.cancel();
@@ -565,7 +562,7 @@ fn ssim_penalizes_dropped_frames() {
 /// Both backends should produce the same probe results and similar files.
 #[test]
 fn backends_agree() {
-    let (Some(backends), Some(input)) = (backends(), reference("pig.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Tall)) else { return };
     if backends.len() < 2 {
         return;
     }
@@ -623,16 +620,16 @@ fn first_frames(backends: &[Backend], input: &Path, options: Options) -> Vec<Vec
 
 #[test]
 fn handles_offset_and_missing_timestamps() {
-    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     let dir = tempfile::tempdir().unwrap();
-    let ts = dir.path().join("uhh.ts");
-    let raw = dir.path().join("uhh.h264");
+    let ts = dir.path().join("clip.ts");
+    let raw = dir.path().join("clip.h264");
     let input = input.to_str().unwrap();
     // MPEG-TS starts at a non-zero timestamp, raw H.264 has none
     make(&["-i", input, "-c", "copy", "-f", "mpegts", ts.to_str().unwrap()]);
     make(&["-i", input, "-c", "copy", "-bsf:v", "h264_mp4toannexb", raw.to_str().unwrap()]);
 
-    // seeking into these needs keyframes, which uhh.mp4 only has at the
+    // seeking into these needs keyframes, which the clip only has at its
     // start; the ffmpeg command line decodes nothing after such a seek too
     for path in [&ts, &raw] {
         for backend in &backends {
@@ -652,7 +649,7 @@ fn handles_offset_and_missing_timestamps() {
 
 #[test]
 fn applies_display_matrix_like_ffmpeg() {
-    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     let dir = tempfile::tempdir().unwrap();
     let cases: [(&str, &[&str]); 3] = [
         ("hflip", &["-display_hflip"]),
@@ -671,7 +668,8 @@ fn applies_display_matrix_like_ffmpeg() {
         assert_ne!(probes[0].orientation, ffmpeg::Orientation::Normal, "{name}");
         assert!(probes.windows(2).all(|p| p[0] == p[1]), "{name}: {probes:?}");
 
-        let frames = first_frames(&backends, &turned, Options { crf: Some(10), ..fast(Fit::Off) });
+        // good enough to compare, small enough for a sticker
+        let frames = first_frames(&backends, &turned, Options { crf: Some(24), ..fast(Fit::Off) });
         for frame in &frames[1..] {
             let diff = difference(&frames[0], frame);
             assert!(diff < 4.0, "{name}: backends differ by {diff}");
@@ -718,7 +716,7 @@ fn uses_first_video_stream() {
 
 #[test]
 fn passes_encoder_options() {
-    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     let with = |name: &str, value: &str| Options {
         length: Some(0.5),
         encoder_options: Some([(name.to_string(), value.to_string())].into()),
@@ -759,7 +757,7 @@ fn builtin_backend_rejects_fifos() {
 #[cfg(feature = "linked")]
 #[test]
 fn builtin_backend_rejects_extra_args() {
-    let Some(input) = reference("uhh.mp4") else { return };
+    let Some(input) = clip(Clip::Square) else { return };
     let request = Request {
         options: Options {
             extra_args: Some(vec!["-tune-content".into(), "screen".into()]),
@@ -773,7 +771,7 @@ fn builtin_backend_rejects_extra_args() {
 
 #[test]
 fn makes_image_stickers_from_a_frame() {
-    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     let mut pictures = Vec::new();
     for backend in &backends {
         let dir = tempfile::tempdir().unwrap();

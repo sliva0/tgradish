@@ -23,5 +23,8 @@ schema = ["dep:schemars"]
 # Fitting tries its candidates in threads of their own
 threads = []
 
+[dev-dependencies]
+tgradish-corpus.workspace = true
+
 [lints]
 workspace = true

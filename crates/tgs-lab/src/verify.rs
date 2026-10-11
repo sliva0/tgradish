@@ -533,14 +533,11 @@ mod tests {
 
     #[test]
     fn baseline_matches_the_corpus() {
-        let dir =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../references/pixelart");
-        for name in ["Ralsei_battle_start.gif", "ralsei_fat_blunt.webp", "animation_hammer.gif"] {
-            let Ok(bytes) = std::fs::read(dir.join(name)) else {
-                eprintln!("skipped: needs references/pixelart/{name}");
-                return;
-            };
-            let input = tgradish_tgs::frames::decode(&bytes, &Default::default()).unwrap();
+        // outlined art, partial alpha, and a large canvas at 4x
+        let files = tgradish_corpus::files();
+        for name in ["walker.gif", "glow.webp", "hammer_4x.gif"] {
+            let bytes = &files.iter().find(|file| file.name == name).unwrap().bytes;
+            let input = tgradish_tgs::frames::decode(bytes, &Default::default()).unwrap();
             let (anim, _) = normalise(&input, &Options::default()).unwrap();
             let scene = tgradish_tgs::encode::runs(&anim);
             let json = lay_out(&scene, &anim, None).to_json(Style::default());

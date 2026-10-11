@@ -1,114 +1,98 @@
-//! Decodes the pixel art corpus in `references/pixelart` (see its README).
-//! Skipped when the local `references/` folder is missing.
+//! Decodes the synthetic pixel art of `tgradish-corpus` in each format it
+//! is written in, and finds the frames and timing it was drawn with.
 
-use std::path::{Path, PathBuf};
+use std::collections::BTreeSet;
 use std::time::Duration;
 
+use tgradish_corpus::{File, Sprite, encode};
 use tgradish_frames::{
     Animation, DecodeOptions, Error, Limits, Sheet, decode, sequence, sprite_sheet,
 };
 
-fn reference(name: &str) -> Option<PathBuf> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../references/pixelart").join(name);
-    if !path.exists() {
-        eprintln!("skipped: needs references/pixelart/{name}");
-        return None;
-    }
-    Some(path)
+fn file(name: &str) -> File {
+    tgradish_corpus::files().into_iter().find(|file| file.name == name).unwrap()
 }
 
-fn open(path: &Path) -> Animation {
-    decode(&std::fs::read(path).unwrap(), &DecodeOptions::default())
-        .unwrap_or_else(|err| panic!("{}: {err}", path.display()))
-}
-
-#[test]
-fn decodes_every_file() {
-    let Some(dir) = reference("") else { return };
-    let mut count = 0;
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        if matches!(path.extension().and_then(|e| e.to_str()), Some("gif" | "webp" | "ase")) {
-            assert!(open(&path).frames().len() > 1, "{} is animated", path.display());
-            count += 1;
-        }
-    }
-    assert!(count >= 60, "{count} files");
-}
-
-#[test]
-fn reads_sizes_and_timing() {
-    // (file, width, height, frames, milliseconds) as in the README
-    let expected = [
-        ("Kris_battle.gif", 92, 94, 30, 3000),
-        ("animation_king_circle.gif", 44, 83, 43, 9850),
-        ("animation_hammer.gif", 417, 277, 7, 580),
-        // 5 frames of 170 ms, partial alpha
-        ("ralsei_fat_blunt.webp", 48, 48, 5, 850),
-    ];
-    for (name, width, height, frames, ms) in expected {
-        let Some(path) = reference(name) else { return };
-        let animation = open(&path);
-        assert_eq!(
-            (animation.width(), animation.height(), animation.frames().len()),
-            (width, height, frames),
-            "{name}"
-        );
-        assert_eq!(animation.duration(), Duration::from_millis(ms), "{name}");
-    }
+fn open(file: &File) -> Animation {
+    decode(&file.bytes, &DecodeOptions::default())
+        .unwrap_or_else(|err| panic!("{}: {err}", file.name))
 }
 
 /// Transparent pixels compare equal whatever colour they carry.
-fn visible(animation: &Animation, frame: usize) -> Vec<[u8; 4]> {
-    animation.frames()[frame]
-        .rgba
-        .as_chunks::<4>()
+fn visible(rgba: &[u8]) -> Vec<[u8; 4]> {
+    rgba.as_chunks::<4>()
         .0
         .iter()
         .map(|&pixel| if pixel[3] == 0 { [0; 4] } else { pixel })
         .collect()
 }
 
-#[test]
-fn aseprite_matches_its_gif() {
-    let (Some(ase), Some(gif)) = (reference("Kris_battle.ase"), reference("Kris_battle.gif"))
-    else {
-        return;
-    };
-    let gif_bytes = std::fs::read(&gif).unwrap();
-    let (ase, gif) = (open(&ase), open(&gif));
-    assert_eq!((ase.width(), ase.height()), (gif.width(), gif.height()));
-    assert_eq!(ase.frames().len(), gif.frames().len());
-    for index in 0..ase.frames().len() {
-        assert!(visible(&ase, index) == visible(&gif, index), "frame {index} differs");
-        // GIF delays are in centiseconds
-        let (a, g) = (ase.frames()[index].duration, gif.frames()[index].duration);
-        assert!(a.abs_diff(g) < Duration::from_millis(10), "frame {index}: {a:?} vs {g:?}");
+/// Checks that `animation` has the frames of `sprite` from `first`, and
+/// their timing.
+fn assert_frames(animation: &Animation, sprite: &Sprite, first: usize, what: &str) {
+    let (width, height) = sprite.size();
+    assert_eq!((animation.width(), animation.height()), (width, height), "{what}");
+    let expected = sprite.frames[first..].iter().zip(&sprite.delays[first..]);
+    for (index, (frame, (canvas, &delay))) in animation.frames().iter().zip(expected).enumerate() {
+        assert!(visible(&frame.rgba) == visible(&canvas.rgba), "{what}: frame {index} differs");
+        assert_eq!(frame.duration, Duration::from_millis(delay.into()), "{what}: frame {index}");
     }
+}
+
+#[test]
+fn decodes_every_format() {
+    let files = tgradish_corpus::files();
+    let extensions: BTreeSet<&str> =
+        files.iter().filter_map(|file| file.name.rsplit_once('.')).map(|(_, e)| e).collect();
+    assert_eq!(extensions, BTreeSet::from(["ase", "gif", "png", "webp"]));
+    for file in &files {
+        let animation = open(file);
+        assert_eq!(animation.frames().len(), file.sprite.frames.len(), "{}", file.name);
+        assert_frames(&animation, &file.sprite, 0, &file.name);
+    }
+}
+
+#[test]
+fn plays_aseprite_tags() {
+    let ase = file("walker_2x.ase");
     let tagged = DecodeOptions { tag: Some("idle".into()), ..DecodeOptions::default() };
-    assert_eq!(decode(&gif_bytes, &tagged), Err(Error::TagWithoutAseprite));
+    let idle = decode(&ase.bytes, &tagged).unwrap();
+    assert_eq!(idle.frames().len(), 2);
+    assert_frames(&idle, &ase.sprite, 0, "idle");
+    let missing = DecodeOptions { tag: Some("run".into()), ..DecodeOptions::default() };
+    assert!(matches!(decode(&ase.bytes, &missing), Err(Error::NoSuchTag { .. })));
+    // only Aseprite files have tags
+    assert_eq!(decode(&file("walker_2x.gif").bytes, &tagged), Err(Error::TagWithoutAseprite));
 }
 
 #[test]
 fn joins_image_sequences() {
-    let Some(dir) = reference("sequences/kris_dance") else { return };
-    let files: Vec<Vec<u8>> =
-        (1..=4).map(|n| std::fs::read(dir.join(format!("{n}.png"))).unwrap()).collect();
+    let [(_, steps), (_, wave)] = tgradish_corpus::sequences();
+    let files: Vec<Vec<u8>> = steps.iter().map(encode::png).collect();
     let animation =
         sequence(files.iter().map(Vec::as_slice), Duration::from_millis(200), &Limits::default())
             .unwrap();
     assert_eq!((animation.width(), animation.height()), (27, 31));
     assert_eq!(animation.frames().len(), 4);
     assert_eq!(animation.duration(), Duration::from_millis(800));
-    // the README says 2.png and 4.png are identical
+    // the second and fourth steps are the same
     assert_eq!(animation.frames()[1], animation.frames()[3]);
 
-    let Some(other) = reference("sequences/ralsei_dance/1.png") else { return };
-    let mixed = [files[0].clone(), std::fs::read(other).unwrap()];
+    let mixed = [files[0].clone(), encode::png(&wave[0])];
     assert!(matches!(
         sequence(mixed.iter().map(Vec::as_slice), Duration::from_millis(200), &Limits::default()),
         Err(Error::SequenceSize { index: 1, .. })
     ));
+}
+
+#[test]
+fn splits_sprite_sheets_back_into_frames() {
+    let walker = tgradish_corpus::sprite("walker");
+    let sheet =
+        Sheet { columns: 4, rows: 2, frames: None, frame_duration: Duration::from_millis(100) };
+    let animation = sprite_sheet(&encode::sheet(&walker, 4), &sheet, &Limits::default()).unwrap();
+    assert_eq!(animation.frames().len(), 8);
+    assert_frames(&animation, &walker, 0, "sheet");
 }
 
 fn png(width: u32, height: u32, pixel: impl Fn(u32, u32) -> [u8; 4]) -> Vec<u8> {
@@ -153,8 +137,7 @@ fn splits_sprite_sheets() {
 
 #[test]
 fn survives_corrupted_files() {
-    let Some(path) = reference("Kris_battle.ase") else { return };
-    let original = std::fs::read(path).unwrap();
+    let original = file("walker_2x.ase").bytes;
     // a fixed pseudo-random sequence
     let mut state = 0x9e37_79b9_7f4a_7c15u64;
     let mut next = move || {

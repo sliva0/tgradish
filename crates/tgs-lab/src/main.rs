@@ -12,6 +12,7 @@
 //! cargo run --release -p tgs-lab -- limits DIR [ART...]
 //! cargo run --release -p tgs-lab -- sizes DIR [1X.tgs...]
 //! cargo run --release -p tgs-lab -- features DIR
+//! cargo run -p tgs-lab -- corpus DIR
 //! cargo run --release -p tgs-lab -- bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--no-reuse] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]
 //! ```
 
@@ -270,6 +271,9 @@ fn main() -> Result<()> {
             probes::write_sizes(Path::new(&args[1]), &one_x)
         }
         Some("features") if args.len() == 2 => features::write(Path::new(&args[1])),
+        Some("corpus") if args.len() == 2 => {
+            tgradish_corpus::write(Path::new(&args[1])).context("cannot write the corpus")
+        }
         Some("bench") => {
             let (paths, rest) = options(&args[1..], &["--save", "--against"])?;
             let flag = |name: &str| rest.contains(&name);
@@ -281,7 +285,7 @@ fn main() -> Result<()> {
             };
             let dir = rest.iter().find(|arg| !arg.starts_with("--"));
             bench::run(
-                Path::new(dir.copied().unwrap_or("references/pixelart")),
+                dir.map(Path::new),
                 &bench::Bench {
                     fast: flag("--fast"),
                     verify: flag("--verify"),
@@ -315,6 +319,7 @@ fn main() -> Result<()> {
              tgs-lab limits DIR [ART...]\n       \
              tgs-lab sizes DIR [1X.tgs...]\n       \
              tgs-lab features DIR\n       \
+             tgs-lab corpus DIR\n       \
              tgs-lab bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--no-reuse] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]"
         ),
     }

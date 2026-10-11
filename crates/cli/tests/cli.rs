@@ -1,10 +1,11 @@
 //! Runs the built `tgradish` binary. Conversion tests skip themselves when
-//! ffmpeg or the local `references/` media is missing.
+//! ffmpeg is missing.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use serde_json::Value;
+use tgradish_corpus::Clip;
 
 fn tgradish(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_tgradish"))
@@ -22,14 +23,10 @@ fn json_lines(output: &Output) -> Vec<Value> {
         .collect()
 }
 
-fn reference(name: &str) -> Option<PathBuf> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../references").join(name);
-    let ffmpeg = Command::new("ffmpeg").arg("-version").output().is_ok();
-    if !(ffmpeg && path.exists()) {
-        eprintln!("skipped: needs ffmpeg on PATH and references/{name}");
-        return None;
-    }
-    Some(path)
+/// A clip like phone footage, made once with ffmpeg and kept for later
+/// runs.
+fn clip(kind: Clip) -> Option<PathBuf> {
+    tgradish_corpus::clip(kind, Path::new(env!("CARGO_TARGET_TMPDIR")))
 }
 
 #[test]
@@ -90,7 +87,7 @@ fn rejects_bad_flags() {
 
 #[test]
 fn converts_with_json_events() {
-    let Some(input) = reference("uhh.mp4") else { return };
+    let Some(input) = clip(Clip::Square) else { return };
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("out.webm");
     let output = tgradish(&[
@@ -128,7 +125,7 @@ fn cancels_from_stdin() {
     use std::io::{BufRead, BufReader, Write};
     use std::process::Stdio;
 
-    let Some(input) = reference("pig.mp4") else { return };
+    let Some(input) = clip(Clip::Tall) else { return };
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("out.webm");
     let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
@@ -264,7 +261,7 @@ fn watch_converts_new_files() {
     use std::io::{BufRead, BufReader};
     use std::process::Stdio;
 
-    let Some(input) = reference("uhh.mp4") else { return };
+    let Some(input) = clip(Clip::Square) else { return };
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("old.mp4"), b"there before watching").unwrap();
     let out = dir.path().join("out");
@@ -346,7 +343,7 @@ fn refuses_to_merge_outputs_of_same_named_inputs() {
 
 #[test]
 fn makes_image_stickers() {
-    let Some(input) = reference("uhh.mp4") else { return };
+    let Some(input) = clip(Clip::Square) else { return };
     let dir = tempfile::tempdir().unwrap();
     // the output's extension asks for an image
     let out = dir.path().join("frame.webp");
