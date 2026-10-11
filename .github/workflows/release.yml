@@ -2,9 +2,10 @@ name: release
 
 # Builds single-file tgradish binaries with ffmpeg linked statically, for
 # Linux (x86-64 and aarch64) and Windows (cross-compiled with mingw-w64),
-# and Linux binaries that use the system's ffmpeg instead. Tests them, and
-# on a version tag drafts a GitHub release with them and the ffmpeg sources
-# the LGPL asks for. Pull requests that touch the ffmpeg build run it too.
+# the Linux ones also as .deb and .rpm packages, and Linux binaries that use
+# the system's ffmpeg instead. Tests them, and on a version tag drafts a
+# GitHub release with them and the ffmpeg sources the LGPL asks for. Pull
+# requests that touch the ffmpeg build run it too.
 on:
   push:
     tags: ["v*"]
@@ -102,7 +103,8 @@ jobs:
         if: ${{ !matrix.container }}
         run: cargo xtask package --target ${{ matrix.target }}
 
-      # the system-ffmpeg build replaces the linked one, packaged first
+      # the system-ffmpeg build replaces the linked one, packaged first, also
+      # as a .deb and an .rpm
       - name: Package, then build and package without ffmpeg
         if: matrix.container
         run: |
@@ -116,6 +118,8 @@ jobs:
           path: |
             target/release-artifacts/*.tar.gz
             target/release-artifacts/*.zip
+            target/release-artifacts/*.deb
+            target/release-artifacts/*.rpm
             target/release-artifacts/*.sha256
 
   # runs the Linux builds on a current Ubuntu, with and without ffmpeg
@@ -152,6 +156,51 @@ jobs:
           done
           # the system-ffmpeg build really uses the system's
           tgradish-*-system-ffmpeg/tgradish --json ffmpeg status | grep -q /usr/bin/ffmpeg
+
+  # installs the .deb and .rpm on the distributions they are for, which
+  # resolves their dependencies, and converts with what they installed
+  test-packages:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # the oldest and the newest of each family, roughly
+          - { target: linux-x86_64, runner: ubuntu-24.04, image: "debian:11" }
+          - { target: linux-x86_64, runner: ubuntu-24.04, image: "ubuntu:24.04" }
+          - { target: linux-x86_64, runner: ubuntu-24.04, image: "fedora:latest" }
+          - { target: linux-x86_64, runner: ubuntu-24.04, image: "opensuse/tumbleweed" }
+          - { target: linux-aarch64, runner: ubuntu-24.04-arm, image: "debian:12" }
+          - { target: linux-aarch64, runner: ubuntu-24.04-arm, image: "fedora:latest" }
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-${{ matrix.target }}
+          path: artifacts
+
+      - name: Install
+        run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y ./artifacts/*.deb
+          elif command -v dnf >/dev/null; then
+            dnf install -y ./artifacts/*.rpm
+          else
+            zypper --non-interactive install --allow-unsigned-rpm ./artifacts/*.rpm
+          fi
+
+      - name: Convert with the installed tgradish
+        run: |
+          tgradish --version
+          tgradish ffmpeg status
+          test -f /usr/share/applications/tgradish.desktop
+          # a 16 x 16 PNG: a red square in a transparent border
+          echo iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGF7gjobGf2LwqAGjBtDWgKEJAGe22M1pQ+POAAAAAElFTkSuQmCC | base64 -d > input.png
+          tgradish convert input.png -o out.webm --length 1 --preset fast
+          tgradish inspect out.webm
 
   # runs the Windows build on Windows
   test-windows:
@@ -194,7 +243,7 @@ jobs:
           "$bin" convert still.webm -o out.webm --preset fast && exit 1 || true
 
   publish:
-    needs: [build, test-linux, test-windows]
+    needs: [build, test-linux, test-packages, test-windows]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     timeout-minutes: 30

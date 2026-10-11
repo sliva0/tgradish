@@ -17,6 +17,8 @@
 //! `cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc
 //! 2.28]` packs a built tgradish into a release archive. With
 //! `--system-ffmpeg` it is a build without ffmpeg, which uses the system's.
+//! Linux builds with ffmpeg built in are also packed as a .deb and an .rpm,
+//! with nfpm, which it downloads.
 //!
 //! `cargo xtask local-release [--targets linux-x86_64,windows-x86_64]
 //! [--no-asm]` builds and packs every release variant for manual tests,
@@ -84,6 +86,31 @@ const FFMPEG: Source = Source {
     sha256: "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e",
     licenses: &["COPYING.LGPLv2.1", "LICENSE.md"],
 };
+
+/// nfpm, which writes the .deb and .rpm packages, for the machine that runs
+/// it; hashes from the release's checksums.txt.
+const NFPM: [(&str, Source); 2] = [
+    (
+        "x86_64",
+        Source {
+            name: "nfpm",
+            version: "2.47.0",
+            url: "https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_x86_64.tar.gz",
+            sha256: "0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783",
+            licenses: &[],
+        },
+    ),
+    (
+        "aarch64",
+        Source {
+            name: "nfpm",
+            version: "2.47.0",
+            url: "https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_arm64.tar.gz",
+            sha256: "1c0f5f2999b9a974bfb04fdb0cc3306096de530ac5dbb25d739cc5f5219c919c",
+            licenses: &[],
+        },
+    ),
+];
 
 /// Everything tgradish asks ffmpeg to do, and nothing else.
 const FFMPEG_COMPONENTS: &[(&str, &[&str])] = &[
@@ -285,32 +312,39 @@ fn output(cmd: &mut Command) -> Result<String> {
     Ok(String::from_utf8(out.stdout)?)
 }
 
+/// Downloads the archive of `source` into `dir`, unless it is there, and
+/// verifies it.
+fn download(source: &Source, dir: &Path) -> Result<PathBuf> {
+    let file_name = source.url.rsplit('/').next().unwrap();
+    let archive = dir.join(format!("{}-{file_name}", source.name));
+    if !archive.exists() {
+        std::fs::create_dir_all(dir)?;
+        let partial = archive.with_extension("partial");
+        run(Command::new("curl")
+            .args(["-sSfL", "--retry", "3", "--retry-connrefused", "-o"])
+            .arg(&partial)
+            .arg(source.url))?;
+        std::fs::rename(&partial, &archive)?;
+    }
+    let sum = output(Command::new("sha256sum").arg(&archive))?;
+    let sum = sum.split_whitespace().next().unwrap_or_default();
+    if sum != source.sha256 {
+        std::fs::remove_file(&archive)?;
+        bail!(
+            "{} checksum mismatch: expected {}, got {sum}; the server may have sent an \
+             error page instead of {}",
+            source.name,
+            source.sha256,
+            source.url
+        );
+    }
+    Ok(archive)
+}
+
 impl Build {
     /// Downloads and verifies the archive of `source`.
     fn fetch_archive(&self, source: &Source) -> Result<PathBuf> {
-        let file_name = source.url.rsplit('/').next().unwrap();
-        let archive = self.sources.join(format!("{}-{file_name}", source.name));
-        if !archive.exists() {
-            let partial = archive.with_extension("partial");
-            run(Command::new("curl")
-                .args(["-sSfL", "--retry", "3", "--retry-connrefused", "-o"])
-                .arg(&partial)
-                .arg(source.url))?;
-            std::fs::rename(&partial, &archive)?;
-        }
-        let sum = output(Command::new("sha256sum").arg(&archive))?;
-        let sum = sum.split_whitespace().next().unwrap_or_default();
-        if sum != source.sha256 {
-            std::fs::remove_file(&archive)?;
-            bail!(
-                "{} checksum mismatch: expected {}, got {sum}; the server may have sent an \
-                 error page instead of {}",
-                source.name,
-                source.sha256,
-                source.url
-            );
-        }
-        Ok(archive)
+        download(source, &self.sources)
     }
 
     /// Downloads, verifies and extracts `source`. Returns the source directory.
@@ -927,9 +961,153 @@ fn package_release(args: &[String]) -> Result<()> {
         archive
     };
     sha256_file(&archive)?;
-
     println!("{}", archive.display());
+
+    // with ffmpeg built in, as the system's may be too old or lack codecs
+    if !target.is_windows() && !system_ffmpeg {
+        for package in linux_packages(root, target, &version, &stage)? {
+            sha256_file(&package)?;
+            println!("{}", package.display());
+        }
+    }
     Ok(())
+}
+
+/// What the window loads when it opens, as Debian packages and as the
+/// libraries an .rpm can ask for by name, which Fedora and openSUSE both
+/// resolve: the graphics libraries, and D-Bus for file dialogs.
+const WINDOW_LIBRARIES: [(&str, &str); 13] = [
+    ("libegl1", "libEGL.so.1"),
+    ("libgl1", "libGL.so.1"),
+    ("libwayland-client0", "libwayland-client.so.0"),
+    ("libwayland-egl1", "libwayland-egl.so.1"),
+    ("libx11-6", "libX11.so.6"),
+    ("libx11-xcb1", "libX11-xcb.so.1"),
+    ("libxcb1", "libxcb.so.1"),
+    ("libxcursor1", "libXcursor.so.1"),
+    ("libxi6", "libXi.so.6"),
+    ("libxrender1", "libXrender.so.1"),
+    ("libxkbcommon0", "libxkbcommon.so.0"),
+    ("libxkbcommon-x11-0", "libxkbcommon-x11.so.0"),
+    ("libdbus-1-3", "libdbus-1.so.3"),
+];
+
+/// Packs the release staged in `stage` as a .deb and an .rpm, with nfpm.
+/// Returns their paths.
+fn linux_packages(
+    root: &Path,
+    target: Target,
+    version: &str,
+    stage: &Path,
+) -> Result<Vec<PathBuf>> {
+    let host = std::env::consts::ARCH;
+    let (_, source) = NFPM
+        .iter()
+        .find(|(arch, _)| *arch == host)
+        .with_context(|| format!("no nfpm for {host} machines"))?;
+    let tools = root.join("target/tools");
+    let archive = download(source, &tools)?;
+    let nfpm_dir = tools.join(format!("nfpm-{}", source.version));
+    std::fs::create_dir_all(&nfpm_dir)?;
+    run(Command::new("tar").arg("-xzf").arg(&archive).arg("-C").arg(&nfpm_dir).arg("nfpm"))?;
+
+    let quoted = |path: &Path| format!("{:?}", path.display().to_string());
+    let mut contents = vec![
+        format!(
+            "  - src: {}\n    dst: /usr/bin/tgradish\n    file_info:\n      mode: 0755",
+            quoted(&stage.join("tgradish"))
+        ),
+        format!(
+            "  - src: {}\n    dst: /usr/share/applications/tgradish.desktop",
+            quoted(&stage.join("tgradish.desktop"))
+        ),
+    ];
+    for size in ICON_SIZES {
+        let icon = format!("icons/hicolor/{size}x{size}/apps/tgradish.png");
+        contents
+            .push(format!("  - src: {}\n    dst: /usr/share/{icon}", quoted(&stage.join(&icon))));
+    }
+    for doc in ["README.md", "THIRD-PARTY.txt", "THIRD-PARTY-CRATES.txt"] {
+        contents.push(format!(
+            "  - src: {}\n    dst: /usr/share/doc/tgradish/{doc}",
+            quoted(&stage.join(doc))
+        ));
+    }
+    contents.push(format!(
+        "  - src: {}\n    dst: /usr/share/licenses/tgradish/LICENSE.txt",
+        quoted(&stage.join("LICENSE.txt"))
+    ));
+    for entry in std::fs::read_dir(stage.join("licenses"))? {
+        let entry = entry?;
+        contents.push(format!(
+            "  - src: {}\n    dst: /usr/share/licenses/tgradish/{}",
+            quoted(&entry.path()),
+            entry.file_name().to_string_lossy()
+        ));
+    }
+    contents.sort();
+    let list = |names: Vec<String>| {
+        names.iter().map(|name| format!("\n      - {name:?}")).collect::<String>()
+    };
+    let debs = std::iter::once("libc6 (>= 2.28)".to_owned())
+        .chain(["libgcc-s1 | libgcc1".to_owned()])
+        .chain(WINDOW_LIBRARIES.iter().map(|(deb, _)| (*deb).to_owned()))
+        .collect();
+    // as rpm names the libraries of 64-bit programs
+    let rpms = ["libc.so.6(GLIBC_2.28)", "libgcc_s.so.1"]
+        .into_iter()
+        .chain(WINDOW_LIBRARIES.iter().map(|(_, library)| *library))
+        .map(|library| match library.ends_with(')') {
+            true => format!("{library}(64bit)"),
+            false => format!("{library}()(64bit)"),
+        })
+        .collect();
+    let arch = match target {
+        Target::LinuxX64 => "amd64",
+        Target::LinuxArm64 => "arm64",
+        Target::WindowsX64 => bail!("Windows has no .deb or .rpm"),
+    };
+    let config = format!(
+        "name: tgradish\n\
+         arch: {arch}\n\
+         platform: linux\n\
+         version: {version:?}\n\
+         release: \"1\"\n\
+         section: graphics\n\
+         priority: optional\n\
+         maintainer: \"sliva0 <sliva0mk@gmail.com>\"\n\
+         description: |-\n  \
+           Telegram stickers and emoji from videos, pictures and pixel art\n  \
+           Makes video (WebM) and image (WebP) stickers and custom emoji from any\n  \
+           video or picture, and animated (TGS) stickers from pixel art, fitted to\n  \
+           Telegram's limits. It has ffmpeg built in.\n\
+         homepage: \"https://github.com/sliva0/tgradish\"\n\
+         license: \"MIT AND LGPL-2.1-or-later AND BSD-3-Clause AND BSD-2-Clause AND Zlib\"\n\
+         contents:\n{contents}\n\
+         overrides:\n  \
+           deb:\n    depends:{debs}\n    recommends:\n      - xdg-desktop-portal\n  \
+           rpm:\n    depends:{rpms}\n    recommends:\n      - xdg-desktop-portal\n",
+        contents = contents.join("\n"),
+        debs = list(debs),
+        rpms = list(rpms),
+    );
+    let out = stage.parent().unwrap();
+    let config_path = out.join(format!("nfpm-{}.yaml", target.triple()));
+    std::fs::write(&config_path, config)?;
+    let rpm_arch = target.triple().split('-').next().unwrap();
+    let packages = [
+        ("deb", out.join(format!("tgradish_{version}-1_{arch}.deb"))),
+        ("rpm", out.join(format!("tgradish-{version}-1.{rpm_arch}.rpm"))),
+    ];
+    for (packager, path) in &packages {
+        run(Command::new(nfpm_dir.join("nfpm"))
+            .arg("package")
+            .arg("--config")
+            .arg(&config_path)
+            .args(["--packager", packager, "--target"])
+            .arg(path))?;
+    }
+    Ok(packages.into_iter().map(|(_, path)| path).collect())
 }
 
 /// `2.28` as `(2, 28)`; `2.2.5` is `(2, 2)`.
