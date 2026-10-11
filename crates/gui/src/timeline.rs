@@ -158,14 +158,14 @@ fn bar(
         let x = x_of(from + limit);
         painter.line_segment(
             [pos2(x, track.top()), pos2(x, track.bottom())],
-            Stroke::new(1.5, widgets::warn(ui)),
+            Stroke::new(1.5, widgets::WARN),
         );
         painter.text(
             pos2(x + 3.0, rect.top()),
             egui::Align2::LEFT_TOP,
             "3 s",
             egui::FontId::proportional(10.5),
-            widgets::warn(ui),
+            widgets::WARN,
         );
     }
     // brackets at both ends of the used part

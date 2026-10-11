@@ -1,37 +1,18 @@
 //! Small pieces the window is built from.
 
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, Color32, RichText, vec2};
 
 use crate::jobs::Problem;
+use crate::theme;
 
-/// Colours that say how things are, readable on the theme's background.
-pub fn good(ui: &egui::Ui) -> Color32 {
-    if ui.visuals().dark_mode {
-        Color32::from_rgb(96, 186, 112)
-    } else {
-        Color32::from_rgb(30, 130, 56)
-    }
-}
-
-pub fn warn(ui: &egui::Ui) -> Color32 {
-    if ui.visuals().dark_mode {
-        Color32::from_rgb(226, 170, 72)
-    } else {
-        Color32::from_rgb(166, 98, 0)
-    }
-}
-
-pub fn bad(ui: &egui::Ui) -> Color32 {
-    if ui.visuals().dark_mode {
-        Color32::from_rgb(232, 96, 88)
-    } else {
-        Color32::from_rgb(190, 40, 36)
-    }
-}
+/// Colours that say how things are: Breeze's, the same in either theme.
+pub const GOOD: Color32 = theme::POSITIVE;
+pub const WARN: Color32 = theme::NEUTRAL;
+pub const BAD: Color32 = theme::NEGATIVE;
 
 /// The background pictures are shown on.
 pub fn stage(dark: bool) -> Color32 {
-    if dark { Color32::from_gray(24) } else { Color32::from_gray(222) }
+    theme::stage(dark)
 }
 
 pub fn kib(bytes: u64) -> String {
@@ -62,7 +43,6 @@ pub fn section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(4.0);
 }
 
-/// Weaker text explaining something.
 /// How wide `text` is in buttons' font, plus `padding`.
 pub fn text_width(ui: &egui::Ui, text: &str, padding: f32) -> f32 {
     let galley = egui::WidgetText::from(text).into_galley(
@@ -74,11 +54,12 @@ pub fn text_width(ui: &egui::Ui, text: &str, padding: f32) -> f32 {
     galley.size().x + padding
 }
 
+/// Weaker text explaining something.
 pub fn note(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(RichText::new(text.into()).weak().size(12.5));
 }
 
-/// The label column of a settings grid, explained on hover.
+/// The label column of a grid, explained on hover.
 pub fn label(ui: &mut egui::Ui, text: &str, hint: &str) {
     let label = ui.label(text);
     if !hint.is_empty() {
@@ -86,28 +67,50 @@ pub fn label(ui: &mut egui::Ui, text: &str, hint: &str) {
     }
 }
 
-/// One choice of a [`choice`] row: its value, label and explanation.
-pub type Choice<'a, T> = (T, &'a str, &'a str);
+/// Width of the labels before settings.
+pub const LABELS: f32 = 150.0;
 
-/// Radio buttons for a value with no preset behind it.
-pub fn radios<T: PartialEq + Copy>(
+/// A setting: its label, explained on hover, and its controls beside it,
+/// both from the top. Unless `allowed`, all of it is greyed out, and the
+/// label's hover says why.
+pub fn row<R>(
     ui: &mut egui::Ui,
-    value: &mut T,
-    choices: &[Choice<T>],
-) -> bool {
-    let mut changed = false;
-    ui.horizontal_wrapped(|ui| {
-        for &(option, text, hint) in choices {
-            let response = ui.radio(*value == option, text);
-            let response = if hint.is_empty() { response } else { response.on_hover_text(hint) };
-            if response.clicked() && *value != option {
-                *value = option;
-                changed = true;
+    text: &str,
+    hint: &str,
+    allowed: Result<(), &str>,
+    contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    ui.add_enabled_ui(allowed.is_ok(), |ui| {
+        ui.horizontal_top(|ui| {
+            // as high as the first line of controls, the text in its middle
+            let line = ui.spacing().interact_size.y;
+            let layout = egui::Layout::top_down(egui::Align::Min);
+            let label = ui
+                .allocate_ui_with_layout(vec2(LABELS, line), layout, |ui| {
+                    ui.set_width(LABELS);
+                    let text_height = ui.text_style_height(&egui::TextStyle::Body);
+                    ui.add_space(((line - text_height) / 2.0).floor().max(0.0));
+                    ui.add(egui::Label::new(text).wrap())
+                })
+                .inner;
+            match allowed {
+                Err(why) => {
+                    label.on_disabled_hover_text(why);
+                }
+                Ok(()) if !hint.is_empty() => {
+                    label.on_hover_text(hint);
+                }
+                Ok(()) => {}
             }
-        }
-    });
-    changed
+            ui.vertical(contents).inner
+        })
+        .inner
+    })
+    .inner
 }
+
+/// One choice of a [`segments`] row: its value, label and explanation.
+pub type Choice<'a, T> = (T, &'a str, &'a str);
 
 /// Options side by side as one control, the chosen one lit. `enabled`
 /// says which can be picked, with why not. True when changed.
@@ -121,8 +124,10 @@ pub fn segments<T: PartialEq + Copy>(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 1.0;
         let last = choices.len().saturating_sub(1);
+        let radius = ui.visuals().widgets.inactive.corner_radius.nw;
+        let height = ui.spacing().interact_size.y;
         for (index, &(option, text, hint)) in choices.iter().enumerate() {
-            let round = |at_end: bool| if at_end { 5 } else { 0 };
+            let round = |at_end: bool| if at_end { radius } else { 0 };
             let corners = egui::CornerRadius {
                 nw: round(index == 0),
                 sw: round(index == 0),
@@ -132,11 +137,13 @@ pub fn segments<T: PartialEq + Copy>(
             let selected = *value == option;
             let mut button = egui::Button::selectable(selected, text)
                 .corner_radius(corners)
-                .min_size(egui::vec2(0.0, 26.0));
-            if !selected {
-                button =
-                    button.frame_when_inactive(true).fill(ui.visuals().widgets.inactive.bg_fill);
-            }
+                .min_size(vec2(0.0, height));
+            button = if selected {
+                // outlined in the accent, as Breeze marks what is on
+                button.stroke(ui.visuals().widgets.hovered.bg_stroke)
+            } else {
+                button.frame_when_inactive(true)
+            };
             let allowed = enabled(option);
             let response = ui.add_enabled(allowed.is_ok(), button);
             let response = match allowed {
@@ -216,28 +223,33 @@ pub fn flag(
     changed
 }
 
-/// A number that is either automatic (`None`) or set: a radio for each,
-/// the number editable when set. `fallback` is where a newly set number
-/// starts.
+/// A number that is either automatic (`None`) or set: the two as
+/// segments, `automatic` and Custom, and the number beside them, greyed
+/// out while automatic. It shows `shown` then, the automatic value if it
+/// is known, and a newly set number starts from it, or from `start`.
 pub fn auto_number<T: egui::emath::Numeric>(
     ui: &mut egui::Ui,
     value: &mut Option<T>,
     automatic: &str,
-    fallback: T,
+    shown: Option<T>,
+    start: T,
     edit: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
 ) -> bool {
     let mut changed = false;
-    ui.horizontal_wrapped(|ui| {
-        if ui.radio(value.is_none(), automatic).clicked() && value.is_some() {
-            *value = None;
+    ui.horizontal(|ui| {
+        let mut custom = value.is_some();
+        let choices = [(false, automatic, ""), (true, "Custom", "")];
+        if segments(ui, &mut custom, &choices, |_| Ok(())) {
+            *value = custom.then(|| shown.unwrap_or(start));
             changed = true;
         }
-        if ui.radio(value.is_some(), "").clicked() && value.is_none() {
-            *value = Some(fallback);
-            changed = true;
+        let mut number = value.or(shown).unwrap_or(start);
+        let mut field = edit(egui::DragValue::new(&mut number));
+        if value.is_none() && shown.is_none() {
+            field = field.custom_formatter(|_, _| "—".to_owned());
         }
-        let mut number = value.unwrap_or(fallback);
-        let response = ui.add_enabled(value.is_some(), edit(egui::DragValue::new(&mut number)));
+        let response =
+            ui.add_enabled(value.is_some(), field).on_disabled_hover_text("Pick Custom to set it");
         if response.changed() {
             *value = Some(number);
             changed = true;
@@ -249,7 +261,7 @@ pub fn auto_number<T: egui::emath::Numeric>(
 /// How much of a limit something uses: a bar, red when over.
 pub fn gauge(ui: &mut egui::Ui, used: u64, limit: u64, text: String) {
     let share = used as f32 / limit.max(1) as f32;
-    let colour = if share > 1.0 { bad(ui) } else { good(ui) };
+    let colour = if share > 1.0 { BAD } else { GOOD };
     bar(ui, Some(share), &text, colour.gamma_multiply(0.55));
 }
 
@@ -303,10 +315,10 @@ pub fn bar_sized(
 /// Telegram's problems with a result, or that it has none.
 pub fn problems(ui: &mut egui::Ui, problems: &[Problem]) {
     if problems.is_empty() {
-        ui.colored_label(good(ui), "✔ Telegram should accept it");
+        ui.colored_label(GOOD, "✔ Telegram should accept it");
     }
     for problem in problems {
-        let (colour, mark) = if problem.refused { (bad(ui), "✖") } else { (warn(ui), "⚠") };
+        let (colour, mark) = if problem.refused { (BAD, "✖") } else { (WARN, "⚠") };
         ui.colored_label(colour, format!("{mark} {}", problem.text));
     }
 }

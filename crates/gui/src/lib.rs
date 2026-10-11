@@ -2,6 +2,7 @@
 //! preview to crop and trim it, and its result. It converts with
 //! `tgradish-core` directly, like the CLI.
 
+mod accent;
 mod canvas;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod dnd;
@@ -15,6 +16,7 @@ mod output;
 mod prefs;
 mod session;
 mod settings;
+mod theme;
 mod timeline;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod toplevel_icon;
@@ -65,7 +67,7 @@ pub fn run(launch: Launch) -> eframe::Result<()> {
         "tgradish",
         options,
         Box::new(|cc| {
-            let app = App::new(launch);
+            let app = App { accent: Some(accent::Accent::watch(&cc.egui_ctx)), ..App::new(launch) };
             app.style(&cc.egui_ctx);
             #[cfg(all(unix, not(target_os = "macos")))]
             let app = App {
@@ -212,6 +214,10 @@ struct App {
     hovering: bool,
     /// Share of the main panel's height the preview takes.
     preview_share: f32,
+    /// The system's accent colour, as it changes.
+    accent: Option<accent::Accent>,
+    /// The accent the window's look was made with last.
+    applied_accent: Option<Color32>,
 }
 
 impl App {
@@ -322,12 +328,15 @@ impl App {
             _toplevel_icon: None,
             hovering: false,
             preview_share: 0.56,
+            accent: None,
+            applied_accent: None,
         }
     }
 
     fn style(&self, ctx: &egui::Context) {
         ctx.set_fonts(fonts());
         set_theme(ctx, self.config.gui.theme);
+        theme::apply(ctx, self.applied_accent);
         ctx.all_styles_mut(|style| {
             use egui::{FontFamily, FontId, TextStyle};
             style.text_styles = [
@@ -338,10 +347,16 @@ impl App {
                 (TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace)),
             ]
             .into();
-            style.spacing.item_spacing = vec2(8.0, 6.0);
-            style.spacing.button_padding = vec2(9.0, 4.0);
-            style.spacing.interact_size.y = 24.0;
         });
+    }
+
+    /// Makes the window's look again when the system's accent changed.
+    fn follow_accent(&mut self, ctx: &egui::Context) {
+        let accent = self.accent.as_ref().and_then(accent::Accent::get);
+        if accent != self.applied_accent {
+            self.applied_accent = accent;
+            theme::apply(ctx, accent);
+        }
     }
 
     fn backend(&self) -> Result<Backend, String> {
@@ -860,6 +875,49 @@ impl App {
         }
     }
 
+    /// What an inspected sticker holds, in a dialog, while there is one.
+    fn inspection_dialog(&mut self, ctx: &egui::Context) {
+        let Some(inspection) = &self.inspection else { return };
+        let name = inspection
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let style = ctx.global_style();
+        let format = egui::TextFormat::simple(
+            egui::TextStyle::Heading.resolve(&style),
+            style.visuals.text_color(),
+        );
+        let title = drawable_in(&self.fallbacks, &name, format, style.visuals.code_bg_color).0;
+        let (mut another, mut close) = (false, false);
+        let modal = egui::Modal::new(egui::Id::new("inspect")).show(ctx, |ui| {
+            ui.set_width(520.0);
+            ui.add(egui::Label::new(title).truncate());
+            ui.add_space(4.0);
+            inspect::show(ui, inspection);
+            ui.separator();
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                close = ui.button("Close").clicked();
+                another = ui.button("Inspect another…").clicked();
+            });
+        });
+        if close || modal.should_close() {
+            self.inspection = None;
+        }
+        if another {
+            self.pick_inspected();
+        }
+    }
+
+    /// Asks for a sticker to inspect.
+    fn pick_inspected(&mut self) {
+        if let Some(file) =
+            rfd::FileDialog::new().add_filter("stickers", &["webm", "tgs", "webp"]).pick_file()
+        {
+            self.inspection = Some(inspect::Inspection::of(&file));
+        }
+    }
+
     fn pick_files(&mut self) {
         if let Some(files) = rfd::FileDialog::new().pick_files() {
             self.add(files);
@@ -874,18 +932,15 @@ impl App {
         let layout = egui::Layout::right_to_left(egui::Align::Center);
         ui.allocate_ui_with_layout(header, layout, |ui| {
             if ui.button("⚙").on_hover_text("Settings").clicked() {
-                self.prefs.open = true;
+                self.prefs.open(&self.config);
             }
             self.theme_button(ui);
             if ui
                 .button("🔬")
                 .on_hover_text("Inspect a sticker: check a file against Telegram's rules")
                 .clicked()
-                && let Some(file) = rfd::FileDialog::new()
-                    .add_filter("stickers", &["webm", "tgs", "webp"])
-                    .pick_file()
             {
-                self.inspection = Some(inspect::Inspection::of(&file));
+                self.pick_inspected();
             }
             // a split button: files, or the rest from its arrow
             ui.scope(|ui| {
@@ -1173,11 +1228,11 @@ impl App {
                     if let Some(failed) = &item.failed {
                         match &failed.job.status {
                             Status::Failed(message) => {
-                                ui.colored_label(widgets::bad(ui), format!("Failed: {message}"));
+                                ui.colored_label(widgets::BAD, format!("Failed: {message}"));
                             }
                             Status::Exists(path) => {
                                 ui.colored_label(
-                                    widgets::warn(ui),
+                                    widgets::WARN,
                                     "A file not made here is in the way:",
                                 );
                                 if ui.button("Replace it").clicked() {
@@ -1282,7 +1337,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
                 ui.label(format!("{:.0}%", zoom.level * 100.0));
             }
             if has_result && !item.result_is_current() {
-                let stale = RichText::new("made with earlier settings").color(widgets::warn(ui));
+                let stale = RichText::new("made with earlier settings").color(widgets::WARN);
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add(egui::Label::new(stale).truncate());
                 });
@@ -1330,7 +1385,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
     match item.view.show {
         Show::Input => {
             if let Some(message) = error {
-                message_in(ui, rect, &format!("Couldn't read it: {message}"), widgets::bad(ui));
+                message_in(ui, rect, &format!("Couldn't read it: {message}"), widgets::BAD);
             } else if let (Some(clip), Some(size)) = (overview, input_size) {
                 // a picture is one frame: shown still, where it is picked
                 let picking = item.format == Format::Image;
@@ -1513,7 +1568,7 @@ fn about(ui: &mut egui::Ui) {
          to go with every copy, so the program carries them:",
     );
     ui.add_space(4.0);
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(360.0).show(ui, |ui| {
         let notices = ui.ctx().memory_mut(|memory| {
             memory
                 .data
@@ -1617,7 +1672,7 @@ fn toast(ctx: &egui::Context, message: &str) -> bool {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.set_max_width(560.0);
                 ui.horizontal(|ui| {
-                    ui.colored_label(widgets::warn(ui), "⚠");
+                    ui.colored_label(widgets::WARN, "⚠");
                     ui.label(message);
                     if ui.small_button("OK").clicked() {
                         open = false;
@@ -1748,13 +1803,9 @@ fn row(
     let (rect, response) = ui.allocate_exact_size(vec2(width, THUMB + 12.0), egui::Sense::click());
     let visuals = ui.visuals();
     if selected {
-        ui.painter().rect_filled(rect, 6.0, visuals.selection.bg_fill.gamma_multiply(0.45));
+        ui.painter().rect_filled(rect, 6.0, visuals.selection.bg_fill);
     } else if response.hovered() {
-        ui.painter().rect_filled(
-            rect,
-            6.0,
-            visuals.widgets.hovered.weak_bg_fill.gamma_multiply(0.5),
-        );
+        ui.painter().rect_filled(rect, 6.0, visuals.widgets.hovered.weak_bg_fill);
     }
     let inner = rect.shrink2(vec2(6.0, 6.0));
     let input = egui::Rect::from_min_size(inner.min, vec2(THUMB, THUMB));
@@ -1769,7 +1820,7 @@ fn row(
             let badge =
                 egui::Rect::from_min_size(result.right_top() - vec2(20.0, 0.0), vec2(20.0, 20.0));
             let button = egui::Button::new(RichText::new("⟳").size(13.0).color(Color32::BLACK))
-                .fill(widgets::warn(ui))
+                .fill(widgets::WARN)
                 .corner_radius(4.0);
             // placed, so the rows below don't move
             if ui.place(badge, button).on_hover_text("Settings changed: convert again").clicked() {
@@ -1912,9 +1963,7 @@ fn thumb(
     stale: bool,
 ) {
     let painter = ui.painter_at(rect);
-    let back =
-        if ui.visuals().dark_mode { Color32::from_gray(34) } else { Color32::from_gray(214) };
-    painter.rect_filled(rect, 4.0, back);
+    painter.rect_filled(rect, 4.0, widgets::stage(ui.visuals().dark_mode));
     match texture {
         Some(texture) => {
             let size = texture.size_vec2();
@@ -1931,7 +1980,7 @@ fn thumb(
                 egui::Align2::CENTER_CENTER,
                 "✖",
                 egui::FontId::proportional(16.0),
-                widgets::bad(ui),
+                widgets::BAD,
             );
         }
         None => {}
@@ -1959,7 +2008,7 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
         (None, Some(made)) => match &made.job.status {
             Status::Done(done) => {
                 let refused = done.problems.iter().any(|p| p.refused);
-                let colour = if refused { widgets::bad(ui) } else { widgets::good(ui) };
+                let colour = if refused { widgets::BAD } else { widgets::GOOD };
                 let mark = if refused { "✖" } else { "✔" };
                 let stale = if item.result_is_current() { "" } else { " · settings changed" };
                 ui.colored_label(
@@ -1968,10 +2017,10 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
                 );
             }
             Status::Failed(_) => {
-                ui.colored_label(widgets::bad(ui), small("✖ failed".into()));
+                ui.colored_label(widgets::BAD, small("✖ failed".into()));
             }
             Status::Exists(_) => {
-                ui.colored_label(widgets::warn(ui), small("a file is in the way".into()));
+                ui.colored_label(widgets::WARN, small("a file is in the way".into()));
             }
             Status::Cancelled => {
                 ui.label(small("stopped".into()).weak());
@@ -1992,10 +2041,10 @@ fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
         widgets::section(ui, "Last conversion");
         match &failed.job.status {
             Status::Failed(message) => {
-                ui.colored_label(widgets::bad(ui), message);
+                ui.colored_label(widgets::BAD, message);
             }
             Status::Exists(path) => {
-                ui.colored_label(widgets::warn(ui), format!("{} is in the way", path.display()));
+                ui.colored_label(widgets::WARN, format!("{} is in the way", path.display()));
             }
             Status::Cancelled => widgets::note(ui, "Stopped before it was done"),
             Status::Done(_) | Status::Waiting | Status::Running => {}
@@ -2033,17 +2082,14 @@ fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
                 widgets::note(ui, "Changed to fit: see Details below");
             }
             if made.job.replaces {
-                ui.colored_label(
-                    widgets::warn(ui),
-                    "⚠ Replaced an earlier result made by tgradish",
-                );
+                ui.colored_label(widgets::WARN, "⚠ Replaced an earlier result made by tgradish");
             }
         }
         Status::Failed(message) => {
-            ui.colored_label(widgets::bad(ui), message);
+            ui.colored_label(widgets::BAD, message);
         }
         Status::Exists(path) => {
-            ui.colored_label(widgets::warn(ui), format!("{} is in the way", path.display()));
+            ui.colored_label(widgets::WARN, format!("{} is in the way", path.display()));
         }
         Status::Cancelled => widgets::note(ui, "Stopped before it was done"),
         Status::Waiting | Status::Running => {}
@@ -2066,7 +2112,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     }
     let progress = &job.progress;
     let running = ui.visuals().selection.bg_fill;
-    let done = widgets::good(ui).gamma_multiply(0.45);
+    let done = widgets::GOOD.gamma_multiply(0.45);
     if let Some(stage) = progress.tgs {
         use jobs::TgsStage;
         let fits = progress.lossless_bytes.is_none() && stage > TgsStage::Fitting;
@@ -2122,7 +2168,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
                 let (mark, colour) = if attempt.fits {
                     ("fits", done)
                 } else {
-                    ("too large", widgets::bad(ui).gamma_multiply(0.45))
+                    ("too large", widgets::BAD.gamma_multiply(0.45))
                 };
                 let text = format!("{text} → {}, {mark}", widgets::kib(bytes));
                 widgets::bar(ui, Some(1.0), &text, colour);
@@ -2183,7 +2229,7 @@ fn details(ui: &mut egui::Ui, item: &Item) {
                         tgradish_core::events::Rate::Lossless => "lossless".into(),
                     });
                     match attempt.bytes {
-                        Some(bytes) => ui.colored_label(if attempt.fits { widgets::good(ui) } else { widgets::bad(ui) }, widgets::kib(bytes)),
+                        Some(bytes) => ui.colored_label(if attempt.fits { widgets::GOOD } else { widgets::BAD }, widgets::kib(bytes)),
                         None => ui.label("—"),
                     };
                     ui.label(attempt.ssim.map(|ssim| format!("{:.1}%", ssim * 100.0)).unwrap_or_default());
@@ -2192,7 +2238,7 @@ fn details(ui: &mut egui::Ui, item: &Item) {
             });
         }
         for warning in &progress.warnings {
-            ui.colored_label(widgets::warn(ui), format!("⚠ {warning}"));
+            ui.colored_label(widgets::WARN, format!("⚠ {warning}"));
         }
     });
 }
@@ -2252,61 +2298,52 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.follow_accent(&ctx);
         if !self.config.gui.smooth_scrolling {
             direct_scrolling(&ctx);
         }
         self.take_input(&ctx);
         self.pump(&ctx);
         self.find_fonts(&ctx);
+        // a narrow window takes room from the list first, leaving the
+        // preview and the column beside it theirs
+        let widest = (ctx.content_rect().width() - 640.0).clamp(260.0, 520.0);
         egui::Panel::left("files")
             .resizable(true)
             .default_size(410.0)
-            .size_range(260.0..=520.0)
+            .size_range(260.0..=widest)
             .show(ui, |ui| {
                 self.files_panel(ui);
             });
         egui::CentralPanel::default().show(ui, |ui| self.main_panel(ui));
-        if self.prefs.open && self.prefs_theme != Some(self.config.gui.theme) {
-            set_theme(&ctx, self.config.gui.theme);
-        }
-        self.prefs_theme = Some(self.config.gui.theme);
-        prefs::show(
+        if let Some(message) = prefs::show(
             &ctx,
             &mut self.prefs,
             &mut self.config,
             self.config_path.as_deref(),
             &self.presets,
-        );
-        if let Some(inspection) = &self.inspection {
-            let mut open = true;
-            let title = inspection
-                .path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let format = egui::TextFormat::simple(
-                egui::TextStyle::Heading.resolve(&ctx.global_style()),
-                ctx.global_style().visuals.text_color(),
-            );
-            let title = drawable_in(&self.fallbacks, &title, format, Color32::GRAY).0;
-            egui::Window::new(title).open(&mut open).collapsible(false).default_width(460.0).show(
-                &ctx,
-                |ui| {
-                    inspect::show(ui, inspection);
-                },
-            );
-            if !open {
-                self.inspection = None;
-            }
+        ) {
+            self.message = Some(message);
         }
+        // as Settings changes it, or puts it back
+        if self.prefs_theme != Some(self.config.gui.theme) {
+            set_theme(&ctx, self.config.gui.theme);
+            self.prefs_theme = Some(self.config.gui.theme);
+        }
+        self.inspection_dialog(&ctx);
         if self.prefs.about {
-            let mut open = true;
-            egui::Window::new("About tgradish")
-                .open(&mut open)
-                .collapsible(false)
-                .default_size([560.0, 480.0])
-                .show(&ctx, about);
-            self.prefs.about = open;
+            let modal = egui::Modal::new(egui::Id::new("about")).show(&ctx, |ui| {
+                ui.set_width(600.0);
+                about(ui);
+                ui.separator();
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.button("Close").clicked()
+                })
+                .inner
+            });
+            if modal.inner || modal.should_close() {
+                self.prefs.about = false;
+            }
         }
         if let Some(message) = &self.message
             && !toast(&ctx, message)
@@ -2418,7 +2455,7 @@ mod tests {
         assert_eq!((item.kind, item.format), (Kind::Frames, Format::Tgs));
         assert!(item.input_thumb.is_some());
         // a folder can't be a video
-        harness.get_by_label("Vector animation (TGS)");
+        harness.get_by_label("Animation");
         convert(&harness);
         harness.run_steps(2);
         finish(&mut harness);
@@ -2450,7 +2487,7 @@ mod tests {
         let mut harness = harness(config);
         harness.state_mut().add(vec![video]);
         finish(&mut harness);
-        harness.get_by_label("Image sticker (WebP)").click();
+        harness.get_by_label("Image").click();
         harness.run_steps(2);
         // the frame at a second, which the preview stops at
         harness.state_mut().items[0].choices.frame = Some(1.0);
@@ -2838,10 +2875,11 @@ mod tests {
         harness.state_mut().items.last_mut().unwrap().view.show = Show::Input;
         harness.run_steps(3);
         save(&mut harness, "tgs-input");
-        harness.state_mut().prefs.open = true;
+        let config = harness.state().config.clone();
+        harness.state_mut().prefs.open(&config);
         harness.run_steps(3);
         save(&mut harness, "settings");
-        harness.state_mut().prefs.open = false;
+        harness.state_mut().prefs = prefs::Prefs::default();
         let sticker = dir.path().join("out").join("dance.sticker.tgs");
         harness.state_mut().inspection = Some(inspect::Inspection::of(&sticker));
         harness.run_steps(3);
@@ -2904,7 +2942,7 @@ mod tests {
         harness.state_mut().add(vec![video]);
         finish(&mut harness);
         harness.get_by_label_contains("will be spoofed");
-        harness.get_by_label("Default");
+        harness.get_by_label("Spoof to");
         // cut to 3 seconds, or not spoofed at all: no warning
         harness.state_mut().items[0].choices.length = Some(3.0);
         harness.run_steps(2);
