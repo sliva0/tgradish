@@ -3566,6 +3566,8 @@ dependencies = [
  "tgradish-tgs",
  "wayland-backend",
  "wayland-client",
+ "wayland-protocols",
+ "winit",
 ]
 
 [[package]]

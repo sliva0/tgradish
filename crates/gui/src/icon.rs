@@ -16,22 +16,26 @@ fn pixels() -> (usize, Vec<u8>) {
     (info.width as usize, pixels)
 }
 
-/// The icon for the taskbar and the like, each of its pixels a square of
-/// `SCALE`: systems shrink it to the size they want instead of blurring it
-/// bigger.
-pub fn window() -> egui::IconData {
-    const SCALE: usize = 4;
+/// The icon's side and straight RGBA pixels, each of its pixels a square
+/// of `scale`.
+pub fn scaled(scale: usize) -> (usize, Vec<u8>) {
     let (side, pixels) = pixels();
     let rgba = pixels
         .chunks_exact(side * 4)
         .flat_map(|row| {
             let row: Vec<u8> =
-                row.as_chunks::<4>().0.iter().flat_map(|pixel| pixel.repeat(SCALE)).collect();
-            std::iter::repeat_n(row, SCALE).flatten()
+                row.as_chunks::<4>().0.iter().flat_map(|pixel| pixel.repeat(scale)).collect();
+            std::iter::repeat_n(row, scale).flatten()
         })
         .collect();
-    let side = (side * SCALE) as u32;
-    egui::IconData { rgba, width: side, height: side }
+    (side * scale, rgba)
+}
+
+/// The icon for the taskbar and the like, four times as large: systems
+/// shrink it to the size they want instead of blurring it bigger.
+pub fn window() -> egui::IconData {
+    let (side, rgba) = scaled(4);
+    egui::IconData { rgba, width: side as u32, height: side as u32 }
 }
 
 /// The icon as a texture, made once.

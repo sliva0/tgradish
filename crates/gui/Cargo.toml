@@ -26,6 +26,9 @@ rustix = { workspace = true, features = ["event"] }
 wayland-client.workspace = true
 # libwayland's own client, which can share winit's connection
 wayland-backend = { workspace = true, features = ["client_system"] }
+# the window's icon, which winit doesn't set on Wayland
+wayland-protocols = { workspace = true, features = ["client", "staging"] }
+winit = { workspace = true, features = ["wayland"] }
 
 [lints]
 workspace = true
