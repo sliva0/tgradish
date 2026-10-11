@@ -243,14 +243,17 @@ pub fn auto_number<T: egui::emath::Numeric>(
             *value = custom.then(|| shown.unwrap_or(start));
             changed = true;
         }
+        let set = value.is_some();
         let mut number = value.or(shown).unwrap_or(start);
-        let mut field = edit(egui::DragValue::new(&mut number));
-        if value.is_none() && shown.is_none() {
+        // an automatic value shows as it is, even outside the range a set
+        // one keeps to, and is never stored: egui would clamp it, and say
+        // it changed
+        let mut field = edit(egui::DragValue::new(&mut number)).clamp_existing_to_range(set);
+        if !set && shown.is_none() {
             field = field.custom_formatter(|_, _| "—".to_owned());
         }
-        let response =
-            ui.add_enabled(value.is_some(), field).on_disabled_hover_text("Pick Custom to set it");
-        if response.changed() {
+        let response = ui.add_enabled(set, field).on_disabled_hover_text("Pick Custom to set it");
+        if set && response.changed() {
             *value = Some(number);
             changed = true;
         }
@@ -353,6 +356,25 @@ pub fn checkerboard(painter: &egui::Painter, rect: egui::Rect, square: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keeps_automatic_numbers_automatic() {
+        // an automatic value outside the range a set one keeps to, like the
+        // speed that fits a minute into 3 seconds
+        let mut harness = egui_kittest::Harness::new_ui_state(
+            |ui, value: &mut Option<f64>| {
+                auto_number(ui, value, "Automatic", Some(20.0), 1.0, |field| {
+                    field.range(0.1..=10.0)
+                });
+            },
+            None,
+        );
+        harness.run();
+        assert_eq!(*harness.state(), None);
+        // shown as it is, not clamped to the range
+        use egui_kittest::kittest::Queryable;
+        harness.get(egui_kittest::kittest::by().value("20"));
+    }
 
     #[test]
     fn writes_times() {

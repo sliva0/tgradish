@@ -730,7 +730,7 @@ fn aspect_ratio(
                 ui.label("×");
                 let down =
                     ui.add(egui::DragValue::new(&mut result_h).range(1..=box_h).suffix(" px"));
-                if across.changed() || down.changed() {
+                if follows && (across.changed() || down.changed()) {
                     (width, height) = reduced(result_w, result_h);
                     typed = true;
                 }
@@ -805,7 +805,9 @@ fn integer_scale(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, i
                     .range(lowest..=highest)
                     .speed(0.05)
                     .custom_formatter(|n, _| scale_text(step_scale(n as i64)))
-                    .custom_parser(|text| parse_scale(text).map(|s| scale_step(s) as f64)),
+                    .custom_parser(|text| parse_scale(text).map(|s| scale_step(s) as f64))
+                    // a scale kept for integer scaling shows as it is
+                    .clamp_existing_to_range(integer),
             )
             .on_hover_text("Type 3 for three times as large, or 1/3 for a third")
             .on_disabled_hover_text("Pick Fixed to choose a scale");
@@ -818,7 +820,8 @@ fn integer_scale(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, i
             }
         });
     });
-    if chosen != scale {
+    // greyed out, the scale is only shown, and kept for integer scaling
+    if integer && chosen != scale {
         item.choices.webm.exact_scale = chosen;
         return;
     }
@@ -1103,7 +1106,7 @@ fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                     egui::DragValue::new(&mut shown.max).speed(0.5).max_decimals(2).suffix(unit),
                 )
                 .on_disabled_hover_text(pick);
-            if low.changed() || high.changed() {
+            if enabled && (low.changed() || high.changed()) {
                 shown.max = shown.max.max(shown.min);
                 range = Some(shown);
             }

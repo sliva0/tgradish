@@ -785,8 +785,9 @@ impl App {
                 }
             }
         }
-        // typing into a text field is just typing
-        if ctx.memory(|memory| memory.focused().is_some()) {
+        // typing into a text field is just typing, and keys pressed in a
+        // dialog are for it, not the window behind
+        if ctx.memory(|memory| memory.focused().is_some()) || self.dialog_open() {
             self.pasted = false;
             return;
         }
@@ -907,6 +908,11 @@ impl App {
         if another {
             self.pick_inspected();
         }
+    }
+
+    /// Whether a dialog is open over the window.
+    fn dialog_open(&self) -> bool {
+        self.prefs.is_open() || self.prefs.about || self.inspection.is_some()
     }
 
     /// Asks for a sticker to inspect.
@@ -1271,8 +1277,8 @@ impl App {
                     .on_hover_text("Settings chooses where results go");
             });
         });
-        let shortcut =
-            ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::Enter));
+        let shortcut = !self.dialog_open()
+            && ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::Enter));
         // the user lets this item replace the file that is there now
         if let Some(path) = replace {
             if let Some(written) = Written::of(id, &path) {
@@ -2930,6 +2936,48 @@ mod tests {
             });
         harness.run_steps(3);
         save(&mut harness, "scaled");
+    }
+
+    #[test]
+    fn leaves_keys_pressed_in_dialogs_to_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        let mut harness = harness(Config::default());
+        harness.state_mut().add(vec![art]);
+        finish(&mut harness);
+        let config = harness.state().config.clone();
+        harness.state_mut().prefs.open(&config);
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Delete);
+        harness.run_steps(2);
+        assert_eq!(harness.state().items.len(), 1);
+        // Escape closes the dialog, and the window has its keys again
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+        assert!(!harness.state().prefs.is_open());
+        harness.key_press(egui::Key::Delete);
+        harness.run_steps(2);
+        assert!(harness.state().items.is_empty());
+    }
+
+    #[test]
+    fn keeps_a_fixed_scale_while_integer_scaling_is_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video(dir.path(), "64x48") else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        // more than an emoji takes, kept for when integer scaling is back
+        let scale = Some("200".parse().unwrap());
+        let item = &mut harness.state_mut().items[0];
+        item.choices.webm.exact_scale = scale;
+        item.choices.webm.scaling = Some(Scaling::Smooth);
+        item.choices.target = telegram::Target::Emoji;
+        harness.run_steps(3);
+        assert_eq!(harness.state().items[0].choices.webm.exact_scale, scale);
     }
 
     #[test]
