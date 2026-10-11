@@ -8,6 +8,7 @@ pkgbase = tgradish
 	license = MIT
 	license = BSD-3-Clause
 	makedepends = cargo
+	depends = dbus
 	depends = ffmpeg
 	depends = gcc-libs
 	depends = glibc

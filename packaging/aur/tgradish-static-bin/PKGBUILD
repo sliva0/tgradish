@@ -10,8 +10,9 @@ url='https://github.com/sliva0/tgradish'
 # tgradish is MIT; the ffmpeg built in is LGPL, with libvpx, dav1d and zlib
 license=(MIT LGPL-2.1-or-later BSD-3-Clause BSD-2-Clause Zlib)
 # ffmpeg, libvpx, dav1d and zlib are linked in; the window loads the
-# graphics libraries when it opens
+# graphics libraries when it opens, and D-Bus for file dialogs
 depends=(
+  dbus
   gcc-libs
   glibc
   libglvnd

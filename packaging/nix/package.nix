@@ -3,6 +3,7 @@
   rustPlatform,
   makeWrapper,
   ffmpeg,
+  dbus,
   libGL,
   libxkbcommon,
   wayland,
@@ -14,8 +15,10 @@
 
 let
   version = (lib.importTOML ../../Cargo.toml).workspace.package.version;
-  # the window loads these with dlopen when it opens
+  # the window loads these with dlopen when it opens, and D-Bus for file
+  # dialogs
   windowLibraries = [
+    dbus
     libGL
     libxkbcommon
     wayland
