@@ -41,8 +41,10 @@ thiserror = "2.0.21"
 toml = "1.1.7"
 wayland-backend = "0.3.17"
 wayland-client = "0.31.15"
+wayland-protocols = "0.32.13"
 which = "8.0.6"
 windows-sys = "0.61.2"
+winit = { version = "0.30.13", default-features = false }
 zopfli = { version = "0.8.3", default-features = false, features = ["gzip", "std"] }
 
 [workspace.lints.rust]

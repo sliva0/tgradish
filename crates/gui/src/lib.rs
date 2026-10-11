@@ -16,6 +16,8 @@ mod prefs;
 mod session;
 mod settings;
 mod timeline;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod toplevel_icon;
 mod widgets;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -66,7 +68,13 @@ pub fn run(launch: Launch) -> eframe::Result<()> {
             let app = App::new(launch);
             app.style(&cc.egui_ctx);
             #[cfg(all(unix, not(target_os = "macos")))]
-            let app = App { drops: dnd::Drops::start(cc, &cc.egui_ctx), ..app };
+            let app = App {
+                drops: dnd::Drops::start(cc, &cc.egui_ctx),
+                _toplevel_icon: cc.winit_window().and_then(|window| toplevel_icon::set(window)),
+                ..app
+            };
+            // the icon applies with the window's next frame
+            cc.egui_ctx.request_repaint();
             Ok(Box::new(app))
         }),
     )
@@ -197,6 +205,9 @@ struct App {
     pasted: bool,
     #[cfg(all(unix, not(target_os = "macos")))]
     drops: Option<dnd::Drops>,
+    /// The window's icon on Wayland, kept while the window shows it.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    _toplevel_icon: Option<toplevel_icon::ToplevelIcon>,
     /// Files are being dragged over the window, as Wayland reports it.
     hovering: bool,
     /// Share of the main panel's height the preview takes.
@@ -307,6 +318,8 @@ impl App {
             pasted: false,
             #[cfg(all(unix, not(target_os = "macos")))]
             drops: None,
+            #[cfg(all(unix, not(target_os = "macos")))]
+            _toplevel_icon: None,
             hovering: false,
             preview_share: 0.56,
         }
