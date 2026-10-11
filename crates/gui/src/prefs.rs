@@ -30,6 +30,10 @@ impl Prefs {
     pub fn open(&mut self, config: &Config) {
         *self = Prefs { before: Some(config.clone()), about: self.about, ..Prefs::default() };
     }
+
+    pub fn is_open(&self) -> bool {
+        self.before.is_some()
+    }
 }
 
 /// Shows the dialog if it is open. Returns what to tell the user once it
