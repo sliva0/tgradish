@@ -3566,6 +3566,7 @@ dependencies = [
  "eframe",
  "egui-wgpu",
  "egui_kittest",
+ "libloading",
  "png",
  "raw-window-handle",
  "rfd",
@@ -3582,7 +3583,6 @@ dependencies = [
  "wayland-protocols",
  "windows-sys 0.61.2",
  "winit",
- "zbus",
 ]
 
 [[package]]
