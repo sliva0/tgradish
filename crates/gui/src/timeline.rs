@@ -234,6 +234,70 @@ pub fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &mut bool
     });
 }
 
+/// Picks a frame of a video for a still picture: a frame's step either way,
+/// its time, and a bar to click or drag along. `step` is a frame's length.
+pub fn frame_picker(ui: &mut egui::Ui, length: f64, frame: &mut Option<f64>, step: f64) {
+    let length = length.max(1e-6);
+    ui.horizontal(|ui| {
+        let mut at = frame.unwrap_or(0.0).clamp(0.0, length);
+        let mut picked = None;
+        let button = |text| egui::Button::new(text).min_size(vec2(26.0, 26.0));
+        if ui.add(button("<")).on_hover_text("The frame before").clicked() {
+            picked = Some(at - step);
+        }
+        if ui.add(button(">")).on_hover_text("The frame after").clicked() {
+            picked = Some(at + step);
+        }
+        let field = egui::DragValue::new(&mut at)
+            .range(0.0..=length)
+            .speed(0.01)
+            .max_decimals(3)
+            .suffix(" s");
+        if ui.add_sized(vec2(72.0, 24.0), field).on_hover_text("The frame's time").changed() {
+            picked = Some(at);
+        }
+        let width = ui.available_width().max(80.0);
+        let (rect, response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click_and_drag());
+        let track = Rect::from_min_max(
+            pos2(rect.left() + 8.0, rect.top() + 11.0),
+            pos2(rect.right() - 8.0, rect.bottom() - 11.0),
+        );
+        let seconds_at =
+            |x: f32| (f64::from((x - track.left()) / track.width()) * length).clamp(0.0, length);
+        if let Some(pointer) = response.interact_pointer_pos()
+            && (response.dragged() || response.clicked())
+        {
+            picked = Some(seconds_at(pointer.x));
+        }
+        if let Some(pointer) = response.hover_pos() {
+            response.clone().on_hover_text_at_pointer(widgets::seconds(seconds_at(pointer.x)));
+        }
+        if let Some(new) = picked {
+            at = new.clamp(0.0, length);
+            *frame = (at > 1e-6).then_some(at);
+        }
+        let painter = ui.painter_at(rect);
+        let visuals = ui.visuals();
+        painter.rect_filled(track, 3.0, visuals.extreme_bg_color);
+        // the frame, marked like a playhead
+        let x = track.left() + (at / length) as f32 * track.width();
+        let marks = visuals.strong_text_color();
+        painter.line_segment(
+            [pos2(x, track.top() - 4.0), pos2(x, rect.bottom())],
+            Stroke::new(1.5, marks),
+        );
+        painter.add(Shape::convex_polygon(
+            vec![
+                pos2(x - 5.0, track.top() - 9.0),
+                pos2(x + 5.0, track.top() - 9.0),
+                pos2(x, track.top() - 2.0),
+            ],
+            marks,
+            Stroke::NONE,
+        ));
+    });
+}
+
 fn play_button(ui: &mut egui::Ui, playing: &mut bool) {
     let icon = if *playing { "⏸" } else { "▶" };
     if ui

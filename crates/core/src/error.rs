@@ -14,6 +14,8 @@ pub enum Error {
     Probe { path: PathBuf, message: String },
     #[error("{0} has no video stream")]
     NoVideo(PathBuf),
+    #[error("{} has no frame at {at:.3} s", path.display())]
+    NoFrame { path: PathBuf, at: f64 },
     #[error("invalid options: {0}")]
     InvalidOptions(String),
     #[error("{} already exists", .0.display())]
@@ -33,6 +35,8 @@ pub enum Error {
     Webm(#[from] WebmError),
     #[error(transparent)]
     Tgs(#[from] tgradish_tgs::Error),
+    #[error("could not encode the WebP: {0}")]
+    Webp(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

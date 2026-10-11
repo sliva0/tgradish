@@ -108,6 +108,11 @@ fn scale_filters(plan: &Plan) -> Vec<String> {
     let (sw, sh) = (plan.scaled_width, plan.scaled_height);
     let (used_w, used_h) = plan.used();
     match plan.scaling {
+        // already the size, as shown: nothing to blend, and the round trip
+        // through linear light would only add noise
+        Scaling::Smooth | Scaling::Auto if (sw, sh) == (used_w, used_h) => {
+            vec![format!("scale={sw}:{sh}:flags=neighbor")]
+        }
         Scaling::Smooth | Scaling::Auto => {
             in_linear_light(plan, format!("scale={sw}:{sh}:flags=lanczos"))
         }

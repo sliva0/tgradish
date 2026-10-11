@@ -12,7 +12,8 @@ pub use crate::term::ColorChoice;
 const TGS: &str = "Animated stickers (.tgs)";
 
 /// Converts videos into Telegram video stickers and emoji, with the ability
-/// to bypass the 3 second limit, and pixel art into animated stickers.
+/// to bypass the 3 second limit, pictures and frames into image stickers,
+/// and pixel art into animated stickers.
 #[derive(Debug, Parser)]
 #[command(version, max_term_width = 100, styles = crate::ui::help_styles())]
 pub struct Cli {
@@ -141,13 +142,14 @@ pub struct WatchArgs {
 /// Flags shared by `convert` and `watch`.
 #[derive(Debug, Args)]
 pub struct ConversionArgs {
-    /// What to make: webm (video sticker or emoji, from any video or image)
-    /// or tgs (animated sticker, from pixel art). [default: by the output's
+    /// What to make: webm (video sticker or emoji, from any video or image),
+    /// tgs (animated sticker, from pixel art) or image (image sticker or
+    /// emoji as WebP, from the frame at --start). [default: by the output's
     /// extension, then webm]
     #[arg(long, value_enum)]
     pub format: Option<FormatArg>,
     /// Directory for results. Default: next to each input, as
-    /// NAME.sticker.webm, NAME.emoji.webm or the same with .tgs.
+    /// NAME.sticker.webm, NAME.emoji.webm or the same with .tgs or .webp.
     #[arg(short = 'O', long, value_name = "DIR")]
     pub output_dir: Option<PathBuf>,
     /// Replace existing output files.
@@ -311,6 +313,29 @@ impl OptionArgs {
                 given(self.sheet.is_some(), "--sheet"),
                 given(self.sheet_frames.is_some(), "--sheet-frames"),
             ],
+            Format::Image => vec![
+                given(self.fit.is_some(), "--fit"),
+                given(self.attempts.is_some(), "--attempts"),
+                given(self.fit_range.is_some(), "--fit-range"),
+                given(self.length.is_some(), "--length"),
+                given(self.tempo.is_some(), "--tempo"),
+                given(self.fps.is_some(), "--fps"),
+                given(self.bitrate.is_some(), "--bitrate"),
+                given(self.crf.is_some(), "--crf"),
+                given(self.speed.is_some(), "--speed"),
+                given(self.lossless.is_some(), "--lossless"),
+                given(!self.encoder_options.is_empty(), "--encoder-options"),
+                given(self.extra_args.is_some(), "--extra-args"),
+                given(self.spoof.is_some(), "--spoof"),
+                given(self.fake_duration.is_some(), "--fake-duration"),
+                given(!self.reductions.is_empty(), "--reductions"),
+                given(self.compromise.is_some(), "--compromise"),
+                given(self.keep_canvas.is_some(), "--keep-canvas"),
+                given(self.pixel_scale.is_some(), "--pixel-scale"),
+                given(self.tag.is_some(), "--tag"),
+                given(self.sheet.is_some(), "--sheet"),
+                given(self.sheet_frames.is_some(), "--sheet-frames"),
+            ],
             Format::Tgs => vec![
                 given(self.resize.is_some(), "--resize"),
                 given(self.scaling.is_some(), "--scaling"),
@@ -418,7 +443,7 @@ value_enum!(ScalingArg => options::Scaling { Auto, Smooth, Sharp, PixelPerfect }
 value_enum!(FitArg => options::Fit { Auto, Bitrate, Crf, Fps, Length, Off });
 value_enum!(SpeedArg => options::Speed { Fast, Balanced, Best });
 value_enum!(SpoofArg => options::Spoof { Auto, Always, Never });
-value_enum!(FormatArg => Format { Webm, Tgs });
+value_enum!(FormatArg => Format { Webm, Tgs, Image });
 value_enum!(KindArg => tgs::Kind {
     SnapToGrid,
     MergeColours,

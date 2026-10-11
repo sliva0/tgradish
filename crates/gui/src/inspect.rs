@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use eframe::egui;
 use tgradish_core::telegram::{self, Target};
-use tgradish_core::tgs;
 use tgradish_core::webm::{self, WebmInfo};
+use tgradish_core::{still, tgs};
 use tgradish_tgs::check::{Severity, Stats};
 use tgradish_tgs::limits::{self, telegram as server};
 
@@ -15,6 +15,7 @@ use crate::widgets::{self, gauge, label, note, problems};
 pub enum Found {
     Webm { info: Box<WebmInfo>, target: Target },
     Tgs(Box<Stats>),
+    Image { info: still::Info, target: Target },
     Failed(String),
 }
 
@@ -26,7 +27,20 @@ pub struct Inspection {
 
 impl Inspection {
     pub fn of(path: &Path) -> Inspection {
-        let (found, problems) = if tgs::is_sticker(path) {
+        let (found, problems) = if still::is_image(path) {
+            match still::inspect_file(path) {
+                Ok(info) => {
+                    let target = info.target();
+                    let problems =
+                        telegram::check_still(info.width, info.height, info.bytes, target)
+                            .iter()
+                            .map(|issue| Problem { refused: true, text: issue.to_string() })
+                            .collect();
+                    (Found::Image { info, target }, problems)
+                }
+                Err(err) => (Found::Failed(err.to_string()), Vec::new()),
+            }
+        } else if tgs::is_sticker(path) {
             match tgs::inspect_file(path) {
                 Ok((stats, issues)) => {
                     let problems = issues
@@ -87,6 +101,7 @@ pub fn show(ui: &mut egui::Ui, inspection: &Inspection) {
         }
         Found::Webm { info, target } => webm(ui, info, *target),
         Found::Tgs(stats) => animation(ui, stats),
+        Found::Image { info, target } => image(ui, info, *target),
     }
     ui.add_space(8.0);
     problems(ui, &inspection.problems);
@@ -163,6 +178,24 @@ fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target) {
             ui.label(signature);
             ui.end_row();
         }
+    });
+}
+
+fn image(ui: &mut egui::Ui, info: &still::Info, target: Target) {
+    note(ui, format!("An image {}", target.name()));
+    ui.add_space(6.0);
+    grid(ui, "inspect-image", |ui| {
+        let limit = telegram::MAX_STILL_BYTES;
+        let size = of(widgets::kib(info.bytes), widgets::kib(limit));
+        budget(ui, "Size", "Telegram refuses larger files", info.bytes, limit, size);
+        label(ui, "Picture", "");
+        let kind = if info.lossy { "lossy" } else { "lossless" };
+        let alpha = if info.alpha { ", with transparency" } else { "" };
+        ui.label(format!("{} × {} px, WebP, {kind}{alpha}", info.width, info.height));
+        ui.end_row();
+        label(ui, "Made with", "The program its metadata names");
+        ui.label(info.made_with.as_deref().unwrap_or("unknown"));
+        ui.end_row();
     });
 }
 

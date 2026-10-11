@@ -37,7 +37,8 @@ fn is_input(path: &Path, format: Format) -> bool {
     if name.starts_with('.') || name.starts_with('~') {
         return false;
     }
-    if [".sticker.webm", ".emoji.webm", ".spoofed.webm"].iter().any(|s| name.ends_with(s)) {
+    let results = [".sticker.webm", ".emoji.webm", ".spoofed.webm", ".sticker.webp", ".emoji.webp"];
+    if results.iter().any(|s| name.ends_with(s)) {
         return false;
     }
     let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else { return false };

@@ -50,7 +50,7 @@ impl Kind {
 
     pub fn allows(self, format: Format) -> bool {
         match self {
-            Kind::Video => format == Format::Webm,
+            Kind::Video => format != Format::Tgs,
             Kind::Image => true,
             Kind::Frames => format == Format::Tgs,
         }
@@ -76,7 +76,10 @@ pub struct Choices {
     pub crop: Option<Crop>,
     pub start: Option<f64>,
     pub length: Option<f64>,
-    /// Values set over the preset's, for WebM and `.tgs` results.
+    /// Seconds into the input of the frame an image sticker is made of.
+    pub frame: Option<f64>,
+    /// Values set over the preset's, for WebM and `.tgs` results; images
+    /// take WebM's.
     pub webm: Options,
     pub tgs: TgsOptions,
 }
@@ -89,6 +92,7 @@ impl Choices {
             crop: None,
             start: None,
             length: None,
+            frame: None,
             webm: Options::default(),
             tgs: TgsOptions::default(),
         }
@@ -124,6 +128,13 @@ impl Choices {
     pub fn webm_options(&self, presets: &Presets, config: &Config) -> Result<Options, String> {
         let merged = self.webm_merged(presets, config)?;
         Ok(shown(merged.clone(), &merged))
+    }
+
+    /// Everything an image conversion gets: WebM's options a still picture
+    /// has, and the frame for its start.
+    pub fn image_options(&self, presets: &Presets, config: &Config) -> Result<Options, String> {
+        let options = self.webm_options(presets, config)?;
+        Ok(Options { start: self.frame, ..tgradish_core::still::picture_options(&options) })
     }
 
     /// Everything a `.tgs` conversion gets.
@@ -271,6 +282,7 @@ pub struct Framing {
     crop: Option<Crop>,
     start: Option<f64>,
     length: Option<f64>,
+    frame: Option<f64>,
     webm: Options,
     tgs: TgsOptions,
 }
@@ -284,6 +296,7 @@ impl Framing {
             crop: item.choices.crop,
             start: item.choices.start,
             length: item.choices.length,
+            frame: item.choices.frame,
             webm: Options {
                 resize: webm.resize,
                 scaling: webm.scaling,
@@ -393,7 +406,7 @@ impl Item {
     /// The input as it is shown for the current format.
     pub fn input_clip(&self) -> Option<&Clip> {
         match self.format {
-            Format::Webm => self.video.ready().map(|video| &video.overview),
+            Format::Webm | Format::Image => self.video.ready().map(|video| &video.overview),
             Format::Tgs => self.art.ready().map(|art| &art.clip),
         }
     }
@@ -401,7 +414,9 @@ impl Item {
     /// Size of the input picture.
     pub fn input_size(&self) -> Option<(u32, u32)> {
         match self.format {
-            Format::Webm => self.video.ready().map(|v| (v.probe.width, v.probe.height)),
+            Format::Webm | Format::Image => {
+                self.video.ready().map(|v| (v.probe.width, v.probe.height))
+            }
             Format::Tgs => self.art.ready().map(|art| (art.clip.width, art.clip.height)),
         }
     }
@@ -409,7 +424,7 @@ impl Item {
     /// Length of the input in seconds, `None` for still images.
     pub fn input_length(&self) -> Option<f64> {
         match self.format {
-            Format::Webm => self.video.ready().and_then(|video| {
+            Format::Webm | Format::Image => self.video.ready().and_then(|video| {
                 (!video.probe.still_image).then_some(video.probe.duration).flatten()
             }),
             Format::Tgs => {
@@ -421,7 +436,7 @@ impl Item {
     /// Why the input can't be shown, if reading it failed.
     pub fn input_error(&self) -> Option<&str> {
         let load = match self.format {
-            Format::Webm => match &self.video {
+            Format::Webm | Format::Image => match &self.video {
                 Load::Failed(message) => Some(message),
                 _ => None,
             },
@@ -448,9 +463,10 @@ impl Item {
         let set = match self.format {
             Format::Webm => self.choices.webm_options(presets, config).ok().and_then(|o| o.tempo),
             Format::Tgs => self.choices.tgs_options(presets, config).ok().and_then(|o| o.tempo),
+            Format::Image => None,
         };
         set.unwrap_or_else(|| match self.format {
-            Format::Webm => 1.0,
+            Format::Webm | Format::Image => 1.0,
             Format::Tgs => {
                 let used = self.range().map_or(0.0, |(start, end)| end - start);
                 (used / telegram::MAX_SECONDS).max(1.0)

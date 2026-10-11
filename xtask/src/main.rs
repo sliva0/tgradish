@@ -28,7 +28,8 @@
 //! `cargo xtask licenses [--check]` writes the licenses of the Rust crates
 //! in tgradish to `licenses/THIRD-PARTY-CRATES.txt`, which binaries carry;
 //! `--check` fails if it is out of date, as after dependencies change. Needs
-//! cargo-about. cargo-about skips files a `.gitignore` above the crates'
+//! cargo-about 0.9.2, which CI uses too: other versions word the list
+//! differently. cargo-about skips files a `.gitignore` above the crates'
 //! sources ignores, such as one of a home directory kept in git: then set
 //! `CARGO_HOME` to a directory outside it. `cargo xtask ffmpeg` keeps
 //! `licenses/ffmpeg` up to date the same way.
@@ -867,13 +868,18 @@ fn package_release(args: &[String]) -> Result<()> {
             std::fs::copy(root.join("crates/cli/assets").join(&icon), stage.join(&icon))?;
         }
     }
+    // libwebp, which every build has for image stickers
+    std::fs::create_dir_all(stage.join("licenses"))?;
+    for file in ["COPYING", "PATENTS"] {
+        let to = stage.join("licenses").join(format!("libwebp-{file}"));
+        std::fs::copy(root.join("licenses/libwebp").join(file), to)?;
+    }
     let third_party = if system_ffmpeg {
         "tgradish is MIT licensed, see LICENSE.txt.\n\n\
          This build has no ffmpeg in it: it runs the system's ffmpeg and ffprobe\n\
          (6.0 or newer, with libvpx for VP9) from PATH.\n"
             .to_owned()
     } else {
-        std::fs::create_dir_all(stage.join("licenses"))?;
         for entry in std::fs::read_dir(&licenses)? {
             let entry = entry?;
             std::fs::copy(entry.path(), stage.join("licenses").join(entry.file_name()))?;
@@ -887,9 +893,13 @@ fn package_release(args: &[String]) -> Result<()> {
             ffmpeg = FFMPEG.version,
         )
     };
+    let libwebp = "\nIt includes libwebp (BSD 3-Clause), for image stickers: its licence and\n\
+                   patent grant are licenses/libwebp-COPYING and licenses/libwebp-PATENTS.\n";
     std::fs::write(
         stage.join("THIRD-PARTY.txt"),
-        third_party + "\nThe Rust crates in it and their licenses are in THIRD-PARTY-CRATES.txt.\n",
+        third_party
+            + libwebp
+            + "\nThe Rust crates in it and their licenses are in THIRD-PARTY-CRATES.txt.\n",
     )?;
     // the crates of every build, as the binary carries them
     std::fs::copy(

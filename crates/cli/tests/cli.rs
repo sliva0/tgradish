@@ -37,7 +37,7 @@ fn describes_protocol() {
     let output = tgradish(&["describe"]);
     assert!(output.status.success());
     let description: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(description["protocol"], 3);
+    assert_eq!(description["protocol"], 4);
     assert_eq!(description["default_format"], "webm");
     let formats = description["formats"].as_array().unwrap();
     let format = |name: &str| formats.iter().find(|f| f["format"] == name).unwrap();
@@ -47,6 +47,10 @@ fn describes_protocol() {
     assert_eq!(format("tgs")["default_preset"], "best");
     assert_eq!(format("tgs")["output_extension"], "tgs");
     assert!(format("tgs")["options"]["properties"]["reductions"].is_object());
+    // images take WebM's options and presets
+    assert_eq!(format("image")["output_extension"], "webp");
+    assert_eq!(format("image")["default_preset"], "balanced");
+    assert!(format("image")["options"]["properties"]["start"].is_object());
     let presets = description["presets"].as_array().unwrap();
     let preset = |name: &str| presets.iter().find(|p| p["name"] == name).unwrap();
     // presets say how, for both formats, and nothing about the target
@@ -62,7 +66,7 @@ fn carries_licences() {
     let output = tgradish(&["licenses"]);
     assert!(output.status.success());
     let text = String::from_utf8_lossy(&output.stdout);
-    for title in ["tgradish", "Font: Ubuntu Light, a subset", "Rust crates"] {
+    for title in ["tgradish", "Font: Ubuntu Light, a subset", "libwebp: licence", "Rust crates"] {
         assert!(text.lines().any(|line| line == title), "no {title:?}");
     }
     // each crate's own license file, with who holds its copyright
@@ -338,4 +342,35 @@ fn refuses_to_merge_outputs_of_same_named_inputs() {
     assert_eq!(errors.len(), 1, "{events:?}");
     assert!(errors[0]["input"].as_str().unwrap().ends_with("b/same.png"));
     assert!(out.join("same.sticker.webm").is_file());
+}
+
+#[test]
+fn makes_image_stickers() {
+    let Some(input) = reference("uhh.mp4") else { return };
+    let dir = tempfile::tempdir().unwrap();
+    // the output's extension asks for an image
+    let out = dir.path().join("frame.webp");
+    let output = tgradish(&[
+        "--json",
+        "--ffmpeg-from",
+        "system",
+        "convert",
+        input.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+        "--start",
+        "1",
+    ]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let event: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(event["event"], "finished");
+    assert_eq!((event["width"].as_u64(), event["height"].as_u64()), (Some(512), Some(512)));
+    assert_eq!(event["encoding"]["encoding"], "lossless");
+    assert!(event["issues"].as_array().unwrap().is_empty());
+    assert_eq!(&std::fs::read(&out).unwrap()[8..12], b"WEBP");
+    // what an image doesn't use is refused
+    let output =
+        tgradish(&["convert", input.to_str().unwrap(), "--format", "image", "--crf", "30"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--crf can't be used"));
 }

@@ -1,7 +1,8 @@
 //! Packs the licence notices of what tgradish is built from, compressed,
 //! so a binary on its own carries them; `licenses` reads them back. The
 //! texts are in `licenses/` at the top of the repository: the Rust crates'
-//! from `cargo xtask licenses`, ffmpeg's from `cargo xtask ffmpeg`.
+//! from `cargo xtask licenses`, ffmpeg's from `cargo xtask ffmpeg`, and
+//! libwebp's from the libwebp-sys crate's copy of it.
 
 use std::io::Write;
 use std::path::Path;
@@ -27,6 +28,10 @@ fn main() {
         ] {
             notices.push((title.to_owned(), read(&format!("licenses/ffmpeg/{file}"))));
         }
+    }
+    // libwebp, which every build has, from libwebp-sys
+    for (file, title) in [("COPYING", "libwebp: licence"), ("PATENTS", "libwebp: patent grant")] {
+        notices.push((title.to_owned(), read(&format!("licenses/libwebp/{file}"))));
     }
     notices.push(("Rust crates".to_owned(), read("licenses/THIRD-PARTY-CRATES.txt")));
 

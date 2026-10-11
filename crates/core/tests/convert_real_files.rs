@@ -770,3 +770,49 @@ fn builtin_backend_rejects_extra_args() {
     let result = convert(&Backend::Linked, &request, &CancelToken::new(), &mut |_| {});
     assert!(matches!(result, Err(Error::InvalidOptions(_))), "{result:?}");
 }
+
+#[test]
+fn makes_image_stickers_from_a_frame() {
+    let (Some(backends), Some(input)) = (backends(), reference("uhh.mp4")) else { return };
+    let mut pictures = Vec::new();
+    for backend in &backends {
+        let dir = tempfile::tempdir().unwrap();
+        let name = name(backend);
+        // a wide part of the frame at 1 s, as a sticker
+        let options = Options {
+            start: Some(1.0),
+            crop: Some(Crop { x: 0, y: 128, width: 512, height: 256 }),
+            ..Options::default()
+        };
+        let request = Request { options, ..Request::new(input.clone()) };
+        let request = Request { output: Some(dir.path().join("out.webp")), ..request };
+        let made = tgradish_core::still::convert(backend, &request, &CancelToken::new()).unwrap();
+        assert!(made.issues.is_empty(), "{name}: {:?}", made.issues);
+        assert_eq!((made.width, made.height), (512, 256), "{name}");
+        assert_eq!(made.encoding, tgradish_core::still::Encoding::Lossless, "{name}");
+        let preview = tgradish_core::still::preview(&made.output).unwrap();
+        assert_eq!((preview.width, preview.height), (512, 256), "{name}");
+        pictures.push(preview.frames[0].0.clone());
+        // an emoji, padded square
+        let emoji = Options { target: Some(Target::Emoji), ..request.options.clone() };
+        let request = Request {
+            options: emoji,
+            output: Some(dir.path().join("emoji.webp")),
+            ..request.clone()
+        };
+        let made = tgradish_core::still::convert(backend, &request, &CancelToken::new()).unwrap();
+        assert!(made.issues.is_empty(), "{name}: {:?}", made.issues);
+        assert_eq!((made.width, made.height), (100, 100), "{name}");
+        let corner = &tgradish_core::still::preview(&made.output).unwrap().frames[0].0[..4];
+        assert_eq!(corner[3], 0, "{name}: the padding is transparent");
+        // past the end
+        let late = Options { start: Some(60.0), ..Options::default() };
+        let request = Request { options: late, ..request };
+        assert!(tgradish_core::still::convert(backend, &request, &CancelToken::new()).is_err());
+    }
+    // the same picture either way
+    if let [first, second] = pictures.as_slice() {
+        let differ = first.iter().zip(second).filter(|(a, b)| a.abs_diff(**b) > 8).count();
+        assert!(differ < first.len() / 100, "{differ} of {} channels differ", first.len());
+    }
+}

@@ -1,4 +1,4 @@
-//! Telegram requirements for video stickers and emoji.
+//! Telegram requirements for video and image stickers and emoji.
 //!
 //! Source: <https://core.telegram.org/stickers>, checked 2026-10-08, and
 //! uploads to @Stickers, which found the exact limits.
@@ -12,6 +12,8 @@ use crate::webm::WebmInfo;
 pub const MAX_STICKER_BYTES: u64 = 256 * 1024;
 /// Largest video emoji @Stickers accepts, in bytes; one more is "too big".
 pub const MAX_EMOJI_BYTES: u64 = 64 * 1024;
+/// Largest image sticker or emoji, PNG or WebP, in bytes.
+pub const MAX_STILL_BYTES: u64 = 512 * 1024;
 /// Longest allowed duration in seconds, as read from the file header.
 pub const MAX_SECONDS: f64 = 3.0;
 /// The rules say 30 fps, but @Stickers accepted a 60 fps sticker.
@@ -94,6 +96,35 @@ impl std::fmt::Display for Issue {
     }
 }
 
+/// The issue with a picture `width` by `height` pixels as `target`, if its
+/// size isn't one Telegram takes.
+fn size_issue(width: u64, height: u64, target: Target) -> Option<Issue> {
+    let (box_w, box_h) = target.box_size();
+    let (box_w, box_h) = (u64::from(box_w), u64::from(box_h));
+    let size_ok = if target.requires_exact_size() {
+        width == box_w && height == box_h
+    } else {
+        width <= box_w && height <= box_h && (width == box_w || height == box_h)
+    };
+    let expected = if target.requires_exact_size() {
+        format!("{box_w}x{box_h}")
+    } else {
+        format!("one side {box_w} px, the other at most {box_w} px")
+    };
+    (!size_ok).then_some(Issue::WrongSize { width, height, expected })
+}
+
+/// Lists everything that would make Telegram reject an image sticker or
+/// emoji of `bytes` bytes, `width` by `height` pixels, as `target`.
+pub fn check_still(width: u32, height: u32, bytes: u64, target: Target) -> Vec<Issue> {
+    let mut issues: Vec<Issue> =
+        size_issue(u64::from(width), u64::from(height), target).into_iter().collect();
+    if bytes > MAX_STILL_BYTES {
+        issues.push(Issue::TooBig { bytes, max: MAX_STILL_BYTES });
+    }
+    issues
+}
+
 /// Lists everything that would make Telegram reject `info` as `target`.
 ///
 /// Duration is checked against the header, which is what Telegram reads, so
@@ -109,27 +140,7 @@ pub fn check(info: &WebmInfo, target: Target) -> Vec<Issue> {
             if video.codec_id != "V_VP9" {
                 issues.push(Issue::NotVp9 { codec_id: video.codec_id.clone() });
             }
-            let (box_w, box_h) = target.box_size();
-            let (box_w, box_h) = (u64::from(box_w), u64::from(box_h));
-            let size_ok = if target.requires_exact_size() {
-                video.width == box_w && video.height == box_h
-            } else {
-                video.width <= box_w
-                    && video.height <= box_h
-                    && (video.width == box_w || video.height == box_h)
-            };
-            if !size_ok {
-                let expected = if target.requires_exact_size() {
-                    format!("{box_w}x{box_h}")
-                } else {
-                    format!("one side {box_w} px, the other at most {box_w} px")
-                };
-                issues.push(Issue::WrongSize {
-                    width: video.width,
-                    height: video.height,
-                    expected,
-                });
-            }
+            issues.extend(size_issue(video.width, video.height, target));
         }
     }
     if info.audio_tracks > 0 {

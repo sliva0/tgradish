@@ -1,11 +1,12 @@
 pkgbase = tgradish-bin
-	pkgdesc = Telegram video stickers and emoji from any video, and animated stickers from pixel art (release build)
+	pkgdesc = Telegram video and image stickers and emoji from any video or picture, and animated stickers from pixel art (release build)
 	pkgver = 2.0.0
 	pkgrel = 1
 	url = https://github.com/sliva0/tgradish
 	arch = x86_64
 	arch = aarch64
 	license = MIT
+	license = BSD-3-Clause
 	depends = ffmpeg
 	depends = gcc-libs
 	depends = glibc

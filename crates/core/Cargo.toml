@@ -21,6 +21,8 @@ tgradish-tgs = { workspace = true, features = ["schema", "threads"] }
 
 arboard = { workspace = true, optional = true }
 directories.workspace = true
+image-webp.workspace = true
+libwebp-sys.workspace = true
 ffmpeg-next = { workspace = true, optional = true }
 png = { workspace = true, optional = true }
 schemars.workspace = true

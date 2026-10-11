@@ -30,7 +30,7 @@ use tgradish_core::config::Config;
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::presets::{Format, Presets};
-use tgradish_core::{convert, paths, telegram, tgs};
+use tgradish_core::{convert, paths, still, telegram, tgs};
 
 use crate::canvas::{Cropping, Inset, Picture, Screen};
 use crate::item::{Framing, Item, Kind, Made, Show, Zoom};
@@ -446,6 +446,7 @@ impl App {
         let next_to_input = match item.format {
             Format::Webm => convert::default_output(input, item.choices.target),
             Format::Tgs => tgs::default_output(input, item.choices.target),
+            Format::Image => still::default_output(input, item.choices.target),
         };
         let name = next_to_input.file_name().unwrap_or_default();
         let first = match (&item.pasted, dir) {
@@ -575,7 +576,7 @@ impl App {
                     item.art_reading.clone(),
                 ));
                 reading += 1;
-            } else if item.format == Format::Webm
+            } else if matches!(item.format, Format::Webm | Format::Image)
                 && item.video.is_idle()
                 && !(item.format_guessed && item.art.is_loading())
             {
@@ -602,7 +603,7 @@ impl App {
         let Some(id) = self.selected else { return };
         let Ok(backend) = backend else { return };
         let Some(item) = self.item_mut(id) else { return };
-        if item.format != Format::Webm {
+        if item.format == Format::Tgs {
             return;
         }
         let range = item.range().map(|(start, end)| (start, end - start));
@@ -682,6 +683,11 @@ impl App {
                 Format::Tgs => choices
                     .tgs_options(&self.presets, &self.config)
                     .map(|options| Plan::Tgs { options }),
+                Format::Image => {
+                    choices.image_options(&self.presets, &self.config).and_then(|options| {
+                        backend.clone().map(|backend| Plan::Image { options, backend })
+                    })
+                }
             };
             let overwrite = self.may_replace(id, &job.output);
             // a result of another time, rather than this item's own
@@ -875,8 +881,9 @@ impl App {
                 .button("🔬")
                 .on_hover_text("Inspect a sticker: check a file against Telegram's rules")
                 .clicked()
-                && let Some(file) =
-                    rfd::FileDialog::new().add_filter("stickers", &["webm", "tgs"]).pick_file()
+                && let Some(file) = rfd::FileDialog::new()
+                    .add_filter("stickers", &["webm", "tgs", "webp"])
+                    .pick_file()
             {
                 self.inspection = Some(inspect::Inspection::of(&file));
             }
@@ -1008,7 +1015,7 @@ impl App {
             ui.add_space(6.0);
             widgets::note(
                 ui,
-                "Videos become WebM stickers; pixel art can also become a crisp TGS animation.",
+                "Videos become WebM stickers, pictures image stickers; pixel art can also become a crisp TGS animation.",
             );
             ui.add_space(18.0);
             ui.horizontal(|ui| {
@@ -1306,7 +1313,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
     let error = item.input_error().map(str::to_owned);
     // fields rather than methods, so the view and crop can change
     let (overview, part, still) = match item.format {
-        Format::Webm => (
+        Format::Webm | Format::Image => (
             item.video.ready().map(|video| &video.overview),
             item.part.as_ref().and_then(|(_, part)| part.ready()),
             item.still.as_ref().and_then(|(at, still)| Some((*at, still.ready()?))),
@@ -1315,7 +1322,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
     };
     let target = item.choices.target;
     let resize = settings::resize_of(item);
-    let filling = (item.format == Format::Webm && resize == Resize::Crop).then(|| {
+    let filling = (item.format != Format::Tgs && resize == Resize::Crop).then(|| {
         let (width, height) = target.box_size();
         f64::from(width) / f64::from(height)
     });
@@ -1325,8 +1332,15 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
             if let Some(message) = error {
                 message_in(ui, rect, &format!("Couldn't read it: {message}"), widgets::bad(ui));
             } else if let (Some(clip), Some(size)) = (overview, input_size) {
+                // a picture is one frame: shown still, where it is picked
+                let picking = item.format == Format::Image;
+                if picking {
+                    item.view.playing = false;
+                    let frame = item.choices.frame.unwrap_or(0.0);
+                    item.view.time = length.map_or(0.0, |length| frame.clamp(0.0, length));
+                }
                 // play within the used part, as fast as the result will
-                if let Some((start, end)) = range {
+                if let Some((start, end)) = range.filter(|_| !picking) {
                     if item.view.playing {
                         item.view.time += dt * tempo;
                         ui.ctx().request_repaint();
@@ -1348,7 +1362,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
                 // with room for its longest label
                 let (input_area, inset_area) = if item.view.inset {
                     let widest = match item.format {
-                        Format::Webm => "Result\n512 × 512 px",
+                        Format::Webm | Format::Image => "Result\n512 × 512 px",
                         Format::Tgs => "Result",
                     };
                     let text = ui.visuals().text_color();
@@ -1370,7 +1384,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
                     let crop = item.choices.crop;
                     let where_ = output::Part::of(crop, size, (clip.width, clip.height));
                     match item.format {
-                        Format::Webm => {
+                        Format::Webm | Format::Image => {
                             let used = crop.map_or(size, |crop| (crop.width, crop.height));
                             let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
                             // a crop that doesn't suit the exact scale yet is made to
@@ -1436,6 +1450,10 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
     }
     ui.add_space(6.0);
     match (item.view.show, length, result_length) {
+        (Show::Input, Some(length), _) if item.format == Format::Image => {
+            let fps = item.video.ready().and_then(|video| video.probe.fps).unwrap_or(25.0);
+            timeline::frame_picker(ui, length, &mut item.choices.frame, 1.0 / fps.max(1.0));
+        }
         (Show::Input, Some(length), _) => timeline::show(
             ui,
             timeline::Timeline {
@@ -1459,7 +1477,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
 /// `.tgs` results, vectors, have none of in pixels.
 fn inset_label(item: &Item, size: (u32, u32)) -> Option<String> {
     match item.format {
-        Format::Webm => {
+        Format::Webm | Format::Image => {
             let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
             let sizes = settings::webm_sizes(item, item.choices.crop.unwrap_or(full))?;
             Some(format!("Result\n{} × {} px", sizes.width, sizes.height))
@@ -1653,6 +1671,9 @@ fn settle(ctx: &egui::Context, item: &mut Item) {
         item.format_guessed = false;
         if art.clip.looks_like_pixel_art() {
             item.format = Format::Tgs;
+        } else if !art.clip.is_animated() {
+            // a photo or a drawing stays a picture
+            item.format = Format::Image;
         }
     }
     if item.input_thumb.is_none()
@@ -1681,9 +1702,19 @@ fn texture_options(clip: &Clip) -> egui::TextureOptions {
 }
 
 fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backend, String>) {
-    let Some(Made { job, format: Format::Webm, .. }) = &item.made else { return };
-    let (Status::Done(done), Ok(backend)) = (&job.status, backend) else { return };
-    item.result_clip = Load::Loading(media::load_result(ctx, backend.clone(), &done.output));
+    let Some(Made { job, format, .. }) = &item.made else { return };
+    let Status::Done(done) = &job.status else { return };
+    item.result_clip = match (format, backend) {
+        (Format::Webm, Ok(backend)) => {
+            Load::Loading(media::load_result(ctx, backend.clone(), &done.output))
+        }
+        // small enough to read at once
+        (Format::Image, _) => match still::preview(&done.output) {
+            Ok(preview) => Load::Ready(Clip::from_preview(preview, true)),
+            Err(err) => Load::Failed(err.to_string()),
+        },
+        _ => return,
+    };
 }
 
 fn message_in(ui: &egui::Ui, rect: egui::Rect, text: &str, colour: Color32) {
@@ -1775,6 +1806,8 @@ fn row(
         (Format::Webm, telegram::Target::Emoji) => "WebM emoji",
         (Format::Tgs, telegram::Target::Sticker) => "TGS sticker",
         (Format::Tgs, telegram::Target::Emoji) => "TGS emoji",
+        (Format::Image, telegram::Target::Sticker) => "Image sticker",
+        (Format::Image, telegram::Target::Emoji) => "Image emoji",
     };
     child.add(egui::Label::new(RichText::new(what).small().weak()).selectable(false));
     status(&mut child, item, queued);
@@ -2407,6 +2440,34 @@ mod tests {
         assert!(harness.state().items[0].result_is_current());
     }
 
+    #[test]
+    fn makes_image_stickers_from_a_frame() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video_of(dir.path(), "320x240", 2) else { return };
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        config.ffmpeg.choice = FfmpegChoice::System;
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        harness.get_by_label("Image sticker (WebP)").click();
+        harness.run_steps(2);
+        // the frame at a second, which the preview stops at
+        harness.state_mut().items[0].choices.frame = Some(1.0);
+        harness.run_steps(2);
+        let item = &harness.state().items[0];
+        assert_eq!((item.format, item.view.time, item.view.playing), (Format::Image, 1.0, false));
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let item = &harness.state().items[0];
+        assert!(matches!(item.made.as_ref().unwrap().job.status, Status::Done(_)));
+        let out = dir.path().join("out").join("clip.sticker.webp");
+        assert_eq!(still::dimensions(&out).unwrap(), (512, 384));
+        assert!(item.result_clip.ready().is_some());
+        harness.get_by_label_contains("Telegram should accept it");
+    }
+
     fn video(dir: &Path, size: &str) -> Option<PathBuf> {
         video_of(dir, size, 1)
     }
@@ -2673,6 +2734,18 @@ mod tests {
             (item.kind, item.format, item.format_guessed),
             (Kind::Image, Format::Tgs, false)
         );
+        // a picture of more colours than pixel art has stays a picture
+        let photo = dir.path().join("photo.png");
+        let file = std::io::BufWriter::new(std::fs::File::create(&photo).unwrap());
+        let mut encoder = png::Encoder::new(file, 32, 32);
+        encoder.set_color(png::ColorType::Rgba);
+        let pixels: Vec<u8> =
+            (0..32u32 * 32).flat_map(|i| [i as u8, (i >> 2) as u8, 99, 255]).collect();
+        encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
+        harness.state_mut().add(vec![photo]);
+        finish(&mut harness);
+        let item = &harness.state().items[1];
+        assert_eq!((item.kind, item.format), (Kind::Image, Format::Image));
     }
 
     /// Renders the window to `$TGRADISH_SCREENSHOTS/*.png` for a look at
@@ -2732,6 +2805,15 @@ mod tests {
             harness.set_size(egui::vec2(1280.0, 820.0));
             let item = &mut harness.state_mut().items[0];
             (item.view.aspect, item.choices.webm) = (item::Aspect::Free, Default::default());
+            // a frame of it as an image sticker, picked on the bar
+            (item.format, item.choices.frame) = (Format::Image, Some(0.5));
+            harness.run_steps(3);
+            for _ in 0..100 {
+                harness.step();
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            save(&mut harness, "image");
+            harness.state_mut().items[0].format = Format::Webm;
             harness.run_steps(3);
         }
         // names in scripts the window's fonts lack, drawn with the system's

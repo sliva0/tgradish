@@ -169,7 +169,7 @@ pub fn show(
                     let picked = chosen.to_owned();
                     if picked != current {
                         match format {
-                            Format::Webm => config.preset = Some(picked),
+                            Format::Webm | Format::Image => config.preset = Some(picked),
                             Format::Tgs => config.tgs_preset = Some(picked),
                         }
                     }

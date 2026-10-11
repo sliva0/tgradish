@@ -21,6 +21,7 @@ pub mod options;
 pub mod paths;
 pub mod presets;
 pub mod protocol;
+pub mod still;
 pub mod telegram;
 pub mod tgs;
 pub mod webm;

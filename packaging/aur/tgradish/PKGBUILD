@@ -3,10 +3,10 @@
 pkgname=tgradish
 pkgver=2.0.0
 pkgrel=1
-pkgdesc='Telegram video stickers and emoji from any video, and animated stickers from pixel art'
+pkgdesc='Telegram video and image stickers and emoji from any video or picture, and animated stickers from pixel art'
 arch=(x86_64 aarch64)
 url='https://github.com/sliva0/tgradish'
-license=(MIT)
+license=(MIT BSD-3-Clause)
 # ffmpeg runs as a program; the window loads the graphics libraries when
 # it opens
 depends=(
@@ -61,4 +61,8 @@ package() {
   done
   install -Dm644 README.md -t "$pkgdir/usr/share/doc/$pkgname/"
   install -Dm644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  # libwebp's licence and patent grant
+  for file in COPYING PATENTS; do
+    install -Dm644 "licenses/libwebp/$file" "$pkgdir/usr/share/licenses/$pkgname/libwebp-$file"
+  done
 }

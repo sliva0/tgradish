@@ -4,10 +4,10 @@ pkgname=tgradish-bin
 _pkgname=tgradish
 pkgver=2.0.0
 pkgrel=1
-pkgdesc='Telegram video stickers and emoji from any video, and animated stickers from pixel art (release build)'
+pkgdesc='Telegram video and image stickers and emoji from any video or picture, and animated stickers from pixel art (release build)'
 arch=(x86_64 aarch64)
 url='https://github.com/sliva0/tgradish'
-license=(MIT)
+license=(MIT BSD-3-Clause)
 # the release build without ffmpeg, which runs the system's; the window
 # loads the graphics libraries when it opens
 depends=(
@@ -41,4 +41,6 @@ package() {
   done
   install -Dm644 README.md THIRD-PARTY.txt THIRD-PARTY-CRATES.txt -t "$pkgdir/usr/share/doc/$_pkgname/"
   install -Dm644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  # libwebp's licence and patent grant
+  install -Dm644 licenses/* -t "$pkgdir/usr/share/licenses/$pkgname/"
 }

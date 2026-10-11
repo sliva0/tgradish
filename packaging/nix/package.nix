@@ -73,9 +73,13 @@ rustPlatform.buildRustPackage {
   passthru = { inherit windowLibraries; };
 
   meta = {
-    description = "Telegram video stickers and emoji from any video, and animated stickers from pixel art";
+    description = "Telegram video and image stickers and emoji from any video or picture, and animated stickers from pixel art";
     homepage = "https://github.com/sliva0/tgradish";
-    license = lib.licenses.mit;
+    # libwebp is in every build
+    license = [
+      lib.licenses.mit
+      lib.licenses.bsd3
+    ];
     mainProgram = "tgradish";
     platforms = lib.platforms.linux;
   };

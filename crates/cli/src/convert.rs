@@ -11,6 +11,7 @@ use tgradish_core::convert::{Request, convert, default_output};
 use tgradish_core::events::Event;
 use tgradish_core::options::Options;
 use tgradish_core::presets::{Format, FormatOptions, Presets};
+use tgradish_core::still;
 use tgradish_core::tgs::{self, TgsEvent, TgsOptions, TgsRequest};
 
 use crate::Context;
@@ -21,6 +22,7 @@ use crate::{term, ui};
 enum Resolved {
     Webm { options: Options, backend: Backend },
     Tgs { options: TgsOptions },
+    Image { options: Options, backend: Backend },
 }
 
 /// Runs conversions with the options and output settings of one command.
@@ -62,14 +64,19 @@ impl<'a> Converter<'a> {
         // preset, then --options-json, then flags
         let name = args.preset.as_deref().unwrap_or_else(|| ctx.config.preset_for(format));
         let invalid_json = || format!("invalid --options-json for {} output", format.extension());
+        let webm = |mut options: Options| -> Result<Options> {
+            if let Some(json) = &args.options_json {
+                let overlay: Options = serde_json::from_str(json).with_context(invalid_json)?;
+                options = options.merged(&overlay);
+            }
+            Ok(options.merged(&args.options.to_options()))
+        };
         let resolved = match presets.resolve(name, format)? {
-            FormatOptions::Webm(mut options) => {
-                if let Some(json) = &args.options_json {
-                    let overlay: Options = serde_json::from_str(json).with_context(invalid_json)?;
-                    options = options.merged(&overlay);
-                }
-                let options = options.merged(&args.options.to_options());
-                Resolved::Webm { options, backend: ctx.backend()? }
+            FormatOptions::Webm(options) => {
+                Resolved::Webm { options: webm(options)?, backend: ctx.backend()? }
+            }
+            FormatOptions::Image(options) => {
+                Resolved::Image { options: webm(options)?, backend: ctx.backend()? }
             }
             FormatOptions::Tgs(mut options) => {
                 if let Some(json) = &args.options_json {
@@ -94,6 +101,7 @@ impl<'a> Converter<'a> {
         match self.resolved {
             Resolved::Webm { .. } => Format::Webm,
             Resolved::Tgs { .. } => Format::Tgs,
+            Resolved::Image { .. } => Format::Image,
         }
     }
 
@@ -111,6 +119,9 @@ impl<'a> Converter<'a> {
             }
             Resolved::Tgs { options } => {
                 tgs::default_output(input, options.target.unwrap_or_default())
+            }
+            Resolved::Image { options, .. } => {
+                still::default_output(input, options.target.unwrap_or_default())
             }
         };
         let (Some(dir), Some(name)) = (&self.args.output_dir, output.file_name()) else {
@@ -220,9 +231,50 @@ impl<'a> Converter<'a> {
                     }
                 }
             }
+            Resolved::Image { options, backend } => {
+                let request = Request {
+                    input: input.to_path_buf(),
+                    output: Some(output),
+                    options: options.clone(),
+                    overwrite,
+                    keep_temp: false,
+                };
+                let outcome = still::convert(backend, &request, cancel)?;
+                if json {
+                    let event = still::StillEvent::Finished(outcome);
+                    println!("{}", serde_json::to_string(&event).expect("events serialize"));
+                } else {
+                    self.print_still(&outcome);
+                }
+            }
         }
         self.written.borrow_mut().insert(key, input_key);
         Ok(())
+    }
+
+    /// What an image came out as, with what Telegram would refuse.
+    fn print_still(&self, outcome: &still::Outcome) {
+        for warning in &outcome.warnings {
+            eprintln!("{} {warning}", ui::warning_label());
+        }
+        if self.ctx.global.quiet {
+            return;
+        }
+        let output = term::link(outcome.output.display(), &outcome.output);
+        let mut line =
+            format!("{output}, {}x{}, {}", outcome.width, outcome.height, ui::kib(outcome.bytes));
+        if let still::Encoding::Lossy { quality } = outcome.encoding {
+            line.push_str(&format!(", lossy at quality {quality} to fit 512 KiB"));
+        }
+        eprintln!("{}", ui::status("Made", line));
+        for issue in &outcome.issues {
+            eprintln!("{} Telegram will reject it: {issue}", ui::warning_label());
+        }
+        if term::shows_pictures()
+            && let Ok(preview) = still::preview(&outcome.output)
+        {
+            show_result(&preview);
+        }
     }
 
     /// Reports a failed conversion of one of several inputs.
