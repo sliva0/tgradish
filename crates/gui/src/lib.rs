@@ -1344,17 +1344,20 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
                 let clip = still.map(|(_, still)| still).or(part).unwrap_or(clip);
                 let frame = clip.index_at(time);
                 let picture = Picture { clip, frame, size, square: false };
-                // the result's small picture beside the input, not over it
-                let shape = inset_shape(item, size).filter(|_| item.view.inset);
-                let (input_area, inset_area) = match &shape {
-                    Some((result, label)) => {
-                        let text = ui.visuals().text_color();
-                        let label =
-                            ui.painter().layout_no_wrap(label.clone(), canvas::INSET_LABEL, text);
-                        let zoomed = item.view.input_zoom.level > 1.0;
-                        canvas::split(rect, size, *result, label.size() + vec2(6.0, 0.0), zoomed)
-                    }
-                    None => (rect, (rect, vec2(0.0, 0.0))),
+                // the result's small picture beside the input, not over it,
+                // with room for its longest label
+                let (input_area, inset_area) = if item.view.inset {
+                    let widest = match item.format {
+                        Format::Webm => "Result\n512 × 512 px",
+                        Format::Tgs => "Result",
+                    };
+                    let text = ui.visuals().text_color();
+                    let label =
+                        ui.painter().layout_no_wrap(widest.into(), canvas::INSET_LABEL, text);
+                    let zoomed = item.view.input_zoom.level > 1.0;
+                    canvas::split(rect, size, label.size() + vec2(6.0, 0.0), zoomed)
+                } else {
+                    (rect, (rect, vec2(0.0, 0.0)))
                 };
                 ui.painter().rect_filled(rect, 0.0, widgets::stage(ui.visuals().dark_mode));
                 let ratio = settings::ratio(item.view.aspect, size);
@@ -1363,7 +1366,7 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
                 let zoom = &mut item.view.input_zoom;
                 canvas::show(ui, screen, input_area, &picture, zoom, Some(cropping));
                 // after the crop moved
-                if let Some((_, label)) = inset_shape(item, size).filter(|_| item.view.inset) {
+                if let Some(label) = inset_label(item, size).filter(|_| item.view.inset) {
                     let crop = item.choices.crop;
                     let where_ = output::Part::of(crop, size, (clip.width, clip.height));
                     match item.format {
@@ -1452,20 +1455,16 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
     }
 }
 
-/// The size of an item's result, `.tgs` ones square, and the label of its
-/// small picture: what the preview needs to place it.
-fn inset_shape(item: &Item, size: (u32, u32)) -> Option<((u32, u32), String)> {
+/// The label of an item's small picture of its result: its size, which
+/// `.tgs` results, vectors, have none of in pixels.
+fn inset_label(item: &Item, size: (u32, u32)) -> Option<String> {
     match item.format {
         Format::Webm => {
             let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
             let sizes = settings::webm_sizes(item, item.choices.crop.unwrap_or(full))?;
-            Some((
-                (sizes.width, sizes.height),
-                format!("Result\n{} × {} px", sizes.width, sizes.height),
-            ))
+            Some(format!("Result\n{} × {} px", sizes.width, sizes.height))
         }
-        // vectors: square, but of no size in pixels
-        Format::Tgs => Some(((1, 1), "Result".to_owned())),
+        Format::Tgs => Some("Result".to_owned()),
     }
 }
 
