@@ -1052,7 +1052,8 @@ impl App {
                     vec2(width, ui.available_height()),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
-                        preview(ui, &mut self.screen, &mut self.inset, item);
+                        let tempo = item.tempo(&self.presets, &self.config);
+                        preview(ui, &mut self.screen, &mut self.inset, item, tempo);
                     },
                 );
                 ui.add_space(8.0);
@@ -1215,8 +1216,9 @@ const SIDE: f32 = 300.0;
 /// Points for the app's icon before its name, above the list of files.
 const ICON_ROOM: f32 = 48.0;
 
-/// The big preview of an item, its header and timeline.
-fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut Item) {
+/// The big preview of an item, its header and timeline. The input plays at
+/// `tempo`, as the result will.
+fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut Item, tempo: f64) {
     let has_result = item.result_clip.ready().is_some();
     // a change to what is used or how it is fitted shows on the input
     let framing = Framing::of(item);
@@ -1287,7 +1289,6 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let dt = ui.input(|input| f64::from(input.stable_dt.min(0.1)));
     let range = item.range();
-    let tempo = item.tempo();
     let input_size = item.input_size();
     let error = item.input_error().map(str::to_owned);
     // fields rather than methods, so the view and crop can change

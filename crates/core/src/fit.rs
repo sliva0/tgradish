@@ -352,6 +352,7 @@ mod tests {
             width: 1280,
             height: 720,
             fps: Some(30.0),
+            base_fps: Some(30.0),
             duration: Some(duration),
             alpha: false,
             still_image: false,

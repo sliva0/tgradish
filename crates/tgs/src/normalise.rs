@@ -16,6 +16,9 @@ use crate::limits::telegram::{FPS, MAX_FRAMES};
 use crate::{Error, Result};
 
 const NANOS: u64 = 1_000_000_000;
+/// The slowest and fastest an animation may play, as many times as fast as
+/// its input.
+pub const TEMPOS: std::ops::RangeInclusive<f64> = 0.1..=10.0;
 /// Longest stretch Telegram allows, in nanoseconds.
 const MAX_NANOS: u64 = MAX_FRAMES as u64 * NANOS / FPS as u64;
 /// Largest pixel scale looked for when the art isn't exactly on a grid.
@@ -239,7 +242,7 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
         return Err(Error::CropOutside { crop: area, width: input_width, height: input_height });
     }
     let (tempo, fitted) = match options.tempo {
-        Some(tempo) if !(tempo > 0.0 && tempo.is_finite()) => return Err(Error::Tempo(tempo)),
+        Some(tempo) if !TEMPOS.contains(&tempo) => return Err(Error::Tempo(tempo)),
         Some(tempo) => (tempo, false),
         None if end - start > MAX_NANOS => ((end - start) as f64 / MAX_NANOS as f64, true),
         None => (1.0, false),
@@ -795,8 +798,10 @@ mod tests {
         let (anim, report) = normalise(&input, &slow).unwrap();
         let ticks: Vec<u32> = anim.frames().iter().map(|frame| frame.ticks).collect();
         assert_eq!((ticks, report.trimmed), (vec![180], true));
-        let wrong = Options { tempo: Some(0.0), ..Options::default() };
-        assert!(matches!(normalise(&input, &wrong), Err(Error::Tempo(_))));
+        for tempo in [0.0, 1e-7, 11.0, 1e300, f64::NAN] {
+            let wrong = Options { tempo: Some(tempo), ..Options::default() };
+            assert!(matches!(normalise(&input, &wrong), Err(Error::Tempo(_))), "{tempo}");
+        }
     }
 
     #[test]

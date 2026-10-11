@@ -107,8 +107,9 @@ impl Choices {
         presets.tgs(self.preset_name(Format::Tgs, config)).map_err(|err| err.to_string())
     }
 
-    /// Everything a WebM conversion gets.
-    pub fn webm_options(&self, presets: &Presets, config: &Config) -> Result<Options, String> {
+    /// The preset's WebM options with the item's over them, those of
+    /// hidden settings too.
+    pub fn webm_merged(&self, presets: &Presets, config: &Config) -> Result<Options, String> {
         let shared = Options {
             target: Some(self.target),
             crop: self.crop,
@@ -116,8 +117,13 @@ impl Choices {
             length: self.length,
             ..Options::default()
         };
-        let options = self.webm_base(presets, config)?.merged(&self.webm).merged(&shared);
-        Ok(shown(options.clone(), &options))
+        Ok(self.webm_base(presets, config)?.merged(&self.webm).merged(&shared))
+    }
+
+    /// Everything a WebM conversion gets.
+    pub fn webm_options(&self, presets: &Presets, config: &Config) -> Result<Options, String> {
+        let merged = self.webm_merged(presets, config)?;
+        Ok(shown(merged.clone(), &merged))
     }
 
     /// Everything a `.tgs` conversion gets.
@@ -435,17 +441,21 @@ impl Item {
         Some((start, end))
     }
 
-    /// How many times as fast as the input the result plays: the item's
-    /// own tempo, or for `.tgs` as fast as fits the used part into 3
-    /// seconds.
-    pub fn tempo(&self) -> f64 {
-        match self.format {
-            Format::Webm => self.choices.webm.tempo.unwrap_or(1.0),
-            Format::Tgs => self.choices.tgs.tempo.unwrap_or_else(|| {
+    /// How many times as fast as the input the result plays: the tempo
+    /// set, the item's or its preset's, or for `.tgs` as fast as fits the
+    /// used part into 3 seconds.
+    pub fn tempo(&self, presets: &Presets, config: &Config) -> f64 {
+        let set = match self.format {
+            Format::Webm => self.choices.webm_options(presets, config).ok().and_then(|o| o.tempo),
+            Format::Tgs => self.choices.tgs_options(presets, config).ok().and_then(|o| o.tempo),
+        };
+        set.unwrap_or_else(|| match self.format {
+            Format::Webm => 1.0,
+            Format::Tgs => {
                 let used = self.range().map_or(0.0, |(start, end)| end - start);
                 (used / telegram::MAX_SECONDS).max(1.0)
-            }),
-        }
+            }
+        })
     }
 
     /// Whether the last sticker was made with what is chosen now.
