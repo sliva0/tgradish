@@ -11,6 +11,7 @@ use tgradish_core::events::{Event, Params};
 use tgradish_core::ffmpeg::CancelToken;
 use tgradish_core::options::Options;
 use tgradish_core::presets::Format;
+use tgradish_core::still;
 use tgradish_core::tgs::{self, Preview, TgsEvent, TgsOptions, TgsRequest};
 use tgradish_core::{Error, telegram};
 use tgradish_tgs::check::Severity;
@@ -19,8 +20,18 @@ use tgradish_tgs::sticker::Step;
 
 /// What a job converts with, fixed when it starts.
 pub enum Plan {
-    Webm { options: Options, backend: Backend },
-    Tgs { options: TgsOptions },
+    Webm {
+        options: Options,
+        backend: Backend,
+    },
+    Tgs {
+        options: TgsOptions,
+    },
+    /// An image sticker: WebM's options, `start` the frame's time.
+    Image {
+        options: Options,
+        backend: Backend,
+    },
 }
 
 /// One encode while fitting a WebM sticker.
@@ -151,6 +162,23 @@ impl Done {
                     json_bytes: None,
                     shapes: None,
                     problems: telegram::check(&info, target).iter().map(problem).collect(),
+                    preview: None,
+                })
+            }
+            Format::Image => {
+                let (width, height) = still::dimensions(path).ok()?;
+                let bytes = std::fs::metadata(path).ok()?.len();
+                let issues = telegram::check_still(width, height, bytes, target);
+                Some(Done {
+                    output: path.to_path_buf(),
+                    bytes,
+                    limit: telegram::MAX_STILL_BYTES,
+                    lossy: false,
+                    kept: None,
+                    spoofed: false,
+                    json_bytes: None,
+                    shapes: None,
+                    problems: issues.iter().map(problem).collect(),
                     preview: None,
                 })
             }
@@ -318,6 +346,32 @@ fn run(
     match plan {
         Plan::Webm { options, backend } => {
             webm(options, backend, &inputs[0], output, overwrite, cancel, update)
+        }
+        Plan::Image { options, backend } => {
+            let request = Request {
+                input: inputs[0].clone(),
+                output: Some(output),
+                options,
+                overwrite,
+                keep_temp: false,
+            };
+            update(Box::new(|progress| progress.stage = "making the picture".into()));
+            let outcome = still::convert(&backend, &request, cancel)?;
+            let warnings = outcome.warnings.clone();
+            update(Box::new(move |progress| progress.warnings.extend(warnings)));
+            let preview = still::preview(&outcome.output).ok();
+            Ok(Done {
+                output: outcome.output,
+                bytes: outcome.bytes,
+                limit: telegram::MAX_STILL_BYTES,
+                lossy: matches!(outcome.encoding, still::Encoding::Lossy { .. }),
+                kept: None,
+                spoofed: false,
+                json_bytes: None,
+                shapes: None,
+                problems: outcome.issues.iter().map(problem).collect(),
+                preview,
+            })
         }
         Plan::Tgs { options } => {
             let request = TgsRequest { inputs, sequence, output, options, overwrite };

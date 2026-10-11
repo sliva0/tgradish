@@ -203,9 +203,12 @@ pub fn read_file(path: &std::path::Path) -> Option<Mark> {
 /// Whether tgradish made the sticker at `path`, so making it again may
 /// replace it: by the marks it shows, exactly as tgradish writes them. The
 /// name of `.tgs` stickers; in WebM files both apps and the signature in
-/// padding.
+/// padding; in WebP images the tool their XMP names.
 pub fn made_by_tgradish(path: &std::path::Path) -> bool {
-    if crate::tgs::is_sticker(path) {
+    if crate::still::is_image(path) {
+        let tool = std::fs::read(path).ok().and_then(|webp| crate::still::creator_tool(&webp));
+        tool.as_deref().is_some_and(is_tool_id)
+    } else if crate::tgs::is_sticker(path) {
         let Ok(json) = crate::tgs::read_json(path) else { return false };
         serde_json::from_slice::<serde_json::Value>(&json)
             .ok()

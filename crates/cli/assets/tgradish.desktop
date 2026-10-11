@@ -2,7 +2,7 @@
 Type=Application
 Name=tgradish
 GenericName=Telegram sticker maker
-Comment=Make Telegram video stickers, emoji and animated pixel art stickers
+Comment=Make Telegram video, image and animated pixel art stickers and emoji
 Exec=tgradish gui
 Icon=tgradish
 Terminal=false

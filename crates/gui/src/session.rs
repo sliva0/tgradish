@@ -33,6 +33,8 @@ struct SavedChoices {
     crop: Option<Crop>,
     start: Option<f64>,
     length: Option<f64>,
+    #[serde(default)]
+    frame: Option<f64>,
     webm: Options,
     tgs: TgsOptions,
 }
@@ -45,6 +47,7 @@ impl SavedChoices {
             crop: choices.crop,
             start: choices.start,
             length: choices.length,
+            frame: choices.frame,
             webm: choices.webm.clone(),
             tgs: choices.tgs.clone(),
         }
@@ -57,6 +60,7 @@ impl SavedChoices {
             crop: self.crop,
             start: self.start,
             length: self.length,
+            frame: self.frame,
             webm: self.webm,
             tgs: self.tgs,
         }

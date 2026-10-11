@@ -115,3 +115,25 @@ pub(crate) fn frames(
     let frame = width as usize * height as usize * 4;
     Ok(out.chunks_exact(frame).map(<[u8]>::to_vec).collect())
 }
+
+/// The planned frame at the plan's start, cropped, scaled and padded as the
+/// plan says, as straight RGBA of the plan's size.
+pub(crate) fn still(
+    ffmpeg: &Ffmpeg,
+    plan: &crate::convert::Plan,
+    cancel: &CancelToken,
+) -> crate::Result<Vec<u8>> {
+    cancel.check()?;
+    let length = 1.0 / plan.fps;
+    let mut cmd = Command::new(&ffmpeg.ffmpeg);
+    cmd.args(["-hide_banner", "-nostdin", "-v", "error"]);
+    cmd.args(args::input_args(plan, length, plan.fps));
+    cmd.args(["-map", "0:v:0", "-vf", &args::video_filter(plan, plan.fps, length, "rgba")]);
+    cmd.args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
+    let out = process::run_bytes(cmd, "ffmpeg", cancel)?;
+    let size = plan.width as usize * plan.height as usize * 4;
+    match out.get(..size) {
+        Some(pixels) => Ok(pixels.to_vec()),
+        None => Err(crate::Error::NoFrame { path: plan.input.clone(), at: plan.start }),
+    }
+}

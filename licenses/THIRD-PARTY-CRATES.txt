@@ -1,7 +1,7 @@
 Rust crates in tgradish and their licenses
 ==========================================
 
-MIT License: 206 crates
+MIT License: 207 crates
 Apache License 2.0: 12 crates
 Boost Software License 1.0: 2 crates
 Do What The F*ck You Want To Public License: 2 crates
@@ -3643,6 +3643,7 @@ MIT License, used by:
   egui_glow 0.36.2
   emath 0.36.2
   epaint 0.36.2
+  libwebp-sys 0.14.4
   profiling 1.0.18
   windows-link 0.2.1
   windows-sys 0.52.0

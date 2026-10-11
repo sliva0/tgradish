@@ -1,7 +1,8 @@
 //! Named sets of options that say how to convert: three built in (fast,
 //! balanced and best), more from TOML files in the `presets` directory of
-//! the config dir. What to make, a sticker or an emoji as WebM or `.tgs`,
-//! is chosen separately, so one preset serves every kind of result.
+//! the config dir. What to make, a sticker or an emoji as WebM, `.tgs` or
+//! an image, is chosen separately, so one preset serves every kind of
+//! result.
 //!
 //! A preset file looks like this, and is named after the preset:
 //!
@@ -9,8 +10,8 @@
 //! description = "Small and fast, for previews"
 //! extends = "fast"  # optional, options of the base preset come first
 //!
-//! [webm]            # options for WebM results
-//! crf = 40
+//! [webm]            # options for WebM results, and for image results
+//! crf = 40          # where a still picture has them
 //!
 //! [tgs]             # options for .tgs results
 //! speed = "balanced"
@@ -44,6 +45,9 @@ pub enum Format {
     Webm,
     /// Animated stickers, from pixel art.
     Tgs,
+    /// Image stickers and emoji: one frame of a video, or an image, as
+    /// WebP. They take WebM's options where a still picture has them.
+    Image,
 }
 
 impl Format {
@@ -51,6 +55,7 @@ impl Format {
         match self {
             Format::Webm => "webm",
             Format::Tgs => "tgs",
+            Format::Image => "webp",
         }
     }
 
@@ -59,13 +64,14 @@ impl Format {
         match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
             "webm" => Some(Format::Webm),
             "tgs" => Some(Format::Tgs),
+            "webp" => Some(Format::Image),
             _ => None,
         }
     }
 
     pub fn default_preset(self) -> &'static str {
         match self {
-            Format::Webm => DEFAULT_PRESET,
+            Format::Webm | Format::Image => DEFAULT_PRESET,
             Format::Tgs => DEFAULT_TGS_PRESET,
         }
     }
@@ -77,6 +83,8 @@ impl Format {
 pub enum FormatOptions {
     Webm(Options),
     Tgs(TgsOptions),
+    /// WebM's options, for an image.
+    Image(Options),
 }
 
 impl FormatOptions {
@@ -84,6 +92,7 @@ impl FormatOptions {
         match self {
             FormatOptions::Webm(_) => Format::Webm,
             FormatOptions::Tgs(_) => Format::Tgs,
+            FormatOptions::Image(_) => Format::Image,
         }
     }
 }
@@ -234,6 +243,7 @@ impl Presets {
         Ok(match format {
             Format::Webm => FormatOptions::Webm(self.webm(name)?),
             Format::Tgs => FormatOptions::Tgs(self.tgs(name)?),
+            Format::Image => FormatOptions::Image(self.webm(name)?),
         })
     }
 

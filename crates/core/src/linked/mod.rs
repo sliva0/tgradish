@@ -483,6 +483,49 @@ pub(crate) fn frames(
     Ok(out)
 }
 
+/// Linked version of [`crate::ffmpeg::still`].
+pub(crate) fn still(plan: &Plan, cancel: &CancelToken) -> Result<Vec<u8>> {
+    init()?;
+    cancel.check()?;
+    let length = 1.0 / plan.fps;
+    let mut source = Source::open(plan, 2.0 * length, cancel)?;
+    let mut frame = frame::Video::empty();
+    let no_frame = || Error::NoFrame { path: plan.input.clone(), at: plan.start };
+    if !source.next(&mut frame)? {
+        return Err(no_frame());
+    }
+    let chain = video_filter(plan, plan.fps, length, "rgba");
+    let spec = format!("[in]{}{chain}[out]", plan.source.orientation.filters());
+    let mut graph = filter_graph(&[("in", source.buffer_args(&frame))], &spec)?;
+    let mut filtered = frame::Video::empty();
+    let mut input_open = true;
+    loop {
+        cancel.check()?;
+        if input_open {
+            let mut source_filter = graph.get("in").expect("added");
+            let mut source_filter = source_filter.source();
+            source_filter.add(&frame).map_err(libav("filtering"))?;
+            if !source.next(&mut frame)? {
+                source_filter.flush().map_err(libav("filtering"))?;
+                input_open = false;
+            }
+        }
+        match graph.get("out").expect("added").sink().frame(&mut filtered) {
+            Ok(()) => break,
+            Err(err) if is_again(&err) && input_open => continue,
+            Err(ff::Error::Eof) => return Err(no_frame()),
+            Err(err) if is_again(&err) => return Err(no_frame()),
+            Err(err) => return Err(libav("filtering")(err)),
+        }
+    }
+    // rows can be padded
+    let (stride, data, row) = (filtered.stride(0), filtered.data(0), plan.width as usize * 4);
+    Ok((0..plan.height as usize)
+        .flat_map(|y| &data[y * stride..y * stride + row])
+        .copied()
+        .collect())
+}
+
 pub(crate) fn ssim(plan: &Plan, candidate: &Path, fps: f64, cancel: &CancelToken) -> Result<f64> {
     init()?;
     let frames = frame_count(plan.length, plan.fps);

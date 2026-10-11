@@ -46,7 +46,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         if: runner.os == 'Linux'
         with:
-          tool: cargo-about
+          # other versions word the list differently
+          tool: cargo-about@0.9.2
       - run: cargo xtask licenses --check
         if: runner.os == 'Linux'
 

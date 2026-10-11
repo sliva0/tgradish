@@ -83,6 +83,7 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             "Vector animation (TGS)",
             "Pixel art drawn as shapes: sharp at any size, and small",
         ),
+        (Format::Image, "Image sticker (WebP)", "One frame of a video, or a picture, as it is"),
     ];
     for (format, text, hint) in formats {
         let allowed = item.kind.allows(format);
@@ -105,11 +106,17 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let (sticker, emoji) = match item.format {
         Format::Webm => ("512 px on the longer side, up to 256 KB", "100 × 100 px, up to 64 KB"),
         Format::Tgs => ("Square, up to 64 KB", "Square, up to 64 KB"),
+        Format::Image => ("512 px on the longer side, up to 512 KB", "100 × 100 px"),
     };
     let targets = [(Target::Sticker, "Sticker", sticker), (Target::Emoji, "Custom emoji", emoji)];
     segments(ui, &mut item.choices.target, &targets, |_| Ok(()));
     chosen_hint(ui, item.choices.target, &targets);
 
+    // presets say how to encode videos and animations; a picture has
+    // nothing to choose there
+    if item.format == Format::Image {
+        return;
+    }
     ui.add_space(8.0);
     ui.label("Preset")
         .on_hover_text("How hard to work on the result; your own values below go on top");
@@ -210,10 +217,15 @@ const SQUARES: [Choice<Resize>; 4] = [
 /// Shows the settings under the preview.
 pub fn show(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     picture(ui, item, context);
-    time(ui, item, context);
+    match item.format {
+        Format::Webm | Format::Tgs => time(ui, item, context),
+        Format::Image => frame(ui, item),
+    }
     match item.format {
         Format::Webm => webm_quality(ui, item, context),
         Format::Tgs => tgs_quality(ui, item, context),
+        // lossless, or lossy where only that fits: nothing to choose
+        Format::Image => {}
     }
     if item.format == Format::Tgs {
         reading(ui, item);
@@ -289,10 +301,13 @@ fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         if let Some(output) = &context.output {
             args.extend(["-o".into(), output.display().to_string()]);
         }
-        if item.format == Format::Tgs {
-            args.extend(["--format".into(), "tgs".into()]);
+        match item.format {
+            Format::Webm => {}
+            Format::Tgs => args.extend(["--format".into(), "tgs".into()]),
+            Format::Image => args.extend(["--format".into(), "image".into()]),
         }
-        if let Some(preset) = &item.choices.preset {
+        // presets only say how to encode videos and animations
+        if let Some(preset) = item.choices.preset.as_ref().filter(|_| item.format != Format::Image) {
             args.extend(["--preset".into(), preset.clone()]);
         }
         let choices = &item.choices;
@@ -307,6 +322,15 @@ fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 length: choices.length,
                 ..Options::default()
             })),
+            Format::Image => {
+                let picture = tgradish_core::still::picture_options(&webm);
+                tgradish_core::options::flags(&picture.merged(&Options {
+                    target: Some(choices.target),
+                    crop: choices.crop,
+                    start: choices.frame,
+                    ..Options::default()
+                }))
+            }
             Format::Tgs => tgradish_core::options::flags(&choices.tgs.clone().merged(&tgs::TgsOptions {
                 target: Some(choices.target),
                 crop: choices.crop,
@@ -403,7 +427,7 @@ const SCALINGS: [Choice<Scaling>; 4] = [
 /// fixed to one.
 fn exact_scale_of(item: &Item) -> Option<ExactScale> {
     let webm = &item.choices.webm;
-    let integer = item.format == Format::Webm && webm.scaling == Some(Scaling::PixelPerfect);
+    let integer = item.format != Format::Tgs && webm.scaling == Some(Scaling::PixelPerfect);
     webm.exact_scale.filter(|_| integer)
 }
 
@@ -548,7 +572,7 @@ fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         ui.end_row();
 
         match item.format {
-            Format::Webm => {
+            Format::Webm | Format::Image => {
                 let target = item.choices.target;
                 label(
                     ui,
@@ -680,7 +704,7 @@ fn aspect_ratio(
         // the result's size, where the result takes the crop's shape: not
         // squared, nor with margins
         let sizes = crop.and_then(|crop| webm_sizes(item, crop)).filter(|sizes| !sizes.pads());
-        let follows = item.format == Format::Webm && resize_of(item) == Resize::Contain;
+        let follows = item.format != Format::Tgs && resize_of(item) == Resize::Contain;
         if follows && let Some(sizes) = sizes {
             ui.horizontal(|ui| {
                 ui.label("Result size");
@@ -843,12 +867,14 @@ fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let played = used.map(|used| used / tempo);
     // the average rate, and the most a video of variable rate reaches
     let input_fps = match item.format {
-        Format::Webm => item.video.ready().map(|video| (video.probe.fps, video.probe.base_fps)),
+        Format::Webm | Format::Image => {
+            item.video.ready().map(|video| (video.probe.fps, video.probe.base_fps))
+        }
         Format::Tgs => None,
     };
     // a preset's tempo is what the automatic choice stands for
     let preset_tempo = match item.format {
-        Format::Webm => {
+        Format::Webm | Format::Image => {
             item.choices.webm_base(context.presets, context.config).ok().and_then(|base| base.tempo)
         }
         Format::Tgs => {
@@ -863,12 +889,12 @@ fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                     let (tempo, automatic) = match (item.format, preset_tempo) {
                         (_, Some(preset)) => (
                             match item.format {
-                                Format::Webm => &mut item.choices.webm.tempo,
+                                Format::Webm | Format::Image => &mut item.choices.webm.tempo,
                                 Format::Tgs => &mut item.choices.tgs.tempo,
                             },
                             format!("The preset's: ×{}", preset_number(preset)),
                         ),
-                        (Format::Webm, None) => {
+                        (Format::Webm | Format::Image, None) => {
                             (&mut item.choices.webm.tempo, "As the input".into())
                         }
                         (Format::Tgs, None) => {
@@ -908,7 +934,7 @@ fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             ui.end_row();
         }
         match item.format {
-            Format::Webm => {
+            Format::Webm | Format::Image => {
                 let options = &mut item.choices.webm;
                 // as converting chooses it, and more would repeat the
                 // input's frames
@@ -978,6 +1004,25 @@ fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             }
             Format::Tgs => {}
         }
+    });
+}
+
+/// Which frame of a video an image sticker is made of.
+fn frame(ui: &mut egui::Ui, item: &mut Item) {
+    let Some(length) = item.input_length() else { return };
+    section(ui, "Frame");
+    grid(ui, "frame", |ui| {
+        label(
+            ui,
+            "Frame at",
+            "The time of the frame the picture is made of; the bar under the preview picks it too",
+        );
+        let mut at = item.choices.frame.unwrap_or(0.0);
+        let field = egui::DragValue::new(&mut at).range(0.0..=length).speed(0.01).max_decimals(3);
+        if ui.add(field.suffix(" s")).changed() {
+            item.choices.frame = (at > 0.0).then_some(at);
+        }
+        ui.end_row();
     });
 }
 
@@ -1249,7 +1294,7 @@ fn parse_sheet(sheet: Option<&str>) -> Option<(u32, u32)> {
 fn metadata(ui: &mut egui::Ui, item: &mut Item) {
     section(ui, "In the file");
     let title = match item.format {
-        Format::Webm => &mut item.choices.webm.title,
+        Format::Webm | Format::Image => &mut item.choices.webm.title,
         Format::Tgs => &mut item.choices.tgs.title,
     };
     grid(ui, "metadata", |ui| {

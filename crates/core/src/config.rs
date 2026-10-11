@@ -70,7 +70,7 @@ impl Config {
     /// The preset to use for `format` when none is given.
     pub fn preset_for(&self, format: crate::presets::Format) -> &str {
         let configured = match format {
-            crate::presets::Format::Webm => &self.preset,
+            crate::presets::Format::Webm | crate::presets::Format::Image => &self.preset,
             crate::presets::Format::Tgs => &self.tgs_preset,
         };
         configured.as_deref().unwrap_or(format.default_preset())

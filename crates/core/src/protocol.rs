@@ -12,7 +12,8 @@ use crate::tgs::{TgsEvent, TgsOptions};
 /// Bumped on incompatible changes to the description, events or CLI flags
 /// used by front-ends. 2: `.tgs` output, formats and preset formats. 3:
 /// presets hold options for both formats, and say nothing about the target.
-pub const PROTOCOL_VERSION: u32 = 3;
+/// 4: image output, with WebM's options.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Description {
@@ -45,8 +46,8 @@ pub struct PresetDescription {
     pub name: String,
     pub description: String,
     pub builtin: bool,
-    /// Options for WebM results, with everything the preset extends
-    /// applied; `None` if broken.
+    /// Options for WebM and image results, with everything the preset
+    /// extends applied; `None` if broken.
     pub webm: Option<Options>,
     /// The same for `.tgs` results.
     pub tgs: Option<TgsOptions>,
@@ -97,6 +98,16 @@ pub fn describe(presets: &Presets, default_presets: [&str; 2]) -> Description {
                 default_preset: tgs.to_string(),
                 options: schema_for!(TgsOptions),
                 events: schema_for!(TgsEvent),
+            },
+            FormatDescription {
+                format: Format::Image,
+                description: "Image sticker or emoji, from one frame of a video or an image: \
+                              WebM's options where a still picture has them, start being \
+                              the frame's time",
+                output_extension: Format::Image.extension(),
+                default_preset: webm.to_string(),
+                options: schema_for!(Options),
+                events: schema_for!(crate::still::StillEvent),
             },
         ],
         presets,

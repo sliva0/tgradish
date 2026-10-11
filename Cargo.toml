@@ -24,6 +24,8 @@ directories = "6.0.0"
 embed-resource = "3.0.12"
 eframe = { version = "0.36.2", default-features = false, features = ["glow", "wayland", "x11"] }
 flate2 = "1.1.10"
+image-webp = "0.2.4"
+libwebp-sys = { version = "0.14.4", default-features = false, features = ["std", "parallel"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec", "filter", "format", "software-scaling"] }
 indicatif = "0.18.6"

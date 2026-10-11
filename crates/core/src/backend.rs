@@ -191,6 +191,16 @@ impl Backend {
         Ok(crate::tgs::Preview { width: frames.width, height: frames.height, frames: rgba })
     }
 
+    /// The planned frame at the plan's start, cropped, scaled and padded as
+    /// the plan says: straight RGBA of the plan's size, for image stickers.
+    pub fn still(&self, plan: &Plan, cancel: &CancelToken) -> Result<Vec<u8>> {
+        match self {
+            Backend::Process(ffmpeg) => ffmpeg::still(ffmpeg, plan, cancel),
+            #[cfg(feature = "linked")]
+            Backend::Linked => crate::linked::still(plan, cancel),
+        }
+    }
+
     /// See [`ffmpeg::ssim`].
     pub fn ssim(
         &self,

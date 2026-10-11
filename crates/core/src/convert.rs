@@ -535,7 +535,11 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
 
 /// A few frames of the planned part at full size, to tell pixel art from
 /// filmed pictures.
-fn looks_like_pixel_art(backend: &Backend, plan: &Plan, cancel: &CancelToken) -> Result<bool> {
+pub(crate) fn looks_like_pixel_art(
+    backend: &Backend,
+    plan: &Plan,
+    cancel: &CancelToken,
+) -> Result<bool> {
     let request = FramesRequest {
         start: plan.start,
         length: Some((plan.length * plan.tempo).min(telegram::MAX_SECONDS)),

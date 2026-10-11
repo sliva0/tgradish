@@ -7,9 +7,9 @@ use tgradish_core::backend::BackendInfo;
 use tgradish_core::config::Config;
 use tgradish_core::presets::{self, Format, Presets};
 use tgradish_core::telegram::{self, Target};
-use tgradish_core::tgs;
 use tgradish_core::webm::{self, Patch, WebmInfo};
 use tgradish_core::{TOOL_ID, protocol};
+use tgradish_core::{still, tgs};
 
 use crate::term;
 
@@ -78,6 +78,40 @@ fn guess_target(info: &WebmInfo) -> Target {
     }
 }
 
+fn print_image(
+    path: &std::path::Path,
+    info: &still::Info,
+    target: Target,
+    issues: &[telegram::Issue],
+) {
+    println!("{}", style(term::link_out(path.display(), path)).bold());
+    println!("{}", ui::field("size", ui::size_within(info.bytes, telegram::MAX_STILL_BYTES)));
+    let kind = if info.lossy { "lossy" } else { "lossless" };
+    let alpha = if info.alpha { ", transparent" } else { "" };
+    println!(
+        "{}",
+        ui::field("picture", format!("WebP {}x{}, {kind}{alpha}", info.width, info.height))
+    );
+    if let Some(tool) = &info.made_with {
+        println!("{}", ui::field("made", format!("with {tool}")));
+    }
+    print_verdict(issues, target);
+}
+
+/// What Telegram would say about a sticker.
+fn print_verdict(issues: &[telegram::Issue], target: Target) {
+    if issues.is_empty() {
+        let accepted = format!("{} as {}", style("✔ accepts it").green(), target.name());
+        println!("{}", ui::field("telegram", accepted));
+    } else {
+        let refused = format!("{} as {}:", style("✖ refuses it").red(), target.name());
+        println!("{}", ui::field("telegram", refused));
+        for issue in issues {
+            println!("              {} {issue}", style("-").red());
+        }
+    }
+}
+
 fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
     println!("{}", style(term::link_out(path.display(), path)).bold());
     println!("{}", ui::field("size", ui::size_within(info.file_size, target.max_bytes())));
@@ -121,22 +155,42 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
         println!("  {}", style("the file is truncated").red());
     }
 
-    let issues = telegram::check(info, target);
-    if issues.is_empty() {
-        let accepted = format!("{} as {}", style("✔ accepts it").green(), target.name());
-        println!("{}", ui::field("telegram", accepted));
-    } else {
-        let refused = format!("{} as {}:", style("✖ refuses it").red(), target.name());
-        println!("{}", ui::field("telegram", refused));
-        for issue in issues {
-            println!("              {} {issue}", style("-").red());
-        }
-    }
+    print_verdict(&telegram::check(info, target), target);
 }
 
 pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
     let mut failed = 0;
     for (i, path) in args.files.iter().enumerate() {
+        if still::is_image(path) {
+            match still::inspect_file(path) {
+                Ok(info) => {
+                    let target = args.target.map_or_else(|| info.target(), Into::into);
+                    let issues = telegram::check_still(info.width, info.height, info.bytes, target);
+                    if ctx.global.json {
+                        let line = json!({
+                            "file": path, "format": "image", "target": target,
+                            "info": info, "issues": issues,
+                        });
+                        println!("{line}");
+                    } else {
+                        if i > 0 {
+                            println!();
+                        }
+                        print_image(path, &info, target, &issues);
+                    }
+                }
+                Err(err) if args.files.len() > 1 => {
+                    failed += 1;
+                    if ctx.global.json {
+                        println!("{}", json!({ "file": path, "error": err.to_string() }));
+                    } else {
+                        eprintln!("{} {}: {err}", ui::error_label(), path.display());
+                    }
+                }
+                Err(err) => return Err(err).with_context(|| format!("{}", path.display())),
+            }
+            continue;
+        }
         if tgs::is_sticker(path) {
             match tgs::inspect_file(path) {
                 Ok((stats, issues)) if ctx.global.json => {
