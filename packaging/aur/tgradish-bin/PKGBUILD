@@ -9,8 +9,9 @@ arch=(x86_64 aarch64)
 url='https://github.com/sliva0/tgradish'
 license=(MIT BSD-3-Clause)
 # the release build without ffmpeg, which runs the system's; the window
-# loads the graphics libraries when it opens
+# loads the graphics libraries when it opens, and D-Bus for file dialogs
 depends=(
+  dbus
   ffmpeg
   gcc-libs
   glibc

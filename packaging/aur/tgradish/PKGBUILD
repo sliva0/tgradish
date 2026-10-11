@@ -8,8 +8,9 @@ arch=(x86_64 aarch64)
 url='https://github.com/sliva0/tgradish'
 license=(MIT BSD-3-Clause)
 # ffmpeg runs as a program; the window loads the graphics libraries when
-# it opens
+# it opens, and D-Bus for file dialogs
 depends=(
+  dbus
   ffmpeg
   gcc-libs
   glibc
