@@ -21,6 +21,10 @@ const NANOS: u64 = 1_000_000_000;
 pub const TEMPOS: std::ops::RangeInclusive<f64> = 0.1..=10.0;
 /// Longest stretch Telegram allows, in nanoseconds.
 const MAX_NANOS: u64 = MAX_FRAMES as u64 * NANOS / FPS as u64;
+/// Half a 60 fps frame, in nanoseconds: what is longer than 3 s by less
+/// still rounds to 3 s of frames, like 180 frames of 1/60 s each rounded up
+/// to whole nanoseconds.
+const HALF_TICK: u64 = NANOS / FPS as u64 / 2;
 /// Largest pixel scale looked for when the art isn't exactly on a grid.
 const MAX_LIKELY_SCALE: u32 = 16;
 /// Share of colour edges that must lie on a scale's grid to suggest it.
@@ -244,12 +248,14 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
     let (tempo, fitted) = match options.tempo {
         Some(tempo) if !TEMPOS.contains(&tempo) => return Err(Error::Tempo(tempo)),
         Some(tempo) => (tempo, false),
-        None if end - start > MAX_NANOS => ((end - start) as f64 / MAX_NANOS as f64, true),
+        None if end - start > MAX_NANOS + HALF_TICK => {
+            ((end - start) as f64 / MAX_NANOS as f64, true)
+        }
         None => (1.0, false),
     };
     // what still plays longer than 3 seconds is cut
     let most = (MAX_NANOS as f64 * tempo).round() as u64;
-    let trimmed = !fitted && end - start > most;
+    let trimmed = !fitted && end - start > most + HALF_TICK;
     if trimmed {
         end = start + most;
     }
@@ -801,6 +807,20 @@ mod tests {
         for tempo in [0.0, 1e-7, 11.0, 1e300, f64::NAN] {
             let wrong = Options { tempo: Some(tempo), ..Options::default() };
             assert!(matches!(normalise(&input, &wrong), Err(Error::Tempo(_))), "{tempo}");
+        }
+    }
+
+    #[test]
+    fn takes_3_s_of_60_fps_frames_whole() {
+        // 1/60 s in whole nanoseconds is a little longer
+        let tick = Duration::from_secs_f64(1.0 / 60.0);
+        let frames: Vec<_> =
+            (0..180).map(|i| (if i % 2 == 0 { RED } else { BLUE }, tick)).collect();
+        for tempo in [None, Some(1.0)] {
+            let options = Options { tempo, ..Options::default() };
+            let (anim, report) = normalise(&flat(&frames), &options).unwrap();
+            assert_eq!((report.ticks, report.tempo, report.trimmed), (180, 1.0, false));
+            assert_eq!(anim.frames().len(), 180);
         }
     }
 
