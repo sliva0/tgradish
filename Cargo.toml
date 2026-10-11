@@ -11,6 +11,8 @@ repository = "https://github.com/sliva0/tgradish"
 
 [workspace.dependencies]
 tgradish-core = { path = "crates/core", version = "2.0.0" }
+# synthetic test art, unpublished
+tgradish-corpus = { path = "crates/corpus" }
 tgradish-frames = { path = "crates/frames", version = "2.0.0" }
 tgradish-gui = { path = "crates/gui", version = "2.0.0" }
 tgradish-tgs = { path = "crates/tgs", version = "2.0.0" }
@@ -24,6 +26,7 @@ directories = "6.0.0"
 embed-resource = "3.0.12"
 eframe = { version = "0.36.2", default-features = false, features = ["glow", "wayland", "x11"] }
 flate2 = "1.1.10"
+gif = "0.14.2"
 image-webp = "0.2.4"
 libloading = "0.8.9"
 libwebp-sys = { version = "0.14.4", default-features = false, features = ["std", "parallel"] }

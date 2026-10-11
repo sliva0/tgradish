@@ -46,4 +46,5 @@ embed-resource.workspace = true
 workspace = true
 
 [dev-dependencies]
+tgradish-corpus.workspace = true
 tempfile.workspace = true

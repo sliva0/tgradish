@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 tgradish-tgs = { workspace = true, features = ["threads"] }
+tgradish-corpus.workspace = true
 
 anyhow.workspace = true
 flate2.workspace = true

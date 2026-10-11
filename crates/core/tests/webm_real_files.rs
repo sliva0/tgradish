@@ -1,19 +1,16 @@
 //! Checks WebM inspection and patching on files written by a real ffmpeg.
-//! Skipped when ffmpeg or the local `references/` media is missing.
+//! Skipped when ffmpeg is missing.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tgradish_core::webm::{self, Patch};
+use tgradish_corpus::Clip;
 
-fn reference(name: &str) -> Option<PathBuf> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../references").join(name);
-    let ffmpeg = Command::new("ffmpeg").arg("-version").output().is_ok();
-    if !(ffmpeg && path.exists()) {
-        eprintln!("skipped: needs ffmpeg on PATH and references/{name}");
-        return None;
-    }
-    Some(path)
+/// A clip like phone footage, made once with ffmpeg and kept for later
+/// runs.
+fn clip(kind: Clip) -> Option<PathBuf> {
+    tgradish_corpus::clip(kind, Path::new(env!("CARGO_TARGET_TMPDIR")))
 }
 
 fn encode(input: &Path, output: &Path, seconds: &str) {
@@ -50,8 +47,9 @@ fn decodes_cleanly(path: &Path) -> bool {
 
 #[test]
 fn spoofs_and_watermarks_ffmpeg_output() {
-    for name in ["pig.mp4", "uhh.mp4"] {
-        let Some(input) = reference(name) else { return };
+    for kind in [Clip::Tall, Clip::Square] {
+        let name = format!("{kind:?}");
+        let Some(input) = clip(kind) else { return };
         let dir = tempfile::tempdir().unwrap();
         let encoded = dir.path().join("encoded.webm");
         let patched = dir.path().join("patched.webm");

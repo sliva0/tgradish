@@ -12,5 +12,8 @@ flate2.workspace = true
 image.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+tgradish-corpus.workspace = true
+
 [lints]
 workspace = true
