@@ -130,3 +130,29 @@ pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Prob
         codec,
     })
 }
+
+/// Where the frames of `input`'s first video stream start, in seconds
+/// from the file's start, as its packets come: empty when some carry no
+/// time.
+pub fn frame_starts(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Vec<f64>> {
+    let mut cmd = Command::new(&ffmpeg.ffprobe);
+    cmd.args(["-v", "error", "-select_streams", "v:0", "-of", "compact"])
+        .args(["-show_entries", "format=start_time:packet=pts_time"])
+        .arg(input);
+    let (mut file_start, mut starts, mut untimed) = (0.0, Vec::new(), false);
+    run(cmd, "ffprobe", cancel, &mut |output| {
+        let Output::Stdout(line) = output else { return };
+        if let Some(time) = line.strip_prefix("packet|pts_time=") {
+            match time.trim().parse::<f64>() {
+                Ok(time) => starts.push(time),
+                Err(_) => untimed = true,
+            }
+        } else if let Some(start) = line.strip_prefix("format|start_time=") {
+            file_start = start.trim().parse().unwrap_or(0.0);
+        }
+    })?;
+    if untimed {
+        return Ok(Vec::new());
+    }
+    Ok(starts.into_iter().map(|start| start - file_start).collect())
+}

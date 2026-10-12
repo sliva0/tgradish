@@ -3137,7 +3137,8 @@ mod tests {
         {
             let item = &mut harness.state_mut().items[0];
             let frames = item.input_frames().unwrap();
-            assert_eq!(frames.count(), 25);
+            // as its packets time them
+            assert_eq!((frames.count(), item.video.ready().unwrap().starts.len()), (25, 25));
             // frames 5 to 9, cut at the frames shown
             item.view.time = frames.times[5];
             Keys { start_here: true, ..Keys::default() }.apply(item);

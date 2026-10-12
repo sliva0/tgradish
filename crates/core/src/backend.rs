@@ -80,6 +80,22 @@ impl Backend {
         }
     }
 
+    /// Where the frames of a video start, in order, in seconds from its
+    /// start as cuts count them: empty when its packets carry no times.
+    pub fn frame_starts(&self, input: &Path, cancel: &CancelToken) -> Result<Vec<f64>> {
+        let mut starts = match self {
+            Backend::Process(ffmpeg) => ffmpeg::frame_starts(ffmpeg, input, cancel)?,
+            #[cfg(feature = "linked")]
+            Backend::Linked => crate::linked::frame_starts(input, cancel)?,
+        };
+        // packets come in decoding order, and decoders drop those before
+        // the start
+        starts.retain(|start| start.is_finite() && *start > -1e-6);
+        starts.sort_by(f64::total_cmp);
+        starts.dedup_by(|later, earlier| *later - *earlier < 1e-6);
+        Ok(starts)
+    }
+
     pub fn capabilities(&self, cancel: &CancelToken) -> Result<Capabilities> {
         match self {
             Backend::Process(ffmpeg) => ffmpeg::capabilities(ffmpeg, cancel),

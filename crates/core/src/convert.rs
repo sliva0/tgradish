@@ -142,6 +142,14 @@ pub fn frame_count(length: f64, fps: f64) -> u64 {
     ((length * fps + 1e-6).floor() as u64).max(1)
 }
 
+/// Where to start reading for the frame that starts at `start`, after one
+/// that starts at `previous`. Reading keeps frames from the first that
+/// starts at or after its start: a little before the frame's, so it stays
+/// however times are rounded.
+pub fn read_from(start: f64, previous: f64) -> f64 {
+    start - ((start - previous) / 4.0).min(1e-3)
+}
+
 /// Duration of [`frame_count`] frames, as written into the file header.
 pub fn encoded_length(length: f64, fps: f64) -> f64 {
     frame_count(length, fps) as f64 / fps

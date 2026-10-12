@@ -137,6 +137,11 @@ pub(crate) fn probe(input: &Path, cancel: &CancelToken) -> Result<Probe> {
     })
 }
 
+pub(crate) fn frame_starts(input: &Path, cancel: &CancelToken) -> Result<Vec<f64>> {
+    init()?;
+    Source::open_file(input, None, cancel)?.frame_starts()
+}
+
 /// A filter graph from `buffer` sources named after `inputs` to a
 /// `buffersink` named `out`. `spec` refers to them as `[name]` and `[out]`.
 fn filter_graph(inputs: &[(&str, String)], spec: &str) -> Result<filter::Graph> {
