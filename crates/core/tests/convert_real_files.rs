@@ -869,15 +869,19 @@ fn counts_time_from_where_the_video_starts() {
             let name = format!("{} {container}", name(backend));
             let probe = backend.probe(&input, &CancelToken::new()).unwrap();
             let duration = probe.duration.unwrap();
-            assert!((probe.start - 0.5).abs() < 0.01, "{name}: {probe:?}");
+            // the video starts half a second into the file, or, where ffmpeg
+            // before 7 writes the wait into MP4 as an empty edit, its first
+            // frame half a second into it
+            let late = 0.5 - probe.start;
+            assert!(late.abs() < 0.01 || (late - 0.5).abs() < 0.01, "{name}: {probe:?}");
             // from where the video starts; where the file says, to where
             // the longest stream, the sound, ends
-            assert!((0.95..1.2).contains(&duration), "{name}: {probe:?}");
+            assert!((0.95 + late..1.2 + late).contains(&duration), "{name}: {probe:?}");
             let starts = backend.frame_starts(&input, &probe, &CancelToken::new()).unwrap();
-            let even: Vec<f64> = (0..10).map(|index| f64::from(index) / 10.0).collect();
+            let even: Vec<f64> = (0..10).map(|index| late + f64::from(index) / 10.0).collect();
             assert!(near(&starts, &even), "{name}: {starts:?}");
             // all of it, and frames 5 to 7
-            let start = tgradish_core::convert::read_from(0.5, 0.4);
+            let start = tgradish_core::convert::read_from(even[5], even[4]);
             for (part, frames) in [((None, None), 10), ((Some(start), Some(0.3)), 3)] {
                 let request = Request {
                     output: Some(dir.path().join(format!("{name}-{frames}.webm"))),
