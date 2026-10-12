@@ -118,6 +118,15 @@ pub enum EncodeError {
     Cancelled,
 }
 
+/// Where a piece goes among its colour's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Place {
+    /// A split colour's delta, drawn just below its cores.
+    Below,
+    /// Everything else.
+    Main,
+}
+
 /// One colour's shape over frames `from..to` (not 60 fps ticks).
 struct Piece {
     from: usize,
@@ -128,7 +137,7 @@ struct Piece {
     tile: u32,
 }
 
-fn cost(pieces: &[(u8, Piece)]) -> usize {
+fn cost(pieces: &[(Place, Piece)]) -> usize {
     pieces.iter().fold(0, |total: usize, (_, piece)| {
         total.saturating_add(piece.rects.len() * RECT_COST + GROUP_COST)
     })
@@ -141,7 +150,7 @@ const IMPOSSIBLE: usize = usize::MAX;
 /// [`cost`] of a tiled colour: tiles with lifetimes of their own need
 /// layers of their own, about one for each piece past the first in each
 /// tile.
-fn tiled_cost(pieces: &[(u8, Piece)]) -> usize {
+fn tiled_cost(pieces: &[(Place, Piece)]) -> usize {
     let tiles: std::collections::BTreeSet<u32> =
         pieces.iter().map(|(_, piece)| piece.tile).collect();
     let extra = pieces.len().saturating_sub(tiles.len());
@@ -150,8 +159,8 @@ fn tiled_cost(pieces: &[(u8, Piece)]) -> usize {
 
 /// [`cost`] of a split colour: its deltas mostly need layers of their own,
 /// since its core lies between them and the next colour's.
-fn split_cost(pieces: &[(u8, Piece)]) -> usize {
-    let deltas = pieces.iter().filter(|(place, _)| *place == 0).count();
+fn split_cost(pieces: &[(Place, Piece)]) -> usize {
+    let deltas = pieces.iter().filter(|(place, _)| *place == Place::Below).count();
     cost(pieces).saturating_add(deltas * LAYER_ESTIMATE)
 }
 
@@ -312,14 +321,13 @@ impl<'a> Painter<'a> {
     }
 
     /// The pieces of `colour` when `later[frame]` holds the cells of the
-    /// opaque colours drawn after it, each with its place under the colour:
-    /// 0 for a part drawn below the rest, 1 otherwise.
+    /// opaque colours drawn after it, each with its place among them.
     fn pieces(
         &self,
         colour: u16,
         later: &[Mask],
         tiles: bool,
-    ) -> Result<Vec<(u8, Piece)>, EncodeError> {
+    ) -> Result<Vec<(Place, Piece)>, EncodeError> {
         let own: Vec<Mask> = (0..self.frames()).map(|f| self.own(colour, f)).collect();
         // everything but tiles happens within a cell of the colour's cells:
         // worked out in a window of that, and moved back
@@ -333,7 +341,7 @@ impl<'a> Painter<'a> {
             masks.iter().map(|mask| mask.crop(left, top, width, height)).collect()
         };
         let (own_window, later_window) = (crop(&own), crop(later));
-        let moved = |mut pieces: Vec<(u8, Piece)>| {
+        let moved = |mut pieces: Vec<(Place, Piece)>| {
             for (_, piece) in &mut pieces {
                 for rect in &mut piece.rects {
                     rect.0 += left;
@@ -351,7 +359,7 @@ impl<'a> Painter<'a> {
                     .collect(),
                 self.opaque(colour),
             )
-            .map(|whole| moved(whole.into_iter().map(|piece| (1, piece)).collect()));
+            .map(|whole| moved(whole.into_iter().map(|piece| (Place::Main, piece)).collect()));
         if !self.lifetimes || !self.opaque(colour) {
             return whole;
         }
@@ -388,7 +396,11 @@ impl<'a> Painter<'a> {
     /// Tiles are drawn in reading order, and a tile also covers the cells
     /// of its colour in later tiles next to its own: the seam invariant
     /// between two tiles, which shows every cell in its own tile's group.
-    fn tiled_pieces(&self, own: &[Mask], later: &[Mask]) -> Result<Vec<(u8, Piece)>, EncodeError> {
+    fn tiled_pieces(
+        &self,
+        own: &[Mask],
+        later: &[Mask],
+    ) -> Result<Vec<(Place, Piece)>, EncodeError> {
         let (width, height) = (self.anim.width(), self.anim.height());
         let size = TILE;
         let mut any = self.empty();
@@ -451,7 +463,7 @@ impl<'a> Painter<'a> {
                     rect.0 += wl;
                     rect.1 += wt;
                 }
-                pieces.push((1, piece));
+                pieces.push((Place::Main, piece));
             }
         }
         Ok(pieces)
@@ -548,7 +560,7 @@ impl<'a> Painter<'a> {
         own: &[Mask],
         later: &[Mask],
         patch: bool,
-    ) -> Result<Vec<(u8, Piece)>, EncodeError> {
+    ) -> Result<Vec<(Place, Piece)>, EncodeError> {
         let (cores, at) = self.cores(own, later, patch)?;
         let deltas = own
             .iter()
@@ -582,8 +594,11 @@ impl<'a> Painter<'a> {
                 (must, may)
             })
             .collect();
-        let mut out: Vec<(u8, Piece)> = cores.into_iter().map(|piece| (1, piece)).collect();
-        out.extend(self.lifetime_pieces(deltas, true)?.into_iter().map(|piece| (0, piece)));
+        let mut out: Vec<(Place, Piece)> =
+            cores.into_iter().map(|piece| (Place::Main, piece)).collect();
+        out.extend(
+            self.lifetime_pieces(deltas, true)?.into_iter().map(|piece| (Place::Below, piece)),
+        );
         Ok(out)
     }
 
@@ -749,7 +764,7 @@ impl<'a> Painter<'a> {
                 return Err(EncodeError::Cancelled);
             }
             for (place, piece) in self.pieces(colour, &later, true)? {
-                pieces.push((rank * 2 + usize::from(place), colour, piece));
+                pieces.push((rank * 2 + usize::from(place == Place::Main), colour, piece));
             }
             if self.opaque(colour) {
                 for (f, mask) in later.iter_mut().enumerate() {
