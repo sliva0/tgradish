@@ -53,7 +53,6 @@ pub struct WebmPlan {
     pub height: u32,
     pub fps: f64,
     pub length: f64,
-    pub spoofs: bool,
     /// How many times fitting may encode.
     pub attempts: u32,
 }
@@ -70,7 +69,6 @@ pub enum TgsStage {
 /// What a conversion is doing or did, besides its result.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Progress {
-    pub stage: String,
     /// How far along the stage is, when that is known.
     pub fraction: Option<f32>,
     pub webm: Option<WebmPlan>,
@@ -268,7 +266,7 @@ impl Job {
         let (sender, receiver) = channel();
         self.messages = Some(receiver);
         self.status = Status::Running;
-        self.progress = Progress { stage: "starting".into(), ..Progress::default() };
+        self.progress = Progress::default();
         let output = self.output.clone();
         let cancel = self.cancel.clone();
         let ctx = ctx.clone();
@@ -330,10 +328,6 @@ impl Job {
 
 type Update<'a> = &'a dyn Fn(Box<dyn FnOnce(&mut Progress) + Send>);
 
-fn kib(bytes: u64) -> String {
-    format!("{:.1} KiB", bytes as f64 / 1024.0)
-}
-
 fn run(
     plan: Plan,
     inputs: Vec<PathBuf>,
@@ -358,7 +352,6 @@ fn run(
                 overwrite,
                 keep_temp: false,
             };
-            update(Box::new(|progress| progress.stage = "making the picture".into()));
             let outcome = still::convert(&backend, &request, cancel)?;
             let warnings = outcome.warnings.clone();
             update(Box::new(move |progress| progress.warnings.extend(warnings)));
@@ -388,12 +381,10 @@ fn run(
             let outcome = tgs::convert(&request, cancel, &mut |event| match event {
                 TgsEvent::Started { report, .. } => update(Box::new(move |progress| {
                     progress.report = Some(report);
-                    progress.stage = "drawing".into();
                     progress.tgs = Some(TgsStage::Drawing);
                 })),
                 TgsEvent::TooLarge { bytes } => update(Box::new(move |progress| {
                     progress.lossless_bytes = Some(bytes);
-                    progress.stage = format!("about {} losslessly", kib(bytes as u64));
                     progress.tgs = Some(TgsStage::Fitting);
                 })),
                 TgsEvent::Reduced { step } => update(Box::new(move |progress| {
@@ -401,7 +392,6 @@ fn run(
                     progress.tgs = Some(TgsStage::Fitting);
                 })),
                 TgsEvent::Packing => update(Box::new(|progress| {
-                    progress.stage = "compressing".into();
                     progress.tgs = Some(TgsStage::Compressing);
                 })),
                 TgsEvent::Warning { message } => update(Box::new(move |progress| {
@@ -460,7 +450,6 @@ fn webm(
                 height: plan.height,
                 fps: plan.fps,
                 length: plan.length,
-                spoofs: plan.spoofs(plan.length),
                 attempts: if plan.fit == tgradish_core::options::Fit::Off {
                     1
                 } else {
@@ -470,7 +459,6 @@ fn webm(
             update(Box::new(move |progress| progress.webm = Some(planned)));
         }
         Event::AttemptStarted { attempt, params } => update(Box::new(move |progress| {
-            progress.stage = format!("encoding, attempt {attempt}");
             progress.fraction = Some(0.0);
             progress.attempts.push(Attempt {
                 number: attempt,

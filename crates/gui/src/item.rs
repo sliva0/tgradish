@@ -238,7 +238,8 @@ pub struct View {
     pub playing: bool,
     pub input_zoom: Zoom,
     pub result_zoom: Zoom,
-    /// The small picture of what the result will look like, over the input.
+    /// The small picture of what the result will look like, beside the
+    /// input.
     pub inset: bool,
     /// What the framing was when last shown, to show the input when it
     /// changes.

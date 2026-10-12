@@ -10,7 +10,7 @@ use tgradish_core::telegram::Target;
 
 use crate::item::Zoom;
 use crate::media::Clip;
-use crate::widgets;
+use crate::{theme, widgets};
 
 /// The one texture the preview draws, and which frame it holds.
 #[derive(Default)]
@@ -49,7 +49,8 @@ impl Screen {
     }
 }
 
-/// The small picture of what the result will look like, over the input.
+/// The small picture of what the result will look like, beside the input
+/// or over its corner.
 #[derive(Default)]
 pub struct Inset {
     texture: Option<egui::TextureHandle>,
@@ -590,8 +591,8 @@ fn fit(rect: Rect, size: (u32, u32)) -> f32 {
 /// a smooth picture blurs them, and you can't put a crop on a pixel's edge.
 const SHARP_FROM: f32 = 2.0;
 
-/// Shows `picture` in `rect`, with `cropping` over it if given. True when
-/// the crop changed. The picture fits `fit_in`, a part of `rect`, and
+/// Shows `picture` in `rect`, with `cropping` over it if given, which
+/// dragging changes. The picture fits `fit_in`, a part of `rect`, and
 /// zooms from there, over the rest of `rect`: nothing moves when zooming
 /// starts or ends.
 pub fn show(
@@ -601,12 +602,12 @@ pub fn show(
     picture: &Picture,
     zoom: &mut Zoom,
     cropping: Option<Cropping>,
-) -> bool {
+) {
     // a part of the space the caller took: taking it again would move
     // what comes next
     let response = ui.interact(rect, ui.id().with("canvas"), Sense::click_and_drag());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, widgets::stage(ui.visuals().dark_mode));
+    painter.rect_filled(rect, 0.0, theme::stage(ui.visuals().dark_mode));
 
     let side = picture.size.0.max(picture.size.1);
     let canvas = if picture.square { (side, side) } else { picture.size };
@@ -626,7 +627,7 @@ pub fn show(
     let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
     painter.image(texture, shown, uv, Color32::WHITE);
 
-    let Some(cropping) = cropping else { return false };
+    let Some(cropping) = cropping else { return };
     let size = picture.size;
     let to_pixels = |point: Pos2| {
         let x = ((point.x - shown.min.x) / scale).clamp(0.0, size.0 as f32);
@@ -682,7 +683,6 @@ pub fn show(
     }
 
     let id = response.id.with("drag");
-    let mut changed = false;
     if response.drag_started_by(PointerButton::Primary)
         && let Some(origin) = ui.input(|input| input.pointer.press_origin())
         && let Some(drag) = grab(origin)
@@ -716,7 +716,6 @@ pub fn show(
             let new = (new != full).then_some(new);
             if new != *cropping.crop {
                 *cropping.crop = new;
-                changed = true;
             }
         }
     }
@@ -732,7 +731,6 @@ pub fn show(
             }
             None => None,
         };
-        changed = true;
     }
 
     // the crop as it is now
@@ -821,7 +819,6 @@ pub fn show(
         painter.rect_filled(back, 4.0, Color32::from_black_alpha(170));
         painter.galley(at, galley, Color32::WHITE);
     }
-    changed
 }
 
 fn zoom_and_pan(

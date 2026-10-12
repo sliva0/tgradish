@@ -1,6 +1,6 @@
 //! What a result will look like, worked out on a frame of the input: the
 //! part used, scaled the way the conversion scales it, in its box. Shown
-//! small over the input, so the effect of the crop and the scaling shows
+//! small beside the input, so the effect of the crop and the scaling shows
 //! without converting.
 
 use eframe::egui;
@@ -176,10 +176,6 @@ pub fn webm(frame: &[u8], width: u32, part: Part, sizes: &Sizes) -> egui::ColorI
     }
 }
 
-/// The `.tgs` result of pixel art: `part` of `frames`, cut to what is
-/// visible in any frame unless `keep_canvas`, and scaled to fill the
-/// 512 x 512 canvas along its longer side, pixel for pixel. Shown on a
-/// smaller canvas of `side`, which keeps the art pixels whole when it can.
 /// Left, top, right and bottom of what a `.tgs` result shows of `frames`:
 /// `part`, cut to what is visible in any frame unless `keep_canvas`. Looks
 /// at every pixel of every frame, so the caller keeps it.
