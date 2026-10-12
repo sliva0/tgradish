@@ -238,20 +238,28 @@ fn fit_auto(encoder: &mut dyn Encoder, plan: &Plan, limit: u64) -> Result<Search
     Ok(total)
 }
 
-/// Runs the search configured in `plan` and returns the attempt to keep.
-/// With `fit = off` that is the single attempt, even if it is too big.
-/// Roughly what fitting encodes first: what it then changes depends on the
-/// sizes that come out.
-pub fn first_params(plan: &Plan) -> Params {
-    let quality = if plan.lossless { Rate::Lossless } else { Rate::Crf(plan.crf) };
-    let rate = match plan.fit {
-        Fit::Off if plan.lossless || plan.constant_quality => quality,
-        Fit::Off | Fit::Auto | Fit::Bitrate => Rate::Bitrate(plan.bitrate),
-        Fit::Crf | Fit::Fps | Fit::Length => quality,
-    };
-    Params { fps: plan.fps, length: plan.length, rate }
+/// What fitting encodes first, for `limit` bytes: what it then changes
+/// depends on the sizes that come out. Found by running [`run`] with an
+/// encoder that stops at its first attempt, so it always agrees with it.
+pub fn first_params(plan: &Plan, limit: u64) -> Params {
+    /// Notes the first attempt asked for, and stops the search there.
+    struct First(Option<Params>);
+    impl Encoder for First {
+        fn encode(&mut self, params: Params) -> Result<Attempt> {
+            self.0.get_or_insert(params);
+            Err(Error::Cancelled)
+        }
+        fn score(&mut self, _: &Attempt) -> Result<f64> {
+            Err(Error::Cancelled)
+        }
+    }
+    let mut first = First(None);
+    let _ = run(plan, &mut first, limit);
+    first.0.expect("every search encodes at least once")
 }
 
+/// Runs the search configured in `plan` and returns the attempt to keep.
+/// With `fit = off` that is the single attempt, even if it is too big.
 pub fn run(plan: &Plan, encoder: &mut dyn Encoder, limit: u64) -> Result<Attempt> {
     let (fps, length, budget) = (plan.fps, plan.length, plan.attempts);
     let quality = if plan.lossless { Rate::Lossless } else { Rate::Crf(plan.crf) };
@@ -371,6 +379,17 @@ mod tests {
     fn assert_good_fit(attempt: &Attempt) {
         let used = attempt.bytes as f64 / MAX_BYTES as f64;
         assert!((GOOD_ENOUGH..=1.0).contains(&used), "uses {used:.3} of the limit");
+    }
+
+    #[test]
+    fn says_what_it_encodes_first() {
+        // whatever the search, what it says first is what it encodes first
+        for fit in [Fit::Off, Fit::Auto, Fit::Bitrate, Fit::Crf, Fit::Fps, Fit::Length] {
+            let plan = test_plan(Options { fit: Some(fit), ..Options::default() }, 4.84);
+            let mut encoder = FakeEncoder::new(0.0);
+            let _ = run(&plan, &mut encoder, MAX_BYTES);
+            assert_eq!(encoder.calls.first(), Some(&first_params(&plan, MAX_BYTES)), "{fit:?}");
+        }
     }
 
     #[test]
