@@ -3590,6 +3590,7 @@ dependencies = [
  "skrifa",
  "tempfile",
  "tgradish-core",
+ "tgradish-corpus",
  "tgradish-tgs",
  "wayland-backend",
  "wayland-client",

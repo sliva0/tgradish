@@ -3329,6 +3329,67 @@ mod tests {
         assert_eq!(links("no address here"), [(false, "no address here")]);
     }
 
+    /// The window at work, for the README: `TGRADISH_SCREENSHOTS` says
+    /// where it goes.
+    #[test]
+    #[ignore]
+    fn readme_screenshot() {
+        let out =
+            PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
+        // a folder whose name reads well where results are said to go
+        let dir = std::env::temp_dir().join("tgradish-readme");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // the synthetic art the tests use
+        let names = ["hammer_4x.gif", "walker_2x.gif", "dance.gif", "slime_jittered.gif"];
+        let mut inputs = Vec::new();
+        for file in tgradish_corpus::files() {
+            if names.contains(&file.name.as_str()) {
+                let path = dir.join(&file.name);
+                std::fs::write(&path, &file.bytes).unwrap();
+                inputs.push(path);
+            }
+        }
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.join("Stickers"));
+        config.gui.theme = tgradish_core::config::Theme::Dark;
+        let filtering = egui_wgpu::RendererOptions {
+            predictable_texture_filtering: false,
+            ..egui_wgpu::RendererOptions::PREDICTABLE
+        };
+        let mut harness = Harness::builder()
+            .with_size([1280.0, 820.0])
+            .with_render_options(filtering)
+            .wgpu()
+            .build_eframe(move |cc| {
+                let app = App::with(config.clone(), None, Presets::builtin(), None);
+                app.style(&cc.egui_ctx);
+                app
+            });
+        harness.state_mut().add(inputs);
+        finish(&mut harness);
+        // one made, another chosen, with the result's small picture
+        let first = harness.state().items[0].id;
+        harness.state_mut().select(first);
+        harness.run_steps(2);
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let shown = harness.state().items[3].id;
+        harness.state_mut().select(shown);
+        let item = &mut harness.state_mut().items[3];
+        item.view.inset = true;
+        // a square crop, its handles out
+        item.choices.crop = Some(Crop { x: 0, y: 2, width: 40, height: 40 });
+        harness.event(egui::Event::PointerGone);
+        harness.run_steps(3);
+        std::thread::sleep(Duration::from_millis(300));
+        harness.run_steps(3);
+        let image = harness.render().expect("rendering needs a GPU");
+        image.save(out.join("tgradish-readme.png")).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn leaves_keys_pressed_in_dialogs_to_them() {
         let dir = tempfile::tempdir().unwrap();
