@@ -30,13 +30,19 @@ pub fn pack(json: &[u8], iterations: u64) -> Vec<u8> {
     out
 }
 
-/// About how large `json` packs: its `gzip -9` size, much quicker than
-/// [`pack`] and ranked the same way, for comparing candidates.
-pub fn quick_size(json: &[u8]) -> usize {
+/// `json` as a `.tgs` packed by `gzip -9`: much quicker than [`pack`],
+/// and a little larger.
+pub fn pack_quick(json: &[u8]) -> Vec<u8> {
     use std::io::Write;
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
     encoder.write_all(json).expect("compressing into memory can't fail");
-    encoder.finish().expect("compressing into memory can't fail").len()
+    encoder.finish().expect("compressing into memory can't fail")
+}
+
+/// About how large `json` packs: its `gzip -9` size, much quicker than
+/// [`pack`] and ranked the same way, for comparing candidates.
+pub fn quick_size(json: &[u8]) -> usize {
+    pack_quick(json).len()
 }
 
 /// The Lottie JSON in a `.tgs`.

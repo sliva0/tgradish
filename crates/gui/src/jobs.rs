@@ -83,6 +83,8 @@ pub struct Progress {
     pub warnings: Vec<String>,
     /// For `.tgs`: what it is doing.
     pub tgs: Option<TgsStage>,
+    /// For `.tgs`: the art is never changed to fit.
+    pub tgs_lossless: bool,
 }
 
 impl Progress {
@@ -378,10 +380,14 @@ fn run(
             })
         }
         Plan::Tgs { options } => {
+            let lossless = options.lossless.unwrap_or(false);
             let request = TgsRequest { inputs, sequence, output, options, overwrite };
             let mut found = Vec::new();
             let mut finished = None;
-            update(Box::new(|progress| progress.tgs = Some(TgsStage::Reading)));
+            update(Box::new(move |progress| {
+                progress.tgs = Some(TgsStage::Reading);
+                progress.tgs_lossless = lossless;
+            }));
             let outcome = tgs::convert(&request, cancel, &mut |event| match event {
                 TgsEvent::Started { report, .. } => update(Box::new(move |progress| {
                     progress.report = Some(report);
@@ -390,7 +396,7 @@ fn run(
                 })),
                 TgsEvent::TooLarge { bytes } => update(Box::new(move |progress| {
                     progress.lossless_bytes = Some(bytes);
-                    progress.stage = format!("about {} losslessly; fitting", kib(bytes as u64));
+                    progress.stage = format!("about {} losslessly", kib(bytes as u64));
                     progress.tgs = Some(TgsStage::Fitting);
                 })),
                 TgsEvent::Reduced { step } => update(Box::new(move |progress| {

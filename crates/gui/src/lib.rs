@@ -2129,12 +2129,19 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     if let Some(stage) = progress.tgs {
         use jobs::TgsStage;
         let fits = progress.lossless_bytes.is_none() && stage > TgsStage::Fitting;
+        // too large, and never to be changed: packed quickly, in red
+        let hopeless = progress.tgs_lossless && progress.lossless_bytes.is_some();
         let stages = [
             (TgsStage::Reading, "Reading the art".to_owned()),
             (TgsStage::Drawing, "Drawing it as shapes".to_owned()),
             (
                 TgsStage::Fitting,
                 match (progress.lossless_bytes, progress.steps.last()) {
+                    // never changed: nothing is fitted
+                    (Some(bytes), _) if progress.tgs_lossless => {
+                        format!("Kept as it is: about {}, too large", widgets::kib(bytes as u64))
+                    }
+                    (None, _) if progress.tgs_lossless => "Kept as it is".to_owned(),
                     (Some(_), Some(step)) => {
                         let count = progress.steps.len();
                         let steps = if count == 1 { "step" } else { "steps" };
@@ -2150,13 +2157,20 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
                     (None, _) => "Fitting into 64 KiB, if it has to".to_owned(),
                 },
             ),
-            (TgsStage::Compressing, "Compressing".to_owned()),
+            (
+                TgsStage::Compressing,
+                if hopeless { "Compressing quickly: it can't fit" } else { "Compressing" }
+                    .to_owned(),
+            ),
         ];
         for (each, text) in stages {
             use widgets::Fill;
             // the stage at work moves even while its share stays put, as
             // fitting's does through a round of trying reductions
             let (fill, colour) = match each.cmp(&stage) {
+                std::cmp::Ordering::Less if hopeless && each == TgsStage::Fitting => {
+                    (Fill::Share(1.0), widgets::BAD.gamma_multiply(0.45))
+                }
                 std::cmp::Ordering::Less => (Fill::Share(1.0), done),
                 std::cmp::Ordering::Equal if each == TgsStage::Fitting => {
                     (Fill::working(progress.tgs_fitting()), running)
