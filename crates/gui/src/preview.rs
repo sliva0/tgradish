@@ -19,6 +19,9 @@ use crate::{predict, settings, theme, timeline, widgets};
 
 /// Width of the column beside the preview.
 const SIDE: f32 = 300.0;
+/// Height kept for the timeline under a preview that plays: its 30 point
+/// track and the space around it.
+const TIMELINE: f32 = 38.0;
 
 impl App {
     pub(crate) fn main_panel(&mut self, ui: &mut egui::Ui) {
@@ -86,6 +89,8 @@ impl App {
         let (line, response) =
             ui.allocate_exact_size(vec2(ui.available_width(), 8.0), egui::Sense::drag());
         let response = response.on_hover_cursor(egui::CursorIcon::ResizeVertical);
+        // never so small the preview is no use, nor so large the settings
+        // below lose their first row
         if response.dragged() {
             self.preview_share =
                 ((preview_height + response.drag_delta().y) / height).clamp(0.2, 0.85);
@@ -188,12 +193,13 @@ fn preview(
     let result_length =
         item.result_clip.ready().filter(|clip| clip.is_animated()).map(|clip| clip.end());
     let timeline_height = match item.view.show {
-        Show::Input if length.is_some() => 38.0,
-        Show::Result if result_length.is_some() => 38.0,
+        Show::Input if length.is_some() => TIMELINE,
+        Show::Result if result_length.is_some() => TIMELINE,
         _ => 0.0,
     };
     let size = ui.available_size() - vec2(0.0, timeline_height + 6.0);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    // after a stall, playing goes on where it was rather than jumping ahead
     let dt = ui.input(|input| f64::from(input.stable_dt.min(0.1)));
     let range = item.range();
     let input_size = item.input_size();
@@ -237,6 +243,7 @@ fn preview(
                     }
                 }
                 let time = item.view.time;
+                // its last frame starts at its end, and shows a little past it
                 let part = part.filter(|part| part.start() <= time && time < part.end() + 0.05);
                 // paused: the sharp frame, once it is there
                 // and still images, which don't play, always
