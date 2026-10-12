@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tgradish_frames::Animation;
 
 use crate::check::{self, Issue, Severity};
-use crate::encode::{Effort, EncodeError, Settings, painter};
+use crate::encode::{Effort, Settings, painter};
 use crate::layout::{self, lay_out};
 use crate::limits::{MAX_RAW_JSON, telegram};
 use crate::lottie::Style;
@@ -160,10 +160,7 @@ fn render(
         lottie.to_json(options.style)
     };
     let score = |scene: &Scene| file::quick_size(json(scene).as_bytes());
-    let scene = painter(anim, settings, Some(&score), cancelled).map_err(|err| match err {
-        EncodeError::Cancelled => crate::Error::Cancelled,
-        err => err.into(),
-    })?;
+    let scene = painter(anim, settings, Some(&score), cancelled)?;
     let json = json(&scene);
     Ok((scene, json))
 }
@@ -262,13 +259,23 @@ pub fn make(
     // what scales quick estimates to the real encoder's sizes, measured
     // once fitting comes near the limit
     let mut calibration = None;
+    // the grid snapping aims for, worked out once: normalising again is
+    // slow, and reductions don't change it
+    let likely = match options.fit {
+        Fit::Auto => normalise_likely_scale(&original),
+        Fit::Lossless => None,
+    };
     let mut current = original.clone();
     let mut steps: Vec<Step> = Vec::new();
     let mut target = options.max_bytes;
+    // whether fitting got its estimate to the target, rather than running
+    // out of reductions
+    let mut reached = true;
     loop {
         if options.fit == Fit::Auto {
-            let fitting = Fitting { target, settings: &settings, options, cancelled };
-            current = fit(&original, current, &mut steps, &mut calibration, &fitting, progress)?;
+            let fitting = Fitting { target, likely, settings: &settings, options, cancelled };
+            (current, reached) =
+                fit(&original, current, &mut steps, &mut calibration, &fitting, progress)?;
         }
         check()?;
         let (scene, json) = render(&current, &settings, options, cancelled)?;
@@ -277,9 +284,10 @@ pub fn make(
         // that can fit
         let hopeless = !within_limits(&scene, &json)
             || quick_packed.len() as f64 * ZOPFLI_BEST > options.max_bytes as f64;
-        // the estimate was off; aim lower and reduce some more
+        // the estimate was off; aim lower and reduce some more, which only
+        // helps while fitting has reductions left to make
         let retarget = || -> Result<bool> {
-            let again = options.fit == Fit::Auto && target > options.max_bytes / 4;
+            let again = options.fit == Fit::Auto && reached && target > options.max_bytes / 4;
             Ok(again && quick(&current, options, cancelled)?.is_some())
         };
         if hopeless && retarget()? {
@@ -418,6 +426,8 @@ type Candidate = (PixelAnim, Option<Quick>, usize, f64);
 struct Fitting<'a> {
     /// The estimate to get to.
     target: usize,
+    /// The grid most of the art is on, which snapping to a grid aims for.
+    likely: Option<u32>,
     /// The real encoder's, for calibrating.
     settings: &'a Settings,
     options: &'a Options,
@@ -429,7 +439,8 @@ struct Fitting<'a> {
 /// among those the compromise puts first while any of them help, then the
 /// last one is weakened as far as it still fits. Estimates are scaled by
 /// `calibration`, which is measured on the art as it is once it comes near
-/// the target.
+/// the target. Also says whether the estimate got to the target, rather
+/// than every reduction being used up first.
 fn fit(
     original: &PixelAnim,
     mut current: PixelAnim,
@@ -437,8 +448,8 @@ fn fit(
     calibration: &mut Option<f64>,
     fitting: &Fitting,
     progress: &mut dyn FnMut(Progress),
-) -> Result<PixelAnim> {
-    let Fitting { target, settings, options, cancelled } = *fitting;
+) -> Result<(PixelAnim, bool)> {
+    let Fitting { target, likely, settings, options, cancelled } = *fitting;
     let size_of = |quick: Option<Quick>, calibration: Option<f64>| {
         quick.map_or(usize::MAX, |quick| {
             quick.size(calibration.unwrap_or(ZOPFLI_SHARE), options.max_bytes)
@@ -459,22 +470,23 @@ fn fit(
     // fits even as gzip packs the quick encode: the real encoder and
     // zopfli only make it smaller
     if quick_now.is_some_and(|quick| quick.size(1.0, options.max_bytes) <= target) {
-        return Ok(current);
+        return Ok((current, true));
     }
     if calibration.is_none() {
         *calibration = measure(&current, quick_now)?;
     }
     let mut size = size_of(quick_now, *calibration);
     if size <= target {
-        return Ok(current);
+        return Ok((current, true));
     }
     if steps.is_empty() {
         progress(Progress::TooLarge { bytes: size });
     }
+    // once snapped, the art is on its grid
     let likely = steps
         .iter()
         .all(|step| step.reduction.kind() != Kind::SnapToGrid)
-        .then(|| normalise_likely_scale(original))
+        .then_some(likely)
         .flatten();
     let ladders: Vec<Vec<Reduction>> =
         options.reductions.iter().map(|kind| kind.ladder(likely)).collect();
@@ -554,6 +566,8 @@ fn fit(
         next[k] += 1;
     }
 
+    // weakening the last step keeps the estimate within the target
+    let reached = size <= target;
     // weaken the last step as far as the result still fits
     if let Some((previous, k)) = before_last
         && size <= target
@@ -578,12 +592,12 @@ fn fit(
             }
         }
     }
-    Ok(current)
+    Ok((current, reached))
 }
 
-/// The scale snapping would use: the likely scale normalising found.
+/// The scale snapping would use: the likely scale of `anim`'s cells, as
+/// normalising finds it.
 fn normalise_likely_scale(anim: &PixelAnim) -> Option<u32> {
-    // a fresh look at the cells as they are now
     let rgba: Vec<_> = (0..anim.frames().len())
         .map(|frame| tgradish_frames::Frame {
             rgba: anim.rgba(frame),
@@ -604,6 +618,7 @@ mod tests {
     use tgradish_frames::Frame;
 
     use super::*;
+    use crate::encode::EncodeError;
 
     /// A quick estimate scaled by `calibration`.
     fn estimate(anim: &PixelAnim, options: &Options, calibration: f64) -> Option<usize> {
@@ -611,9 +626,9 @@ mod tests {
         quick.map(|quick| quick.size(calibration, options.max_bytes))
     }
 
-    #[test]
-    fn packs_art_that_cant_fit_quickly() {
-        // noise in many colours, kept as it is: far over the limit
+    /// Noise in many colours, 64 by 64 in 4 frames: far over the limit
+    /// as it is.
+    fn noise() -> Animation {
         let mut seed = 7u32;
         let frames = (0..4)
             .map(|_| Frame {
@@ -627,7 +642,30 @@ mod tests {
                 duration: Duration::from_millis(100),
             })
             .collect();
-        let input = Animation::new(64, 64, frames).unwrap();
+        Animation::new(64, 64, frames).unwrap()
+    }
+
+    #[test]
+    fn gives_up_with_nothing_left_to_reduce() {
+        // fitting with no reductions to make comes to keeping it as it is,
+        // rather than aiming lower and encoding again some 34 times
+        let input = noise();
+        let lossless = Options { fit: Fit::Lossless, effort: Effort::Fast, ..Options::default() };
+        let started = std::time::Instant::now();
+        let kept = make(&input, &lossless, &mut |_| {}, &|| false).unwrap();
+        let once = started.elapsed();
+        let options = Options { fit: Fit::Auto, reductions: Vec::new(), ..lossless };
+        let started = std::time::Instant::now();
+        let fitted = make(&input, &options, &mut |_| {}, &|| false).unwrap();
+        let took = started.elapsed();
+        assert!(fitted.tgs == kept.tgs && fitted.steps.is_empty());
+        assert!(took < once * 4 + Duration::from_secs(1), "{took:?} against {once:?}");
+    }
+
+    #[test]
+    fn packs_art_that_cant_fit_quickly() {
+        // noise in many colours, kept as it is: far over the limit
+        let input = noise();
         let options = Options { fit: Fit::Lossless, effort: Effort::Fast, ..Options::default() };
         let mut too_large = None;
         let made = make(
@@ -755,6 +793,7 @@ mod tests {
             let settings = Settings::default();
             let fitting = Fitting {
                 target: lossless / 20,
+                likely: normalise_likely_scale(&anim),
                 settings: &settings,
                 options: &options,
                 cancelled: &|| false,
