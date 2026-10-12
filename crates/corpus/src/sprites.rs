@@ -29,39 +29,68 @@ const SLIME_LIGHT: Colour = [180, 240, 170, 255];
 /// to 1, with an outline.
 pub fn person(phase: f32, blink: bool, shirt: (Colour, Colour)) -> Canvas {
     let mut canvas = Canvas::new(32, 32);
+    figure(&mut canvas, (0, 0), (phase, blink, shirt), None);
+    canvas.outline(OUTLINE);
+    canvas
+}
+
+/// Draws a person, 32 by 32 from `at`, with no outline: at `phase` of a
+/// step cycle from 0 to 1, and with `wave`, its arm on the right raised and
+/// waving at that point of a cycle from 0 to 1, its hand up to 10 pixels
+/// above the 32.
+fn figure(
+    canvas: &mut Canvas,
+    (x0, y0): (i32, i32),
+    (phase, blink, shirt): (f32, bool, (Colour, Colour)),
+    wave: Option<f32>,
+) {
+    let (fx, fy) = (x0 as f32, y0 as f32);
     let swing = (phase * TAU).sin();
     // the body is lower while the legs are apart
     let bob = i32::from(swing.abs() > 0.5);
-    let hip = (16, 20 + bob);
+    let hip = (x0 + 16, y0 + 20 + bob);
     for (side, sign) in [(-2, 1.0), (2, -1.0)] {
-        let foot = (hip.0 + side + (swing * sign * 4.0).round() as i32, 28);
+        let foot = (hip.0 + side + (swing * sign * 4.0).round() as i32, y0 + 28);
         canvas.line((hip.0 + side, hip.1), foot, 3, PANTS);
         canvas.rect(foot.0 - 1, foot.1, 3, 2, SHOE);
     }
     let (lit, shade) = shirt;
-    canvas.ellipse(16.0, 15.5 + bob as f32, 5.5, 6.0, shade);
-    canvas.ellipse(15.5, 15.0 + bob as f32, 4.5, 5.5, lit);
+    canvas.ellipse(fx + 16.0, fy + 15.5 + bob as f32, 5.5, 6.0, shade);
+    canvas.ellipse(fx + 15.5, fy + 15.0 + bob as f32, 4.5, 5.5, lit);
     for (shoulder, sign) in [(11, -1.0), (21, 1.0)] {
-        let hand = (shoulder + (swing * sign * 3.0).round() as i32, 19 + bob);
-        canvas.line((shoulder, 12 + bob), hand, 2, SKIN);
-        canvas.set(hand.0, hand.1 + 1, SKIN_SHADE);
+        let top = (x0 + shoulder, y0 + 12 + bob);
+        match wave {
+            // raised from the shoulder, the forearm swinging from the elbow
+            Some(wave) if shoulder == 21 => {
+                let elbow = (top.0 + 3, top.1 - 5);
+                let sway = ((wave * TAU).sin() * 2.5).round() as i32;
+                let hand = (elbow.0 + sway, elbow.1 - 6);
+                canvas.line(top, elbow, 2, SKIN);
+                canvas.line(elbow, hand, 2, SKIN);
+                canvas.rect(hand.0 - 1, hand.1 - 2, 3, 3, SKIN);
+                canvas.set(hand.0 + 1, hand.1, SKIN_SHADE);
+            }
+            _ => {
+                let hand = (top.0 + (swing * sign * 3.0).round() as i32, y0 + 19 + bob);
+                canvas.line(top, hand, 2, SKIN);
+                canvas.set(hand.0, hand.1 + 1, SKIN_SHADE);
+            }
+        }
     }
-    canvas.ellipse(16.0, 8.0 + bob as f32, 5.5, 5.5, SKIN_SHADE);
-    canvas.ellipse(15.5, 7.5 + bob as f32, 5.0, 5.0, SKIN);
-    canvas.ellipse(16.0, 4.5 + bob as f32, 6.0, 3.5, HAIR);
-    canvas.rect(10, 4 + bob, 3, 4, HAIR);
+    canvas.ellipse(fx + 16.0, fy + 8.0 + bob as f32, 5.5, 5.5, SKIN_SHADE);
+    canvas.ellipse(fx + 15.5, fy + 7.5 + bob as f32, 5.0, 5.0, SKIN);
+    canvas.ellipse(fx + 16.0, fy + 4.5 + bob as f32, 6.0, 3.5, HAIR);
+    canvas.rect(x0 + 10, y0 + 4 + bob, 3, 4, HAIR);
     for x in [13, 14, 17] {
-        canvas.set(x, 3 + bob, HAIR_LIGHT);
+        canvas.set(x0 + x, y0 + 3 + bob, HAIR_LIGHT);
     }
     for x in [14, 18] {
         if blink {
-            canvas.set(x, 9 + bob, OUTLINE);
+            canvas.set(x0 + x, y0 + 9 + bob, OUTLINE);
         } else {
-            canvas.rect(x, 8 + bob, 1, 2, OUTLINE);
+            canvas.rect(x0 + x, y0 + 8 + bob, 1, 2, OUTLINE);
         }
     }
-    canvas.outline(OUTLINE);
-    canvas
 }
 
 /// Eight steps of a walk, 100 ms each, blinking once.
@@ -158,26 +187,65 @@ pub fn slime_jittered() -> (Vec<Canvas>, Vec<u32>) {
     (frames, delays)
 }
 
-/// A king bowing and rising, 44 by 83, over almost 10 seconds.
+/// A king bowing and rising, 44 by 83, over almost 10 seconds: facing
+/// right in a long robe, a hand on his chest, bending at the waist.
 pub fn bow() -> (Vec<Canvas>, Vec<u32>) {
+    const ROBE: Colour = [196, 60, 84, 255];
+    const ROBE_SHADE: Colour = [150, 40, 60, 255];
+    const BEARD: Colour = [236, 232, 224, 255];
     let count = 43;
     let frames = (0..count)
         .map(|i| {
             let mut canvas = Canvas::new(44, 83);
-            let lean = ((i as f32 / count as f32) * TAU).sin().max(0.0) * 14.0;
-            // robe, then the upper body leaning forward from the waist
-            canvas.ellipse(22.0, 62.0, 13.0, 19.0, [150, 40, 60, 255]);
-            canvas.ellipse(21.0, 61.0, 11.0, 18.0, [196, 60, 84, 255]);
-            let neck = (22 + lean.round() as i32, 30 + (lean / 3.0).round() as i32);
-            canvas.line((22, 48), neck, 9, [196, 60, 84, 255]);
-            canvas.ellipse(neck.0 as f32, neck.1 as f32 - 8.0, 7.0, 7.0, SKIN_SHADE);
-            canvas.ellipse(neck.0 as f32 - 0.5, neck.1 as f32 - 8.5, 6.5, 6.5, SKIN);
-            // the crown, and a beard
-            for (dx, height) in [(-5, 5), (-2, 7), (1, 5), (4, 7)] {
-                canvas.rect(neck.0 + dx, neck.1 - 15 - height + 4, 2, height, GOLD);
+            // down to 40 degrees from upright, for half the cycle
+            let lean = ((i as f32 / count as f32) * TAU).sin().max(0.0) * 40f32.to_radians();
+            let (sin, cos) = lean.sin_cos();
+            let waist = (16.0, 47.0);
+            // a point of the upper body, `x` ahead of the waist and `y`
+            // below it when upright, as it leans
+            let at = |x: f32, y: f32| (waist.0 + x * cos - y * sin, waist.1 + x * sin + y * cos);
+            let pixel = |(x, y): (f32, f32)| (x.round() as i32, y.round() as i32);
+
+            // shoes ahead of the robe, which widens to the floor, with a
+            // trim along its hem and its back in shade
+            canvas.rect(19, 79, 7, 3, SHOE);
+            canvas.rect(11, 80, 6, 2, SHOE);
+            for y in 47..81 {
+                let half = 6.0 + (y - 47) as f32 * 0.25;
+                let left = (16.0 - half).round() as i32;
+                let width = (2.0 * half).round() as i32;
+                canvas.rect(left, y, width, 1, if y >= 78 { WHITE } else { ROBE });
+                if y < 78 {
+                    canvas.rect(left, y, 3, 1, ROBE_SHADE);
+                }
             }
-            canvas.rect(neck.0 - 5, neck.1 - 13, 11, 2, GOLD_SHADE);
-            canvas.ellipse(neck.0 as f32, neck.1 as f32 - 2.0, 5.0, 4.0, WHITE);
+            // the body, belted, and the head on its neck
+            canvas.line(pixel(at(0.0, 0.0)), pixel(at(0.0, -14.0)), 12, ROBE);
+            canvas.line(pixel(at(-5.0, -1.0)), pixel(at(-5.0, -14.0)), 3, ROBE_SHADE);
+            canvas.line(pixel(at(-6.0, 0.0)), pixel(at(6.0, 0.0)), 2, GOLD);
+            canvas.line(pixel(at(1.0, -15.0)), pixel(at(1.0, -19.0)), 4, SKIN_SHADE);
+            let head = at(1.5, -25.0);
+            canvas.ellipse(head.0, head.1, 6.0, 6.5, SKIN_SHADE);
+            canvas.ellipse(head.0 - 0.5, head.1 - 0.5, 5.5, 6.0, SKIN);
+            // white hair at the back of the head, a beard, an eye and a nose
+            // on the side he faces
+            let hair = at(-2.5, -25.0);
+            canvas.ellipse(hair.0, hair.1, 3.0, 5.0, BEARD);
+            let beard = at(3.5, -20.5);
+            canvas.ellipse(beard.0, beard.1, 3.5, 3.0, BEARD);
+            canvas.set(pixel(at(5.0, -26.0)).0, pixel(at(5.0, -26.0)).1, OUTLINE);
+            let nose = pixel(at(7.5, -24.0));
+            canvas.set(nose.0, nose.1, SKIN_SHADE);
+            // a crown of three points
+            canvas.line(pixel(at(-3.0, -31.0)), pixel(at(5.0, -31.0)), 2, GOLD_SHADE);
+            for (x, height) in [(-3.0, 3.0), (1.0, 5.0), (5.0, 3.0)] {
+                canvas.line(pixel(at(x, -32.0)), pixel(at(x, -32.0 - height)), 2, GOLD);
+            }
+            // the near arm: down from the shoulder, its hand on his chest
+            let (shoulder, elbow, hand) = (at(1.0, -13.0), at(5.0, -6.0), at(2.0, -10.0));
+            canvas.line(pixel(shoulder), pixel(elbow), 4, ROBE_SHADE);
+            canvas.line(pixel(elbow), pixel(hand), 3, ROBE_SHADE);
+            canvas.ellipse(hand.0, hand.1, 2.0, 2.0, SKIN);
             canvas.outline(OUTLINE);
             canvas
         })
@@ -330,11 +398,9 @@ pub fn wave() -> Vec<Canvas> {
     (0..8)
         .map(|i| {
             let mut canvas = Canvas::new(28, 42);
-            let person = person(0.0, false, ([80, 160, 90, 255], [50, 110, 60, 255]));
-            canvas.paste(&person, -2, 10);
-            let raised = (i as f32 / 8.0 * TAU).sin();
-            let hand = (23 + (raised * 3.0).round() as i32, 8);
-            canvas.line((20, 22), hand, 2, SKIN);
+            let shirt = ([80, 160, 90, 255], [50, 110, 60, 255]);
+            figure(&mut canvas, (-2, 10), (0.0, false, shirt), Some(i as f32 / 8.0));
+            canvas.outline(OUTLINE);
             canvas
         })
         .collect()
