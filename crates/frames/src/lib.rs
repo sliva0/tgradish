@@ -1,5 +1,6 @@
 //! RGBA animations with frame durations, and pure-Rust decoders for them:
-//! GIF, PNG and APNG, WebP, Aseprite, sprite sheets and image sequences.
+//! GIF, PNG and APNG, WebP, JPEG, BMP, Aseprite, sprite sheets and image
+//! sequences.
 //!
 //! Builds for `wasm32-unknown-unknown`, so everything works on bytes: no
 //! filesystem, processes or threads.
@@ -28,7 +29,7 @@ pub enum Error {
     BadSize { width: u32, height: u32 },
     #[error("frame {index} has {len} bytes, a {width}x{height} RGBA frame has {expected}")]
     FrameSize { index: usize, len: usize, width: u32, height: u32, expected: usize },
-    #[error("not a GIF, PNG, WebP or Aseprite file")]
+    #[error("not a GIF, PNG, WebP, JPEG, BMP or Aseprite file")]
     UnknownFormat,
     #[error("cannot decode the {format} file: {message}")]
     Decode { format: Format, message: String },

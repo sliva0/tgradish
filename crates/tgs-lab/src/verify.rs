@@ -240,8 +240,7 @@ fn largest_error(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 /// Renders each frame (or the `only` ones) at every size, over magenta,
-/// and compares it with an exact area-averaged render of the art, like the
-/// planning prototype's `seams.py`.
+/// and compares it with an exact area-averaged render of the art.
 pub fn seams(
     renderer: &mut Renderer,
     anim: &PixelAnim,
