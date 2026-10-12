@@ -1159,7 +1159,7 @@ fn crate_licenses(args: &[String]) -> Result<()> {
         .arg("xtask/about.hbs")
         .arg("-o")
         .arg(&fresh))?;
-    let text = std::fs::read_to_string(&fresh)?;
+    let text = sorted_sections(&std::fs::read_to_string(&fresh)?);
     // crates' own license files say who holds the copyright; without them
     // (see the module's notes) every crate gets the bare license text
     ensure!(
@@ -1179,6 +1179,30 @@ fn crate_licenses(args: &[String]) -> Result<()> {
         println!("{}", file.display());
     }
     Ok(())
+}
+
+/// cargo-about's list with its sections in the order they read in, by
+/// licence and then crates, and each one's crates by name: it lists those
+/// of a licence in no order a reader could follow.
+fn sorted_sections(text: &str) -> String {
+    let rule = format!("\n{}\n", "-".repeat(80));
+    let mut parts = text.split(rule.as_str());
+    let intro = parts.next().unwrap_or_default().to_owned();
+    let mut sections: Vec<String> = parts
+        .map(|section| {
+            let (head, body) = section.split_once("\n\n").unwrap_or((section, ""));
+            let mut lines = head.lines();
+            let title = lines.next().unwrap_or_default();
+            let mut crates: Vec<&str> = lines.collect();
+            crates.sort_by_key(|line| line.trim().to_lowercase());
+            format!("{title}\n{}\n\n{body}", crates.join("\n"))
+        })
+        .collect();
+    sections.sort_by_cached_key(|section| {
+        let head = section.split_once("\n\n").map_or(section.as_str(), |(head, _)| head);
+        head.lines().map(|line| line.trim().to_lowercase()).collect::<Vec<_>>()
+    });
+    std::iter::once(intro).chain(sections).collect::<Vec<_>>().join(&rule)
 }
 
 /// Sizes of the icons for menus; the Windows executable has those up to 256.
