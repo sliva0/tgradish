@@ -243,7 +243,6 @@ pub fn show(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     if item.format == Format::Tgs {
         reading(ui, item);
     }
-    metadata(ui, item);
     if item.format == Format::Webm {
         advanced(ui, item, context);
     }
@@ -1282,23 +1281,6 @@ fn reading(ui: &mut egui::Ui, item: &mut Item) {
 fn parse_sheet(sheet: Option<&str>) -> Option<(u32, u32)> {
     let (columns, rows) = sheet?.split_once('x')?;
     Some((columns.parse().ok()?, rows.parse().ok()?))
-}
-
-fn metadata(ui: &mut egui::Ui, item: &mut Item) {
-    section(ui, "In the file");
-    let title = match item.format {
-        Format::Webm | Format::Image => &mut item.choices.webm.title,
-        Format::Tgs => &mut item.choices.tgs.title,
-    };
-    row(ui, "Title", "A name stored in the file", Ok(()), |ui| {
-        let mut text = title.clone().unwrap_or_default();
-        if ui
-            .add(egui::TextEdit::singleline(&mut text).hint_text("none").desired_width(260.0))
-            .changed()
-        {
-            *title = (!text.is_empty()).then_some(text);
-        }
-    });
 }
 
 fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
