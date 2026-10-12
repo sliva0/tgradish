@@ -2005,7 +2005,8 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
             ui.add_space(3.0);
             let size = vec2(ui.available_width(), 6.0);
             let colour = theme::accent(ui.visuals());
-            widgets::bar_sized(ui, size, job.progress.overall(), "", colour);
+            let fill = widgets::Fill::working(job.progress.overall());
+            widgets::bar_sized(ui, size, fill, "", colour);
         }
         (Some(_), _) => {
             ui.label(
@@ -2152,21 +2153,24 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
             (TgsStage::Compressing, "Compressing".to_owned()),
         ];
         for (each, text) in stages {
-            let (fraction, colour) = match each.cmp(&stage) {
-                std::cmp::Ordering::Less => (Some(1.0), done),
+            use widgets::Fill;
+            // the stage at work moves even while its share stays put, as
+            // fitting's does through a round of trying reductions
+            let (fill, colour) = match each.cmp(&stage) {
+                std::cmp::Ordering::Less => (Fill::Share(1.0), done),
                 std::cmp::Ordering::Equal if each == TgsStage::Fitting => {
-                    (progress.tgs_fitting(), running)
+                    (Fill::working(progress.tgs_fitting()), running)
                 }
-                std::cmp::Ordering::Equal => (None, running),
-                std::cmp::Ordering::Greater => (Some(0.0), running),
+                std::cmp::Ordering::Equal => (Fill::Unknown, running),
+                std::cmp::Ordering::Greater => (Fill::Share(0.0), running),
             };
-            widgets::bar(ui, fraction, &text, colour);
+            widgets::bar(ui, fill, &text, colour);
             ui.add_space(2.0);
         }
         return;
     }
     if progress.attempts.is_empty() {
-        widgets::bar(ui, None, "Starting", running);
+        widgets::bar(ui, widgets::Fill::Unknown, "Starting", running);
     }
     for attempt in &progress.attempts {
         let rate = match attempt.params.rate {
@@ -2183,9 +2187,9 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
                     ("too large", widgets::BAD.gamma_multiply(0.45))
                 };
                 let text = format!("{text} → {}, {mark}", widgets::kib(bytes));
-                widgets::bar(ui, Some(1.0), &text, colour);
+                widgets::bar(ui, widgets::Fill::Share(1.0), &text, colour);
             }
-            None => widgets::bar(ui, progress.fraction, &text, running),
+            None => widgets::bar(ui, widgets::Fill::working(progress.fraction), &text, running),
         }
         ui.add_space(2.0);
     }

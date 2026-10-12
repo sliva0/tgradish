@@ -265,47 +265,63 @@ pub fn auto_number<T: egui::emath::Numeric>(
 pub fn gauge(ui: &mut egui::Ui, used: u64, limit: u64, text: String) {
     let share = used as f32 / limit.max(1) as f32;
     let colour = if share > 1.0 { BAD } else { GOOD };
-    bar(ui, Some(share), &text, colour.gamma_multiply(0.55));
+    bar(ui, Fill::Share(share), &text, colour.gamma_multiply(0.55));
 }
 
-/// A bar filled to `fraction`, or with a band moving through it while how
-/// far along is unknown, and `text` over it.
-pub fn bar(ui: &mut egui::Ui, fraction: Option<f32>, text: &str, colour: Color32) {
+/// How far a [`bar`] got.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Fill {
+    /// This share of it, done.
+    Share(f32),
+    /// This share, still at work: a band moves over it, so a share that
+    /// takes a while to change doesn't look stuck.
+    Working(f32),
+    /// At work, how far along unknown: only the band.
+    Unknown,
+}
+
+impl Fill {
+    /// At work: this share, or unknown without one.
+    pub fn working(share: Option<f32>) -> Fill {
+        share.map_or(Fill::Unknown, Fill::Working)
+    }
+}
+
+/// A bar filled as `fill` says, `text` over it.
+pub fn bar(ui: &mut egui::Ui, fill: Fill, text: &str, colour: Color32) {
     let width = ui.available_width().min(380.0);
-    bar_sized(ui, egui::vec2(width, 22.0), fraction, text, colour);
+    bar_sized(ui, egui::vec2(width, 22.0), fill, text, colour);
 }
 
 /// A [`bar`] of `size`.
-pub fn bar_sized(
-    ui: &mut egui::Ui,
-    size: egui::Vec2,
-    fraction: Option<f32>,
-    text: &str,
-    colour: Color32,
-) {
+pub fn bar_sized(ui: &mut egui::Ui, size: egui::Vec2, fill: Fill, text: &str, colour: Color32) {
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let rounding = (size.y / 2.0).min(4.0);
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, rounding, ui.visuals().extreme_bg_color);
     // the whole bar's shape, cut to how far it got: no blob at its start
     // when it is nearly empty
-    let part = match fraction {
-        Some(fraction) => egui::Rect::from_min_size(
-            rect.min,
-            egui::vec2(rect.width() * fraction.clamp(0.0, 1.0), rect.height()),
-        ),
-        None => {
-            let band = rect.width() * 0.3;
-            let time = ui.input(|input| input.time) as f32;
-            let left = rect.left() - band + (time * 0.7).fract() * (rect.width() + band);
-            ui.ctx().request_repaint();
-            egui::Rect::from_min_max(
-                egui::pos2(left, rect.top()),
-                egui::pos2(left + band, rect.bottom()),
-            )
-        }
-    };
-    ui.painter_at(part.intersect(rect)).rect_filled(rect, rounding, colour);
+    if let Fill::Share(share) | Fill::Working(share) = fill {
+        let width = rect.width() * share.clamp(0.0, 1.0);
+        let part = egui::Rect::from_min_size(rect.min, egui::vec2(width, rect.height()));
+        ui.painter_at(part).rect_filled(rect, rounding, colour);
+    }
+    if !matches!(fill, Fill::Share(_)) {
+        let band = rect.width() * 0.3;
+        let time = ui.input(|input| input.time) as f32;
+        let left = rect.left() - band + (time * 0.7).fract() * (rect.width() + band);
+        let part = egui::Rect::from_min_max(
+            egui::pos2(left, rect.top()),
+            egui::pos2(left + band, rect.bottom()),
+        );
+        // over a share, a sheen that shows on what is filled and what isn't
+        let shade = match fill {
+            Fill::Unknown => colour,
+            _ => ui.visuals().strong_text_color().gamma_multiply(0.14),
+        };
+        ui.painter_at(part.intersect(rect)).rect_filled(rect, rounding, shade);
+        ui.ctx().request_repaint();
+    }
     painter.text(
         rect.left_center() + egui::vec2(8.0, 0.0),
         egui::Align2::LEFT_CENTER,
