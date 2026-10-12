@@ -9,11 +9,22 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # changes to what the release jobs build with, which CI alone doesn't
+  # catch: the ffmpeg build and the filters it must have, the binary's
+  # resources and the notices it carries
   pull_request:
     paths:
       - xtask/**
       - crates/core/src/linked/**
+      - crates/core/src/ffmpeg/args.rs
+      - crates/core/build.rs
+      - crates/cli/build.rs
+      - crates/cli/tgradish.rc
+      - crates/cli/tgradish.exe.manifest
+      - crates/cli/assets/**
+      - licenses/**
       - Cargo.lock
+      - rust-toolchain.toml
       - .github/workflows/release.yml
   workflow_dispatch:
 

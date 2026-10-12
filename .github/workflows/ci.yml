@@ -39,6 +39,9 @@ jobs:
       # the command line on its own, without the window
       - run: cargo clippy -p tgradish --no-default-features --all-targets -- -D warnings
       - run: cargo test --workspace
+      # .tgs on one thread, as for the web: the workspace's other crates
+      # turn on its threads
+      - run: cargo test -p tgradish-tgs
       # the icons for menus and Windows, made from the window's
       - run: cargo xtask icons --check
 
@@ -65,7 +68,7 @@ jobs:
             libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev \
             libswscale-dev libswresample-dev libavdevice-dev
       - run: cargo clippy --workspace --all-targets --features tgradish/linked -- -D warnings
-      - run: cargo test --workspace --features tgradish/linked,tgradish-core/linked
+      - run: cargo test --workspace --features tgradish/linked
 
   # .tgs output rendered with rlottie too; the check job covers tlottie
   rlottie:
@@ -79,7 +82,7 @@ jobs:
       - run: cargo clippy -p tgs-lab --all-targets --features rlottie -- -D warnings
       - run: cargo test -p tgs-lab --features rlottie
 
-  # libraries the Telegram web app will run in the browser
+  # the libraries a web page can run, with no files, processes or threads
   wasm:
     runs-on: ubuntu-latest
     timeout-minutes: 15

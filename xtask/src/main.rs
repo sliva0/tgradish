@@ -1049,12 +1049,16 @@ fn linux_packages(
     let list = |names: Vec<String>| {
         names.iter().map(|name| format!("\n      - {name:?}")).collect::<String>()
     };
-    let debs = std::iter::once("libc6 (>= 2.28)".to_owned())
+    // the glibc it was built against, which a build on a newer system
+    // than CI's needs newer
+    let (major, minor) = needed_glibc(&stage.join("tgradish"))?;
+    let debs = std::iter::once(format!("libc6 (>= {major}.{minor})"))
         .chain(["libgcc-s1 | libgcc1".to_owned()])
         .chain(WINDOW_LIBRARIES.iter().map(|(deb, _)| (*deb).to_owned()))
         .collect();
     // as rpm names the libraries of 64-bit programs
-    let rpms = ["libc.so.6(GLIBC_2.28)", "libgcc_s.so.1"]
+    let glibc = format!("libc.so.6(GLIBC_{major}.{minor})");
+    let rpms = [glibc.as_str(), "libgcc_s.so.1"]
         .into_iter()
         .chain(WINDOW_LIBRARIES.iter().map(|(_, library)| *library))
         .map(|library| match library.ends_with(')') {
@@ -1122,13 +1126,7 @@ fn glibc_version(text: &str) -> Result<(u32, u32)> {
 /// Fails if a Linux executable needs a newer glibc than `max`, so it would
 /// not start on older systems.
 fn check_glibc(exe: &Path, max: (u32, u32)) -> Result<()> {
-    let dump = output(Command::new("objdump").arg("-T").arg(exe))?;
-    let newest = dump
-        .split_whitespace()
-        .filter_map(|word| word.trim_matches(['(', ')']).strip_prefix("GLIBC_"))
-        .filter_map(|version| glibc_version(version).ok())
-        .max()
-        .context("the executable uses no versioned glibc symbols")?;
+    let newest = needed_glibc(exe)?;
     ensure!(
         newest <= max,
         "{} needs glibc {}.{}, newer than {}.{}",
@@ -1139,6 +1137,17 @@ fn check_glibc(exe: &Path, max: (u32, u32)) -> Result<()> {
         max.1
     );
     Ok(())
+}
+
+/// The newest glibc `exe` needs: the newest version among its glibc
+/// symbols.
+fn needed_glibc(exe: &Path) -> Result<(u32, u32)> {
+    let dump = output(Command::new("objdump").arg("-T").arg(exe))?;
+    dump.split_whitespace()
+        .filter_map(|word| word.trim_matches(['(', ')']).strip_prefix("GLIBC_"))
+        .filter_map(|version| glibc_version(version).ok())
+        .max()
+        .context("the executable uses no versioned glibc symbols")
 }
 
 /// Writes or checks `licenses/THIRD-PARTY-CRATES.txt`: the crates of
