@@ -86,6 +86,20 @@ fn joins_image_sequences() {
 }
 
 #[test]
+fn decodes_each_image_of_a_sequence_in_what_the_others_leave() {
+    let [(_, steps), _] = tgradish_corpus::sequences();
+    let files: Vec<Vec<u8>> = steps.iter().map(encode::png).collect();
+    let joined = |max_bytes| {
+        let limits = Limits { max_dimension: 4096, max_bytes };
+        sequence(files.iter().map(Vec::as_slice), Duration::from_millis(200), &limits)
+    };
+    // decoding a PNG takes twice its pixels, beside the three images before
+    let frame = 27 * 31 * 4;
+    assert!(matches!(joined(5 * frame - 1), Err(Error::TooLarge(_))));
+    assert_eq!(joined(5 * frame).unwrap().frames().len(), 4);
+}
+
+#[test]
 fn splits_sprite_sheets_back_into_frames() {
     let walker = tgradish_corpus::sprite("walker");
     let sheet =
