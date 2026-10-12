@@ -86,12 +86,6 @@ pub fn on_outline(visuals: &egui::Visuals) -> Stroke {
     Stroke::new(1.0, mix(accent(visuals), visuals.widgets.inactive.bg_stroke.color, 0.5))
 }
 
-/// `button` as the one to press, like Breeze's default button: its
-/// colour mixed a fifth of the way to the accent.
-pub fn primary<'a>(visuals: &egui::Visuals, button: egui::Button<'a>) -> egui::Button<'a> {
-    button.fill(mix(visuals.widgets.inactive.weak_bg_fill, accent(visuals), 0.2))
-}
-
 /// The background of stages pictures are shown on.
 pub fn stage(dark: bool) -> Color32 {
     if dark { DARK.header } else { LIGHT.header }
