@@ -2467,7 +2467,10 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     {
         widgets::note(
             ui,
-            format!("Up to {} encodes, until one lands just under the limit", plan.attempts),
+            format!(
+                "Up to {}, until one lands just under the limit",
+                widgets::count(plan.attempts, "encode")
+            ),
         );
     }
 }
@@ -2477,55 +2480,80 @@ fn details(ui: &mut egui::Ui, item: &Item) {
     let Some(made) = &item.made else { return };
     let Status::Done(done) = &made.job.status else { return };
     let progress = &made.job.progress;
-    ui.add_space(10.0);
-    egui::CollapsingHeader::new(RichText::new("Details of the result").strong()).id_salt(("details", item.id)).show(ui, |ui| {
-        if let Some(report) = &progress.report {
-            let scale = if report.scale > 1 { format!(", each {0} × {0} input pixels", report.scale) } else { String::new() };
-            widgets::note(ui, format!("{} × {} art pixels{scale}; {} colours, {} frames", report.width, report.height, report.colours, report.frames));
-            if report.tempo != 1.0 {
-                widgets::note(ui, format!("Plays {:.2}× as fast as the input", report.tempo));
+    ui.add_space(6.0);
+    // as plain as the result's size above it
+    use widgets::count;
+    if let Some(report) = &progress.report {
+        let scale = match report.scale {
+            1 => String::new(),
+            scale => format!(", each {scale} × {scale} input pixels"),
+        };
+        ui.label(format!(
+            "{} × {} art pixels{scale}; {}, {}",
+            report.width,
+            report.height,
+            count(report.colours, "colour"),
+            count(report.frames, "frame"),
+        ));
+        if report.tempo != 1.0 {
+            ui.label(format!("Plays {:.2}× as fast as the input", report.tempo));
+        }
+        if let Some(likely) = report.likely_scale {
+            ui.label(format!(
+                "Most of it looks like {0}× art with some pixels off the grid; an art pixel \
+                 size of {0} snaps them",
+                likely.scale
+            ));
+        }
+    }
+    if let (Some(json), Some((layers, rectangles))) = (done.json_bytes, done.shapes) {
+        ui.label(format!(
+            "{} of {}, {} unpacked",
+            count(layers, "layer"),
+            count(rectangles, "rectangle"),
+            widgets::kib(json)
+        ));
+    }
+    if let Some(bytes) = progress.lossless_bytes {
+        ui.label(format!("About {} as it is; changed to fit:", widgets::kib(bytes as u64)));
+    }
+    for step in &progress.steps {
+        let after = widgets::kib(step.bytes as u64);
+        ui.label(format!("  • {}, about {after} after", reduction(&step.reduction)));
+    }
+    if !progress.attempts.is_empty() {
+        let grid = egui::Grid::new(("attempts", item.id)).num_columns(5).spacing([10.0, 4.0]);
+        grid.striped(true).show(ui, |ui| {
+            for header in ["Encode", "frame rate", "rate", "size", "likeness"] {
+                ui.label(RichText::new(header).weak());
             }
-            if let Some(likely) = report.likely_scale {
-                widgets::note(ui, format!("Most of it looks like {0}× art with some pixels off the grid; an art pixel size of {0} snaps them", likely.scale));
-            }
-        }
-        if let (Some(json), Some((layers, rectangles))) = (done.json_bytes, done.shapes) {
-            widgets::note(ui, format!("{layers} layers of {rectangles} rectangles, {} unpacked", widgets::kib(json)));
-        }
-        if let Some(bytes) = progress.lossless_bytes {
-            widgets::note(ui, format!("About {} as it is; changed to fit:", widgets::kib(bytes as u64)));
-        }
-        for step in &progress.steps {
-            widgets::note(ui, format!("  • {}, about {} after", reduction(&step.reduction), widgets::kib(step.bytes as u64)));
-        }
-        if !progress.attempts.is_empty() {
-            egui::Grid::new(("attempts", item.id)).num_columns(5).spacing([10.0, 4.0]).striped(true).show(ui, |ui| {
-                for header in ["Encode", "frame rate", "rate", "size", "likeness"] {
-                    ui.label(RichText::new(header).weak());
-                }
+            ui.end_row();
+            for attempt in &progress.attempts {
+                let kept = if done.kept == Some(attempt.number) { " (kept)" } else { "" };
+                ui.label(format!("{}{kept}", attempt.number));
+                ui.label(format!("{:.2} fps", attempt.params.fps));
+                ui.label(match attempt.params.rate {
+                    tgradish_core::events::Rate::Bitrate(kbps) => format!("{kbps:.0} kbit/s"),
+                    tgradish_core::events::Rate::Crf(crf) => format!("quality {crf}"),
+                    tgradish_core::events::Rate::Lossless => "lossless".into(),
+                });
+                match attempt.bytes {
+                    Some(bytes) => {
+                        let colour = if attempt.fits { widgets::GOOD } else { widgets::BAD };
+                        ui.colored_label(colour, widgets::kib(bytes))
+                    }
+                    None => ui.label("—"),
+                };
+                ui.label(
+                    attempt.ssim.map(|ssim| format!("{:.1}%", ssim * 100.0)).unwrap_or_default(),
+                );
                 ui.end_row();
-                for attempt in &progress.attempts {
-                    let kept = if done.kept == Some(attempt.number) { " (kept)" } else { "" };
-                    ui.label(format!("{}{kept}", attempt.number));
-                    ui.label(format!("{:.2} fps", attempt.params.fps));
-                    ui.label(match attempt.params.rate {
-                        tgradish_core::events::Rate::Bitrate(kbps) => format!("{kbps:.0} kbit/s"),
-                        tgradish_core::events::Rate::Crf(crf) => format!("quality {crf}"),
-                        tgradish_core::events::Rate::Lossless => "lossless".into(),
-                    });
-                    match attempt.bytes {
-                        Some(bytes) => ui.colored_label(if attempt.fits { widgets::GOOD } else { widgets::BAD }, widgets::kib(bytes)),
-                        None => ui.label("—"),
-                    };
-                    ui.label(attempt.ssim.map(|ssim| format!("{:.1}%", ssim * 100.0)).unwrap_or_default());
-                    ui.end_row();
-                }
-            });
-        }
-        for warning in &progress.warnings {
-            ui.colored_label(widgets::WARN, format!("⚠ {warning}"));
-        }
-    });
+            }
+        });
+    }
+    for warning in &progress.warnings {
+        ui.colored_label(widgets::WARN, format!("⚠ {warning}"));
+    }
 }
 
 fn reduction(reduction: &tgradish_tgs::reduce::Reduction) -> String {

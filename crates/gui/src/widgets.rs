@@ -69,6 +69,12 @@ pub fn link(
     response
 }
 
+/// `n` and what it counts, which takes an "s" for any number but one.
+pub fn count(n: impl std::fmt::Display, what: &str) -> String {
+    let n = n.to_string();
+    format!("{n} {what}{}", if n == "1" { "" } else { "s" })
+}
+
 pub fn note(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(RichText::new(text.into()).weak().size(12.5));
 }
@@ -386,6 +392,15 @@ pub fn checkerboard(painter: &egui::Painter, rect: egui::Rect, square: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counts_one_without_an_s() {
+        assert_eq!((count(1, "frame"), count(2, "frame")), ("1 frame".into(), "2 frames".into()));
+        assert_eq!(
+            (count(1.0, "frame"), count(0usize, "layer")),
+            ("1 frame".into(), "0 layers".into())
+        );
+    }
 
     #[test]
     fn takes_clicks_on_links_rather_than_selecting() {

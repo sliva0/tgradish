@@ -272,9 +272,14 @@ fn check_ffmpeg(config: &Config) -> (bool, String) {
     };
     match backend.capabilities(&CancelToken::new()) {
         Ok(caps) => {
-            // "ffmpeg version 8.0 Copyright (c) …", or "… (built in)"
+            // "ffmpeg version 8.0 Copyright (c) …", or "… (built in)", where
+            // builds from ffmpeg's git tags say "n8.0"
             let version = caps.version.trim_start_matches("ffmpeg version ");
             let version = version.split(" Copyright").next().unwrap_or(version).trim();
+            let version = match version.strip_prefix('n') {
+                Some(number) if number.starts_with(|c: char| c.is_ascii_digit()) => number,
+                _ => version,
+            };
             match caps.libvpx_vp9 {
                 true => (true, format!("ffmpeg {version} with VP9: ready")),
                 false => (false, format!("ffmpeg {version} can't encode VP9 with libvpx")),

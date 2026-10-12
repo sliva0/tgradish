@@ -74,6 +74,12 @@ pub fn size_within(bytes: u64, limit: u64) -> String {
     format!("{} ({:.1}%)", kib(bytes), bytes as f64 / limit as f64 * 100.0)
 }
 
+/// `n` and what it counts, which takes an "s" for any number but one.
+pub fn count(n: impl std::fmt::Display, what: &str) -> String {
+    let n = n.to_string();
+    format!("{n} {what}{}", if n == "1" { "" } else { "s" })
+}
+
 pub fn kib(bytes: u64) -> String {
     format!("{:.1} KiB", bytes as f64 / 1024.0)
 }
