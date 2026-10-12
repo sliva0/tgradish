@@ -324,8 +324,15 @@ pub fn exact_sizes(
 }
 
 /// Whether `frames` of a `width` wide picture look like pixel art within
-/// `crop`: few colours, so it is drawn rather than filmed.
+/// `crop`, as auto scaling decides it: few colours, so it is drawn rather
+/// than filmed.
 pub fn is_pixel_art(frames: &[Vec<u8>], width: u32, crop: Option<Crop>) -> bool {
+    has_few_colours(frames, width, crop, PIXEL_ART_COLOURS)
+}
+
+/// Whether `frames` of a `width` wide picture have at most `most` colours
+/// within `crop`, not counting transparent pixels.
+pub fn has_few_colours(frames: &[Vec<u8>], width: u32, crop: Option<Crop>, most: usize) -> bool {
     let mut colours = std::collections::HashSet::new();
     for rgba in frames {
         let height = (rgba.len() / 4) as u32 / width.max(1);
@@ -334,7 +341,7 @@ pub fn is_pixel_art(frames: &[Vec<u8>], width: u32, crop: Option<Crop>) -> bool 
             let start = (row * width + x) as usize * 4;
             let end = (row * width + (x + w).min(width)) as usize * 4;
             for pixel in rgba[start..end].as_chunks::<4>().0 {
-                if pixel[3] > 0 && colours.insert(*pixel) && colours.len() > PIXEL_ART_COLOURS {
+                if pixel[3] > 0 && colours.insert(*pixel) && colours.len() > most {
                     return false;
                 }
             }
@@ -344,7 +351,7 @@ pub fn is_pixel_art(frames: &[Vec<u8>], width: u32, crop: Option<Crop>) -> bool 
 }
 
 /// More colours than this is a photo or a video, not pixel art.
-const PIXEL_ART_COLOURS: usize = 256;
+pub const PIXEL_ART_COLOURS: usize = 256;
 
 /// Resolves options against the probed input. Returns the plan and warnings
 /// about options that were adjusted or ignored.
@@ -588,9 +595,13 @@ fn looks_like_pixel_art(backend: &Backend, plan: &Plan, cancel: &CancelToken) ->
 
 /// Result of a finished conversion.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+/// What converting made: all that [`Event::Finished`] says, whether or not
+/// events were followed.
 pub struct Outcome {
     pub output: PathBuf,
     pub bytes: u64,
+    /// The attempt that was kept.
+    pub attempt: u32,
     pub params: Params,
     pub spoofed: bool,
     pub issues: Vec<Issue>,
@@ -751,6 +762,7 @@ pub fn convert(
     Ok(Outcome {
         output: plan.output,
         bytes: info.file_size,
+        attempt: best.number,
         params: best.params,
         spoofed,
         issues,

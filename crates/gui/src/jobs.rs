@@ -379,8 +379,6 @@ fn run(
         Plan::Tgs { options } => {
             let lossless = options.lossless.unwrap_or(false);
             let request = TgsRequest { inputs, sequence, output, options, overwrite };
-            let mut found = Vec::new();
-            let mut finished = None;
             update(Box::new(move |progress| {
                 progress.tgs = Some(TgsStage::Reading);
                 progress.tgs_lossless = lossless;
@@ -404,11 +402,7 @@ fn run(
                 TgsEvent::Warning { message } => update(Box::new(move |progress| {
                     progress.warnings.push(message);
                 })),
-                TgsEvent::Finished { issues, json_bytes, layers, rectangles, .. } => {
-                    found = issues.into_iter().map(Problem::of_tgs).collect();
-                    finished = Some((json_bytes, layers, rectangles));
-                }
-                TgsEvent::Error { .. } => {}
+                TgsEvent::Finished { .. } | TgsEvent::Error { .. } => {}
             })?;
             Ok(Done {
                 output: outcome.output,
@@ -417,9 +411,9 @@ fn run(
                 lossy: outcome.lossy,
                 kept: None,
                 spoofed: false,
-                json_bytes: finished.map(|(json, _, _)| json),
-                shapes: finished.map(|(_, layers, rectangles)| (layers, rectangles)),
-                problems: found,
+                json_bytes: Some(outcome.json_bytes),
+                shapes: Some((outcome.layers, outcome.rectangles)),
+                problems: outcome.issues.into_iter().map(Problem::of_tgs).collect(),
                 preview: Some(outcome.preview),
             })
         }
@@ -443,7 +437,6 @@ fn webm(
         overwrite,
         keep_temp: false,
     };
-    let mut kept = None;
     let outcome = convert(&backend, &request, cancel, &mut |event| match event {
         Event::Started { plan } => {
             let planned = WebmPlan {
@@ -487,7 +480,6 @@ fn webm(
         Event::Warning { message } => {
             update(Box::new(move |progress| progress.warnings.push(message)))
         }
-        Event::Finished { attempt, .. } => kept = Some(attempt),
         _ => {}
     })?;
     Ok(Done {
@@ -495,7 +487,7 @@ fn webm(
         bytes: outcome.bytes,
         limit,
         lossy: false,
-        kept,
+        kept: Some(outcome.attempt),
         spoofed: outcome.spoofed,
         json_bytes: None,
         shapes: None,

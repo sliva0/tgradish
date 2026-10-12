@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 use crate::error::{Error, Result};
 
 /// Cancels work from another thread: conversions check it between steps,
-/// and an ffmpeg process one waits for is killed.
+/// and an ffmpeg process one waits for is killed. It knows one process at
+/// a time, the last started, so work that runs several at once needs a
+/// token for each.
 #[derive(Debug, Clone, Default)]
 pub struct CancelToken {
     inner: Arc<Inner>,
