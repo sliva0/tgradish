@@ -171,7 +171,8 @@ pub struct ConversionArgs {
     /// flags. Keys are the flag names, see `tgradish describe`.
     #[arg(long, value_name = "JSON")]
     pub options_json: Option<String>,
-    /// Keep intermediate files and print where they are.
+    /// Keep intermediate files and print where they are: the first pass's
+    /// statistics of WebM output, which alone has any.
     #[arg(long)]
     pub keep_temp: bool,
     #[command(flatten)]

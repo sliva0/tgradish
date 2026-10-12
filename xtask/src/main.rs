@@ -9,7 +9,7 @@
 //! `linux-aarch64` and `windows-x86_64`.
 //!
 //! The static libraries end up in `target/ffmpeg/prefix-<triple>`, and the
-//! licenses of everything in them in `target/ffmpeg/licenses-<triple>`.
+//! licences of everything in them in `target/ffmpeg/licenses-<triple>`.
 //! ffmpeg is configured without GPL parts, so it is LGPL 2.1 or later.
 //! Point `PKG_CONFIG_PATH` at the prefix's `lib/pkgconfig` to build
 //! tgradish with `--features linked-static`.
@@ -20,6 +20,10 @@
 //! Linux builds with ffmpeg built in are also packed as a .deb and an .rpm,
 //! with nfpm, which it downloads.
 //!
+//! `cargo xtask ffmpeg-sources` packs the exact source archives of the
+//! ffmpeg build into `target/ffmpeg/ffmpeg-<version>-sources.tar`, which
+//! the release workflow publishes with each release, as the LGPL asks.
+//!
 //! `cargo xtask local-release [--targets linux-x86_64,windows-x86_64]
 //! [--no-asm]` builds and packs every release variant for manual tests,
 //! like the release workflow: with ffmpeg built in, and for Linux also
@@ -27,7 +31,7 @@
 //! built from another recipe. Windows needs mingw-w64. The archives and
 //! binaries end up in `target/release-artifacts`.
 //!
-//! `cargo xtask licenses [--check]` writes the licenses of the Rust crates
+//! `cargo xtask licenses [--check]` writes the licences of the Rust crates
 //! in tgradish to `licenses/THIRD-PARTY-CRATES.txt`, which binaries carry;
 //! `--check` fails if it is out of date, as after dependencies change. Needs
 //! cargo-about 0.9.2, which CI uses too: other versions word the list

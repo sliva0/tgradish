@@ -40,6 +40,6 @@ windows-sys = { workspace = true, features = ["Win32_System_Registry"] }
 workspace = true
 
 [dev-dependencies]
-egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
-egui-wgpu = "0.36.2"
+egui_kittest.workspace = true
+egui-wgpu.workspace = true
 tgradish-corpus.workspace = true
