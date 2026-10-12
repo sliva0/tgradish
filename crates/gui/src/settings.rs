@@ -743,8 +743,8 @@ fn aspect_ratio(
     }
     let square =
         item.choices.crop.map_or(size.is_none_or(|(w, h)| w == h), |c| c.width == c.height);
-    // always a line, said again once the crop is let go of rather than as
-    // it is dragged through square
+    // its room always kept, and shown or not once the crop is let go of
+    // rather than as it is dragged through square
     if item.format == Format::Tgs {
         let id = ui.id().with(("square", item.id));
         let square = if ui.input(|input| input.pointer.primary_down()) {
@@ -753,11 +753,8 @@ fn aspect_ratio(
             ui.data_mut(|data| data.insert_temp(id, square));
             square
         };
-        if square {
-            note(ui, "Square, as TGS stickers always are");
-        } else {
-            ui.colored_label(widgets::WARN, "⚠ Not square: TGS stickers get transparent margins");
-        }
+        let warning = RichText::new("⚠ Not square: TGS stickers get transparent margins");
+        ui.add_visible(!square, egui::Label::new(warning.color(widgets::WARN)));
     }
 }
 
