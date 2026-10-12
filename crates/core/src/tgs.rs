@@ -218,24 +218,16 @@ impl TgsOptions {
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum TgsEvent {
     /// The input is read: what normalising found and did.
-    Started {
-        input: PathBuf,
-        report: Box<Report>,
-    },
+    Started { input: PathBuf, report: Box<Report> },
     /// Losslessly, the sticker would come to about this many bytes, more
     /// than fits; fitting starts.
-    TooLarge {
-        bytes: usize,
-    },
+    TooLarge { bytes: usize },
     /// Fitting applied a reduction.
-    Reduced {
-        step: Step,
-    },
+    Reduced { step: Step },
     /// The result is being compressed.
     Packing,
-    Warning {
-        message: String,
-    },
+    /// Something about the art worth knowing, as normalising found it.
+    Warning { message: String },
     Finished {
         output: PathBuf,
         bytes: u64,
@@ -253,10 +245,7 @@ pub enum TgsEvent {
     },
     /// A conversion failed. Only printed by the CLI; the library returns
     /// errors instead.
-    Error {
-        message: String,
-        input: Option<PathBuf>,
-    },
+    Error { message: String, input: Option<PathBuf> },
 }
 
 /// `NAME.sticker.tgs` or `NAME.emoji.tgs` next to the input.
@@ -382,7 +371,15 @@ fn read(path: &Path) -> Result<Vec<u8>> {
 }
 
 /// The animation the inputs describe.
-fn load(inputs: &[PathBuf], sequence: bool, options: &TgsOptions) -> Result<frames::Animation> {
+/// Pixel art as [`convert`] reads it, with the tags of an Aseprite file,
+/// which `tag` can choose from, read from the same bytes. `cancel` is
+/// asked between files.
+fn load(
+    inputs: &[PathBuf],
+    sequence: bool,
+    options: &TgsOptions,
+    cancel: &CancelToken,
+) -> Result<(frames::Animation, Vec<String>)> {
     let limits = Limits::default();
     let decode_error = |path: &Path| {
         let path = path.to_path_buf();
@@ -390,23 +387,33 @@ fn load(inputs: &[PathBuf], sequence: bool, options: &TgsOptions) -> Result<fram
     };
     if sequence || inputs.len() > 1 {
         let files = sequence_files(inputs)?;
-        let bytes: Vec<Vec<u8>> = files.iter().map(|file| read(file)).collect::<Result<_>>()?;
-        return frames::sequence(
-            bytes.iter().map(Vec::as_slice),
-            options.frame_duration()?,
-            &limits,
-        )
-        .map_err(decode_error(&files[0]));
+        let mut bytes = Vec::with_capacity(files.len());
+        for file in &files {
+            cancel.check()?;
+            bytes.push(read(file)?);
+        }
+        let animation =
+            frames::sequence(bytes.iter().map(Vec::as_slice), options.frame_duration()?, &limits)
+                .map_err(decode_error(&files[0]))?;
+        return Ok((animation, Vec::new()));
     }
     let [input] = inputs else {
         return Err(Error::InvalidOptions("nothing to convert".into()));
     };
     let bytes = read(input)?;
-    match options.sheet_layout()? {
+    cancel.check()?;
+    let tags = match frames::Format::detect(&bytes) {
+        Some(frames::Format::Aseprite) => frames::Sprite::read_with(&bytes, &limits)
+            .map(|sprite| sprite.tags().iter().map(|tag| tag.name.clone()).collect())
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    let animation = match options.sheet_layout()? {
         Some(sheet) => frames::sprite_sheet(&bytes, &sheet, &limits),
         None => frames::decode(&bytes, &DecodeOptions { tag: options.tag.clone(), limits }),
     }
-    .map_err(decode_error(input))
+    .map_err(decode_error(input))?;
+    Ok((animation, tags))
 }
 
 /// Pixel art as it is read, before anything is cropped or reduced.
@@ -421,23 +428,15 @@ pub struct Source {
 }
 
 /// Reads pixel art the way [`convert`] does, with the options that choose
-/// what is read: `tag`, `sheet`, `sheet_frames` and `fps`.
-pub fn read_source(inputs: &[PathBuf], sequence: bool, options: &TgsOptions) -> Result<Source> {
-    let animation = load(inputs, sequence, options)?;
-    let tags = match inputs {
-        [input] if !sequence && !input.is_dir() => {
-            let bytes = read(input)?;
-            match frames::Format::detect(&bytes) {
-                Some(frames::Format::Aseprite) => {
-                    frames::Sprite::read_with(&bytes, &Limits::default())
-                        .map(|sprite| sprite.tags().iter().map(|tag| tag.name.clone()).collect())
-                        .unwrap_or_default()
-                }
-                _ => Vec::new(),
-            }
-        }
-        _ => Vec::new(),
-    };
+/// what is read: `tag`, `sheet`, `sheet_frames` and `fps`. `cancel` is
+/// asked between files.
+pub fn read_source(
+    inputs: &[PathBuf],
+    sequence: bool,
+    options: &TgsOptions,
+    cancel: &CancelToken,
+) -> Result<Source> {
+    let (animation, tags) = load(inputs, sequence, options, cancel)?;
     let (width, height) = (animation.width(), animation.height());
     let frames = animation
         .into_frames()
@@ -516,20 +515,23 @@ pub fn convert(
     }
     refuse_overwriting_inputs(request)?;
     let settings = request.options.sticker_options()?;
-    let animation = load(&request.inputs, request.sequence, &request.options)?;
+    let (animation, _) = load(&request.inputs, request.sequence, &request.options, cancel)?;
     let input = request.inputs.first().cloned().unwrap_or_default();
     let sticker = sticker::make(
         &animation,
         &settings,
-        &mut |progress| {
-            on_event(match progress {
-                Progress::Normalised { report } => {
-                    TgsEvent::Started { input: input.clone(), report }
+        &mut |progress| match progress {
+            // what reading the art found worth saying, after it
+            Progress::Normalised { report } => {
+                let warnings: Vec<String> = report.warnings.iter().map(|w| w.to_string()).collect();
+                on_event(TgsEvent::Started { input: input.clone(), report });
+                for message in warnings {
+                    on_event(TgsEvent::Warning { message });
                 }
-                Progress::TooLarge { bytes } => TgsEvent::TooLarge { bytes },
-                Progress::Reduced { step } => TgsEvent::Reduced { step },
-                Progress::Packing => TgsEvent::Packing,
-            })
+            }
+            Progress::TooLarge { bytes } => on_event(TgsEvent::TooLarge { bytes }),
+            Progress::Reduced { step } => on_event(TgsEvent::Reduced { step }),
+            Progress::Packing => on_event(TgsEvent::Packing),
         },
         &|| cancel.is_cancelled(),
     )

@@ -334,9 +334,9 @@ impl Art {
         sequence: bool,
         options: TgsOptions,
     ) -> Task<Art> {
-        Task::spawn(ctx, move |_| {
+        Task::spawn(ctx, move |cancel| {
             let source =
-                tgs::read_source(&inputs, sequence, &options).map_err(|e| e.to_string())?;
+                tgs::read_source(&inputs, sequence, &options, cancel).map_err(|e| e.to_string())?;
             if source.frames.is_empty() {
                 return Err("no frames".into());
             }
