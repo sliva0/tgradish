@@ -340,12 +340,7 @@ fn sequence_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>> {
             let mut found: Vec<PathBuf> = std::fs::read_dir(input)?
                 .map(|entry| entry.map(|entry| entry.path()))
                 .collect::<std::io::Result<_>>()?;
-            found.retain(|path| {
-                let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                path.is_file()
-                    && ["png", "gif", "webp", "jpg", "jpeg", "bmp", "ase", "aseprite"]
-                        .contains(&extension.to_ascii_lowercase().as_str())
-            });
+            found.retain(|path| path.is_file() && crate::inputs::is_frame(path));
             files.extend(found);
         } else {
             files.push(input.clone());

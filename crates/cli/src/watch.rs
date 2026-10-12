@@ -12,18 +12,10 @@ use anyhow::{Context as _, Result, bail};
 use crate::Context;
 use crate::args::WatchArgs;
 use crate::convert::Converter;
+use tgradish_core::inputs;
 use tgradish_core::presets::Format;
 
 use crate::ui;
-
-/// Extensions of files worth converting.
-const EXTENSIONS: &[&str] = &[
-    "mp4", "m4v", "mov", "mkv", "webm", "avi", "flv", "ts", "mts", "ogv", "gif", "apng", "png",
-    "jpg", "jpeg", "webp", "bmp", "tif", "tiff",
-];
-
-/// Aseprite files, which only `.tgs` conversion reads.
-const ASEPRITE: &[&str] = &["ase", "aseprite"];
 
 /// Failed conversions are retried this many times, in case the file was
 /// locked or not readable yet.
@@ -41,10 +33,11 @@ fn is_input(path: &Path, format: Format) -> bool {
     if results.iter().any(|s| name.ends_with(s)) {
         return false;
     }
-    let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else { return false };
-    let extension = extension.to_lowercase();
-    EXTENSIONS.contains(&extension.as_str())
-        || format == Format::Tgs && ASEPRITE.contains(&extension.as_str())
+    let extension = inputs::extension(path);
+    let extension = extension.as_str();
+    inputs::VIDEOS.contains(&extension)
+        || inputs::IMAGES.contains(&extension)
+        || format == Format::Tgs && inputs::ASEPRITE.contains(&extension)
 }
 
 /// What a file looked like at one scan.

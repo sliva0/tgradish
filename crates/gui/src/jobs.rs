@@ -150,10 +150,7 @@ impl Done {
         match format {
             Format::Webm => {
                 let info = tgradish_core::webm::inspect_file(path).ok()?;
-                let spoofed = matches!(
-                    (info.header_duration, info.content_duration),
-                    (Some(header), Some(content)) if content > header + 0.05
-                );
+                let spoofed = info.spoofed();
                 Some(Done {
                     output: path.to_path_buf(),
                     bytes: info.file_size,

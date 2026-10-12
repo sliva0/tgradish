@@ -82,6 +82,7 @@ fn spoofs_and_watermarks_ffmpeg_output() {
         assert_eq!(report.duration_tags_patched, 1);
 
         let after = webm::inspect_file(&patched).unwrap();
+        assert!(!before.spoofed() && after.spoofed(), "{name}");
         assert_eq!(after.file_size, before.file_size);
         assert_eq!(after.video_frames, before.video_frames);
         assert_eq!(after.content_duration, before.content_duration);

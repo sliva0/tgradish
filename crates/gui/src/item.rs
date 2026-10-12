@@ -1,9 +1,10 @@
 //! A file in the list: what it is, what to make of it, and what came out.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use eframe::egui;
 use tgradish_core::config::Config;
+use tgradish_core::inputs;
 use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Spoof};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::{self, Target};
@@ -25,21 +26,14 @@ pub enum Kind {
     Frames,
 }
 
-const IMAGES: [&str; 7] = ["png", "apng", "gif", "webp", "jpg", "jpeg", "bmp"];
-const ASEPRITE: [&str; 2] = ["ase", "aseprite"];
-
-fn extension(path: &Path) -> String {
-    path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase()
-}
-
 impl Kind {
     pub fn of(inputs: &[PathBuf], sequence: bool) -> Kind {
         match inputs {
             [input] if !sequence && !input.is_dir() => {
-                let extension = extension(input);
-                if ASEPRITE.contains(&extension.as_str()) {
+                let extension = inputs::extension(input);
+                if inputs::ASEPRITE.contains(&extension.as_str()) {
                     Kind::Frames
-                } else if IMAGES.contains(&extension.as_str()) {
+                } else if inputs::IMAGES.contains(&extension.as_str()) {
                     Kind::Image
                 } else {
                     Kind::Video

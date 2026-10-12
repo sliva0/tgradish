@@ -57,11 +57,7 @@ impl Inspection {
         } else {
             match webm::inspect_file(path) {
                 Ok(info) => {
-                    // emoji are the only square 100 px stickers
-                    let target = match &info.video {
-                        Some(video) if video.width == 100 && video.height == 100 => Target::Emoji,
-                        _ => Target::Sticker,
-                    };
+                    let target = info.target();
                     let problems = telegram::check(&info, target)
                         .iter()
                         .map(|issue| Problem { refused: true, text: issue.to_string() })
@@ -117,15 +113,14 @@ fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target) {
         let max = telegram::MAX_SECONDS;
         match (info.header_duration, info.content_duration) {
             (Some(header), content) => {
-                let spoofed = content.is_some_and(|content| content > header + 0.05);
-                let text = if spoofed {
+                let text = if info.spoofed() {
                     format!("{header:.3} s in the header, spoofed")
                 } else {
                     of(widgets::seconds(header), widgets::seconds(max))
                 };
                 let hint = "Telegram reads the duration in the header; spoofing makes it short";
                 budget(ui, "Duration", hint, (header * 1000.0) as u64, (max * 1000.0) as u64, text);
-                if let Some(content) = content.filter(|_| spoofed) {
+                if let Some(content) = content.filter(|_| info.spoofed()) {
                     label(ui, "Plays", "How long the video really is");
                     ui.label(widgets::seconds(content));
                     ui.end_row();

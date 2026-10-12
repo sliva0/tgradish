@@ -363,9 +363,14 @@ pub struct Info {
 }
 
 impl Info {
-    /// What it would be: emoji are the only square 100 px stickers.
+    /// What it would be: emoji are the only image stickers of their box's
+    /// size, square 100 px.
     pub fn target(&self) -> Target {
-        if (self.width, self.height) == (100, 100) { Target::Emoji } else { Target::Sticker }
+        if (self.width, self.height) == Target::Emoji.box_size() {
+            Target::Emoji
+        } else {
+            Target::Sticker
+        }
     }
 
     /// Everything that would make Telegram refuse it as `target`.
