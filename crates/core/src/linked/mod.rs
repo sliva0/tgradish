@@ -149,6 +149,66 @@ fn filter_graph(inputs: &[(&str, String)], spec: &str) -> Result<filter::Graph> 
     Ok(graph)
 }
 
+/// A source read through a filter graph from `[in]` to `[out]`, one
+/// filtered frame at a time.
+struct Filtered {
+    source: Source,
+    graph: filter::Graph,
+    /// The next decoded frame, not yet given to the filters.
+    next: frame::Video,
+    input_open: bool,
+}
+
+impl Filtered {
+    /// `source` through `spec`, or `None` when it has no frames: the
+    /// filters' input takes its format from the first.
+    fn new(mut source: Source, spec: &str) -> Result<Option<Filtered>> {
+        let mut next = frame::Video::empty();
+        if !source.next(&mut next)? {
+            return Ok(None);
+        }
+        let graph = filter_graph(&[("in", source.buffer_args(&next))], spec)?;
+        Ok(Some(Filtered { source, graph, next, input_open: true }))
+    }
+
+    fn time_base(&mut self) -> Rational {
+        self.graph.get("out").expect("added").sink().time_base()
+    }
+
+    /// The next filtered frame, into `frame`, decoding as much as that
+    /// takes: false once the input is used up and the filters drained.
+    fn next(&mut self, frame: &mut frame::Video, cancel: &CancelToken) -> Result<bool> {
+        loop {
+            match self.graph.get("out").expect("added").sink().frame(frame) {
+                Ok(()) => return Ok(true),
+                Err(ff::Error::Eof) => return Ok(false),
+                Err(err) if is_again(&err) && !self.input_open => return Ok(false),
+                Err(err) if is_again(&err) => {}
+                Err(err) => return Err(libav("filtering")(err)),
+            }
+            cancel.check()?;
+            let mut input = self.graph.get("in").expect("added");
+            let mut input = input.source();
+            input.add(&self.next).map_err(libav("filtering"))?;
+            if !self.source.next(&mut self.next)? {
+                input.flush().map_err(libav("filtering"))?;
+                self.input_open = false;
+            }
+        }
+    }
+}
+
+/// The pixels of an RGBA `frame` `width` wide, without the padding its
+/// rows can have.
+fn rgba(frame: &frame::Video, width: u32, height: u32) -> Vec<u8> {
+    let (stride, data, row) = (frame.stride(0), frame.data(0), width as usize * 4);
+    let mut pixels = Vec::with_capacity(row * height as usize);
+    for y in 0..height as usize {
+        pixels.extend_from_slice(&data[y * stride..][..row]);
+    }
+    pixels
+}
+
 fn is_again(err: &ff::Error) -> bool {
     matches!(err, ff::Error::Other { errno } if *errno == ff::util::error::EAGAIN)
 }
@@ -359,55 +419,26 @@ pub(crate) fn encode(
     cancel.check()?;
     let total = frame_count(params.length, params.fps);
     let read = (total + 1) as f64 / params.fps;
-    let mut source = Source::open(plan, read, cancel)?;
-    let mut frame = frame::Video::empty();
-    if !source.next(&mut frame)? {
-        return Err(Error::Libav(format!("{} has no frames to encode", plan.input.display())));
-    }
-
+    let source = Source::open(plan, read, cancel)?;
     let pix_fmt = if plan.alpha { "yuva420p" } else { "yuv420p" };
     let chain = video_filter(plan, params.fps, params.length, pix_fmt);
     let spec = format!("[in]{}{chain}[out]", plan.source.orientation.filters());
-    let mut graph = filter_graph(&[("in", source.buffer_args(&frame))], &spec)?;
-    let time_base = graph.get("out").expect("added").sink().time_base();
-    let mut encoder = Encoder::open(plan, params, pass, output, time_base)?;
+    let Some(mut filtered) = Filtered::new(source, &spec)? else {
+        return Err(Error::Libav(format!("{} has no frames to encode", plan.input.display())));
+    };
+    let mut encoder = Encoder::open(plan, params, pass, output, filtered.time_base())?;
     let frame_duration = encoder.frame_duration;
 
-    let mut filtered = frame::Video::empty();
+    let mut frame = frame::Video::empty();
     let mut sent = 0;
-    let mut input_open = true;
-    while sent < total {
-        cancel.check()?;
-        if input_open {
-            let mut source_filter = graph.get("in").expect("added");
-            let mut source_filter = source_filter.source();
-            source_filter.add(&frame).map_err(libav("filtering"))?;
-            if !source.next(&mut frame)? {
-                source_filter.flush().map_err(libav("filtering"))?;
-                input_open = false;
-            }
-        }
-        loop {
-            match graph.get("out").expect("added").sink().frame(&mut filtered) {
-                Ok(()) => {}
-                Err(ff::Error::Eof) => break,
-                Err(err) if is_again(&err) => break,
-                Err(err) => return Err(libav("filtering")(err)),
-            }
-            if sent == total {
-                break;
-            }
-            filtered.set_kind(ff::picture::Type::None);
-            // SAFETY: setting a plain field of a frame we own
-            unsafe { (*filtered.as_mut_ptr()).duration = frame_duration };
-            encoder.send(Some(&filtered))?;
-            sent += 1;
-            on_output(Output::Time { micros: (sent as f64 / params.fps * 1e6) as u64 });
-        }
-        if !input_open && sent < total {
-            // the filters are flushed and drained: the input was shorter
-            break;
-        }
+    // fewer when the input is shorter
+    while sent < total && filtered.next(&mut frame, cancel)? {
+        frame.set_kind(ff::picture::Type::None);
+        // SAFETY: setting a plain field of a frame we own
+        unsafe { (*frame.as_mut_ptr()).duration = frame_duration };
+        encoder.send(Some(&frame))?;
+        sent += 1;
+        on_output(Output::Time { micros: (sent as f64 / params.fps * 1e6) as u64 });
     }
     encoder.finish(pass)
 }
@@ -424,11 +455,7 @@ pub(crate) fn frames(
 ) -> Result<Vec<Vec<u8>>> {
     init()?;
     let read = (count + 1) as f64 / fps;
-    let mut source = Source::open_window(input, probe, start, read, cancel)?;
-    let mut frame = frame::Video::empty();
-    if !source.next(&mut frame)? {
-        return Ok(Vec::new());
-    }
+    let source = Source::open_window(input, probe, start, read, cancel)?;
     // one frame is the first from the start, which resampling can skip
     let resample =
         if probe.still_image || count == 1 { String::new() } else { format!("fps={fps},") };
@@ -436,42 +463,11 @@ pub(crate) fn frames(
         "[in]{}{resample}scale={width}:{height}:flags=bilinear,setsar=1,format=rgba[out]",
         probe.orientation.filters()
     );
-    let mut graph = filter_graph(&[("in", source.buffer_args(&frame))], &spec)?;
-    let mut filtered = frame::Video::empty();
+    let Some(mut filtered) = Filtered::new(source, &spec)? else { return Ok(Vec::new()) };
+    let mut frame = frame::Video::empty();
     let mut out = Vec::new();
-    let mut input_open = true;
-    while out.len() < count {
-        cancel.check()?;
-        if input_open {
-            let mut source_filter = graph.get("in").expect("added");
-            let mut source_filter = source_filter.source();
-            source_filter.add(&frame).map_err(libav("filtering"))?;
-            if !source.next(&mut frame)? {
-                source_filter.flush().map_err(libav("filtering"))?;
-                input_open = false;
-            }
-        }
-        loop {
-            match graph.get("out").expect("added").sink().frame(&mut filtered) {
-                Ok(()) => {}
-                Err(ff::Error::Eof) => break,
-                Err(err) if is_again(&err) => break,
-                Err(err) => return Err(libav("filtering")(err)),
-            }
-            if out.len() == count {
-                break;
-            }
-            // rows can be padded
-            let (stride, data, row) = (filtered.stride(0), filtered.data(0), width as usize * 4);
-            let mut pixels = Vec::with_capacity(row * height as usize);
-            for y in 0..height as usize {
-                pixels.extend_from_slice(&data[y * stride..y * stride + row]);
-            }
-            out.push(pixels);
-        }
-        if !input_open {
-            break;
-        }
+    while out.len() < count && filtered.next(&mut frame, cancel)? {
+        out.push(rgba(&frame, width, height));
     }
     Ok(out)
 }
@@ -481,44 +477,18 @@ pub(crate) fn still(plan: &Plan, cancel: &CancelToken) -> Result<Vec<u8>> {
     init()?;
     cancel.check()?;
     let length = 1.0 / plan.fps;
-    let mut source = Source::open(plan, 2.0 * length, cancel)?;
-    let mut frame = frame::Video::empty();
+    let source = Source::open(plan, 2.0 * length, cancel)?;
     let no_frame = || Error::NoFrame { path: plan.input.clone(), at: plan.start };
-    if !source.next(&mut frame)? {
-        return Err(no_frame());
-    }
     // the first frame from the start, as it is: resampling to a frame rate
     // can skip a short one
     let chain = picture_filter(plan, "rgba");
     let spec = format!("[in]{}{chain}[out]", plan.source.orientation.filters());
-    let mut graph = filter_graph(&[("in", source.buffer_args(&frame))], &spec)?;
-    let mut filtered = frame::Video::empty();
-    let mut input_open = true;
-    loop {
-        cancel.check()?;
-        if input_open {
-            let mut source_filter = graph.get("in").expect("added");
-            let mut source_filter = source_filter.source();
-            source_filter.add(&frame).map_err(libav("filtering"))?;
-            if !source.next(&mut frame)? {
-                source_filter.flush().map_err(libav("filtering"))?;
-                input_open = false;
-            }
-        }
-        match graph.get("out").expect("added").sink().frame(&mut filtered) {
-            Ok(()) => break,
-            Err(err) if is_again(&err) && input_open => continue,
-            Err(ff::Error::Eof) => return Err(no_frame()),
-            Err(err) if is_again(&err) => return Err(no_frame()),
-            Err(err) => return Err(libav("filtering")(err)),
-        }
+    let mut filtered = Filtered::new(source, &spec)?.ok_or_else(no_frame)?;
+    let mut frame = frame::Video::empty();
+    if !filtered.next(&mut frame, cancel)? {
+        return Err(no_frame());
     }
-    // rows can be padded
-    let (stride, data, row) = (filtered.stride(0), filtered.data(0), plan.width as usize * 4);
-    Ok((0..plan.height as usize)
-        .flat_map(|y| &data[y * stride..y * stride + row])
-        .copied()
-        .collect())
+    Ok(rgba(&frame, plan.width, plan.height))
 }
 
 /// Linked version of [`crate::ffmpeg::ssim`], averaging the per-frame SSIM
