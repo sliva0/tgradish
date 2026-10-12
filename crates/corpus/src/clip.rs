@@ -70,9 +70,17 @@ pub fn clip(clip: Clip, dir: &Path) -> Option<PathBuf> {
     Some(path)
 }
 
-/// Whether the ffmpeg on PATH can make clips.
+/// Whether the ffmpeg on PATH can make clips: false without one, or one
+/// without x264. An ffmpeg that fails to list its encoders panics.
 fn has_x264() -> bool {
-    Command::new("ffmpeg").args(["-hide_banner", "-encoders"]).output().is_ok_and(|out| {
-        out.status.success() && String::from_utf8_lossy(&out.stdout).contains(" libx264 ")
-    })
+    let listed = match Command::new("ffmpeg").args(["-hide_banner", "-encoders"]).output() {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return false,
+        listed => listed.expect("ffmpeg runs"),
+    };
+    assert!(
+        listed.status.success(),
+        "ffmpeg could not list its encoders: {}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    String::from_utf8_lossy(&listed.stdout).contains(" libx264 ")
 }

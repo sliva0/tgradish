@@ -18,7 +18,12 @@ pub struct Sheet {
 
 /// Splits a still image into the frames of a sprite sheet.
 pub fn sprite_sheet(bytes: &[u8], sheet: &Sheet, limits: &Limits) -> Result<Animation> {
-    let image = decode(bytes, &DecodeOptions { tag: None, limits: *limits })?;
+    split_sheet(&decode(bytes, &DecodeOptions { tag: None, limits: *limits })?, sheet, limits)
+}
+
+/// Splits a decoded `image` into the frames of a sprite sheet, counting
+/// them against `limits` beside the image.
+pub fn split_sheet(image: &Animation, sheet: &Sheet, limits: &Limits) -> Result<Animation> {
     let (width, height) = (image.width(), image.height());
     let grid_error =
         || Error::SheetGrid { width, height, columns: sheet.columns, rows: sheet.rows };
@@ -61,9 +66,10 @@ pub fn sprite_sheet(bytes: &[u8], sheet: &Sheet, limits: &Limits) -> Result<Anim
     let left = Limits { max_bytes: limits.max_bytes.saturating_sub(held), ..*limits };
     left.check(cell_width, cell_height, count as usize)?;
     let frames = (0..count)
-        .map(|cell| Frame {
-            rgba: rows(cell).flatten().copied().collect(),
-            duration: sheet.frame_duration,
+        .map(|cell| {
+            let mut rgba = Vec::with_capacity(row_bytes * cell_height as usize);
+            rows(cell).for_each(|row| rgba.extend_from_slice(row));
+            Frame { rgba, duration: sheet.frame_duration }
         })
         .collect();
     Animation::new(cell_width, cell_height, frames)

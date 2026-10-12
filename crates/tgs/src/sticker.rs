@@ -484,7 +484,8 @@ fn fit(
     };
     let mut quick_now = quick(&current, options, cancelled)?;
     // fits even as gzip packs the quick encode: the real encoder and
-    // zopfli only make it smaller
+    // zopfli usually make it smaller still, and the result is checked
+    // after fitting all the same
     if quick_now.is_some_and(|quick| quick.size(1.0, options.max_bytes) <= target) {
         return Ok((current, true));
     }

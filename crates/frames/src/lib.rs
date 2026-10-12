@@ -15,7 +15,7 @@ mod raster;
 mod sheet;
 
 pub use aseprite::{Direction, Sprite, Tag};
-pub use sheet::{Sheet, sequence, sprite_sheet};
+pub use sheet::{Sheet, sequence, split_sheet, sprite_sheet};
 
 /// Duration of still images in an animation when nothing else says how long
 /// to show them, and of frames whose files say 0.
