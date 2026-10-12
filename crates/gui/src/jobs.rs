@@ -535,5 +535,39 @@ pub fn reveal(path: &Path) {
         let _ = path;
         std::process::Command::new("xdg-open").arg(folder).spawn()
     };
-    let _ = (command, folder);
+    let _ = folder;
+    wait_for(command);
+}
+
+/// Opens a web address in the system's browser; anything else, which
+/// could be a file or an option, is left alone.
+pub fn browse(url: &str) {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return;
+    }
+    // tests only note it; the condition keeps what follows reachable
+    #[cfg(test)]
+    if cfg!(test) {
+        BROWSED.lock().unwrap().push(url.to_owned());
+        return;
+    }
+    #[cfg(target_os = "windows")]
+    let command = std::process::Command::new("explorer").arg(url).spawn();
+    #[cfg(target_os = "macos")]
+    let command = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let command = std::process::Command::new("xdg-open").arg(url).spawn();
+    wait_for(command);
+}
+
+/// Web addresses tests asked to open, rather than opening them.
+#[cfg(test)]
+pub static BROWSED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Waits for a program started to open something to end, on a thread of
+/// its own, so it doesn't linger as a zombie.
+fn wait_for(started: std::io::Result<std::process::Child>) {
+    if let Ok(mut child) = started {
+        std::thread::spawn(move || child.wait());
+    }
 }

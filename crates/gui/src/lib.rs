@@ -2643,6 +2643,19 @@ impl eframe::App for App {
                 self.hovering = false;
             }
         }
+        // links clicked, opened as files are shown in their folder: eframe
+        // opens them only with a dependency much larger than this
+        let mut links = Vec::new();
+        ctx.output_mut(|output| {
+            output.commands.retain(|command| match command {
+                egui::OutputCommand::OpenUrl(open) => {
+                    links.push(open.url.clone());
+                    false
+                }
+                _ => true,
+            })
+        });
+        links.iter().for_each(|url| jobs::browse(url));
         // every few seconds, so a crash loses little; what changed is kept
         // even if nothing draws the window again before then
         let now = ctx.input(|input| input.time);
@@ -3215,6 +3228,23 @@ mod tests {
             });
         harness.run_steps(3);
         save(&mut harness, "scaled");
+    }
+
+    #[test]
+    fn opens_links() {
+        let mut harness = harness(Config::default());
+        harness.state_mut().prefs.about = true;
+        harness.run_steps(2);
+        // a link, a label whose text is its name rather than its value
+        let link = egui_kittest::kittest::by()
+            .predicate(|node| node.label().as_deref() == Some("source code"));
+        harness.get(link).click_accesskit();
+        harness.run_steps(2);
+        let browsed = jobs::BROWSED.lock().unwrap();
+        assert!(
+            browsed.iter().any(|url| url == "https://github.com/sliva0/tgradish"),
+            "{browsed:?}"
+        );
     }
 
     #[test]
