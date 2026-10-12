@@ -29,14 +29,19 @@ impl Clip {
 }
 
 /// `clip`, made in `dir` unless it is there from an earlier run; `None`
-/// without an ffmpeg on PATH that has the x264 encoder.
+/// without an ffmpeg on PATH that has the x264 encoder. With one, failing
+/// to make the clip panics: that is a broken test, not a missing tool.
 pub fn clip(clip: Clip, dir: &Path) -> Option<PathBuf> {
     // the name changes with how the clip is made
     let path = dir.join(format!("tgradish-{}-1.mp4", clip.name()));
     if path.exists() {
         return Some(path);
     }
-    std::fs::create_dir_all(dir).ok()?;
+    if !has_x264() {
+        eprintln!("skipped: needs ffmpeg on PATH with the x264 encoder");
+        return None;
+    }
+    std::fs::create_dir_all(dir).expect("the clips' directory can be made");
     // made aside, so tests running at once never see half a clip
     let thread = format!("{:?}", std::thread::current().id());
     let digits: String = thread.chars().filter(char::is_ascii_digit).collect();
@@ -51,12 +56,23 @@ pub fn clip(clip: Clip, dir: &Path) -> Option<PathBuf> {
         })
         .args(["-pix_fmt", "yuv420p", "-an"])
         .arg(&partial)
-        .status();
-    if !made.is_ok_and(|status| status.success()) {
+        .output()
+        .expect("ffmpeg runs");
+    if !made.status.success() {
         let _ = std::fs::remove_file(&partial);
-        eprintln!("skipped: needs ffmpeg on PATH with the x264 encoder");
-        return None;
+        panic!(
+            "ffmpeg could not make the {} clip: {}",
+            clip.name(),
+            String::from_utf8_lossy(&made.stderr)
+        );
     }
-    std::fs::rename(&partial, &path).ok()?;
+    std::fs::rename(&partial, &path).expect("the clip can be moved into place");
     Some(path)
+}
+
+/// Whether the ffmpeg on PATH can make clips.
+fn has_x264() -> bool {
+    Command::new("ffmpeg").args(["-hide_banner", "-encoders"]).output().is_ok_and(|out| {
+        out.status.success() && String::from_utf8_lossy(&out.stdout).contains(" libx264 ")
+    })
 }
