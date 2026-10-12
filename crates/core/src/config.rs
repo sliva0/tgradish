@@ -53,6 +53,8 @@ pub struct GuiConfig {
     /// Start with no files, rather than those open when the window last
     /// closed.
     pub forget_files: bool,
+    /// Show the timeline's cuts and times in frames rather than seconds.
+    pub timeline_frames: bool,
 }
 
 /// The window's colours.

@@ -797,6 +797,29 @@ impl App {
         {
             item.view.playing = !item.view.playing;
         }
+        let keys = ctx.input(|input| {
+            let pressed = |key| input.key_pressed(key);
+            let step = if input.modifiers.shift { 10 } else { 1 };
+            Keys {
+                by: if pressed(egui::Key::ArrowLeft) {
+                    -step
+                } else if pressed(egui::Key::ArrowRight) {
+                    step
+                } else {
+                    0
+                },
+                first: pressed(egui::Key::Home),
+                last: pressed(egui::Key::End),
+                start_here: pressed(egui::Key::OpenBracket),
+                end_here: pressed(egui::Key::CloseBracket),
+            }
+        });
+        if keys != Keys::default()
+            && let Some(id) = self.selected
+            && let Some(item) = self.item_mut(id)
+        {
+            keys.apply(item);
+        }
         if delete && let Some(id) = self.selected {
             self.remove(id);
         }
@@ -826,15 +849,21 @@ impl App {
         if !ui.button(icon).on_hover_text(hint).clicked() {
             return;
         }
-        self.config.gui.theme = theme;
         set_theme(ui.ctx(), theme);
+        self.keep("theme", |gui| gui.theme = theme);
+    }
+
+    /// Changes a setting of the window, and keeps that change in the config
+    /// file at once, without the rest of what Settings changed.
+    fn keep(&mut self, what: &str, change: impl Fn(&mut tgradish_core::config::GuiConfig)) {
+        change(&mut self.config.gui);
         if let Some(path) = &self.config_path {
             let saved = Config::load(path).and_then(|mut saved| {
-                saved.gui.theme = theme;
+                change(&mut saved.gui);
                 saved.save(path)
             });
             if let Err(err) = saved {
-                self.message = Some(format!("The theme couldn't be saved: {err}"));
+                self.message = Some(format!("The {what} couldn't be saved: {err}"));
             }
         }
     }
@@ -1123,6 +1152,7 @@ impl App {
         let height = ui.available_height();
         let preview_height =
             (height * self.preview_share).clamp(240.0, (height - 140.0).max(240.0));
+        let mut in_frames = self.config.gui.timeline_frames;
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
         egui::Panel::top("preview").exact_size(preview_height).show(ui, |ui| {
             ui.horizontal_top(|ui| {
@@ -1133,7 +1163,13 @@ impl App {
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         let tempo = item.tempo(&self.presets, &self.config);
-                        preview(ui, &mut self.screen, &mut self.inset, item, tempo);
+                        preview(
+                            ui,
+                            &mut self.screen,
+                            &mut self.inset,
+                            item,
+                            (tempo, &mut in_frames),
+                        );
                     },
                 );
                 ui.add_space(8.0);
@@ -1177,6 +1213,9 @@ impl App {
                 ui.add_space(12.0);
             });
         });
+        if in_frames != self.config.gui.timeline_frames {
+            self.keep("timeline's unit", |gui| gui.timeline_frames = in_frames);
+        }
     }
 
     fn actions(&mut self, ui: &mut egui::Ui, id: u64) {
@@ -1299,7 +1338,13 @@ const ICON_ROOM: f32 = 48.0;
 
 /// The big preview of an item, its header and timeline. The input plays at
 /// `tempo`, as the result will.
-fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut Item, tempo: f64) {
+fn preview(
+    ui: &mut egui::Ui,
+    screen: &mut Screen,
+    inset: &mut Inset,
+    item: &mut Item,
+    (tempo, in_frames): (f64, &mut bool),
+) {
     let has_result = item.result_clip.ready().is_some();
     // a change to what is used or how it is fitted shows on the input
     let framing = Framing::of(item);
@@ -1511,22 +1556,29 @@ fn preview(ui: &mut egui::Ui, screen: &mut Screen, inset: &mut Inset, item: &mut
     }
     ui.add_space(6.0);
     match (item.view.show, length, result_length) {
-        (Show::Input, Some(length), _) if item.format == Format::Image => {
-            let fps = item.video.ready().and_then(|video| video.probe.fps).unwrap_or(25.0);
-            timeline::frame_picker(ui, length, &mut item.choices.frame, 1.0 / fps.max(1.0));
+        (Show::Input, Some(_), _) if item.format == Format::Image => {
+            if let Some(frames) = item.input_frames() {
+                timeline::frame_picker(ui, &frames, &mut item.choices.frame, in_frames);
+            }
         }
-        (Show::Input, Some(length), _) => timeline::show(
-            ui,
-            timeline::Timeline {
-                length,
-                start: &mut item.choices.start,
-                used: &mut item.choices.length,
-                time: &mut item.view.time,
-                playing: &mut item.view.playing,
-                // in the input's seconds, which the tempo makes 3 of the result's
-                limit: telegram::MAX_SECONDS * tempo,
-            },
-        ),
+        (Show::Input, Some(length), _) => {
+            let frames = item.input_frames();
+            timeline::show(
+                ui,
+                timeline::Timeline {
+                    length,
+                    start: &mut item.choices.start,
+                    used: &mut item.choices.length,
+                    time: &mut item.view.time,
+                    playing: &mut item.view.playing,
+                    // in the input's seconds, which the tempo makes 3 of the
+                    // result's
+                    limit: telegram::MAX_SECONDS * tempo,
+                    frames: frames.as_ref(),
+                    in_frames,
+                },
+            )
+        }
         (Show::Result, _, Some(length)) => {
             timeline::player(ui, length, &mut item.view.result_time, &mut item.view.playing);
         }
@@ -1788,6 +1840,73 @@ fn message_in(ui: &egui::Ui, rect: egui::Rect, text: &str, colour: Color32) {
         egui::FontId::proportional(15.0),
         colour,
     );
+}
+
+/// What the keys over the preview ask for: a step of frames, the first
+/// or last frame used, and the used part to start or end at the frame
+/// shown.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Keys {
+    by: i64,
+    first: bool,
+    last: bool,
+    start_here: bool,
+    end_here: bool,
+}
+
+impl Keys {
+    /// Moves through what `item` shows, frame by frame, stopping playback.
+    fn apply(&self, item: &mut Item) {
+        let step = |now: usize, first: usize, last: usize| -> usize {
+            if self.first {
+                first
+            } else if self.last {
+                last
+            } else {
+                (now as i64 + self.by).clamp(first as i64, last as i64) as usize
+            }
+        };
+        let moves = self.by != 0 || self.first || self.last;
+        match item.view.show {
+            Show::Result => {
+                let Some(clip) = item.result_clip.ready() else { return };
+                if moves {
+                    let at = step(clip.index_at(item.view.result_time), 0, clip.frames.len() - 1);
+                    item.view.result_time = clip.times[at];
+                    item.view.playing = false;
+                }
+            }
+            // a picture is made of the frame picked
+            Show::Input if item.format == Format::Image => {
+                let Some(frames) = item.input_frames() else { return };
+                if moves {
+                    let at =
+                        step(frames.at(item.choices.frame.unwrap_or(0.0)), 0, frames.count() - 1);
+                    item.choices.frame = (at > 0).then_some(frames.times[at]);
+                }
+            }
+            Show::Input => {
+                let (Some(frames), Some(length)) = (item.input_frames(), item.input_length())
+                else {
+                    return;
+                };
+                let choices = &mut item.choices;
+                let now = frames.at(item.view.time);
+                let (first, after) = frames.part(length, choices.start, choices.length);
+                if self.start_here && now < after {
+                    frames.set_part((now, after), &mut choices.start, &mut choices.length);
+                }
+                if self.end_here && now + 1 > first {
+                    frames.set_part((first, now + 1), &mut choices.start, &mut choices.length);
+                }
+                if moves {
+                    let (first, after) = frames.part(length, choices.start, choices.length);
+                    item.view.time = frames.times[step(now, first, after - 1)];
+                    item.view.playing = false;
+                }
+            }
+        }
+    }
 }
 
 /// What a row's own buttons ask for.
@@ -2337,7 +2456,7 @@ impl eframe::App for App {
         self.find_fonts(&ctx);
         // a narrow window takes room from the list first, leaving the
         // preview and the column beside it theirs
-        let widest = (ctx.content_rect().width() - 640.0).clamp(260.0, 520.0);
+        let widest = (ctx.content_rect().width() - 710.0).clamp(260.0, 520.0);
         egui::Panel::left("files")
             .resizable(true)
             .default_size(410.0)
@@ -3002,6 +3121,47 @@ mod tests {
         item.choices.target = telegram::Target::Emoji;
         harness.run_steps(3);
         assert_eq!(harness.state().items[0].choices.webm.exact_scale, scale);
+    }
+
+    #[test]
+    fn cuts_and_steps_by_frames() {
+        let dir = tempfile::tempdir().unwrap();
+        // a second at 25 fps
+        let Some(video) = video_of(dir.path(), "64x48", 1) else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        {
+            let item = &mut harness.state_mut().items[0];
+            let frames = item.input_frames().unwrap();
+            assert_eq!(frames.count(), 25);
+            // frames 5 to 9, cut at the frames shown
+            item.view.time = frames.times[5];
+            Keys { start_here: true, ..Keys::default() }.apply(item);
+            item.view.time = frames.times[9];
+            Keys { end_here: true, ..Keys::default() }.apply(item);
+            // steps stay within them
+            Keys { by: 1, ..Keys::default() }.apply(item);
+            assert_eq!(frames.at(item.view.time), 9);
+            Keys { first: true, ..Keys::default() }.apply(item);
+            assert_eq!(frames.at(item.view.time), 5);
+            Keys { by: -10, ..Keys::default() }.apply(item);
+            assert_eq!((frames.at(item.view.time), item.view.playing), (5, false));
+            item.choices.preset = Some("fast".into());
+            item.choices.webm.fit = Some(tgradish_core::options::Fit::Off);
+        }
+        harness.run_steps(2);
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        // converting keeps exactly those frames
+        let made = &harness.state().items[0].made.as_ref().unwrap().job;
+        let Status::Done(done) = &made.status else { panic!("{:?}", made.status) };
+        let info = tgradish_core::webm::inspect_file(&done.output).unwrap();
+        assert_eq!(info.video_frames, 5);
     }
 
     #[test]

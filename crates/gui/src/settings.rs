@@ -1017,14 +1017,16 @@ fn frame(ui: &mut egui::Ui, item: &mut Item) {
     let hint =
         "The time of the frame the picture is made of; the bar under the preview picks it too";
     row(ui, "Frame at", hint, Ok(()), |ui| {
-        let fps = item.video.ready().and_then(|video| video.probe.fps).unwrap_or(25.0);
+        let Some(frames) = item.input_frames() else { return };
         let mut at = item.choices.frame.unwrap_or(0.0);
         let field = egui::DragValue::new(&mut at).range(0.0..=length).speed(0.01).max_decimals(3);
         if ui.add(field.suffix(" s")).changed() {
             // where its frame starts, as the picture is made of it
-            let at = crate::timeline::frame_at(at, length, 1.0 / fps.max(1.0));
-            item.choices.frame = (at > 1e-6).then_some(at);
+            let index = frames.at(at);
+            item.choices.frame = (index > 0).then_some(frames.times[index]);
         }
+        let index = frames.at(item.choices.frame.unwrap_or(0.0));
+        note(ui, format!("Frame {} of {}", index + 1, frames.count()));
     });
 }
 
