@@ -1295,9 +1295,9 @@ fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 let mut remove = None;
                 for (index, (name, value)) in pairs.iter_mut().enumerate() {
                     ui.horizontal(|ui| {
-                        changed |= ui.add(egui::TextEdit::singleline(name).hint_text("name").desired_width(130.0)).changed();
+                        changed |= ui.add(egui::TextEdit::singleline(name).hint_text("For example: tune-content").desired_width(190.0)).changed();
                         ui.label("=");
-                        changed |= ui.add(egui::TextEdit::singleline(value).hint_text("value").desired_width(100.0)).changed();
+                        changed |= ui.add(egui::TextEdit::singleline(value).hint_text("For example: screen").desired_width(150.0)).changed();
                         if ui.small_button("✖").on_hover_text("Remove").clicked() {
                             remove = Some(index);
                         }
@@ -1334,7 +1334,7 @@ fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         let hint = "Raw arguments added before the output, split like a shell would";
         row(ui, "ffmpeg arguments", hint, allowed, |ui| {
             let mut text = options.extra_args.as_ref().map(|words| shlex::try_join(words.iter().map(String::as_str)).unwrap_or_default()).unwrap_or_default();
-            let edit = ui.add(egui::TextEdit::singleline(&mut text).hint_text("none").desired_width(300.0));
+            let edit = ui.add(egui::TextEdit::singleline(&mut text).hint_text("For example: -lag-in-frames 25").desired_width(300.0));
             if edit.changed() {
                 options.extra_args = shlex::split(&text).filter(|words| !words.is_empty());
             }

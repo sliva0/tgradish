@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use eframe::egui;
+use eframe::egui::{self, Vec2};
 use tgradish_core::backend::Backend;
 use tgradish_core::config::Config;
 use tgradish_core::ffmpeg::{CancelToken, FfmpegChoice};
@@ -21,11 +21,27 @@ pub struct Prefs {
     ffmpeg_status: Option<(bool, String)>,
     /// What Save did: where the settings went, or why they didn't.
     saved: Option<Result<String, String>>,
+    /// What the fields show while empty, found once the dialog opens: the
+    /// ffmpeg on PATH, and a folder results could go to.
+    placeholders: (String, String),
 }
 
 impl Prefs {
     pub fn open(&mut self) {
-        *self = Prefs { open: true, about: self.about, ..Prefs::default() };
+        let ffmpeg = match tgradish_core::ffmpeg::locate(FfmpegChoice::System, None) {
+            Ok(found) => format!("{}, found on PATH", found.ffmpeg.display()),
+            Err(_) if cfg!(windows) => r"For example: C:\ffmpeg\bin".to_owned(),
+            Err(_) => "For example: /usr/local/bin/ffmpeg".to_owned(),
+        };
+        let folder = tgradish_core::paths::pictures_dir()
+            .map(|dir| format!("For example: {}", dir.join("Stickers").display()))
+            .unwrap_or_default();
+        *self = Prefs {
+            open: true,
+            about: self.about,
+            placeholders: (ffmpeg, folder),
+            ..Prefs::default()
+        };
     }
 
     pub fn is_open(&self) -> bool {
@@ -49,8 +65,10 @@ pub fn show(
         ui.set_width(620.0);
         ui.horizontal(|ui| {
             ui.heading("Settings");
+            // in the corner, square, level with the heading
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let cross = egui::Button::new("✖").frame(false);
+                let side = ui.spacing().interact_size.y;
+                let cross = egui::Button::new("✖").frame(false).min_size(Vec2::splat(side));
                 close = ui.add(cross).on_hover_text("Close").clicked();
             });
         });
@@ -74,15 +92,15 @@ pub fn show(
                 if ui.button("About and licenses…").clicked() {
                     prefs.about = true;
                 }
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| match &prefs
-                    .saved
-                {
-                    Some(Ok(saved)) => note(ui, saved),
-                    Some(Err(error)) => {
-                        let text = egui::RichText::new(error).color(widgets::BAD);
-                        ui.add(egui::Label::new(text).truncate());
-                    }
-                    None => note(ui, "Changes apply now; Save keeps them"),
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    // cut short where it is long, as a path can be
+                    let weak = |text: &str| egui::RichText::new(text).weak().size(12.5);
+                    let text = match &prefs.saved {
+                        Some(Ok(saved)) => weak(saved),
+                        Some(Err(error)) => egui::RichText::new(error).color(widgets::BAD),
+                        None => weak("Changes apply now; Save keeps them between restarts"),
+                    };
+                    ui.add(egui::Label::new(text).truncate());
                 });
             });
         });
@@ -123,7 +141,7 @@ fn sections(ui: &mut egui::Ui, prefs: &mut Prefs, config: &mut Config, presets: 
             let mut text =
                 ffmpeg.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
             let edit = egui::TextEdit::singleline(&mut text)
-                .hint_text("found on PATH")
+                .hint_text(prefs.placeholders.0.as_str())
                 .desired_width(280.0);
             if ui.add(edit).changed() {
                 ffmpeg.path = (!text.trim().is_empty()).then(|| PathBuf::from(text.trim()));
@@ -139,13 +157,15 @@ fn sections(ui: &mut egui::Ui, prefs: &mut Prefs, config: &mut Config, presets: 
                 prefs.ffmpeg_status = Some(check_ffmpeg(config));
             }
             if let Some((ok, status)) = &prefs.ffmpeg_status {
-                ui.colored_label(if *ok { widgets::GOOD } else { widgets::BAD }, status);
+                let colour = if *ok { widgets::GOOD } else { widgets::BAD };
+                ui.add(egui::Label::new(egui::RichText::new(status).color(colour)).truncate());
             }
         });
     });
 
     widgets::section(ui, "Results");
     let gui = &mut config.gui;
+    let placeholder = &prefs.placeholders.1;
     row(ui, "Save them", "", Ok(()), |ui| {
         let mut elsewhere = gui.output_dir.is_some();
         let choices = [(false, "Next to each input", ""), (true, "In a folder", "")];
@@ -157,7 +177,7 @@ fn sections(ui: &mut egui::Ui, prefs: &mut Prefs, config: &mut Config, presets: 
                 let mut text =
                     gui.output_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
                 let edit = egui::TextEdit::singleline(&mut text)
-                    .hint_text("a folder")
+                    .hint_text(placeholder.as_str())
                     .desired_width(280.0);
                 if ui.add(edit).changed() {
                     gui.output_dir = Some(PathBuf::from(text.trim()));
@@ -251,8 +271,15 @@ fn check_ffmpeg(config: &Config) -> (bool, String) {
         Err(err) => return (false, err.to_string()),
     };
     match backend.capabilities(&CancelToken::new()) {
-        Ok(caps) if caps.libvpx_vp9 => (true, format!("ffmpeg {} with VP9: ready", caps.version)),
-        Ok(caps) => (false, format!("ffmpeg {} can't encode VP9 with libvpx", caps.version)),
+        Ok(caps) => {
+            // "ffmpeg version 8.0 Copyright (c) …", or "… (built in)"
+            let version = caps.version.trim_start_matches("ffmpeg version ");
+            let version = version.split(" Copyright").next().unwrap_or(version).trim();
+            match caps.libvpx_vp9 {
+                true => (true, format!("ffmpeg {version} with VP9: ready")),
+                false => (false, format!("ffmpeg {version} can't encode VP9 with libvpx")),
+            }
+        }
         Err(err) => (false, err.to_string()),
     }
 }

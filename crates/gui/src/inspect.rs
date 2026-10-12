@@ -162,7 +162,7 @@ fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target) {
         }
         if let Some(title) = &info.title {
             label(ui, "Title", "");
-            ui.label(title);
+            ui.add(egui::Label::new(title).truncate());
             ui.end_row();
         }
         label(ui, "Made with", "The programs that wrote the file, as it says");
@@ -171,11 +171,11 @@ fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target) {
             (Some(app), _) | (None, Some(app)) => app.clone(),
             (None, None) => "unknown".into(),
         };
-        ui.label(made);
+        ui.add(egui::Label::new(made).truncate());
         ui.end_row();
         if let Some(signature) = &info.signature {
             label(ui, "Note", "Text in the file's padding, which players skip");
-            ui.label(signature);
+            ui.add(egui::Label::new(signature).truncate());
             ui.end_row();
         }
     });
@@ -194,7 +194,7 @@ fn image(ui: &mut egui::Ui, info: &still::Info, target: Target) {
         ui.label(format!("{} × {} px, WebP, {kind}{alpha}", info.width, info.height));
         ui.end_row();
         label(ui, "Made with", "The program its metadata names");
-        ui.label(info.made_with.as_deref().unwrap_or("unknown"));
+        ui.add(egui::Label::new(info.made_with.as_deref().unwrap_or("unknown")).truncate());
         ui.end_row();
     });
 }
@@ -208,7 +208,7 @@ fn animation(ui: &mut egui::Ui, stats: &Stats) {
     grid(ui, "inspect-tgs", |ui| {
         if let Some(name) = &stats.name {
             label(ui, "Name", "The animation's own name, which Telegram doesn't show");
-            ui.label(name);
+            ui.add(egui::Label::new(name).truncate());
             ui.end_row();
         }
         if let Some(bytes) = stats.tgs_bytes {
