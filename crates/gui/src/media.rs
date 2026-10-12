@@ -286,9 +286,7 @@ impl Video {
             Ok(Clip::from_frames(frames))
         })
     }
-}
 
-impl Video {
     /// The frame shown at `time`, at full size.
     pub fn load_still(
         &self,

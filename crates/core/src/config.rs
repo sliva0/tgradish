@@ -45,7 +45,8 @@ pub struct GuiConfig {
     pub result_preview: ResultPreview,
 }
 
-/// The result's small picture over the input: how large it is, and where.
+/// The result's small picture beside the input in the window: how large
+/// it is, and in which corner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct ResultPreview {

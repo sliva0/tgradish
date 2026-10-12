@@ -1386,7 +1386,7 @@ fn preview(
                 let text =
                     if room >= widgets::text_width(ui, full, 8.0) { full } else { "Preview" };
                 ui.toggle_value(&mut item.view.inset, text)
-                    .on_hover_text("What the result will look like, small, over the input");
+                    .on_hover_text("What the result will look like, small, beside the input");
             }
             // always there, so nothing beside them moves as zooming starts
             let zoom = item.view.zoom_mut();
@@ -1507,7 +1507,7 @@ fn preview(
                 };
                 let (input_area, room, align) =
                     inset.ease(ui.ctx(), item.id, (on, step, corner), layout);
-                ui.painter().rect_filled(rect, 0.0, widgets::stage(ui.visuals().dark_mode));
+                ui.painter().rect_filled(rect, 0.0, theme::stage(ui.visuals().dark_mode));
                 let ratio = settings::ratio(item.view.aspect, size);
                 let exact = settings::exact_of(item);
                 let cropping = Cropping { crop: &mut item.choices.crop, ratio, filling, exact };
@@ -1946,7 +1946,7 @@ fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backe
 
 fn message_in(ui: &egui::Ui, rect: egui::Rect, text: &str, colour: Color32) {
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, widgets::stage(ui.visuals().dark_mode));
+    painter.rect_filled(rect, 0.0, theme::stage(ui.visuals().dark_mode));
     painter.text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -2231,7 +2231,7 @@ fn thumb(
     stale: bool,
 ) {
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 4.0, widgets::stage(ui.visuals().dark_mode));
+    painter.rect_filled(rect, 4.0, theme::stage(ui.visuals().dark_mode));
     match texture {
         Some(texture) => {
             let size = texture.size_vec2();
@@ -2638,7 +2638,7 @@ impl eframe::App for App {
             self.config_path.as_deref(),
             &self.presets,
         );
-        // as Settings changes it, or puts it back
+        // as Settings or the theme button changes it
         if self.prefs_theme != Some(self.config.gui.theme) {
             set_theme(&ctx, self.config.gui.theme);
             self.prefs_theme = Some(self.config.gui.theme);

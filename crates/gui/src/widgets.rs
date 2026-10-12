@@ -10,11 +10,6 @@ pub const GOOD: Color32 = theme::POSITIVE;
 pub const WARN: Color32 = theme::NEUTRAL;
 pub const BAD: Color32 = theme::NEGATIVE;
 
-/// The background pictures are shown on.
-pub fn stage(dark: bool) -> Color32 {
-    theme::stage(dark)
-}
-
 pub fn kib(bytes: u64) -> String {
     format!("{:.1} KiB", bytes as f64 / 1024.0)
 }
@@ -54,7 +49,6 @@ pub fn text_width(ui: &egui::Ui, text: &str, padding: f32) -> f32 {
     galley.size().x + padding
 }
 
-/// Weaker text explaining something.
 /// A link to `url`, which takes a click as a link, rather than starting a
 /// selection as text does.
 pub fn link(
@@ -75,6 +69,7 @@ pub fn count(n: impl std::fmt::Display, what: &str) -> String {
     format!("{n} {what}{}", if n == "1" { "" } else { "s" })
 }
 
+/// Weaker text explaining something.
 pub fn note(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(RichText::new(text.into()).weak().size(12.5));
 }
@@ -179,7 +174,7 @@ pub fn segments<T: PartialEq + Copy>(
     changed
 }
 
-/// [`segments`] for a value a preset may set, like [`choice`].
+/// [`segments`] for a value a preset may set.
 pub fn preset_segments<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     value: &mut Option<T>,
