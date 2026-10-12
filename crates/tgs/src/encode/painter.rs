@@ -590,6 +590,10 @@ impl<'a> Painter<'a> {
         // and which of its colours goes lowest
         let mut best = vec![(0usize, 0usize); 1 << n];
         for set in 1..1usize << n {
+            // any order will do: encoding it stops at once
+            if (self.stop)() {
+                return colours.to_vec();
+            }
             best[set] = (0..n)
                 .filter(|&i| set >> i & 1 == 1)
                 .map(|i| {
@@ -626,21 +630,23 @@ impl<'a> Painter<'a> {
         }
         // cells of different colours never overlap, so "every colour but
         // this one" is a subtraction
-        let at_bottom: Vec<usize> = colours
-            .iter()
-            .map(|&colour| {
-                let later: Vec<Mask> = everything
-                    .iter()
-                    .enumerate()
-                    .map(|(f, mask)| {
-                        let mut later = mask.clone();
-                        later.subtract(&self.own(colour, f));
-                        later
-                    })
-                    .collect();
-                self.cost_of(colour, &later)
-            })
-            .collect();
+        let mut at_bottom = Vec::with_capacity(colours.len());
+        for &colour in colours {
+            // any order will do: encoding it stops at once
+            if (self.stop)() {
+                return colours.to_vec();
+            }
+            let later: Vec<Mask> = everything
+                .iter()
+                .enumerate()
+                .map(|(f, mask)| {
+                    let mut later = mask.clone();
+                    later.subtract(&self.own(colour, f));
+                    later
+                })
+                .collect();
+            at_bottom.push(self.cost_of(colour, &later));
+        }
         // a colour's pieces are worked out in a window of its cells and a
         // cell around them, where rectangles can reach over any later
         // colour: after each step only the costs of colours whose window
@@ -666,12 +672,11 @@ impl<'a> Painter<'a> {
         let mut costs: Vec<Option<usize>> = vec![None; colours.len()];
         let mut top_down = Vec::with_capacity(colours.len());
         while !remaining.is_empty() {
-            // any order will do: encoding it stops at once
-            if (self.stop)() {
-                return colours.to_vec();
-            }
             for &i in &remaining {
                 if costs[i].is_none() {
+                    if (self.stop)() {
+                        return colours.to_vec();
+                    }
                     costs[i] = Some(self.cost_of(colours[i], &later));
                 }
             }
@@ -778,6 +783,7 @@ impl Painter<'_> {
         let plain = self.encode(&order);
         self.reuse = true;
         match plain {
+            Err(EncodeError::Cancelled) => Err(EncodeError::Cancelled),
             Ok(plain) if score(&plain) < score(&scene) => Ok(plain),
             _ => Ok(scene),
         }
@@ -807,10 +813,16 @@ impl Painter<'_> {
         };
         // the better of both starting orders, then neighbours swapped while
         // that helps
-        let try_order = |order: &[u16]| self.encode(order).ok().map(|scene| (score(&scene), scene));
+        // an order that doesn't fit tlottie's limits is no candidate; a
+        // stop ends the search
+        let try_order = |order: &[u16]| match self.encode(order) {
+            Ok(scene) => Ok(Some((score(&scene), scene))),
+            Err(EncodeError::Cancelled) => Err(EncodeError::Cancelled),
+            Err(_) => Ok(None),
+        };
         let mut order = searched();
-        let mut best = try_order(&order);
-        if let Some(guessed) = try_order(&guess)
+        let mut best = try_order(&order)?;
+        if let Some(guessed) = try_order(&guess)?
             && best.as_ref().is_none_or(|(size, _)| guessed.0 < *size)
         {
             (order, best) = (guess, Some(guessed));
@@ -832,7 +844,7 @@ impl Painter<'_> {
                 }
                 tries += 1;
                 order.swap(i, i + 1);
-                match try_order(&order) {
+                match try_order(&order)? {
                     Some((size, candidate)) if size < smallest => {
                         (smallest, scene) = (size, candidate);
                         improved = true;
