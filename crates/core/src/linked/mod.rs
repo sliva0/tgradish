@@ -20,7 +20,7 @@ use crate::convert::{Plan, frame_count};
 use crate::error::{Error, Result};
 use crate::events::{Params, Rate};
 use crate::ffmpeg::{CancelToken, Capabilities, Output, Probe};
-use crate::ffmpeg::{Orientation, pix_fmt_has_alpha, video_filter};
+use crate::ffmpeg::{Orientation, picture_filter, pix_fmt_has_alpha, video_filter};
 
 /// Turns an ffmpeg error into ours, saying what was being done.
 fn libav(doing: &'static str) -> impl Fn(ff::Error) -> Error {
@@ -130,6 +130,19 @@ pub(crate) fn probe(input: &Path, cancel: &CancelToken) -> Result<Probe> {
         fps: ratio(stream.avg_frame_rate()).or_else(|| ratio(stream.rate())),
         base_fps: ratio(stream.rate()),
         duration,
+        start: {
+            // SAFETY: reading a plain field of the open context
+            let file_start = unsafe { (*context.as_ptr()).start_time };
+            let video_start = stream.start_time();
+            if file_start == ff::ffi::AV_NOPTS_VALUE || video_start == ff::ffi::AV_NOPTS_VALUE {
+                0.0
+            } else {
+                let tb = stream.time_base();
+                let video = video_start as f64 * f64::from(tb.numerator())
+                    / f64::from(tb.denominator().max(1));
+                (video - file_start as f64 / f64::from(ff::ffi::AV_TIME_BASE)).max(0.0)
+            }
+        },
         alpha: pix_fmt_has_alpha(&pix_fmt) || webm_alpha,
         still_image,
         orientation,
@@ -443,7 +456,9 @@ pub(crate) fn frames(
     if !source.next(&mut frame)? {
         return Ok(Vec::new());
     }
-    let resample = if probe.still_image { String::new() } else { format!("fps={fps},") };
+    // one frame is the first from the start, which resampling can skip
+    let resample =
+        if probe.still_image || count == 1 { String::new() } else { format!("fps={fps},") };
     let spec = format!(
         "[in]{}{resample}scale={width}:{height}:flags=bilinear,setsar=1,format=rgba[out]",
         probe.orientation.filters()
@@ -499,7 +514,9 @@ pub(crate) fn still(plan: &Plan, cancel: &CancelToken) -> Result<Vec<u8>> {
     if !source.next(&mut frame)? {
         return Err(no_frame());
     }
-    let chain = video_filter(plan, plan.fps, length, "rgba");
+    // the first frame from the start, as it is: resampling to a frame rate
+    // can skip a short one
+    let chain = picture_filter(plan, "rgba");
     let spec = format!("[in]{}{chain}[out]", plan.source.orientation.filters());
     let mut graph = filter_graph(&[("in", source.buffer_args(&frame))], &spec)?;
     let mut filtered = frame::Video::empty();

@@ -769,19 +769,15 @@ fn builtin_backend_rejects_extra_args() {
     assert!(matches!(result, Err(Error::InvalidOptions(_))), "{result:?}");
 }
 
-/// Red, green and blue for 0.1, 0.1 and 0.5 s, then white for 0.1 s.
-const UNEVEN: [([u8; 4], u32); 4] = [
-    ([255, 0, 0, 255], 100),
-    ([0, 255, 0, 255], 100),
-    ([0, 0, 255, 255], 500),
-    ([255, 255, 255, 255], 100),
-];
+/// Red, green, blue and white: the frames of [`uneven_gif`].
+const UNEVEN: [[u8; 4]; 4] =
+    [[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255], [255, 255, 255, 255]];
 
-/// A GIF of frames that show for different times, as [`UNEVEN`].
-fn uneven_gif(dir: &Path) -> PathBuf {
+/// A GIF of [`UNEVEN`] frames that show for `delays` milliseconds.
+fn uneven_gif(dir: &Path, delays: [u32; 4]) -> PathBuf {
     let frames = UNEVEN
         .iter()
-        .map(|&(colour, _)| {
+        .map(|&colour| {
             let mut canvas = tgradish_corpus::Canvas::new(8, 8);
             canvas.rect(0, 0, 8, 8, colour);
             canvas
@@ -791,45 +787,106 @@ fn uneven_gif(dir: &Path) -> PathBuf {
         name: "uneven",
         about: "frames that show for different times",
         frames,
-        delays: UNEVEN.iter().map(|&(_, delay)| delay).collect(),
+        delays: delays.to_vec(),
         scale: 1,
         likely_scale: None,
     };
-    let path = dir.join("uneven.gif");
+    let path = dir.join(format!("uneven-{}.gif", delays[0]));
     std::fs::write(&path, tgradish_corpus::encode::gif(&sprite)).unwrap();
     path
+}
+
+fn near(starts: &[f64], expected: &[f64]) -> bool {
+    starts.len() == expected.len()
+        && starts.iter().zip(expected).all(|(start, expected)| (start - expected).abs() < 1e-6)
 }
 
 #[test]
 fn finds_where_frames_start() {
     let Some(backends) = backends() else { return };
     let dir = tempfile::tempdir().unwrap();
-    let gif = uneven_gif(dir.path());
-    let near = |starts: &[f64], expected: &[f64]| {
-        starts.len() == expected.len()
-            && starts.iter().zip(expected).all(|(start, expected)| (start - expected).abs() < 1e-6)
-    };
+    // frames of a tenth and half a second, and of a fiftieth, shorter than
+    // a frame at the average rate
+    let cases = [
+        (
+            [100, 100, 500, 100],
+            [0.0, 0.1, 0.2, 0.7],
+            [(0.0, 0), (0.15, 1), (0.2, 2), (0.65, 2), (0.7, 3)],
+        ),
+        (
+            [20, 20, 500, 20],
+            [0.0, 0.02, 0.04, 0.54],
+            [(0.0, 0), (0.02, 1), (0.04, 2), (0.3, 2), (0.54, 3)],
+        ),
+    ];
     for backend in &backends {
         let name = name(backend);
-        let starts = backend.frame_starts(&gif, &CancelToken::new()).unwrap();
-        assert!(near(&starts, &[0.0, 0.1, 0.2, 0.7]), "{name}: {starts:?}");
+        for (delays, expected, shown) in cases {
+            let gif = uneven_gif(dir.path(), delays);
+            let probe = backend.probe(&gif, &CancelToken::new()).unwrap();
+            let starts = backend.frame_starts(&gif, &probe, &CancelToken::new()).unwrap();
+            assert!(near(&starts, &expected), "{name}: {starts:?}");
+            // the frame that shows at a time, however long frames show
+            let colour_at = |time: f64| {
+                let options = Options { start: Some(time), ..Options::default() };
+                let output = Some(dir.path().join(format!("{name}-{}-{time}.webp", delays[0])));
+                let request = Request { options, output, ..Request::new(gif.clone()) };
+                let made = tgradish_core::still::convert(backend, &request, &CancelToken::new());
+                let preview = tgradish_core::still::preview(&made.unwrap().output).unwrap();
+                <[u8; 4]>::try_from(&preview.frames[0].0[..4]).unwrap()
+            };
+            for (time, frame) in shown {
+                assert_eq!(colour_at(time), UNEVEN[frame], "{name}: {delays:?} at {time} s");
+            }
+        }
         // a video with frames out of order in the file, at 25 fps
         if let Some(clip) = clip(Clip::Square) {
-            let starts = backend.frame_starts(&clip, &CancelToken::new()).unwrap();
+            let probe = backend.probe(&clip, &CancelToken::new()).unwrap();
+            let starts = backend.frame_starts(&clip, &probe, &CancelToken::new()).unwrap();
             let even: Vec<f64> = (0..121).map(|index| f64::from(index) / 25.0).collect();
             assert!(near(&starts, &even), "{name}: {starts:?}");
         }
-        // the frame that shows at a time, however long frames show
-        let colour_at = |time: f64| {
-            let options = Options { start: Some(time), ..Options::default() };
-            let output = Some(dir.path().join(format!("{name}-{time}.webp")));
-            let request = Request { options, output, ..Request::new(gif.clone()) };
-            let made = tgradish_core::still::convert(backend, &request, &CancelToken::new());
-            let preview = tgradish_core::still::preview(&made.unwrap().output).unwrap();
-            <[u8; 4]>::try_from(&preview.frames[0].0[..4]).unwrap()
-        };
-        for (time, frame) in [(0.0, 0), (0.15, 1), (0.2, 2), (0.65, 2), (0.7, 3)] {
-            assert_eq!(colour_at(time), UNEVEN[frame].0, "{name}: at {time} s");
+    }
+}
+
+#[test]
+fn counts_time_from_where_the_video_starts() {
+    let Some(backends) = backends() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    // sound from the start, and a second of video at 10 fps from half a
+    // second in
+    let input = dir.path().join("late.mp4");
+    let status = Command::new("ffmpeg")
+        .args(["-v", "error", "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono"])
+        .args(["-itsoffset", "0.5", "-f", "lavfi", "-i", "testsrc2=s=64x48:r=10:d=1"])
+        .args(["-map", "0:a", "-map", "1:v", "-t", "1.5", "-c:v", "libx264", "-c:a", "aac"])
+        .arg(&input)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    for backend in &backends {
+        let name = name(backend);
+        let probe = backend.probe(&input, &CancelToken::new()).unwrap();
+        assert!((probe.start - 0.5).abs() < 0.01, "{name}: {probe:?}");
+        let starts = backend.frame_starts(&input, &probe, &CancelToken::new()).unwrap();
+        let even: Vec<f64> = (0..10).map(|index| f64::from(index) / 10.0).collect();
+        assert!(near(&starts, &even), "{name}: {starts:?}");
+        // all of it, and frames 5 to 7
+        let start = tgradish_core::convert::read_from(0.5, 0.4);
+        for (part, frames) in [((None, None), 10), ((Some(start), Some(0.3)), 3)] {
+            let request = Request {
+                output: Some(dir.path().join(format!("{name}-{frames}.webm"))),
+                options: Options {
+                    start: part.0,
+                    length: part.1,
+                    fps: Some(10.0),
+                    ..fast(Fit::Off)
+                },
+                ..Request::new(input.clone())
+            };
+            let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
+            let info = webm::inspect_file(&outcome.output).unwrap();
+            assert_eq!(info.video_frames, frames, "{name}: {part:?}");
         }
     }
 }
