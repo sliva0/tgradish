@@ -1,0 +1,79 @@
+//! What the window's tests share: a window to drive, ways to wait for its
+//! work and to convert, and inputs to give it. Videos are made with the
+//! ffmpeg on PATH; without one, the tests that need them are skipped.
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
+use tgradish_core::config::Config;
+use tgradish_core::presets::Presets;
+
+use crate::app::App;
+
+/// A 4x4 PNG with a 2x2 square of `colour` in the middle.
+pub(crate) fn square(path: &Path, colour: [u8; 4]) {
+    let file = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
+    let mut encoder = png::Encoder::new(file, 4, 4);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let inside = |i: usize| (1..3).contains(&(i % 4)) && (1..3).contains(&(i / 4));
+    let pixels: Vec<u8> = (0..16).flat_map(|i| if inside(i) { colour } else { [0; 4] }).collect();
+    encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
+}
+
+pub(crate) fn harness(config: Config) -> Harness<'static, App> {
+    Harness::builder()
+        .with_size([1280.0, 820.0])
+        .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin(), None))
+}
+
+/// Clicks the selected item's Convert button, which shows its shortcut.
+pub(crate) fn convert(harness: &Harness<App>) {
+    harness.get(egui_kittest::kittest::by().label_contains("Ctrl+Enter")).click();
+}
+
+/// Steps the window until no item is busy.
+pub(crate) fn finish(harness: &mut Harness<App>) {
+    for _ in 0..6000 {
+        harness.step();
+        let state = harness.state();
+        let reading = state.items.iter().any(|item| {
+            item.video.is_loading() || item.art.is_loading() || item.result_clip.is_loading()
+        });
+        if !reading && state.queue.is_empty() && state.items.iter().all(|item| item.job.is_none()) {
+            harness.run_steps(2);
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the window didn't settle");
+}
+
+pub(crate) fn video(dir: &Path, size: &str) -> Option<PathBuf> {
+    video_of(dir, size, 1)
+}
+
+/// A test video of `size` lasting `seconds`.
+pub(crate) fn video_of(dir: &Path, size: &str, seconds: u32) -> Option<PathBuf> {
+    let video = dir.join("clip.mp4");
+    let made = std::process::Command::new("ffmpeg")
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            &format!("testsrc2=s={size}:d={seconds}"),
+            "-pix_fmt",
+            "yuv420p",
+        ])
+        .arg(&video)
+        .status();
+    if !made.is_ok_and(|status| status.success()) {
+        eprintln!("skipped: needs ffmpeg on PATH");
+        return None;
+    }
+    Some(video)
+}

@@ -399,8 +399,8 @@ fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String
     if auto && plan.enlarges() >= 2.0 {
         let size = (video.probe.width, video.probe.height);
         let clip = &video.overview;
-        let part = crate::output::Part::of(plan.crop, size, (clip.width, clip.height));
-        if crate::output::looks_like_art(clip, part) {
+        let part = crate::predict::Part::of(plan.crop, size, (clip.width, clip.height));
+        if crate::predict::looks_like_art(clip, part) {
             plan.scaling = Scaling::Sharp;
         }
     }
@@ -1347,7 +1347,11 @@ fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
 
 #[cfg(test)]
 mod tests {
+    use egui_kittest::kittest::Queryable;
+    use tgradish_core::ffmpeg::FfmpegChoice;
+
     use super::*;
+    use crate::testing::{finish, harness, video, video_of};
 
     #[test]
     fn reshapes_crops_around_their_middle() {
@@ -1393,5 +1397,46 @@ mod tests {
         let names: Vec<String> =
             preset_names(&Presets::builtin()).into_iter().map(|(name, _)| name).collect();
         assert_eq!(names, ["fast", "balanced", "best"]);
+    }
+
+    #[test]
+    fn keeps_a_fixed_scale_while_integer_scaling_is_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video(dir.path(), "64x48") else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        // more than an emoji takes, kept for when integer scaling is back
+        let scale = Some("200".parse().unwrap());
+        let item = &mut harness.state_mut().items[0];
+        item.choices.webm.exact_scale = scale;
+        item.choices.webm.scaling = Some(Scaling::Smooth);
+        item.choices.target = telegram::Target::Emoji;
+        harness.run_steps(3);
+        assert_eq!(harness.state().items[0].choices.webm.exact_scale, scale);
+    }
+
+    #[test]
+    fn warns_before_spoofing() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video_of(dir.path(), "64x48", 4) else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        harness.get_by_label_contains("will be spoofed");
+        harness.get_by_label("Spoof to");
+        // cut to 3 seconds, or not spoofed at all: no warning
+        harness.state_mut().items[0].choices.length = Some(3.0);
+        harness.run_steps(2);
+        assert!(harness.query_by_label_contains("will be spoofed").is_none());
+        harness.state_mut().items[0].choices.length = None;
+        harness.state_mut().items[0].choices.webm.spoof =
+            Some(tgradish_core::options::Spoof::Never);
+        harness.run_steps(2);
+        assert!(harness.query_by_label_contains("will be spoofed").is_none());
     }
 }

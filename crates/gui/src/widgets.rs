@@ -384,6 +384,43 @@ pub fn checkerboard(painter: &egui::Painter, rect: egui::Rect, square: f32) {
     }
 }
 
+/// A message over the bottom of the window, gone when dismissed or after a
+/// while. False once it is gone.
+pub(crate) fn toast(ctx: &egui::Context, message: &str) -> bool {
+    const SHOWN: f64 = 12.0;
+    let now = ctx.input(|input| input.time);
+    let id = egui::Id::new(("toast", message));
+    let since = ctx.data_mut(|data| *data.get_temp_mut_or_insert_with(id, || now));
+    let mut open = true;
+    let area = egui::Area::new(egui::Id::new("toast"))
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -56.0))
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_max_width(560.0);
+                ui.horizontal(|ui| {
+                    ui.colored_label(WARN, "⚠");
+                    ui.label(message);
+                    if ui.small_button("OK").clicked() {
+                        open = false;
+                    }
+                });
+            });
+        });
+    // hovering keeps it
+    if area.response.contains_pointer() {
+        ctx.data_mut(|data| data.insert_temp(id, now));
+    } else if now - since > SHOWN {
+        open = false;
+    } else {
+        ctx.request_repaint_after(std::time::Duration::from_secs(1));
+    }
+    if !open {
+        ctx.data_mut(|data| data.remove::<f64>(id));
+    }
+    open
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -288,3 +288,36 @@ fn check_ffmpeg(config: &Config) -> (bool, String) {
         Err(err) => (false, err.to_string()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+
+    use super::*;
+    use crate::app::App;
+
+    #[test]
+    fn saves_settings_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let at = path.clone();
+        let mut harness = Harness::builder().with_size([1280.0, 820.0]).build_eframe(move |_| {
+            App::with(Config::default(), Some(at.clone()), Presets::builtin(), None)
+        });
+        harness.state_mut().prefs.open();
+        harness.run_steps(2);
+        // a change applies at once, and stays in the file once saved
+        harness.state_mut().config.gui.overwrite = true;
+        harness.get_by_label("Save").click_accesskit();
+        harness.run_steps(2);
+        assert!(Config::load(&path).unwrap().gui.overwrite);
+        harness.get_by_label_contains("Saved to");
+        // closing keeps what changed
+        harness.state_mut().config.gui.forget_files = true;
+        harness.get_by_label("✖").click_accesskit();
+        harness.run_steps(2);
+        assert!(!harness.state().prefs.is_open() && harness.state().config.gui.forget_files);
+        assert!(!Config::load(&path).unwrap().gui.forget_files);
+    }
+}
