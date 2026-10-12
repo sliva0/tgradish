@@ -1,5 +1,5 @@
-//! Encoder v1: painter's
-//! layers that keep the seam invariant, rectangle covers and lifetimes.
+//! The painter's encoder: colours drawn one over another in layers that
+//! keep the seam invariant, as rectangle covers with lifetimes.
 //!
 //! Colours are drawn in one order for the whole animation. A colour's
 //! shape must hold its own cells and every 8-neighbour that shows a later
@@ -25,8 +25,10 @@ use crate::scene::{FillRule, Group, Layer, Scene, Shape};
 /// group's fill and wrapping take about one and a half rectangles' bytes.
 const RECT_COST: usize = 2;
 const GROUP_COST: usize = 3;
-/// What a layer of its own adds, measured on the corpus.
-const LAYER_COST: usize = 10;
+/// What a layer of its own adds, in the same units, measured on the
+/// corpus. Not [`telegram::LAYER_COST`], which counts against the server's
+/// limit rather than bytes.
+const LAYER_ESTIMATE: usize = 10;
 /// Side of the tiles a colour can be cut into, in cells: 16 and 64 were
 /// both worse.
 const TILE: u32 = 32;
@@ -50,7 +52,7 @@ pub enum Effort {
     #[default]
     Balanced,
     /// Starting from that, swaps neighbouring colours in the order while
-    /// the real compressed size goes down.
+    /// the size `gzip -9` packs the result to goes down.
     Best,
 }
 
@@ -125,14 +127,14 @@ fn tiled_cost(pieces: &[(u8, Piece)]) -> usize {
     let tiles: std::collections::BTreeSet<u32> =
         pieces.iter().map(|(_, piece)| piece.tile).collect();
     let extra = pieces.len().saturating_sub(tiles.len());
-    cost(pieces).saturating_add(extra * LAYER_COST)
+    cost(pieces).saturating_add(extra * LAYER_ESTIMATE)
 }
 
 /// [`cost`] of a split colour: its deltas mostly need layers of their own,
 /// since its core lies between them and the next colour's.
 fn split_cost(pieces: &[(u8, Piece)]) -> usize {
     let deltas = pieces.iter().filter(|(place, _)| *place == 0).count();
-    cost(pieces).saturating_add(deltas * LAYER_COST)
+    cost(pieces).saturating_add(deltas * LAYER_ESTIMATE)
 }
 
 /// A colour's core lasts while it keeps at least this share of each

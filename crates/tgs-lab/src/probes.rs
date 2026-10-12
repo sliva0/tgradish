@@ -405,7 +405,7 @@ fn padded(sprite: &str, bytes: usize) -> String {
 
 /// `json` with its paths rewritten: `"c":true` or no `c`, zero or empty
 /// tangents, the first point repeated at the end or not. The writer
-/// leaves out `c`, writes empty tangents and repeats the first point.
+/// leaves out `c`, writes zero tangents and repeats the first point.
 fn path_form(json: &str, closed: bool, zero_tangents: bool, repeat: bool) -> String {
     fn visit(value: &mut Value, form: &dyn Fn(&mut Value)) {
         match value {

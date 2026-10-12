@@ -13,7 +13,8 @@
 //! cargo run --release -p tgs-lab -- sizes DIR [1X.tgs...]
 //! cargo run --release -p tgs-lab -- features DIR
 //! cargo run -p tgs-lab -- corpus DIR
-//! cargo run --release -p tgs-lab -- bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--no-reuse] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]
+//! cargo run --release -p tgs-lab -- bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--no-reuse] [--fast-effort|--best] [--full]
+//!                    [--save FILE] [--against FILE] [DIR]
 //! ```
 
 mod bench;

@@ -62,7 +62,8 @@ pub struct Transform {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
-    /// Drawn top first; ends with its fill and [`Item::GroupTransform { opacity: Vec::new() }`].
+    /// Drawn top first; ends with its fill and an [`Item::GroupTransform`]
+    /// with no opacity keyframes.
     Group(Vec<Item>),
     Rect {
         centre: [f64; 2],

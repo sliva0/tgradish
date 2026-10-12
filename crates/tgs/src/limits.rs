@@ -1,8 +1,6 @@
 //! What a `.tgs` file has to stay within to be accepted by Telegram and
 //! drawn by every client. Output is checked against all of these.
 
-use serde::Serialize;
-
 /// Telegram's rules for animated stickers, from
 /// <https://core.telegram.org/stickers> and
 /// <https://core.telegram.org/animated_stickers> (checked 2026-10-08), and
@@ -57,7 +55,7 @@ pub const MAX_RAW_JSON: usize = 2 * 1024 * 1024;
 /// clients; Telegram Android passes no limits of its own. From tlottie's
 /// `src/composition/limits.rs`, only the ones tgradish's output can get
 /// near.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RendererLimits {
     pub max_input_bytes: usize,
     /// Arrays and objects inside each other in the JSON.
