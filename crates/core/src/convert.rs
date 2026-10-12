@@ -734,12 +734,7 @@ pub fn convert(
         webm::patch(&mut bytes, &changes)?;
     }
     // checked again here: the output may have appeared while encoding
-    crate::fsutil::write_file(&plan.output, &bytes, request.overwrite).map_err(|err| match err
-        .kind()
-    {
-        std::io::ErrorKind::AlreadyExists => Error::OutputExists(plan.output.clone()),
-        _ => Error::Io(err),
-    })?;
+    crate::fsutil::write_output(&plan.output, &bytes, request.overwrite)?;
 
     let info = webm::inspect_file(&plan.output)?;
     let issues = telegram::check(&info, plan.target);

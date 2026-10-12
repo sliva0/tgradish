@@ -14,7 +14,7 @@ pub(crate) fn about(ui: &mut egui::Ui) {
             ui.label(RichText::new(format!("tgradish {}", env!("CARGO_PKG_VERSION"))).heading());
             ui.horizontal(|ui| {
                 ui.label("Telegram stickers from videos and pixel art. MIT licence;");
-                widgets::link(ui, "source code", "https://github.com/sliva0/tgradish");
+                widgets::link(ui, "source code", tgradish_core::REPOSITORY);
             });
         });
     });
@@ -43,7 +43,8 @@ pub(crate) fn about(ui: &mut egui::Ui) {
                             ui,
                             "The exact sources of the ffmpeg built in, with this release",
                             format!(
-                                "https://github.com/sliva0/tgradish/releases/tag/v{}",
+                                "{}/releases/tag/v{}",
+                                tgradish_core::REPOSITORY,
                                 env!("CARGO_PKG_VERSION")
                             ),
                         );

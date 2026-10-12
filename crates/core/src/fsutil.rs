@@ -23,6 +23,15 @@ pub fn write_file(path: &Path, bytes: &[u8], replace: bool) -> std::io::Result<(
     result.map(drop).map_err(|err| err.error)
 }
 
+/// [`write_file`] for a result, where an output already there is
+/// [`Error::OutputExists`](crate::Error::OutputExists).
+pub(crate) fn write_output(path: &Path, bytes: &[u8], replace: bool) -> crate::Result<()> {
+    write_file(path, bytes, replace).map_err(|err| match err.kind() {
+        std::io::ErrorKind::AlreadyExists => crate::Error::OutputExists(path.to_path_buf()),
+        _ => err.into(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

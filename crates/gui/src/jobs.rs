@@ -14,7 +14,7 @@ use tgradish_core::presets::Format;
 use tgradish_core::still;
 use tgradish_core::tgs::{self, Preview, TgsEvent, TgsOptions, TgsRequest};
 use tgradish_core::{Error, telegram};
-use tgradish_tgs::check::Severity;
+use tgradish_tgs::check::{Issue, Severity};
 use tgradish_tgs::normalise::Report;
 use tgradish_tgs::sticker::Step;
 
@@ -123,6 +123,18 @@ pub struct Problem {
     pub text: String,
 }
 
+impl Problem {
+    /// Something Telegram refuses.
+    pub fn refused(issue: impl std::fmt::Display) -> Problem {
+        Problem { refused: true, text: issue.to_string() }
+    }
+
+    /// What checking a `.tgs` found, which may only be frowned on.
+    pub fn of_tgs(issue: Issue) -> Problem {
+        Problem { refused: issue.severity == Severity::Error, text: issue.message }
+    }
+}
+
 #[derive(Debug)]
 pub struct Done {
     pub output: PathBuf,
@@ -158,7 +170,7 @@ impl Done {
                     spoofed,
                     json_bytes: None,
                     shapes: None,
-                    problems: telegram::check(&info, target).iter().map(problem).collect(),
+                    problems: telegram::check(&info, target).iter().map(Problem::refused).collect(),
                     preview: None,
                 })
             }
@@ -174,7 +186,7 @@ impl Done {
                     spoofed: false,
                     json_bytes: None,
                     shapes: None,
-                    problems: issues.iter().map(problem).collect(),
+                    problems: issues.iter().map(Problem::refused).collect(),
                     preview: None,
                 })
             }
@@ -189,13 +201,7 @@ impl Done {
                     spoofed: false,
                     json_bytes: Some(stats.json_bytes as u64),
                     shapes: Some((stats.layers, stats.shapes)),
-                    problems: issues
-                        .into_iter()
-                        .map(|issue| Problem {
-                            refused: issue.severity == Severity::Error,
-                            text: issue.message,
-                        })
-                        .collect(),
+                    problems: issues.into_iter().map(Problem::of_tgs).collect(),
                     preview: None,
                 })
             }
@@ -365,7 +371,7 @@ fn run(
                 spoofed: false,
                 json_bytes: None,
                 shapes: None,
-                problems: outcome.issues.iter().map(problem).collect(),
+                problems: outcome.issues.iter().map(Problem::refused).collect(),
                 preview,
             })
         }
@@ -398,13 +404,7 @@ fn run(
                     progress.warnings.push(message);
                 })),
                 TgsEvent::Finished { issues, json_bytes, layers, rectangles, .. } => {
-                    found = issues
-                        .into_iter()
-                        .map(|issue| Problem {
-                            refused: issue.severity == Severity::Error,
-                            text: issue.message,
-                        })
-                        .collect();
+                    found = issues.into_iter().map(Problem::of_tgs).collect();
                     finished = Some((json_bytes, layers, rectangles));
                 }
                 TgsEvent::Error { .. } => {}
@@ -498,11 +498,7 @@ fn webm(
         spoofed: outcome.spoofed,
         json_bytes: None,
         shapes: None,
-        problems: outcome.issues.iter().map(problem).collect(),
+        problems: outcome.issues.iter().map(Problem::refused).collect(),
         preview: None,
     })
-}
-
-fn problem(issue: &telegram::Issue) -> Problem {
-    Problem { refused: true, text: issue.to_string() }
 }
