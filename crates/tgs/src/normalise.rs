@@ -213,6 +213,17 @@ pub enum Warning {
     ManyColours { colours: usize },
 }
 
+impl std::fmt::Display for Warning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Warning::ManyColours { colours } => write!(
+                f,
+                "{colours} colours, which pixel art seldom has: the sticker will be large"
+            ),
+        }
+    }
+}
+
 fn nanos(duration: Duration) -> u64 {
     u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
 }
