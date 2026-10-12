@@ -1479,7 +1479,7 @@ fn preview(
                 // with room for its longest label, eased into place when it
                 // is turned on or off, resized or moved
                 let widest = match item.format {
-                    Format::Webm | Format::Image => "Result\n512 × 512 px",
+                    Format::Webm | Format::Image => "Result at 100%\n512 × 512 px",
                     Format::Tgs => "Result",
                 };
                 let text = ui.visuals().text_color();
@@ -1502,7 +1502,8 @@ fn preview(
                     let y = if corner.top() { room.top() } else { room.bottom() };
                     (rect, Rect::from_min_max(pos2(x, y), pos2(x, y)))
                 };
-                let (input_area, room) = inset.ease(ui.ctx(), item.id, (on, step, corner), layout);
+                let (input_area, room, align) =
+                    inset.ease(ui.ctx(), item.id, (on, step, corner), layout);
                 ui.painter().rect_filled(rect, 0.0, widgets::stage(ui.visuals().dark_mode));
                 let ratio = settings::ratio(item.view.aspect, size);
                 let exact = settings::exact_of(item);
@@ -1512,7 +1513,7 @@ fn preview(
                 // after the crop moved
                 let showing = on || inset.leaving();
                 let mut change = None;
-                let place = ((rect, room), (corner, step, on));
+                let place = ((rect, room, align), (corner, step, on));
                 if let Some(label) = inset_label(item, size).filter(|_| showing) {
                     let crop = item.choices.crop;
                     let where_ = output::Part::of(crop, size, (clip.width, clip.height));
@@ -1536,9 +1537,15 @@ fn preview(
                                     sizes.scaling = Scaling::Sharp;
                                 }
                                 let key = inset_key((clip.id, frame, where_, sizes));
-                                change = inset.show(ui, place.0, place.1, key, &label, || {
-                                    output::webm(&clip.frames[frame], clip.width, where_, &sizes)
-                                });
+                                change =
+                                    inset.show(ui, place.0, place.1, key, label.as_deref(), || {
+                                        output::webm(
+                                            &clip.frames[frame],
+                                            clip.width,
+                                            where_,
+                                            &sizes,
+                                        )
+                                    });
                             }
                         }
                         Format::Tgs => {
@@ -1548,9 +1555,10 @@ fn preview(
                                     output::tgs_bounds(&clip.frames, clip.width, where_, keep)
                                 });
                             let key = inset_key((clip.id, frame, bounds));
-                            change = inset.show(ui, place.0, place.1, key, &label, || {
-                                output::tgs(&clip.frames[frame], clip.width, bounds, 256)
-                            });
+                            change =
+                                inset.show(ui, place.0, place.1, key, label.as_deref(), || {
+                                    output::tgs(&clip.frames[frame], clip.width, bounds, 256)
+                                });
                         }
                     }
                 }
@@ -1619,16 +1627,17 @@ fn preview(
     }
 }
 
-/// The label of an item's small picture of its result: its size, which
-/// `.tgs` results, vectors, have none of in pixels.
-fn inset_label(item: &Item, size: (u32, u32)) -> Option<String> {
+/// What the label of an item's small picture of its result says under
+/// "Result": its size, which `.tgs` results, vectors, have none of in
+/// pixels. `None` while its size isn't known.
+fn inset_label(item: &Item, size: (u32, u32)) -> Option<Option<String>> {
     match item.format {
         Format::Webm | Format::Image => {
             let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
             let sizes = settings::webm_sizes(item, item.choices.crop.unwrap_or(full))?;
-            Some(format!("Result\n{} × {} px", sizes.width, sizes.height))
+            Some(Some(format!("{} × {} px", sizes.width, sizes.height)))
         }
-        Format::Tgs => Some("Result".to_owned()),
+        Format::Tgs => Some(None),
     }
 }
 

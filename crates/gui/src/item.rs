@@ -221,11 +221,14 @@ pub struct Zoom {
     pub level: f32,
     /// The picture point in the middle of the view, from 0 to 1.
     pub centre: egui::Vec2,
+    /// The view and the part of it the picture fits, as last shown: zoomed
+    /// in, the picture stays where it is when only that part changes.
+    pub anchor: Option<(egui::Rect, egui::Rect)>,
 }
 
 impl Default for Zoom {
     fn default() -> Zoom {
-        Zoom { level: 1.0, centre: egui::vec2(0.5, 0.5) }
+        Zoom { level: 1.0, centre: egui::vec2(0.5, 0.5), anchor: None }
     }
 }
 

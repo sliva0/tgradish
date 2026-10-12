@@ -59,18 +59,24 @@ pub struct Inset {
     art: Option<(u64, bool)>,
     /// What a `.tgs` result shows of a clip, by its key.
     bounds: Option<(u64, [usize; 4])>,
-    /// The layout drawn last: the item's, what it was made of, and the
-    /// input's area and the small picture's room.
-    drawn: Option<(u64, Arrangement, (Rect, Rect))>,
+    /// The layout drawn last: the item's, and what it was made of.
+    drawn: Option<(u64, Arrangement, Layout)>,
     /// A change of layout being eased in: where it started, and when.
-    motion: Option<((Rect, Rect), f64)>,
-    /// Where the small picture was let go of, to ease from there.
+    motion: Option<(Layout, f64)>,
+    /// How far the small picture is dragged, while it is.
+    dragged: Option<Vec2>,
+    /// The room the small picture was let go of in, to ease from there.
     dropped: Option<Rect>,
 }
 
 /// What the layout of the input and the small picture is made of: whether
 /// the small picture shows, its size and its corner.
 pub type Arrangement = (bool, usize, Corner);
+
+/// Where things go in the preview: the area the input fits, the small
+/// picture's room, and where in it the small picture is, from 0 to 1
+/// across and down, which its corner says.
+pub type Layout = (Rect, Rect, Vec2);
 
 /// What the small picture's controls asked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,20 +107,26 @@ impl Inset {
         }
     }
 
-    /// The input's area and the small picture's room to draw for `item`
-    /// now: `layout`, eased in from what was drawn before when what it is
-    /// made of changed, rather than with the window's size.
+    /// The layout to draw for `item` now: the input's area and the small
+    /// picture's room, and its place in that as its corner says, eased in
+    /// from what was drawn before when what it is made of changed or the
+    /// small picture was let go of, rather than with the window's size.
     pub fn ease(
         &mut self,
         ctx: &egui::Context,
         item: u64,
         arrangement: Arrangement,
-        layout: (Rect, Rect),
-    ) -> (Rect, Rect) {
+        (input, room): (Rect, Rect),
+    ) -> Layout {
         let now = ctx.input(|input| input.time);
+        let corner = arrangement.2;
+        let layout = (input, room, vec2(!corner.left() as u8 as f32, !corner.top() as u8 as f32));
+        let dropped = self.dropped.take();
         match self.drawn {
-            Some((seen, before, (input, room))) if seen == item && before != arrangement => {
-                self.motion = Some(((input, self.dropped.take().unwrap_or(room)), now));
+            Some((seen, before, (input, room, align)))
+                if seen == item && (before != arrangement || dropped.is_some()) =>
+            {
+                self.motion = Some(((input, dropped.unwrap_or(room), align), now));
             }
             Some((seen, ..)) if seen != item => self.motion = None,
             _ => {}
@@ -124,7 +136,11 @@ impl Inset {
                 ctx.request_repaint();
                 // fast, then settling
                 let t = (1.0 - (1.0 - (now - since) / EASING).powi(3)) as f32;
-                (lerp(from.0, layout.0, t), lerp(from.1, layout.1, t))
+                (
+                    lerp(from.0, layout.0, t),
+                    lerp(from.1, layout.1, t),
+                    from.2 + (layout.2 - from.2) * t,
+                )
             }
             _ => {
                 self.motion = None;
@@ -141,18 +157,18 @@ impl Inset {
     }
 
     /// Shows the picture `make` makes, made again only when `key` changes,
-    /// as large as fits `room`, in its `corner` of it, labelled. With
+    /// as large as fits `room`, at `align` in it, labelled as the result,
+    /// with `details` under that and then how large it shows. With
     /// `controls`, buttons on the label change its `size`, one of
-    /// [`INSET_SIZES`], and dragging it to another corner of `view` moves
-    /// it there.
-    #[allow(clippy::too_many_arguments)]
+    /// [`INSET_SIZES`], and dragging it or its label to another corner of
+    /// `view` than its `corner` moves it there.
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
-        (view, room): (Rect, Rect),
+        (view, room, align): (Rect, Rect, Vec2),
         (corner, size, controls): (Corner, usize, bool),
         key: u64,
-        label: &str,
+        details: Option<&str>,
         make: impl FnOnce() -> egui::ColorImage,
     ) -> Option<InsetChange> {
         let ppp = ui.ctx().pixels_per_point();
@@ -174,44 +190,74 @@ impl Inset {
         }
         let texture = self.texture.as_ref().expect("set above");
         let shown = texture.size_vec2() * fits(texture.size_vec2());
-        let x = if corner.left() { room.left() } else { room.right() - shown.x };
-        let y = if corner.top() { room.top() } else { room.bottom() - shown.y };
-        let mut frame = Rect::from_min_size(pos2(x, y), shown);
+        let docked = Rect::from_min_size(room.min + (room.size() - shown) * align, shown);
+        let painter = ui.painter_at(view);
+        // a result's size, and how much of a screen pixel each of its
+        // pixels takes
+        let label = match details {
+            Some(details) => {
+                let scale = (fits(texture.size_vec2()) * ppp * 100.0).round();
+                format!("Result at {scale}%\n{details}")
+            }
+            None => "Result".to_owned(),
+        };
+        let galley = painter.layout_no_wrap(label, INSET_LABEL, Color32::PLACEHOLDER);
+        let boxed = label_box(galley.size());
+        // the label over the picture's left edge, or further left where it
+        // would stick out
+        let label_at = |frame: Rect| {
+            let left = frame.left().min(view.right() - MARGIN - boxed.x).max(view.left() + 3.0);
+            pos2(left, frame.top() - boxed.y - 8.0)
+        };
 
-        // dragged towards another corner, which the pointer's quarter of
-        // the view picks
+        // dragged by the picture or its label, which keep the crop under
+        // them from being dragged, towards another corner, which the
+        // pointer's quarter of the view picks
         let mut change = None;
-        let id = ui.id().with("inset");
-        let held = controls.then(|| ui.interact(frame.expand(4.0), id, Sense::drag()));
-        if let Some(held) = &held {
-            let pointer = ui.input(|input| input.pointer.interact_pos());
-            if let (true, Some(origin), Some(pointer)) =
-                (held.dragged(), ui.input(|input| input.pointer.press_origin()), pointer)
+        let mut frame = docked.translate(self.dragged.unwrap_or_default());
+        let mut dragging = false;
+        if controls {
+            let id = ui.id().with("inset");
+            let behind = Rect::from_min_size(label_at(frame), boxed).expand(3.0);
+            let held = [
+                ui.interact(frame.expand(4.0), id, Sense::drag()),
+                ui.interact(behind, id.with("label"), Sense::drag())
+                    .on_hover_text("Drag it to another corner"),
+            ];
+            let pointer = ui.input(|input| input.pointer.latest_pos());
+            let origin = ui.input(|input| input.pointer.press_origin());
+            if held.iter().any(|held| held.dragged())
+                && let (Some(origin), Some(pointer)) = (origin, pointer)
             {
                 ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
-                frame = frame.translate(pointer - origin);
-            } else if held.hovered() {
+                self.dragged = Some(pointer - origin);
+                frame = docked.translate(pointer - origin);
+                dragging = true;
+            } else if held.iter().any(|held| held.hovered()) {
                 ui.ctx().set_cursor_icon(CursorIcon::Grab);
             }
-            if held.drag_stopped()
-                && let Some(pointer) = pointer
+            // let go of: eased from where it was to its corner, the same
+            // one or another
+            if held.iter().any(|held| held.drag_stopped())
+                && let Some(by) = self.dragged.take()
             {
-                let to = Corner::at(pointer.x < view.center().x, pointer.y < view.center().y);
+                self.dropped = Some(room.translate(by));
+                let to = pointer.map_or(corner, |pointer| {
+                    Corner::at(pointer.x < view.center().x, pointer.y < view.center().y)
+                });
                 if to != corner {
-                    self.dropped = Some(room.translate(frame.min - pos2(x, y)));
                     change = Some(InsetChange::Corner(to));
                 }
             }
         }
 
-        let painter = ui.painter_at(view);
         let (back, text) = if ui.visuals().dark_mode {
             (Color32::from_black_alpha(200), Color32::WHITE)
         } else {
             (Color32::from_white_alpha(230), Color32::from_gray(20))
         };
         let edge = ui.visuals().widgets.noninteractive.bg_stroke;
-        if held.as_ref().is_some_and(|held| held.dragged()) {
+        if dragging {
             // the corners it can go to
             let stroke = Stroke::new(1.0, edge.color.gamma_multiply(0.8));
             for corner in
@@ -235,14 +281,21 @@ impl Inset {
         }
 
         // the label, and the buttons that change the size after it
-        let galley = painter.layout_no_wrap(label.into(), INSET_LABEL, text);
-        let boxed = label_box(galley.size());
-        // over the picture's left edge, or further left where it would stick out
-        let left = frame.left().min(view.right() - MARGIN - boxed.x).max(view.left() + 3.0);
-        let at = pos2(left, frame.top() - boxed.y - 8.0);
+        let at = label_at(frame);
         let behind = Rect::from_min_size(at, boxed).expand(3.0);
         painter.rect(behind, 3.0, back, edge, egui::StrokeKind::Outside);
-        painter.galley(pos2(at.x, at.y + (boxed.y - galley.size().y) / 2.0), galley, text);
+        // a grip, for dragging it by
+        for row in 0..3 {
+            for column in 0..2 {
+                let dot = pos2(
+                    at.x + 2.0 + 4.0 * column as f32,
+                    at.y + boxed.y / 2.0 + 4.0 * (row - 1) as f32,
+                );
+                painter.circle_filled(dot, 1.2, text.gamma_multiply(0.6));
+            }
+        }
+        let text_at = pos2(at.x + GRIP, at.y + (boxed.y - galley.size().y) / 2.0);
+        painter.galley_with_override_text_color(text_at, galley, text);
         let buttons = Rect::from_min_max(
             pos2(at.x + boxed.x - SIZE_BUTTONS, at.y),
             pos2(at.x + boxed.x, at.y + boxed.y),
@@ -252,8 +305,10 @@ impl Inset {
                 .max_rect(buttons)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
+        // square, rather than as tall as other buttons
         row.spacing_mut().item_spacing.x = 2.0;
         row.spacing_mut().button_padding = vec2(0.0, 0.0);
+        row.spacing_mut().interact_size = Vec2::splat(SIZE_BUTTON);
         let button = |text| egui::Button::new(text).min_size(vec2(SIZE_BUTTON, SIZE_BUTTON));
         let last = INSET_SIZES.len() - 1;
         if row.add_enabled(size > 0, button("−")).on_hover_text("Smaller").clicked() {
@@ -279,6 +334,8 @@ pub const INSET_SIZES: [f32; 5] = [0.20, 0.27, 0.34, 0.42, 0.50];
 const SIZE_BUTTON: f32 = 20.0;
 /// The width the two of them take after the label's text.
 const SIZE_BUTTONS: f32 = 2.0 * SIZE_BUTTON + 2.0;
+/// The width of the grip before the label's text.
+const GRIP: f32 = 12.0;
 /// Height the label takes over the small picture, besides its text.
 const LABEL_GAP: f32 = 12.0;
 /// The frame around the small picture, beyond it.
@@ -289,10 +346,10 @@ const SMALLEST_INSET: f32 = 64.0;
 /// The least share of its size the input keeps to make room for it.
 const LEAST_SHARE: f32 = 0.75;
 
-/// The size of the label over the small picture, for `text` of that size
-/// and the buttons after it.
+/// The size of the label over the small picture, for `text` of that size,
+/// the grip before it and the buttons after it.
 pub fn label_box(text: Vec2) -> Vec2 {
-    vec2(text.x + 6.0 + SIZE_BUTTONS, text.y.max(SIZE_BUTTON))
+    vec2(GRIP + text.x + 6.0 + SIZE_BUTTONS, text.y.max(SIZE_BUTTON))
 }
 
 /// Where the input and the result's small picture go in `view`. The small
@@ -500,11 +557,18 @@ const MAX_ZOOM: f32 = 64.0;
 /// takes.
 fn layout(rect: Rect, size: (u32, u32), zoom: &Zoom) -> (Rect, f32) {
     let (width, height) = (size.0.max(1) as f32, size.1.max(1) as f32);
-    let fit = ((rect.width() - 2.0 * MARGIN) / width).min((rect.height() - 2.0 * MARGIN) / height);
-    let scale = fit.max(1e-3) * zoom.level;
+    let scale = fit(rect, size) * zoom.level;
     let shown = vec2(width, height) * scale;
     let min = rect.center() - vec2(zoom.centre.x * shown.x, zoom.centre.y * shown.y);
     (Rect::from_min_size(min, shown), scale)
+}
+
+/// How many points an input pixel takes where a `size` picture fits
+/// `rect`.
+fn fit(rect: Rect, size: (u32, u32)) -> f32 {
+    let (width, height) = (size.0.max(1) as f32, size.1.max(1) as f32);
+    let fit = ((rect.width() - 2.0 * MARGIN) / width).min((rect.height() - 2.0 * MARGIN) / height);
+    fit.max(1e-3)
 }
 
 /// Screen pixels to a picture pixel from which pixels show as squares:
@@ -531,6 +595,7 @@ pub fn show(
 
     let side = picture.size.0.max(picture.size.1);
     let canvas = if picture.square { (side, side) } else { picture.size };
+    hold(zoom, (rect, fit_in), canvas);
     zoom_and_pan(ui, &response, fit_in, canvas, zoom);
     let (whole, scale) = layout(fit_in, canvas, zoom);
     widgets::checkerboard(&painter, whole, 8.0);
@@ -769,10 +834,33 @@ fn zoom_and_pan(
         let (shown, _) = layout(rect, size, zoom);
         zoom.centre -= response.drag_delta() / shown.size();
     }
-    if zoom.level <= 1.0 {
-        zoom.centre = vec2(0.5, 0.5);
+    cover(zoom, rect, size);
+}
+
+/// Zoomed in, keeps a `size` picture where it is on the screen when the
+/// part `fit_in` of the `view` it fits changes, as for the small picture
+/// beside it.
+fn hold(zoom: &mut Zoom, (view, fit_in): (Rect, Rect), size: (u32, u32)) {
+    if let Some((seen, before)) = zoom.anchor
+        && seen == view
+        && before != fit_in
+        && zoom.level > 1.0
+    {
+        let (shown, scale) = layout(before, size, zoom);
+        zoom.level = (scale / fit(fit_in, size)).clamp(1.0, MAX_ZOOM);
+        let (now, _) = layout(fit_in, size, zoom);
+        zoom.centre = (fit_in.center() - shown.min) / now.size();
     }
-    zoom.centre = zoom.centre.clamp(vec2(0.0, 0.0), vec2(1.0, 1.0));
+    zoom.anchor = Some((view, fit_in));
+}
+
+/// Pans a `size` picture so it covers `rect`, the part it fits, as far as
+/// it is large enough: zooming out ends where it fits.
+fn cover(zoom: &mut Zoom, rect: Rect, size: (u32, u32)) {
+    let (shown, _) = layout(rect, size, zoom);
+    let seen = (rect.size() - Vec2::splat(2.0 * MARGIN)) / shown.size();
+    let leeway = (Vec2::splat(0.5) - seen * 0.5).max(Vec2::ZERO);
+    zoom.centre = zoom.centre.clamp(Vec2::splat(0.5) - leeway, Vec2::splat(0.5) + leeway);
 }
 
 /// Edges `[left, top, right, bottom]` as numbers.
@@ -925,7 +1013,8 @@ mod tests {
             let room = Rect::from_min_size(view.max - vec2(100.0, 100.0), vec2(80.0, 80.0));
             let place = (Corner::BottomRight, *size, true);
             let red = || egui::ColorImage::filled([8, 8], Color32::RED);
-            *change = inset.show(ui, (view, room), place, 1, "Result", red).or(*change);
+            let room = (view, room, vec2(1.0, 1.0));
+            *change = inset.show(ui, room, place, 1, None, red).or(*change);
         };
         let mut harness = egui_kittest::Harness::new_ui_state(show, (Inset::default(), None, 2));
         harness.get_by_label("+").click();
@@ -936,24 +1025,56 @@ mod tests {
         harness.run();
         let disabled = |label| harness.get_by_label(label).accesskit_node().is_disabled();
         assert!(disabled("−") && !disabled("+"));
-        // dragged to the top left, it goes there
-        let picture = harness.get_by_label("+").rect().center() + vec2(0.0, 30.0);
+        // dragged to the top left, by a button on its label, which keeps
+        // the drag from what is under it, it goes there, from where it was
+        // let go of
+        let start = harness.get_by_label("+").rect().center();
         let button = |pos, pressed| egui::Event::PointerButton {
             pos,
             button: PointerButton::Primary,
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        harness.event(egui::Event::PointerMoved(picture));
-        harness.event(button(picture, true));
+        harness.event(egui::Event::PointerMoved(start));
+        harness.event(button(start, true));
         harness.run();
-        for to in [picture - vec2(40.0, 40.0), pos2(20.0, 20.0)] {
+        for to in [start - vec2(40.0, 40.0), pos2(20.0, 20.0)] {
             harness.event(egui::Event::PointerMoved(to));
             harness.run();
         }
         harness.event(button(pos2(20.0, 20.0), false));
         harness.run();
         assert_eq!(harness.state().1, Some(InsetChange::Corner(Corner::TopLeft)));
+        let dropped = harness.state().0.dropped.unwrap();
+        assert!(dropped.center().x < start.x - 100.0, "{dropped:?}");
+    }
+
+    #[test]
+    fn zooms_without_jumps() {
+        let view = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
+        let (beside, smaller) = (
+            Rect::from_min_size(pos2(0.0, 0.0), vec2(450.0, 400.0)),
+            Rect::from_min_size(pos2(0.0, 0.0), vec2(500.0, 400.0)),
+        );
+        let size = (300, 200);
+        // zoomed in, the picture stays put as the small picture's strip
+        // changes beside it
+        let mut zoom = Zoom { level: 2.0, centre: vec2(0.3, 0.6), anchor: None };
+        hold(&mut zoom, (view, beside), size);
+        let before = layout(beside, size, &zoom).0;
+        hold(&mut zoom, (view, smaller), size);
+        let after = layout(smaller, size, &zoom).0;
+        assert!((before.min - after.min).length() < 1e-3, "{before:?} {after:?}");
+        assert!((before.size() - after.size()).length() < 1e-3, "{before:?} {after:?}");
+        // zooming out, the picture comes to where it fits bit by bit
+        let mut last = zoom.centre;
+        for level in [1.8, 1.4, 1.1, 1.01, 1.0] {
+            zoom.level = level;
+            cover(&mut zoom, smaller, size);
+            assert!((zoom.centre - last).length() < 0.15, "{level}: {:?}", zoom.centre);
+            last = zoom.centre;
+        }
+        assert_eq!(zoom.centre, vec2(0.5, 0.5));
     }
 
     #[test]
@@ -962,14 +1083,22 @@ mod tests {
         let mut inset = Inset::default();
         let rect = |x: f32| Rect::from_min_size(pos2(x, 0.0), vec2(10.0, 10.0));
         let (before, after) = ((rect(0.0), rect(1.0)), (rect(2.0), rect(3.0)));
+        // bottom right, where the picture is at the end of its room both ways
         let at = (true, 2, Corner::BottomRight);
-        assert_eq!(inset.ease(&ctx, 1, at, before), before);
+        let with = |(input, room): (Rect, Rect)| (input, room, vec2(1.0, 1.0));
+        assert_eq!(inset.ease(&ctx, 1, at, before), with(before));
         // the window's size changing follows it at once
-        assert_eq!(inset.ease(&ctx, 1, at, after), after);
+        assert_eq!(inset.ease(&ctx, 1, at, after), with(after));
         // a size changing starts from what was drawn
-        assert_eq!(inset.ease(&ctx, 1, (true, 3, Corner::BottomRight), before), after);
+        assert_eq!(inset.ease(&ctx, 1, (true, 3, Corner::BottomRight), before), with(after));
+        // another corner, its place in its room too
+        let top_left = (true, 3, Corner::TopLeft);
+        assert_eq!(inset.ease(&ctx, 1, top_left, before), with(after));
+        // let go of where it is, from there
+        inset.dropped = Some(rect(9.0));
+        assert_eq!(inset.ease(&ctx, 1, top_left, before).1, rect(9.0));
         // another item is drawn as it is
-        assert_eq!(inset.ease(&ctx, 2, at, before), before);
+        assert_eq!(inset.ease(&ctx, 2, at, before), with(before));
     }
 
     #[test]
