@@ -55,7 +55,7 @@ pub(crate) fn video(dir: &Path, size: &str) -> Option<PathBuf> {
     video_of(dir, size, 1)
 }
 
-/// A test video of `size` lasting `seconds`.
+/// A test video of `size` lasting `seconds`, or `None` without ffmpeg.
 pub(crate) fn video_of(dir: &Path, size: &str, seconds: u32) -> Option<PathBuf> {
     let video = dir.join("clip.mp4");
     let made = std::process::Command::new("ffmpeg")
@@ -71,9 +71,15 @@ pub(crate) fn video_of(dir: &Path, size: &str, seconds: u32) -> Option<PathBuf> 
         ])
         .arg(&video)
         .status();
-    if !made.is_ok_and(|status| status.success()) {
-        eprintln!("skipped: needs ffmpeg on PATH");
-        return None;
+    // without ffmpeg the test is skipped; ffmpeg failing is a broken test
+    match made {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("skipped: needs ffmpeg on PATH");
+            None
+        }
+        made => {
+            assert!(made.expect("ffmpeg runs").success(), "ffmpeg could not make the video");
+            Some(video)
+        }
     }
-    Some(video)
 }
