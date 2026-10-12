@@ -2203,8 +2203,13 @@ fn drawable_in(
 
 /// What to say of characters no font has, if there are any.
 fn missing_note(missing: &[char]) -> Option<String> {
-    let mut codes: Vec<String> = missing.iter().map(|c| format!("U+{:04X}", *c as u32)).collect();
-    codes.dedup();
+    // each once, in the order they come
+    let mut codes: Vec<String> = Vec::new();
+    for code in missing.iter().map(|c| format!("U+{:04X}", *c as u32)) {
+        if !codes.contains(&code) {
+            codes.push(code);
+        }
+    }
     let (them, are, their) = match codes.len() {
         0 => return None,
         1 => ("it", "is", "its"),
