@@ -396,25 +396,33 @@ fn load(
             cancel.check()?;
             bytes.push(read(file)?);
         }
-        let animation =
-            frames::sequence(bytes.iter().map(Vec::as_slice), options.frame_duration()?, &limits)
-                .map_err(decode_error(&files[0]))?;
-        return Ok((animation, Vec::new()));
+        // a file can't be stopped part of the way, but the rest are left
+        let images = bytes.iter().map(Vec::as_slice).take_while(|_| !cancel.is_cancelled());
+        let animation = frames::sequence(images, options.frame_duration()?, &limits);
+        cancel.check()?;
+        return Ok((animation.map_err(decode_error(&files[0]))?, Vec::new()));
     }
     let [input] = inputs else {
         return Err(Error::InvalidOptions("nothing to convert".into()));
     };
+    cancel.check()?;
     let bytes = read(input)?;
     cancel.check()?;
-    let tags = match frames::Format::detect(&bytes) {
-        Some(frames::Format::Aseprite) => frames::Sprite::read_with(&bytes, &limits)
-            .map(|sprite| sprite.tags().iter().map(|tag| tag.name.clone()).collect())
-            .unwrap_or_default(),
-        _ => Vec::new(),
+    let sheet = options.sheet_layout()?;
+    // a sheet is one picture, whatever tag is asked for
+    let tag = options.tag.clone().filter(|_| sheet.is_none());
+    // an Aseprite file is parsed once, for its tags and its frames
+    let (decoded, tags) = match frames::Format::detect(&bytes) {
+        Some(frames::Format::Aseprite) => {
+            let sprite = frames::Sprite::read_with(&bytes, &limits).map_err(decode_error(input))?;
+            let tags = sprite.tags().iter().map(|tag| tag.name.clone()).collect();
+            (sprite.animation(tag.as_deref()), tags)
+        }
+        _ => (frames::decode(&bytes, &DecodeOptions { tag, limits }), Vec::new()),
     };
-    let animation = match options.sheet_layout()? {
-        Some(sheet) => frames::sprite_sheet(&bytes, &sheet, &limits),
-        None => frames::decode(&bytes, &DecodeOptions { tag: options.tag.clone(), limits }),
+    let animation = match sheet {
+        Some(sheet) => decoded.and_then(|image| frames::split_sheet(&image, &sheet, &limits)),
+        None => decoded,
     }
     .map_err(decode_error(input))?;
     Ok((animation, tags))
@@ -576,6 +584,38 @@ pub fn convert(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_an_aseprite_file_for_its_tags_frames_and_sheet() {
+        let dir = tempfile::tempdir().unwrap();
+        let ase = tgradish_corpus::files().into_iter().find(|file| file.name == "walker_2x.ase");
+        let ase = ase.unwrap();
+        let path = dir.path().join(&ase.name);
+        std::fs::write(&path, &ase.bytes).unwrap();
+        let read = |options: TgsOptions| {
+            let (animation, tags) =
+                load(std::slice::from_ref(&path), false, &options, &CancelToken::new()).unwrap();
+            (animation.width(), animation.frames().len(), tags)
+        };
+        let (width, frames, tags) = read(TgsOptions::default());
+        assert_eq!((tags, frames), (vec!["idle".to_string()], ase.sprite.frames.len()));
+        let idle = TgsOptions { tag: Some("idle".into()), ..TgsOptions::default() };
+        assert_eq!(read(idle).1, 2);
+        // a sheet is the first frame, whatever the tag
+        let sheet = TgsOptions {
+            tag: Some("idle".into()),
+            sheet: Some("2x1".into()),
+            ..TgsOptions::default()
+        };
+        assert_eq!(read(sheet).0, width / 2);
+
+        // stopped between the files of a sequence
+        let cancel = CancelToken::new();
+        cancel.cancel();
+        let both = [path.clone(), path.clone()];
+        let stopped = load(&both, true, &TgsOptions::default(), &cancel);
+        assert!(matches!(stopped, Err(Error::Cancelled)));
+    }
 
     #[test]
     fn refuses_to_overwrite_inputs() {
