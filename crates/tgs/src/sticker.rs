@@ -330,20 +330,44 @@ pub fn make(
 
 /// `json` packed by zopfli, given up on when `cancelled` says so. zopfli
 /// can't be stopped, so with the `threads` feature it packs in a thread of
-/// its own, left to finish alone.
+/// its own, left to finish alone; at most [`PACKING`] of them run at once,
+/// so stopping and starting again doesn't pile them up.
 fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
+    let check = || if cancelled() { Err(crate::Error::Cancelled) } else { Ok(()) };
+    check()?;
     let iterations = zopfli_iterations(effort);
     #[cfg(feature = "threads")]
     let tgs = {
+        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::mpsc::{RecvTimeoutError, channel};
+        use std::time::Duration;
+        static RUNNING: AtomicUsize = AtomicUsize::new(0);
+        /// Counts a thread as running until it ends, however it ends.
+        struct Running;
+        impl Drop for Running {
+            fn drop(&mut self) {
+                RUNNING.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+        while RUNNING
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |running| {
+                (running < PACKING).then_some(running + 1)
+            })
+            .is_err()
+        {
+            check()?;
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let running = Running;
         let (send, receive) = channel();
         let json = json.as_bytes().to_vec();
-        std::thread::spawn(move || send.send(file::pack(&json, iterations)));
+        std::thread::spawn(move || {
+            let _running = running;
+            send.send(file::pack(&json, iterations))
+        });
         loop {
-            if cancelled() {
-                return Err(crate::Error::Cancelled);
-            }
-            match receive.recv_timeout(std::time::Duration::from_millis(50)) {
+            check()?;
+            match receive.recv_timeout(Duration::from_millis(50)) {
                 Ok(tgs) => break tgs,
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => panic!("zopfli panicked"),
@@ -352,8 +376,14 @@ fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
     };
     #[cfg(not(feature = "threads"))]
     let tgs = file::pack(json.as_bytes(), iterations);
-    if cancelled() { Err(crate::Error::Cancelled) } else { Ok(tgs) }
+    check()?;
+    Ok(tgs)
 }
+
+/// How many threads zopfli packs in at once, at most: one at work, and one
+/// left to finish after a stop.
+#[cfg(feature = "threads")]
+const PACKING: usize = 2;
 
 /// `f` of each item, in threads of their own with the `threads` feature.
 fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
