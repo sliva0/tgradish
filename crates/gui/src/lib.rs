@@ -32,7 +32,7 @@ use tgradish_core::config::{Config, ResultPreview};
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::presets::{Format, Presets};
-use tgradish_core::{convert, paths, still, telegram, tgs};
+use tgradish_core::{convert, inputs, paths, still, telegram, tgs};
 
 use crate::canvas::{Cropping, Inset, InsetChange, Picture, Screen};
 use crate::item::{Framing, Item, Kind, Made, Show, Zoom};
@@ -891,10 +891,7 @@ impl App {
             .clicked()
         {
             if let Some(files) = rfd::FileDialog::new()
-                .add_filter(
-                    "images",
-                    &["png", "gif", "webp", "jpg", "jpeg", "bmp", "ase", "aseprite"],
-                )
+                .add_filter("images", &[inputs::IMAGES, inputs::ASEPRITE].concat())
                 .pick_files()
             {
                 self.add_frames(files);

@@ -71,13 +71,6 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
     Ok(())
 }
 
-fn guess_target(info: &WebmInfo) -> Target {
-    match &info.video {
-        Some(video) if video.width == 100 && video.height == 100 => Target::Emoji,
-        _ => Target::Sticker,
-    }
-}
-
 fn print_image(
     path: &std::path::Path,
     info: &still::Info,
@@ -135,10 +128,7 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
     }
     let header = info.header_duration.map_or("none".into(), ui::seconds);
     let content = info.content_duration.map_or("unknown".into(), ui::seconds);
-    let spoofed = match (info.header_duration, info.content_duration) {
-        (Some(header), Some(content)) if content - header > 0.1 => " (spoofed)",
-        _ => "",
-    };
+    let spoofed = if info.spoofed() { " (spoofed)" } else { "" };
     let duration = format!("{header} in header, {content} of video{spoofed}");
     println!("{}", ui::field("duration", duration));
     if let Some(title) = &info.title {
@@ -232,7 +222,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
             }
             Err(err) => return Err(err).with_context(|| format!("{}", path.display())),
         };
-        let target = args.target.map_or_else(|| guess_target(&info), Into::into);
+        let target = args.target.map_or_else(|| info.target(), Into::into);
         if ctx.global.json {
             #[derive(serde::Serialize)]
             struct Line<'a> {

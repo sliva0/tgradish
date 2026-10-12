@@ -87,6 +87,28 @@ pub struct WebmInfo {
 }
 
 impl WebmInfo {
+    /// Whether the header says it is shorter than its frames last, as
+    /// spoofing makes it. Unspoofed, the two differ by less than a frame,
+    /// as the header is rounded and the last frame's length guessed.
+    pub fn spoofed(&self) -> bool {
+        matches!(
+            (self.header_duration, self.content_duration),
+            (Some(header), Some(content)) if content > header + 0.05
+        )
+    }
+
+    /// What it would be: emoji are the only video stickers of their box's
+    /// size, square 100 px.
+    pub fn target(&self) -> crate::telegram::Target {
+        use crate::telegram::Target;
+        let (width, height) = Target::Emoji.box_size();
+        let emoji = (u64::from(width), u64::from(height));
+        match &self.video {
+            Some(video) if (video.width, video.height) == emoji => Target::Emoji,
+            _ => Target::Sticker,
+        }
+    }
+
     pub fn fps(&self) -> Option<f64> {
         if let Some(ns) = self.video.as_ref().and_then(|v| v.default_duration_ns)
             && ns > 0

@@ -13,6 +13,7 @@ pub mod events;
 pub mod ffmpeg;
 pub mod fit;
 mod fsutil;
+pub mod inputs;
 pub mod licenses;
 #[cfg(feature = "linked")]
 mod linked;
