@@ -131,10 +131,10 @@ const ZOPFLI_SHARE: f64 = 0.93;
 /// When the real size misses an estimate, the next target is this much
 /// lower.
 const RETARGET: f64 = 0.96;
-/// Estimates are measured against the real encoder only for art at most
-/// this many times as large as the limit. Farther over it, fitting shrinks
-/// the art a lot first, the packed result corrects a missed estimate
-/// anyway, and the real encoder's search can take minutes.
+/// Estimates are measured against the real encoder once fitting comes
+/// within this many times the limit, on the art as it is by then: farther
+/// over it, fitting shrinks the art a lot anyway, and the real encoder's
+/// search of all of it can take minutes.
 const CALIBRATE_WITHIN: f64 = 2.0;
 
 /// Asked between steps: when it says yes, making a sticker stops. It may
@@ -170,25 +170,57 @@ fn within_limits(scene: &Scene, json: &str) -> bool {
     layout::cost(scene) <= telegram::MAX_COST && json.len() <= MAX_RAW_JSON
 }
 
-/// Estimates what a `.tgs` of `anim` comes to: quickly encoded, then
-/// scaled by `calibration`. A cost near the server's limit, or JSON near
-/// Telegram Desktop's, counts as that share of `max_bytes` when that is
-/// more, so reductions that shrink either count as progress even before
-/// it fits. `None` when it can't be made at all, or was cancelled.
-fn estimate(
+/// What a quick encode of an animation comes to before it is scaled to
+/// the real encoder: its size packed by gzip, and its share of the
+/// server's cost limit or Telegram Desktop's JSON limit, whichever is more.
+#[derive(Debug, Clone, Copy)]
+struct Quick {
+    packed: usize,
+    share: f64,
+}
+
+impl Quick {
+    /// The estimated size of the `.tgs`: the packed size scaled by
+    /// `calibration`, or the share of `max_bytes` when that is more, so
+    /// reductions that shrink the cost or the JSON count as progress even
+    /// before it fits.
+    fn size(self, calibration: f64, max_bytes: usize) -> usize {
+        (self.packed as f64 * calibration).max(self.share * max_bytes as f64) as usize
+    }
+}
+
+/// Encodes `anim` quickly: `None` when it can't be made at all.
+fn quick(anim: &PixelAnim, options: &Options, cancelled: Cancelled) -> Result<Option<Quick>> {
+    let fast = Settings { effort: Effort::Fast, ..Settings::default() };
+    match render(anim, &fast, options, cancelled) {
+        Ok((scene, json)) => Ok(Some(Quick {
+            packed: file::quick_size(json.as_bytes()),
+            share: f64::max(
+                layout::cost(&scene) as f64 / telegram::MAX_COST as f64,
+                json.len() as f64 / MAX_RAW_JSON as f64,
+            ),
+        })),
+        Err(crate::Error::Cancelled) => Err(crate::Error::Cancelled),
+        Err(_) => Ok(None),
+    }
+}
+
+/// What the real encoder and zopfli make of `anim` against its `quick`
+/// encode: the factor that scales quick sizes to real ones.
+fn calibrate(
     anim: &PixelAnim,
+    quick: Quick,
+    settings: &Settings,
     options: &Options,
-    calibration: f64,
     cancelled: Cancelled,
-) -> Option<usize> {
-    let quick = Settings { effort: Effort::Fast, ..Settings::default() };
-    let (scene, json) = render(anim, &quick, options, cancelled).ok()?;
-    let packed = file::quick_size(json.as_bytes()) as f64 * calibration;
-    let share = f64::max(
-        layout::cost(&scene) as f64 / telegram::MAX_COST as f64,
-        json.len() as f64 / MAX_RAW_JSON as f64,
-    );
-    Some(packed.max(share * options.max_bytes as f64) as usize)
+) -> Result<f64> {
+    match render(anim, settings, options, cancelled) {
+        Ok((_, real)) => {
+            Ok(ZOPFLI_SHARE * file::quick_size(real.as_bytes()) as f64 / quick.packed.max(1) as f64)
+        }
+        Err(crate::Error::Cancelled) => Err(crate::Error::Cancelled),
+        Err(_) => Ok(ZOPFLI_SHARE),
+    }
 }
 
 /// Makes a sticker of `animation`, reporting `progress`. `cancelled` is
@@ -205,41 +237,16 @@ pub fn make(
     progress(Progress::Normalised { report: Box::new(report.clone()) });
     let settings = Settings { effort: options.effort, ..Settings::default() };
 
-    // estimates are quick encodes, scaled to what the real encoder and
-    // zopfli make of the original, when that is near the limit
-    let calibration = {
-        let quick = Settings { effort: Effort::Fast, ..Settings::default() };
-        let fast = render(&original, &quick, options, cancelled)
-            .map(|(_, json)| file::quick_size(json.as_bytes()));
-        check()?;
-        let near =
-            |fast: usize| fast as f64 * ZOPFLI_SHARE <= options.max_bytes as f64 * CALIBRATE_WITHIN;
-        match fast {
-            Ok(fast) if near(fast) => match render(&original, &settings, options, cancelled) {
-                Ok((_, real)) => {
-                    ZOPFLI_SHARE * file::quick_size(real.as_bytes()) as f64 / fast.max(1) as f64
-                }
-                Err(_) => ZOPFLI_SHARE,
-            },
-            _ => ZOPFLI_SHARE,
-        }
-    };
-    check()?;
-
+    // what scales quick estimates to the real encoder's sizes, measured
+    // once fitting comes near the limit
+    let mut calibration = None;
     let mut current = original.clone();
     let mut steps: Vec<Step> = Vec::new();
     let mut target = options.max_bytes;
     loop {
         if options.fit == Fit::Auto {
-            current = fit(
-                &original,
-                current,
-                &mut steps,
-                (target, calibration),
-                options,
-                progress,
-                cancelled,
-            )?;
+            let fitting = Fitting { target, settings: &settings, options, cancelled };
+            current = fit(&original, current, &mut steps, &mut calibration, &fitting, progress)?;
         }
         check()?;
         progress(Progress::Packing);
@@ -249,12 +256,13 @@ pub fn make(
         let fits = tgs.len() <= options.max_bytes && within_limits(&scene, &json);
         // the estimate was off; aim lower and reduce some more
         if !fits && options.fit == Fit::Auto && target > options.max_bytes / 4 {
-            let reachable = estimate(&current, options, calibration, cancelled).is_some();
+            let reachable = quick(&current, options, cancelled)?.is_some();
             if reachable {
                 target = ((target as f64) * RETARGET) as usize;
                 continue;
             }
         }
+        check()?;
         let (_, issues) =
             check::check(json.as_bytes(), Some(tgs.len())).expect("the writer's JSON parses");
         let groups = scene.layers.iter().map(|layer| layer.groups.len()).sum();
@@ -302,22 +310,56 @@ fn zopfli_iterations(effort: Effort) -> u64 {
     }
 }
 
-/// Reduces `current` until its estimate is at most `target`: each round
+/// A reduced animation, its quick encode, its estimated size and its
+/// error.
+type Candidate = (PixelAnim, Option<Quick>, usize, f64);
+
+/// What fitting aims at and works with.
+struct Fitting<'a> {
+    /// The estimate to get to.
+    target: usize,
+    /// The real encoder's, for calibrating.
+    settings: &'a Settings,
+    options: &'a Options,
+    cancelled: Cancelled<'a>,
+}
+
+/// Reduces `current` until its estimate is at most the target: each round
 /// takes the reduction that saves the most bytes for the least change,
 /// among those the compromise puts first while any of them help, then the
-/// last one is weakened as far as it still fits.
+/// last one is weakened as far as it still fits. Estimates are scaled by
+/// `calibration`, which is measured on the art as it is once it comes near
+/// the target.
 fn fit(
     original: &PixelAnim,
     mut current: PixelAnim,
     steps: &mut Vec<Step>,
-    (target, calibration): (usize, f64),
-    options: &Options,
+    calibration: &mut Option<f64>,
+    fitting: &Fitting,
     progress: &mut dyn FnMut(Progress),
-    cancelled: Cancelled,
 ) -> Result<PixelAnim> {
-    let size_of =
-        |anim: &PixelAnim| estimate(anim, options, calibration, cancelled).unwrap_or(usize::MAX);
-    let mut size = size_of(&current);
+    let Fitting { target, settings, options, cancelled } = *fitting;
+    let size_of = |quick: Option<Quick>, calibration: Option<f64>| {
+        quick.map_or(usize::MAX, |quick| {
+            quick.size(calibration.unwrap_or(ZOPFLI_SHARE), options.max_bytes)
+        })
+    };
+    // measures the calibration once the art comes near the target
+    let near =
+        |quick: Option<Quick>| size_of(quick, None) as f64 <= target as f64 * CALIBRATE_WITHIN;
+    let measure = |anim: &PixelAnim, quick: Option<Quick>| -> Result<Option<f64>> {
+        match quick {
+            Some(quick) if near(Some(quick)) => {
+                calibrate(anim, quick, settings, options, cancelled).map(Some)
+            }
+            _ => Ok(None),
+        }
+    };
+    let mut quick_now = quick(&current, options, cancelled)?;
+    if calibration.is_none() {
+        *calibration = measure(&current, quick_now)?;
+    }
+    let mut size = size_of(quick_now, *calibration);
     if size <= target {
         return Ok(current);
     }
@@ -362,33 +404,45 @@ fn fit(
         let kinds = if first.is_empty() { open } else { first };
         // each kind's candidate, its estimate and its error, or `None` when
         // it doesn't help at this strength
-        let tries = parallel(&kinds, |&k| -> Result<Option<(PixelAnim, usize, f64)>> {
+        let now = *calibration;
+        let tries = parallel(&kinds, |&k| -> Result<Option<Candidate>> {
             let candidate = ladders[k][next[k]].apply(&current)?;
-            let candidate_size = size_of(&candidate);
+            let candidate_quick = quick(&candidate, options, cancelled)?;
+            let candidate_size = size_of(candidate_quick, now);
             if candidate == current || candidate_size >= size {
                 return Ok(None);
             }
             let candidate_error = error(original, &candidate);
-            Ok(Some((candidate, candidate_size, candidate_error)))
+            Ok(Some((candidate, candidate_quick, candidate_size, candidate_error)))
         });
-        // (value, kind, candidate, size, error)
-        let mut best: Option<(f64, usize, PixelAnim, usize, f64)> = None;
+        // (value, kind, candidate)
+        let mut best: Option<(f64, usize, Candidate)> = None;
         for (&k, tried) in kinds.iter().zip(tries) {
-            let Some((candidate, candidate_size, candidate_error)) = tried? else {
+            let Some(candidate) = tried? else {
                 // no help at this strength; the next round tries stronger
                 next[k] += 1;
                 continue;
             };
-            let value = (size - candidate_size) as f64 / (candidate_error - error_now).max(1e-9);
+            let value = (size - candidate.2) as f64 / (candidate.3 - error_now).max(1e-9);
             if best.as_ref().is_none_or(|b| value > b.0) {
-                best = Some((value, k, candidate, candidate_size, candidate_error));
+                best = Some((value, k, candidate));
             }
         }
-        let Some((_, k, candidate, candidate_size, candidate_error)) = best else { continue };
+        let Some((_, k, (candidate, candidate_quick, candidate_size, candidate_error))) = best
+        else {
+            continue;
+        };
         before_last = Some((current, k));
         current = candidate;
+        quick_now = candidate_quick;
         size = candidate_size;
         error_now = candidate_error;
+        // near the target now: sizes measured against the real encoder
+        // decide how much further to go
+        if calibration.is_none() {
+            *calibration = measure(&current, quick_now)?;
+            size = size_of(quick_now, *calibration);
+        }
         let step = Step { reduction: ladders[k][next[k]], bytes: size, error: error_now };
         progress(Progress::Reduced { step: step.clone() });
         steps.push(step);
@@ -407,7 +461,7 @@ fn fit(
             let share = (low + high) / 2.0;
             let Some(reduction) = last.between(weaker.as_ref(), share) else { break };
             let candidate = reduction.apply(&previous)?;
-            let candidate_size = size_of(&candidate);
+            let candidate_size = size_of(quick(&candidate, options, cancelled)?, *calibration);
             if candidate_size <= target {
                 high = share;
                 let candidate_error = error(original, &candidate);
@@ -446,6 +500,12 @@ mod tests {
 
     use super::*;
 
+    /// A quick estimate scaled by `calibration`.
+    fn estimate(anim: &PixelAnim, options: &Options, calibration: f64) -> Option<usize> {
+        let quick = quick(anim, options, &|| false).unwrap();
+        quick.map(|quick| quick.size(calibration, options.max_bytes))
+    }
+
     #[test]
     fn stops_inside_an_encode() {
         let walker = tgradish_corpus::files().into_iter().find(|f| f.name == "walker.gif").unwrap();
@@ -460,6 +520,16 @@ mod tests {
         let cancelled = || asked.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 3;
         let made = make(&input, &Options::default(), &mut |_| {}, &cancelled);
         assert!(matches!(made, Err(crate::Error::Cancelled)), "{:?}", made.map(|s| s.bytes));
+        // stopped while packing, with nothing left to encode: no sticker
+        let packing = std::sync::atomic::AtomicBool::new(false);
+        let stopped_packing = || packing.load(std::sync::atomic::Ordering::Relaxed);
+        let mut progress = |event: Progress| {
+            if matches!(event, Progress::Packing) {
+                packing.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        };
+        let made = make(&input, &Options::default(), &mut progress, &stopped_packing);
+        assert!(matches!(made, Err(crate::Error::Cancelled)), "{:?}", made.map(|s| s.bytes));
     }
 
     #[test]
@@ -472,11 +542,11 @@ mod tests {
         .unwrap();
         let (anim, _) = normalise(&input, &normalise::Options::default()).unwrap();
         let named = |bytes: usize| Options { name: Some("x".repeat(bytes)), ..Options::default() };
-        let small = estimate(&anim, &named(0), 1.0, &|| false).unwrap();
+        let small = estimate(&anim, &named(0), 1.0).unwrap();
         assert!(small < 1000, "{small}");
         // the name packs to almost nothing, but the JSON is too large
-        let over = estimate(&anim, &named(MAX_RAW_JSON + 100_000), 1.0, &|| false).unwrap();
-        let further = estimate(&anim, &named(MAX_RAW_JSON + 200_000), 1.0, &|| false).unwrap();
+        let over = estimate(&anim, &named(MAX_RAW_JSON + 100_000), 1.0).unwrap();
+        let further = estimate(&anim, &named(MAX_RAW_JSON + 200_000), 1.0).unwrap();
         assert!(telegram::MAX_BYTES < over && over < further, "{over} {further}");
     }
 
@@ -504,12 +574,19 @@ mod tests {
         let input = Animation::new(SIDE, SIDE, frames).unwrap();
         let normalise_options = normalise::Options { keep_canvas: true, ..Default::default() };
         let (anim, _) = normalise(&input, &normalise_options).unwrap();
-        let lossless = estimate(&anim, &Options::default(), 1.0, &|| false).unwrap();
+        let lossless = estimate(&anim, &Options::default(), 1.0).unwrap();
         let fitted = |compromise: Compromise| {
             let options = Options { compromise, ..Options::default() };
             let mut steps = Vec::new();
-            let target = (lossless / 20, 1.0);
-            fit(&anim, anim.clone(), &mut steps, target, &options, &mut |_| {}, &|| false).unwrap();
+            let settings = Settings::default();
+            let fitting = Fitting {
+                target: lossless / 20,
+                settings: &settings,
+                options: &options,
+                cancelled: &|| false,
+            };
+            let mut calibration = Some(1.0);
+            fit(&anim, anim.clone(), &mut steps, &mut calibration, &fitting, &mut |_| {}).unwrap();
             assert!(!steps.is_empty());
             steps.iter().map(|step| step.reduction.kind().motion()).collect::<Vec<bool>>()
         };
@@ -554,6 +631,6 @@ mod tests {
         assert!(layout::cost(&scene) > telegram::MAX_COST, "{}", layout::cost(&scene));
         assert!(!within_limits(&scene, &json));
         // with no weight on the packed size, what is left is the cost
-        assert!(estimate(&anim, &options, 0.0, &|| false).unwrap() > telegram::MAX_BYTES);
+        assert!(estimate(&anim, &options, 0.0).unwrap() > telegram::MAX_BYTES);
     }
 }

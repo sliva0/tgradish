@@ -543,6 +543,10 @@ pub fn convert(
         err => err.into(),
     })?;
     let lossy = sticker.lossy();
+    // stopped as the last of it was packed: nothing is written
+    if cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
     crate::fsutil::write_file(&request.output, &sticker.tgs, request.overwrite).map_err(|err| {
         match err.kind() {
             std::io::ErrorKind::AlreadyExists => Error::OutputExists(request.output.clone()),

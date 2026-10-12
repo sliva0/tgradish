@@ -179,3 +179,19 @@ fn fits_large_animations() {
     assert!(fitted.fits(), "{:?}", fitted.issues);
     assert!(fitted.bytes <= 65536 && fitted.lossy());
 }
+
+#[test]
+fn fits_close_to_the_limit() {
+    use tgradish_tgs::sticker::{Options as StickerOptions, make};
+
+    // a limit just past where estimates are first measured against the
+    // real encoder: fitting measures them as it nears it, and stops close
+    let file = corpus().into_iter().find(|file| file.sprite.name == "dance").unwrap();
+    for max_bytes in [14_500, 9_000] {
+        let options = StickerOptions { max_bytes, ..StickerOptions::default() };
+        let made = make(&input(&file), &options, &mut |_| {}, &|| false).unwrap();
+        eprintln!("{max_bytes}: {} bytes, {:?}", made.bytes, made.steps);
+        assert!(made.bytes <= max_bytes, "{} bytes", made.bytes);
+        assert!(made.bytes as f64 > max_bytes as f64 * 0.9, "{} bytes", made.bytes);
+    }
+}
