@@ -1195,6 +1195,7 @@ impl App {
                                 ui.add_space(6.0);
                                 settings::make(ui, item, &context);
                                 summary(ui, item, queued);
+                                details(ui, item);
                             });
                     },
                 );
@@ -1217,7 +1218,6 @@ impl App {
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 settings::show(ui, item, &context);
-                details(ui, item);
                 ui.add_space(12.0);
             });
         });
@@ -1704,13 +1704,9 @@ fn about(ui: &mut egui::Ui) {
                         widgets::note(ui, blocks[0].trim());
                         for block in &blocks[1..] {
                             let (head, body) = block.split_once("\n\n").unwrap_or((block, ""));
-                            let crates = head.lines().count().saturating_sub(1);
                             let name =
                                 head.lines().next().unwrap_or("").trim_end_matches(", used by:");
-                            let title = format!(
-                                "{name}, {crates} crate{}",
-                                if crates == 1 { "" } else { "s" }
-                            );
+                            let title = licence_title(name, head);
                             egui::CollapsingHeader::new(title).id_salt(("crates", *block)).show(
                                 ui,
                                 |ui| {
@@ -1733,6 +1729,21 @@ fn about(ui: &mut egui::Ui) {
             );
         }
     });
+}
+
+/// A licence's section named after the crates it covers, as many as
+/// read at a glance: the crates are the lines after the first of `head`,
+/// each a name and a version.
+fn licence_title(licence: &str, head: &str) -> String {
+    let crates: Vec<&str> =
+        head.lines().skip(1).filter_map(|line| line.split_whitespace().next()).collect();
+    match crates.as_slice() {
+        [] => licence.to_owned(),
+        [_] | [_, _] | [_, _, _] => format!("{licence}: {}", crates.join(", ")),
+        [first @ .., _] => {
+            format!("{licence}: {} and {} more", first[..3].join(", "), crates.len() - 3)
+        }
+    }
 }
 
 /// `text` small and monospaced, as licences are, its web addresses links.
@@ -2461,7 +2472,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     }
 }
 
-/// How the last result was made, under the settings.
+/// How the last result was made, under its size beside the preview.
 fn details(ui: &mut egui::Ui, item: &Item) {
     let Some(made) = &item.made else { return };
     let Status::Done(done) = &made.job.status else { return };
@@ -2488,7 +2499,7 @@ fn details(ui: &mut egui::Ui, item: &Item) {
             widgets::note(ui, format!("  • {}, about {} after", reduction(&step.reduction), widgets::kib(step.bytes as u64)));
         }
         if !progress.attempts.is_empty() {
-            egui::Grid::new(("attempts", item.id)).num_columns(5).spacing([16.0, 4.0]).striped(true).show(ui, |ui| {
+            egui::Grid::new(("attempts", item.id)).num_columns(5).spacing([10.0, 4.0]).striped(true).show(ui, |ui| {
                 for header in ["Encode", "frame rate", "rate", "size", "likeness"] {
                     ui.label(RichText::new(header).weak());
                 }
@@ -3268,6 +3279,14 @@ mod tests {
             browsed.iter().any(|url| url == "https://github.com/sliva0/tgradish"),
             "{browsed:?}"
         );
+    }
+
+    #[test]
+    fn names_licences_after_their_crates() {
+        let head = "MIT License, used by:\n  anyhow 1.0.104\n  arboard 3.6.1";
+        assert_eq!(licence_title("MIT License", head), "MIT License: anyhow, arboard");
+        let many = "MIT License, used by:\n  a 1\n  b 1\n  c 1\n  d 1\n  e 1";
+        assert_eq!(licence_title("MIT License", many), "MIT License: a, b, c and 2 more");
     }
 
     #[test]
