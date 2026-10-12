@@ -62,15 +62,16 @@ impl Drops {
         let seat: WlSeat = globals.bind(&handle, 1..=1, ()).ok()?;
         let device = manager.get_data_device(&seat, &handle, ());
         let (sender, receiver) = channel();
+        let stop = Arc::new(AtomicBool::new(false));
         let mut state = State {
             connection,
             sender,
             ctx: ctx.clone(),
             types: HashMap::new(),
             over: None,
+            stop: stop.clone(),
             _device: device,
         };
-        let stop = Arc::new(AtomicBool::new(false));
         let stopped = stop.clone();
         let worker = std::thread::Builder::new()
             .name("drag and drop".into())
@@ -100,6 +101,10 @@ impl Drop for Drops {
 
 /// How long the worker waits for events before looking whether to stop.
 const WAKE: rustix::time::Timespec = rustix::time::Timespec { tv_sec: 0, tv_nsec: 100_000_000 };
+
+/// How many [`WAKE`]s a drop's source may stay silent before reading its
+/// files is given up: 5 s, much longer than any file manager takes.
+const SILENCE: u32 = 50;
 
 /// Dispatches events until told to stop or the connection breaks. Waits
 /// with a timeout rather than blocking, so it notices the stop.
@@ -133,6 +138,8 @@ struct State {
     types: HashMap<ObjectId, Vec<String>>,
     /// The offer of the drag over the window, if it has files.
     over: Option<WlDataOffer>,
+    /// Set when the window closes, which reading a drop gives up for.
+    stop: Arc<AtomicBool>,
     _device: WlDataDevice,
 }
 
@@ -147,14 +154,38 @@ impl State {
         offer.destroy();
     }
 
-    /// Reads the dropped files' URIs; the drag's source writes them.
+    /// Reads the dropped files' URIs, which the drag's source writes and
+    /// then closes the pipe. A source that never closes it would hold the
+    /// window from closing, which waits for this thread: reading gives up
+    /// when the window closes, or after [`SILENCE`] without a byte.
     fn receive(&self, offer: &WlDataOffer) -> Option<Vec<PathBuf>> {
+        use rustix::event::{PollFd, PollFlags};
         let (mut reader, writer) = std::io::pipe().ok()?;
         offer.receive(URI_LIST.into(), writer.as_fd());
         drop(writer);
         self.connection.flush().ok()?;
-        let mut text = String::new();
-        reader.read_to_string(&mut text).ok()?;
+        let (mut text, mut buffer, mut quiet) = (Vec::new(), [0; 4096], 0);
+        loop {
+            if self.stop.load(Ordering::Relaxed) || quiet >= SILENCE {
+                return None;
+            }
+            let mut fds = [PollFd::new(&reader, PollFlags::IN)];
+            match rustix::event::poll(&mut fds, Some(&WAKE)) {
+                Ok(0) => quiet += 1,
+                Ok(_) => match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(read) => {
+                        text.extend_from_slice(&buffer[..read]);
+                        quiet = 0;
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(_) => return None,
+                },
+                Err(rustix::io::Errno::INTR) => {}
+                Err(_) => return None,
+            }
+        }
+        let text = String::from_utf8_lossy(&text);
         Some(tgradish_core::clipboard::paths_in_text(&text, false))
     }
 }
