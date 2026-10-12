@@ -555,11 +555,11 @@ impl TgsPrinter {
                     scale => format!(" at {scale}x"),
                 };
                 let mut line = format!(
-                    "{}x{} cells{scale}, {} colours, {} frames, {}",
+                    "{}x{} cells{scale}, {}, {}, {}",
                     report.width,
                     report.height,
-                    report.colours,
-                    report.frames,
+                    ui::count(report.colours, "colour"),
+                    ui::count(report.frames, "frame"),
                     ui::seconds(f64::from(report.ticks) / 60.0),
                 );
                 if report.tempo != 1.0 {

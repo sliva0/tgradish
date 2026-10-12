@@ -140,7 +140,10 @@ fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target) {
         }
         if let Some(fps) = info.fps() {
             let most = telegram::MAX_FPS;
-            let text = format!("{fps:.2} fps of {most:.0}, {} frames", info.video_frames);
+            let text = format!(
+                "{fps:.2} fps of {most:.0}, {}",
+                widgets::count(info.video_frames, "frame")
+            );
             budget(ui, "Frame rate", "", (fps * 100.0) as u64, (most * 100.0) as u64, text);
         }
         label(ui, "Picture", "");
@@ -157,7 +160,7 @@ fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target) {
         ui.end_row();
         if info.audio_tracks > 0 {
             label(ui, "Audio", "");
-            ui.label(format!("{} tracks", info.audio_tracks));
+            ui.label(widgets::count(info.audio_tracks, "track"));
             ui.end_row();
         }
         if let Some(title) = &info.title {
@@ -217,7 +220,11 @@ fn animation(ui: &mut egui::Ui, stats: &Stats) {
             budget(ui, "Size", "Telegram refuses larger stickers", bytes, limit, text);
         }
         let seconds = if stats.fps > 0.0 { stats.frames / stats.fps } else { 0.0 };
-        let text = format!("{} of 3.00 s, {} frames", widgets::seconds(seconds), stats.frames);
+        let text = format!(
+            "{} of 3.00 s, {}",
+            widgets::seconds(seconds),
+            widgets::count(stats.frames, "frame")
+        );
         budget(
             ui,
             "Length",

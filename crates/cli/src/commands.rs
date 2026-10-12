@@ -120,15 +120,18 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
             let fps = info.fps().map(ui::fps).unwrap_or_else(|| "unknown fps".into());
             let alpha = if video.alpha { ", transparent" } else { "" };
             format!(
-                "{} {}x{}, {fps}, {} frames{alpha}",
-                video.codec_id, video.width, video.height, info.video_frames
+                "{} {}x{}, {fps}, {}{alpha}",
+                video.codec_id,
+                video.width,
+                video.height,
+                ui::count(info.video_frames, "frame")
             )
         }
         None => "none".to_owned(),
     };
     println!("{}", ui::field("video", video));
     if info.audio_tracks > 0 {
-        println!("{}", ui::field("audio", format!("{} tracks", info.audio_tracks)));
+        println!("{}", ui::field("audio", ui::count(info.audio_tracks, "track")));
     }
     let header = info.header_duration.map_or("none".into(), ui::seconds);
     let content = info.content_duration.map_or("unknown".into(), ui::seconds);
@@ -253,7 +256,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
         if ctx.global.json {
             return Err(crate::Exit(1).into());
         }
-        bail!("{failed} of {} files could not be read", args.files.len());
+        bail!("{failed} of {} could not be read", ui::count(args.files.len(), "file"));
     }
     Ok(())
 }
@@ -396,20 +399,20 @@ fn print_sticker(path: &std::path::Path, stats: &tgs::Stats, issues: &[tgs::Issu
     };
     println!("{}", ui::field("size", size));
     let animation = format!(
-        "{}x{}, {} fps, {} frames ({})",
+        "{}x{}, {} fps, {} ({})",
         stats.width,
         stats.height,
         stats.fps,
-        stats.frames,
+        ui::count(stats.frames, "frame"),
         ui::seconds(stats.frames / stats.fps.max(1.0)),
     );
     println!("{}", ui::field("animation", animation));
     let cost = tgs::limits::telegram::cost(stats.shapes, stats.layers);
     let drawing = format!(
-        "{} layers, up to {} shapes and {} fills in one; cost {cost} of {}",
-        stats.layers,
-        stats.max_shapes_per_layer,
-        stats.max_paints_per_layer,
+        "{}, up to {} and {} in one; cost {cost} of {}",
+        ui::count(stats.layers, "layer"),
+        ui::count(stats.max_shapes_per_layer, "shape"),
+        ui::count(stats.max_paints_per_layer, "fill"),
         tgs::limits::telegram::MAX_COST
     );
     println!("{}", ui::field("drawing", drawing));
