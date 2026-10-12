@@ -151,7 +151,7 @@ impl Backend {
             (None, Some(duration)) => duration - start,
             (None, None) => 0.0,
         };
-        let source_fps = probe.fps.unwrap_or(25.0);
+        let source_fps = probe.fps_or_default();
         let max_frames = request.max_frames.max(1);
         let (fps, count) = if probe.still_image || length <= 0.0 {
             (source_fps, 1)
@@ -185,7 +185,7 @@ impl Backend {
         cancel: &CancelToken,
     ) -> Result<crate::tgs::Preview> {
         let probe = self.probe(path, cancel)?;
-        let fps = probe.fps.unwrap_or(25.0).clamp(1.0, 60.0);
+        let fps = probe.fps_or_default().clamp(1.0, 60.0);
         // spoofed stickers say in their header that they are shorter than
         // they play; their frames tell the truth
         let played = crate::webm::inspect_file(path).ok().and_then(|info| info.content_duration);

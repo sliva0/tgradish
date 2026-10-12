@@ -385,6 +385,12 @@ pub struct Options {
 }
 
 impl Options {
+    /// Whether how pixels are scaled is left to the input: auto, with no
+    /// exact scale, which places pixels itself.
+    pub fn auto_scaling(&self) -> bool {
+        self.scaling.unwrap_or(Scaling::Auto) == Scaling::Auto && self.exact_scale.is_none()
+    }
+
     /// Returns `self` with every value set in `overlay` replacing its own.
     pub fn merged(mut self, overlay: &Options) -> Options {
         macro_rules! merge {
@@ -487,6 +493,8 @@ pub const MAX_ATTEMPTS: u32 = 50;
 /// The constant quality where nothing is fitted to it: good for libvpx-vp9
 /// at sticker sizes.
 pub const DEFAULT_CRF: u8 = 32;
+/// libvpx's constant qualities, the best first.
+pub const CRFS: std::ops::RangeInclusive<u8> = 0..=63;
 /// The duration spoofing writes by default: well under Telegram's 3
 /// seconds, and odd enough that a spoofed header is easy to spot.
 pub const DEFAULT_FAKE_DURATION: f64 = 0.42069;

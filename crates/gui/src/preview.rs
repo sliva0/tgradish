@@ -6,6 +6,7 @@
 use eframe::egui::{self, Color32, Rect, RichText, pos2, vec2};
 use tgradish_core::backend::Backend;
 use tgradish_core::config::ResultPreview;
+use tgradish_core::convert;
 use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::presets::Format;
 use tgradish_core::telegram;
@@ -298,7 +299,7 @@ fn preview(
                                 let art_key = inset_key((clip.id, where_));
                                 let scaling = item.choices.webm.scaling.unwrap_or(Scaling::Auto);
                                 if scaling == Scaling::Auto
-                                    && sizes.enlarges(used) >= 2.0
+                                    && sizes.enlarges(used) >= convert::AUTO_SHARP_FROM
                                     && inset.looks_like_art(art_key, || {
                                         predict::looks_like_art(clip, where_)
                                     })

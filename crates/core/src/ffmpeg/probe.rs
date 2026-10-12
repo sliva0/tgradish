@@ -43,6 +43,12 @@ pub struct Probe {
 }
 
 impl Probe {
+    /// [`Probe::fps`], or where the file doesn't say, 25, which ffmpeg
+    /// assumes for images and raw streams too.
+    pub fn fps_or_default(&self) -> f64 {
+        self.fps.unwrap_or(25.0)
+    }
+
     /// Where reading the file starts for `start` seconds into the video,
     /// at the start a hair before its first frame, so it stays.
     pub fn seek(&self, start: f64) -> f64 {

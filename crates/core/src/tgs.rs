@@ -16,7 +16,7 @@ use tgradish_tgs::sticker::{self, Fit, Progress, Step};
 
 use crate::error::{Error, Result};
 use crate::ffmpeg::CancelToken;
-use crate::options::{Crop, Speed};
+use crate::options::{Crop, Speed, TEMPOS};
 use crate::telegram::Target;
 
 /// Frame rate of still images, sprite sheets and image sequences unless
@@ -189,9 +189,10 @@ impl TgsOptions {
                 start: Self::seconds(self.start, "start")?.unwrap_or_default(),
                 length: Self::seconds(self.length, "length")?,
                 tempo: match self.tempo {
-                    Some(tempo) if !crate::options::TEMPOS.contains(&tempo) => {
+                    Some(tempo) if !TEMPOS.contains(&tempo) => {
+                        let (low, high) = (TEMPOS.start(), TEMPOS.end());
                         return Err(Error::InvalidOptions(format!(
-                            "tempo {tempo} is not from 0.1 to 10"
+                            "tempo {tempo} is not from {low} to {high}"
                         )));
                     }
                     tempo => tempo,

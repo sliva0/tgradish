@@ -297,7 +297,7 @@ impl Video {
     ) -> Task<Clip> {
         let (probe, starts) = (self.probe.clone(), self.starts.clone());
         Task::spawn(ctx, move |cancel| {
-            let fps = probe.fps.unwrap_or(25.0);
+            let fps = probe.fps_or_default();
             let start = tgradish_core::still::frame_start(time, &starts, fps);
             let request = FramesRequest {
                 start,
