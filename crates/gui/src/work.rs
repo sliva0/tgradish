@@ -299,7 +299,7 @@ mod tests {
     use tgradish_core::telegram;
 
     use super::*;
-    use crate::testing::{convert, finish, harness, square, video, video_of};
+    use crate::testing::{convert, finish, harness, made_job, square, video, video_of};
 
     #[test]
     fn converts_pixel_art() {
@@ -325,7 +325,7 @@ mod tests {
         harness.run_steps(2);
         finish(&mut harness);
         let item = &harness.state().items[0];
-        assert!(matches!(item.made.as_ref().unwrap().job.status, Status::Done(_)));
+        assert!(matches!(made_job(item).status, Status::Done(_)));
         assert!(item.result_is_current() && item.result_thumb.is_some());
         assert!(dir.path().join("out").join("frames.sticker.tgs").exists());
         harness.get_by_label_contains("Telegram should accept it");
@@ -363,7 +363,7 @@ mod tests {
         harness.run_steps(2);
         finish(&mut harness);
         let item = &harness.state().items[0];
-        assert!(matches!(item.made.as_ref().unwrap().job.status, Status::Done(_)));
+        assert!(matches!(made_job(item).status, Status::Done(_)));
         let out = dir.path().join("out").join("clip.sticker.webp");
         assert_eq!(still::dimensions(&out).unwrap(), (512, 384));
         assert!(item.result_clip.ready().is_some());
@@ -393,8 +393,8 @@ mod tests {
         harness.run_steps(2);
         finish(&mut harness);
         let item = &harness.state().items[0];
-        let Status::Done(done) = &item.made.as_ref().unwrap().job.status else {
-            panic!("{:?}", item.made.as_ref().unwrap().job.status)
+        let Status::Done(done) = &made_job(item).status else {
+            panic!("{:?}", made_job(item).status)
         };
         let info = tgradish_core::webm::inspect_file(&done.output).unwrap();
         let picture = info.video.unwrap();

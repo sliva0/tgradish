@@ -133,7 +133,7 @@ mod tests {
 
     use super::*;
     use crate::jobs::Status;
-    use crate::testing::{convert, finish, harness, square};
+    use crate::testing::{convert, finish, harness, made_job, square};
 
     #[test]
     fn numbers_results_of_files_with_the_same_name() {
@@ -153,7 +153,7 @@ mod tests {
         harness.run_steps(2);
         finish(&mut harness);
         for item in &harness.state().items {
-            assert!(matches!(item.made.as_ref().unwrap().job.status, Status::Done(_)));
+            assert!(matches!(made_job(item).status, Status::Done(_)));
         }
         assert!(out.join("same.sticker.tgs").exists() && out.join("same 2.sticker.tgs").exists());
     }
@@ -179,7 +179,7 @@ mod tests {
         finish(&mut harness);
         // the result goes next to it, under a number
         let item = &harness.state().items[0];
-        let made = &item.made.as_ref().unwrap().job;
+        let made = made_job(item);
         assert_eq!(made.output, dir.path().join("art 2.sticker.tgs"));
         assert!(made.output.exists() && !made.replaces);
         assert_eq!(std::fs::read(&output).unwrap(), b"mine");
@@ -199,7 +199,7 @@ mod tests {
             convert(&harness);
             harness.run_steps(2);
             finish(&mut harness);
-            let made = &harness.state().items[0].made.as_ref().unwrap().job;
+            let made = made_job(&harness.state().items[0]);
             assert_eq!(made.output, output);
             assert_eq!(made.replaces, !earlier);
         }
