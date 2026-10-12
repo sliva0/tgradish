@@ -861,6 +861,9 @@ fn counts_time_from_where_the_video_starts() {
             .args(["-v", "error", "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono"])
             .args(["-itsoffset", "0.5", "-f", "lavfi", "-i", "testsrc2=s=64x48:r=10:d=1"])
             .args(["-map", "0:a", "-map", "1:v", "-t", "1.5", "-c:v", "libx264", "-c:a", "aac"])
+            // as the frames come: ffmpeg before 7 fills the wait with copies
+            // of the first
+            .args(["-fps_mode", "passthrough"])
             .arg(&input)
             .status()
             .unwrap();
