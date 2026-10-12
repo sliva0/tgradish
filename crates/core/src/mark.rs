@@ -220,10 +220,10 @@ pub fn made_by_tgradish(path: &std::path::Path) -> bool {
             app(&info.writing_app)
                 && app(&info.muxing_app)
                 && info.signature.as_deref().is_some_and(|signature| {
-                    signature.ends_with(" https://github.com/sliva0/tgradish")
-                        && is_tool_id(
-                            signature.trim_end_matches(" https://github.com/sliva0/tgradish"),
-                        )
+                    signature
+                        .strip_suffix(crate::REPOSITORY)
+                        .and_then(|tool| tool.strip_suffix(' '))
+                        .is_some_and(is_tool_id)
                 })
         })
     }

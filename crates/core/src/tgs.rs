@@ -546,12 +546,7 @@ pub fn convert(
     if cancel.is_cancelled() {
         return Err(Error::Cancelled);
     }
-    crate::fsutil::write_file(&request.output, &sticker.tgs, request.overwrite).map_err(|err| {
-        match err.kind() {
-            std::io::ErrorKind::AlreadyExists => Error::OutputExists(request.output.clone()),
-            _ => err.into(),
-        }
-    })?;
+    crate::fsutil::write_output(&request.output, &sticker.tgs, request.overwrite)?;
     on_event(TgsEvent::Finished {
         output: request.output.clone(),
         bytes: sticker.bytes as u64,

@@ -38,7 +38,11 @@ pub use error::{Error, Result};
 /// Name and version, used in watermarks.
 pub const TOOL_ID: &str = concat!("tgradish ", env!("CARGO_PKG_VERSION"));
 
+/// Where tgradish lives. Files made carry it in their signature, which
+/// [`mark`] looks for: changing it stops older files being recognised.
+pub const REPOSITORY: &str = "https://github.com/sliva0/tgradish";
+
 /// Text hidden in WebM padding to mark files made or modified by tgradish.
 pub fn signature() -> String {
-    format!("{TOOL_ID} https://github.com/sliva0/tgradish")
+    format!("{TOOL_ID} {REPOSITORY}")
 }

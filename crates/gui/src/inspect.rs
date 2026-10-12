@@ -6,7 +6,7 @@ use eframe::egui;
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::webm::{self, WebmInfo};
 use tgradish_core::{still, tgs};
-use tgradish_tgs::check::{Severity, Stats};
+use tgradish_tgs::check::Stats;
 use tgradish_tgs::limits::{self, telegram as server};
 
 use crate::app::App;
@@ -33,11 +33,7 @@ impl Inspection {
             match still::inspect_file(path) {
                 Ok(info) => {
                     let target = info.target();
-                    let problems = info
-                        .issues(target)
-                        .iter()
-                        .map(|issue| Problem { refused: true, text: issue.to_string() })
-                        .collect();
+                    let problems = info.issues(target).iter().map(Problem::refused).collect();
                     (Found::Image { info, target }, problems)
                 }
                 Err(err) => (Found::Failed(err.to_string()), Vec::new()),
@@ -45,13 +41,7 @@ impl Inspection {
         } else if tgs::is_sticker(path) {
             match tgs::inspect_file(path) {
                 Ok((stats, issues)) => {
-                    let problems = issues
-                        .into_iter()
-                        .map(|issue| Problem {
-                            refused: issue.severity == Severity::Error,
-                            text: issue.message,
-                        })
-                        .collect();
+                    let problems = issues.into_iter().map(Problem::of_tgs).collect();
                     (Found::Tgs(Box::new(stats)), problems)
                 }
                 Err(err) => (Found::Failed(err.to_string()), Vec::new()),
@@ -60,10 +50,8 @@ impl Inspection {
             match webm::inspect_file(path) {
                 Ok(info) => {
                     let target = info.target();
-                    let problems = telegram::check(&info, target)
-                        .iter()
-                        .map(|issue| Problem { refused: true, text: issue.to_string() })
-                        .collect();
+                    let problems =
+                        telegram::check(&info, target).iter().map(Problem::refused).collect();
                     (Found::Webm { info: Box::new(info), target }, problems)
                 }
                 Err(err) => (Found::Failed(err.to_string()), Vec::new()),

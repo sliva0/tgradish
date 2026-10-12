@@ -139,12 +139,7 @@ pub fn convert(backend: &Backend, request: &Request, cancel: &CancelToken) -> Re
     let (webp, encoding) = fit(&rgba, plan.width, plan.height, finish)?;
     // encoding can't stop part of the way, but a stopped one isn't kept
     cancel.check()?;
-    crate::fsutil::write_file(&plan.output, &webp, request.overwrite).map_err(|err| {
-        match err.kind() {
-            std::io::ErrorKind::AlreadyExists => Error::OutputExists(plan.output.clone()),
-            _ => err.into(),
-        }
-    })?;
+    crate::fsutil::write_output(&plan.output, &webp, request.overwrite)?;
     let bytes = webp.len() as u64;
     Ok(Outcome {
         output: plan.output.clone(),
