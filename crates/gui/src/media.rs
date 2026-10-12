@@ -223,6 +223,9 @@ pub struct Video {
     pub probe: Probe,
     /// All of it, a few frames a second.
     pub overview: Clip,
+    /// Where its frames start, in order: empty for a picture, or when they
+    /// carry no times.
+    pub starts: Vec<f64>,
 }
 
 impl Video {
@@ -241,7 +244,15 @@ impl Video {
             if frames.frames.is_empty() {
                 return Err("ffmpeg found no frames in it".into());
             }
-            Ok(Video { probe, overview: Clip::from_frames(frames) })
+            let starts = if probe.still_image {
+                Vec::new()
+            } else {
+                match backend.frame_starts(&path, cancel) {
+                    Err(err @ tgradish_core::Error::Cancelled) => return Err(err.to_string()),
+                    starts => starts.unwrap_or_default(),
+                }
+            };
+            Ok(Video { probe, overview: Clip::from_frames(frames), starts })
         })
     }
 
@@ -286,12 +297,10 @@ impl Video {
         path: PathBuf,
         time: f64,
     ) -> Task<Clip> {
-        let probe = self.probe.clone();
+        let (probe, starts) = (self.probe.clone(), self.starts.clone());
         Task::spawn(ctx, move |cancel| {
             let fps = probe.fps.unwrap_or(25.0);
-            // from just before the frame starts: reading from `time`
-            // would skip to the next one
-            let start = (((time * fps + 1e-6).floor() - 0.25) / fps).max(0.0);
+            let start = tgradish_core::still::frame_start(time, &starts, fps);
             let request = FramesRequest {
                 start,
                 length: Some(1.0 / fps),

@@ -6,6 +6,7 @@
 use std::ops::RangeInclusive;
 
 use eframe::egui::{self, CursorIcon, PointerButton, Rect, Sense, Shape, Stroke, pos2, vec2};
+use tgradish_core::convert::read_from;
 
 use crate::{theme, widgets};
 
@@ -13,8 +14,9 @@ use crate::{theme, widgets};
 /// meant, whatever rounding does to the number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cut {
-    /// ffmpeg keeps frames from the first at or after a cut: a cut is a
-    /// quarter of a frame before the frame it starts.
+    /// ffmpeg keeps frames from the first that starts at or after a cut,
+    /// and counts them over the length: a cut is a hair before the frame
+    /// it starts, and the length is the frames'.
     Video,
     /// Normalising keeps every frame a cut overlaps: a cut is a hair
     /// inside the frames it keeps.
@@ -29,12 +31,27 @@ pub struct Frames {
 }
 
 impl Frames {
-    /// Frames of `1 / fps` seconds over `length`, the last one cut short.
+    /// Frames starting at `starts`, in order, over `length`: the first
+    /// shows from the beginning, and none starts at the end.
+    pub fn starting(starts: &[f64], length: f64, cut: Cut) -> Option<Frames> {
+        if starts.is_empty() || !(length > 0.0 && length.is_finite()) {
+            return None;
+        }
+        let mut times = vec![0.0];
+        times.extend(
+            starts[1..].iter().copied().filter(|&start| start > 1e-6 && start < length - 1e-6),
+        );
+        times.push(length);
+        Some(Frames { times, cut })
+    }
+
+    /// Frames of `1 / fps` seconds over `length`, the last one cut short;
+    /// a tenth of a frame or less over the last is taken for rounding.
     pub fn even(length: f64, fps: f64, cut: Cut) -> Option<Frames> {
         if !(fps > 0.0 && length > 0.0) {
             return None;
         }
-        let count = ((length * fps).round() as usize).max(1);
+        let count = ((length * fps - 0.1).ceil() as usize).max(1);
         let mut times: Vec<f64> = (0..count).map(|i| i as f64 / fps).collect();
         times.push(length);
         Some(Frames { times, cut })
@@ -64,20 +81,6 @@ impl Frames {
         }
     }
 
-    /// How a cut at `boundary` is written, as where the used part starts or
-    /// where it ends.
-    fn cut_at(&self, boundary: usize, end: bool) -> f64 {
-        let times = &self.times;
-        if boundary == 0 || boundary >= self.count() {
-            return times[boundary.min(self.count())];
-        }
-        match (self.cut, end) {
-            (Cut::Video, _) => times[boundary] - (times[boundary] - times[boundary - 1]) / 4.0,
-            (Cut::Art, false) => times[boundary] + 1e-6,
-            (Cut::Art, true) => times[boundary] - 1e-6,
-        }
-    }
-
     /// The used part as boundaries: its first frame and the one after its
     /// last.
     pub fn part(&self, length: f64, start: Option<f64>, used: Option<f64>) -> (usize, usize) {
@@ -94,9 +97,17 @@ impl Frames {
         start: &mut Option<f64>,
         used: &mut Option<f64>,
     ) {
-        let (from, to) = (self.cut_at(first, false), self.cut_at(after, true));
+        let times = &self.times;
+        let (from, length) = match self.cut {
+            Cut::Video if first > 0 => {
+                (read_from(times[first], times[first - 1]), times[after] - times[first])
+            }
+            Cut::Video => (0.0, times[after]),
+            Cut::Art if first > 0 => (times[first] + 1e-6, times[after] - times[first] - 2e-6),
+            Cut::Art => (0.0, times[after] - 1e-6),
+        };
         *start = (first > 0).then_some(from);
-        *used = (after < self.count()).then_some(to - from);
+        *used = (after < self.count()).then_some(length);
     }
 }
 
@@ -516,22 +527,31 @@ mod tests {
             (12, 12, 24, 0)
         );
         assert_eq!((frames.nearest(0.49), frames.nearest(0.51), frames.nearest(2.0)), (12, 13, 25));
-        // a short last frame
-        let short = Frames::even(0.98, 25.0, Cut::Video).unwrap();
-        assert_eq!((short.count(), short.at(0.97)), (25, 24));
+        // a short last frame, and one a hair over rounding
+        let short = Frames::even(0.97, 25.0, Cut::Video).unwrap();
+        assert_eq!((short.count(), short.at(0.965)), (25, 24));
+        assert_eq!(Frames::even(1.003, 25.0, Cut::Video).unwrap().count(), 25);
+        // frames as long as their packets say, the first from the start
+        let uneven = Frames::starting(&[0.02, 0.1, 0.2, 0.7], 0.8, Cut::Video).unwrap();
+        assert_eq!(uneven.times, [0.0, 0.1, 0.2, 0.7, 0.8]);
+        assert_eq!((uneven.at(0.65), uneven.at(0.7)), (2, 3));
     }
 
     #[test]
     fn cuts_where_converting_keeps_the_frames_meant() {
         let video = Frames::even(1.0, 25.0, Cut::Video).unwrap();
-        let (mut start, mut used) = (None, None);
-        // frames 5 to 9: ffmpeg keeps from the first at or after the start,
-        // and counts frames over the length
-        video.set_part((5, 10), &mut start, &mut used);
-        let (start, used) = (start.unwrap(), used.unwrap());
-        assert!(start < 0.2 && start > 0.16, "{start}");
-        assert!((used * 25.0 - 5.0).abs() < 1e-9, "{used}");
-        assert_eq!(video.part(1.0, Some(start), Some(used)), (5, 10));
+        // ffmpeg keeps from the first frame at or after the start, and
+        // counts frames over the length
+        let frames = |part| {
+            let (mut start, mut used) = (None, None);
+            video.set_part(part, &mut start, &mut used);
+            assert_eq!(video.part(1.0, start, used), part);
+            let first = start.map_or(0, |start| video.times.partition_point(|&t| t < start));
+            (first, tgradish_core::convert::frame_count(used.unwrap(), 25.0) as usize)
+        };
+        // frames 5 to 9, and 0 to 9
+        assert_eq!(frames((5, 10)), (5, 5));
+        assert_eq!(frames((0, 10)), (0, 10));
         // the whole of it is no cut at all
         let (mut start, mut used) = (Some(0.3), Some(0.2));
         video.set_part((0, 25), &mut start, &mut used);
@@ -544,5 +564,14 @@ mod tests {
         let end = start.unwrap() + used.unwrap();
         assert!(start.unwrap() > 0.1 && end < 0.25, "{start:?} {used:?}");
         assert_eq!(art.part(0.4, start, used), (1, 2));
+
+        // frames of different lengths keep their own
+        let uneven = Frames::starting(&[0.0, 0.1, 0.2, 0.7], 0.8, Cut::Video).unwrap();
+        let (mut start, mut used) = (None, None);
+        uneven.set_part((2, 3), &mut start, &mut used);
+        let start = start.unwrap();
+        let used = used.unwrap();
+        assert!(start > 0.1 && start < 0.2 && (used - 0.5).abs() < 1e-9, "{start} {used}");
+        assert_eq!(uneven.part(0.8, Some(start), Some(used)), (2, 3));
     }
 }

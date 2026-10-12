@@ -67,19 +67,37 @@ pub fn picture_options(options: &Options) -> Options {
     }
 }
 
-/// Where the frame that shows at `time` starts, at `fps`.
-pub fn frame_start(time: f64, fps: f64) -> f64 {
-    (time * fps + 1e-6).floor() / fps
+/// Where to start reading for the frame that shows at `time`. `starts`
+/// are where frames start, in order; without them, frames come every
+/// `1 / fps` seconds.
+pub fn frame_start(time: f64, starts: &[f64], fps: f64) -> f64 {
+    let (start, previous) = if starts.is_empty() {
+        let index = (time * fps + 1e-6).floor();
+        (index / fps, (index - 1.0) / fps)
+    } else {
+        match starts.partition_point(|&start| start <= time + 1e-6) {
+            0 | 1 => return 0.0,
+            after => (starts[after - 1], starts[after - 2]),
+        }
+    };
+    if start <= 0.0 { 0.0 } else { convert::read_from(start, previous) }
 }
 
 /// Plans the picture: its frame, a sticker's or emoji's size, and the
-/// output, `.webp` unless `request` names one.
-pub fn plan(request: &Request, source: crate::ffmpeg::Probe) -> Result<(Plan, Vec<String>)> {
+/// output, `.webp` unless `request` names one. `starts` are where the
+/// input's frames start, when they are known.
+pub fn plan(
+    request: &Request,
+    source: crate::ffmpeg::Probe,
+    starts: &[f64],
+) -> Result<(Plan, Vec<String>)> {
     let mut options = picture_options(&request.options);
-    // the frame that shows at `start`, from where it starts, as previews
-    // show it
-    if let (Some(start), Some(fps)) = (options.start, source.fps.filter(|_| !source.still_image)) {
-        options.start = Some(frame_start(start, fps));
+    // the frame that shows at `start`, as previews show it; past the end,
+    // planning says so
+    if let (Some(start), Some(fps)) = (options.start, source.fps.filter(|_| !source.still_image))
+        && source.duration.is_none_or(|duration| start < duration)
+    {
+        options.start = Some(frame_start(start, starts, fps));
     }
     let target = options.target.unwrap_or_default();
     let output = request.output.clone().unwrap_or_else(|| default_output(&request.input, target));
@@ -93,7 +111,14 @@ pub fn plan(request: &Request, source: crate::ffmpeg::Probe) -> Result<(Plan, Ve
 /// Makes an image sticker or emoji from the frame at `start`.
 pub fn convert(backend: &Backend, request: &Request, cancel: &CancelToken) -> Result<Outcome> {
     let source = backend.probe(&request.input, cancel)?;
-    let (mut plan, warnings) = plan(request, source)?;
+    let starts = match request.options.start {
+        Some(_) if !source.still_image => match backend.frame_starts(&request.input, cancel) {
+            Err(Error::Cancelled) => return Err(Error::Cancelled),
+            starts => starts.unwrap_or_default(),
+        },
+        _ => Vec::new(),
+    };
+    let (mut plan, warnings) = plan(request, source, &starts)?;
     let options = &request.options;
     if options.scaling.unwrap_or(Scaling::Auto) == Scaling::Auto
         && options.exact_scale.is_none()

@@ -769,6 +769,71 @@ fn builtin_backend_rejects_extra_args() {
     assert!(matches!(result, Err(Error::InvalidOptions(_))), "{result:?}");
 }
 
+/// Red, green and blue for 0.1, 0.1 and 0.5 s, then white for 0.1 s.
+const UNEVEN: [([u8; 4], u32); 4] = [
+    ([255, 0, 0, 255], 100),
+    ([0, 255, 0, 255], 100),
+    ([0, 0, 255, 255], 500),
+    ([255, 255, 255, 255], 100),
+];
+
+/// A GIF of frames that show for different times, as [`UNEVEN`].
+fn uneven_gif(dir: &Path) -> PathBuf {
+    let frames = UNEVEN
+        .iter()
+        .map(|&(colour, _)| {
+            let mut canvas = tgradish_corpus::Canvas::new(8, 8);
+            canvas.rect(0, 0, 8, 8, colour);
+            canvas
+        })
+        .collect();
+    let sprite = tgradish_corpus::Sprite {
+        name: "uneven",
+        about: "frames that show for different times",
+        frames,
+        delays: UNEVEN.iter().map(|&(_, delay)| delay).collect(),
+        scale: 1,
+        likely_scale: None,
+    };
+    let path = dir.join("uneven.gif");
+    std::fs::write(&path, tgradish_corpus::encode::gif(&sprite)).unwrap();
+    path
+}
+
+#[test]
+fn finds_where_frames_start() {
+    let Some(backends) = backends() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let gif = uneven_gif(dir.path());
+    let near = |starts: &[f64], expected: &[f64]| {
+        starts.len() == expected.len()
+            && starts.iter().zip(expected).all(|(start, expected)| (start - expected).abs() < 1e-6)
+    };
+    for backend in &backends {
+        let name = name(backend);
+        let starts = backend.frame_starts(&gif, &CancelToken::new()).unwrap();
+        assert!(near(&starts, &[0.0, 0.1, 0.2, 0.7]), "{name}: {starts:?}");
+        // a video with frames out of order in the file, at 25 fps
+        if let Some(clip) = clip(Clip::Square) {
+            let starts = backend.frame_starts(&clip, &CancelToken::new()).unwrap();
+            let even: Vec<f64> = (0..121).map(|index| f64::from(index) / 25.0).collect();
+            assert!(near(&starts, &even), "{name}: {starts:?}");
+        }
+        // the frame that shows at a time, however long frames show
+        let colour_at = |time: f64| {
+            let options = Options { start: Some(time), ..Options::default() };
+            let output = Some(dir.path().join(format!("{name}-{time}.webp")));
+            let request = Request { options, output, ..Request::new(gif.clone()) };
+            let made = tgradish_core::still::convert(backend, &request, &CancelToken::new());
+            let preview = tgradish_core::still::preview(&made.unwrap().output).unwrap();
+            <[u8; 4]>::try_from(&preview.frames[0].0[..4]).unwrap()
+        };
+        for (time, frame) in [(0.0, 0), (0.15, 1), (0.2, 2), (0.65, 2), (0.7, 3)] {
+            assert_eq!(colour_at(time), UNEVEN[frame].0, "{name}: at {time} s");
+        }
+    }
+}
+
 #[test]
 fn makes_image_stickers_from_a_frame() {
     let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };

@@ -183,6 +183,31 @@ impl Source {
         Ok(source)
     }
 
+    /// Where the stream's frames start, in seconds from the file's start,
+    /// as its packets come: empty when some carry no time.
+    pub(super) fn frame_starts(mut self) -> Result<Vec<f64>> {
+        let (start, time_base) = (self.start, self.time_base);
+        let decoding = &mut self.decoding;
+        let mut starts = Vec::new();
+        loop {
+            decoding.cancel.check()?;
+            let mut packet = Packet::empty();
+            match packet.read(&mut decoding.input) {
+                Ok(()) if packet.stream() == decoding.stream => match packet.pts() {
+                    Some(pts) => starts.push(
+                        (pts - start) as f64 * f64::from(time_base.numerator())
+                            / f64::from(time_base.denominator()),
+                    ),
+                    None => return Ok(Vec::new()),
+                },
+                Ok(()) | Err(ff::Error::InvalidData) => {}
+                Err(ff::Error::Eof) => return Ok(starts),
+                Err(_) if decoding.cancel.is_cancelled() => return Err(Error::Cancelled),
+                Err(err) => return Err(libav("reading the input")(err)),
+            }
+        }
+    }
+
     pub(super) fn decoder(&self) -> &ff::decoder::Video {
         &self.decoding.decoder
     }

@@ -435,13 +435,16 @@ impl Item {
     }
 
     /// Where the input's frames start, which cuts land between: a video's
-    /// at its frame rate, art's as it times them.
+    /// as its packets time them, or else at its frame rate, and art's as
+    /// it times them.
     pub fn input_frames(&self) -> Option<Frames> {
         match self.format {
             Format::Webm | Format::Image => {
-                let video = self.video.ready()?;
-                let fps = video.probe.fps.or(video.probe.base_fps)?;
-                Frames::even(self.input_length()?, fps, Cut::Video)
+                let (video, length) = (self.video.ready()?, self.input_length()?);
+                Frames::starting(&video.starts, length, Cut::Video).or_else(|| {
+                    let fps = video.probe.fps.or(video.probe.base_fps)?;
+                    Frames::even(length, fps, Cut::Video)
+                })
             }
             Format::Tgs => {
                 let art = self.art.ready().filter(|art| art.clip.is_animated())?;
