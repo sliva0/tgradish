@@ -128,6 +128,9 @@ impl Sticker {
 /// zopfli packs about this much smaller than `gzip -9`; estimates lean
 /// high.
 const ZOPFLI_SHARE: f64 = 0.93;
+/// zopfli packs no smaller than this share of `gzip -9`: past it, a
+/// sticker can't fit however long zopfli works on it.
+const ZOPFLI_BEST: f64 = 0.85;
 /// When the real size misses an estimate, the next target is this much
 /// lower.
 const RETARGET: f64 = 0.96;
@@ -249,18 +252,35 @@ pub fn make(
             current = fit(&original, current, &mut steps, &mut calibration, &fitting, progress)?;
         }
         check()?;
-        progress(Progress::Packing);
         let (scene, json) = render(&current, &settings, options, cancelled)?;
-        let tgs = file::pack(json.as_bytes(), zopfli_iterations(options.effort));
+        let quick_packed = file::pack_quick(json.as_bytes());
+        // packing it as small as it goes is worth zopfli's time only when
+        // that can fit
+        let hopeless = !within_limits(&scene, &json)
+            || quick_packed.len() as f64 * ZOPFLI_BEST > options.max_bytes as f64;
+        // the estimate was off; aim lower and reduce some more
+        let retarget = || -> Result<bool> {
+            let again = options.fit == Fit::Auto && target > options.max_bytes / 4;
+            Ok(again && quick(&current, options, cancelled)?.is_some())
+        };
+        if hopeless && retarget()? {
+            target = ((target as f64) * RETARGET) as usize;
+            continue;
+        }
+        if hopeless && steps.is_empty() {
+            let bytes = (quick_packed.len() as f64 * ZOPFLI_SHARE) as usize;
+            progress(Progress::TooLarge { bytes });
+        }
+        progress(Progress::Packing);
+        let tgs = match hopeless {
+            true => quick_packed,
+            false => file::pack(json.as_bytes(), zopfli_iterations(options.effort)),
+        };
         check()?;
         let fits = tgs.len() <= options.max_bytes && within_limits(&scene, &json);
-        // the estimate was off; aim lower and reduce some more
-        if !fits && options.fit == Fit::Auto && target > options.max_bytes / 4 {
-            let reachable = quick(&current, options, cancelled)?.is_some();
-            if reachable {
-                target = ((target as f64) * RETARGET) as usize;
-                continue;
-            }
+        if !fits && retarget()? {
+            target = ((target as f64) * RETARGET) as usize;
+            continue;
         }
         check()?;
         let (_, issues) =
@@ -504,6 +524,45 @@ mod tests {
     fn estimate(anim: &PixelAnim, options: &Options, calibration: f64) -> Option<usize> {
         let quick = quick(anim, options, &|| false).unwrap();
         quick.map(|quick| quick.size(calibration, options.max_bytes))
+    }
+
+    #[test]
+    fn packs_art_that_cant_fit_quickly() {
+        // noise in many colours, kept as it is: far over the limit
+        let mut seed = 7u32;
+        let frames = (0..4)
+            .map(|_| Frame {
+                rgba: (0..64 * 64)
+                    .flat_map(|_| {
+                        seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                        let colour = (seed >> 16) % 200;
+                        [colour as u8, (colour * 7) as u8, (colour * 13) as u8, 255]
+                    })
+                    .collect(),
+                duration: Duration::from_millis(100),
+            })
+            .collect();
+        let input = Animation::new(64, 64, frames).unwrap();
+        let options = Options { fit: Fit::Lossless, effort: Effort::Fast, ..Options::default() };
+        let mut too_large = None;
+        let made = make(
+            &input,
+            &options,
+            &mut |event| {
+                if let Progress::TooLarge { bytes } = event {
+                    too_large = Some(bytes);
+                }
+            },
+            &|| false,
+        )
+        .unwrap();
+        // said so before packing, and packed with gzip rather than zopfli
+        assert!(too_large.is_some_and(|bytes| bytes > options.max_bytes), "{too_large:?}");
+        assert!(!made.fits() && made.steps.is_empty());
+        let mut json = Vec::new();
+        std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&made.tgs[..]), &mut json)
+            .unwrap();
+        assert_eq!(made.tgs, file::pack_quick(&json));
     }
 
     #[test]
