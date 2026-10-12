@@ -37,8 +37,13 @@ impl App {
             ui.add_space(6.0);
         });
         let output = self.item(id).map(|item| self.output_for(item));
-        let context =
-            settings::Context { presets: &self.presets, config: &self.config, extra_args, output };
+        let context = settings::Context {
+            presets: &self.presets,
+            config: &self.config,
+            extra_args,
+            output,
+            config_path: self.config_path.as_deref(),
+        };
         let height = ui.available_height();
         let preview_height =
             (height * self.preview_share).clamp(240.0, (height - 140.0).max(240.0));

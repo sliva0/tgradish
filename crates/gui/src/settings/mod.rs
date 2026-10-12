@@ -32,6 +32,8 @@ pub struct Context<'a> {
     pub extra_args: bool,
     /// Where the result goes.
     pub output: Option<std::path::PathBuf>,
+    /// The config file the window reads and saves.
+    pub config_path: Option<&'a std::path::Path>,
 }
 
 /// The built-in presets in the order of their speed, then the user's own.
