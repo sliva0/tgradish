@@ -1,25 +1,8 @@
-//! User configuration, `config.toml` in the config dir:
-//!
-//! ```toml
-//! preset = "sticker"   # preset used when none is given, for WebM
-//! tgs-preset = "tgs-sticker"  # the same for .tgs
-//!
-//! [ffmpeg]
-//! use = "auto"         # auto (built in if there is one, else system),
-//!                      # builtin or system
-//! path = "/opt/ffmpeg" # ffmpeg executable or its directory, overrides `use`
-//!
-//! [gui]
-//! output-dir = "/home/me/stickers"  # results go here instead of next to inputs
-//! overwrite = false                  # replace existing results
-//! smooth-scrolling = false           # ease scrolling instead of following the wheel
-//! theme = "system"                   # or "light" or "dark"
-//! forget-files = false               # don't reopen the files of last time
-//!
-//! [gui.result-preview]
-//! size = 3                 # the result's small picture, from 1 to 5
-//! corner = "bottom-right"  # or "bottom-left", "top-right", "top-left"
-//! ```
+#![doc = concat!(
+    "User configuration, `config.toml` in the config dir:\n\n```toml\n",
+    include_str!("config.example.toml"),
+    "```"
+)]
 
 use std::path::{Path, PathBuf};
 
@@ -172,6 +155,14 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reads_the_documented_example() {
+        let example: Config = toml::from_str(include_str!("config.example.toml")).unwrap();
+        let presets = crate::presets::Presets::builtin();
+        assert!(presets.webm(example.preset.as_deref().unwrap()).is_ok());
+        assert!(presets.tgs(example.tgs_preset.as_deref().unwrap()).is_ok());
+    }
+
     use super::*;
 
     #[test]

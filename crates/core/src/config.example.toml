@@ -1,0 +1,20 @@
+preset = "balanced"   # preset used when none is given, for WebM and images
+tgs-preset = "best"   # the same for .tgs
+
+[ffmpeg]
+use = "auto"          # auto (built in if there is one, else system),
+                      # builtin or system
+path = "/opt/ffmpeg"  # ffmpeg executable or its directory, overrides `use`
+
+[gui]
+output-dir = "/home/me/stickers"  # results go here instead of next to inputs
+overwrite = false                  # replace existing results
+target = "sticker"                 # what new files become, or "emoji"
+smooth-scrolling = false           # ease scrolling instead of following the wheel
+theme = "system"                   # or "light" or "dark"
+forget-files = false               # don't reopen the files of last time
+timeline-frames = false            # count the timeline in frames, not seconds
+
+[gui.result-preview]
+size = 3                 # the result's small picture, from 1 to 5
+corner = "bottom-right"  # or "bottom-left", "top-right", "top-left"
