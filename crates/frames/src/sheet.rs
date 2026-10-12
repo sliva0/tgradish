@@ -40,28 +40,32 @@ pub fn sprite_sheet(bytes: &[u8], sheet: &Sheet, limits: &Limits) -> Result<Anim
     // Only the first frame of an animated image is used as the sheet.
     let source = &image.frames()[0].rgba;
     let row_bytes = cell_width as usize * 4;
-    let mut frames: Vec<Frame> = (0..cells)
-        .map(|cell| {
-            let left = (cell % sheet.columns * cell_width) as usize;
-            let top = (cell / sheet.columns * cell_height) as usize;
-            let mut rgba = Vec::with_capacity(row_bytes * cell_height as usize);
-            for y in top..top + cell_height as usize {
-                let start = (y * width as usize + left) * 4;
-                rgba.extend_from_slice(&source[start..start + row_bytes]);
-            }
-            Frame { rgba, duration: sheet.frame_duration }
+    let rows = |cell: u32| {
+        let left = (cell % sheet.columns * cell_width) as usize;
+        let top = (cell / sheet.columns * cell_height) as usize;
+        (top..top + cell_height as usize).map(move |y| {
+            let start = (y * width as usize + left) * 4;
+            &source[start..start + row_bytes]
+        })
+    };
+    let count = match sheet.frames {
+        Some(count) => count,
+        None => (0..cells)
+            .rposition(|cell| {
+                rows(cell).any(|row| row.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 0))
+            })
+            .map_or(1, |last| last as u32 + 1),
+    };
+    // the cells are copied out while the sheet is held
+    let held = image.frames().iter().map(|frame| frame.rgba.len()).sum::<usize>();
+    let left = Limits { max_bytes: limits.max_bytes.saturating_sub(held), ..*limits };
+    left.check(cell_width, cell_height, count as usize)?;
+    let frames = (0..count)
+        .map(|cell| Frame {
+            rgba: rows(cell).flatten().copied().collect(),
+            duration: sheet.frame_duration,
         })
         .collect();
-    match sheet.frames {
-        Some(count) => frames.truncate(count as usize),
-        None => {
-            let used = frames
-                .iter()
-                .rposition(|frame| frame.rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 0))
-                .map_or(1, |last| last + 1);
-            frames.truncate(used);
-        }
-    }
     Animation::new(cell_width, cell_height, frames)
 }
 
@@ -74,14 +78,17 @@ pub fn sequence<'a>(
 ) -> Result<Animation> {
     let mut size = None;
     let mut frames = Vec::new();
+    let mut held = 0;
     for (index, bytes) in images.into_iter().enumerate() {
-        let image = decode(bytes, &DecodeOptions { tag: None, limits: *limits })?;
+        // each image is decoded in what the ones before left of the budget
+        let left = Limits { max_bytes: limits.max_bytes.saturating_sub(held), ..*limits };
+        let image = decode(bytes, &DecodeOptions { tag: None, limits: left })?;
         let (width, height) = (image.width(), image.height());
         let (first_width, first_height) = *size.get_or_insert((width, height));
         if (width, height) != (first_width, first_height) {
             return Err(Error::SequenceSize { index, width, height, first_width, first_height });
         }
-        limits.check(width, height, frames.len() + image.frames().len())?;
+        held += image.frames().iter().map(|frame| frame.rgba.len()).sum::<usize>();
         let still = image.frames().len() == 1;
         frames.extend(image.into_frames().into_iter().map(|mut frame| {
             if still {
