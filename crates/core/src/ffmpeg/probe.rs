@@ -123,25 +123,30 @@ pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Prob
         && codec != "gif"
         && stream["nb_frames"].as_str().is_none_or(|frames| frames == "1");
 
+    let start = {
+        let time = |value: &Value| value.as_str()?.parse::<f64>().ok().filter(|t| t.is_finite());
+        match (time(&stream["start_time"]), time(&json["format"]["start_time"])) {
+            (Some(video), Some(file)) => (video - file).max(0.0),
+            _ => 0.0,
+        }
+    };
     Ok(Probe {
         width: width.round() as u32,
         height: height.round() as u32,
         fps: parse_ratio(&stream["avg_frame_rate"])
             .or_else(|| parse_ratio(&stream["r_frame_rate"])),
         base_fps: parse_ratio(&stream["r_frame_rate"]),
+        // the file's, where the stream has none, from where the video starts
         duration: if still_image {
             None
         } else {
-            parse_f64(&stream["duration"]).or_else(|| parse_f64(&json["format"]["duration"]))
+            parse_f64(&stream["duration"]).or_else(|| {
+                parse_f64(&json["format"]["duration"])
+                    .map(|duration| duration - start)
+                    .filter(|duration| *duration > 0.0)
+            })
         },
-        start: {
-            let time =
-                |value: &Value| value.as_str()?.parse::<f64>().ok().filter(|t| t.is_finite());
-            match (time(&stream["start_time"]), time(&json["format"]["start_time"])) {
-                (Some(video), Some(file)) => (video - file).max(0.0),
-                _ => 0.0,
-            }
-        },
+        start,
         alpha: pix_fmt_has_alpha(pix_fmt) || webm_alpha,
         still_image,
         orientation,

@@ -359,6 +359,8 @@ fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
             std::thread::sleep(Duration::from_millis(50));
         }
         let running = Running;
+        // stopped while waiting: the slot is given back
+        check()?;
         let (send, receive) = channel();
         let json = json.as_bytes().to_vec();
         std::thread::spawn(move || {

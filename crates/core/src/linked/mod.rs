@@ -115,11 +115,30 @@ pub(crate) fn probe(input: &Path, cancel: &CancelToken) -> Result<Probe> {
     let still_image = (format_name.contains("image2") || format_name.ends_with("_pipe"))
         && codec != "gif"
         && stream.frames() <= 1;
+    // where the video starts in the file, which other streams can start
+    // before
+    let start = {
+        // SAFETY: reading a plain field of the open context
+        let file_start = unsafe { (*context.as_ptr()).start_time };
+        let video_start = stream.start_time();
+        if file_start == ff::ffi::AV_NOPTS_VALUE || video_start == ff::ffi::AV_NOPTS_VALUE {
+            0.0
+        } else {
+            let tb = stream.time_base();
+            let video =
+                video_start as f64 * f64::from(tb.numerator()) / f64::from(tb.denominator().max(1));
+            (video - file_start as f64 / f64::from(ff::ffi::AV_TIME_BASE)).max(0.0)
+        }
+    };
+    // the file's, where the stream has none, from where the video starts
     let duration = if still_image {
         None
     } else {
-        seconds(stream.duration(), stream.time_base())
-            .or_else(|| seconds(context.duration(), Rational::new(1, ff::ffi::AV_TIME_BASE)))
+        seconds(stream.duration(), stream.time_base()).or_else(|| {
+            seconds(context.duration(), Rational::new(1, ff::ffi::AV_TIME_BASE))
+                .map(|duration| duration - start)
+                .filter(|duration| *duration > 0.0)
+        })
     };
 
     Ok(Probe {
@@ -130,19 +149,7 @@ pub(crate) fn probe(input: &Path, cancel: &CancelToken) -> Result<Probe> {
         fps: ratio(stream.avg_frame_rate()).or_else(|| ratio(stream.rate())),
         base_fps: ratio(stream.rate()),
         duration,
-        start: {
-            // SAFETY: reading a plain field of the open context
-            let file_start = unsafe { (*context.as_ptr()).start_time };
-            let video_start = stream.start_time();
-            if file_start == ff::ffi::AV_NOPTS_VALUE || video_start == ff::ffi::AV_NOPTS_VALUE {
-                0.0
-            } else {
-                let tb = stream.time_base();
-                let video = video_start as f64 * f64::from(tb.numerator())
-                    / f64::from(tb.denominator().max(1));
-                (video - file_start as f64 / f64::from(ff::ffi::AV_TIME_BASE)).max(0.0)
-            }
-        },
+        start,
         alpha: pix_fmt_has_alpha(&pix_fmt) || webm_alpha,
         still_image,
         orientation,

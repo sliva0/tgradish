@@ -854,39 +854,45 @@ fn counts_time_from_where_the_video_starts() {
     let Some(backends) = backends() else { return };
     let dir = tempfile::tempdir().unwrap();
     // sound from the start, and a second of video at 10 fps from half a
-    // second in
-    let input = dir.path().join("late.mp4");
-    let status = Command::new("ffmpeg")
-        .args(["-v", "error", "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono"])
-        .args(["-itsoffset", "0.5", "-f", "lavfi", "-i", "testsrc2=s=64x48:r=10:d=1"])
-        .args(["-map", "0:a", "-map", "1:v", "-t", "1.5", "-c:v", "libx264", "-c:a", "aac"])
-        .arg(&input)
-        .status()
-        .unwrap();
-    assert!(status.success());
-    for backend in &backends {
-        let name = name(backend);
-        let probe = backend.probe(&input, &CancelToken::new()).unwrap();
-        assert!((probe.start - 0.5).abs() < 0.01, "{name}: {probe:?}");
-        let starts = backend.frame_starts(&input, &probe, &CancelToken::new()).unwrap();
-        let even: Vec<f64> = (0..10).map(|index| f64::from(index) / 10.0).collect();
-        assert!(near(&starts, &even), "{name}: {starts:?}");
-        // all of it, and frames 5 to 7
-        let start = tgradish_core::convert::read_from(0.5, 0.4);
-        for (part, frames) in [((None, None), 10), ((Some(start), Some(0.3)), 3)] {
-            let request = Request {
-                output: Some(dir.path().join(format!("{name}-{frames}.webm"))),
-                options: Options {
-                    start: part.0,
-                    length: part.1,
-                    fps: Some(10.0),
-                    ..fast(Fit::Off)
-                },
-                ..Request::new(input.clone())
-            };
-            let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
-            let info = webm::inspect_file(&outcome.output).unwrap();
-            assert_eq!(info.video_frames, frames, "{name}: {part:?}");
+    // second in; Matroska says how long the file is, not the video
+    for container in ["mp4", "mkv"] {
+        let input = dir.path().join(format!("late.{container}"));
+        let status = Command::new("ffmpeg")
+            .args(["-v", "error", "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono"])
+            .args(["-itsoffset", "0.5", "-f", "lavfi", "-i", "testsrc2=s=64x48:r=10:d=1"])
+            .args(["-map", "0:a", "-map", "1:v", "-t", "1.5", "-c:v", "libx264", "-c:a", "aac"])
+            .arg(&input)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        for backend in &backends {
+            let name = format!("{} {container}", name(backend));
+            let probe = backend.probe(&input, &CancelToken::new()).unwrap();
+            let duration = probe.duration.unwrap();
+            assert!((probe.start - 0.5).abs() < 0.01, "{name}: {probe:?}");
+            // from where the video starts; where the file says, to where
+            // the longest stream, the sound, ends
+            assert!((0.95..1.2).contains(&duration), "{name}: {probe:?}");
+            let starts = backend.frame_starts(&input, &probe, &CancelToken::new()).unwrap();
+            let even: Vec<f64> = (0..10).map(|index| f64::from(index) / 10.0).collect();
+            assert!(near(&starts, &even), "{name}: {starts:?}");
+            // all of it, and frames 5 to 7
+            let start = tgradish_core::convert::read_from(0.5, 0.4);
+            for (part, frames) in [((None, None), 10), ((Some(start), Some(0.3)), 3)] {
+                let request = Request {
+                    output: Some(dir.path().join(format!("{name}-{frames}.webm"))),
+                    options: Options {
+                        start: part.0,
+                        length: part.1,
+                        fps: Some(10.0),
+                        ..fast(Fit::Off)
+                    },
+                    ..Request::new(input.clone())
+                };
+                let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
+                let info = webm::inspect_file(&outcome.output).unwrap();
+                assert_eq!(info.video_frames, frames, "{name}: {part:?}");
+            }
         }
     }
 }
