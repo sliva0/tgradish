@@ -84,7 +84,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: target/ffmpeg/sources
-          key: ffmpeg-sources-${{ hashFiles('xtask/src/main.rs') }}
+          key: ffmpeg-sources-${{ hashFiles('xtask/src/ffmpeg.rs') }}
 
       - run: cargo xtask ffmpeg --target ${{ matrix.target }}
 
@@ -262,7 +262,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: target/ffmpeg/sources
-          key: ffmpeg-sources-${{ hashFiles('xtask/src/main.rs') }}
+          key: ffmpeg-sources-${{ hashFiles('xtask/src/ffmpeg.rs') }}
       - run: cargo xtask ffmpeg-sources
 
       - uses: actions/download-artifact@v8
