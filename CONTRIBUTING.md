@@ -39,6 +39,15 @@ most bytes for the least visible change, and when the real result still
 misses, fitting aims a little lower and goes again. `crates/tgs/src/sticker.rs`
 explains each constant involved.
 
+The encoder's weights, such as `TILE` and `CORE_SHARE`, were measured on
+the corpus. `cargo run --release -p tgs-lab -- bench --save before.tsv`
+records how it encodes now, and after a change `bench --against
+before.tsv` compares;
+`--verify` also renders every result and counts wrong cells. tlottie's
+limits in `crates/tgs/src/limits.rs` come from its source, at the version
+`tgs-lab` depends on, and Telegram's from stickers `tgs-lab probes DIR` makes
+for @Stickers to accept or refuse.
+
 ## Building and testing
 
 ```console
