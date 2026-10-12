@@ -25,6 +25,9 @@ ctrlc = "3.5.2"
 directories = "6.0.0"
 embed-resource = "3.0.12"
 eframe = { version = "0.36.2", default-features = false, features = ["glow", "wayland", "x11"] }
+# the window's tests, which must move with eframe
+egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
+egui-wgpu = "0.36.2"
 flate2 = "1.1.10"
 gif = "0.14.2"
 image-webp = "0.2.4"

@@ -101,10 +101,10 @@ fn started_outside_a_terminal() -> bool {
         return false;
     }
     #[cfg(windows)]
-    if console::is_our_own() {
+    if windows_console::is_our_own() {
         // Windows before 11 24H2 ignores the manifest asking for no
         // console, and the one it made would stay open behind the window
-        console::close();
+        windows_console::close();
         return true;
     }
     !std::io::stdin().is_terminal() && !std::io::stdout().is_terminal()
@@ -112,7 +112,7 @@ fn started_outside_a_terminal() -> bool {
 
 #[cfg(all(windows, feature = "gui"))]
 #[allow(unsafe_code)]
-mod console {
+mod windows_console {
     use windows_sys::Win32::System::Console::{FreeConsole, GetConsoleProcessList};
 
     /// Whether the console was made for this process alone, as when it was

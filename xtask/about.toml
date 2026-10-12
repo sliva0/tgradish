@@ -1,4 +1,4 @@
-# Licenses of the crates in release binaries, which `cargo xtask package`
+# Licences of the crates in release binaries, which `cargo xtask licenses`
 # lists with `cargo about`. Of a crate's choices, the first one accepted
 # here is used.
 accepted = [

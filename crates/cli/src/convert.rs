@@ -61,6 +61,9 @@ impl<'a> Converter<'a> {
         if !foreign.is_empty() {
             bail!("{} can't be used for {} output", foreign.join(", "), format.extension());
         }
+        if args.keep_temp && format != Format::Webm {
+            bail!("--keep-temp is for WebM output, which alone leaves intermediate files");
+        }
         // preset, then --options-json, then flags
         let name = args.preset.as_deref().unwrap_or_else(|| ctx.config.preset_for(format));
         let invalid_json = || format!("invalid --options-json for {} output", format.extension());
@@ -311,10 +314,10 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
             .map_err(explain);
     }
     // keeps a pasted image on disk until it is converted
-    let mut _pasted_image = None;
+    let mut pasted_image = None;
     let inputs = if args.clipboard {
         let pasted = tgradish_core::clipboard::paste()?;
-        _pasted_image = pasted.image_dir;
+        pasted_image = pasted.image_dir;
         pasted.files
     } else {
         args.inputs.clone()
@@ -327,7 +330,7 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
     for input in &inputs {
         // a pasted image lives in a temporary directory; its result goes to
         // the current one
-        let output = match (&args.output, &_pasted_image) {
+        let output = match (&args.output, &pasted_image) {
             (Some(output), _) => Some(output.clone()),
             (None, Some(_)) if args.conversion.output_dir.is_none() => {
                 let name = converter.output_for(input);

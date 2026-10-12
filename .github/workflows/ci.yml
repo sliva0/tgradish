@@ -45,7 +45,7 @@ jobs:
       # the icons for menus and Windows, made from the window's
       - run: cargo xtask icons --check
 
-      # binaries carry the licenses of their crates; they must list today's
+      # binaries carry the licences of their crates; they must list today's
       - uses: taiki-e/install-action@v2
         if: runner.os == 'Linux'
         with:
