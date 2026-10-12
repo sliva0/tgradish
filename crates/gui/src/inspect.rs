@@ -9,6 +9,8 @@ use tgradish_core::{still, tgs};
 use tgradish_tgs::check::{Severity, Stats};
 use tgradish_tgs::limits::{self, telegram as server};
 
+use crate::app::App;
+use crate::fonts::drawable_in;
 use crate::jobs::Problem;
 use crate::widgets::{self, gauge, label, note, problems};
 
@@ -267,4 +269,49 @@ fn animation(ui: &mut egui::Ui, stats: &Stats) {
             ui.end_row();
         }
     });
+}
+
+impl App {
+    /// What an inspected sticker holds, in a dialog, while there is one.
+    pub(crate) fn inspection_dialog(&mut self, ctx: &egui::Context) {
+        let Some(inspection) = &self.inspection else { return };
+        let name = inspection
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let style = ctx.global_style();
+        let format = egui::TextFormat::simple(
+            egui::TextStyle::Heading.resolve(&style),
+            style.visuals.text_color(),
+        );
+        let title = drawable_in(&self.fallbacks, &name, format, style.visuals.code_bg_color).0;
+        let (mut another, mut close) = (false, false);
+        let modal = egui::Modal::new(egui::Id::new("inspect")).show(ctx, |ui| {
+            ui.set_width(520.0);
+            ui.add(egui::Label::new(title).truncate());
+            ui.add_space(4.0);
+            show(ui, inspection);
+            ui.separator();
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                close = ui.button("Close").clicked();
+                another = ui.button("Inspect another…").clicked();
+            });
+        });
+        if close || modal.should_close() {
+            self.inspection = None;
+        }
+        if another {
+            self.pick_inspected();
+        }
+    }
+
+    /// Asks for a sticker to inspect.
+    pub(crate) fn pick_inspected(&mut self) {
+        if let Some(file) =
+            rfd::FileDialog::new().add_filter("stickers", &["webm", "tgs", "webp"]).pick_file()
+        {
+            self.inspection = Some(Inspection::of(&file));
+        }
+    }
 }
