@@ -151,6 +151,15 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
     print_verdict(&telegram::check(info, target), target);
 }
 
+/// Says a file of several couldn't be inspected, and goes on to the rest.
+fn print_failure(ctx: &Context, path: &std::path::Path, err: &impl std::fmt::Display) {
+    if ctx.global.json {
+        crate::json_line(&json!({ "file": path, "error": err.to_string() }));
+    } else {
+        eprintln!("{} {}: {err}", ui::error_label(), path.display());
+    }
+}
+
 pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
     let mut failed = 0;
     for (i, path) in args.files.iter().enumerate() {
@@ -164,7 +173,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
                             "file": path, "format": "image", "target": target,
                             "info": info, "issues": issues,
                         });
-                        println!("{line}");
+                        crate::json_line(&line);
                     } else {
                         if i > 0 {
                             println!();
@@ -174,11 +183,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
                 }
                 Err(err) if args.files.len() > 1 => {
                     failed += 1;
-                    if ctx.global.json {
-                        println!("{}", json!({ "file": path, "error": err.to_string() }));
-                    } else {
-                        eprintln!("{} {}: {err}", ui::error_label(), path.display());
-                    }
+                    print_failure(ctx, path, &err);
                 }
                 Err(err) => return Err(err).with_context(|| format!("{}", path.display())),
             }
@@ -189,7 +194,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
                 Ok((stats, issues)) if ctx.global.json => {
                     let line =
                         json!({ "file": path, "format": "tgs", "stats": stats, "issues": issues });
-                    println!("{line}");
+                    crate::json_line(&line);
                 }
                 Ok((stats, issues)) => {
                     if i > 0 {
@@ -199,11 +204,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
                 }
                 Err(err) if args.files.len() > 1 => {
                     failed += 1;
-                    if ctx.global.json {
-                        println!("{}", json!({ "file": path, "error": err.to_string() }));
-                    } else {
-                        eprintln!("{} {}: {err}", ui::error_label(), path.display());
-                    }
+                    print_failure(ctx, path, &err);
                 }
                 Err(err) => return Err(err).with_context(|| format!("{}", path.display())),
             }
@@ -213,11 +214,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
             Ok(info) => info,
             Err(err) if args.files.len() > 1 => {
                 failed += 1;
-                if ctx.global.json {
-                    println!("{}", json!({ "file": path, "error": err.to_string() }));
-                } else {
-                    eprintln!("{} {}: {err}", ui::error_label(), path.display());
-                }
+                print_failure(ctx, path, &err);
                 continue;
             }
             Err(err) => return Err(err).with_context(|| format!("{}", path.display())),
@@ -234,7 +231,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
             }
             let issues = telegram::check(&info, target);
             let line = Line { file: path, format: "webm", target, info: &info, issues };
-            println!("{}", serde_json::to_string(&line)?);
+            crate::json_line(&line);
         } else {
             if i > 0 {
                 println!();

@@ -188,12 +188,12 @@ impl<'a> Converter<'a> {
                 };
                 let outcome = if json {
                     convert(backend, &request, cancel, &mut |event| {
-                        println!("{}", serde_json::to_string(&event).expect("events serialise"));
+                        crate::json_line(&event);
                     })
                 } else {
                     let mut printer = Printer::new(self.ctx);
                     let result = convert(backend, &request, cancel, &mut |e| printer.event(e));
-                    printer.finish();
+                    printer.bar.finish();
                     result
                 }?;
                 if let Some(dir) = &outcome.temp_dir
@@ -222,12 +222,12 @@ impl<'a> Converter<'a> {
                 };
                 if json {
                     tgs::convert(&request, cancel, &mut |event| {
-                        println!("{}", serde_json::to_string(&event).expect("events serialise"));
+                        crate::json_line(&event);
                     })?;
                 } else {
                     let mut printer = TgsPrinter::new(self.ctx);
                     let result = tgs::convert(&request, cancel, &mut |e| printer.event(e));
-                    printer.finish();
+                    printer.bar.finish();
                     let outcome = result?;
                     if !self.ctx.global.quiet && term::shows_pictures() {
                         show_result(&outcome.preview);
@@ -245,7 +245,7 @@ impl<'a> Converter<'a> {
                 let outcome = still::convert(backend, &request, cancel)?;
                 if json {
                     let event = still::StillEvent::Finished(outcome);
-                    println!("{}", serde_json::to_string(&event).expect("events serialise"));
+                    crate::json_line(&event);
                 } else {
                     self.print_still(&outcome);
                 }
@@ -392,11 +392,44 @@ fn progress_bar(verb: &str, length: Option<u64>) -> ProgressBar {
     bar
 }
 
+/// The progress bar a printer shows, if any, with lines printed above it.
+#[derive(Default)]
+struct Bar(Option<ProgressBar>);
+
+impl Bar {
+    /// Shows `bar` in place of the one before.
+    fn show(&mut self, bar: ProgressBar) {
+        self.clear();
+        self.0 = Some(bar);
+    }
+
+    /// Prints a line above the progress bar.
+    fn line(&self, text: impl AsRef<str>) {
+        match &self.0 {
+            // a hidden bar, when stderr is not a terminal, prints nothing
+            Some(bar) if !bar.is_hidden() => bar.println(text),
+            _ => eprintln!("{}", text.as_ref()),
+        }
+    }
+
+    fn clear(&mut self) {
+        if let Some(bar) = self.0.take() {
+            bar.finish_and_clear();
+        }
+    }
+
+    /// Clears the bar, and the progress the terminal shows.
+    fn finish(&mut self) {
+        self.clear();
+        term::progress(None);
+    }
+}
+
 /// Shows conversion events as text with a progress bar.
 struct Printer {
     verbose: u8,
     quiet: bool,
-    bar: Option<ProgressBar>,
+    bar: Bar,
     /// Telegram's size limit for what is being made.
     limit: u64,
 }
@@ -406,25 +439,9 @@ impl Printer {
         Self {
             verbose: ctx.global.verbose,
             quiet: ctx.global.quiet,
-            bar: None,
+            bar: Bar::default(),
             limit: tgradish_core::telegram::MAX_STICKER_BYTES,
         }
-    }
-
-    /// Prints a line above the progress bar.
-    fn line(&self, text: impl AsRef<str>) {
-        match &self.bar {
-            // a hidden bar, when stderr is not a terminal, prints nothing
-            Some(bar) if !bar.is_hidden() => bar.println(text),
-            _ => eprintln!("{}", text.as_ref()),
-        }
-    }
-
-    fn finish(&mut self) {
-        if let Some(bar) = self.bar.take() {
-            bar.finish_and_clear();
-        }
-        term::progress(None);
     }
 
     fn event(&mut self, event: Event) {
@@ -433,7 +450,7 @@ impl Printer {
         }
         match event {
             Event::Started { plan } if !self.quiet => {
-                self.line(ui::status(
+                self.bar.line(ui::status(
                     "Converting",
                     format!(
                         "{} → {}",
@@ -442,7 +459,7 @@ impl Printer {
                     ),
                 ));
                 let spoof = if plan.spoofs(plan.length) { ", spoofed" } else { "" };
-                self.line(ui::status(
+                self.bar.line(ui::status(
                     "Planned",
                     ui::dim(format!(
                         "{} {}×{}, {}, {}, fit {}{spoof}",
@@ -456,26 +473,21 @@ impl Printer {
                 ));
             }
             Event::AttemptStarted { attempt, params } if !self.quiet => {
-                if let Some(bar) = self.bar.take() {
-                    bar.finish_and_clear();
-                }
                 let bar = progress_bar("Encoding", Some(1000));
                 bar.set_message(format!("{attempt}: {}", ui::params(&params)));
-                self.bar = Some(bar);
+                self.bar.show(bar);
             }
             Event::Progress { pass, passes, fraction, .. } => {
                 let done = (f64::from(pass - 1) + fraction) / f64::from(passes);
-                if let Some(bar) = &self.bar {
+                if let Some(bar) = &self.bar.0 {
                     bar.set_position((done * 1000.0) as u64);
                 }
                 term::progress(Some(done));
             }
             Event::AttemptFinished { attempt, params, bytes, fits } if !self.quiet => {
-                if let Some(bar) = self.bar.take() {
-                    bar.finish_and_clear();
-                }
+                self.bar.clear();
                 let mark = if fits { style("fits").green() } else { style("too large").red() };
-                self.line(ui::status(
+                self.bar.line(ui::status(
                     "Encoded",
                     format!(
                         "{attempt}: {} → {}, {mark}",
@@ -485,14 +497,17 @@ impl Printer {
                 ));
             }
             Event::Scored { ssim, .. } if self.verbose > 0 => {
-                self.line(ui::status("Compared", ui::dim(format!("likeness (SSIM) {ssim:.4}"))));
+                self.bar
+                    .line(ui::status("Compared", ui::dim(format!("likeness (SSIM) {ssim:.4}"))));
             }
             Event::Warning { message } => {
-                self.line(format!("{} {message}", ui::warning_label()));
+                self.bar.line(format!("{} {message}", ui::warning_label()));
             }
-            Event::Log { line } if self.verbose > 1 => self.line(ui::dim(format!("    {line}"))),
+            Event::Log { line } if self.verbose > 1 => {
+                self.bar.line(ui::dim(format!("    {line}")))
+            }
             Event::Finished { output, bytes, params, spoofed, issues, .. } => {
-                self.finish();
+                self.bar.finish();
                 let spoofed = if spoofed { ", duration spoofed" } else { "" };
                 println!(
                     "{} {}, {}{spoofed}",
@@ -512,47 +527,29 @@ impl Printer {
 /// Shows `.tgs` conversion events as text.
 struct TgsPrinter {
     quiet: bool,
-    bar: Option<ProgressBar>,
+    bar: Bar,
     /// The lossless size, to show how much fitting has taken off.
     lossless: Option<usize>,
 }
 
 impl TgsPrinter {
     fn new(ctx: &Context) -> Self {
-        Self { quiet: ctx.global.quiet, bar: None, lossless: None }
+        Self { quiet: ctx.global.quiet, bar: Bar::default(), lossless: None }
     }
 
     fn spinner(&mut self, verb: &str, message: String) {
         if self.quiet {
             return;
         }
-        if let Some(bar) = self.bar.take() {
-            bar.finish_and_clear();
-        }
         let bar = progress_bar(verb, None);
         bar.set_message(message);
-        self.bar = Some(bar);
-    }
-
-    fn line(&self, text: impl AsRef<str>) {
-        match &self.bar {
-            // a hidden bar, when stderr is not a terminal, prints nothing
-            Some(bar) if !bar.is_hidden() => bar.println(text),
-            _ => eprintln!("{}", text.as_ref()),
-        }
-    }
-
-    fn finish(&mut self) {
-        if let Some(bar) = self.bar.take() {
-            bar.finish_and_clear();
-        }
-        term::progress(None);
+        self.bar.show(bar);
     }
 
     fn event(&mut self, event: TgsEvent) {
         match event {
             TgsEvent::Started { input, report } if !self.quiet => {
-                self.line(ui::status("Converting", term::link(input.display(), &input)));
+                self.bar.line(ui::status("Converting", term::link(input.display(), &input)));
                 let scale = match report.scale {
                     1 => String::new(),
                     scale => format!(" at {scale}x"),
@@ -571,9 +568,9 @@ impl TgsPrinter {
                 if report.trimmed {
                     line.push_str(", trimmed to 3 s");
                 }
-                self.line(ui::status("Read", ui::dim(line)));
+                self.bar.line(ui::status("Read", ui::dim(line)));
                 if let Some(likely) = report.likely_scale {
-                    self.line(format!(
+                    self.bar.line(format!(
                         "{} the art looks like {}x with {:.1}% of its edges off that grid; \
                          --pixel-scale {} snaps them",
                         ui::warning_label(),
@@ -587,7 +584,7 @@ impl TgsPrinter {
             }
             TgsEvent::TooLarge { bytes } if !self.quiet => {
                 self.lossless = Some(bytes);
-                self.line(ui::status(
+                self.bar.line(ui::status(
                     "Fitting",
                     format!(
                         "about {} losslessly, too large",
@@ -598,7 +595,7 @@ impl TgsPrinter {
                 self.spinner("Fitting", "into 64 KiB".into());
             }
             TgsEvent::Reduced { step } if !self.quiet => {
-                self.line(ui::status(
+                self.bar.line(ui::status(
                     "Reduced",
                     format!(
                         "{} → about {}",
@@ -619,10 +616,10 @@ impl TgsPrinter {
                 self.spinner("Compressing", "with zopfli".into());
             }
             TgsEvent::Warning { message } => {
-                self.line(format!("{} {message}", ui::warning_label()));
+                self.bar.line(format!("{} {message}", ui::warning_label()));
             }
             TgsEvent::Finished { output, bytes, lossy, steps, issues, .. } => {
-                self.finish();
+                self.bar.finish();
                 let lossy = if lossy && !steps.is_empty() {
                     format!(", {}", style("changed to fit").yellow())
                 } else if lossy {
