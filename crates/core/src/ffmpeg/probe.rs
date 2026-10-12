@@ -5,7 +5,8 @@ use std::path::Path;
 use std::process::Command;
 
 use super::orientation::{Orientation, parse_display_matrix};
-use super::{CancelToken, Output, run};
+use super::{Output, run};
+use crate::CancelToken;
 use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;

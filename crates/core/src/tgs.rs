@@ -14,9 +14,10 @@ use tgradish_tgs::normalise::{self, Report};
 pub use tgradish_tgs::reduce::{Compromise, Kind, Reduction};
 use tgradish_tgs::sticker::{self, Fit, Progress, Step};
 
+use crate::CancelToken;
 use crate::error::{Error, Result};
-use crate::ffmpeg::CancelToken;
 use crate::options::{Crop, Speed, TEMPOS};
+use crate::preview::Preview;
 use crate::telegram::Target;
 
 /// Frame rate of still images, sprite sheets and image sequences unless
@@ -273,16 +274,6 @@ pub struct TgsOutcome {
     pub lossy: bool,
     /// What the sticker shows, for previews.
     pub preview: Preview,
-}
-
-/// Frames of a sticker as straight RGBA, each with how many 60 fps frames
-/// it shows for. `.tgs` previews have a pixel per art pixel, WebM previews
-/// fit the size asked for.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Preview {
-    pub width: u32,
-    pub height: u32,
-    pub frames: Vec<(Vec<u8>, u32)>,
 }
 
 /// The longest side of a `.tgs` preview: plenty for a window, and within

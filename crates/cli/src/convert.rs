@@ -646,7 +646,7 @@ impl TgsPrinter {
 }
 
 /// A frame of a finished sticker, shown in terminals that show pictures.
-fn show_result(preview: &tgradish_core::tgs::Preview) {
+fn show_result(preview: &tgradish_core::preview::Preview) {
     let Some((rgba, _)) = preview.frames.get(preview.frames.len() / 3) else { return };
     term::picture(rgba, preview.width, preview.height, 8);
 }

@@ -5,14 +5,15 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
 
 use eframe::egui;
+use tgradish_core::CancelToken;
 use tgradish_core::backend::Backend;
 use tgradish_core::convert::{Request, convert};
 use tgradish_core::events::{Event, Params};
-use tgradish_core::ffmpeg::CancelToken;
 use tgradish_core::options::Options;
 use tgradish_core::presets::Format;
+use tgradish_core::preview::Preview;
 use tgradish_core::still;
-use tgradish_core::tgs::{self, Preview, TgsEvent, TgsOptions, TgsRequest};
+use tgradish_core::tgs::{self, TgsEvent, TgsOptions, TgsRequest};
 use tgradish_core::{Error, telegram};
 use tgradish_tgs::check::{Issue, Severity};
 use tgradish_tgs::normalise::Report;

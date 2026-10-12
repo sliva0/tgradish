@@ -6,9 +6,11 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
 use eframe::egui;
+use tgradish_core::CancelToken;
 use tgradish_core::backend::{Backend, Frames, FramesRequest};
-use tgradish_core::ffmpeg::{CancelToken, Probe};
-use tgradish_core::tgs::{self, Preview, TgsOptions};
+use tgradish_core::ffmpeg::Probe;
+use tgradish_core::preview::Preview;
+use tgradish_core::tgs::{self, TgsOptions};
 
 /// Frames of a video or animation, as straight RGBA.
 pub struct Clip {
