@@ -267,11 +267,22 @@ pub struct TgsRequest {
     pub overwrite: bool,
 }
 
+/// What converting made: all that [`TgsEvent::Finished`] says, whether or
+/// not events were followed, and a preview.
 #[derive(Debug, Clone)]
 pub struct TgsOutcome {
     pub output: PathBuf,
     pub bytes: u64,
+    /// Size of the Lottie JSON inside.
+    pub json_bytes: u64,
+    /// See [`TgsEvent::Finished`].
     pub lossy: bool,
+    /// Reductions fitting applied, in order.
+    pub steps: Vec<Step>,
+    pub layers: usize,
+    pub rectangles: usize,
+    /// Problems Telegram would still have with the result.
+    pub issues: Vec<Issue>,
     /// What the sticker shows, for previews.
     pub preview: Preview,
 }
@@ -538,22 +549,28 @@ pub fn convert(
         return Err(Error::Cancelled);
     }
     crate::fsutil::write_output(&request.output, &sticker.tgs, request.overwrite)?;
-    on_event(TgsEvent::Finished {
+    let outcome = TgsOutcome {
         output: request.output.clone(),
         bytes: sticker.bytes as u64,
         json_bytes: sticker.json_bytes as u64,
         lossy,
-        steps: sticker.steps.clone(),
+        steps: sticker.steps,
         layers: sticker.layers,
         rectangles: sticker.rectangles,
-        issues: sticker.issues.clone(),
-    });
-    Ok(TgsOutcome {
-        output: request.output.clone(),
-        bytes: sticker.bytes as u64,
-        lossy,
+        issues: sticker.issues,
         preview: Preview::of(&sticker.anim),
-    })
+    };
+    on_event(TgsEvent::Finished {
+        output: outcome.output.clone(),
+        bytes: outcome.bytes,
+        json_bytes: outcome.json_bytes,
+        lossy,
+        steps: outcome.steps.clone(),
+        layers: outcome.layers,
+        rectangles: outcome.rectangles,
+        issues: outcome.issues.clone(),
+    });
+    Ok(outcome)
 }
 
 #[cfg(test)]

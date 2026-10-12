@@ -107,19 +107,11 @@ impl Clip {
         egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &out)
     }
 
-    /// Whether this looks like pixel art rather than a photo or video: few
-    /// colours.
+    /// Whether this looks like pixel art to make a `.tgs` of, rather than
+    /// a photo or video: few colours in its first frames.
     pub fn looks_like_pixel_art(&self) -> bool {
-        let mut colours = std::collections::HashSet::new();
-        for rgba in self.frames.iter().take(8) {
-            for pixel in rgba.as_chunks::<4>().0.iter().filter(|pixel| pixel[3] > 0) {
-                colours.insert(*pixel);
-                if colours.len() > PIXEL_ART_COLOURS {
-                    return false;
-                }
-            }
-        }
-        true
+        let frames = &self.frames[..self.frames.len().min(8)];
+        tgradish_core::convert::has_few_colours(frames, self.width, None, TGS_COLOURS)
     }
 }
 
@@ -128,8 +120,12 @@ fn next_id() -> u64 {
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// More colours than this in the first frames is not pixel art.
-const PIXEL_ART_COLOURS: usize = 128;
+/// More colours than this in the first frames is not pixel art to make a
+/// `.tgs` of. Stricter than auto scaling's
+/// [`PIXEL_ART_COLOURS`](tgradish_core::convert::PIXEL_ART_COLOURS): each
+/// colour of a `.tgs` costs bytes of its own, while sharp scaling takes any
+/// number.
+const TGS_COLOURS: usize = 128;
 
 /// Work on another thread, cancelled when dropped.
 pub struct Task<T> {
