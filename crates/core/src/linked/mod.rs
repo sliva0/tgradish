@@ -444,8 +444,6 @@ pub(crate) fn encode(
     encoder.finish(pass)
 }
 
-/// Linked version of [`crate::ffmpeg::ssim`], averaging the per-frame SSIM
-/// the filter reports.
 /// Up to `count` frames of `input` from `start` seconds on, at `fps`,
 /// scaled to `size`, as straight RGBA.
 pub(crate) fn frames(
@@ -555,6 +553,8 @@ pub(crate) fn still(plan: &Plan, cancel: &CancelToken) -> Result<Vec<u8>> {
         .collect())
 }
 
+/// Linked version of [`crate::ffmpeg::ssim`], averaging the per-frame SSIM
+/// the filter reports.
 pub(crate) fn ssim(plan: &Plan, candidate: &Path, fps: f64, cancel: &CancelToken) -> Result<f64> {
     init()?;
     let frames = frame_count(plan.length, plan.fps);
