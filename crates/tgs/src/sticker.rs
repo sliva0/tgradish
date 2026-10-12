@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tgradish_frames::Animation;
 
 use crate::check::{self, Issue, Severity};
-use crate::encode::{Effort, Settings, painter};
+use crate::encode::{Effort, EncodeError, Settings, painter};
 use crate::layout::{self, lay_out};
 use crate::limits::{MAX_RAW_JSON, telegram};
 use crate::lottie::Style;
@@ -131,9 +131,23 @@ const ZOPFLI_SHARE: f64 = 0.93;
 /// When the real size misses an estimate, the next target is this much
 /// lower.
 const RETARGET: f64 = 0.96;
+/// Estimates are measured against the real encoder only for art at most
+/// this many times as large as the limit. Farther over it, fitting shrinks
+/// the art a lot first, the packed result corrects a missed estimate
+/// anyway, and the real encoder's search can take minutes.
+const CALIBRATE_WITHIN: f64 = 2.0;
+
+/// Asked between steps: when it says yes, making a sticker stops. It may
+/// be asked from several threads at once.
+pub type Cancelled<'a> = &'a (dyn Fn() -> bool + Sync);
 
 /// Encodes and lays out `anim`.
-fn render(anim: &PixelAnim, settings: &Settings, options: &Options) -> Result<(Scene, String)> {
+fn render(
+    anim: &PixelAnim,
+    settings: &Settings,
+    options: &Options,
+    cancelled: Cancelled,
+) -> Result<(Scene, String)> {
     let json = |scene: &Scene| {
         let mut lottie = lay_out(scene, anim, options.name.clone());
         if let Some(mark) = &options.mark {
@@ -142,7 +156,10 @@ fn render(anim: &PixelAnim, settings: &Settings, options: &Options) -> Result<(S
         lottie.to_json(options.style)
     };
     let score = |scene: &Scene| file::quick_size(json(scene).as_bytes());
-    let scene = painter(anim, settings, Some(&score))?;
+    let scene = painter(anim, settings, Some(&score), cancelled).map_err(|err| match err {
+        EncodeError::Cancelled => crate::Error::Cancelled,
+        err => err.into(),
+    })?;
     let json = json(&scene);
     Ok((scene, json))
 }
@@ -157,10 +174,15 @@ fn within_limits(scene: &Scene, json: &str) -> bool {
 /// scaled by `calibration`. A cost near the server's limit, or JSON near
 /// Telegram Desktop's, counts as that share of `max_bytes` when that is
 /// more, so reductions that shrink either count as progress even before
-/// it fits. `None` when it can't be made at all.
-fn estimate(anim: &PixelAnim, options: &Options, calibration: f64) -> Option<usize> {
+/// it fits. `None` when it can't be made at all, or was cancelled.
+fn estimate(
+    anim: &PixelAnim,
+    options: &Options,
+    calibration: f64,
+    cancelled: Cancelled,
+) -> Option<usize> {
     let quick = Settings { effort: Effort::Fast, ..Settings::default() };
-    let (scene, json) = render(anim, &quick, options).ok()?;
+    let (scene, json) = render(anim, &quick, options, cancelled).ok()?;
     let packed = file::quick_size(json.as_bytes()) as f64 * calibration;
     let share = f64::max(
         layout::cost(&scene) as f64 / telegram::MAX_COST as f64,
@@ -170,13 +192,13 @@ fn estimate(anim: &PixelAnim, options: &Options, calibration: f64) -> Option<usi
 }
 
 /// Makes a sticker of `animation`, reporting `progress`. `cancelled` is
-/// asked between steps; when it says yes, this stops with
-/// [`Error::Cancelled`](crate::Error::Cancelled).
+/// asked between steps, and while encoding between colours; when it says
+/// yes, this stops with [`Error::Cancelled`](crate::Error::Cancelled).
 pub fn make(
     animation: &Animation,
     options: &Options,
     progress: &mut dyn FnMut(Progress),
-    cancelled: &dyn Fn() -> bool,
+    cancelled: Cancelled,
 ) -> Result<Sticker> {
     let check = || if cancelled() { Err(crate::Error::Cancelled) } else { Ok(()) };
     let (original, report) = normalise(animation, &options.normalise)?;
@@ -184,21 +206,25 @@ pub fn make(
     let settings = Settings { effort: options.effort, ..Settings::default() };
 
     // estimates are quick encodes, scaled to what the real encoder and
-    // zopfli make of the original
+    // zopfli make of the original, when that is near the limit
     let calibration = {
         let quick = Settings { effort: Effort::Fast, ..Settings::default() };
-        let mut renders =
-            parallel(&[quick, settings.clone()], |settings| render(&original, settings, options))
-                .into_iter();
-        match (renders.next().unwrap(), renders.next().unwrap()) {
-            (Ok((_, fast)), Ok((_, real))) => {
-                let (fast, real) =
-                    (file::quick_size(fast.as_bytes()), file::quick_size(real.as_bytes()));
-                ZOPFLI_SHARE * real as f64 / fast.max(1) as f64
-            }
+        let fast = render(&original, &quick, options, cancelled)
+            .map(|(_, json)| file::quick_size(json.as_bytes()));
+        check()?;
+        let near =
+            |fast: usize| fast as f64 * ZOPFLI_SHARE <= options.max_bytes as f64 * CALIBRATE_WITHIN;
+        match fast {
+            Ok(fast) if near(fast) => match render(&original, &settings, options, cancelled) {
+                Ok((_, real)) => {
+                    ZOPFLI_SHARE * file::quick_size(real.as_bytes()) as f64 / fast.max(1) as f64
+                }
+                Err(_) => ZOPFLI_SHARE,
+            },
             _ => ZOPFLI_SHARE,
         }
     };
+    check()?;
 
     let mut current = original.clone();
     let mut steps: Vec<Step> = Vec::new();
@@ -217,12 +243,13 @@ pub fn make(
         }
         check()?;
         progress(Progress::Packing);
-        let (scene, json) = render(&current, &settings, options)?;
+        let (scene, json) = render(&current, &settings, options, cancelled)?;
         let tgs = file::pack(json.as_bytes(), zopfli_iterations(options.effort));
+        check()?;
         let fits = tgs.len() <= options.max_bytes && within_limits(&scene, &json);
         // the estimate was off; aim lower and reduce some more
         if !fits && options.fit == Fit::Auto && target > options.max_bytes / 4 {
-            let reachable = estimate(&current, options, calibration).is_some();
+            let reachable = estimate(&current, options, calibration, cancelled).is_some();
             if reachable {
                 target = ((target as f64) * RETARGET) as usize;
                 continue;
@@ -286,9 +313,10 @@ fn fit(
     (target, calibration): (usize, f64),
     options: &Options,
     progress: &mut dyn FnMut(Progress),
-    cancelled: &dyn Fn() -> bool,
+    cancelled: Cancelled,
 ) -> Result<PixelAnim> {
-    let size_of = |anim: &PixelAnim| estimate(anim, options, calibration).unwrap_or(usize::MAX);
+    let size_of =
+        |anim: &PixelAnim| estimate(anim, options, calibration, cancelled).unwrap_or(usize::MAX);
     let mut size = size_of(&current);
     if size <= target {
         return Ok(current);
@@ -419,6 +447,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn stops_inside_an_encode() {
+        let walker = tgradish_corpus::files().into_iter().find(|f| f.name == "walker.gif").unwrap();
+        let input = tgradish_frames::decode(&walker.bytes, &Default::default()).unwrap();
+        let (anim, _) = normalise(&input, &normalise::Options::default()).unwrap();
+        // between colours, whatever the effort
+        let best = Settings { effort: Effort::Best, ..Settings::default() };
+        let stopped = painter(&anim, &best, None, &|| true);
+        assert!(matches!(stopped, Err(EncodeError::Cancelled)), "{stopped:?}");
+        // and making a sticker ends there too, after a few questions
+        let asked = std::sync::atomic::AtomicUsize::new(0);
+        let cancelled = || asked.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 3;
+        let made = make(&input, &Options::default(), &mut |_| {}, &cancelled);
+        assert!(matches!(made, Err(crate::Error::Cancelled)), "{:?}", made.map(|s| s.bytes));
+    }
+
+    #[test]
     fn estimates_json_over_desktops_limit_as_too_large() {
         let input = Animation::new(
             2,
@@ -428,11 +472,11 @@ mod tests {
         .unwrap();
         let (anim, _) = normalise(&input, &normalise::Options::default()).unwrap();
         let named = |bytes: usize| Options { name: Some("x".repeat(bytes)), ..Options::default() };
-        let small = estimate(&anim, &named(0), 1.0).unwrap();
+        let small = estimate(&anim, &named(0), 1.0, &|| false).unwrap();
         assert!(small < 1000, "{small}");
         // the name packs to almost nothing, but the JSON is too large
-        let over = estimate(&anim, &named(MAX_RAW_JSON + 100_000), 1.0).unwrap();
-        let further = estimate(&anim, &named(MAX_RAW_JSON + 200_000), 1.0).unwrap();
+        let over = estimate(&anim, &named(MAX_RAW_JSON + 100_000), 1.0, &|| false).unwrap();
+        let further = estimate(&anim, &named(MAX_RAW_JSON + 200_000), 1.0, &|| false).unwrap();
         assert!(telegram::MAX_BYTES < over && over < further, "{over} {further}");
     }
 
@@ -460,7 +504,7 @@ mod tests {
         let input = Animation::new(SIDE, SIDE, frames).unwrap();
         let normalise_options = normalise::Options { keep_canvas: true, ..Default::default() };
         let (anim, _) = normalise(&input, &normalise_options).unwrap();
-        let lossless = estimate(&anim, &Options::default(), 1.0).unwrap();
+        let lossless = estimate(&anim, &Options::default(), 1.0, &|| false).unwrap();
         let fitted = |compromise: Compromise| {
             let options = Options { compromise, ..Options::default() };
             let mut steps = Vec::new();
@@ -506,10 +550,10 @@ mod tests {
         let (anim, _) = normalise(&input, &normalise_options).unwrap();
         let options = Options::default();
         let quick = Settings { effort: Effort::Fast, ..Settings::default() };
-        let (scene, json) = render(&anim, &quick, &options).unwrap();
+        let (scene, json) = render(&anim, &quick, &options, &|| false).unwrap();
         assert!(layout::cost(&scene) > telegram::MAX_COST, "{}", layout::cost(&scene));
         assert!(!within_limits(&scene, &json));
         // with no weight on the packed size, what is left is the cost
-        assert!(estimate(&anim, &options, 0.0).unwrap() > telegram::MAX_BYTES);
+        assert!(estimate(&anim, &options, 0.0, &|| false).unwrap() > telegram::MAX_BYTES);
     }
 }

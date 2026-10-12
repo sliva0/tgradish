@@ -68,7 +68,7 @@ fn sprite() -> Result<Frames> {
 fn sprite_json(style: Style) -> Result<String> {
     let options = Options { keep_canvas: true, ..Options::default() };
     let (anim, _) = normalise(&sprite()?, &options)?;
-    let scene = encode::painter(&anim, &Default::default(), None)?;
+    let scene = encode::painter(&anim, &Default::default(), None, &|| false)?;
     Ok(lay_out(&scene, &anim, Some("tgradish probe".into())).to_json(style))
 }
 

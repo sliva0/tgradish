@@ -299,6 +299,11 @@ impl Job {
         self.cancel.cancel();
     }
 
+    /// Asked to stop, and not yet stopped.
+    pub fn is_stopping(&self) -> bool {
+        self.is_running() && self.cancel.is_cancelled()
+    }
+
     /// Takes in what the worker reported; true when it just finished.
     pub fn poll(&mut self) -> bool {
         let Some(messages) = &self.messages else { return false };

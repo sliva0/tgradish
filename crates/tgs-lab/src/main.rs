@@ -56,8 +56,11 @@ fn load(path: &Path) -> Result<(PixelAnim, Report)> {
 
 /// `anim` as Lottie JSON, from the encoder or the `runs` baseline.
 fn encoded(anim: &PixelAnim, runs: bool) -> Result<String> {
-    let scene =
-        if runs { encode::runs(anim) } else { encode::painter(anim, &Default::default(), None)? };
+    let scene = if runs {
+        encode::runs(anim)
+    } else {
+        encode::painter(anim, &Default::default(), None, &|| false)?
+    };
     Ok(lay_out(&scene, anim, Some("tgs-lab".into())).to_json(Style::default()))
 }
 
