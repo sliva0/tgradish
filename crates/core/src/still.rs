@@ -92,9 +92,10 @@ pub fn plan(
     starts: &[f64],
 ) -> Result<(Plan, Vec<String>)> {
     let mut options = picture_options(&request.options);
-    // the frame that shows at `start`, as previews show it; past the end,
-    // planning says so
+    // the frame that shows at `start`, as previews show it; before the
+    // start or past the end, planning says so
     if let (Some(start), Some(fps)) = (options.start, source.fps.filter(|_| !source.still_image))
+        && start >= 0.0
         && source.duration.is_none_or(|duration| start < duration)
     {
         options.start = Some(frame_start(start, starts, fps));
@@ -139,6 +140,8 @@ pub fn convert(backend: &Backend, request: &Request, cancel: &CancelToken) -> Re
         None => webp,
     };
     let (webp, encoding) = fit(&rgba, plan.width, plan.height, finish)?;
+    // encoding can't stop part of the way, but a stopped one isn't kept
+    cancel.check()?;
     crate::fsutil::write_file(&plan.output, &webp, request.overwrite).map_err(|err| {
         match err.kind() {
             std::io::ErrorKind::AlreadyExists => Error::OutputExists(plan.output.clone()),
