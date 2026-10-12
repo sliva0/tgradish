@@ -1,6 +1,5 @@
 //! The settings dialog: ffmpeg, where results go, and what new files start
-//! with. Changes apply at once; OK keeps them in `config.toml`, and Cancel
-//! goes back to how they were.
+//! with. Changes apply at once; Save keeps them in `config.toml`.
 
 use std::path::{Path, PathBuf};
 
@@ -16,41 +15,45 @@ use crate::widgets::{self, note, row, segments};
 
 #[derive(Default)]
 pub struct Prefs {
-    /// The settings as they were when the dialog opened, for Cancel; the
-    /// dialog is open while they are kept.
-    before: Option<Config>,
+    open: bool,
     /// Whether the window of tgradish's version and licences is open.
     pub about: bool,
     ffmpeg_status: Option<(bool, String)>,
-    /// Why OK couldn't save the settings.
-    error: Option<String>,
+    /// What Save did: where the settings went, or why they didn't.
+    saved: Option<Result<String, String>>,
 }
 
 impl Prefs {
-    pub fn open(&mut self, config: &Config) {
-        *self = Prefs { before: Some(config.clone()), about: self.about, ..Prefs::default() };
+    pub fn open(&mut self) {
+        *self = Prefs { open: true, about: self.about, ..Prefs::default() };
     }
 
     pub fn is_open(&self) -> bool {
-        self.before.is_some()
+        self.open
     }
 }
 
-/// Shows the dialog if it is open. Returns what to tell the user once it
-/// closed with settings that couldn't be kept.
+/// Shows the dialog if it is open.
 pub fn show(
     ctx: &egui::Context,
     prefs: &mut Prefs,
     config: &mut Config,
     config_path: Option<&Path>,
     presets: &Presets,
-) -> Option<String> {
-    let before = prefs.before.clone()?;
-    let mut ok = false;
-    let mut cancel = false;
+) {
+    if !prefs.open {
+        return;
+    }
+    let mut close = false;
     let modal = egui::Modal::new(egui::Id::new("settings")).show(ctx, |ui| {
         ui.set_width(620.0);
-        ui.heading("Settings");
+        ui.horizontal(|ui| {
+            ui.heading("Settings");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let cross = egui::Button::new("✖").frame(false);
+                close = ui.add(cross).on_hover_text("Close").clicked();
+            });
+        });
         // the dialog fits the window, its settings scrolling within
         let room = (ctx.content_rect().height() - 150.0).max(200.0);
         egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
@@ -58,49 +61,35 @@ pub fn show(
         });
         ui.separator();
         ui.horizontal(|ui| {
-            if ui.button("About and licenses…").clicked() {
-                prefs.about = true;
+            if ui.button("Save").on_hover_text("Keep these settings for next time").clicked() {
+                prefs.saved = Some(match config_path {
+                    Some(path) => match config.save(path) {
+                        Ok(()) => Ok(format!("Saved to {}", path.display())),
+                        Err(err) => Err(format!("Couldn't save: {err}")),
+                    },
+                    None => Err("There is no home folder to keep settings in".to_owned()),
+                });
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Breeze's order: OK, then Cancel
-                cancel = ui.button("Cancel").on_hover_text("Back to how they were").clicked();
-                ok = ui.button("OK").on_hover_text("Keep these settings").clicked();
-                if let Some(error) = &prefs.error {
-                    let text = egui::RichText::new(error).color(widgets::BAD);
-                    ui.add(egui::Label::new(text).truncate());
+                if ui.button("About and licenses…").clicked() {
+                    prefs.about = true;
                 }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| match &prefs
+                    .saved
+                {
+                    Some(Ok(saved)) => note(ui, saved),
+                    Some(Err(error)) => {
+                        let text = egui::RichText::new(error).color(widgets::BAD);
+                        ui.add(egui::Label::new(text).truncate());
+                    }
+                    None => note(ui, "Changes apply now; Save keeps them"),
+                });
             });
         });
     });
-    // Escape cancels; a click beside the dialog doesn't, so changes aren't
-    // lost to a stray one
-    let escape = modal.is_top_modal
-        && !modal.any_popup_open
-        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-    if cancel || escape {
-        *config = before;
-        prefs.before = None;
-        return None;
-    }
-    if !ok {
-        return None;
-    }
-    match config_path.map(|path| config.save(path)) {
-        Some(Ok(())) => {
-            prefs.before = None;
-            None
-        }
-        Some(Err(err)) => {
-            prefs.error = Some(format!("Couldn't save: {err}"));
-            None
-        }
-        None => {
-            prefs.before = None;
-            Some(
-                "There is no home folder to keep settings in: they last until tgradish closes"
-                    .into(),
-            )
-        }
+    // changes stay either way, until tgradish closes unless saved
+    if close || modal.should_close() {
+        prefs.open = false;
     }
 }
 

@@ -55,6 +55,20 @@ pub fn text_width(ui: &egui::Ui, text: &str, padding: f32) -> f32 {
 }
 
 /// Weaker text explaining something.
+/// A link to `url`, which takes a click as a link, rather than starting a
+/// selection as text does.
+pub fn link(
+    ui: &mut egui::Ui,
+    text: impl Into<egui::WidgetText>,
+    url: impl ToString,
+) -> egui::Response {
+    let selectable = ui.style().interaction.selectable_labels;
+    ui.style_mut().interaction.selectable_labels = false;
+    let response = ui.add(egui::Hyperlink::from_label_and_url(text, url));
+    ui.style_mut().interaction.selectable_labels = selectable;
+    response
+}
+
 pub fn note(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(RichText::new(text.into()).weak().size(12.5));
 }
@@ -372,6 +386,32 @@ pub fn checkerboard(painter: &egui::Painter, rect: egui::Rect, square: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn takes_clicks_on_links_rather_than_selecting() {
+        type State = Option<egui::Rect>;
+        let show = |ui: &mut egui::Ui, at: &mut State| {
+            ui.style_mut().interaction.selectable_labels = true;
+            *at = Some(link(ui, "source code", "https://example.org").rect);
+        };
+        let mut harness = egui_kittest::Harness::new_ui_state(show, None);
+        harness.run();
+        let at = harness.state().unwrap().center();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        harness.event(egui::Event::PointerMoved(at));
+        harness.event(press(true));
+        harness.step();
+        assert_eq!(harness.output().platform_output.cursor_icon, egui::CursorIcon::PointingHand);
+        harness.event(press(false));
+        harness.step();
+        let opened = &harness.output().platform_output.commands;
+        assert!(matches!(opened.as_slice(), [egui::OutputCommand::OpenUrl(_)]), "{opened:?}");
+    }
 
     #[test]
     fn keeps_automatic_numbers_automatic() {

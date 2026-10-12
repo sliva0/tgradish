@@ -177,7 +177,7 @@ fn boundary_field<'a>(
 const KEYS: &str = "Space: play or pause\n← →: a frame back or on, with Shift ten\n\
                     Home, End: the first or last frame used\n\
                     [ ]: start or end the used part at the frame shown\n\
-                    Alt+← →, Ctrl+← →: move its start or its end";
+                    Ctrl+← →, Alt+← →: move its start or its end";
 
 /// Width of [`unit`]'s two buttons.
 const UNIT: f32 = 122.0;
