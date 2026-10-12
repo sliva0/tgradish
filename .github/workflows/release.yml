@@ -60,6 +60,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # archives are named after the version in Cargo.toml, the release
+      # after the tag
+      - name: Check the tag is the version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "the tag is $GITHUB_REF_NAME, but Cargo.toml says $version"
+            exit 1
+          fi
+
       - name: Install build tools (Linux)
         if: matrix.container
         run: |
@@ -155,12 +167,16 @@ jobs:
           cd artifacts
           for archive in tgradish-*.tar.gz; do tar -xzf "$archive"; done
           ffmpeg -v error -f lavfi -i testsrc2=s=320x240:d=4 -pix_fmt yuv420p input.mp4
+          # a 16 x 16 PNG: a red square in a transparent border
+          echo iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGF7gjobGf2LwqAGjBtDWgKEJAGe22M1pQ+POAAAAAElFTkSuQmCC | base64 -d > input.png
           for bin in tgradish-*/tgradish; do
             echo "== $bin"
             ldd "$bin"
             "$bin" ffmpeg status
             "$bin" convert input.mp4 -o out.webm --preset fast --overwrite
-            "$bin" inspect out.webm
+            "$bin" convert input.png -o out.tgs --overwrite
+            "$bin" convert input.png -o out.webp --overwrite
+            "$bin" inspect out.webm out.tgs out.webp
           done
           # the system-ffmpeg build really uses the system's
           tgradish-*-system-ffmpeg/tgradish --json ffmpeg status | grep -q /usr/bin/ffmpeg
@@ -208,7 +224,9 @@ jobs:
           # a 16 x 16 PNG: a red square in a transparent border
           echo iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGF7gjobGf2LwqAGjBtDWgKEJAGe22M1pQ+POAAAAAElFTkSuQmCC | base64 -d > input.png
           tgradish convert input.png -o out.webm --length 1 --preset fast
-          tgradish inspect out.webm
+          tgradish convert input.png -o out.tgs
+          tgradish convert input.png -o out.webp
+          tgradish inspect out.webm out.tgs out.webp
 
   # runs the Windows build on Windows
   test-windows:
@@ -246,7 +264,9 @@ jobs:
           "$bin" convert input.png -o still.webm --length 1 --preset fast
           # VP9 with alpha in, which needs the libvpx decoder
           "$bin" convert still.webm -o out.webm --preset fast
-          "$bin" inspect out.webm
+          "$bin" convert input.png -o out.tgs --preset fast
+          "$bin" convert input.png -o out.webp
+          "$bin" inspect out.webm out.tgs out.webp
           # Windows paths and an output that already exists
           "$bin" convert still.webm -o out.webm --preset fast && exit 1 || true
 
