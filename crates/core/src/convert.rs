@@ -5,7 +5,7 @@
 //! [`CancelToken`]:
 //!
 //! ```no_run
-//! # use tgradish_core::{backend::Backend, convert::{convert, Request}, ffmpeg::CancelToken};
+//! # use tgradish_core::{backend::Backend, convert::{convert, Request}, CancelToken};
 //! let backend = Backend::select(Default::default(), None)?;
 //! let cancel = CancelToken::new();
 //! let request = Request::new("pig.mp4".into());
@@ -24,10 +24,11 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::Serialize;
 
+use crate::CancelToken;
 use crate::backend::{Backend, FramesRequest, Pass};
 use crate::error::{Error, Result};
 use crate::events::{Event, Params, Rate};
-use crate::ffmpeg::{CancelToken, Output, Probe};
+use crate::ffmpeg::{Output, Probe};
 use crate::fit::{self, Attempt, Encoder};
 use crate::options::{self, Crop, ExactScale, Fit, Options, Range, Resize, Scaling, Speed, Spoof};
 use crate::telegram::{self, Issue, Target};

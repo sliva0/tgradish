@@ -8,10 +8,11 @@ use std::process::Command;
 use schemars::JsonSchema;
 use serde::Serialize;
 
+use crate::CancelToken;
 use crate::convert::Plan;
 use crate::error::Result;
 use crate::events::Params;
-use crate::ffmpeg::{self, CancelToken, Capabilities, Ffmpeg, FfmpegChoice, Output, Probe};
+use crate::ffmpeg::{self, Capabilities, Ffmpeg, FfmpegChoice, Output, Probe};
 
 /// Pass of a libvpx encode. Two-pass encodes share a statistics file.
 #[derive(Debug, Clone, Copy)]
@@ -183,7 +184,7 @@ impl Backend {
         path: &Path,
         max_side: u32,
         cancel: &CancelToken,
-    ) -> Result<crate::tgs::Preview> {
+    ) -> Result<crate::preview::Preview> {
         let probe = self.probe(path, cancel)?;
         let fps = probe.fps_or_default().clamp(1.0, 60.0);
         // spoofed stickers say in their header that they are shorter than
@@ -211,7 +212,7 @@ impl Backend {
             .enumerate()
             .map(|(index, rgba)| (rgba, (start(index + 1) - start(index)).max(1)))
             .collect();
-        Ok(crate::tgs::Preview { width: frames.width, height: frames.height, frames: rgba })
+        Ok(crate::preview::Preview { width: frames.width, height: frames.height, frames: rgba })
     }
 
     /// The planned frame at the plan's start, cropped, scaled and padded as

@@ -9,6 +9,7 @@
 //! are here too.
 
 pub mod backend;
+mod cancel;
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
 pub mod config;
@@ -27,12 +28,14 @@ pub mod mark;
 pub mod options;
 pub mod paths;
 pub mod presets;
+pub mod preview;
 pub mod protocol;
 pub mod still;
 pub mod telegram;
 pub mod tgs;
 pub mod webm;
 
+pub use cancel::CancelToken;
 pub use error::{Error, Result};
 
 /// Name and version, used in watermarks.

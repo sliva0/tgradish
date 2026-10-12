@@ -7,7 +7,8 @@ use std::path::Path;
 use std::process::Command;
 
 use super::args::{input_args, video_filter};
-use super::{CancelToken, Ffmpeg, Output, run};
+use super::{Ffmpeg, Output, run};
+use crate::CancelToken;
 use crate::convert::Plan;
 use crate::error::{Error, Result};
 

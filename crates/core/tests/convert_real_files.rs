@@ -5,10 +5,11 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use tgradish_core::CancelToken;
 use tgradish_core::backend::{Backend, FramesRequest};
 use tgradish_core::convert::{Request, convert};
 use tgradish_core::events::Event;
-use tgradish_core::ffmpeg::{self, CancelToken, FfmpegChoice};
+use tgradish_core::ffmpeg::{self, FfmpegChoice};
 use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Speed};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::{Error, webm};

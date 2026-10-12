@@ -1,51 +1,13 @@
-//! Running ffmpeg and ffprobe as child processes: their output read line
-//! by line as they go, and a [`CancelToken`] that kills them.
+//! Running ffmpeg and ffprobe as child processes, their output read line
+//! by line as they go, so that a [`CancelToken`] can kill them.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
+use crate::CancelToken;
 use crate::error::{Error, Result};
-
-/// Cancels a running conversion from another thread, killing the ffmpeg
-/// process it is waiting for.
-#[derive(Debug, Clone, Default)]
-pub struct CancelToken {
-    inner: Arc<Inner>,
-}
-
-#[derive(Debug, Default)]
-struct Inner {
-    cancelled: AtomicBool,
-    child: Mutex<Option<Arc<Mutex<Child>>>>,
-}
-
-impl CancelToken {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn cancel(&self) {
-        self.inner.cancelled.store(true, Ordering::SeqCst);
-        if let Some(child) = self.inner.child.lock().unwrap().as_ref() {
-            let _ = child.lock().unwrap().kill();
-        }
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.inner.cancelled.load(Ordering::SeqCst)
-    }
-
-    pub(crate) fn check(&self) -> Result<()> {
-        if self.is_cancelled() { Err(Error::Cancelled) } else { Ok(()) }
-    }
-
-    fn register(&self, child: Option<Arc<Mutex<Child>>>) {
-        *self.inner.child.lock().unwrap() = child;
-    }
-}
 
 /// Output of a running ffmpeg.
 pub(crate) enum Output {

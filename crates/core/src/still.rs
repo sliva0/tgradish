@@ -13,10 +13,10 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::Serialize;
 
+use crate::CancelToken;
 use crate::backend::Backend;
 use crate::convert::{self, Plan, Request};
 use crate::error::{Error, Result};
-use crate::ffmpeg::CancelToken;
 use crate::options::Options;
 use crate::telegram::{self, Issue, Target};
 
@@ -415,7 +415,7 @@ pub fn dimensions(path: &Path) -> Result<(u32, u32)> {
 }
 
 /// A WebP, decoded for a preview: one frame, as long as a `.tgs` one.
-pub fn preview(path: &Path) -> Result<crate::tgs::Preview> {
+pub fn preview(path: &Path) -> Result<crate::preview::Preview> {
     let bytes = std::fs::read(path)?;
     let invalid = |message: String| Error::Probe { path: path.to_path_buf(), message };
     let mut decoder = image_webp::WebPDecoder::new(Cursor::new(&bytes))
@@ -429,7 +429,7 @@ pub fn preview(path: &Path) -> Result<crate::tgs::Preview> {
     } else {
         pixels.as_chunks::<3>().0.iter().flat_map(|&[r, g, b]| [r, g, b, 255]).collect()
     };
-    Ok(crate::tgs::Preview { width, height, frames: vec![(rgba, 1)] })
+    Ok(crate::preview::Preview { width, height, frames: vec![(rgba, 1)] })
 }
 
 #[cfg(test)]

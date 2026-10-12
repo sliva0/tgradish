@@ -15,11 +15,12 @@ use ff::{Dictionary, Packet, Rational, codec, filter, format, frame};
 use ffmpeg_next as ff;
 
 use self::source::Source;
+use crate::CancelToken;
 use crate::backend::{Pass, pass_log_file};
 use crate::convert::{Plan, frame_count};
 use crate::error::{Error, Result};
 use crate::events::{Params, Rate};
-use crate::ffmpeg::{CancelToken, Capabilities, Output, Probe};
+use crate::ffmpeg::{Capabilities, Output, Probe};
 use crate::ffmpeg::{Facts, Orientation, picture_filter, video_filter};
 
 /// Turns an ffmpeg error into ours, saying what was being done.

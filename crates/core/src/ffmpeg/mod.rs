@@ -1,6 +1,6 @@
-//! Running ffmpeg as separate programs, and what both backends share: the
-//! [`Probe`] of an input, the filter chains and command lines they follow,
-//! and cancelling with a [`CancelToken`].
+//! Running ffmpeg as separate programs, which a [`CancelToken`] kills,
+//! and what both backends share: the [`Probe`] of an input, and the filter
+//! chains and command lines they follow.
 
 mod args;
 mod locate;
@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use schemars::JsonSchema;
+
+use crate::CancelToken;
 use serde::{Deserialize, Serialize};
 
 pub use args::commands;
@@ -28,7 +30,6 @@ pub use orientation::Orientation;
 #[cfg(feature = "linked")]
 pub(crate) use probe::Facts;
 pub use probe::{Probe, frame_starts, probe};
-pub use process::CancelToken;
 pub(crate) use process::{Output, run};
 pub use ssim::ssim;
 

@@ -9,9 +9,9 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::Parser;
+use tgradish_core::CancelToken;
 use tgradish_core::backend::Backend;
 use tgradish_core::config::Config;
-use tgradish_core::ffmpeg::CancelToken;
 
 use crate::args::{Cli, Command, Global};
 
