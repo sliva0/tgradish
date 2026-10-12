@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master, rewrite-v2]
+    branches: [main]
     paths-ignore: ["**.md"]
   pull_request:
     paths-ignore: ["**.md"]
