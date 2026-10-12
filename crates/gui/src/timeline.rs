@@ -1,9 +1,104 @@
 //! The bar under the preview: where playback is, and which part of the
-//! input is used, with handles and numbers to change it.
+//! input is used, with handles and numbers to change it. Where the
+//! input's frames are known, cuts land between them, and the numbers can
+//! count frames instead of seconds.
+
+use std::ops::RangeInclusive;
 
 use eframe::egui::{self, CursorIcon, PointerButton, Rect, Sense, Shape, Stroke, pos2, vec2};
 
 use crate::{theme, widgets};
+
+/// How a cut between frames is written, so converting keeps the frames
+/// meant, whatever rounding does to the number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cut {
+    /// ffmpeg keeps frames from the first at or after a cut: a cut is a
+    /// quarter of a frame before the frame it starts.
+    Video,
+    /// Normalising keeps every frame a cut overlaps: a cut is a hair
+    /// inside the frames it keeps.
+    Art,
+}
+
+/// Where an input's frames start, then where the last one ends.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Frames {
+    pub times: Vec<f64>,
+    pub cut: Cut,
+}
+
+impl Frames {
+    /// Frames of `1 / fps` seconds over `length`, the last one cut short.
+    pub fn even(length: f64, fps: f64, cut: Cut) -> Option<Frames> {
+        if !(fps > 0.0 && length > 0.0) {
+            return None;
+        }
+        let count = ((length * fps).round() as usize).max(1);
+        let mut times: Vec<f64> = (0..count).map(|i| i as f64 / fps).collect();
+        times.push(length);
+        Some(Frames { times, cut })
+    }
+
+    pub fn count(&self) -> usize {
+        self.times.len() - 1
+    }
+
+    /// The frame shown at `time`.
+    pub fn at(&self, time: f64) -> usize {
+        self.times
+            .partition_point(|&start| start <= time + 1e-9)
+            .saturating_sub(1)
+            .min(self.count() - 1)
+    }
+
+    /// The boundary between frames nearest `time`: 0 is before the first,
+    /// [`Frames::count`] after the last.
+    pub fn nearest(&self, time: f64) -> usize {
+        let after = self.times.partition_point(|&boundary| boundary < time);
+        match after {
+            0 => 0,
+            n if n > self.count() => self.count(),
+            n if time - self.times[n - 1] <= self.times[n] - time => n - 1,
+            n => n,
+        }
+    }
+
+    /// How a cut at `boundary` is written, as where the used part starts or
+    /// where it ends.
+    fn cut_at(&self, boundary: usize, end: bool) -> f64 {
+        let times = &self.times;
+        if boundary == 0 || boundary >= self.count() {
+            return times[boundary.min(self.count())];
+        }
+        match (self.cut, end) {
+            (Cut::Video, _) => times[boundary] - (times[boundary] - times[boundary - 1]) / 4.0,
+            (Cut::Art, false) => times[boundary] + 1e-6,
+            (Cut::Art, true) => times[boundary] - 1e-6,
+        }
+    }
+
+    /// The used part as boundaries: its first frame and the one after its
+    /// last.
+    pub fn part(&self, length: f64, start: Option<f64>, used: Option<f64>) -> (usize, usize) {
+        let (from, to) = part(length, start, used);
+        let first = self.nearest(from).min(self.count() - 1);
+        (first, self.nearest(to).max(first + 1))
+    }
+
+    /// Uses the frames from `first` up to `after`, writing the cuts into
+    /// `start` and `used` as the item stores them.
+    pub fn set_part(
+        &self,
+        (first, after): (usize, usize),
+        start: &mut Option<f64>,
+        used: &mut Option<f64>,
+    ) {
+        let (from, to) = (self.cut_at(first, false), self.cut_at(after, true));
+        *start = (first > 0).then_some(from);
+        *used = (after < self.count()).then_some(to - from);
+    }
+}
 
 /// What the timeline changes.
 pub struct Timeline<'a> {
@@ -16,6 +111,10 @@ pub struct Timeline<'a> {
     pub playing: &'a mut bool,
     /// Telegram's length limit, marked from the start.
     pub limit: f64,
+    /// The input's frames, which cuts land between, when they are known.
+    pub frames: Option<&'a Frames>,
+    /// Numbers count frames rather than seconds.
+    pub in_frames: &'a mut bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -36,43 +135,113 @@ fn set_part(length: f64, (from, to): (f64, f64), start: &mut Option<f64>, used: 
     *used = (to < length - 1e-3).then_some(to - from);
 }
 
+/// A field of a boundary between frames: its frame counted from 1, or
+/// where it is in seconds. `end` marks the boundary after the last frame
+/// used, which counts as that frame.
+fn boundary_field<'a>(
+    boundary: &'a mut usize,
+    range: RangeInclusive<usize>,
+    frames: &'a Frames,
+    in_frames: bool,
+    end: bool,
+) -> egui::DragValue<'a> {
+    let field = egui::DragValue::new(boundary).range(range).speed(0.1);
+    if in_frames {
+        let shift = if end { 0.0 } else { 1.0 };
+        field
+            .custom_formatter(move |n, _| format!("{}", n + shift))
+            .custom_parser(move |text| text.trim().parse::<f64>().ok().map(|n| n.round() - shift))
+    } else {
+        let last = frames.count();
+        field
+            .custom_formatter(move |n, _| widgets::seconds(frames.times[(n as usize).min(last)]))
+            .custom_parser(move |text| {
+                let seconds: f64 = text.trim().trim_end_matches('s').trim().parse().ok()?;
+                Some(frames.nearest(seconds) as f64)
+            })
+    }
+}
+
+/// What the keys over the preview do, for the play button's hover.
+const KEYS: &str = "Space: play or pause\n← →: a frame back or on, with Shift ten\n\
+                    Home, End: the first or last frame used\n\
+                    [ ]: start or end the used part at the frame shown";
+
 /// Shows the timeline.
 pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
-    let Timeline { length, start, used, time, playing, limit } = timeline;
+    let Timeline { length, start, used, time, playing, limit, frames, in_frames } = timeline;
     ui.horizontal(|ui| {
         play_button(ui, playing);
-        let (mut from, to) = part(length, *start, *used);
-        fn seconds(value: &mut f64, length: f64) -> egui::DragValue<'_> {
-            egui::DragValue::new(value).range(0.0..=length).speed(0.01).max_decimals(2).suffix(" s")
+        let size = vec2(64.0, 24.0);
+        match frames {
+            Some(frames) => {
+                let (mut first, after) = frames.part(length, *start, *used);
+                let field = boundary_field(&mut first, 0..=after - 1, frames, *in_frames, false);
+                let hint = "Where the used part starts: its first frame";
+                if ui.add_sized(size, field).on_hover_text(hint).changed() {
+                    frames.set_part((first, after), start, used);
+                    *time = frames.times[first];
+                }
+            }
+            None => {
+                let (mut from, to) = part(length, *start, *used);
+                let field = seconds(&mut from, length);
+                let hint = "Where the used part starts";
+                if ui.add_sized(size, field).on_hover_text(hint).changed() {
+                    from = from.min(to - 0.01).max(0.0);
+                    set_part(length, (from, to), start, used);
+                    *time = from;
+                }
+            }
         }
-        let field = ui
-            .add_sized(vec2(64.0, 24.0), seconds(&mut from, length))
-            .on_hover_text("Where the used part starts");
-        if field.changed() {
-            from = from.min(to - 0.01).max(0.0);
-            set_part(length, (from, to), start, used);
-            *time = from;
-        }
-        let end_width = 64.0 + 8.0;
-        let width = (ui.available_width() - end_width).max(80.0);
+        let toggle = if frames.is_some() { 68.0 } else { 0.0 };
+        let width = (ui.available_width() - 64.0 - 8.0 - toggle).max(80.0);
         let (rect, response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click_and_drag());
-        bar(ui, rect, &response, length, (start, used), time, limit);
-        let (from, mut to) = part(length, *start, *used);
-        let field = ui
-            .add_sized(vec2(64.0, 24.0), seconds(&mut to, length))
-            .on_hover_text("Where the used part ends");
-        if field.changed() {
-            to = to.max(from + 0.01).min(length);
-            set_part(length, (from, to), start, used);
+        bar(ui, rect, &response, (length, frames, *in_frames), (start, used), time, limit);
+        match frames {
+            Some(frames) => {
+                let (first, mut after) = frames.part(length, *start, *used);
+                let range = first + 1..=frames.count();
+                let field = boundary_field(&mut after, range, frames, *in_frames, true);
+                let hint = "Where the used part ends: its last frame";
+                if ui.add_sized(size, field).on_hover_text(hint).changed() {
+                    frames.set_part((first, after), start, used);
+                }
+                let unit = egui::Button::selectable(*in_frames, "Frames").frame_when_inactive(true);
+                let hint = "Count in frames rather than seconds";
+                if ui.add(unit).on_hover_text(hint).clicked() {
+                    *in_frames = !*in_frames;
+                }
+            }
+            None => {
+                let (from, mut to) = part(length, *start, *used);
+                let field = seconds(&mut to, length);
+                if ui.add_sized(size, field).on_hover_text("Where the used part ends").changed() {
+                    to = to.max(from + 0.01).min(length);
+                    set_part(length, (from, to), start, used);
+                }
+            }
         }
     });
+}
+
+fn seconds(value: &mut f64, length: f64) -> egui::DragValue<'_> {
+    egui::DragValue::new(value).range(0.0..=length).speed(0.01).max_decimals(2).suffix(" s")
+}
+
+/// What the pointer is over, as the numbers count.
+fn time_text(time: f64, frames: Option<&Frames>, in_frames: bool) -> String {
+    match frames {
+        Some(frames) if in_frames => format!("frame {}", frames.at(time) + 1),
+        _ => widgets::seconds(time),
+    }
 }
 
 fn bar(
     ui: &mut egui::Ui,
     rect: Rect,
     response: &egui::Response,
-    length: f64,
+    (length, frames, in_frames): (f64, Option<&Frames>, bool),
     (start, used): (&mut Option<f64>, &mut Option<f64>),
     time: &mut f64,
     limit: f64,
@@ -85,7 +254,15 @@ fn bar(
     let x_of = |seconds: f64| track.left() + (seconds / length) as f32 * track.width();
     let seconds_at =
         |x: f32| (f64::from((x - track.left()) / track.width()) * length).clamp(0.0, length);
-    let (from, to) = part(length, *start, *used);
+    // where the used part's ends show: between frames, where they are known
+    let ends = |start: Option<f64>, used: Option<f64>| match frames {
+        Some(frames) => {
+            let (first, after) = frames.part(length, start, used);
+            (frames.times[first], frames.times[after])
+        }
+        None => part(length, start, used),
+    };
+    let (from, to) = ends(*start, *used);
 
     let grab_at = |x: f32| {
         if (x - x_of(from)).abs() <= 8.0 {
@@ -100,7 +277,8 @@ fn bar(
         if grab_at(pointer.x) != Grab::Seek {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
         }
-        response.clone().on_hover_text_at_pointer(widgets::seconds(seconds_at(pointer.x)));
+        let text = time_text(seconds_at(pointer.x), frames, in_frames);
+        response.clone().on_hover_text_at_pointer(text);
     }
     let id = response.id.with("grab");
     if response.drag_started_by(PointerButton::Primary)
@@ -114,18 +292,30 @@ fn bar(
         && response.dragged_by(PointerButton::Primary)
     {
         let at = seconds_at(pointer.x);
-        match grab {
-            Grab::Start => {
+        match (grab, frames) {
+            (Grab::Start, Some(frames)) => {
+                let (_, after) = frames.part(length, *start, *used);
+                let first = frames.nearest(at).min(after - 1);
+                frames.set_part((first, after), start, used);
+                *time = frames.times[first];
+            }
+            (Grab::End, Some(frames)) => {
+                let (first, _) = frames.part(length, *start, *used);
+                let after = frames.nearest(at).max(first + 1);
+                frames.set_part((first, after), start, used);
+                *time = frames.times[after - 1];
+            }
+            (Grab::Start, None) => {
                 let at = at.min(to - 0.05).max(0.0);
                 set_part(length, (at, to), start, used);
                 *time = at;
             }
-            Grab::End => {
+            (Grab::End, None) => {
                 let at = at.max(from + 0.05).min(length);
                 set_part(length, (from, at), start, used);
                 *time = (at - 0.5).max(from);
             }
-            Grab::Seek => *time = at,
+            (Grab::Seek, _) => *time = at,
         }
     }
     if response.clicked()
@@ -137,7 +327,7 @@ fn bar(
         ui.data_mut(|data| data.remove::<Grab>(id));
     }
 
-    let (from, to) = part(length, *start, *used);
+    let (from, to) = ends(*start, *used);
     let painter = ui.painter_at(rect);
     let visuals = ui.visuals();
     painter.rect_filled(track, 3.0, theme::tint(theme::accent(visuals), 0.5));
@@ -229,36 +419,32 @@ pub fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &mut bool
     });
 }
 
-/// Where the frame `step` long that shows at `time` starts, in a video
-/// `length` long: the last frame's start at most.
-pub fn frame_at(time: f64, length: f64, step: f64) -> f64 {
-    let last = ((length / step - 1e-6).ceil() - 1.0).max(0.0);
-    (time / step + 1e-6).floor().clamp(0.0, last) * step
-}
-
-/// Picks a frame of a video for a still picture: a frame's step either way,
-/// its time, and a bar to click or drag along. `step` is a frame's length.
-pub fn frame_picker(ui: &mut egui::Ui, length: f64, frame: &mut Option<f64>, step: f64) {
-    let length = length.max(1e-6);
+/// Picks a frame of a video for a still picture: a frame either way, its
+/// number or time, and a bar to click or drag along. `frame` is where the
+/// picked frame starts, as the picture is made of it.
+pub fn frame_picker(
+    ui: &mut egui::Ui,
+    frames: &Frames,
+    frame: &mut Option<f64>,
+    in_frames: &mut bool,
+) {
+    let length = frames.times[frames.count()].max(1e-6);
     ui.horizontal(|ui| {
-        let mut at = frame.unwrap_or(0.0).clamp(0.0, length);
+        let mut index = frames.at(frame.unwrap_or(0.0));
+        let last = frames.count() - 1;
         let mut picked = None;
         let button = |text| egui::Button::new(text).min_size(vec2(26.0, 26.0));
-        if ui.add(button("<")).on_hover_text("The frame before").clicked() {
-            picked = Some(at - step);
+        if ui.add(button("<")).on_hover_text("The frame before (←)").clicked() {
+            picked = Some(index.saturating_sub(1));
         }
-        if ui.add(button(">")).on_hover_text("The frame after").clicked() {
-            picked = Some(at + step);
+        if ui.add(button(">")).on_hover_text("The frame after (→)").clicked() {
+            picked = Some((index + 1).min(last));
         }
-        let field = egui::DragValue::new(&mut at)
-            .range(0.0..=length)
-            .speed(0.01)
-            .max_decimals(3)
-            .suffix(" s");
-        if ui.add_sized(vec2(72.0, 24.0), field).on_hover_text("The frame's time").changed() {
-            picked = Some(at);
+        let field = boundary_field(&mut index, 0..=last, frames, *in_frames, false);
+        if ui.add_sized(vec2(72.0, 24.0), field).on_hover_text("The frame").changed() {
+            picked = Some(index);
         }
-        let width = ui.available_width().max(80.0);
+        let width = (ui.available_width() - 68.0).max(80.0);
         let (rect, response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click_and_drag());
         let track = Rect::from_min_max(
             pos2(rect.left() + 8.0, rect.top() + 11.0),
@@ -269,21 +455,25 @@ pub fn frame_picker(ui: &mut egui::Ui, length: f64, frame: &mut Option<f64>, ste
         if let Some(pointer) = response.interact_pointer_pos()
             && (response.dragged() || response.clicked())
         {
-            picked = Some(seconds_at(pointer.x));
+            picked = Some(frames.at(seconds_at(pointer.x)));
         }
         if let Some(pointer) = response.hover_pos() {
-            response.clone().on_hover_text_at_pointer(widgets::seconds(seconds_at(pointer.x)));
+            let text = time_text(seconds_at(pointer.x), Some(frames), *in_frames);
+            response.clone().on_hover_text_at_pointer(text);
         }
-        if let Some(new) = picked {
-            // where its frame starts, as the picture is made of it
-            at = frame_at(new, length, step);
-            *frame = (at > 1e-6).then_some(at);
+        if let Some(picked) = picked {
+            index = picked;
+            *frame = (picked > 0).then_some(frames.times[picked]);
+        }
+        let unit = egui::Button::selectable(*in_frames, "Frames").frame_when_inactive(true);
+        if ui.add(unit).on_hover_text("Count in frames rather than seconds").clicked() {
+            *in_frames = !*in_frames;
         }
         let painter = ui.painter_at(rect);
         let visuals = ui.visuals();
         painter.rect_filled(track, 3.0, visuals.extreme_bg_color);
         // the frame, marked like a playhead
-        let x = track.left() + (at / length) as f32 * track.width();
+        let x = track.left() + (frames.times[index] / length) as f32 * track.width();
         let marks = visuals.strong_text_color();
         painter.line_segment(
             [pos2(x, track.top() - 4.0), pos2(x, rect.bottom())],
@@ -305,7 +495,7 @@ fn play_button(ui: &mut egui::Ui, playing: &mut bool) {
     let icon = if *playing { "⏸" } else { "▶" };
     if ui
         .add(egui::Button::new(egui::RichText::new(icon).size(15.0)).min_size(vec2(30.0, 26.0)))
-        .on_hover_text(if *playing { "Pause (Space)" } else { "Play (Space)" })
+        .on_hover_text(KEYS)
         .clicked()
     {
         *playing = !*playing;
@@ -317,12 +507,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn picks_where_frames_start() {
+    fn finds_frames_and_the_boundaries_between_them() {
         // 25 fps, 1 s: frames start every 0.04 s, the last at 0.96
-        assert!((frame_at(0.5, 1.0, 0.04) - 0.48).abs() < 1e-9);
-        assert!((frame_at(0.48, 1.0, 0.04) - 0.48).abs() < 1e-9);
-        assert!((frame_at(1.0, 1.0, 0.04) - 0.96).abs() < 1e-9);
-        assert!((frame_at(0.99, 0.98, 0.04) - 0.96).abs() < 1e-9);
-        assert_eq!(frame_at(-1.0, 1.0, 0.04), 0.0);
+        let frames = Frames::even(1.0, 25.0, Cut::Video).unwrap();
+        assert_eq!(frames.count(), 25);
+        assert_eq!(
+            (frames.at(0.5), frames.at(0.48), frames.at(1.0), frames.at(-1.0)),
+            (12, 12, 24, 0)
+        );
+        assert_eq!((frames.nearest(0.49), frames.nearest(0.51), frames.nearest(2.0)), (12, 13, 25));
+        // a short last frame
+        let short = Frames::even(0.98, 25.0, Cut::Video).unwrap();
+        assert_eq!((short.count(), short.at(0.97)), (25, 24));
+    }
+
+    #[test]
+    fn cuts_where_converting_keeps_the_frames_meant() {
+        let video = Frames::even(1.0, 25.0, Cut::Video).unwrap();
+        let (mut start, mut used) = (None, None);
+        // frames 5 to 9: ffmpeg keeps from the first at or after the start,
+        // and counts frames over the length
+        video.set_part((5, 10), &mut start, &mut used);
+        let (start, used) = (start.unwrap(), used.unwrap());
+        assert!(start < 0.2 && start > 0.16, "{start}");
+        assert!((used * 25.0 - 5.0).abs() < 1e-9, "{used}");
+        assert_eq!(video.part(1.0, Some(start), Some(used)), (5, 10));
+        // the whole of it is no cut at all
+        let (mut start, mut used) = (Some(0.3), Some(0.2));
+        video.set_part((0, 25), &mut start, &mut used);
+        assert_eq!((start, used), (None, None));
+
+        // art keeps every frame a cut overlaps: cuts fall just inside
+        let art = Frames { times: vec![0.0, 0.1, 0.25, 0.4], cut: Cut::Art };
+        let (mut start, mut used) = (None, None);
+        art.set_part((1, 2), &mut start, &mut used);
+        let end = start.unwrap() + used.unwrap();
+        assert!(start.unwrap() > 0.1 && end < 0.25, "{start:?} {used:?}");
+        assert_eq!(art.part(0.4, start, used), (1, 2));
     }
 }

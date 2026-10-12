@@ -11,6 +11,7 @@ use tgradish_core::tgs::TgsOptions;
 
 use crate::jobs::Job;
 use crate::media::{Art, Clip, Load, Video};
+use crate::timeline::{Cut, Frames};
 
 /// What kind of input an item is, which limits what it can become.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -429,6 +430,22 @@ impl Item {
             }),
             Format::Tgs => {
                 self.art.ready().filter(|art| art.clip.is_animated()).map(|art| art.clip.end())
+            }
+        }
+    }
+
+    /// Where the input's frames start, which cuts land between: a video's
+    /// at its frame rate, art's as it times them.
+    pub fn input_frames(&self) -> Option<Frames> {
+        match self.format {
+            Format::Webm | Format::Image => {
+                let video = self.video.ready()?;
+                let fps = video.probe.fps.or(video.probe.base_fps)?;
+                Frames::even(self.input_length()?, fps, Cut::Video)
+            }
+            Format::Tgs => {
+                let art = self.art.ready().filter(|art| art.clip.is_animated())?;
+                Some(Frames { times: art.clip.times.clone(), cut: Cut::Art })
             }
         }
     }
