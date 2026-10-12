@@ -20,7 +20,7 @@ use crate::convert::{Plan, frame_count};
 use crate::error::{Error, Result};
 use crate::events::{Params, Rate};
 use crate::ffmpeg::{CancelToken, Capabilities, Output, Probe};
-use crate::ffmpeg::{Orientation, picture_filter, pix_fmt_has_alpha, video_filter};
+use crate::ffmpeg::{Facts, Orientation, picture_filter, video_filter};
 
 /// Turns an ffmpeg error into ours, saying what was being done.
 fn libav(doing: &'static str) -> impl Fn(ff::Error) -> Error {
@@ -81,40 +81,10 @@ fn ratio(value: Rational) -> Option<f64> {
 pub(crate) fn probe(input: &Path, cancel: &CancelToken) -> Result<Probe> {
     init()?;
     let source = Source::open_file(input, None, cancel)?;
-    let probe_error = |message: String| Error::Probe { path: input.to_path_buf(), message };
-    let (context, stream) = (source.input(), source.stream());
-
-    let decoder = source.decoder();
-    let (mut width, mut height) = (f64::from(decoder.width()), f64::from(decoder.height()));
-    if width == 0.0 || height == 0.0 {
-        return Err(probe_error("video stream has no size".into()));
-    }
+    let (context, stream, decoder) = (source.input(), source.stream(), source.decoder());
     // like ffprobe: the stream's aspect ratio wins over the codec's
     // SAFETY: reading a plain field of the open stream
     let stream_sar = unsafe { Rational::from((*stream.as_ptr()).sample_aspect_ratio) };
-    if let Some(sar) = ratio(stream_sar).or_else(|| ratio(decoder.aspect_ratio())) {
-        width *= sar;
-    }
-    let orientation = orientation(&stream);
-    if orientation.swaps_size() {
-        std::mem::swap(&mut width, &mut height);
-    }
-
-    let format_name = context.format().name().to_string();
-    let codec = stream.parameters().id().name().to_string();
-    let pix_fmt = decoder.format().descriptor().map(|d| d.name().to_string()).unwrap_or_default();
-    let webm_alpha = stream
-        .metadata()
-        .iter()
-        .any(|(key, value)| key.eq_ignore_ascii_case("alpha_mode") && value == "1");
-    let decoder_name = match codec.as_str() {
-        "vp9" if webm_alpha => Some("libvpx-vp9".to_string()),
-        "vp8" if webm_alpha => Some("libvpx".to_string()),
-        _ => None,
-    };
-    let still_image = (format_name.contains("image2") || format_name.ends_with("_pipe"))
-        && codec != "gif"
-        && stream.frames() <= 1;
     // where the video starts in the file, which other streams can start
     // before
     let start = {
@@ -130,31 +100,29 @@ pub(crate) fn probe(input: &Path, cancel: &CancelToken) -> Result<Probe> {
             (video - file_start as f64 / f64::from(ff::ffi::AV_TIME_BASE)).max(0.0)
         }
     };
-    // the file's, where the stream has none, from where the video starts
-    let duration = if still_image {
-        None
-    } else {
-        seconds(stream.duration(), stream.time_base()).or_else(|| {
-            seconds(context.duration(), Rational::new(1, ff::ffi::AV_TIME_BASE))
-                .map(|duration| duration - start)
-                .filter(|duration| *duration > 0.0)
-        })
-    };
-
-    Ok(Probe {
-        format: format_name,
-        codec,
-        width: width.round() as u32,
-        height: height.round() as u32,
-        fps: ratio(stream.avg_frame_rate()).or_else(|| ratio(stream.rate())),
+    Facts {
+        format: context.format().name().to_string(),
+        codec: stream.parameters().id().name().to_string(),
+        pix_fmt: decoder.format().descriptor().map(|d| d.name().to_string()).unwrap_or_default(),
+        width: f64::from(decoder.width()),
+        height: f64::from(decoder.height()),
+        sample_aspect: ratio(stream_sar).or_else(|| ratio(decoder.aspect_ratio())),
+        orientation: orientation(&stream),
+        avg_fps: ratio(stream.avg_frame_rate()),
         base_fps: ratio(stream.rate()),
-        duration,
+        durations: (
+            seconds(stream.duration(), stream.time_base()),
+            seconds(context.duration(), Rational::new(1, ff::ffi::AV_TIME_BASE)),
+        ),
         start,
-        alpha: pix_fmt_has_alpha(&pix_fmt) || webm_alpha,
-        still_image,
-        orientation,
-        decoder: decoder_name,
-    })
+        webm_alpha: stream
+            .metadata()
+            .iter()
+            .any(|(key, value)| key.eq_ignore_ascii_case("alpha_mode") && value == "1"),
+        // libavformat says 0 when it doesn't know
+        frames: u64::try_from(stream.frames()).ok().filter(|&frames| frames > 0),
+    }
+    .probe(input)
 }
 
 pub(crate) fn frame_starts(input: &Path, cancel: &CancelToken) -> Result<Vec<f64>> {
