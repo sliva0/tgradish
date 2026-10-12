@@ -5,7 +5,8 @@ use eframe::egui::{self, RichText};
 use tgradish_core::config::Config;
 use tgradish_core::convert;
 use tgradish_core::options::{
-    Crop, DEFAULT_FAKE_DURATION, ExactScale, Fit, Options, Range, Resize, Scaling, Speed, Spoof,
+    CRFS, Crop, DEFAULT_ATTEMPTS, DEFAULT_CRF, DEFAULT_FAKE_DURATION, ExactScale, Fit,
+    MAX_ATTEMPTS, Options, Range, Resize, Scaling, Speed, Spoof, TEMPOS,
 };
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::{self, Target};
@@ -384,8 +385,7 @@ fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
 fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String> {
     let video = item.video.ready().ok_or("the input isn't read yet")?;
     let options = item.choices.webm_options(context.presets, context.config)?;
-    let auto =
-        options.scaling.unwrap_or(Scaling::Auto) == Scaling::Auto && options.exact_scale.is_none();
+    let auto = options.auto_scaling();
     let request = convert::Request {
         input: item.inputs[0].clone(),
         output: context.output.clone(),
@@ -396,7 +396,7 @@ fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String
     let (mut plan, _) =
         convert::plan(&request, video.probe.clone()).map_err(|err| err.to_string())?;
     // as converting decides it, on the input's frames
-    if auto && plan.enlarges() >= 2.0 {
+    if auto && plan.enlarges() >= convert::AUTO_SHARP_FROM {
         let size = (video.probe.width, video.probe.height);
         let clip = &video.overview;
         let part = crate::predict::Part::of(plan.crop, size, (clip.width, clip.height));
@@ -911,7 +911,7 @@ fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                     (Format::Tgs, None) => (&mut item.choices.tgs.tempo, "Fit into 3 s"),
                 };
                 auto_number(ui, value, automatic, Some(tempo), 1.0, |value| {
-                    value.range(0.1..=10.0).speed(0.01).max_decimals(2).prefix("×")
+                    value.range(TEMPOS).speed(0.01).max_decimals(2).prefix("×")
                 });
                 if item.format == Format::Webm
                     && let Some(used) = used
@@ -920,13 +920,14 @@ fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                         .on_hover_text("Plays the used part in 3 seconds")
                         .clicked()
                 {
-                    item.choices.webm.tempo = Some((used / telegram::MAX_SECONDS).clamp(0.1, 10.0));
+                    item.choices.webm.tempo =
+                        Some((used / telegram::MAX_SECONDS).clamp(*TEMPOS.start(), *TEMPOS.end()));
                 }
             });
             // .tgs results, and honest WebM ones, last 3 seconds at most
             let cut = item.format == Format::Tgs || item.choices.webm.spoof == Some(Spoof::Never);
             match played {
-                Some(played) if cut && played > telegram::MAX_SECONDS + 1e-3 => note(
+                Some(played) if cut && telegram::too_long(played) => note(
                     ui,
                     format!(
                         "Plays {} of the {}: the rest is cut off",
@@ -966,7 +967,7 @@ fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 chosen_hint(ui, spoof, &SPOOFS);
                 if let Some(played) = played
                     && spoof == Spoof::Auto
-                    && played > telegram::MAX_SECONDS + 1e-3
+                    && telegram::too_long(played)
                 {
                     ui.colored_label(
                         widgets::WARN,
@@ -1075,7 +1076,10 @@ fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     // for it
     let fitting = if fit == Fit::Off { Err("Off encodes once") } else { Ok(()) };
     row(ui, "Encodes at most", "How many times fitting may encode", fitting, |ui| {
-        auto_number(ui, &mut options.attempts, "Default", Some(8), 8, |value| value.range(1..=50));
+        let default = DEFAULT_ATTEMPTS;
+        auto_number(ui, &mut options.attempts, "Default", Some(default), default, |value| {
+            value.range(1..=MAX_ATTEMPTS)
+        });
     });
     let unit = match fit {
         Fit::Auto | Fit::Bitrate | Fit::Off => " kbit/s",
@@ -1088,7 +1092,7 @@ fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         ui.horizontal(|ui| {
             let mut range = options.fit_range;
             let start = match fit {
-                Fit::Crf => Range { min: 4.0, max: 63.0 },
+                Fit::Crf => Range { min: 4.0, max: f64::from(*CRFS.end()) },
                 Fit::Fps => Range { min: 1.0, max: 30.0 },
                 Fit::Length => Range { min: 0.1, max: 3.0 },
                 _ => Range { min: 8.0, max: 2000.0 },
@@ -1128,7 +1132,10 @@ fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     };
     let hint = "Constant quality from 0, the best, to 63";
     row(ui, "Quality (CRF)", hint, quality, |ui| {
-        auto_number(ui, &mut options.crf, "Default", Some(32), 32, |value| value.range(0..=63));
+        let default = DEFAULT_CRF;
+        auto_number(ui, &mut options.crf, "Default", Some(default), default, |value| {
+            value.range(CRFS)
+        });
     });
     row(ui, "Lossless", "", quality, |ui| {
         let hint = "Only small for tiny or still pictures";

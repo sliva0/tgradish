@@ -128,7 +128,7 @@ impl Plan {
     /// Whether a result of `length` seconds gets its duration spoofed.
     pub fn spoofs(&self, length: f64) -> bool {
         match self.spoof {
-            Spoof::Auto => length > telegram::MAX_SECONDS + 1e-3,
+            Spoof::Auto => telegram::too_long(length),
             Spoof::Always => true,
             Spoof::Never => false,
         }
@@ -185,7 +185,7 @@ fn check_range(range: Range, fit: Fit, length: f64) -> Result<Range> {
         return Err(invalid(format!("fit range {range} must be MIN..MAX with MIN <= MAX")));
     }
     let (low, high, what) = match fit {
-        Fit::Crf => (0.0, 63.0, "crf"),
+        Fit::Crf => (f64::from(*options::CRFS.start()), f64::from(*options::CRFS.end()), "crf"),
         Fit::Fps => (1.0, telegram::MAX_FPS, "fps"),
         Fit::Length => (f64::MIN_POSITIVE, length, "length"),
         Fit::Auto | Fit::Bitrate | Fit::Off => (1.0, f64::INFINITY, "bitrate"),
@@ -435,15 +435,16 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         }
         Some(fps) => fps,
         None => {
-            let source_fps = source.fps.unwrap_or(25.0);
+            let source_fps = source.fps_or_default();
             let played = if source.still_image { source_fps } else { source_fps * tempo };
             played.clamp(1.0, telegram::MAX_FPS)
         }
     };
 
     let crf = o.crf.unwrap_or(options::DEFAULT_CRF);
-    if crf > 63 {
-        return Err(invalid("crf must be between 0 and 63"));
+    if !options::CRFS.contains(&crf) {
+        let (low, high) = (options::CRFS.start(), options::CRFS.end());
+        return Err(invalid(format!("crf must be between {low} and {high}")));
     }
     let bitrate = match o.bitrate {
         Some(bitrate) if !(bitrate >= 1.0 && bitrate.is_finite()) => {
@@ -490,7 +491,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         // makes a picture to far past any sticker, and libvpx's CRF short of
         // its near-lossless end, which no sticker fits
         (None, Fit::Auto | Fit::Bitrate | Fit::Off) => Range { min: 8.0, max: 50_000.0 },
-        (None, Fit::Crf) => Range { min: 4.0, max: 63.0 },
+        (None, Fit::Crf) => Range { min: 4.0, max: f64::from(*options::CRFS.end()) },
         (None, Fit::Fps) => Range { min: 1.0, max: fps.floor().max(1.0) },
         (None, Fit::Length) => Range { min: length.min(0.1), max: length },
     };
@@ -547,13 +548,32 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     Ok((plan, warnings))
 }
 
+/// Auto scaling keeps pixels sharp for pixel art made at least this many
+/// times as large. Less, and blocks of one and two pixels would alternate,
+/// which shows more than blending them does.
+pub const AUTO_SHARP_FROM: f64 = 2.0;
+
+/// What auto scaling, as `options` leave it, makes of the input: sharp
+/// pixels for pixel art made at least [`AUTO_SHARP_FROM`] times as large,
+/// smooth as [`plan`] has it otherwise.
+pub(crate) fn choose_auto_scaling(
+    backend: &Backend,
+    plan: &mut Plan,
+    options: &Options,
+    cancel: &CancelToken,
+) -> Result<()> {
+    if options.auto_scaling()
+        && plan.enlarges() >= AUTO_SHARP_FROM
+        && looks_like_pixel_art(backend, plan, cancel)?
+    {
+        plan.scaling = Scaling::Sharp;
+    }
+    Ok(())
+}
+
 /// A few frames of the planned part at full size, to tell pixel art from
 /// filmed pictures.
-pub(crate) fn looks_like_pixel_art(
-    backend: &Backend,
-    plan: &Plan,
-    cancel: &CancelToken,
-) -> Result<bool> {
+fn looks_like_pixel_art(backend: &Backend, plan: &Plan, cancel: &CancelToken) -> Result<bool> {
     let request = FramesRequest {
         start: plan.start,
         length: Some((plan.length * plan.tempo).min(telegram::MAX_SECONDS)),
@@ -673,13 +693,7 @@ pub fn convert(
 ) -> Result<Outcome> {
     let source = backend.probe(&request.input, cancel)?;
     let (mut plan, warnings) = plan(request, source)?;
-    if request.options.scaling.unwrap_or(Scaling::Auto) == Scaling::Auto
-        && request.options.exact_scale.is_none()
-        && plan.enlarges() >= 2.0
-        && looks_like_pixel_art(backend, &plan, cancel)?
-    {
-        plan.scaling = Scaling::Sharp;
-    }
+    choose_auto_scaling(backend, &mut plan, &request.options, cancel)?;
     if !plan.extra_args.is_empty() && !backend.supports_extra_args() {
         return Err(Error::InvalidOptions(
             "extra-args are ffmpeg command line arguments, so they need ffmpeg as a \

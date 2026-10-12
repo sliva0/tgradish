@@ -17,7 +17,7 @@ use crate::backend::Backend;
 use crate::convert::{self, Plan, Request};
 use crate::error::{Error, Result};
 use crate::ffmpeg::CancelToken;
-use crate::options::{Options, Scaling};
+use crate::options::Options;
 use crate::telegram::{self, Issue, Target};
 
 /// The input with a `.sticker.webp` or `.emoji.webp` extension.
@@ -126,14 +126,7 @@ pub fn convert(backend: &Backend, request: &Request, cancel: &CancelToken) -> Re
         _ => Vec::new(),
     };
     let (mut plan, warnings) = plan(request, source, &starts)?;
-    let options = &request.options;
-    if options.scaling.unwrap_or(Scaling::Auto) == Scaling::Auto
-        && options.exact_scale.is_none()
-        && plan.enlarges() >= 2.0
-        && convert::looks_like_pixel_art(backend, &plan, cancel)?
-    {
-        plan.scaling = Scaling::Sharp;
-    }
+    convert::choose_auto_scaling(backend, &mut plan, &request.options, cancel)?;
     let rgba = backend.still(&plan, cancel)?;
     cancel.check()?;
     let alpha = rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] < 255);
