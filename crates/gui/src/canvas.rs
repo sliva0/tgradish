@@ -209,6 +209,13 @@ impl Inset {
             let left = frame.left().min(view.right() - MARGIN - boxed.x).max(view.left() + 3.0);
             pos2(left, frame.top() - boxed.y - 8.0)
         };
+        // the size buttons at the end of the label at `at`
+        let buttons_at = |at: Pos2| {
+            Rect::from_min_max(
+                pos2(at.x + boxed.x - SIZE_BUTTONS, at.y),
+                pos2(at.x + boxed.x, at.y + boxed.y),
+            )
+        };
 
         // dragged by the picture or its label, which keep the crop under
         // them from being dragged, towards another corner, which the
@@ -218,11 +225,14 @@ impl Inset {
         let mut dragging = false;
         if controls {
             let id = ui.id().with("inset");
-            let behind = Rect::from_min_size(label_at(frame), boxed).expand(3.0);
+            let at = label_at(frame);
+            let behind = Rect::from_min_size(at, boxed).expand(3.0);
+            // the buttons are buttons, until a drag starts on them
+            let on_buttons = ui.rect_contains_pointer(buttons_at(at));
+            let label = ui.interact(behind, id.with("label"), Sense::drag());
             let held = [
                 ui.interact(frame.expand(4.0), id, Sense::drag()),
-                ui.interact(behind, id.with("label"), Sense::drag())
-                    .on_hover_text("Drag it to another corner"),
+                if on_buttons { label } else { label.on_hover_text("Drag it to another corner") },
             ];
             let pointer = ui.input(|input| input.pointer.latest_pos());
             let origin = ui.input(|input| input.pointer.press_origin());
@@ -237,7 +247,7 @@ impl Inset {
                 self.dragged = Some(pointer - origin);
                 frame = docked.translate(pointer - origin);
                 dragging = true;
-            } else if held.iter().any(|held| held.hovered()) {
+            } else if held.iter().any(|held| held.hovered()) && !on_buttons {
                 ui.ctx().set_cursor_icon(CursorIcon::Grab);
             }
             // let go of: eased from where it was to its corner, the same
@@ -304,10 +314,7 @@ impl Inset {
         }
         let text_at = pos2(at.x + GRIP, at.y + (boxed.y - galley.size().y) / 2.0);
         painter.galley_with_override_text_color(text_at, galley, text);
-        let buttons = Rect::from_min_max(
-            pos2(at.x + boxed.x - SIZE_BUTTONS, at.y),
-            pos2(at.x + boxed.x, at.y + boxed.y),
-        );
+        let buttons = buttons_at(at);
         let mut row = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(buttons)

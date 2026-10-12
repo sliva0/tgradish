@@ -807,8 +807,9 @@ impl App {
             } else {
                 0
             };
-            // with Ctrl the used part's end moves, with Alt its start
-            let (end, start) = (input.modifiers.command, input.modifiers.alt);
+            // as the keys lie, left to right: with Ctrl the used part's
+            // start moves, with Alt its end
+            let (start, end) = (input.modifiers.command, input.modifiers.alt);
             Keys {
                 by: if end || start { 0 } else { by },
                 move_start: if start { by } else { 0 },
@@ -972,7 +973,7 @@ impl App {
         let layout = egui::Layout::right_to_left(egui::Align::Center);
         ui.allocate_ui_with_layout(header, layout, |ui| {
             if ui.button("⚙").on_hover_text("Settings").clicked() {
-                self.prefs.open(&self.config);
+                self.prefs.open();
             }
             self.theme_button(ui);
             if ui
@@ -1662,7 +1663,7 @@ fn about(ui: &mut egui::Ui) {
             ui.label(RichText::new(format!("tgradish {}", env!("CARGO_PKG_VERSION"))).heading());
             ui.horizontal(|ui| {
                 ui.label("Telegram stickers from videos and pixel art. MIT licence;");
-                ui.hyperlink_to("source code", "https://github.com/sliva0/tgradish");
+                widgets::link(ui, "source code", "https://github.com/sliva0/tgradish");
             });
         });
     });
@@ -1687,7 +1688,8 @@ fn about(ui: &mut egui::Ui) {
                 ui,
                 |ui| {
                     if notice.title.starts_with("ffmpeg: what") {
-                        ui.hyperlink_to(
+                        widgets::link(
+                            ui,
                             "The exact sources of the ffmpeg built in, with this release",
                             format!(
                                 "https://github.com/sliva0/tgradish/releases/tag/v{}",
@@ -1754,7 +1756,7 @@ fn text_with_links(ui: &mut egui::Ui, text: &str) {
             ui.horizontal_wrapped(|ui| {
                 for (link, part) in parts {
                     if link {
-                        ui.add(egui::Hyperlink::from_label_and_url(mono(part), part));
+                        widgets::link(ui, mono(part), part);
                     } else {
                         ui.label(mono(part));
                     }
@@ -2588,15 +2590,13 @@ impl eframe::App for App {
                 self.files_panel(ui);
             });
         egui::CentralPanel::default().show(ui, |ui| self.main_panel(ui));
-        if let Some(message) = prefs::show(
+        prefs::show(
             &ctx,
             &mut self.prefs,
             &mut self.config,
             self.config_path.as_deref(),
             &self.presets,
-        ) {
-            self.message = Some(message);
-        }
+        );
         // as Settings changes it, or puts it back
         if self.prefs_theme != Some(self.config.gui.theme) {
             set_theme(&ctx, self.config.gui.theme);
@@ -3160,8 +3160,7 @@ mod tests {
         harness.state_mut().items.last_mut().unwrap().view.show = Show::Input;
         harness.run_steps(3);
         save(&mut harness, "tgs-input");
-        let config = harness.state().config.clone();
-        harness.state_mut().prefs.open(&config);
+        harness.state_mut().prefs.open();
         harness.run_steps(3);
         save(&mut harness, "settings");
         harness.state_mut().prefs = prefs::Prefs::default();
@@ -3231,6 +3230,30 @@ mod tests {
     }
 
     #[test]
+    fn saves_settings_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let at = path.clone();
+        let mut harness = Harness::builder().with_size([1280.0, 820.0]).build_eframe(move |_| {
+            App::with(Config::default(), Some(at.clone()), Presets::builtin(), None)
+        });
+        harness.state_mut().prefs.open();
+        harness.run_steps(2);
+        // a change applies at once, and stays in the file once saved
+        harness.state_mut().config.gui.overwrite = true;
+        harness.get_by_label("Save").click_accesskit();
+        harness.run_steps(2);
+        assert!(Config::load(&path).unwrap().gui.overwrite);
+        harness.get_by_label_contains("Saved to");
+        // closing keeps what changed
+        harness.state_mut().config.gui.forget_files = true;
+        harness.get_by_label("✖").click_accesskit();
+        harness.run_steps(2);
+        assert!(!harness.state().prefs.is_open() && harness.state().config.gui.forget_files);
+        assert!(!Config::load(&path).unwrap().gui.forget_files);
+    }
+
+    #[test]
     fn opens_links() {
         let mut harness = harness(Config::default());
         harness.state_mut().prefs.about = true;
@@ -3270,8 +3293,7 @@ mod tests {
         let mut harness = harness(Config::default());
         harness.state_mut().add(vec![art]);
         finish(&mut harness);
-        let config = harness.state().config.clone();
-        harness.state_mut().prefs.open(&config);
+        harness.state_mut().prefs.open();
         harness.run_steps(2);
         harness.key_press(egui::Key::Delete);
         harness.run_steps(2);
