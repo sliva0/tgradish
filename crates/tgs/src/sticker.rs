@@ -129,8 +129,9 @@ impl Sticker {
 /// high.
 const ZOPFLI_SHARE: f64 = 0.93;
 /// zopfli packs no smaller than this share of `gzip -9`: past it, a
-/// sticker can't fit however long zopfli works on it.
-const ZOPFLI_BEST: f64 = 0.85;
+/// sticker can't fit however long zopfli works on it. Regular patterns
+/// come down to about 0.75.
+const ZOPFLI_BEST: f64 = 0.5;
 /// When the real size misses an estimate, the next target is this much
 /// lower.
 const RETARGET: f64 = 0.96;
@@ -173,6 +174,15 @@ fn within_limits(scene: &Scene, json: &str) -> bool {
     layout::cost(scene) <= telegram::MAX_COST && json.len() <= MAX_RAW_JSON
 }
 
+/// How much of the server's cost limit or Telegram Desktop's JSON limit a
+/// sticker takes, whichever is more.
+fn share_of_limits(scene: &Scene, json: &str) -> f64 {
+    f64::max(
+        layout::cost(scene) as f64 / telegram::MAX_COST as f64,
+        json.len() as f64 / MAX_RAW_JSON as f64,
+    )
+}
+
 /// What a quick encode of an animation comes to before it is scaled to
 /// the real encoder: its size packed by gzip, and its share of the
 /// server's cost limit or Telegram Desktop's JSON limit, whichever is more.
@@ -198,10 +208,7 @@ fn quick(anim: &PixelAnim, options: &Options, cancelled: Cancelled) -> Result<Op
     match render(anim, &fast, options, cancelled) {
         Ok((scene, json)) => Ok(Some(Quick {
             packed: file::quick_size(json.as_bytes()),
-            share: f64::max(
-                layout::cost(&scene) as f64 / telegram::MAX_COST as f64,
-                json.len() as f64 / MAX_RAW_JSON as f64,
-            ),
+            share: share_of_limits(&scene, &json),
         })),
         Err(crate::Error::Cancelled) => Err(crate::Error::Cancelled),
         Err(_) => Ok(None),
@@ -209,7 +216,8 @@ fn quick(anim: &PixelAnim, options: &Options, cancelled: Cancelled) -> Result<Op
 }
 
 /// What the real encoder and zopfli make of `anim` against its `quick`
-/// encode: the factor that scales quick sizes to real ones.
+/// encode: the factor that scales quick sizes to real ones. zopfli packs
+/// some art much smaller than `gzip -9`, regular patterns most.
 fn calibrate(
     anim: &PixelAnim,
     quick: Quick,
@@ -219,7 +227,7 @@ fn calibrate(
 ) -> Result<f64> {
     match render(anim, settings, options, cancelled) {
         Ok((_, real)) => {
-            Ok(ZOPFLI_SHARE * file::quick_size(real.as_bytes()) as f64 / quick.packed.max(1) as f64)
+            Ok(pack(&real, settings.effort, cancelled)?.len() as f64 / quick.packed.max(1) as f64)
         }
         Err(crate::Error::Cancelled) => Err(crate::Error::Cancelled),
         Err(_) => Ok(ZOPFLI_SHARE),
@@ -236,6 +244,17 @@ pub fn make(
     cancelled: Cancelled,
 ) -> Result<Sticker> {
     let check = || if cancelled() { Err(crate::Error::Cancelled) } else { Ok(()) };
+    // the lossless size is said once, by whichever finds it too large first
+    let mut said_too_large = false;
+    let progress = &mut |event: Progress| {
+        if matches!(event, Progress::TooLarge { .. }) {
+            if said_too_large {
+                return;
+            }
+            said_too_large = true;
+        }
+        progress(event);
+    };
     let (original, report) = normalise(animation, &options.normalise)?;
     progress(Progress::Normalised { report: Box::new(report.clone()) });
     let settings = Settings { effort: options.effort, ..Settings::default() };
@@ -267,14 +286,16 @@ pub fn make(
             target = ((target as f64) * RETARGET) as usize;
             continue;
         }
+        // too large as it is, kept so or with nothing for fitting to do;
+        // short of that, only packing tells
         if hopeless && steps.is_empty() {
-            let bytes = (quick_packed.len() as f64 * ZOPFLI_SHARE) as usize;
-            progress(Progress::TooLarge { bytes });
+            let quick = Quick { packed: quick_packed.len(), share: share_of_limits(&scene, &json) };
+            progress(Progress::TooLarge { bytes: quick.size(ZOPFLI_SHARE, options.max_bytes) });
         }
         progress(Progress::Packing);
         let tgs = match hopeless {
             true => quick_packed,
-            false => file::pack(json.as_bytes(), zopfli_iterations(options.effort)),
+            false => pack(&json, options.effort, cancelled)?,
         };
         check()?;
         let fits = tgs.len() <= options.max_bytes && within_limits(&scene, &json);
@@ -305,6 +326,33 @@ pub fn make(
             anim: current,
         });
     }
+}
+
+/// `json` packed by zopfli, given up on when `cancelled` says so. zopfli
+/// can't be stopped, so with the `threads` feature it packs in a thread of
+/// its own, left to finish alone.
+fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
+    let iterations = zopfli_iterations(effort);
+    #[cfg(feature = "threads")]
+    let tgs = {
+        use std::sync::mpsc::{RecvTimeoutError, channel};
+        let (send, receive) = channel();
+        let json = json.as_bytes().to_vec();
+        std::thread::spawn(move || send.send(file::pack(&json, iterations)));
+        loop {
+            if cancelled() {
+                return Err(crate::Error::Cancelled);
+            }
+            match receive.recv_timeout(std::time::Duration::from_millis(50)) {
+                Ok(tgs) => break tgs,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => panic!("zopfli panicked"),
+            }
+        }
+    };
+    #[cfg(not(feature = "threads"))]
+    let tgs = file::pack(json.as_bytes(), iterations);
+    if cancelled() { Err(crate::Error::Cancelled) } else { Ok(tgs) }
 }
 
 /// `f` of each item, in threads of their own with the `threads` feature.
@@ -376,6 +424,11 @@ fn fit(
         }
     };
     let mut quick_now = quick(&current, options, cancelled)?;
+    // fits even as gzip packs the quick encode: the real encoder and
+    // zopfli only make it smaller
+    if quick_now.is_some_and(|quick| quick.size(1.0, options.max_bytes) <= target) {
+        return Ok(current);
+    }
     if calibration.is_none() {
         *calibration = measure(&current, quick_now)?;
     }
@@ -563,6 +616,36 @@ mod tests {
         std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&made.tgs[..]), &mut json)
             .unwrap();
         assert_eq!(made.tgs, file::pack_quick(&json));
+    }
+
+    #[test]
+    fn fits_what_only_zopfli_packs_small_enough() {
+        // a checkerboard, which zopfli packs a quarter smaller than gzip
+        let frames = (0..2)
+            .map(|frame| Frame {
+                rgba: (0..48 * 48)
+                    .flat_map(|i| match (i % 48 + i / 48 + frame) % 2 {
+                        0 => [255, 0, 0, 255],
+                        _ => [0, 0, 255, 255],
+                    })
+                    .collect(),
+                duration: Duration::from_millis(100),
+            })
+            .collect();
+        let input = Animation::new(48, 48, frames).unwrap();
+        let lossless = Options { fit: Fit::Lossless, effort: Effort::Fast, ..Options::default() };
+        let made = make(&input, &lossless, &mut |_| {}, &|| false).unwrap();
+        let json = file::unpack(&made.tgs).unwrap();
+        let gzip = file::pack_quick(&json).len();
+        assert!((made.bytes as f64) < gzip as f64 * 0.85, "{} of {gzip}", made.bytes);
+        // at a limit only zopfli's size fits, it fits as it is either way
+        for fit in [Fit::Lossless, Fit::Auto] {
+            let options = Options { fit, max_bytes: made.bytes, ..lossless.clone() };
+            let mut too_large = false;
+            let mut progress = |event| too_large |= matches!(event, Progress::TooLarge { .. });
+            let again = make(&input, &options, &mut progress, &|| false).unwrap();
+            assert_eq!((again.bytes, again.steps.len(), too_large), (made.bytes, 0, false));
+        }
     }
 
     #[test]

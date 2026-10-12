@@ -64,6 +64,13 @@ all = { level = "warn", priority = -1 }
 [profile.dev.package.tgradish-tgs]
 opt-level = 2
 
+# and packs them, fitting's estimates as well as the result
+[profile.dev.package.zopfli]
+opt-level = 2
+
+[profile.dev.package.miniz_oxide]
+opt-level = 2
+
 # tgs-lab's tests render every frame of stickers
 [profile.dev.package.tlottie]
 opt-level = 2
