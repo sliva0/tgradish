@@ -25,16 +25,16 @@ mod widgets;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
-use eframe::egui::{self, Color32, RichText, vec2};
+use eframe::egui::{self, Color32, Rect, RichText, pos2, vec2};
 use tgradish_core::backend::Backend;
 use tgradish_core::clipboard::Pasted;
-use tgradish_core::config::Config;
+use tgradish_core::config::{Config, ResultPreview};
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::{convert, paths, still, telegram, tgs};
 
-use crate::canvas::{Cropping, Inset, Picture, Screen};
+use crate::canvas::{Cropping, Inset, InsetChange, Picture, Screen};
 use crate::item::{Framing, Item, Kind, Made, Show, Zoom};
 use crate::jobs::{Job, Plan, Status};
 use crate::media::{Art, Clip, Load, Video};
@@ -1153,6 +1153,7 @@ impl App {
         let preview_height =
             (height * self.preview_share).clamp(240.0, (height - 140.0).max(240.0));
         let mut in_frames = self.config.gui.timeline_frames;
+        let mut look = self.config.gui.result_preview;
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
         egui::Panel::top("preview").exact_size(preview_height).show(ui, |ui| {
             ui.horizontal_top(|ui| {
@@ -1169,6 +1170,7 @@ impl App {
                             &mut self.inset,
                             item,
                             (tempo, &mut in_frames),
+                            &mut look,
                         );
                     },
                 );
@@ -1215,6 +1217,9 @@ impl App {
         });
         if in_frames != self.config.gui.timeline_frames {
             self.keep("timeline's unit", |gui| gui.timeline_frames = in_frames);
+        }
+        if look != self.config.gui.result_preview {
+            self.keep("result preview's size and place", |gui| gui.result_preview = look);
         }
     }
 
@@ -1344,6 +1349,7 @@ fn preview(
     inset: &mut Inset,
     item: &mut Item,
     (tempo, in_frames): (f64, &mut bool),
+    look: &mut ResultPreview,
 ) {
     let has_result = item.result_clip.ready().is_some();
     // a change to what is used or how it is fitted shows on the input
@@ -1379,20 +1385,25 @@ fn preview(
                 ui.toggle_value(&mut item.view.inset, text)
                     .on_hover_text("What the result will look like, small, over the input");
             }
+            // always there, so nothing beside them moves as zooming starts
             let zoom = item.view.zoom_mut();
             let zoomed = zoom.level > 1.0;
-            if zoomed {
-                if ui.small_button("Fit").clicked() {
-                    *zoom = Zoom::default();
-                }
-                ui.label(format!("{:.0}%", zoom.level * 100.0));
+            let fit = ui
+                .add_enabled(zoomed, egui::Button::new("Fit").small())
+                .on_hover_text("Show all of it")
+                .on_disabled_hover_text("All of it shows");
+            if fit.clicked() {
+                *zoom = Zoom::default();
             }
+            let level = RichText::new(format!("{:.0}%", zoom.level * 100.0));
+            let level = if zoomed { level } else { level.weak() };
+            ui.add_sized(vec2(42.0, 18.0), egui::Label::new(level));
             if has_result && !item.result_is_current() {
                 let stale = RichText::new("made with earlier settings").color(widgets::WARN);
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add(egui::Label::new(stale).truncate());
                 });
-            } else if !zoomed && ui.available_width() > 60.0 {
+            } else if ui.available_width() > 60.0 {
                 let hint = match (item.view.show, item.choices.crop.is_some()) {
                     (Show::Input, false) => "Drag to crop · wheel to zoom · right button to pan",
                     (Show::Input, true) => "Drag the crop or its edges · double-click for all",
@@ -1465,28 +1476,44 @@ fn preview(
                 let frame = clip.index_at(time);
                 let picture = Picture { clip, frame, size, square: false };
                 // the result's small picture beside the input, not over it,
-                // with room for its longest label
-                let (input_area, inset_area) = if item.view.inset {
-                    let widest = match item.format {
-                        Format::Webm | Format::Image => "Result\n512 × 512 px",
-                        Format::Tgs => "Result",
-                    };
-                    let text = ui.visuals().text_color();
-                    let label =
-                        ui.painter().layout_no_wrap(widest.into(), canvas::INSET_LABEL, text);
-                    let zoomed = item.view.input_zoom.level > 1.0;
-                    canvas::split(rect, size, label.size() + vec2(6.0, 0.0), zoomed)
-                } else {
-                    (rect, (rect, vec2(0.0, 0.0)))
+                // with room for its longest label, eased into place when it
+                // is turned on or off, resized or moved
+                let widest = match item.format {
+                    Format::Webm | Format::Image => "Result\n512 × 512 px",
+                    Format::Tgs => "Result",
                 };
+                let text = ui.visuals().text_color();
+                let label = ui.painter().layout_no_wrap(widest.into(), canvas::INSET_LABEL, text);
+                let step = usize::from(look.size.clamp(1, 5)) - 1;
+                let corner = look.corner;
+                let (beside, room) = canvas::split(
+                    rect,
+                    size,
+                    canvas::label_box(label.size()),
+                    canvas::INSET_SIZES[step],
+                    corner,
+                );
+                let on = item.view.inset;
+                // turned off, it shrinks into its corner
+                let layout = if on {
+                    (beside, room)
+                } else {
+                    let x = if corner.left() { room.left() } else { room.right() };
+                    let y = if corner.top() { room.top() } else { room.bottom() };
+                    (rect, Rect::from_min_max(pos2(x, y), pos2(x, y)))
+                };
+                let (input_area, room) = inset.ease(ui.ctx(), item.id, (on, step, corner), layout);
                 ui.painter().rect_filled(rect, 0.0, widgets::stage(ui.visuals().dark_mode));
                 let ratio = settings::ratio(item.view.aspect, size);
                 let exact = settings::exact_of(item);
                 let cropping = Cropping { crop: &mut item.choices.crop, ratio, filling, exact };
                 let zoom = &mut item.view.input_zoom;
-                canvas::show(ui, screen, input_area, &picture, zoom, Some(cropping));
+                canvas::show(ui, screen, (rect, input_area), &picture, zoom, Some(cropping));
                 // after the crop moved
-                if let Some(label) = inset_label(item, size).filter(|_| item.view.inset) {
+                let showing = on || inset.leaving();
+                let mut change = None;
+                let place = ((rect, room), (corner, step, on));
+                if let Some(label) = inset_label(item, size).filter(|_| showing) {
                     let crop = item.choices.crop;
                     let where_ = output::Part::of(crop, size, (clip.width, clip.height));
                     match item.format {
@@ -1509,7 +1536,7 @@ fn preview(
                                     sizes.scaling = Scaling::Sharp;
                                 }
                                 let key = inset_key((clip.id, frame, where_, sizes));
-                                inset.show(ui, inset_area, key, &label, || {
+                                change = inset.show(ui, place.0, place.1, key, &label, || {
                                     output::webm(&clip.frames[frame], clip.width, where_, &sizes)
                                 });
                             }
@@ -1521,11 +1548,16 @@ fn preview(
                                     output::tgs_bounds(&clip.frames, clip.width, where_, keep)
                                 });
                             let key = inset_key((clip.id, frame, bounds));
-                            inset.show(ui, inset_area, key, &label, || {
+                            change = inset.show(ui, place.0, place.1, key, &label, || {
                                 output::tgs(&clip.frames[frame], clip.width, bounds, 256)
                             });
                         }
                     }
+                }
+                match change {
+                    Some(InsetChange::Size(step)) => look.size = step as u8 + 1,
+                    Some(InsetChange::Corner(corner)) => look.corner = corner,
+                    None => {}
                 }
             } else {
                 message_in(ui, rect, "Reading…", ui.visuals().weak_text_color());
@@ -1546,7 +1578,8 @@ fn preview(
                     size: (clip.width, clip.height),
                     square,
                 };
-                canvas::show(ui, screen, rect, &picture, &mut item.view.result_zoom, None);
+                let zoom = &mut item.view.result_zoom;
+                canvas::show(ui, screen, (rect, rect), &picture, zoom, None);
             }
         }
     }
@@ -3061,6 +3094,19 @@ mod tests {
         item.view.inset = true;
         harness.run_steps(3);
         save(&mut harness, "light");
+        // zoomed in, the input grows over the result's small picture's
+        // strip; then it larger, in another corner
+        let item = harness.state_mut().items.last_mut().unwrap();
+        item.view.input_zoom.level = 1.6;
+        harness.run_steps(3);
+        save(&mut harness, "zoomed");
+        harness.state_mut().config.gui.result_preview =
+            ResultPreview { size: 5, corner: tgradish_core::config::Corner::TopLeft };
+        harness.step();
+        std::thread::sleep(Duration::from_millis(300));
+        harness.run_steps(3);
+        save(&mut harness, "large-preview");
+        harness.state_mut().items.last_mut().unwrap().view.input_zoom = Zoom::default();
         // the narrowest list, its buttons leaving no room for the name
         harness.set_size(egui::vec2(900.0, 640.0));
         harness.ctx.memory_mut(|memory| memory.reset_areas());

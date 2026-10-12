@@ -15,6 +15,10 @@
 //! smooth-scrolling = false           # ease scrolling instead of following the wheel
 //! theme = "system"                   # or "light" or "dark"
 //! forget-files = false               # don't reopen the files of last time
+//!
+//! [gui.result-preview]
+//! size = 3                 # the result's small picture, from 1 to 5
+//! corner = "bottom-right"  # or "bottom-left", "top-right", "top-left"
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -55,6 +59,53 @@ pub struct GuiConfig {
     pub forget_files: bool,
     /// Show the timeline's cuts and times in frames rather than seconds.
     pub timeline_frames: bool,
+    pub result_preview: ResultPreview,
+}
+
+/// The result's small picture over the input: how large it is, and where.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct ResultPreview {
+    /// From 1, the smallest, to 5.
+    pub size: u8,
+    pub corner: Corner,
+}
+
+impl Default for ResultPreview {
+    fn default() -> ResultPreview {
+        ResultPreview { size: 3, corner: Corner::default() }
+    }
+}
+
+/// A corner of the preview.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum Corner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    #[default]
+    BottomRight,
+}
+
+impl Corner {
+    pub fn left(self) -> bool {
+        matches!(self, Corner::TopLeft | Corner::BottomLeft)
+    }
+
+    pub fn top(self) -> bool {
+        matches!(self, Corner::TopLeft | Corner::TopRight)
+    }
+
+    /// The corner on the `left` or right, at the `top` or bottom.
+    pub fn at(left: bool, top: bool) -> Corner {
+        match (left, top) {
+            (true, true) => Corner::TopLeft,
+            (false, true) => Corner::TopRight,
+            (true, false) => Corner::BottomLeft,
+            (false, false) => Corner::BottomRight,
+        }
+    }
 }
 
 /// The window's colours.
