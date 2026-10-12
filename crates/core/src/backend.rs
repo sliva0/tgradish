@@ -80,14 +80,21 @@ impl Backend {
         }
     }
 
-    /// Where the frames of a video start, in order, in seconds from its
-    /// start as cuts count them: empty when its packets carry no times.
-    pub fn frame_starts(&self, input: &Path, cancel: &CancelToken) -> Result<Vec<f64>> {
-        let mut starts = match self {
+    /// Where the frames of a video, `probe` probed, start, in order, in
+    /// seconds into it as cuts count them: empty when its packets carry no
+    /// times.
+    pub fn frame_starts(
+        &self,
+        input: &Path,
+        probe: &Probe,
+        cancel: &CancelToken,
+    ) -> Result<Vec<f64>> {
+        let in_file = match self {
             Backend::Process(ffmpeg) => ffmpeg::frame_starts(ffmpeg, input, cancel)?,
             #[cfg(feature = "linked")]
             Backend::Linked => crate::linked::frame_starts(input, cancel)?,
         };
+        let mut starts: Vec<f64> = in_file.into_iter().map(|start| start - probe.start).collect();
         // packets come in decoding order, and decoders drop those before
         // the start
         starts.retain(|start| start.is_finite() && *start > -1e-6);

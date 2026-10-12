@@ -170,9 +170,10 @@ impl Source {
             source.window = (read * f64::from(STILL_FPS)).ceil() as i64;
             return Ok(source);
         }
-        source.start += to_units(start, source.time_base);
+        let seek = probe.seek(start);
+        source.start += to_units(seek, source.time_base);
         source.window = to_units(read, source.time_base);
-        if start > 0.0 {
+        if seek > 0.0 {
             let av_time_base = Rational::new(1, ff::ffi::AV_TIME_BASE);
             let target = source.start.rescale(source.time_base, av_time_base);
             // lands on a keyframe at or before the start; earlier frames are
@@ -183,7 +184,7 @@ impl Source {
         Ok(source)
     }
 
-    /// Where the stream's frames start, in seconds from the file's start,
+    /// Where the stream's frames start, in seconds after the file's start,
     /// as its packets come: empty when some carry no time.
     pub(super) fn frame_starts(mut self) -> Result<Vec<f64>> {
         let (start, time_base) = (self.start, self.time_base);

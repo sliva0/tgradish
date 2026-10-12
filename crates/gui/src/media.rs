@@ -247,7 +247,7 @@ impl Video {
             let starts = if probe.still_image {
                 Vec::new()
             } else {
-                match backend.frame_starts(&path, cancel) {
+                match backend.frame_starts(&path, &probe, cancel) {
                     Err(err @ tgradish_core::Error::Cancelled) => return Err(err.to_string()),
                     starts => starts.unwrap_or_default(),
                 }

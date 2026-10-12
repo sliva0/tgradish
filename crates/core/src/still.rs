@@ -112,10 +112,12 @@ pub fn plan(
 pub fn convert(backend: &Backend, request: &Request, cancel: &CancelToken) -> Result<Outcome> {
     let source = backend.probe(&request.input, cancel)?;
     let starts = match request.options.start {
-        Some(_) if !source.still_image => match backend.frame_starts(&request.input, cancel) {
-            Err(Error::Cancelled) => return Err(Error::Cancelled),
-            starts => starts.unwrap_or_default(),
-        },
+        Some(_) if !source.still_image => {
+            match backend.frame_starts(&request.input, &source, cancel) {
+                Err(Error::Cancelled) => return Err(Error::Cancelled),
+                starts => starts.unwrap_or_default(),
+            }
+        }
         _ => Vec::new(),
     };
     let (mut plan, warnings) = plan(request, source, &starts)?;

@@ -25,6 +25,10 @@ pub struct Probe {
     pub base_fps: Option<f64>,
     /// Duration in seconds, missing for still images.
     pub duration: Option<f64>,
+    /// Where the video starts, in seconds after the file's start, which
+    /// other streams can start before. Times into the video, as cuts and
+    /// [`frame_starts`] give them, count from here.
+    pub start: f64,
     pub alpha: bool,
     pub still_image: bool,
     /// How frames are turned for display. Width and height above already
@@ -33,6 +37,14 @@ pub struct Probe {
     /// Decoder that has to be forced to keep transparency: ffmpeg's native
     /// VP8/VP9 decoders ignore WebM alpha.
     pub decoder: Option<String>,
+}
+
+impl Probe {
+    /// Where reading the file starts for `start` seconds into the video,
+    /// at the start a hair before its first frame, so it stays.
+    pub fn seek(&self, start: f64) -> f64 {
+        if start > 0.0 { start + self.start } else { (self.start - 1e-3).max(0.0) }
+    }
 }
 
 fn parse_ratio(value: &Value) -> Option<f64> {
@@ -122,6 +134,14 @@ pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Prob
         } else {
             parse_f64(&stream["duration"]).or_else(|| parse_f64(&json["format"]["duration"]))
         },
+        start: {
+            let time =
+                |value: &Value| value.as_str()?.parse::<f64>().ok().filter(|t| t.is_finite());
+            match (time(&stream["start_time"]), time(&json["format"]["start_time"])) {
+                (Some(video), Some(file)) => (video - file).max(0.0),
+                _ => 0.0,
+            }
+        },
         alpha: pix_fmt_has_alpha(pix_fmt) || webm_alpha,
         still_image,
         orientation,
@@ -131,8 +151,18 @@ pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Prob
     })
 }
 
+/// The field `name` of a line of ffprobe's compact output about `section`:
+/// the section's name, then its fields, each `name=value`, between bars.
+fn compact_field<'a>(line: &'a str, section: &str, name: &str) -> Option<&'a str> {
+    let mut fields = line.trim().split('|');
+    if fields.next()? != section {
+        return None;
+    }
+    fields.find_map(|field| field.strip_prefix(name)?.strip_prefix('='))
+}
+
 /// Where the frames of `input`'s first video stream start, in seconds
-/// from the file's start, as its packets come: empty when some carry no
+/// after the file's start, as its packets come: empty when some carry no
 /// time.
 pub fn frame_starts(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Vec<f64>> {
     let mut cmd = Command::new(&ffmpeg.ffprobe);
@@ -142,17 +172,35 @@ pub fn frame_starts(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Resu
     let (mut file_start, mut starts, mut untimed) = (0.0, Vec::new(), false);
     run(cmd, "ffprobe", cancel, &mut |output| {
         let Output::Stdout(line) = output else { return };
-        if let Some(time) = line.strip_prefix("packet|pts_time=") {
-            match time.trim().parse::<f64>() {
+        if let Some(time) = compact_field(&line, "packet", "pts_time") {
+            match time.parse::<f64>() {
                 Ok(time) => starts.push(time),
                 Err(_) => untimed = true,
             }
-        } else if let Some(start) = line.strip_prefix("format|start_time=") {
-            file_start = start.trim().parse().unwrap_or(0.0);
+        } else if let Some(start) = compact_field(&line, "format", "start_time") {
+            file_start = start.parse().unwrap_or(0.0);
         }
     })?;
     if untimed {
         return Ok(Vec::new());
     }
     Ok(starts.into_iter().map(|start| start - file_start).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_fields_of_compact_output() {
+        // as MPEG-TS packets come, with a bar after the last field
+        assert_eq!(
+            compact_field("packet|pts_time=1.440000|", "packet", "pts_time"),
+            Some("1.440000")
+        );
+        assert_eq!(compact_field("packet|pts_time=N/A", "packet", "pts_time"), Some("N/A"));
+        assert_eq!(compact_field("format|start_time=1.4\n", "format", "start_time"), Some("1.4"));
+        assert_eq!(compact_field("side_data|pts_time=1", "packet", "pts_time"), None);
+        assert_eq!(compact_field("packet|dts_time=1", "packet", "pts_time"), None);
+    }
 }

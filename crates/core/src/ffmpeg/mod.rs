@@ -17,6 +17,8 @@ pub use args::commands;
 pub(crate) use args::encode_args;
 #[cfg(test)]
 pub(crate) use args::input_args;
+#[cfg(feature = "linked")]
+pub(crate) use args::picture_filter;
 #[cfg(any(feature = "linked", test))]
 pub(crate) use args::video_filter;
 pub use locate::locate;
@@ -100,14 +102,17 @@ pub(crate) fn frames(
     cancel.check()?;
     let mut cmd = Command::new(&ffmpeg.ffmpeg);
     cmd.args(["-hide_banner", "-nostdin", "-v", "error"]);
-    if start > 0.0 && !probe.still_image {
-        cmd.args(["-ss", &format!("{start:.6}")]);
+    let seek = probe.seek(start);
+    if seek > 0.0 && !probe.still_image {
+        cmd.args(["-ss", &format!("{seek:.6}")]);
     }
     if let Some(decoder) = &probe.decoder {
         cmd.args(["-c:v", decoder]);
     }
     cmd.arg("-i").arg(input);
-    let resample = if probe.still_image { String::new() } else { format!("fps={fps},") };
+    // one frame is the first from the start, which resampling can skip
+    let resample =
+        if probe.still_image || count == 1 { String::new() } else { format!("fps={fps},") };
     let filter = format!("{resample}scale={width}:{height}:flags=bilinear,setsar=1");
     cmd.args(["-map", "0:v:0", "-frames:v", &count.to_string(), "-vf", &filter]);
     cmd.args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
@@ -128,7 +133,9 @@ pub(crate) fn still(
     let mut cmd = Command::new(&ffmpeg.ffmpeg);
     cmd.args(["-hide_banner", "-nostdin", "-v", "error"]);
     cmd.args(args::input_args(plan, length, plan.fps));
-    cmd.args(["-map", "0:v:0", "-vf", &args::video_filter(plan, plan.fps, length, "rgba")]);
+    // the first frame from the start, as it is: resampling to a frame rate
+    // can skip a short one
+    cmd.args(["-map", "0:v:0", "-vf", &args::picture_filter(plan, "rgba")]);
     cmd.args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
     let out = process::run_bytes(cmd, "ffmpeg", cancel)?;
     let size = plan.width as usize * plan.height as usize * 4;

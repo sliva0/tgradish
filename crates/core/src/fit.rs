@@ -354,6 +354,7 @@ mod tests {
             fps: Some(30.0),
             base_fps: Some(30.0),
             duration: Some(duration),
+            start: 0.0,
             alpha: false,
             still_image: false,
             orientation: Default::default(),
