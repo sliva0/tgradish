@@ -952,10 +952,13 @@ fn makes_image_stickers_from_a_frame() {
         assert_eq!(at(0.5), at(0.48), "{name}");
         assert_ne!(at(0.5), at(0.52), "{name}");
         at(4.83);
-        // past the end
-        let late = Options { start: Some(60.0), ..Options::default() };
-        let request = Request { options: late, ..request };
-        assert!(tgradish_core::still::convert(backend, &request, &CancelToken::new()).is_err());
+        // before the start and past the end
+        for start in [-1.0, 60.0] {
+            let options = Options { start: Some(start), ..Options::default() };
+            let request = Request { options, ..request.clone() };
+            let made = tgradish_core::still::convert(backend, &request, &CancelToken::new());
+            assert!(made.is_err(), "{name}: {start}");
+        }
     }
     // the same picture either way
     if let [first, second] = pictures.as_slice() {
