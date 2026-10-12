@@ -1,3 +1,6 @@
+//! What ffprobe says about an input, as a [`Probe`] both backends fill
+//! the same way, and where its frames start.
+
 use std::path::Path;
 use std::process::Command;
 

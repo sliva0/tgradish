@@ -1,3 +1,5 @@
+//! The errors of the library, which front-ends print or show.
+
 use std::path::PathBuf;
 
 use thiserror::Error;

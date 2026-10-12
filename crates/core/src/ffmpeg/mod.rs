@@ -1,4 +1,6 @@
-//! Running ffmpeg as a separate process.
+//! Running ffmpeg as separate programs, and what both backends share: the
+//! [`Probe`] of an input, the filter chains and command lines they follow,
+//! and cancelling with a [`CancelToken`].
 
 mod args;
 mod locate;

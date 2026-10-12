@@ -14,6 +14,23 @@
 //! What a colour costs depends only on which colours are drawn after it,
 //! not on their order, so the cheapest order is found exactly over subsets
 //! for few colours, and greedily otherwise.
+//!
+//! How a colour is drawn, cheapest kept, by estimated cost in rectangles,
+//! groups and layers ([`RECT_COST`], [`GROUP_COST`], [`LAYER_ESTIMATE`]):
+//!
+//! - whole, one piece per lifetime ([`Painter::lifetime_pieces`]);
+//! - split, a core of the cells that stay over a stretch of frames above
+//!   a delta with the rest of each frame ([`Painter::split_pieces`]), for
+//!   colours that mostly stand still while their edges move;
+//! - tiled, in squares of the canvas with lifetimes of their own
+//!   ([`Painter::tiled_pieces`]), for large colours that change in one
+//!   place at a time, and for those too large for one group.
+//!
+//! The order is then searched for by cost ([`EXACT_ORDER`],
+//! [`GREEDY_ORDER`], [`SEARCH_WORK`]), and with [`Effort::Best`] improved
+//! by real packed sizes. Its pieces are stacked into layers ([`stack`]).
+//! When lifetimes leave too many layers or rectangles for one group, every
+//! frame is drawn in full instead, which always fits for 180 frames.
 
 use super::cover::{Rect, cover};
 use super::mask::Mask;
@@ -76,7 +93,8 @@ impl Default for Settings {
     }
 }
 
-/// Most encodings [`Effort::Best`] tries.
+/// Most encodings [`Effort::Best`] tries, each a whole encode scored by
+/// packing it, so that art with many colours still ends.
 const BEST_TRIES: usize = 200;
 
 const fn min(a: usize, b: usize) -> usize {

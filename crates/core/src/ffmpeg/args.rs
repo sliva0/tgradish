@@ -1,3 +1,10 @@
+//! The ffmpeg command lines conversions run, and the filter chains in
+//! them, which the linked backend builds its filter graphs from too, so
+//! both backends make the same pictures. A chain goes: tempo, then frame
+//! rate and frame count (`fps`, `trim`), the crop in display pixels,
+//! scaling (in linear light where pixels blend), centring or padding into
+//! the box, and the pixel format the encoder takes.
+
 use std::ffi::OsString;
 use std::path::Path;
 
@@ -12,8 +19,9 @@ fn num(value: f64) -> String {
 }
 
 /// Input options and the input itself, for a clip of `length` seconds at
-/// `fps`. Reads one frame more than needed; the filter chain cuts it to an
-/// exact frame count.
+/// `fps`. Reads one frame more than needed, so `-t`, which counts in the
+/// input's own rounded times, never cuts off the last frame the filter
+/// chain's `trim` then keeps to an exact count.
 pub(crate) fn input_args(plan: &Plan, length: f64, fps: f64) -> Vec<OsString> {
     let mut args: Vec<OsString> = Vec::new();
     if plan.source.still_image {

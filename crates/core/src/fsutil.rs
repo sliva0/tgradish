@@ -1,3 +1,5 @@
+//! Writing results without leaving half-written files behind.
+
 use std::io::Write;
 use std::path::Path;
 

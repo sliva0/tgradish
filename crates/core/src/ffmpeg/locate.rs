@@ -1,3 +1,6 @@
+//! Finding ffmpeg and ffprobe: a path the user gave, the ones on PATH, or
+//! the one built in.
+
 use std::env::consts::EXE_SUFFIX;
 use std::path::{Path, PathBuf};
 

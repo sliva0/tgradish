@@ -97,6 +97,9 @@ fn maximize(
                 // stay clear of both ends so every step makes progress
                 bx + t.clamp(0.15, 0.85) * (ax - bx)
             }
+            // a size grows about as the value does, so step by how much it
+            // missed: at least 5%, so near misses still move, and at most 4
+            // times, so one wild size can't throw the search off
             (Some((bx, bs)), None) if bx < max => bx * (aim / bs as f64).clamp(1.05, 4.0),
             (None, Some((ax, as_))) if ax > min => ax * (aim / as_ as f64).clamp(0.25, 0.95),
             _ => break,

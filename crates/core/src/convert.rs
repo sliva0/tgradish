@@ -137,15 +137,18 @@ impl Plan {
 
 /// Number of frames encoded for `length` seconds at `fps`. Rounds down so
 /// the result never lasts longer than asked, which matters at the 3 second
-/// limit, but always at least one frame.
+/// limit, but always at least one frame; the `1e-6` takes float error for
+/// what it is, so 3 s at 30 fps is 90 frames rather than 89.
 pub fn frame_count(length: f64, fps: f64) -> u64 {
     ((length * fps + 1e-6).floor() as u64).max(1)
 }
 
 /// Where to start reading for the frame that starts at `start`, after one
 /// that starts at `previous`. Reading keeps frames from the first that
-/// starts at or after its start: a little before the frame's, so it stays
-/// however times are rounded.
+/// starts at or after its start, and containers, ffprobe and decoders round
+/// times differently (WebM to whole milliseconds): so a millisecond before
+/// the frame's start, or a quarter of the gap to `previous` where that is
+/// less, which never brings the previous frame back.
 pub fn read_from(start: f64, previous: f64) -> f64 {
     start - ((start - previous) / 4.0).min(1e-3)
 }
@@ -483,6 +486,9 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
             check_range(Range { min: range.min.min(length), max: length }, fit, length)?
         }
         (Some(range), _) => check_range(range, fit, length)?,
+        // searched where nothing narrower is asked: bitrates from what still
+        // makes a picture to far past any sticker, and libvpx's CRF short of
+        // its near-lossless end, which no sticker fits
         (None, Fit::Auto | Fit::Bitrate | Fit::Off) => Range { min: 8.0, max: 50_000.0 },
         (None, Fit::Crf) => Range { min: 4.0, max: 63.0 },
         (None, Fit::Fps) => Range { min: 1.0, max: fps.floor().max(1.0) },
