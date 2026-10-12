@@ -800,14 +800,19 @@ impl App {
         let keys = ctx.input(|input| {
             let pressed = |key| input.key_pressed(key);
             let step = if input.modifiers.shift { 10 } else { 1 };
+            let by = if pressed(egui::Key::ArrowLeft) {
+                -step
+            } else if pressed(egui::Key::ArrowRight) {
+                step
+            } else {
+                0
+            };
+            // with Ctrl the used part's end moves, with Alt its start
+            let (end, start) = (input.modifiers.command, input.modifiers.alt);
             Keys {
-                by: if pressed(egui::Key::ArrowLeft) {
-                    -step
-                } else if pressed(egui::Key::ArrowRight) {
-                    step
-                } else {
-                    0
-                },
+                by: if end || start { 0 } else { by },
+                move_start: if start { by } else { 0 },
+                move_end: if end && !start { by } else { 0 },
                 first: pressed(egui::Key::Home),
                 last: pressed(egui::Key::End),
                 start_here: pressed(egui::Key::OpenBracket),
@@ -1389,7 +1394,7 @@ fn preview(
             let zoom = item.view.zoom_mut();
             let zoomed = zoom.level > 1.0;
             let fit = ui
-                .add_enabled(zoomed, egui::Button::new("Fit").small())
+                .add_enabled(zoomed, egui::Button::new("Fit"))
                 .on_hover_text("Show all of it")
                 .on_disabled_hover_text("All of it shows");
             if fit.clicked() {
@@ -1715,17 +1720,74 @@ fn about(ui: &mut egui::Ui) {
                                             .collect::<Vec<_>>()
                                             .join(", "),
                                     );
-                                    ui.label(RichText::new(body.trim()).monospace().size(11.5));
+                                    text_with_links(ui, body.trim());
                                 },
                             );
                         }
                     } else {
-                        ui.label(RichText::new(notice.text.trim()).monospace().size(11.5));
+                        text_with_links(ui, notice.text.trim());
                     }
                 },
             );
         }
     });
+}
+
+/// `text` small and monospaced, as licences are, its web addresses links.
+fn text_with_links(ui: &mut egui::Ui, text: &str) {
+    let mono = |text: &str| RichText::new(text).monospace().size(11.5);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        // lines without addresses together, as one label
+        let mut plain = String::new();
+        for line in text.lines() {
+            let parts = links(line);
+            if parts.iter().all(|(link, _)| !link) {
+                plain.push_str(line);
+                plain.push('\n');
+                continue;
+            }
+            if !plain.is_empty() {
+                ui.label(mono(plain.trim_end_matches('\n')));
+                plain.clear();
+            }
+            ui.horizontal_wrapped(|ui| {
+                for (link, part) in parts {
+                    if link {
+                        ui.add(egui::Hyperlink::from_label_and_url(mono(part), part));
+                    } else {
+                        ui.label(mono(part));
+                    }
+                }
+            });
+        }
+        if !plain.is_empty() {
+            ui.label(mono(plain.trim_end_matches('\n')));
+        }
+    });
+}
+
+/// `line` in parts, each a web address or not.
+fn links(line: &str) -> Vec<(bool, &str)> {
+    let mut parts = Vec::new();
+    let mut rest = line;
+    while let Some(at) = ["https://", "http://"].iter().filter_map(|scheme| rest.find(scheme)).min()
+    {
+        let length = rest[at..]
+            .find(|c: char| c.is_whitespace() || "<>\"'()[]".contains(c))
+            .unwrap_or(rest.len() - at);
+        // punctuation after it is the sentence's
+        let address = rest[at..at + length].trim_end_matches(['.', ',', ';', ':']);
+        if at > 0 {
+            parts.push((false, &rest[..at]));
+        }
+        parts.push((true, address));
+        rest = &rest[at + address.len()..];
+    }
+    if !rest.is_empty() {
+        parts.push((false, rest));
+    }
+    parts
 }
 
 /// Scrolls by what the wheel turned this frame, instead of egui's easing
@@ -1885,11 +1947,13 @@ fn message_in(ui: &egui::Ui, rect: egui::Rect, text: &str, colour: Color32) {
 }
 
 /// What the keys over the preview ask for: a step of frames, the first
-/// or last frame used, and the used part to start or end at the frame
-/// shown.
+/// or last frame used, the used part to start or end at the frame shown,
+/// and its start or end to move by frames.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Keys {
     by: i64,
+    move_start: i64,
+    move_end: i64,
     first: bool,
     last: bool,
     start_here: bool,
@@ -1909,6 +1973,7 @@ impl Keys {
             }
         };
         let moves = self.by != 0 || self.first || self.last;
+        let trims = self.move_start != 0 || self.move_end != 0;
         match item.view.show {
             Show::Result => {
                 let Some(clip) = item.result_clip.ready() else { return };
@@ -1944,6 +2009,22 @@ impl Keys {
                 if moves {
                     let (first, after) = frames.part(length, choices.start, choices.length);
                     item.view.time = frames.times[step(now, first, after - 1)];
+                    item.view.playing = false;
+                }
+                // showing the frame it moves to
+                if trims {
+                    let (first, after) = frames.part(length, choices.start, choices.length);
+                    let (first, after) = if self.move_start != 0 {
+                        let moved = (first as i64 + self.move_start).clamp(0, after as i64 - 1);
+                        item.view.time = frames.times[moved as usize];
+                        (moved as usize, after)
+                    } else {
+                        let count = frames.count() as i64;
+                        let moved = (after as i64 + self.move_end).clamp(first as i64 + 1, count);
+                        item.view.time = frames.times[moved as usize - 1];
+                        (first, moved as usize)
+                    };
+                    frames.set_part((first, after), &mut choices.start, &mut choices.length);
                     item.view.playing = false;
                 }
             }
@@ -3137,6 +3218,21 @@ mod tests {
     }
 
     #[test]
+    fn finds_web_addresses_in_licences() {
+        assert_eq!(
+            links("See <https://www.apache.org/licenses/LICENSE-2.0>, or http://x.org."),
+            [
+                (false, "See <"),
+                (true, "https://www.apache.org/licenses/LICENSE-2.0"),
+                (false, ">, or "),
+                (true, "http://x.org"),
+                (false, "."),
+            ]
+        );
+        assert_eq!(links("no address here"), [(false, "no address here")]);
+    }
+
+    #[test]
     fn leaves_keys_pressed_in_dialogs_to_them() {
         let dir = tempfile::tempdir().unwrap();
         let art = dir.path().join("art.png");
@@ -3206,6 +3302,18 @@ mod tests {
             assert_eq!(frames.at(item.view.time), 5);
             Keys { by: -10, ..Keys::default() }.apply(item);
             assert_eq!((frames.at(item.view.time), item.view.playing), (5, false));
+            // its end and start moved, showing the frame they move to, and
+            // back
+            let part = |item: &Item| {
+                frames.part(item.input_length().unwrap(), item.choices.start, item.choices.length)
+            };
+            Keys { move_end: 2, ..Keys::default() }.apply(item);
+            assert_eq!((part(item), frames.at(item.view.time)), ((5, 12), 11));
+            Keys { move_start: -10, ..Keys::default() }.apply(item);
+            assert_eq!((part(item), frames.at(item.view.time)), ((0, 12), 0));
+            Keys { move_end: -2, ..Keys::default() }.apply(item);
+            Keys { move_start: 5, ..Keys::default() }.apply(item);
+            assert_eq!(part(item), (5, 10));
             item.choices.preset = Some("fast".into());
             item.choices.webm.fit = Some(tgradish_core::options::Fit::Off);
         }

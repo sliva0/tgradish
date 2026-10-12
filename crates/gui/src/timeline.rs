@@ -176,7 +176,30 @@ fn boundary_field<'a>(
 /// What the keys over the preview do, for the play button's hover.
 const KEYS: &str = "Space: play or pause\n← →: a frame back or on, with Shift ten\n\
                     Home, End: the first or last frame used\n\
-                    [ ]: start or end the used part at the frame shown";
+                    [ ]: start or end the used part at the frame shown\n\
+                    Alt+← →, Ctrl+← →: move its start or its end";
+
+/// Width of [`unit`]'s two buttons.
+const UNIT: f32 = 122.0;
+
+/// Whether the numbers count frames or seconds, which `known` frames
+/// allow, greyed out without them.
+fn unit(ui: &mut egui::Ui, in_frames: &mut bool, known: bool) {
+    let choices = [
+        (false, "Seconds", "Times in seconds"),
+        (true, "Frames", "Times as frame numbers, from 1"),
+    ];
+    let mut shown = *in_frames && known;
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = 24.0;
+        widgets::segments(ui, &mut shown, &choices, |_| {
+            if known { Ok(()) } else { Err("Where the input's frames are isn't known") }
+        });
+    });
+    if known {
+        *in_frames = shown;
+    }
+}
 
 /// Shows the timeline.
 pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
@@ -205,8 +228,7 @@ pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
                 }
             }
         }
-        let toggle = if frames.is_some() { 68.0 } else { 0.0 };
-        let width = (ui.available_width() - 64.0 - 8.0 - toggle).max(80.0);
+        let width = (ui.available_width() - 64.0 - 2.0 * 8.0 - UNIT).max(80.0);
         let (rect, response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click_and_drag());
         bar(ui, rect, &response, (length, frames, *in_frames), (start, used), time, limit);
         match frames {
@@ -218,11 +240,7 @@ pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
                 if ui.add_sized(size, field).on_hover_text(hint).changed() {
                     frames.set_part((first, after), start, used);
                 }
-                let unit = egui::Button::selectable(*in_frames, "Frames").frame_when_inactive(true);
-                let hint = "Count in frames rather than seconds";
-                if ui.add(unit).on_hover_text(hint).clicked() {
-                    *in_frames = !*in_frames;
-                }
+                unit(ui, in_frames, true);
             }
             None => {
                 let (from, mut to) = part(length, *start, *used);
@@ -231,6 +249,7 @@ pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
                     to = to.max(from + 0.01).min(length);
                     set_part(length, (from, to), start, used);
                 }
+                unit(ui, in_frames, false);
             }
         }
     });
@@ -455,7 +474,7 @@ pub fn frame_picker(
         if ui.add_sized(vec2(72.0, 24.0), field).on_hover_text("The frame").changed() {
             picked = Some(index);
         }
-        let width = (ui.available_width() - 68.0).max(80.0);
+        let width = (ui.available_width() - UNIT - 8.0).max(80.0);
         let (rect, response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click_and_drag());
         let track = Rect::from_min_max(
             pos2(rect.left() + 8.0, rect.top() + 11.0),
@@ -476,10 +495,7 @@ pub fn frame_picker(
             index = picked;
             *frame = (picked > 0).then_some(frames.times[picked]);
         }
-        let unit = egui::Button::selectable(*in_frames, "Frames").frame_when_inactive(true);
-        if ui.add(unit).on_hover_text("Count in frames rather than seconds").clicked() {
-            *in_frames = !*in_frames;
-        }
+        unit(ui, in_frames, true);
         let painter = ui.painter_at(rect);
         let visuals = ui.visuals();
         painter.rect_filled(track, 3.0, visuals.extreme_bg_color);

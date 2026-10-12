@@ -226,7 +226,11 @@ impl Inset {
             ];
             let pointer = ui.input(|input| input.pointer.latest_pos());
             let origin = ui.input(|input| input.pointer.press_origin());
+            // once the pointer has moved, so pressing a button on the
+            // label is only that
+            let moved = ui.input(|input| input.pointer.is_decidedly_dragging());
             if held.iter().any(|held| held.dragged())
+                && moved
                 && let (Some(origin), Some(pointer)) = (origin, pointer)
             {
                 ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
@@ -258,13 +262,17 @@ impl Inset {
         };
         let edge = ui.visuals().widgets.noninteractive.bg_stroke;
         if dragging {
-            // the corners it can go to
+            // the corners it can go to, under its label at the top
             let stroke = Stroke::new(1.0, edge.color.gamma_multiply(0.8));
             for corner in
                 [Corner::TopLeft, Corner::TopRight, Corner::BottomLeft, Corner::BottomRight]
             {
                 let x = if corner.left() { view.left() + MARGIN } else { view.right() - MARGIN };
-                let y = if corner.top() { view.top() + MARGIN } else { view.bottom() - MARGIN };
+                let y = if corner.top() {
+                    view.top() + MARGIN + boxed.y + LABEL_GAP
+                } else {
+                    view.bottom() - MARGIN
+                };
                 let at = pos2(if corner.left() { x } else { x - shown.x }, {
                     if corner.top() { y } else { y - shown.y }
                 });
@@ -331,7 +339,7 @@ pub const INSET_LABEL: egui::FontId = egui::FontId::proportional(12.0);
 /// The sizes of the small picture, as shares of the view's shorter side.
 pub const INSET_SIZES: [f32; 5] = [0.20, 0.27, 0.34, 0.42, 0.50];
 /// The side of a button that changes its size.
-const SIZE_BUTTON: f32 = 20.0;
+const SIZE_BUTTON: f32 = 24.0;
 /// The width the two of them take after the label's text.
 const SIZE_BUTTONS: f32 = 2.0 * SIZE_BUTTON + 2.0;
 /// The width of the grip before the label's text.
@@ -1020,6 +1028,8 @@ mod tests {
         harness.get_by_label("+").click();
         harness.run();
         assert_eq!(harness.state().1, Some(InsetChange::Size(3)));
+        // a click is no drag
+        assert!(harness.state().0.dropped.is_none());
         // the smallest has none smaller
         harness.state_mut().2 = 0;
         harness.run();
