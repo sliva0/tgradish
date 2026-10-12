@@ -94,6 +94,8 @@ pub enum EncodeError {
     TooManyRects { rects: usize },
     #[error("the animation needs {layers} layers, Telegram allows {MAX_LAYERS}")]
     TooManyLayers { layers: usize },
+    #[error("cancelled")]
+    Cancelled,
 }
 
 /// One colour's shape over frames `from..to` (not 60 fps ticks).
@@ -149,6 +151,8 @@ fn core_neighbours(cell: (u32, u32), mask: &Mask) -> impl Iterator<Item = (u32, 
 
 struct Painter<'a> {
     anim: &'a PixelAnim,
+    /// Asked between colours: when it says yes, encoding stops.
+    stop: &'a dyn Fn() -> bool,
     /// Cells of each colour in each frame: `cells[frame][colour]`.
     cells: Vec<Vec<Vec<u32>>>,
     lifetimes: bool,
@@ -158,7 +162,7 @@ struct Painter<'a> {
 }
 
 impl<'a> Painter<'a> {
-    fn new(anim: &'a PixelAnim, settings: &Settings) -> Painter<'a> {
+    fn new(anim: &'a PixelAnim, settings: &Settings, stop: &'a dyn Fn() -> bool) -> Painter<'a> {
         let mut cells = Vec::with_capacity(anim.frames().len());
         for frame in anim.frames() {
             let mut by_colour = vec![Vec::new(); anim.palette().len()];
@@ -169,6 +173,7 @@ impl<'a> Painter<'a> {
         }
         Painter {
             anim,
+            stop,
             cells,
             lifetimes: settings.lifetimes,
             split: settings.split,
@@ -661,6 +666,10 @@ impl<'a> Painter<'a> {
         let mut costs: Vec<Option<usize>> = vec![None; colours.len()];
         let mut top_down = Vec::with_capacity(colours.len());
         while !remaining.is_empty() {
+            // any order will do: encoding it stops at once
+            if (self.stop)() {
+                return colours.to_vec();
+            }
             for &i in &remaining {
                 if costs[i].is_none() {
                     costs[i] = Some(self.cost_of(colours[i], &later));
@@ -711,6 +720,9 @@ impl<'a> Painter<'a> {
         let mut later = vec![self.empty(); self.frames()];
         let mut pieces = Vec::new();
         for (rank, &colour) in order.iter().enumerate().rev() {
+            if (self.stop)() {
+                return Err(EncodeError::Cancelled);
+            }
             for (place, piece) in self.pieces(colour, &later, true)? {
                 pieces.push((rank * 2 + usize::from(place), colour, piece));
             }
@@ -727,13 +739,15 @@ impl<'a> Painter<'a> {
 
 /// Encodes `anim`. [`Effort::Best`] compares candidates by `score`
 /// (smaller is better), typically the compressed size of their Lottie;
-/// without one it works like [`Effort::Balanced`].
+/// without one it works like [`Effort::Balanced`]. `stop` is asked between
+/// colours; when it says yes, this ends with [`EncodeError::Cancelled`].
 pub fn painter(
     anim: &PixelAnim,
     settings: &Settings,
     score: Option<&dyn Fn(&Scene) -> usize>,
+    stop: &dyn Fn() -> bool,
 ) -> Result<Scene, EncodeError> {
-    let mut painter = Painter::new(anim, settings);
+    let mut painter = Painter::new(anim, settings, stop);
     if settings.lifetimes {
         match painter.search(settings.effort, score) {
             // a layer per frame stays within the limit for up to 180
@@ -812,6 +826,9 @@ impl Painter<'_> {
             for i in 0..order.len().saturating_sub(1) {
                 if tries >= BEST_TRIES {
                     break;
+                }
+                if (self.stop)() {
+                    return Err(EncodeError::Cancelled);
                 }
                 tries += 1;
                 order.swap(i, i + 1);
@@ -1013,7 +1030,7 @@ mod tests {
         let input = Animation::new(size, size, frames).unwrap();
         let anim =
             normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
-        let scene = painter(&anim, &Settings::default(), None).unwrap();
+        let scene = painter(&anim, &Settings::default(), None, &|| false).unwrap();
         assert_eq!(scene.compare(&anim), None);
         for layer in &scene.layers {
             let rects: usize = layer.groups.iter().map(|group| group.shapes.len()).sum();
@@ -1031,7 +1048,7 @@ mod tests {
         let input = Animation::new(width, 1, vec![frame]).unwrap();
         let anim =
             normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
-        let scene = painter(&anim, &Settings::default(), None).unwrap();
+        let scene = painter(&anim, &Settings::default(), None, &|| false).unwrap();
         assert_eq!(scene.compare(&anim), None);
         assert_eq!(scene.seams(anim.palette()), []);
     }
@@ -1055,7 +1072,7 @@ mod tests {
         let input = Animation::new(10, 8, vec![frame]).unwrap();
         let anim =
             normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
-        let painter = Painter::new(&anim, &Settings::default());
+        let painter = Painter::new(&anim, &Settings::default(), &|| false);
         let colours = painter.guessed_order();
         assert_eq!(painter.greedy(&colours, true), painter.greedy(&colours, false));
     }
@@ -1076,7 +1093,7 @@ mod tests {
         let anim =
             normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
         let groups = |settings: &Settings| {
-            let scene = painter(&anim, settings, None).unwrap();
+            let scene = painter(&anim, settings, None, &|| false).unwrap();
             assert_eq!(scene.compare(&anim), None);
             assert_eq!(scene.seams(anim.palette()), []);
             let hidden = scene.layers.iter().filter(|layer| !layer.hidden.is_empty()).count();
@@ -1143,7 +1160,7 @@ mod tests {
         let input = Animation::new(width, height, frames).unwrap();
         let anim =
             normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
-        let scene = painter(&anim, &Settings::default(), None).unwrap();
+        let scene = painter(&anim, &Settings::default(), None, &|| false).unwrap();
         assert_eq!(scene.compare(&anim), None);
         assert_eq!(scene.seams(anim.palette()), []);
         // the track lives through every frame
@@ -1178,7 +1195,7 @@ mod tests {
                 .unwrap();
         let anim = normalise(&input, &Options::default()).unwrap().0;
         assert!(matches!(
-            painter(&anim, &Settings::default(), None),
+            painter(&anim, &Settings::default(), None, &|| false),
             Err(EncodeError::TooManyRects { .. })
         ));
     }

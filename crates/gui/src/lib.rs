@@ -1188,7 +1188,11 @@ impl App {
         ui.horizontal(|ui| {
             match &item.job {
                 Some((job, ..)) if job.is_running() => {
-                    if ui.add(egui::Button::new("Stop").min_size(vec2(140.0, 32.0))).clicked() {
+                    // until the conversion gets to its next check
+                    let stopping = job.is_stopping();
+                    let text = if stopping { "Stopping…" } else { "Stop" };
+                    let stop = egui::Button::new(text).min_size(vec2(140.0, 32.0));
+                    if ui.add_enabled(!stopping, stop).clicked() {
                         job.cancel();
                     }
                     widgets::note(ui, "Converting: progress is beside the preview");

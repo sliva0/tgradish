@@ -115,7 +115,8 @@ pub fn run(dir: Option<&Path>, bench: &Bench) -> Result<()> {
                 lay_out(scene, &anim, name_tag.clone()).to_json(bench.style).as_bytes(),
             )
         };
-        let scene = painter(&anim, &bench.settings, Some(&score)).with_context(|| name.clone())?;
+        let scene = painter(&anim, &bench.settings, Some(&score), &|| false)
+            .with_context(|| name.clone())?;
         let json = lay_out(&scene, &anim, name_tag.clone()).to_json(bench.style);
         let packed = if bench.fast {
             use std::io::Write;

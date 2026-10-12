@@ -69,7 +69,7 @@ fn encodes_valid_lottie() {
     for file in corpus() {
         let (anim, _) = normalise(&input(&file), &Options::default()).unwrap();
         let fast = encode::Settings { effort: encode::Effort::Fast, ..Default::default() };
-        let scene = encode::painter(&anim, &fast, None).unwrap();
+        let scene = encode::painter(&anim, &fast, None, &|| false).unwrap();
         assert_eq!(scene.compare(&anim), None, "{}", file.name);
         let json = lay_out(&scene, &anim, Some("tgradish".into())).to_json(Style::default());
         let (stats, issues) = check(json.as_bytes(), None).unwrap();
@@ -118,7 +118,7 @@ fn painter_is_exact_without_seams() {
         let (anim, _) = normalise(&input(&file), &Options::default()).unwrap();
         for lifetimes in [true, false] {
             let settings = Settings { lifetimes, ..Settings::default() };
-            let scene = painter(&anim, &settings, None).unwrap();
+            let scene = painter(&anim, &settings, None, &|| false).unwrap();
             assert_eq!(scene.compare(&anim), None, "{} ({lifetimes})", file.name);
             let seams = scene.seams(anim.palette());
             assert!(

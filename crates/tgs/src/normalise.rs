@@ -877,7 +877,7 @@ mod tests {
             ..crate::encode::Settings::default()
         };
         // a group per colour, spread over enough layers for tlottie
-        let scene = crate::encode::painter(&anim, &fast, None).unwrap();
+        let scene = crate::encode::painter(&anim, &fast, None, &|| false).unwrap();
         assert_eq!(scene.compare(&anim), None);
         let merged = crate::reduce::Reduction::MergeColours { distance: 0.1 }.apply(&anim).unwrap();
         assert!(merged.palette().len() < 65536);
