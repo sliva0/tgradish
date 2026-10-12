@@ -27,7 +27,7 @@ pub fn print_json_error(err: &anyhow::Error, input: Option<&std::path::Path>) {
         message: format!("{err:#}"),
         input: input.map(Into::into),
     };
-    println!("{}", serde_json::to_string(&event).expect("events serialize"));
+    println!("{}", serde_json::to_string(&event).expect("events serialise"));
 }
 
 /// Settings shared by all commands.
@@ -78,7 +78,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Preset(command) => commands::preset(&ctx, command),
         Command::Config(command) => commands::config(&ctx, command, config_path),
         Command::Ffmpeg(command) => commands::ffmpeg(&ctx, command),
-        Command::Licenses => {
+        Command::Licences => {
             commands::licenses();
             Ok(())
         }

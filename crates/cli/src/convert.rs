@@ -185,7 +185,7 @@ impl<'a> Converter<'a> {
                 };
                 let outcome = if json {
                     convert(backend, &request, cancel, &mut |event| {
-                        println!("{}", serde_json::to_string(&event).expect("events serialize"));
+                        println!("{}", serde_json::to_string(&event).expect("events serialise"));
                     })
                 } else {
                     let mut printer = Printer::new(self.ctx);
@@ -219,7 +219,7 @@ impl<'a> Converter<'a> {
                 };
                 if json {
                     tgs::convert(&request, cancel, &mut |event| {
-                        println!("{}", serde_json::to_string(&event).expect("events serialize"));
+                        println!("{}", serde_json::to_string(&event).expect("events serialise"));
                     })?;
                 } else {
                     let mut printer = TgsPrinter::new(self.ctx);
@@ -242,7 +242,7 @@ impl<'a> Converter<'a> {
                 let outcome = still::convert(backend, &request, cancel)?;
                 if json {
                     let event = still::StillEvent::Finished(outcome);
-                    println!("{}", serde_json::to_string(&event).expect("events serialize"));
+                    println!("{}", serde_json::to_string(&event).expect("events serialise"));
                 } else {
                     self.print_still(&outcome);
                 }

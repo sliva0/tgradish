@@ -308,7 +308,7 @@ mod tests {
 
     /// Pretends to encode: bitrate encodes overshoot their target by 3%,
     /// constant quality encodes shrink 9% per CRF step. SSIM rewards bits per
-    /// frame and penalizes dropped frames.
+    /// frame and penalises dropped frames.
     struct FakeEncoder {
         calls: Vec<Params>,
         motion: f64,

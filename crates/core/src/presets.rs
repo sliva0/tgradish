@@ -123,7 +123,7 @@ pub struct Preset {
 }
 
 fn table(options: &impl Serialize) -> toml::Table {
-    toml::Table::try_from(options).expect("options serialize to a table")
+    toml::Table::try_from(options).expect("options serialise to a table")
 }
 
 fn builtin() -> Vec<Preset> {

@@ -89,7 +89,7 @@ pub fn show(
                 });
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("About and licenses…").clicked() {
+                if ui.button("About and licences…").clicked() {
                     prefs.about = true;
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {

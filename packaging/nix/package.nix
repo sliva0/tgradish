@@ -16,7 +16,7 @@
 let
   version = (lib.importTOML ../../Cargo.toml).workspace.package.version;
   # the window loads these with dlopen when it opens, and D-Bus for file
-  # dialogs
+  # dialogues
   windowLibraries = [
     dbus
     libGL
