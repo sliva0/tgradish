@@ -1084,7 +1084,6 @@ impl App {
                 ui.add_space((ui.available_width() - width).max(0.0) / 2.0);
                 let add = egui::Button::new(RichText::new("Add files…").strong())
                     .min_size(vec2(130.0, 34.0));
-                let add = theme::primary(ui.visuals(), add);
                 if ui.add(add).clicked() {
                     self.pick_files();
                 }
@@ -1217,12 +1216,9 @@ impl App {
                 None => {
                     let current = item.result_is_current();
                     let text = if item.made.is_some() { "Convert again" } else { "Convert" };
-                    let mut button = egui::Button::new(RichText::new(text).strong().size(15.0))
+                    let button = egui::Button::new(RichText::new(text).strong().size(15.0))
                         .min_size(vec2(140.0, 32.0))
                         .shortcut_text("Ctrl+Enter");
-                    if !current {
-                        button = theme::primary(ui.visuals(), button);
-                    }
                     let hint = if current {
                         "Makes it again with the same settings"
                     } else {
