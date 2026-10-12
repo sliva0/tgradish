@@ -318,8 +318,8 @@ fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             Format::Tgs => args.extend(["--format".into(), "tgs".into()]),
             Format::Image => args.extend(["--format".into(), "image".into()]),
         }
-        // presets only say how to encode videos and animations
-        if let Some(preset) = item.choices.preset.as_ref().filter(|_| item.format != Format::Image) {
+        // image stickers take their picture settings from the preset too
+        if let Some(preset) = &item.choices.preset {
             args.extend(["--preset".into(), preset.clone()]);
         }
         let choices = &item.choices;
@@ -404,7 +404,7 @@ fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String
             plan.scaling = Scaling::Sharp;
         }
     }
-    let params = tgradish_core::fit::first_params(&plan);
+    let params = tgradish_core::fit::first_params(&plan, plan.target.max_bytes());
     Ok(tgradish_core::ffmpeg::commands(&plan, &params)
         .iter()
         .map(|args| {
