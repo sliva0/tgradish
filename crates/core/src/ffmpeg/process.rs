@@ -1,3 +1,6 @@
+//! Running ffmpeg and ffprobe as child processes: their output read line
+//! by line as they go, and a [`CancelToken`] that kills them.
+
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};

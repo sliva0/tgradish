@@ -40,7 +40,9 @@ pub fn pack_quick(json: &[u8]) -> Vec<u8> {
 }
 
 /// About how large `json` packs: its `gzip -9` size, much quicker than
-/// [`pack`] and ranked the same way, for comparing candidates.
+/// [`pack`], and close enough to how zopfli ranks candidates to compare
+/// them by; how much smaller zopfli packs varies with the art (see
+/// [`crate::sticker`]).
 pub fn quick_size(json: &[u8]) -> usize {
     pack_quick(json).len()
 }

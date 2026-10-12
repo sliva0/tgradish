@@ -114,6 +114,8 @@ pub fn plan(
 /// Makes an image sticker or emoji from the frame at `start`.
 pub fn convert(backend: &Backend, request: &Request, cancel: &CancelToken) -> Result<Outcome> {
     let source = backend.probe(&request.input, cancel)?;
+    // where frames start, to find the one that shows at a time; without
+    // them, frames count as coming evenly, as before they were read
     let starts = match request.options.start {
         Some(_) if !source.still_image => {
             match backend.frame_starts(&request.input, &source, cancel) {

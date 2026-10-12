@@ -61,8 +61,11 @@ impl Kind {
         matches!(self, Kind::MergeFrames | Kind::DropFrames)
     }
 
-    /// The strengths tried, weakest first. `likely_scale` is the scale
-    /// snapping would use, if the art has one.
+    /// The strengths tried, weakest first, from barely visible (colours an
+    /// OKLab distance of 0.02 apart, about the least difference eyes tell)
+    /// to drastic; fitting weakens its last step to between two of them
+    /// (see [`Reduction::between`]). `likely_scale` is the scale snapping
+    /// would use, if the art has one.
     pub fn ladder(self, likely_scale: Option<u32>) -> Vec<Reduction> {
         match self {
             Kind::SnapToGrid => {
@@ -87,7 +90,10 @@ impl Kind {
 
 /// What fitting gives up first. Art that is mostly motion, such as a
 /// machine of moving parts, can lose either frames or detail: which looks
-/// better depends on the art.
+/// better depends on the art. Fitting uses only the kinds this puts first
+/// while any of their strengths are left untried, then the rest; in each
+/// round, the kind that saves the most bytes for the least added error
+/// wins.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]

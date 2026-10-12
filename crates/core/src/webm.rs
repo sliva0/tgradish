@@ -5,6 +5,14 @@
 //! elements) right next to it. ffmpeg leaves such padding after the SeekHead,
 //! so Info can grow by a few dozen bytes. If Info has to move, the SeekHead
 //! entry pointing at it is updated. Nothing after Info moves.
+//!
+//! Spoofing is such a patch: Telegram refuses video stickers longer than 3
+//! seconds by the Duration in Segment Info, while players play every frame
+//! whatever it says. So a shorter Duration gets a longer sticker through.
+//! ffmpeg also writes a DURATION tag for each track, patched to match, so
+//! tools reading those see the same; [`WebmInfo::content_duration`] keeps
+//! the truth, from the frames' own timestamps. Byte offsets in the SeekHead
+//! and the Cues are why the file's length must never change.
 
 use std::collections::HashMap;
 use std::path::Path;

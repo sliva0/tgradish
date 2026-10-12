@@ -125,12 +125,23 @@ impl Sticker {
     }
 }
 
-/// zopfli packs about this much smaller than `gzip -9`; estimates lean
-/// high.
+// Fitting works on estimates, since the real encoder and zopfli can take
+// minutes: a quick encode at Fast effort packed by `gzip -9`, scaled to
+// what the real ones make of it. The scale is ZOPFLI_SHARE until the art
+// comes within CALIBRATE_WITHIN times the target, then measured once on
+// the art as it is. Each round keeps the reduction that saves the most bytes
+// for the least added error, and the last one is weakened while it still
+// fits. Should the real result miss all the same, the target drops by
+// RETARGET and fitting goes on, while it has reductions left. A result
+// over the limit even at ZOPFLI_BEST of its gzip size is packed by gzip.
+
+/// What zopfli packs to, as a share of `gzip -9`, until it is measured on
+/// the art; most art packs a little smaller, so estimates lean high.
 const ZOPFLI_SHARE: f64 = 0.93;
-/// zopfli packs no smaller than this share of `gzip -9`: past it, a
-/// sticker can't fit however long zopfli works on it. Regular patterns
-/// come down to about 0.75.
+/// A share of `gzip -9` zopfli is taken never to come under: a result over
+/// the limit by more is packed quickly rather than at length for nothing.
+/// Regular patterns come down to about 0.75, so this is far from the edge;
+/// whether a sticker fits is still decided on the file that is packed.
 const ZOPFLI_BEST: f64 = 0.5;
 /// When the real size misses an estimate, the next target is this much
 /// lower.
@@ -287,6 +298,8 @@ pub fn make(
         // the estimate was off; aim lower and reduce some more, which only
         // helps while fitting has reductions left to make
         let retarget = || -> Result<bool> {
+            // aiming at a quarter of the limit, it is far off the mark
+            // whatever the estimates say, and stops there
             let again = options.fit == Fit::Auto && reached && target > options.max_bytes / 4;
             Ok(again && quick(&current, options, cancelled)?.is_some())
         };
@@ -338,7 +351,7 @@ pub fn make(
 
 /// `json` packed by zopfli, given up on when `cancelled` says so. zopfli
 /// can't be stopped, so with the `threads` feature it packs in a thread of
-/// its own, left to finish alone; at most [`PACKING`] of them run at once,
+/// its own, left to finish alone; at most `PACKING` of them run at once,
 /// so stopping and starting again doesn't pile them up.
 fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
     let check = || if cancelled() { Err(crate::Error::Cancelled) } else { Ok(()) };
@@ -349,6 +362,9 @@ fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::mpsc::{RecvTimeoutError, channel};
         use std::time::Duration;
+        // a stop is noticed within this, which the window can't tell apart
+        // from at once
+        const POLL: Duration = Duration::from_millis(50);
         static RUNNING: AtomicUsize = AtomicUsize::new(0);
         /// Counts a thread as running until it ends, however it ends.
         struct Running;
@@ -364,7 +380,7 @@ fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
             .is_err()
         {
             check()?;
-            std::thread::sleep(Duration::from_millis(50));
+            std::thread::sleep(POLL);
         }
         let running = Running;
         // stopped while waiting: the slot is given back
@@ -377,7 +393,7 @@ fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
         });
         loop {
             check()?;
-            match receive.recv_timeout(Duration::from_millis(50)) {
+            match receive.recv_timeout(POLL) {
                 Ok(tgs) => break tgs,
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => panic!("zopfli panicked"),
@@ -568,7 +584,9 @@ fn fit(
 
     // weakening the last step keeps the estimate within the target
     let reached = size <= target;
-    // weaken the last step as far as the result still fits
+    // weaken the last step as far as the result still fits, unless that is
+    // within a tenth of the target already: weakening takes encodes, and
+    // would win little
     if let Some((previous, k)) = before_last
         && size <= target
         && (size as f64) < target as f64 * 0.9
@@ -576,6 +594,8 @@ fn fit(
         let last = steps.last().unwrap().reduction;
         let weaker = next[k].checked_sub(2).map(|level| ladders[k][level]);
         let (mut low, mut high) = (0.0, 1.0);
+        // five halvings put the strength within a 32nd of the weakest
+        // that fits
         for _ in 0..5 {
             let share = (low + high) / 2.0;
             let Some(reduction) = last.between(weaker.as_ref(), share) else { break };

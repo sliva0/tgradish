@@ -479,9 +479,16 @@ pub fn flags(options: &impl Serialize) -> Vec<String> {
     flags
 }
 
+/// Encodes fitting may make: enough to land within a few percent of the
+/// limit for most inputs, at seconds an encode.
 pub const DEFAULT_ATTEMPTS: u32 = 8;
+/// The most it may make, against a mistyped number.
 pub const MAX_ATTEMPTS: u32 = 50;
+/// The constant quality where nothing is fitted to it: good for libvpx-vp9
+/// at sticker sizes.
 pub const DEFAULT_CRF: u8 = 32;
+/// The duration spoofing writes by default: well under Telegram's 3
+/// seconds, and odd enough that a spoofed header is easy to spot.
 pub const DEFAULT_FAKE_DURATION: f64 = 0.42069;
 /// The slowest and fastest tempos, for WebM and .tgs alike.
 pub const TEMPOS: std::ops::RangeInclusive<f64> = tgradish_tgs::normalise::TEMPOS;

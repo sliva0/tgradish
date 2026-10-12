@@ -1,3 +1,7 @@
+//! How alike a result is to its input, by ffmpeg's SSIM filter over the
+//! input as the result's frames see it: how `fit = auto` picks a frame
+//! rate.
+
 use std::ffi::OsString;
 use std::path::Path;
 use std::process::Command;
