@@ -2,7 +2,7 @@
 //! names, progress in the tab or taskbar, and pictures. Found once from the
 //! environment, since terminals can't be asked without waiting for answers.
 //!
-//! - Colours follow `--color`, then `NO_COLOR` and `CLICOLOR_FORCE`.
+//! - Colours follow `--colour`, then `NO_COLOR` and `CLICOLOR_FORCE`.
 //! - Links (OSC 8) are on in terminals known to show them; `FORCE_HYPERLINK`
 //!   set to 1 or 0 decides instead.
 //! - Progress (OSC 9;4) shows in Windows Terminal's tab and taskbar,

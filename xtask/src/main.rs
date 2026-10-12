@@ -921,7 +921,7 @@ fn package_release(args: &[String]) -> Result<()> {
         format!(
             "tgradish is MIT licensed, see LICENSE.txt.\n\n\
              It includes ffmpeg {ffmpeg} (LGPL 2.1 or later) built with zlib, libvpx and\n\
-             dav1d, linked statically. Their licenses are in licenses/. The exact\n\
+             dav1d, linked statically. Their licences are in licenses/. The exact\n\
              sources are in ffmpeg-{ffmpeg}-sources.tar, published with this release,\n\
              with how to rebuild tgradish against a modified ffmpeg.\n",
             ffmpeg = FFMPEG.version,
@@ -933,7 +933,7 @@ fn package_release(args: &[String]) -> Result<()> {
         stage.join("THIRD-PARTY.txt"),
         third_party
             + libwebp
-            + "\nThe Rust crates in it and their licenses are in THIRD-PARTY-CRATES.txt.\n",
+            + "\nThe Rust crates in it and their licences are in THIRD-PARTY-CRATES.txt.\n",
     )?;
     // the crates of every build, as the binary carries them
     std::fs::copy(

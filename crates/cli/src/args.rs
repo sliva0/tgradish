@@ -48,7 +48,14 @@ pub struct Global {
     /// Colours, links on file names, progress in the terminal's tab or
     /// taskbar and pictures of results, where the terminal shows them.
     /// NO_COLOR and CLICOLOR_FORCE are heeded with auto.
-    #[arg(long, global = true, value_enum, default_value_t = ColorChoice::Auto, value_name = "WHEN")]
+    #[arg(
+        long = "colour",
+        alias = "color",
+        global = true,
+        value_enum,
+        default_value_t = ColorChoice::Auto,
+        value_name = "WHEN"
+    )]
     pub color: ColorChoice,
 }
 
@@ -95,7 +102,8 @@ pub enum Command {
     Ffmpeg(FfmpegCommand),
     /// Print the licences of tgradish and of what it is built from, which
     /// every copy carries.
-    Licenses,
+    #[command(alias = "licenses")]
+    Licences,
     /// Open the tgradish window. It also opens when tgradish is started
     /// without arguments outside a terminal.
     #[cfg(feature = "gui")]

@@ -18,7 +18,7 @@ use crate::args::{ConfigCommand, FfmpegCommand, InspectArgs, PresetCommand, Spoo
 use crate::ui;
 
 fn print_json(value: &impl serde::Serialize) {
-    println!("{}", serde_json::to_string_pretty(value).expect("output serializes"));
+    println!("{}", serde_json::to_string_pretty(value).expect("output serialises"));
 }
 
 pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {

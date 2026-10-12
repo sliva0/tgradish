@@ -10,7 +10,7 @@ url='https://github.com/sliva0/tgradish'
 # tgradish is MIT; the ffmpeg built in is LGPL, with libvpx, dav1d and zlib
 license=(MIT LGPL-2.1-or-later BSD-3-Clause BSD-2-Clause Zlib)
 # ffmpeg, libvpx, dav1d and zlib are linked in; the window loads the
-# graphics libraries when it opens, and D-Bus for file dialogs
+# graphics libraries when it opens, and D-Bus for file dialogues
 depends=(
   dbus
   gcc-libs
@@ -25,7 +25,7 @@ depends=(
   wayland
 )
 optdepends=(
-  'xdg-desktop-portal: file dialogs in the window'
+  'xdg-desktop-portal: file dialogues in the window'
   'ffmpeg: raw ffmpeg arguments (--extra-args), which need ffmpeg as a separate program'
 )
 provides=("$_pkgname")

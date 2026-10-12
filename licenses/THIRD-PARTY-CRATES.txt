@@ -1,14 +1,15 @@
-Rust crates in tgradish and their licenses
+Rust crates in tgradish and their licences
 ==========================================
 
-MIT License: 207 crates
-Apache License 2.0: 12 crates
-Boost Software License 1.0: 2 crates
-Do What The F*ck You Want To Public License: 2 crates
-zlib License: 2 crates
-ISC License: 1 crates
-Mozilla Public License 2.0: 1 crates
-Unicode License v3: 1 crates
+How many crates each licence covers:
+  MIT License: 207
+  Apache License 2.0: 12
+  Boost Software License 1.0: 2
+  Do What The F*ck You Want To Public License: 2
+  zlib License: 2
+  ISC License: 1
+  Mozilla Public License 2.0: 1
+  Unicode License v3: 1
 
 --------------------------------------------------------------------------------
 Apache License 2.0, used by:
