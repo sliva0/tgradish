@@ -42,3 +42,4 @@ workspace = true
 [dev-dependencies]
 egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
 egui-wgpu = "0.36.2"
+tgradish-corpus.workspace = true
