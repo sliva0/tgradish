@@ -192,8 +192,6 @@ pub struct ExactScale {
 }
 
 impl ExactScale {
-    pub const ONE: ExactScale = ExactScale { up: 1, down: 1 };
-
     /// The largest scale either way: a pixel to a whole sticker side.
     pub const MAX: u32 = 512;
 
@@ -208,10 +206,6 @@ impl ExactScale {
     /// The most input pixels that make at most `size` result pixels.
     pub fn most_input(self, size: u32) -> u32 {
         (size / self.up).saturating_mul(self.down)
-    }
-
-    pub fn factor(self) -> f64 {
-        f64::from(self.up) / f64::from(self.down)
     }
 }
 

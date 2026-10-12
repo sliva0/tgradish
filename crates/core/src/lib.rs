@@ -1,6 +1,12 @@
-//! Library behind the `tgradish` CLI: converts videos into Telegram video
-//! stickers and patches WebM metadata, including the duration spoofing that
-//! gets stickers past the 3 second limit.
+//! Everything tgradish's command line and window share: Telegram stickers
+//! and emoji as VP9 WebM from videos ([`convert`], fitted to the size
+//! limit by [`fit`]), as WebP pictures ([`still`]) and as `.tgs` from pixel
+//! art ([`tgs`], over the `tgradish-tgs` crate), and WebM inspection and
+//! duration spoofing ([`webm`]). ffmpeg runs through a
+//! [`backend::Backend`]: the ffmpeg programs ([`ffmpeg`]), or with the
+//! `linked` feature its libraries, used to do what those programs' command
+//! lines do. Presets, the user's config and the events front-ends follow
+//! are here too.
 
 pub mod backend;
 #[cfg(feature = "clipboard")]

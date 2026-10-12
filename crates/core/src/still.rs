@@ -1,6 +1,7 @@
 //! Image stickers and emoji: one frame of a video, or a picture, as a
-//! lossless WebP, which @Stickers takes for its static sets as it takes
-//! PNG.
+//! WebP, which @Stickers takes for its static sets as it takes PNG:
+//! lossless where that fits the size limit, otherwise lossy at the best
+//! quality that does.
 //!
 //! The picture is planned like a WebM sticker's, from the options a still
 //! picture has: target, crop, resize, scaling and exact scale, and `start`,
@@ -30,8 +31,9 @@ pub fn default_output(input: &Path, target: Target) -> PathBuf {
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum StillEvent {
     Finished(Outcome),
-    /// A conversion failed. Only printed by the CLI; the library returns
-    /// errors instead.
+    /// A conversion failed. Never sent by the library, which returns
+    /// errors: the CLI prints them as [`crate::events::Event::Error`], the
+    /// same as this, which is here so this stream's schema has it.
     Error {
         message: String,
         /// The input that failed when converting several, `None` when the
@@ -413,7 +415,7 @@ pub fn inspect_file(path: &Path) -> Result<Info> {
     })
 }
 
-/// A WebP or PNG image sticker's size, for inspecting it.
+/// A WebP's size in pixels, which tests check results by.
 pub fn dimensions(path: &Path) -> Result<(u32, u32)> {
     let bytes = std::fs::read(path)?;
     let invalid = |message: String| Error::Probe { path: path.to_path_buf(), message };

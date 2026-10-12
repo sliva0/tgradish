@@ -742,13 +742,8 @@ fn patch_in_place(buf: &mut [u8], patch: &Patch) -> Result<PatchReport> {
         0 => return Err(WebmError::InvalidTimestampScale),
         scale => scale as f64,
     };
+    // a float Duration holds any up to MAX_FAKE_DURATION, at any scale
     let duration_units = patch.duration.map(|secs| secs * 1e9 / scale);
-    if let Some(units) = duration_units
-        && units > f64::from(f32::MAX)
-    {
-        // would not fit a 4-byte Duration
-        return Err(WebmError::InvalidTimestampScale);
-    }
 
     // Info plus the padding right before and after it
     let is_void = |el: &&Element| el.id == ids::VOID;

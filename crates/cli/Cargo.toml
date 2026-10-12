@@ -1,15 +1,11 @@
 [package]
 name = "tgradish"
-description = "Converts videos into Telegram video stickers, with the ability to bypass the 3 second limit"
+description = "Telegram video, image and animated stickers and emoji from videos, pictures and pixel art, with the ability to bypass the 3 second limit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-
-[[bin]]
-name = "tgradish"
-path = "src/main.rs"
 
 [features]
 default = ["gui"]
@@ -29,7 +25,6 @@ clap.workspace = true
 console.workspace = true
 ctrlc.workspace = true
 indicatif.workspace = true
-schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shlex.workspace = true
@@ -46,5 +41,6 @@ embed-resource.workspace = true
 workspace = true
 
 [dev-dependencies]
+schemars.workspace = true
 tgradish-corpus.workspace = true
 tempfile.workspace = true

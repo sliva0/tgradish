@@ -1,6 +1,6 @@
 [package]
 name = "tgradish-core"
-description = "Library behind tgradish: Telegram video sticker conversion and WebM duration spoofing"
+description = "Library behind tgradish: Telegram video, image and pixel art sticker conversion, and WebM duration spoofing"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
