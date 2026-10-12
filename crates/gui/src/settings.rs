@@ -743,11 +743,21 @@ fn aspect_ratio(
     }
     let square =
         item.choices.crop.map_or(size.is_none_or(|(w, h)| w == h), |c| c.width == c.height);
-    if item.format == Format::Tgs && !square {
-        ui.colored_label(
-            widgets::WARN,
-            "⚠ TGS stickers are always square: other shapes get transparent margins",
-        );
+    // always a line, said again once the crop is let go of rather than as
+    // it is dragged through square
+    if item.format == Format::Tgs {
+        let id = ui.id().with(("square", item.id));
+        let square = if ui.input(|input| input.pointer.primary_down()) {
+            ui.data(|data| data.get_temp(id)).unwrap_or(square)
+        } else {
+            ui.data_mut(|data| data.insert_temp(id, square));
+            square
+        };
+        if square {
+            note(ui, "Square, as TGS stickers always are");
+        } else {
+            ui.colored_label(widgets::WARN, "⚠ Not square: TGS stickers get transparent margins");
+        }
     }
 }
 
