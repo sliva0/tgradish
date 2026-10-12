@@ -2,8 +2,8 @@
 //! animations.
 //!
 //! Pure Rust that builds for `wasm32-unknown-unknown`: no ffmpeg,
-//! processes, filesystem or `tgradish-core`. Threads will only come behind
-//! a feature.
+//! processes, filesystem or `tgradish-core`. The `threads` feature tries
+//! fitting's candidates, and packs, in threads of their own.
 
 use std::time::Duration;
 
@@ -44,9 +44,20 @@ pub enum Error {
     #[error("more than 65535 colours: this is not pixel art")]
     TooManyColours,
     #[error(transparent)]
-    Encode(#[from] encode::EncodeError),
+    Encode(encode::EncodeError),
     #[error("cancelled")]
     Cancelled,
+}
+
+impl From<encode::EncodeError> for Error {
+    /// A stopped encode is a stopped sticker, so callers check for one
+    /// [`Error::Cancelled`] whatever stopped.
+    fn from(err: encode::EncodeError) -> Error {
+        match err {
+            encode::EncodeError::Cancelled => Error::Cancelled,
+            err => Error::Encode(err),
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
