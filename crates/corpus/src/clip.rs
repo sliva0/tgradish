@@ -66,7 +66,12 @@ pub fn clip(clip: Clip, dir: &Path) -> Option<PathBuf> {
             String::from_utf8_lossy(&made.stderr)
         );
     }
-    std::fs::rename(&partial, &path).expect("the clip can be moved into place");
+    // Windows can't replace a file in use, as when another test made the
+    // clip first and is reading it: then that one is used
+    if let Err(err) = std::fs::rename(&partial, &path) {
+        let _ = std::fs::remove_file(&partial);
+        assert!(path.exists(), "the clip couldn't be moved into place: {err}");
+    }
     Some(path)
 }
 
