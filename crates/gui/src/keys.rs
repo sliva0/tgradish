@@ -234,7 +234,7 @@ mod tests {
 
     use super::*;
     use crate::jobs::Status;
-    use crate::testing::{convert, finish, harness, square, video_of};
+    use crate::testing::{convert, finish, harness, made_job, square, video_of};
 
     #[test]
     fn leaves_keys_pressed_in_dialogs_to_them() {
@@ -306,7 +306,7 @@ mod tests {
         harness.run_steps(2);
         finish(&mut harness);
         // converting keeps exactly those frames
-        let made = &harness.state().items[0].made.as_ref().unwrap().job;
+        let made = made_job(&harness.state().items[0]);
         let Status::Done(done) = &made.status else { panic!("{:?}", made.status) };
         let info = tgradish_core::webm::inspect_file(&done.output).unwrap();
         assert_eq!(info.video_frames, 5);

@@ -11,6 +11,8 @@ use tgradish_core::config::Config;
 use tgradish_core::presets::Presets;
 
 use crate::app::App;
+use crate::item::Item;
+use crate::jobs::Job;
 
 /// A 4x4 PNG with a 2x2 square of `colour` in the middle.
 pub(crate) fn square(path: &Path, colour: [u8; 4]) {
@@ -49,6 +51,15 @@ pub(crate) fn finish(harness: &mut Harness<App>) {
         std::thread::sleep(Duration::from_millis(10));
     }
     panic!("the window didn't settle");
+}
+
+/// The conversion `item` made, or a panic saying why there is none.
+pub(crate) fn made_job(item: &Item) -> &Job {
+    match (&item.made, &item.failed) {
+        (Some(made), _) => &made.job,
+        (None, Some(failed)) => panic!("converting failed: {:?}", failed.job.status),
+        (None, None) => panic!("nothing was converted"),
+    }
 }
 
 pub(crate) fn video(dir: &Path, size: &str) -> Option<PathBuf> {
