@@ -26,7 +26,7 @@ pub(crate) use args::video_filter;
 pub use locate::locate;
 pub use orientation::Orientation;
 #[cfg(feature = "linked")]
-pub(crate) use probe::pix_fmt_has_alpha;
+pub(crate) use probe::Facts;
 pub use probe::{Probe, frame_starts, probe};
 pub use process::CancelToken;
 pub(crate) use process::{Output, run};
