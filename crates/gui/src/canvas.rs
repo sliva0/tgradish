@@ -4,6 +4,7 @@
 use eframe::egui::{
     self, Color32, CursorIcon, PointerButton, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2,
 };
+use tgradish_core::config::Corner;
 use tgradish_core::options::{Crop, ExactScale};
 use tgradish_core::telegram::Target;
 
@@ -58,7 +59,28 @@ pub struct Inset {
     art: Option<(u64, bool)>,
     /// What a `.tgs` result shows of a clip, by its key.
     bounds: Option<(u64, [usize; 4])>,
+    /// The layout drawn last: the item's, what it was made of, and the
+    /// input's area and the small picture's room.
+    drawn: Option<(u64, Arrangement, (Rect, Rect))>,
+    /// A change of layout being eased in: where it started, and when.
+    motion: Option<((Rect, Rect), f64)>,
+    /// Where the small picture was let go of, to ease from there.
+    dropped: Option<Rect>,
 }
+
+/// What the layout of the input and the small picture is made of: whether
+/// the small picture shows, its size and its corner.
+pub type Arrangement = (bool, usize, Corner);
+
+/// What the small picture's controls asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InsetChange {
+    Size(usize),
+    Corner(Corner),
+}
+
+/// How long a change of layout eases in, in seconds.
+const EASING: f64 = 0.15;
 
 impl Inset {
     /// Whether the part of a clip `key` names looks like pixel art, worked
@@ -79,22 +101,66 @@ impl Inset {
         }
     }
 
+    /// The input's area and the small picture's room to draw for `item`
+    /// now: `layout`, eased in from what was drawn before when what it is
+    /// made of changed, rather than with the window's size.
+    pub fn ease(
+        &mut self,
+        ctx: &egui::Context,
+        item: u64,
+        arrangement: Arrangement,
+        layout: (Rect, Rect),
+    ) -> (Rect, Rect) {
+        let now = ctx.input(|input| input.time);
+        match self.drawn {
+            Some((seen, before, (input, room))) if seen == item && before != arrangement => {
+                self.motion = Some(((input, self.dropped.take().unwrap_or(room)), now));
+            }
+            Some((seen, ..)) if seen != item => self.motion = None,
+            _ => {}
+        }
+        let drawn = match self.motion {
+            Some((from, since)) if now - since < EASING => {
+                ctx.request_repaint();
+                // fast, then settling
+                let t = (1.0 - (1.0 - (now - since) / EASING).powi(3)) as f32;
+                (lerp(from.0, layout.0, t), lerp(from.1, layout.1, t))
+            }
+            _ => {
+                self.motion = None;
+                layout
+            }
+        };
+        self.drawn = Some((item, arrangement, drawn));
+        drawn
+    }
+
+    /// Whether the small picture is still easing out of sight.
+    pub fn leaving(&self) -> bool {
+        self.motion.is_some() && self.drawn.is_some_and(|(_, (on, ..), _)| !on)
+    }
+
     /// Shows the picture `make` makes, made again only when `key` changes,
-    /// in the bottom right corner of `area`, at most `room` large,
-    /// labelled.
+    /// as large as fits `room`, in its `corner` of it, labelled. With
+    /// `controls`, buttons on the label change its `size`, one of
+    /// [`INSET_SIZES`], and dragging it to another corner of `view` moves
+    /// it there.
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
-        ui: &egui::Ui,
-        (area, room): (Rect, Vec2),
+        ui: &mut egui::Ui,
+        (view, room): (Rect, Rect),
+        (corner, size, controls): (Corner, usize, bool),
         key: u64,
         label: &str,
         make: impl FnOnce() -> egui::ColorImage,
-    ) {
+    ) -> Option<InsetChange> {
         let ppp = ui.ctx().pixels_per_point();
+        let room_size = room.size().max(Vec2::splat(1.0));
         // the size of the image isn't known before it is made, so the
         // last one's is used to choose its filtering
         let last = self.texture.as_ref().map(|texture| texture.size_vec2());
-        let fits = |size: egui::Vec2| (room.x / size.x).min(room.y / size.y).min(1.0 / ppp);
+        let fits = |size: Vec2| (room_size.x / size.x).min(room_size.y / size.y).min(1.0 / ppp);
         let sharp = last.is_some_and(|size| fits(size) * ppp >= 1.0);
         if self.key != Some((key, sharp)) || self.texture.is_none() {
             let options =
@@ -107,32 +173,112 @@ impl Inset {
             self.key = Some((key, sharp));
         }
         let texture = self.texture.as_ref().expect("set above");
-        let size = texture.size_vec2();
-        let shown = size * fits(size);
-        let frame = Rect::from_min_size(area.right_bottom() - shown - vec2(MARGIN, MARGIN), shown);
-        let painter = ui.painter_at(area);
+        let shown = texture.size_vec2() * fits(texture.size_vec2());
+        let x = if corner.left() { room.left() } else { room.right() - shown.x };
+        let y = if corner.top() { room.top() } else { room.bottom() - shown.y };
+        let mut frame = Rect::from_min_size(pos2(x, y), shown);
+
+        // dragged towards another corner, which the pointer's quarter of
+        // the view picks
+        let mut change = None;
+        let id = ui.id().with("inset");
+        let held = controls.then(|| ui.interact(frame.expand(4.0), id, Sense::drag()));
+        if let Some(held) = &held {
+            let pointer = ui.input(|input| input.pointer.interact_pos());
+            if let (true, Some(origin), Some(pointer)) =
+                (held.dragged(), ui.input(|input| input.pointer.press_origin()), pointer)
+            {
+                ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+                frame = frame.translate(pointer - origin);
+            } else if held.hovered() {
+                ui.ctx().set_cursor_icon(CursorIcon::Grab);
+            }
+            if held.drag_stopped()
+                && let Some(pointer) = pointer
+            {
+                let to = Corner::at(pointer.x < view.center().x, pointer.y < view.center().y);
+                if to != corner {
+                    self.dropped = Some(room.translate(frame.min - pos2(x, y)));
+                    change = Some(InsetChange::Corner(to));
+                }
+            }
+        }
+
+        let painter = ui.painter_at(view);
         let (back, text) = if ui.visuals().dark_mode {
             (Color32::from_black_alpha(200), Color32::WHITE)
         } else {
             (Color32::from_white_alpha(230), Color32::from_gray(20))
         };
         let edge = ui.visuals().widgets.noninteractive.bg_stroke;
+        if held.as_ref().is_some_and(|held| held.dragged()) {
+            // the corners it can go to
+            let stroke = Stroke::new(1.0, edge.color.gamma_multiply(0.8));
+            for corner in
+                [Corner::TopLeft, Corner::TopRight, Corner::BottomLeft, Corner::BottomRight]
+            {
+                let x = if corner.left() { view.left() + MARGIN } else { view.right() - MARGIN };
+                let y = if corner.top() { view.top() + MARGIN } else { view.bottom() - MARGIN };
+                let at = pos2(if corner.left() { x } else { x - shown.x }, {
+                    if corner.top() { y } else { y - shown.y }
+                });
+                let target = Rect::from_min_size(at, shown).expand(4.0);
+                painter.rect_stroke(target, 4.0, stroke, egui::StrokeKind::Outside);
+            }
+        }
         painter.rect(frame.expand(4.0), 4.0, back, edge, egui::StrokeKind::Outside);
         widgets::checkerboard(&painter, frame, 6.0);
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
         painter.image(texture.id(), frame, uv, Color32::WHITE);
+        if !controls {
+            return change;
+        }
+
+        // the label, and the buttons that change the size after it
         let galley = painter.layout_no_wrap(label.into(), INSET_LABEL, text);
+        let boxed = label_box(galley.size());
         // over the picture's left edge, or further left where it would stick out
-        let left = frame.left().min(area.right() - MARGIN - galley.size().x).max(area.left());
-        let at = pos2(left, frame.top() - galley.size().y - 8.0);
-        let behind = Rect::from_min_size(at, galley.size()).expand(3.0);
+        let left = frame.left().min(view.right() - MARGIN - boxed.x).max(view.left() + 3.0);
+        let at = pos2(left, frame.top() - boxed.y - 8.0);
+        let behind = Rect::from_min_size(at, boxed).expand(3.0);
         painter.rect(behind, 3.0, back, edge, egui::StrokeKind::Outside);
-        painter.galley(at, galley, text);
+        painter.galley(pos2(at.x, at.y + (boxed.y - galley.size().y) / 2.0), galley, text);
+        let buttons = Rect::from_min_max(
+            pos2(at.x + boxed.x - SIZE_BUTTONS, at.y),
+            pos2(at.x + boxed.x, at.y + boxed.y),
+        );
+        let mut row = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(buttons)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        row.spacing_mut().item_spacing.x = 2.0;
+        row.spacing_mut().button_padding = vec2(0.0, 0.0);
+        let button = |text| egui::Button::new(text).min_size(vec2(SIZE_BUTTON, SIZE_BUTTON));
+        let last = INSET_SIZES.len() - 1;
+        if row.add_enabled(size > 0, button("−")).on_hover_text("Smaller").clicked() {
+            change = Some(InsetChange::Size(size - 1));
+        }
+        if row.add_enabled(size < last, button("+")).on_hover_text("Larger").clicked() {
+            change = Some(InsetChange::Size(size + 1));
+        }
+        change
     }
+}
+
+/// `from` moved `t` of the way to `to`.
+fn lerp(from: Rect, to: Rect, t: f32) -> Rect {
+    Rect::from_min_max(from.min.lerp(to.min, t), from.max.lerp(to.max, t))
 }
 
 /// The font of the label over the result's small picture.
 pub const INSET_LABEL: egui::FontId = egui::FontId::proportional(12.0);
+/// The sizes of the small picture, as shares of the view's shorter side.
+pub const INSET_SIZES: [f32; 5] = [0.20, 0.27, 0.34, 0.42, 0.50];
+/// The side of a button that changes its size.
+const SIZE_BUTTON: f32 = 20.0;
+/// The width the two of them take after the label's text.
+const SIZE_BUTTONS: f32 = 2.0 * SIZE_BUTTON + 2.0;
 /// Height the label takes over the small picture, besides its text.
 const LABEL_GAP: f32 = 12.0;
 /// The frame around the small picture, beyond it.
@@ -143,66 +289,95 @@ const SMALLEST_INSET: f32 = 64.0;
 /// The least share of its size the input keeps to make room for it.
 const LEAST_SHARE: f32 = 0.75;
 
-/// Where the input and the result's small picture go in `view` so the small
-/// picture covers none of the input: in a strip along the side where the
-/// input shrinks least to make room, as large as fits there and at most a
-/// share of the view. The input shrinks by up to a quarter to give it
-/// [`SMALLEST_INSET`]; where even that is too little, and when zoomed in,
-/// the small picture goes over the input's corner. `input` is the input's
-/// size in pixels, `label` the size of the small picture's longest label.
+/// The size of the label over the small picture, for `text` of that size
+/// and the buttons after it.
+pub fn label_box(text: Vec2) -> Vec2 {
+    vec2(text.x + 6.0 + SIZE_BUTTONS, text.y.max(SIZE_BUTTON))
+}
+
+/// Where the input and the result's small picture go in `view`. The small
+/// picture is `share` of the view's shorter side, one of [`INSET_SIZES`],
+/// in `corner`. The input gives up a strip along a side of that corner for
+/// it, the side where the input shrinks least, by up to a quarter of its
+/// size; a larger small picture goes over the input's corner from there,
+/// as it does where the input can't give it [`SMALLEST_INSET`]. Zoomed in,
+/// the input grows from where it fits over the strip too. `input` is the
+/// input's size in pixels, `label` the size of the small picture's longest
+/// label box.
 ///
 /// The room is a square, whatever shape the result has, so changing the
-/// crop never moves the input it is changed on. Returns the input's area,
-/// and the small picture's area and room for [`Inset::show`].
-pub fn split(view: Rect, input: (u32, u32), label: Vec2, zoomed: bool) -> (Rect, (Rect, Vec2)) {
-    let most = vec2((view.width() * 0.34).max(110.0), (view.height() * 0.42).max(110.0));
-    let over = (view, (view, most));
+/// crop never moves the input it is changed on. Returns the input's area
+/// and the small picture's room.
+pub fn split(
+    view: Rect,
+    input: (u32, u32),
+    label: Vec2,
+    share: f32,
+    corner: Corner,
+) -> (Rect, Rect) {
+    let label_height = label.y + LABEL_GAP;
+    let largest =
+        (view.width() - 2.0 * MARGIN - FRAME).min(view.height() - 2.0 * MARGIN - label_height);
+    let side = (view.size().min_elem() * share).max(SMALLEST_INSET).min(largest).max(0.0);
+    let x = if corner.left() { view.left() + MARGIN } else { view.right() - MARGIN - side };
+    let y = if corner.top() {
+        view.top() + MARGIN + label_height
+    } else {
+        view.bottom() - MARGIN - side
+    };
+    let room = Rect::from_min_size(pos2(x, y), Vec2::splat(side));
+
     let input = vec2(input.0.max(1) as f32, input.1.max(1) as f32);
-    let inset_in = |room: Vec2| Vec2::splat(room.min(most).max(Vec2::ZERO).min_elem());
     let fit =
         ((view.width() - 2.0 * MARGIN) / input.x).min((view.height() - 2.0 * MARGIN) / input.y);
-    if zoomed || fit <= 0.0 {
-        return over;
+    if fit <= 0.0 {
+        return (view, room);
     }
     let shown = input * fit;
-    let label_height = label.y + LABEL_GAP;
-    let smallest = inset_in(Vec2::splat(SMALLEST_INSET));
-    let strip = vec2(smallest.x.max(label.x) + FRAME, smallest.y + label_height);
-    // the share of its size the input keeps beside a strip for the
-    // smallest, or above it
-    let share_right = ((view.width() - 3.0 * MARGIN - strip.x) / shown.x).min(1.0);
-    let share_below = ((view.height() - 3.0 * MARGIN - strip.y) / shown.y).min(1.0);
-    let right =
-        (share_right >= LEAST_SHARE && view.height() - 2.0 * MARGIN >= strip.y).then(|| {
-            let beside = view.width() - shown.x * share_right - 3.0 * MARGIN;
-            inset_in(vec2(beside, view.height() - 2.0 * MARGIN - label_height))
-        });
-    let below = (share_below >= LEAST_SHARE && view.width() - 2.0 * MARGIN >= strip.x).then(|| {
-        let under = view.height() - shown.y * share_below - 3.0 * MARGIN - label_height;
-        inset_in(vec2(view.width() - 2.0 * MARGIN, under))
-    });
-    let on_right = match (right, below) {
-        (Some(right), Some(below)) if share_right == share_below => {
-            right.x * right.y >= below.x * below.y
-        }
-        (Some(_), Some(_)) => share_right > share_below,
-        (right, _) => right.is_some(),
+    let smallest = SMALLEST_INSET.min(side);
+    // the share of its size the input keeps beside a strip along its
+    // length `view`, where it is `shown` long, and what the strip takes;
+    // `need` is how long the strip is for a small picture of a size
+    let strip = |view: f32, shown: f32, need: &dyn Fn(f32) -> f32, across: bool| {
+        let share_for = |side: f32| ((view - 3.0 * MARGIN - need(side)) / shown).min(1.0);
+        (across && share_for(smallest) >= LEAST_SHARE).then(|| {
+            let share = share_for(side).max(LEAST_SHARE);
+            (share, (view - shown * share - 2.0 * MARGIN).min(need(side) + MARGIN))
+        })
     };
-    match (on_right, right, below) {
-        (true, Some(inset), _) => {
-            let strip = inset.x.max(label.x) + FRAME + MARGIN;
-            let input = Rect::from_min_size(view.min, vec2(view.width() - strip, view.height()));
-            let area = Rect::from_min_max(pos2(input.right(), view.top()), view.max);
-            (input, (area, inset))
+    let beside = strip(
+        view.width(),
+        shown.x,
+        &|side| side.max(label.x) + FRAME,
+        view.height() - 2.0 * MARGIN >= smallest + label_height,
+    );
+    let across = strip(
+        view.height(),
+        shown.y,
+        &|side| side + label_height + FRAME,
+        view.width() - 2.0 * MARGIN >= smallest.max(label.x) + FRAME,
+    );
+    let input = match (beside, across) {
+        (Some((by_side, taken)), Some((by_end, _))) if by_side >= by_end => (true, taken),
+        (_, Some((_, taken))) => (false, taken),
+        (Some((_, taken)), None) => (true, taken),
+        (None, None) => return (view, room),
+    };
+    let input = match (input, corner.left(), corner.top()) {
+        ((true, taken), true, _) => {
+            Rect::from_min_max(pos2(view.left() + taken, view.top()), view.max)
         }
-        (false, _, Some(inset)) => {
-            let strip = inset.y + label_height + FRAME + MARGIN;
-            let input = Rect::from_min_size(view.min, vec2(view.width(), view.height() - strip));
-            let area = Rect::from_min_max(pos2(view.left(), input.bottom()), view.max);
-            (input, (area, inset))
+        ((true, taken), false, _) => {
+            Rect::from_min_size(view.min, vec2(view.width() - taken, view.height()))
         }
-        _ => over,
-    }
+        ((false, taken), _, true) => {
+            Rect::from_min_max(pos2(view.left(), view.top() + taken), view.max)
+        }
+        ((false, taken), _, false) => {
+            Rect::from_min_size(view.min, vec2(view.width(), view.height() - taken))
+        }
+    };
+    (input, room)
 }
 
 /// A frame to show, and the size of what it shows in input pixels: the
@@ -337,11 +512,13 @@ fn layout(rect: Rect, size: (u32, u32), zoom: &Zoom) -> (Rect, f32) {
 const SHARP_FROM: f32 = 2.0;
 
 /// Shows `picture` in `rect`, with `cropping` over it if given. True when
-/// the crop changed.
+/// the crop changed. The picture fits `fit_in`, a part of `rect`, and
+/// zooms from there, over the rest of `rect`: nothing moves when zooming
+/// starts or ends.
 pub fn show(
     ui: &mut egui::Ui,
     screen: &mut Screen,
-    rect: Rect,
+    (rect, fit_in): (Rect, Rect),
     picture: &Picture,
     zoom: &mut Zoom,
     cropping: Option<Cropping>,
@@ -354,8 +531,8 @@ pub fn show(
 
     let side = picture.size.0.max(picture.size.1);
     let canvas = if picture.square { (side, side) } else { picture.size };
-    zoom_and_pan(ui, &response, rect, canvas, zoom);
-    let (whole, scale) = layout(rect, canvas, zoom);
+    zoom_and_pan(ui, &response, fit_in, canvas, zoom);
+    let (whole, scale) = layout(fit_in, canvas, zoom);
     widgets::checkerboard(&painter, whole, 8.0);
     let shown = Rect::from_center_size(
         whole.center(),
@@ -709,6 +886,91 @@ mod tests {
     use super::*;
 
     const SIZE: (u32, u32) = (200, 100);
+
+    #[test]
+    fn makes_room_for_the_small_picture_in_its_corner() {
+        let label = vec2(100.0, 30.0);
+        // a square input in a wide view: a strip on the side of the corner
+        let wide = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 400.0));
+        let (input, room) = split(wide, (100, 100), label, INSET_SIZES[2], Corner::BottomRight);
+        assert_eq!((room.right(), room.bottom(), room.width()), (786.0, 386.0, 136.0));
+        assert!(input.left() == 0.0 && input.right() <= room.left(), "{input:?} {room:?}");
+        let (input, room) = split(wide, (100, 100), label, INSET_SIZES[2], Corner::TopLeft);
+        assert_eq!(room.min, pos2(MARGIN, MARGIN + label.y + LABEL_GAP));
+        assert!(input.right() == 800.0 && input.left() >= room.right(), "{input:?} {room:?}");
+
+        // where there is little room, the input keeps three quarters of its
+        // size, and a larger picture goes over it
+        let tight = Rect::from_min_size(pos2(0.0, 0.0), vec2(510.0, 400.0));
+        let shown = (510.0 - 2.0 * MARGIN) / 400.0 * 400.0;
+        for (size, &share) in INSET_SIZES.iter().enumerate() {
+            let (input, room) = split(tight, (400, 300), label, share, Corner::BottomRight);
+            assert!(input.width() - 2.0 * MARGIN >= shown * LEAST_SHARE - 0.01, "{input:?}");
+            if size == 0 || size == 4 {
+                assert_eq!(input.right() > room.left(), size == 4, "{size}: {input:?} {room:?}");
+            }
+        }
+        // with no room at all, it goes over the input's corner
+        let small = Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 150.0));
+        let (input, room) = split(small, (400, 300), label, INSET_SIZES[0], Corner::BottomLeft);
+        assert_eq!((input, room.left()), (small, MARGIN));
+    }
+
+    #[test]
+    fn changes_the_small_picture_by_its_buttons() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        type State = (Inset, Option<InsetChange>, usize);
+        let show = |ui: &mut egui::Ui, (inset, change, size): &mut State| {
+            let view = ui.max_rect();
+            let room = Rect::from_min_size(view.max - vec2(100.0, 100.0), vec2(80.0, 80.0));
+            let place = (Corner::BottomRight, *size, true);
+            let red = || egui::ColorImage::filled([8, 8], Color32::RED);
+            *change = inset.show(ui, (view, room), place, 1, "Result", red).or(*change);
+        };
+        let mut harness = egui_kittest::Harness::new_ui_state(show, (Inset::default(), None, 2));
+        harness.get_by_label("+").click();
+        harness.run();
+        assert_eq!(harness.state().1, Some(InsetChange::Size(3)));
+        // the smallest has none smaller
+        harness.state_mut().2 = 0;
+        harness.run();
+        let disabled = |label| harness.get_by_label(label).accesskit_node().is_disabled();
+        assert!(disabled("−") && !disabled("+"));
+        // dragged to the top left, it goes there
+        let picture = harness.get_by_label("+").rect().center() + vec2(0.0, 30.0);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        harness.event(egui::Event::PointerMoved(picture));
+        harness.event(button(picture, true));
+        harness.run();
+        for to in [picture - vec2(40.0, 40.0), pos2(20.0, 20.0)] {
+            harness.event(egui::Event::PointerMoved(to));
+            harness.run();
+        }
+        harness.event(button(pos2(20.0, 20.0), false));
+        harness.run();
+        assert_eq!(harness.state().1, Some(InsetChange::Corner(Corner::TopLeft)));
+    }
+
+    #[test]
+    fn eases_only_changes_of_what_the_layout_is_made_of() {
+        let ctx = egui::Context::default();
+        let mut inset = Inset::default();
+        let rect = |x: f32| Rect::from_min_size(pos2(x, 0.0), vec2(10.0, 10.0));
+        let (before, after) = ((rect(0.0), rect(1.0)), (rect(2.0), rect(3.0)));
+        let at = (true, 2, Corner::BottomRight);
+        assert_eq!(inset.ease(&ctx, 1, at, before), before);
+        // the window's size changing follows it at once
+        assert_eq!(inset.ease(&ctx, 1, at, after), after);
+        // a size changing starts from what was drawn
+        assert_eq!(inset.ease(&ctx, 1, (true, 3, Corner::BottomRight), before), after);
+        // another item is drawn as it is
+        assert_eq!(inset.ease(&ctx, 2, at, before), before);
+    }
 
     #[test]
     fn keeps_crops_within_the_picture() {
