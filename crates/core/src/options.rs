@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::telegram::Target;
 
 /// How the video is scaled into the target box.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum Resize {
     /// Keep the aspect ratio, touch the box with the longer side. Default
@@ -368,7 +368,7 @@ pub struct Options {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spoof: Option<Spoof>,
     /// Duration written into the header when spoofing, in seconds. Default:
-    /// 0.42069.
+    /// a short one Telegram accepts.
     #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 3))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fake_duration: Option<f64>,

@@ -190,8 +190,9 @@ pub struct OptionArgs {
     /// the top left, for example 640x360+100+50. [default: all of it]
     #[arg(long, value_name = "WxH+X+Y", help_heading = "Output")]
     pub crop: Option<Crop>,
-    /// How to scale into the target size. [default: contain for stickers,
-    /// pad for emoji]
+    /// How to scale into the target size [default: contain for stickers,
+    /// pad for emoji]; .tgs stickers are square: pad, crop to whole art
+    /// pixels, or stretch them [default: pad].
     #[arg(long, value_enum, help_heading = "Output")]
     pub resize: Option<ResizeArg>,
     /// How pixels are scaled: smooth, sharp blocks for pixel art, or
@@ -268,7 +269,8 @@ pub struct OptionArgs {
     /// [default: auto, only when needed]
     #[arg(long, value_enum, help_heading = "Metadata")]
     pub spoof: Option<SpoofArg>,
-    /// Duration written into the header when spoofing. [default: 0.42069]
+    /// Duration written into the header when spoofing. [default: a short
+    /// one Telegram accepts]
     #[arg(long, value_name = "SECONDS", help_heading = "Metadata")]
     pub fake_duration: Option<f64>,
     /// Title stored in the file.
@@ -357,7 +359,6 @@ impl OptionArgs {
                 given(self.sheet_frames.is_some(), "--sheet-frames"),
             ],
             Format::Tgs => vec![
-                given(self.resize.is_some(), "--resize"),
                 given(self.scaling.is_some(), "--scaling"),
                 given(self.exact_scale.is_some(), "--exact-scale"),
                 given(self.fit.is_some(), "--fit"),
@@ -386,6 +387,7 @@ impl OptionArgs {
                 .then(|| self.reductions.iter().map(|&kind| kind.into()).collect()),
             compromise: self.compromise.map(Into::into),
             crop: self.crop,
+            resize: self.resize.map(Into::into),
             keep_canvas: self.keep_canvas,
             pixel_scale: self.pixel_scale,
             tag: self.tag.clone(),
@@ -497,7 +499,8 @@ pub struct SpoofArgs {
     /// Replace an existing output file.
     #[arg(short = 'y', long)]
     pub overwrite: bool,
-    /// Duration to write into the header. [default: 0.42069]
+    /// Duration to write into the header. [default: a short one Telegram
+    /// accepts]
     #[arg(short, long, value_name = "SECONDS", default_value_t = options::DEFAULT_FAKE_DURATION,
           hide_default_value = true)]
     pub duration: f64,
@@ -684,6 +687,7 @@ mod tests {
             reductions: Some(vec![tgs::Kind::MergeColours, tgs::Kind::DropFrames]),
             compromise: Some(tgs::Compromise::Detail),
             crop: Some(Crop { x: 0, y: 0, width: 8, height: 8 }),
+            resize: Some(options::Resize::Stretch),
             keep_canvas: Some(true),
             pixel_scale: Some(2),
             tag: Some("run".into()),

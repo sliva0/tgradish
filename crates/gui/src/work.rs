@@ -588,15 +588,21 @@ mod tests {
         let item = &harness.state().items[0];
         assert_eq!((item.kind, item.format), (Kind::Aseprite, Format::Tgs));
         let (tags, layers) = item.aseprite().expect("read");
+        let tags: Vec<_> = tags.iter().map(|tag| tag.name.clone()).collect();
         let layers: Vec<_> = layers.iter().map(|l| (l.name.as_str(), l.visible)).collect();
         assert_eq!(
-            (tags, layers.as_slice()),
-            (&["idle".to_owned()][..], &[("sketch", false), ("art", true)][..])
+            (tags, layers),
+            (vec!["idle".to_owned()], vec![("sketch", false), ("art", true)])
         );
         // the idle tag's two frames, its sketch shown
         let choices = &mut harness.state_mut().items[0].choices;
         choices.tag = Some("idle".into());
         choices.show_layers = Some(vec!["sketch".into()]);
+        // read again, the section stays where it was meanwhile: the read
+        // starts in this frame and is taken in only in the next
+        harness.step();
+        assert!(harness.state().items[0].input_reading());
+        assert!(harness.query_by_label("Aseprite file").is_some());
         finish(&mut harness);
         assert_eq!(harness.state().items[0].input_clip().unwrap().frames.len(), 2);
         // drawn the same for ffmpeg, as a video and as a picture

@@ -112,12 +112,12 @@ pub fn run(dir: Option<&Path>, bench: &Bench) -> Result<()> {
         let name_tag = Some("tgradish".to_owned());
         let score = |scene: &tgradish_tgs::scene::Scene| {
             file::quick_size(
-                lay_out(scene, &anim, name_tag.clone()).to_json(bench.style).as_bytes(),
+                lay_out(scene, &anim, name_tag.clone(), false).to_json(bench.style).as_bytes(),
             )
         };
         let scene = painter(&anim, &bench.settings, Some(&score), &|| false)
             .with_context(|| name.clone())?;
-        let json = lay_out(&scene, &anim, name_tag.clone()).to_json(bench.style);
+        let json = lay_out(&scene, &anim, name_tag.clone(), false).to_json(bench.style);
         let packed = if bench.fast {
             use std::io::Write;
             let mut encoder =

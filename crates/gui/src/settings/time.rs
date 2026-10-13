@@ -3,7 +3,7 @@
 //! made from a video has only the frame it is made of.
 
 use eframe::egui;
-use tgradish_core::options::{DEFAULT_FAKE_DURATION, Spoof, TEMPOS};
+use tgradish_core::options::{Spoof, TEMPOS};
 use tgradish_core::presets::Format;
 use tgradish_core::telegram;
 use tgradish_core::tgs;
@@ -54,13 +54,25 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         let hint = "How many times as fast as the input the result plays";
         row(ui, "Speed", hint, Ok(()), |ui| {
             ui.horizontal(|ui| {
+                // a .tgs plays a longer part fast enough to fit 3 s
+                let fitted = used.is_some_and(telegram::too_long);
                 let (value, automatic) = match (item.format, preset_tempo) {
-                    (Format::Webm | Format::Image, _) => (
-                        &mut item.choices.webm.tempo,
-                        if preset_tempo.is_some() { "Preset's" } else { "As the input" },
+                    (Format::Tgs, Some(_)) => {
+                        (&mut item.choices.tgs.tempo, ("Preset's", "The speed the preset sets"))
+                    }
+                    (Format::Webm | Format::Image, Some(_)) => {
+                        (&mut item.choices.webm.tempo, ("Preset's", "The speed the preset sets"))
+                    }
+                    (Format::Webm | Format::Image, None) => {
+                        (&mut item.choices.webm.tempo, ("Input's", "As fast as the input plays"))
+                    }
+                    (Format::Tgs, None) if fitted => (
+                        &mut item.choices.tgs.tempo,
+                        ("Fits 3 s", "As fast as fits the used part into 3 seconds"),
                     ),
-                    (Format::Tgs, Some(_)) => (&mut item.choices.tgs.tempo, "Preset's"),
-                    (Format::Tgs, None) => (&mut item.choices.tgs.tempo, "Fit into 3 s"),
+                    (Format::Tgs, None) => {
+                        (&mut item.choices.tgs.tempo, ("Input's", "As fast as the input plays"))
+                    }
                 };
                 auto_number(ui, value, automatic, Some(tempo), 1.0, |value| {
                     value.range(TEMPOS).speed(0.01).max_decimals(2).prefix("×")
@@ -112,7 +124,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                     auto_number(
                         ui,
                         &mut options.fps,
-                        "Default",
+                        ("Default", "Ten frames a second"),
                         default,
                         tgs::DEFAULT_FPS,
                         |value| value.range(0.1..=60.0).speed(0.1).max_decimals(2).suffix(" fps"),
@@ -124,7 +136,8 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 let highest = most.unwrap_or(telegram::MAX_FPS);
                 row(ui, "Frame rate", hint, Ok(()), |ui| {
                     let most = highest.min(30.0);
-                    auto_number(ui, &mut options.fps, "Input's", chosen, most, |value| {
+                    let automatic = ("Input's", "The input's rate at the speed, at most 60 fps");
+                    auto_number(ui, &mut options.fps, automatic, chosen, most, |value| {
                         value.range(1.0..=highest).speed(0.1).max_decimals(2).suffix(" fps")
                     });
                 });
@@ -138,31 +151,26 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                     && spoof == Spoof::Auto
                     && telegram::too_long(played)
                 {
-                    ui.colored_label(
-                        widgets::WARN,
-                        format!(
-                            "⚠ The result plays {}, so its duration will be spoofed",
-                            widgets::seconds(played)
-                        ),
-                    );
+                    let played = widgets::seconds(played);
+                    note(ui, format!("Plays all {played}: Telegram is told it is shorter"));
                 }
             });
             let honest = options.spoof == Some(Spoof::Never);
             let allowed = if honest { Err("Nothing is spoofed when cut at 3 s") } else { Ok(()) };
             let hint = "The duration written into the file, which Telegram reads";
             row(ui, "Spoof to", hint, allowed, |ui| {
-                let default = DEFAULT_FAKE_DURATION;
+                // the default isn't shown: it is the tool's to choose
                 auto_number(
                     ui,
                     &mut options.fake_duration,
-                    "Default",
-                    Some(default),
-                    1.0,
+                    ("Default", "A short duration Telegram accepts"),
+                    None,
+                    telegram::MAX_SECONDS,
                     |value| {
                         value
                             .range(0.01..=telegram::MAX_SECONDS)
                             .speed(0.01)
-                            .max_decimals(5)
+                            .max_decimals(2)
                             .suffix(" s")
                     },
                 );
@@ -175,7 +183,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 auto_number(
                     ui,
                     &mut item.choices.tgs.fps,
-                    "Default",
+                    ("Default", "Ten frames a second"),
                     default,
                     tgs::DEFAULT_FPS,
                     |value| value.range(0.1..=60.0).speed(0.1).max_decimals(2).suffix(" fps"),
@@ -223,16 +231,16 @@ mod tests {
         let mut harness = harness(config);
         harness.state_mut().add(vec![video]);
         finish(&mut harness);
-        harness.get_by_label_contains("will be spoofed");
+        harness.get_by_label_contains("Telegram is told it is shorter");
         harness.get_by_label("Spoof to");
         // cut to 3 seconds, or not spoofed at all: no warning
         harness.state_mut().items[0].choices.length = Some(3.0);
         harness.run_steps(2);
-        assert!(harness.query_by_label_contains("will be spoofed").is_none());
+        assert!(harness.query_by_label_contains("Telegram is told it is shorter").is_none());
         harness.state_mut().items[0].choices.length = None;
         harness.state_mut().items[0].choices.webm.spoof =
             Some(tgradish_core::options::Spoof::Never);
         harness.run_steps(2);
-        assert!(harness.query_by_label_contains("will be spoofed").is_none());
+        assert!(harness.query_by_label_contains("Telegram is told it is shorter").is_none());
     }
 }

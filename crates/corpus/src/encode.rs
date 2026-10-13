@@ -94,11 +94,34 @@ pub fn webp(sprite: &Sprite) -> Vec<u8> {
     out
 }
 
+/// The colour of an Aseprite file's tags: Aseprite's green.
+pub const TAG_COLOUR: Colour = [0x6a, 0xbe, 0x30, 255];
+
+/// A layer of an Aseprite file besides the art's: a group, or an image
+/// layer, empty but for one named "sketch".
+#[derive(Debug, Clone, Copy)]
+pub struct Layer<'a> {
+    pub name: &'a str,
+    pub group: bool,
+    /// How deep in groups it is; a group's layers follow it.
+    pub level: u16,
+    pub visible: bool,
+}
+
 /// An Aseprite file in indexed colour, index 0 clear, with a layer of the
 /// art, a cel per frame, and over it a hidden layer named "sketch", as
 /// artists leave them, of a 2x2 block at the top left in the first frame;
-/// and `tags` as `(name, first, last)` frames.
+/// and `tags` as `(name, first, last)` frames, each [`TAG_COLOUR`].
 pub fn aseprite(sprite: &Sprite, tags: &[(&str, u16, u16)]) -> Vec<u8> {
+    let sketch = Layer { name: "sketch", group: false, level: 0, visible: false };
+    aseprite_with(sprite, tags, &[sketch])
+}
+
+/// [`aseprite`] with `layers` over the art's, bottom first, instead of
+/// only the sketch.
+pub fn aseprite_with(sprite: &Sprite, tags: &[(&str, u16, u16)], layers: &[Layer]) -> Vec<u8> {
+    // the cel of the sketch, if there is one: after the art's layer
+    let sketch = layers.iter().position(|layer| layer.name == "sketch").map(|at| at as u8 + 1);
     let (width, height) = sprite.size();
     let mut palette: Vec<Colour> = vec![CLEAR];
     for colour in sprite.frames.iter().flat_map(Canvas::colours) {
@@ -141,14 +164,17 @@ pub fn aseprite(sprite: &Sprite, tags: &[(&str, u16, u16)]) -> Vec<u8> {
             data.extend([255, 0, 0, 0]);
             data.extend(string("art"));
             chunks.push(chunk(0x2004, &data));
-            // and a hidden one over it
-            let mut data = Vec::new();
-            for word in [0u16, 0, 0, 0, 0, 0] {
-                data.extend(word.to_le_bytes());
+            // and the others over it
+            for layer in layers {
+                let mut data = Vec::new();
+                let (flags, kind) = (u16::from(layer.visible), u16::from(layer.group));
+                for word in [flags, kind, layer.level, 0, 0, 0] {
+                    data.extend(word.to_le_bytes());
+                }
+                data.extend([255, 0, 0, 0]);
+                data.extend(string(layer.name));
+                chunks.push(chunk(0x2004, &data));
             }
-            data.extend([255, 0, 0, 0]);
-            data.extend(string("sketch"));
-            chunks.push(chunk(0x2004, &data));
             if !tags.is_empty() {
                 let mut data = (tags.len() as u16).to_le_bytes().to_vec();
                 data.extend([0; 8]);
@@ -161,6 +187,13 @@ pub fn aseprite(sprite: &Sprite, tags: &[(&str, u16, u16)]) -> Vec<u8> {
                     data.extend(string(name));
                 }
                 chunks.push(chunk(0x2018, &data));
+                // each tag's colour in user data after them, as Aseprite
+                // 1.3 keeps it
+                for _ in tags {
+                    let mut data = 2u32.to_le_bytes().to_vec();
+                    data.extend(TAG_COLOUR);
+                    chunks.push(chunk(0x2020, &data));
+                }
             }
         }
         // the frame's pixels as palette indices, compressed
@@ -183,9 +216,9 @@ pub fn aseprite(sprite: &Sprite, tags: &[(&str, u16, u16)]) -> Vec<u8> {
         data.extend((height as u16).to_le_bytes());
         data.extend(zlib.finish().unwrap());
         chunks.push(chunk(0x2005, &data));
-        if index == 0 {
-            // layer 1 at 0, 0, opaque, raw: 2x2 of the art's first colour
-            let mut data = vec![1, 0, 0, 0, 0, 0, 255, 0, 0];
+        if let Some(layer) = sketch.filter(|_| index == 0) {
+            // the sketch's at 0, 0, opaque, raw: 2x2 of the art's first colour
+            let mut data = vec![layer, 0, 0, 0, 0, 0, 255, 0, 0];
             data.extend([0; 7]);
             data.extend(2u16.to_le_bytes());
             data.extend(2u16.to_le_bytes());

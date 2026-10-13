@@ -5,7 +5,7 @@
 
 use eframe::egui;
 use tgradish_core::convert::Sizes;
-use tgradish_core::options::{Crop, Scaling};
+use tgradish_core::options::{Crop, Resize, Scaling};
 
 /// The part of a frame used, in the frame's own pixels, which may be fewer
 /// than the input's.
@@ -204,21 +204,66 @@ pub fn tgs_bounds(frames: &[Vec<u8>], width: u32, part: Part, keep_canvas: bool)
     if right > left && bottom > top { [left, top, right, bottom] } else { [x0, y0, x1, y1] }
 }
 
+/// What of `clip` a `.tgs` cropped square shows: `part` of it, cut to
+/// what is visible unless `keep_canvas`, and to a square on the art's grid
+/// of `pixel_scale` or the one found, as converting cuts it; `None` where
+/// converting wouldn't read it.
+pub fn tgs_square(
+    clip: &crate::media::Clip,
+    part: Part,
+    keep_canvas: bool,
+    pixel_scale: Option<u32>,
+) -> Option<[usize; 4]> {
+    use tgradish_tgs::frames::{Animation, Frame};
+    use tgradish_tgs::normalise::{Options, Rect, Square, normalise};
+    let height = (clip.frames.first()?.len() / 4) as u32 / clip.width.max(1);
+    let duration = std::time::Duration::from_millis(100);
+    let frames = clip.frames.iter().map(|rgba| Frame { rgba: rgba.clone(), duration });
+    let animation = Animation::new(clip.width, height, frames.collect()).ok()?;
+    let side = |at: f64, length: f64, most: u32| {
+        let start = (at.round().max(0.0) as u32).min(most.saturating_sub(1));
+        (start, ((at + length).round() as u32).clamp(start + 1, most) - start)
+    };
+    let (x, width) = side(part.x, part.width, clip.width);
+    let (y, height) = side(part.y, part.height, height);
+    let crop = Some(Rect { x, y, width, height });
+    let options =
+        Options { crop, keep_canvas, pixel_scale, square: Square::Crop, ..Options::default() };
+    let (_, report) = normalise(&animation, &options).ok()?;
+    let Rect { x, y, width, height } = report.crop;
+    Some([x as usize, y as usize, (x + width) as usize, (y + height) as usize])
+}
+
 /// The `.tgs` result of `rgba`, a frame `width` pixels wide: `bounds` of
-/// it scaled to fill the canvas along its longer side, as the conversion
-/// does, shown on a smaller canvas of `side`. Shapes have no pixels of
-/// their own, so the scale needn't be whole.
-pub fn tgs(rgba: &[u8], width: u32, [x0, y0, x1, y1]: [usize; 4], side: usize) -> egui::ColorImage {
+/// it made square as `resize` says, padded, cropped or stretched, as the
+/// conversion does, shown on a smaller canvas of `side`. Shapes have no
+/// pixels of their own, so the scale needn't be whole.
+pub fn tgs(
+    rgba: &[u8],
+    width: u32,
+    [mut x0, mut y0, mut x1, mut y1]: [usize; 4],
+    side: usize,
+    resize: Resize,
+) -> egui::ColorImage {
+    if resize == Resize::Crop {
+        // the middle square, as the conversion cuts it but for its grid
+        let square = (x1 - x0).min(y1 - y0);
+        (x0, y0) = (x0 + (x1 - x0 - square) / 2, y0 + (y1 - y0 - square) / 2);
+        (x1, y1) = (x0 + square, y0 + square);
+    }
     let (w, h) = ((x1 - x0).max(1), (y1 - y0).max(1));
-    let scale = side as f64 / w.max(h) as f64;
+    let (scale_x, scale_y) = match resize {
+        Resize::Stretch => (side as f64 / w as f64, side as f64 / h as f64),
+        _ => (side as f64 / w.max(h) as f64, side as f64 / w.max(h) as f64),
+    };
     let (shown_w, shown_h) =
-        ((w as f64 * scale).round() as usize, (h as f64 * scale).round() as usize);
+        ((w as f64 * scale_x).round() as usize, (h as f64 * scale_y).round() as usize);
     let (left, top) = ((side - shown_w.min(side)) / 2, (side - shown_h.min(side)) / 2);
     let mut pixels = vec![egui::Color32::TRANSPARENT; side * side];
     for y in 0..shown_h.min(side) {
-        let sy = y0 + ((y as f64 + 0.5) / scale) as usize;
+        let sy = y0 + ((y as f64 + 0.5) / scale_y) as usize;
         for x in 0..shown_w.min(side) {
-            let sx = x0 + ((x as f64 + 0.5) / scale) as usize;
+            let sx = x0 + ((x as f64 + 0.5) / scale_x) as usize;
             if sx >= x1 || sy >= y1 {
                 continue;
             }
@@ -285,18 +330,46 @@ mod tests {
     }
 
     #[test]
+    fn crops_squares_as_converting_does() {
+        // 5x4 art pixels at 3x, every pixel its own colour: a square of
+        // four across, by whole art pixels, the middle one but for a pixel
+        let rgba: Vec<u8> = (0..12u32)
+            .flat_map(|y| {
+                (0..15u32).flat_map(move |x| [(x / 3 * 40) as u8, (y / 3 * 60) as u8, 7, 255])
+            })
+            .collect();
+        let clip = crate::media::Clip {
+            id: 0,
+            width: 15,
+            height: 12,
+            frames: vec![rgba],
+            times: vec![0.0, 0.1],
+            pixelated: true,
+        };
+        let part = Part::of(None, (15, 12), (15, 12));
+        assert_eq!(tgs_square(&clip, part, false, None), Some([3, 0, 15, 12]));
+    }
+
+    #[test]
     fn fills_the_canvas_with_pixel_art() {
         // 2x1 art, the right pixel transparent: only the red one shows
         let mut art = pair();
         art[7] = 0;
         let part = Part::of(None, (2, 1), (2, 1));
         let frames = [art.clone()];
-        let image = tgs(&art, 2, tgs_bounds(&frames, 2, part, false), 64);
+        let image = tgs(&art, 2, tgs_bounds(&frames, 2, part, false), 64, Resize::Pad);
         assert_eq!(image.pixels[32 * 64 + 32].to_srgba_unmultiplied(), [255, 0, 0, 255]);
         // with its canvas, the art is twice as wide as high
-        let kept = tgs(&art, 2, tgs_bounds(&frames, 2, part, true), 64);
+        let bounds = tgs_bounds(&frames, 2, part, true);
+        let kept = tgs(&art, 2, bounds, 64, Resize::Pad);
         assert_eq!(kept.pixels[8 * 64 + 2], egui::Color32::TRANSPARENT);
         assert_eq!(kept.pixels[32 * 64 + 2].to_srgba_unmultiplied(), [255, 0, 0, 255]);
+        // stretched to the square, or cropped to its left half
+        let stretched = tgs(&art, 2, bounds, 64, Resize::Stretch);
+        assert_eq!(stretched.pixels[8 * 64 + 2].to_srgba_unmultiplied(), [255, 0, 0, 255]);
+        assert_eq!(stretched.pixels[8 * 64 + 60], egui::Color32::TRANSPARENT);
+        let cropped = tgs(&art, 2, bounds, 64, Resize::Crop);
+        assert_eq!(cropped.pixels[8 * 64 + 60].to_srgba_unmultiplied(), [255, 0, 0, 255]);
         // 3x1 art fills the canvas's width, though 64 isn't a multiple of 3
         let three = [art.clone(), vec![255, 0, 0, 255]].concat();
         let wide = tgs(
@@ -304,6 +377,7 @@ mod tests {
             3,
             tgs_bounds(std::slice::from_ref(&three), 3, Part::of(None, (3, 1), (3, 1)), true),
             64,
+            Resize::Pad,
         );
         assert_eq!(wide.pixels[32 * 64].to_srgba_unmultiplied(), [255, 0, 0, 255]);
         assert_eq!(wide.pixels[32 * 64 + 63].to_srgba_unmultiplied(), [255, 0, 0, 255]);

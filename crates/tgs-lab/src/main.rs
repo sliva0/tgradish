@@ -62,7 +62,7 @@ fn encoded(anim: &PixelAnim, runs: bool) -> Result<String> {
     } else {
         encode::painter(anim, &Default::default(), None, &|| false)?
     };
-    Ok(lay_out(&scene, anim, Some("tgs-lab".into())).to_json(Style::default()))
+    Ok(lay_out(&scene, anim, Some("tgs-lab".into()), false).to_json(Style::default()))
 }
 
 fn info(paths: &[PathBuf]) -> Result<()> {

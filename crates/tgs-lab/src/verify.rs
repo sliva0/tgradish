@@ -120,7 +120,7 @@ fn premultiplied([r, g, b, a]: [u8; 4]) -> [u8; 4] {
 /// of each cell, which must match within [`NOISE`]. Every tick counts, so
 /// a layer that ends too early shows up even inside a frame.
 pub fn centres(renderer: &mut Renderer, anim: &PixelAnim) -> Result<Centres> {
-    let placement = Placement::new(anim.grid());
+    let placement = Placement::new(anim.grid(), false);
     let mut out = Centres::default();
     for (frame, start) in anim.frames().iter().zip(starts(anim)) {
         for tick in start..start + frame.ticks {
@@ -195,7 +195,7 @@ const MAGENTA: [f64; 3] = [255.0, 0.0, 255.0];
 /// An exact area-averaged render of a frame: premultiplied channels 0-255
 /// and alpha 0-1, row by row.
 fn ideal(anim: &PixelAnim, frame: usize, size: u32) -> Vec<[f64; 4]> {
-    let placement = Placement::new(anim.grid());
+    let placement = Placement::new(anim.grid(), false);
     let columns: Vec<f64> = (0..=anim.width()).map(|c| placement.canvas(c, 0)[0]).collect();
     let rows: Vec<f64> = (0..=anim.height()).map(|r| placement.canvas(0, r)[1]).collect();
     let palette: Vec<[f64; 4]> = anim
@@ -281,7 +281,7 @@ pub fn explain(
     count: usize,
 ) -> Result<Vec<String>> {
     let rendered = renderer.render(starts(anim)[frame], size)?;
-    let placement = Placement::new(anim.grid());
+    let placement = Placement::new(anim.grid(), false);
     let columns: Vec<f64> = (0..=anim.width()).map(|c| placement.canvas(c, 0)[0]).collect();
     let rows: Vec<f64> = (0..=anim.height()).map(|r| placement.canvas(0, r)[1]).collect();
     let (along_x, along_y) = (overlaps(&columns, size), overlaps(&rows, size));
@@ -384,7 +384,7 @@ mod tests {
             layers: vec![Layer { from: 0, to: anim.ticks(), groups, hidden: Vec::new() }],
         };
         assert_eq!(scene.compare(anim), None, "the scene itself is wrong");
-        let json = lay_out(&scene, anim, None).to_json(Style::default());
+        let json = lay_out(&scene, anim, None, false).to_json(Style::default());
         let mut misses = 0;
         for (name, mut renderer) in Renderer::all(json.as_bytes()).unwrap() {
             let result = centres(&mut renderer, anim).unwrap();
@@ -478,7 +478,7 @@ mod tests {
 
     fn seams_of(anim: &PixelAnim, scene: &Scene) -> Vec<(&'static str, Seams)> {
         assert_eq!(scene.compare(anim), None);
-        let json = lay_out(scene, anim, None).to_json(Style::default());
+        let json = lay_out(scene, anim, None, false).to_json(Style::default());
         Renderer::all(json.as_bytes())
             .unwrap()
             .into_iter()
@@ -539,7 +539,7 @@ mod tests {
             let input = tgradish_tgs::frames::decode(bytes, &Default::default()).unwrap();
             let (anim, _) = normalise(&input, &Options::default()).unwrap();
             let scene = tgradish_tgs::encode::runs(&anim);
-            let json = lay_out(&scene, &anim, None).to_json(Style::default());
+            let json = lay_out(&scene, &anim, None, false).to_json(Style::default());
             for (renderer, mut instance) in Renderer::all(json.as_bytes()).unwrap() {
                 let result = centres(&mut instance, &anim).unwrap();
                 assert_eq!(result.misses, 0, "{name} in {renderer}: {:?}", result.examples);
@@ -572,7 +572,7 @@ mod tests {
                     hidden: Vec::new(),
                 }],
             };
-            let json = lay_out(&scene, &anim, None).to_json(Style::default());
+            let json = lay_out(&scene, &anim, None, false).to_json(Style::default());
             Renderer::all(json.as_bytes())
                 .unwrap()
                 .into_iter()

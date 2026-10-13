@@ -3,14 +3,18 @@
 
 use eframe::egui::{self, RichText};
 use tgradish_core::presets::Format;
-use tgradish_tgs::frames::LayerInfo;
+use tgradish_tgs::frames::{Direction, LayerInfo, Tag};
 
 use super::Context;
 use crate::item::{Choices, Item};
-use crate::widgets::{self, heading, row};
+use crate::widgets::{self, row, section, section_with};
 
 /// Indent of each level of groups in the list of layers.
-const LEVEL: f32 = 18.0;
+const LEVEL: f32 = 20.0;
+/// Where a level's line runs, from the start of its indent.
+const TRUNK: f32 = 9.0;
+/// Side of a tag's colour swatch.
+const SWATCH: f32 = 10.0;
 
 /// What the preset reads of an Aseprite file, which the item's choices go
 /// over: a tag, and layers shown and hidden.
@@ -37,12 +41,15 @@ impl Preset {
     }
 }
 
-/// The tag and layers to read, first of the settings: false when there is
-/// nothing to choose.
-pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) -> bool {
-    let Some((tags, layers)) =
-        item.aseprite().map(|(tags, layers)| (tags.to_vec(), layers.to_vec()))
-    else {
+/// The tag and layers to read, if there is a choice.
+pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
+    let read = item.aseprite().map(|(tags, layers)| (tags.to_vec(), layers.to_vec()));
+    if read.is_some() {
+        item.aseprite_seen.clone_from(&read);
+    }
+    // as last read, while it is read again
+    let read = read.or_else(|| item.aseprite_seen.clone().filter(|_| item.input_reading()));
+    let Some((tags, layers)) = read else {
         // a tag or layer the file no longer has, as after it was edited:
         // nothing to choose from until it reads again
         let failed = item.input_error().is_some();
@@ -50,23 +57,29 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) ->
         let chosen =
             choices.tag.is_some() || choices.show_layers.is_some() || choices.hide_layers.is_some();
         if !(chosen && failed) {
-            return false;
+            return;
         }
-        heading(ui, "Aseprite file");
+        section(ui, "Aseprite file");
         ui.horizontal(|ui| {
             widgets::note(ui, "It doesn't read with the tag and layers chosen");
             if ui.button("Read all of it").clicked() {
                 (choices.tag, choices.show_layers, choices.hide_layers) = (None, None, None);
             }
         });
-        return true;
+        return;
     };
     // a hidden layer, even the only one, is one to show
     let listed = layers.len() >= 2 || layers.iter().any(|layer| !layer.visible);
     if tags.is_empty() && !listed {
-        return false;
+        return;
     }
-    heading(ui, "Aseprite file");
+    // with a sign that it is being read again
+    let reading = item.input_reading();
+    section_with(ui, "Aseprite file", |ui| {
+        if reading {
+            ui.add(egui::Spinner::new().size(12.0));
+        }
+    });
     let preset = Preset::of(item, context);
     let choices = &mut item.choices;
     if !tags.is_empty() {
@@ -84,8 +97,8 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) ->
                     choices.tag = None;
                 }
                 for tag in &tags {
-                    if ui.radio(read.as_ref() == Some(tag), tag).clicked() {
-                        choices.tag = Some(tag.clone());
+                    if tag_radio(ui, read.as_ref() == Some(&tag.name), tag).clicked() {
+                        choices.tag = Some(tag.name.clone());
                     }
                 }
             });
@@ -95,22 +108,70 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) ->
         let hint = "Which layers show, the top one first; a hidden group hides the layers in it";
         row(ui, "Layers", hint, Ok(()), |ui| layer_list(ui, choices, &preset, &layers));
     }
-    true
 }
 
-/// A box for each layer, under its group, ticked where it shows.
+/// A tag to pick, its colour beside its name, its frames on hover.
+fn tag_radio(ui: &mut egui::Ui, selected: bool, tag: &Tag) -> egui::Response {
+    // room for the swatch before the name
+    let response = ui.radio(selected, format!("     {}", tag.name));
+    if tag.colour[3] > 0 {
+        let spacing = ui.spacing();
+        let left = response.rect.left() + spacing.icon_width + spacing.icon_spacing + 1.0;
+        let swatch = egui::Rect::from_center_size(
+            egui::pos2(left + SWATCH / 2.0, response.rect.center().y),
+            egui::vec2(SWATCH, SWATCH),
+        );
+        let [red, green, blue, alpha] = tag.colour;
+        let colour = egui::Color32::from_rgba_unmultiplied(red, green, blue, alpha);
+        let outline = ui.visuals().widgets.noninteractive.bg_stroke;
+        ui.painter().rect(swatch, 2.0, colour, outline, egui::StrokeKind::Inside);
+    }
+    let direction = match tag.direction {
+        Direction::Forward => "",
+        Direction::Reverse => ", in reverse",
+        Direction::PingPong => ", ping-pong",
+        Direction::PingPongReverse => ", ping-pong in reverse",
+    };
+    // as Aseprite counts them, from 1
+    let (from, to) = (tag.from + 1, tag.to + 1);
+    let frames =
+        if from == to { format!("Frame {from}") } else { format!("Frames {from} to {to}") };
+    response.on_hover_text(format!("{frames}{direction}"))
+}
+
+/// Whether each layer is the last of its group's, or of the top level's.
+fn last_of_group(layers: &[LayerInfo]) -> Vec<bool> {
+    (0..layers.len())
+        .map(|index| {
+            let level = layers[index].level;
+            // another at its level, before the group ends
+            !layers[index + 1..]
+                .iter()
+                .take_while(|layer| layer.level >= level)
+                .any(|layer| layer.level == level)
+        })
+        .collect()
+}
+
+/// A box for each layer, under its group, ticked where it shows, with
+/// lines joining each to its group, as `tree` draws them.
 fn layer_list(ui: &mut egui::Ui, choices: &mut Choices, preset: &Preset, layers: &[LayerInfo]) {
     // a list, closer than rows of settings
-    ui.spacing_mut().item_spacing.y = 0.0;
+    ui.spacing_mut().item_spacing.y = 2.0;
+    let last = last_of_group(layers);
+    // for each level above the layer's, whether its line goes on below
+    let mut going_on: Vec<bool> = Vec::new();
     // the level of the group hiding the layers listed under it
     let mut hidden_from: Option<u16> = None;
-    for layer in layers {
+    for (index, layer) in layers.iter().enumerate() {
         if hidden_from.is_some_and(|level| layer.level <= level) {
             hidden_from = None;
         }
+        let level = usize::from(layer.level);
+        going_on.truncate(level);
         let mut on = shows(&named(choices, preset), layer);
-        ui.horizontal(|ui| {
-            ui.add_space(LEVEL * f32::from(layer.level));
+        let row = ui.horizontal(|ui| {
+            ui.add_space(LEVEL * (level + 1) as f32);
             let name = RichText::new(&layer.name);
             let name = if layer.group { name.strong() } else { name };
             let response = ui
@@ -119,21 +180,32 @@ fn layer_list(ui: &mut egui::Ui, choices: &mut Choices, preset: &Preset, layers:
             if response.changed() {
                 set(choices, preset, layer, on);
             }
-            // the last box ends with a way back to the preset's or file's
+            // the first ends with a way back to the preset's or the file's
             let back = match (&preset.show, &preset.hide) {
                 (None, None) => "Back to the layers the file shows",
                 _ => "Back to the layers the preset shows",
             };
-            if std::ptr::eq(layer, layers.last().unwrap())
+            if index == 0
                 && (choices.show_layers.is_some() || choices.hide_layers.is_some())
-                && ui
-                    .add(egui::Button::new(RichText::new("⟲").size(13.0)).small().frame(false))
-                    .on_hover_text(back)
-                    .clicked()
+                && widgets::reset_to(ui, back)
             {
                 (choices.show_layers, choices.hide_layers) = (None, None);
             }
         });
+        // the lines: of the groups above it that go on, and its own
+        let rect = row.response.rect;
+        let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+        let painter = ui.painter();
+        let x = |level: usize| rect.left() + LEVEL * level as f32 + TRUNK;
+        let (top, bottom) = (rect.top() - 1.0, rect.bottom() + 1.0);
+        for (above, _) in going_on.iter().enumerate().filter(|(_, on)| **on) {
+            painter.vline(x(above), top..=bottom, stroke);
+        }
+        let middle = rect.center().y;
+        let end = if last[index] { middle } else { bottom };
+        painter.vline(x(level), top..=end, stroke);
+        painter.hline(x(level)..=rect.left() + LEVEL * (level + 1) as f32 - 4.0, middle, stroke);
+        going_on.push(!last[index]);
         if layer.group && !on && hidden_from.is_none() {
             hidden_from = Some(layer.level);
         }

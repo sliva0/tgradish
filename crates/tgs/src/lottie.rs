@@ -56,8 +56,8 @@ pub struct Layer {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Transform {
     pub position: [f64; 2],
-    /// Canvas pixels per layer unit.
-    pub scale: f64,
+    /// Canvas pixels per layer unit, across and down.
+    pub scale: [f64; 2],
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -115,8 +115,8 @@ impl Animation {
 
 impl Layer {
     fn write(&self, out: &mut String, style: Style) {
-        let Transform { position: [x, y], scale } = self.transform;
-        let scale = number(scale * 100.0, 4);
+        let Transform { position: [x, y], scale: [across, down] } = self.transform;
+        let (across, down) = (number(across * 100.0, 4), number(down * 100.0, 4));
         if let Some(id) = &self.id {
             write!(out, "{{\"ln\":{},", serde_json::Value::from(id.as_str())).unwrap();
         } else {
@@ -124,7 +124,7 @@ impl Layer {
         }
         write!(
             out,
-            "\"ty\":4,\"ks\":{{\"p\":{{\"k\":[{},{}]}},\"s\":{{\"k\":[{scale},{scale}]}}",
+            "\"ty\":4,\"ks\":{{\"p\":{{\"k\":[{},{}]}},\"s\":{{\"k\":[{across},{down}]}}",
             number(x, 4),
             number(y, 4),
         )
@@ -311,7 +311,7 @@ mod tests {
             id: None,
             from: 10,
             to: 90,
-            transform: Transform { position: [0.0, 0.0], scale: 1.0 },
+            transform: Transform { position: [0.0, 0.0], scale: [1.0, 1.0] },
             items: Vec::new(),
             hidden: vec![(30, 50), (60, 70)],
         };
@@ -331,7 +331,7 @@ mod tests {
                 id: None,
                 from: 0,
                 to: 30,
-                transform: Transform { position: [6.0, 0.0], scale: 10.0 },
+                transform: Transform { position: [6.0, 0.0], scale: [10.0, 10.0] },
                 items: vec![Item::Group(vec![
                     Item::Rect { centre: [1.5, 2.0], size: [3.0, 4.0] },
                     Item::Path(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]),

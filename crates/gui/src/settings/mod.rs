@@ -5,6 +5,7 @@ mod advanced;
 mod aseprite;
 mod commands;
 mod picture;
+mod plan;
 mod tgs;
 mod time;
 mod webm;
@@ -25,6 +26,7 @@ use time::{frame, time};
 use webm::webm_quality;
 
 pub(crate) use picture::{exact_of, ratio, resize_of, webm_sizes};
+pub use plan::plan;
 
 /// What the settings depend on besides the item.
 pub struct Context<'a> {
@@ -165,15 +167,57 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     });
 }
 
-/// Shows the settings under the preview.
+/// Width of the settings from which they go in two columns.
+const TWO_COLUMNS: f32 = 1150.0;
+/// Room between the two columns, with a line down its middle.
+const GUTTER: f32 = 24.0;
+
+/// Shows the settings under the preview: what goes in, how it looks and
+/// plays, and then the file that comes out, beside it where there is room.
 pub fn show(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
+    if ui.available_width() < TWO_COLUMNS {
+        input(ui, item, context);
+        output(ui, item, context);
+        return;
+    }
+    let width = (ui.available_width() - GUTTER) / 2.0;
+    let layout = egui::Layout::top_down(egui::Align::Min);
+    let spacing = ui.spacing().item_spacing;
+    let columns = ui.horizontal_top(|ui| {
+        // the gutter alone between them, their own spacing within
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.allocate_ui_with_layout(egui::vec2(width, 0.0), layout, |ui| {
+            ui.spacing_mut().item_spacing = spacing;
+            ui.set_width(width);
+            input(ui, item, context);
+        });
+        ui.add_space(GUTTER);
+        ui.allocate_ui_with_layout(egui::vec2(width, 0.0), layout, |ui| {
+            ui.spacing_mut().item_spacing = spacing;
+            ui.set_width(width);
+            output(ui, item, context);
+        });
+    });
+    let rect = columns.response.rect;
+    let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+    ui.painter().vline(rect.left() + width + GUTTER / 2.0, rect.y_range(), stroke);
+}
+
+/// What is read and how it looks and plays.
+fn input(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     // what is read comes first: it is what the rest is about
-    let read = item.kind == Kind::Aseprite && aseprite(ui, item, context);
-    picture(ui, item, context, !read);
+    if item.kind == Kind::Aseprite {
+        aseprite(ui, item, context);
+    }
+    picture(ui, item, context);
     match item.format {
         Format::Webm | Format::Tgs => time(ui, item, context),
         Format::Image => frame(ui, item),
     }
+}
+
+/// The file that comes out, and the commands that make it.
+fn output(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     match item.format {
         Format::Webm => webm_quality(ui, item, context),
         Format::Tgs => tgs_quality(ui, item, context),

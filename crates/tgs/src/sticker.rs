@@ -164,7 +164,8 @@ fn render(
     cancelled: Cancelled,
 ) -> Result<(Scene, String)> {
     let json = |scene: &Scene| {
-        let mut lottie = lay_out(scene, anim, options.name.clone());
+        let stretch = options.normalise.square == normalise::Square::Stretch;
+        let mut lottie = lay_out(scene, anim, options.name.clone(), stretch);
         if let Some(mark) = &options.mark {
             mark::embed(&mut lottie, mark);
         }

@@ -32,6 +32,18 @@ const LIKELY_FIT: f64 = 0.8;
 /// More colours than this and the input probably isn't pixel art.
 const MANY_COLOURS: usize = 256;
 
+/// How art that isn't square fills the square canvas.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Square {
+    /// Whole, along its longer side, with transparent margins.
+    #[default]
+    Pad,
+    /// Cut to a square in its middle, on its art pixels' grid.
+    Crop,
+    /// Stretched, its art pixels no longer square.
+    Stretch,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Options {
     /// Keep the input's canvas instead of cropping to the visible pixels.
@@ -50,6 +62,9 @@ pub struct Options {
     /// longer than 3 seconds play as fast as fits them in. Whatever still
     /// lasts longer is cut at 3 seconds.
     pub tempo: Option<f64>,
+    /// How art that isn't square fills the canvas; only cropping changes
+    /// what normalising makes.
+    pub square: Square,
 }
 
 /// One frame of palette indices, row by row, and how many 60 fps frames
@@ -339,6 +354,7 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
     } else {
         visible_area(&frames, area.width).ok_or(Error::Invisible)?
     };
+    let mut crop = crop;
     let mut pixels: Vec<Vec<u32>> =
         frames.iter().map(|(pixels, _)| cut(pixels, area.width, crop)).collect();
     let mut edges = Edges::count(&pixels, crop.width, crop.height);
@@ -359,6 +375,13 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
     }
 
     let ticks: Vec<u32> = frames.iter().map(|&(_, ticks)| ticks).collect();
+    // cut square before the colours are gathered: those cut off don't count
+    if options.square == Square::Crop && crop.width != crop.height {
+        let square = square_in(crop.width, crop.height, &edges.grid());
+        pixels = pixels.iter().map(|frame| cut(frame, crop.width, square)).collect();
+        crop = Rect { x: crop.x + square.x, y: crop.y + square.y, ..square };
+        edges = Edges::count(&pixels, crop.width, crop.height);
+    }
     let anim = assemble(&pixels, &ticks, crop.width, &edges)?;
     let (width, height, grid) = (anim.width, anim.height, anim.grid.clone());
 
@@ -434,6 +457,33 @@ pub(crate) fn assemble(
         frames.push(PixelFrame { pixels: cells, ticks });
     }
     Ok(PixelAnim { width: cells_wide, height: cells_high, grid, palette, frames })
+}
+
+/// The largest square in the middle of a `width` by `height` picture, on
+/// the grid of `grid`'s art pixels: whole art pixels only, along both
+/// sides, where it has any.
+pub fn square_in(width: u32, height: u32, grid: &Grid) -> Rect {
+    let unit = grid.scale().max(1);
+    // where whole art pixels start and end along a side, which the canvas
+    // can cut at either end
+    let whole = |length: u32, edges: &[u32]| {
+        let first = if edges.len() > 2 { edges[1] % unit } else { 0 };
+        (first, first + (length - first) / unit * unit)
+    };
+    let (across, down) = (whole(width, &grid.columns), whole(height, &grid.rows));
+    let side = (across.1 - across.0).min(down.1 - down.0);
+    if side == 0 {
+        // not one whole art pixel: the middle, as it comes
+        let side = width.min(height);
+        return Rect { x: (width - side) / 2, y: (height - side) / 2, width: side, height: side };
+    }
+    let start = |length: u32, (first, last): (u32, u32)| {
+        let middle = f64::from(length - side) / 2.0;
+        let most = (last - side - first) / unit;
+        let steps = ((middle - f64::from(first)) / f64::from(unit)).round();
+        first + (steps.max(0.0) as u32).min(most) * unit
+    };
+    Rect { x: start(width, across), y: start(height, down), width: side, height: side }
 }
 
 /// The smallest rectangle holding every visible pixel of every frame.
@@ -685,6 +735,21 @@ mod tests {
         // the transparent margins become cells of their own
         assert_eq!((anim.width(), anim.height(), report.scale), (7, 6, 3));
         assert_lossless(&input, &anim, &report);
+
+        // cropped square, by whole art pixels: 4 of the 5 across
+        let square = Options { square: Square::Crop, ..Options::default() };
+        let (anim, report) = normalise(&input, &square).unwrap();
+        assert_eq!(report.crop, Rect { x: 7, y: 5, width: 12, height: 12 });
+        assert_eq!((anim.width(), anim.height(), report.scale), (4, 4, 3));
+        assert_lossless(&input, &anim, &report);
+        // a grid cut by the canvas: whole art pixels along both sides
+        let grid = Grid { columns: vec![0, 1, 4, 7, 10, 13], rows: vec![0, 2, 5, 8, 10] };
+        assert_eq!(square_in(13, 10, &grid), Rect { x: 4, y: 2, width: 6, height: 6 });
+        // stretching and padding leave it as it is
+        for square in [Square::Pad, Square::Stretch] {
+            let (_, report) = normalise(&input, &Options { square, ..Options::default() }).unwrap();
+            assert_eq!(report.crop, Rect { x: 4, y: 5, width: 15, height: 12 });
+        }
     }
 
     #[test]

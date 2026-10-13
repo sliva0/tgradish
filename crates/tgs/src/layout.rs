@@ -1,5 +1,6 @@
 //! Places a [`Scene`] on the 512x512 canvas and turns it into Lottie: the
-//! art is scaled to fill the canvas along its longer side and centred.
+//! art is scaled to fill the canvas along its longer side and centred, or
+//! stretched to fill all of it.
 //!
 //! Lottie coordinates are in art pixels (the grid's scale), measured from
 //! half an art pixel before where the art pixel grid starts. Rectangles
@@ -26,7 +27,9 @@ pub struct Placement {
 }
 
 impl Placement {
-    pub fn new(grid: &Grid) -> Placement {
+    /// Where the cells of `grid` land: art that isn't square fills the
+    /// canvas along its longer side, or `stretch`ed, all of it.
+    pub fn new(grid: &Grid, stretch: bool) -> Placement {
         let width = f64::from(*grid.columns.last().unwrap());
         let height = f64::from(*grid.rows.last().unwrap());
         let unit = grid.scale();
@@ -37,18 +40,21 @@ impl Placement {
         let coordinates = |edges: &[u32], origin: u32| {
             edges.iter().map(|&edge| (f64::from(edge) - f64::from(origin)) / unit - SHIFT).collect()
         };
-        // canvas pixels per input pixel
-        let fit = f64::from(CANVAS) / width.max(height);
+        // canvas pixels per input pixel, across and down
         let canvas = f64::from(CANVAS);
+        let (across, down) = match stretch {
+            true => (canvas / width, canvas / height),
+            false => (canvas / width.max(height), canvas / width.max(height)),
+        };
         Placement {
             columns: coordinates(&grid.columns, origin_x),
             rows: coordinates(&grid.rows, origin_y),
             transform: Transform {
                 position: [
-                    (canvas - width * fit) / 2.0 + (f64::from(origin_x) + SHIFT * unit) * fit,
-                    (canvas - height * fit) / 2.0 + (f64::from(origin_y) + SHIFT * unit) * fit,
+                    (canvas - width * across) / 2.0 + (f64::from(origin_x) + SHIFT * unit) * across,
+                    (canvas - height * down) / 2.0 + (f64::from(origin_y) + SHIFT * unit) * down,
                 ],
-                scale: fit * unit,
+                scale: [across * unit, down * unit],
             },
         }
     }
@@ -62,13 +68,14 @@ impl Placement {
     pub fn canvas(&self, column: u32, row: u32) -> [f64; 2] {
         let [x, y] = self.point(column, row);
         let Transform { position, scale } = self.transform;
-        [position[0] + x * scale, position[1] + y * scale]
+        [position[0] + x * scale[0], position[1] + y * scale[1]]
     }
 }
 
-/// The Lottie for a scene of `anim`'s cells.
-pub fn lay_out(scene: &Scene, anim: &PixelAnim, name: Option<String>) -> Animation {
-    let placement = Placement::new(anim.grid());
+/// The Lottie for a scene of `anim`'s cells, `stretch`ed to fill the
+/// canvas or not.
+pub fn lay_out(scene: &Scene, anim: &PixelAnim, name: Option<String>, stretch: bool) -> Animation {
+    let placement = Placement::new(anim.grid(), stretch);
     let layers = scene
         .layers
         .iter()
@@ -182,7 +189,7 @@ mod tests {
         let input = Frames::new(8, 1, vec![frame]).unwrap();
         let options = Options { keep_canvas: true, ..Options::default() };
         let (anim, _) = normalise(&input, &options).unwrap();
-        let json = lay_out(&scene, &anim, None).to_json(Style::default());
+        let json = lay_out(&scene, &anim, None, false).to_json(Style::default());
         let (stats, _) = check(json.as_bytes(), None).unwrap();
         assert_eq!(cost(&scene), crate::limits::telegram::cost(stats.shapes, stats.layers));
     }
@@ -192,17 +199,24 @@ mod tests {
         // 2x art, 40x20 input pixels: fills the width, centred vertically
         let grid =
             Grid { columns: (0..=40).step_by(2).collect(), rows: (0..=20).step_by(2).collect() };
-        let placement = Placement::new(&grid);
-        assert_eq!(placement.transform, Transform { position: [12.8, 140.8], scale: 25.6 });
+        let placement = Placement::new(&grid, false);
+        let transform = Transform { position: [12.8, 140.8], scale: [25.6, 25.6] };
+        assert_eq!(placement.transform, transform);
         assert_eq!(placement.point(20, 10), [19.5, 9.5]);
         assert_eq!(placement.canvas(20, 10), [512.0, 384.0]);
+        // stretched to fill the canvas, twice as much down
+        let placement = Placement::new(&grid, true);
+        let transform = Transform { position: [12.8, 25.6], scale: [25.6, 51.2] };
+        assert_eq!(placement.transform, transform);
+        assert_eq!(placement.canvas(0, 0), [0.0, 0.0]);
+        assert_eq!(placement.canvas(20, 10), [512.0, 512.0]);
     }
 
     #[test]
     fn keeps_inner_edges_on_halves_when_art_pixels_are_cut() {
         // 3x art cut by 2 pixels on the left
         let grid = Grid { columns: vec![0, 1, 4, 7], rows: vec![0, 3, 6] };
-        let placement = Placement::new(&grid);
+        let placement = Placement::new(&grid, false);
         assert_eq!(placement.point(1, 0), [-0.5, -0.5]);
         assert_eq!(placement.point(3, 2), [1.5, 1.5]);
         assert!((placement.point(0, 0)[0] - (-1.0 / 3.0 - 0.5)).abs() < 1e-12);

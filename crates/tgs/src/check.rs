@@ -549,7 +549,7 @@ mod tests {
             id: None,
             from: 0,
             to: 60,
-            transform: Transform { position: [0.0, 0.0], scale: 1.0 },
+            transform: Transform { position: [0.0, 0.0], scale: [1.0, 1.0] },
             items: groups,
             hidden: Vec::new(),
         };
@@ -643,7 +643,7 @@ mod tests {
             id: None,
             from: 0,
             to: 60,
-            transform: Transform { position: [0.0, 0.0], scale: 1.0 },
+            transform: Transform { position: [0.0, 0.0], scale: [1.0, 1.0] },
             items: vec![group(rects)],
             hidden: Vec::new(),
         };

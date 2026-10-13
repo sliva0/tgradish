@@ -2,7 +2,7 @@
 //! squared and scaled. The preview works out the result's size from here
 //! too, so what it shows is what converting makes.
 
-use eframe::egui::{self, RichText};
+use eframe::egui;
 use tgradish_core::convert;
 use tgradish_core::options::{Crop, ExactScale, Resize, Scaling};
 use tgradish_core::presets::Format;
@@ -78,6 +78,22 @@ const SQUARES: [Choice<Resize>; 4] = [
         "The middle fills the square and the rest is cut off: the preview dims it",
     ),
     (Resize::Stretch, "By stretching", "The picture is stretched to the square"),
+];
+
+/// How TGS stickers, which are always square, become so.
+const TGS_SQUARES: [Choice<Resize>; 4] = [
+    (Resize::Contain, "Off", ""),
+    (Resize::Pad, "By padding", "Transparent margins fill the rest of the square"),
+    (
+        Resize::Crop,
+        "By cropping",
+        "The middle fills the square and the rest is cut off, by whole art pixels",
+    ),
+    (
+        Resize::Stretch,
+        "By stretching",
+        "The art is stretched to the square: its pixels stop being square",
+    ),
 ];
 
 const SCALINGS: [Choice<Scaling>; 4] = [
@@ -174,13 +190,8 @@ fn largest_scale(target: Target, used: (u32, u32)) -> ExactScale {
     }
 }
 
-/// The picture's settings, `first` of all or after others.
-pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context, first: bool) {
-    if first {
-        widgets::heading(ui, "Picture");
-    } else {
-        widgets::section(ui, "Picture");
-    }
+pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
+    widgets::section(ui, "Picture");
     let size = item.input_size();
     let exact = exact_of(item);
     // an exact scale holds the crop to the size it takes
@@ -193,55 +204,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context, fir
         }
     }
     let crop_hint = "The part of the input to use, in its pixels. Drag on the preview to change it";
-    row(ui, "Crop", crop_hint, Ok(()), |ui| {
-        ui.horizontal_wrapped(|ui| {
-            let Some((width, height)) = size else {
-                note(ui, "once the input is read");
-                return;
-            };
-            let full = Crop { x: 0, y: 0, width, height };
-            let mut crop = item.choices.crop.unwrap_or(full);
-            let mut edited = false;
-            ui.label("x");
-            edited |= ui.add(egui::DragValue::new(&mut crop.x).range(0..=width - 1)).changed();
-            ui.label("y");
-            edited |= ui.add(egui::DragValue::new(&mut crop.y).range(0..=height - 1)).changed();
-            ui.label("  width");
-            edited |= ui.add(egui::DragValue::new(&mut crop.width).range(1..=width)).changed();
-            ui.label("height");
-            edited |= ui.add(egui::DragValue::new(&mut crop.height).range(1..=height)).changed();
-            if edited {
-                crop.width = crop.width.min(width - crop.x);
-                crop.height = crop.height.min(height - crop.y);
-                if let Some(exact) = exact {
-                    let ratio = ratio(item.view.aspect, (width, height));
-                    let start = (Keep::Start, Keep::Start);
-                    crop = exact.fit(crop, start, ratio, (width, height)).unwrap_or(crop);
-                }
-                item.choices.crop = (crop != full).then_some(crop);
-            }
-            ui.add_space(6.0);
-            let whole = if exact.is_some() { "Middle" } else { "Whole picture" };
-            if ui
-                .add_enabled(item.choices.crop.is_some(), egui::Button::new(whole))
-                .on_hover_text(if exact.is_some() {
-                    "As much of the middle as the exact scale takes"
-                } else {
-                    "All of the picture"
-                })
-                .clicked()
-            {
-                item.choices.crop = match (exact, size) {
-                    (Some(exact), Some(size)) => {
-                        let middle = (Keep::Middle, Keep::Middle);
-                        let ratio = ratio(item.view.aspect, size);
-                        exact.fit(full, middle, ratio, size).filter(|crop| *crop != full)
-                    }
-                    _ => None,
-                };
-            }
-        });
-    });
+    row(ui, "Crop", crop_hint, Ok(()), |ui| crop_box(ui, item, size, exact));
 
     let aspect_hint = "The width to height ratio the crop keeps while you drag it";
     row(ui, "Aspect ratio", aspect_hint, Ok(()), |ui| aspect_ratio(ui, item, size, exact));
@@ -284,12 +247,26 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context, fir
             row(ui, "Integer scale", hint, allowed, |ui| integer_scale(ui, item, size, integer));
         }
         Format::Tgs => {
-            let base = item
-                .choices
-                .tgs_base(context.presets, context.config)
-                .ok()
-                .and_then(|base| base.keep_canvas)
-                .unwrap_or(false);
+            let preset = item.choices.tgs_base(context.presets, context.config).ok();
+            let hint = "How the art becomes square, as TGS stickers are";
+            row(ui, "Force into square", hint, Ok(()), |ui| {
+                let base = preset.as_ref().and_then(|base| base.resize).unwrap_or(Resize::Pad);
+                let mut resize = item.choices.tgs.resize.unwrap_or(base);
+                ui.horizontal(|ui| {
+                    let allowed = |option| match option {
+                        Resize::Contain => Err("TGS stickers are always square"),
+                        _ => Ok(()),
+                    };
+                    if segments(ui, &mut resize, &TGS_SQUARES, allowed) {
+                        item.choices.tgs.resize = (resize != base).then_some(resize);
+                    }
+                    if item.choices.tgs.resize.is_some() && widgets::reset(ui) {
+                        item.choices.tgs.resize = None;
+                    }
+                });
+                chosen_hint(ui, resize, &TGS_SQUARES);
+            });
+            let base = preset.and_then(|base| base.keep_canvas).unwrap_or(false);
             let hint = "Rows and columns that are transparent in every frame";
             row(ui, "Margins", hint, Ok(()), |ui| {
                 let mut auto = item.choices.tgs.keep_canvas.map(|keep| !keep);
@@ -316,7 +293,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context, fir
                 auto_number(
                     ui,
                     &mut item.choices.tgs.pixel_scale,
-                    "Detected",
+                    ("Detected", "Found from the art: its smallest blocks of one colour"),
                     detected,
                     2,
                     |value| value.range(1..=64).suffix(" px"),
@@ -324,6 +301,205 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context, fir
             });
         }
     }
+}
+
+/// Width of the crop's number fields.
+const FIELD: f32 = 48.0;
+/// Side of the crop's picture.
+const SKETCH: f32 = 96.0;
+
+/// A side of the crop that a field sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    Left,
+    Top,
+    Right,
+    Bottom,
+    Width,
+    Height,
+}
+
+/// The crop as its four margins around a small picture of it, and its
+/// width and height beside them: any of them can be typed, the others
+/// follow, and the shape it keeps is kept.
+fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact: Option<Exact>) {
+    let Some((width, height)) = size else {
+        note(ui, "once the input is read");
+        return;
+    };
+    let full = Crop { x: 0, y: 0, width, height };
+    // one of another picture, as before the file changed, isn't kept
+    let crop = item.choices.crop.filter(|crop| crop.fits(width, height)).unwrap_or(full);
+    let mut edited = None;
+    ui.horizontal_top(|ui| {
+        let field = |ui: &mut egui::Ui, value: u32, most: u32, hint: &str| {
+            let mut value = value;
+            let response = ui
+                .add_sized(
+                    [FIELD, ui.spacing().interact_size.y],
+                    egui::DragValue::new(&mut value).range(0..=most),
+                )
+                .on_hover_text(hint);
+            response.changed().then_some(value)
+        };
+        let (right, bottom) = (width - crop.x - crop.width, height - crop.y - crop.height);
+        egui::Grid::new(("crop", item.id)).spacing([4.0, 4.0]).show(ui, |ui| {
+            ui.label("");
+            ui.vertical_centered(|ui| {
+                let most = height - bottom - 1;
+                let hint = "Top margin: pixels cut off the top";
+                edited = edited.or(field(ui, crop.y, most, hint).map(|v| (Side::Top, v)));
+            });
+            ui.end_row();
+            // beside the picture, halfway down it
+            let beside = egui::Layout::left_to_right(egui::Align::Center);
+            ui.allocate_ui_with_layout(egui::vec2(FIELD, SKETCH), beside, |ui| {
+                let most = width - right - 1;
+                let hint = "Left margin: pixels cut off the left";
+                edited = edited.or(field(ui, crop.x, most, hint).map(|v| (Side::Left, v)));
+            });
+            sketch(ui, (width, height), crop);
+            ui.allocate_ui_with_layout(egui::vec2(FIELD, SKETCH), beside, |ui| {
+                let most = width - crop.x - 1;
+                let hint = "Right margin: pixels cut off the right";
+                edited = edited.or(field(ui, right, most, hint).map(|v| (Side::Right, v)));
+            });
+            ui.end_row();
+            ui.label("");
+            ui.vertical_centered(|ui| {
+                let most = height - crop.y - 1;
+                let hint = "Bottom margin: pixels cut off the bottom";
+                edited = edited.or(field(ui, bottom, most, hint).map(|v| (Side::Bottom, v)));
+            });
+            ui.end_row();
+        });
+        ui.add_space(14.0);
+        ui.vertical(|ui| {
+            egui::Grid::new(("crop size", item.id)).spacing([6.0, 4.0]).show(ui, |ui| {
+                ui.label("Width");
+                let mut across = crop.width;
+                let field = egui::DragValue::new(&mut across).range(1..=width).suffix(" px");
+                if ui.add(field).changed() {
+                    edited = Some((Side::Width, across));
+                }
+                ui.end_row();
+                ui.label("Height");
+                let mut down = crop.height;
+                let field = egui::DragValue::new(&mut down).range(1..=height).suffix(" px");
+                if ui.add(field).changed() {
+                    edited = Some((Side::Height, down));
+                }
+                ui.end_row();
+            });
+            ui.add_space(4.0);
+            let whole = if exact.is_some() { "Middle" } else { "Whole picture" };
+            if ui
+                .add_enabled(item.choices.crop.is_some(), egui::Button::new(whole))
+                .on_hover_text(if exact.is_some() {
+                    "As much of the middle as the exact scale takes"
+                } else {
+                    "All of the picture"
+                })
+                .clicked()
+            {
+                item.choices.crop = exact.and_then(|exact| {
+                    let middle = (Keep::Middle, Keep::Middle);
+                    let ratio = ratio(item.view.aspect, (width, height));
+                    exact.fit(full, middle, ratio, (width, height)).filter(|crop| *crop != full)
+                });
+            }
+        });
+    });
+    let Some((side, value)) = edited else { return };
+    let ratio = ratio(item.view.aspect, (width, height));
+    let mut crop = edit_crop(crop, side, value, ratio, (width, height));
+    if let Some(exact) = exact {
+        let start = (Keep::Start, Keep::Start);
+        crop = exact.fit(crop, start, ratio, (width, height)).unwrap_or(crop);
+    }
+    item.choices.crop = (crop != full).then_some(crop);
+}
+
+/// `crop` with `side` set to `value`, in a `size` picture: a margin moves
+/// its edge alone, a width or height the far edge, back from the picture's
+/// where it would leave it; with a `ratio` kept, the other way follows,
+/// from the top or the left.
+fn edit_crop(crop: Crop, side: Side, value: u32, ratio: Option<f64>, size: (u32, u32)) -> Crop {
+    let (width, height) = size;
+    let (right, bottom) = (crop.x + crop.width, crop.y + crop.height);
+    let mut crop = crop;
+    match side {
+        Side::Left => (crop.x, crop.width) = (value.min(right - 1), right - value.min(right - 1)),
+        Side::Top => {
+            (crop.y, crop.height) = (value.min(bottom - 1), bottom - value.min(bottom - 1))
+        }
+        Side::Right => crop.width = width.saturating_sub(value + crop.x).max(1),
+        Side::Bottom => crop.height = height.saturating_sub(value + crop.y).max(1),
+        Side::Width => {
+            crop.width = value.clamp(1, width);
+            crop.x = crop.x.min(width - crop.width);
+        }
+        Side::Height => {
+            crop.height = value.clamp(1, height);
+            crop.y = crop.y.min(height - crop.height);
+        }
+    }
+    let Some(ratio) = ratio else { return crop };
+    let across = matches!(side, Side::Left | Side::Right | Side::Width);
+    if across {
+        crop.height = (f64::from(crop.width) / ratio).round().max(1.0) as u32;
+    } else {
+        crop.width = (f64::from(crop.height) * ratio).round().max(1.0) as u32;
+    }
+    // too large for the picture: smaller, keeping its shape
+    let shrink = (f64::from(width) / f64::from(crop.width))
+        .min(f64::from(height) / f64::from(crop.height))
+        .min(1.0);
+    if shrink < 1.0 {
+        crop.width = ((f64::from(crop.width) * shrink).round() as u32).clamp(1, width);
+        crop.height = ((f64::from(crop.height) * shrink).round() as u32).clamp(1, height);
+    }
+    crop.x = crop.x.min(width - crop.width);
+    crop.y = crop.y.min(height - crop.height);
+    crop
+}
+
+/// A small picture of a `size` input with `crop` on it, dashed, around a
+/// mountain.
+fn sketch(ui: &mut egui::Ui, (width, height): (u32, u32), crop: Crop) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(SKETCH, SKETCH), egui::Sense::hover());
+    let visuals = ui.visuals();
+    let (back, edge) = (visuals.extreme_bg_color, visuals.widgets.noninteractive.bg_stroke);
+    let accent = crate::theme::accent(visuals);
+    let weak = visuals.weak_text_color();
+    let painter = ui.painter_at(rect);
+    // the input at its shape, its shorter side at least half the room
+    let scale = (SKETCH / width.max(height) as f32).max(SKETCH / 2.0 / width.min(height) as f32);
+    let picture = egui::Rect::from_center_size(
+        rect.center(),
+        egui::vec2(width as f32 * scale, height as f32 * scale).min(rect.size()),
+    );
+    let (across, down) = (picture.width() / width as f32, picture.height() / height as f32);
+    painter.rect(picture, 2.0, back, edge, egui::StrokeKind::Inside);
+    let cut = egui::Rect::from_min_size(
+        picture.min + egui::vec2(crop.x as f32 * across, crop.y as f32 * down),
+        egui::vec2(crop.width as f32 * across, crop.height as f32 * down),
+    );
+    painter.rect_filled(cut, 0.0, accent.gamma_multiply(0.15));
+    let dashed = egui::Stroke::new(1.0, accent);
+    for [from, to] in [
+        [cut.left_top(), cut.right_top()],
+        [cut.right_top(), cut.right_bottom()],
+        [cut.right_bottom(), cut.left_bottom()],
+        [cut.left_bottom(), cut.left_top()],
+    ] {
+        painter.extend(egui::Shape::dashed_line(&[from, to], dashed, 3.0, 3.0));
+    }
+    // two peaks in its middle
+    let side = cut.width().min(cut.height()) * 0.6;
+    let at = |x: f32, y: f32| cut.center() + egui::vec2(x * side, y * side);
+    let peaks = vec![at(-0.5, 0.3), at(-0.15, -0.25), at(0.05, 0.05), at(0.25, -0.1), at(0.5, 0.3)];
+    painter.with_clip_rect(cut).add(egui::Shape::line(peaks, egui::Stroke::new(1.5, weak)));
 }
 
 /// The shape the crop keeps: none, the input's, or one typed as a ratio
@@ -407,21 +583,6 @@ fn aspect_ratio(
     if typed && custom {
         item.view.aspect = Aspect::Ratio(width, height);
         keep_aspect(item, size, exact);
-    }
-    let square =
-        item.choices.crop.map_or(size.is_none_or(|(w, h)| w == h), |c| c.width == c.height);
-    // its room always kept, and shown or not once the crop is let go of
-    // rather than as it is dragged through square
-    if item.format == Format::Tgs {
-        let id = ui.id().with(("square", item.id));
-        let square = if ui.input(|input| input.pointer.primary_down()) {
-            ui.data(|data| data.get_temp(id)).unwrap_or(square)
-        } else {
-            ui.data_mut(|data| data.insert_temp(id, square));
-            square
-        };
-        let warning = RichText::new("⚠ Not square: TGS stickers get transparent margins");
-        ui.add_visible(!square, egui::Label::new(warning.color(widgets::WARN)));
     }
 }
 
@@ -533,6 +694,26 @@ mod tests {
     use tgradish_core::config::Config;
     use tgradish_core::ffmpeg::FfmpegChoice;
     use tgradish_core::telegram;
+
+    #[test]
+    fn edits_the_crop_from_any_side() {
+        let crop = Crop { x: 10, y: 20, width: 30, height: 40 };
+        let size = (100, 80);
+        let edit = |side, value| edit_crop(crop, side, value, None, size);
+        // a margin moves its edge alone
+        assert_eq!(edit(Side::Left, 5), Crop { x: 5, width: 35, ..crop });
+        assert_eq!(edit(Side::Right, 50), Crop { width: 40, ..crop });
+        assert_eq!(edit(Side::Top, 30), Crop { y: 30, height: 30, ..crop });
+        assert_eq!(edit(Side::Bottom, 0), Crop { height: 60, ..crop });
+        // a width the far edge, back from the picture's where it would leave
+        assert_eq!(edit(Side::Width, 50), Crop { width: 50, ..crop });
+        assert_eq!(edit(Side::Width, 95), Crop { x: 5, width: 95, ..crop });
+        // a shape kept: the other way follows, smaller where it won't fit
+        let square = |side, value| edit_crop(crop, side, value, Some(1.0), size);
+        assert_eq!(square(Side::Width, 50), Crop { x: 10, y: 20, width: 50, height: 50 });
+        assert_eq!(square(Side::Height, 70), Crop { x: 10, y: 10, width: 70, height: 70 });
+        assert_eq!(square(Side::Width, 100), Crop { x: 0, y: 0, width: 80, height: 80 });
+    }
 
     use super::*;
     use crate::testing::{finish, harness, video};
