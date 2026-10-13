@@ -550,6 +550,11 @@ impl Sprite {
         &self.tags
     }
 
+    /// How many frames the file has, which tags count from 0.
+    pub fn frame_count(&self) -> usize {
+        self.frames.len()
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }

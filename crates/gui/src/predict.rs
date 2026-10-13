@@ -79,6 +79,23 @@ fn area(from: f64, to: f64, size: usize) -> (usize, Vec<f32>) {
     (first, weights)
 }
 
+/// `sizes` as small as fit `most` pixels along the longer side, the same
+/// shape, for a picture of the result shown smaller than it is.
+pub fn within(sizes: &Sizes, most: usize) -> Sizes {
+    let longer = sizes.width.max(sizes.height).max(1) as f64;
+    let factor = (most as f64 / longer).min(1.0);
+    if factor >= 1.0 {
+        return *sizes;
+    }
+    let scaled = |value: u32| ((f64::from(value) * factor).round() as u32).max(1);
+    Sizes {
+        scaled: (scaled(sizes.scaled.0), scaled(sizes.scaled.1)),
+        width: scaled(sizes.width),
+        height: scaled(sizes.height),
+        scaling: sizes.scaling,
+    }
+}
+
 /// The WebM result of `frame` (`width` pixels wide, straight RGBA):
 /// `part` scaled to `sizes.scaled` the way `sizes.scaling` does, cropped
 /// or padded around the middle to the result's size.

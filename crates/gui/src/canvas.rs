@@ -54,8 +54,9 @@ impl Screen {
 #[derive(Default)]
 pub struct Inset {
     texture: Option<egui::TextureHandle>,
-    /// What the texture shows, and whether it is drawn sharp.
-    key: Option<(u64, bool)>,
+    /// What the texture shows, whether it is drawn sharp, and the most
+    /// pixels along a side it was made with.
+    key: Option<(u64, bool, usize)>,
     /// Whether a part of a clip looks like pixel art, by their key.
     art: Option<(u64, bool)>,
     /// What a `.tgs` result shows of a clip, by its key.
@@ -157,12 +158,15 @@ impl Inset {
         self.motion.is_some() && self.drawn.is_some_and(|(_, (on, ..), _)| !on)
     }
 
-    /// Shows the picture `make` makes, made again only when `key` changes,
-    /// as large as fits `room`, at `align` in it, labelled as the result,
-    /// with `details` under that and then how large it shows. With
-    /// `controls`, buttons on the label change its `size`, one of
-    /// [`INSET_SIZES`], and dragging it or its label to another corner of
-    /// `view` than its `corner` moves it there.
+    /// Shows the picture `make` makes of a `full` sized result, made again
+    /// only when `key` changes, as large as fits `room`, at `align` in it,
+    /// labelled as the result, with `details` under that and then how
+    /// large it shows. `make` is told the most pixels along a side the
+    /// picture shows with, which it needn't make more of. With `controls`,
+    /// buttons on the label change its `size`, one of [`INSET_SIZES`], and
+    /// dragging it or its label to another corner of `view` than its
+    /// `corner` moves it there.
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -170,34 +174,35 @@ impl Inset {
         (corner, size, controls): (Corner, usize, bool),
         key: u64,
         details: Option<&str>,
-        make: impl FnOnce() -> egui::ColorImage,
+        full: Vec2,
+        make: impl FnOnce(usize) -> egui::ColorImage,
     ) -> Option<InsetChange> {
         let ppp = ui.ctx().pixels_per_point();
         let room_size = room.size().max(Vec2::splat(1.0));
-        // the size of the image isn't known before it is made, so the
-        // last one's is used to choose its filtering
-        let last = self.texture.as_ref().map(|texture| texture.size_vec2());
         let fits = |size: Vec2| (room_size.x / size.x).min(room_size.y / size.y).min(1.0 / ppp);
-        let sharp = last.is_some_and(|size| fits(size) * ppp >= 1.0);
-        if self.key != Some((key, sharp)) || self.texture.is_none() {
+        let full = full.max(Vec2::splat(1.0));
+        let shown = full * fits(full);
+        // as many pixels as show, and no more than the result has
+        let most = ((shown.max_elem() * ppp).ceil() as usize).max(1);
+        let sharp = fits(full) * ppp >= 1.0;
+        if self.key != Some((key, sharp, most)) || self.texture.is_none() {
             let options =
                 if sharp { egui::TextureOptions::NEAREST } else { egui::TextureOptions::LINEAR };
-            let image = make();
+            let image = make(most);
             match &mut self.texture {
                 Some(texture) => texture.set(image, options),
                 None => self.texture = Some(ui.ctx().load_texture("inset", image, options)),
             }
-            self.key = Some((key, sharp));
+            self.key = Some((key, sharp, most));
         }
         let texture = self.texture.as_ref().expect("set above");
-        let shown = texture.size_vec2() * fits(texture.size_vec2());
         let docked = Rect::from_min_size(room.min + (room.size() - shown) * align, shown);
         let painter = ui.painter_at(view);
         // a result's size, and how much of a screen pixel each of its
         // pixels takes
         let label = match details {
             Some(details) => {
-                let scale = (fits(texture.size_vec2()) * ppp * 100.0).round();
+                let scale = (fits(full) * ppp * 100.0).round();
                 format!("Result at {scale}%\n{details}")
             }
             None => "Result".to_owned(),
@@ -1024,9 +1029,9 @@ mod tests {
             let view = ui.max_rect();
             let room = Rect::from_min_size(view.max - vec2(100.0, 100.0), vec2(80.0, 80.0));
             let place = (Corner::BottomRight, *size, true);
-            let red = || egui::ColorImage::filled([8, 8], Color32::RED);
+            let red = |_| egui::ColorImage::filled([8, 8], Color32::RED);
             let room = (view, room, vec2(1.0, 1.0));
-            *change = inset.show(ui, room, place, 1, None, red).or(*change);
+            *change = inset.show(ui, room, place, 1, None, vec2(8.0, 8.0), red).or(*change);
         };
         let mut harness = egui_kittest::Harness::new_ui_state(show, (Inset::default(), None, 2));
         harness.get_by_label("+").click();

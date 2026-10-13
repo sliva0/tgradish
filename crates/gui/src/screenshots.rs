@@ -171,7 +171,8 @@ fn screenshots() {
         layer("sketch", false, 0, false),
     ];
     let walker = tgradish_corpus::sprite("walker_2x");
-    let bytes = tgradish_corpus::encode::aseprite_with(&walker, &[("idle", 0, 1)], &layers);
+    let tags = [("idle", 0, 1), ("wave", 1, 3), ("walk", 2, 7)];
+    let bytes = tgradish_corpus::encode::aseprite_with(&walker, &tags, &layers);
     let ase = dir.path().join("walker.ase");
     std::fs::write(&ase, bytes).unwrap();
     harness.state_mut().add(vec![ase]);

@@ -71,7 +71,7 @@ impl App {
                 && (item.art.is_idle() || (item.art_reading != read_with && !item.art.is_loading()))
             {
                 item.art_reading = read_with;
-                item.art = Load::Loading(Art::load(
+                item.art.reload(Art::load(
                     ctx,
                     item.inputs.clone(),
                     item.sequence,
@@ -96,16 +96,16 @@ impl App {
                     }
                     item.video_drawing = drawing.clone();
                     let (inputs, sequence) = (item.inputs.clone(), item.sequence);
-                    item.video = match &backend {
-                        Ok(backend) => Load::Loading(Video::load(
+                    match &backend {
+                        Ok(backend) => item.video.reload(Video::load(
                             ctx,
                             backend.clone(),
                             inputs,
                             sequence,
                             drawing,
                         )),
-                        Err(message) => Load::Failed(message.clone()),
-                    };
+                        Err(message) => item.video = Load::Failed(message.clone()),
+                    }
                     reading += 1;
                 }
             }
@@ -128,7 +128,8 @@ impl App {
             return;
         }
         let range = item.range().map(|(start, end)| (start, end - start));
-        let Some(video) = item.video.ready() else { return };
+        // drawn pixel art has every frame at its full size already
+        let Some(video) = item.video.ready().filter(|video| !video.complete) else { return };
         let still = video.probe.still_image;
         if !item.view.playing || still {
             let time = if still { 0.0 } else { item.view.time };
@@ -587,7 +588,8 @@ mod tests {
         finish(&mut harness);
         let item = &harness.state().items[0];
         assert_eq!((item.kind, item.format), (Kind::Aseprite, Format::Tgs));
-        let (tags, layers) = item.aseprite().expect("read");
+        let (tags, layers, frames) = item.aseprite().expect("read");
+        assert_eq!(frames, 8);
         let tags: Vec<_> = tags.iter().map(|tag| tag.name.clone()).collect();
         let layers: Vec<_> = layers.iter().map(|l| (l.name.as_str(), l.visible)).collect();
         assert_eq!(
@@ -613,7 +615,7 @@ mod tests {
             harness.state_mut().items[0].format = format;
             finish(&mut harness);
             let item = &harness.state().items[0];
-            assert_eq!(item.aseprite().map(|(tags, _)| tags.len()), Some(1), "{format:?}");
+            assert_eq!(item.aseprite().map(|(tags, ..)| tags.len()), Some(1), "{format:?}");
             let length = item.input_length().unwrap_or_default();
             assert!((length - 0.2).abs() < 1e-3, "{format:?}: {length}");
             convert(&harness);

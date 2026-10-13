@@ -20,6 +20,10 @@ pub struct Readable {
     dir: Option<tempfile::TempDir>,
     tags: Vec<Tag>,
     layers: Vec<LayerInfo>,
+    /// How many frames the Aseprite file has.
+    frame_count: usize,
+    /// What was drawn, until it is taken, and whether it is a still picture.
+    drawn: Option<(Animation, bool)>,
 }
 
 impl Readable {
@@ -32,6 +36,12 @@ impl Readable {
         self.dir.is_some()
     }
 
+    /// The frames drawn, each lasting its own time, and whether they are a
+    /// still picture, as ffmpeg reads them, for showing without it.
+    pub fn take_drawn(&mut self) -> Option<(Animation, bool)> {
+        self.drawn.take()
+    }
+
     /// The tags of the Aseprite file drawn, which `tag` chooses from.
     pub fn tags(&self) -> &[Tag] {
         &self.tags
@@ -41,6 +51,11 @@ impl Readable {
     /// them, which `show-layers` and `hide-layers` choose from.
     pub fn layers(&self) -> &[LayerInfo] {
         &self.layers
+    }
+
+    /// How many frames the Aseprite file drawn has, its tags' or not.
+    pub fn frame_count(&self) -> usize {
+        self.frame_count
     }
 }
 
@@ -84,8 +99,10 @@ pub fn readable(
     if !aseprite && (options.tag.is_some() || !layers.is_empty()) {
         return Err(Error::InvalidOptions("tags and layers are only in Aseprite files".into()));
     }
-    let (animation, tags, listed) = match sequence {
-        Some(frames) => (crate::tgs::read_sequence(frames, options.fps, cancel)?, vec![], vec![]),
+    let (animation, tags, listed, frame_count) = match sequence {
+        Some(frames) => {
+            (crate::tgs::read_sequence(frames, options.fps, cancel)?, vec![], vec![], 0)
+        }
         None if aseprite => {
             let unreadable = |message: String| Error::Probe { path: input.to_path_buf(), message };
             cancel.check()?;
@@ -95,7 +112,7 @@ pub fn readable(
             let animation = sprite
                 .animation(options.tag.as_deref(), &layers)
                 .map_err(|err| unreadable(err.to_string()))?;
-            (animation, sprite.tags().to_vec(), sprite.layers())
+            (animation, sprite.tags().to_vec(), sprite.layers(), sprite.frame_count())
         }
         None if is_animated_webp(input) => {
             let unreadable = |message: String| Error::Probe { path: input.to_path_buf(), message };
@@ -103,11 +120,12 @@ pub fn readable(
             let bytes = std::fs::read(input).map_err(|err| unreadable(err.to_string()))?;
             let animation = frames::decode(&bytes, &frames::DecodeOptions::default())
                 .map_err(|err| unreadable(err.to_string()))?;
-            (animation, vec![], vec![])
+            (animation, vec![], vec![], 0)
         }
         None => {
             let path = input.to_path_buf();
-            return Ok(Readable { path, dir: None, tags: Vec::new(), layers: Vec::new() });
+            let (tags, layers, drawn) = (Vec::new(), Vec::new(), None);
+            return Ok(Readable { path, dir: None, tags, layers, frame_count: 0, drawn });
         }
     };
     cancel.check()?;
@@ -119,7 +137,8 @@ pub fn readable(
     let animated = sequence.is_some() || animation.frames().len() > 1;
     write_png(&path, &animation, animated)
         .map_err(|err| Error::Io(std::io::Error::other(err.to_string())))?;
-    Ok(Readable { path, dir: Some(dir), tags, layers: listed })
+    let drawn = Some((animation, !animated));
+    Ok(Readable { path, dir: Some(dir), tags, layers: listed, frame_count, drawn })
 }
 
 /// Writes `animation` as a PNG, `animated` with each frame lasting its own
