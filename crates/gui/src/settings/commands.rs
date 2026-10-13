@@ -232,6 +232,7 @@ mod tests {
             extra_args: true,
             output: None,
             config_path: Some(std::path::Path::new("/elsewhere/config.toml")),
+            presets_dir: None,
         };
         let mut video = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
         video.format = Format::Webm;

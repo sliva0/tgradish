@@ -33,6 +33,9 @@ pub(crate) struct App {
     pub(crate) config_path: Option<PathBuf>,
     pub(crate) config: Config,
     pub(crate) presets: Presets,
+    /// Where the user's presets are kept, and saved to: none in tests,
+    /// unless one gives a folder.
+    pub(crate) presets_dir: Option<PathBuf>,
     pub(crate) items: Vec<Item>,
     pub(crate) next_id: u64,
     pub(crate) selected: Option<u64>,
@@ -102,6 +105,7 @@ impl App {
             Presets::builtin()
         });
         let mut app = App::with(config, config_path, presets, message);
+        app.presets_dir = tgradish_core::presets::user_dir();
         if let Some(dir) = paths::state_dir() {
             app.reopen(dir.join("session.json"));
         }
@@ -161,6 +165,7 @@ impl App {
             config_path,
             config,
             presets,
+            presets_dir: None,
             items: Vec::new(),
             next_id: 0,
             selected: None,
@@ -369,6 +374,12 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // with the one just saved
+        if crate::settings::presets_saved(&ctx)
+            && let Ok(presets) = Presets::load(self.presets_dir.as_deref())
+        {
+            self.presets = presets;
+        }
         self.follow_accent(&ctx);
         if !self.config.gui.smooth_scrolling {
             direct_scrolling(&ctx);
