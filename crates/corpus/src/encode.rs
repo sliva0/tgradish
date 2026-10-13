@@ -94,8 +94,14 @@ pub fn webp(sprite: &Sprite) -> Vec<u8> {
     out
 }
 
-/// The colour of an Aseprite file's tags: Aseprite's green.
-pub const TAG_COLOUR: Colour = [0x6a, 0xbe, 0x30, 255];
+/// The colours of an Aseprite file's tags, in turn: Aseprite's green
+/// first.
+pub const TAG_COLOURS: [Colour; 4] = [
+    [0x6a, 0xbe, 0x30, 255],
+    [0x5b, 0x6e, 0xe1, 255],
+    [0xd7, 0x7b, 0xba, 255],
+    [0xfb, 0xf2, 0x36, 255],
+];
 
 /// A layer of an Aseprite file besides the art's: a group, or an image
 /// layer, empty but for one named "sketch".
@@ -111,7 +117,7 @@ pub struct Layer<'a> {
 /// An Aseprite file in indexed colour, index 0 clear, with a layer of the
 /// art, a cel per frame, and over it a hidden layer named "sketch", as
 /// artists leave them, of a 2x2 block at the top left in the first frame;
-/// and `tags` as `(name, first, last)` frames, each [`TAG_COLOUR`].
+/// and `tags` as `(name, first, last)` frames, of [`TAG_COLOURS`] in turn.
 pub fn aseprite(sprite: &Sprite, tags: &[(&str, u16, u16)]) -> Vec<u8> {
     let sketch = Layer { name: "sketch", group: false, level: 0, visible: false };
     aseprite_with(sprite, tags, &[sketch])
@@ -189,9 +195,9 @@ pub fn aseprite_with(sprite: &Sprite, tags: &[(&str, u16, u16)], layers: &[Layer
                 chunks.push(chunk(0x2018, &data));
                 // each tag's colour in user data after them, as Aseprite
                 // 1.3 keeps it
-                for _ in tags {
+                for colour in TAG_COLOURS.iter().cycle().take(tags.len()) {
                     let mut data = 2u32.to_le_bytes().to_vec();
-                    data.extend(TAG_COLOUR);
+                    data.extend(colour);
                     chunks.push(chunk(0x2020, &data));
                 }
             }

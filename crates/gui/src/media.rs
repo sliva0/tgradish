@@ -177,14 +177,24 @@ impl<T> Drop for Task<T> {
 pub enum Load<T> {
     Idle,
     Loading(Task<T>),
+    /// What was loaded last, shown until what is loading again is there.
+    Reloading(T, Task<T>),
     Ready(T),
     Failed(String),
 }
 
 impl<T> Load<T> {
+    /// Loads with `task`, keeping what is loaded meanwhile.
+    pub fn reload(&mut self, task: Task<T>) {
+        *self = match std::mem::replace(self, Load::Idle) {
+            Load::Ready(value) | Load::Reloading(value, _) => Load::Reloading(value, task),
+            _ => Load::Loading(task),
+        };
+    }
+
     /// Takes in a finished load; true if it just finished.
     pub fn poll(&mut self) -> bool {
-        let Load::Loading(task) = self else { return false };
+        let (Load::Loading(task) | Load::Reloading(_, task)) = self else { return false };
         match task.poll() {
             Some(Ok(value)) => *self = Load::Ready(value),
             Some(Err(message)) => *self = Load::Failed(message),
@@ -195,7 +205,7 @@ impl<T> Load<T> {
 
     pub fn ready(&self) -> Option<&T> {
         match self {
-            Load::Ready(value) => Some(value),
+            Load::Ready(value) | Load::Reloading(value, _) => Some(value),
             _ => None,
         }
     }
@@ -205,7 +215,7 @@ impl<T> Load<T> {
     }
 
     pub fn is_loading(&self) -> bool {
-        matches!(self, Load::Loading(_))
+        matches!(self, Load::Loading(_) | Load::Reloading(..))
     }
 }
 
@@ -230,7 +240,14 @@ pub struct Video {
     pub starts: Vec<f64>,
     /// What ffmpeg reads: the input, or an Aseprite file drawn for it.
     pub readable: Arc<Readable>,
+    /// The overview is every frame at its full size, as pixel art drawn
+    /// for ffmpeg is: nothing more is read to play or pause it.
+    pub complete: bool,
 }
+
+/// Most bytes of drawn frames shown as they are, rather than read again
+/// through ffmpeg like a video.
+const DRAWN_BYTES: usize = 256 << 20;
 
 impl Video {
     /// One file, or with `sequence` the frames of one animation; `drawing`
@@ -244,8 +261,15 @@ impl Video {
     ) -> Task<Video> {
         Task::spawn(ctx, move |cancel| {
             let frames = (sequence || inputs.len() > 1).then_some(&inputs[..]);
-            let readable = drawn::readable(&inputs[0], frames, &drawing, cancel)
+            let mut readable = drawn::readable(&inputs[0], frames, &drawing, cancel)
                 .map_err(|err| err.to_string())?;
+            // pixel art drawn here, shown as it was drawn, without ffmpeg
+            if let Some((animation, still)) = readable.take_drawn() {
+                let bytes = animation.frames().iter().map(|frame| frame.rgba.len()).sum::<usize>();
+                if bytes <= DRAWN_BYTES {
+                    return Ok(Video::of_drawn(animation, still, readable));
+                }
+            }
             let path = readable.path();
             let probe = backend.probe(path, cancel).map_err(|err| err.to_string())?;
             let request = FramesRequest {
@@ -269,8 +293,52 @@ impl Video {
                 }
             };
             let overview = Clip::from_frames(frames);
-            Ok(Video { probe, overview, starts, readable: Arc::new(readable) })
+            Ok(Video { probe, overview, starts, readable: Arc::new(readable), complete: false })
         })
+    }
+
+    /// Frames drawn for ffmpeg, as ffmpeg would read them from `readable`:
+    /// a still picture, or each frame lasting its own time.
+    fn of_drawn(
+        animation: tgradish_tgs::frames::Animation,
+        still: bool,
+        readable: Readable,
+    ) -> Video {
+        let (width, height) = (animation.width(), animation.height());
+        let mut times = vec![0.0];
+        let mut shortest = f64::INFINITY;
+        let frames: Vec<Vec<u8>> = animation
+            .into_frames()
+            .into_iter()
+            .map(|frame| {
+                let seconds = frame.duration.as_secs_f64();
+                shortest = shortest.min(seconds);
+                times.push(times.last().unwrap() + seconds);
+                frame.rgba
+            })
+            .collect();
+        let frames = if still { frames[..1].to_vec() } else { frames };
+        let length = *times.last().unwrap();
+        let count = frames.len() as f64;
+        let probe = Probe {
+            format: "apng".into(),
+            codec: "apng".into(),
+            width,
+            height,
+            fps: (!still).then(|| count / length),
+            base_fps: (!still).then(|| 1.0 / shortest),
+            duration: (!still).then_some(length),
+            start: 0.0,
+            alpha: true,
+            still_image: still,
+            orientation: Default::default(),
+            decoder: None,
+        };
+        let starts = if still { Vec::new() } else { times[..times.len() - 1].to_vec() };
+        // a picture as ffmpeg times one, a frame at its default rate
+        let times = if still { vec![0.0, 1.0 / probe.fps_or_default()] } else { times };
+        let overview = Clip { id: next_id(), width, height, frames, times, pixelated: true };
+        Video { probe, overview, starts, readable: Arc::new(readable), complete: true }
     }
 
     /// `length` seconds from `start` at up to 30 frames a second, for
@@ -335,6 +403,8 @@ pub struct Art {
     /// Aseprite tags and layers.
     pub tags: Vec<Tag>,
     pub layers: Vec<LayerInfo>,
+    /// How many frames an Aseprite file has, its tags' or not.
+    pub frame_count: usize,
 }
 
 impl Art {
@@ -362,7 +432,8 @@ impl Art {
             }
             let (width, height) = (source.width, source.height);
             let clip = Clip { id: next_id(), width, height, frames, times, pixelated: true };
-            Ok(Art { clip, tags: source.tags, layers: source.layers })
+            let (tags, layers, frame_count) = (source.tags, source.layers, source.frame_count);
+            Ok(Art { clip, tags, layers, frame_count })
         })
     }
 }

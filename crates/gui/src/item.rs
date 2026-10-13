@@ -394,7 +394,7 @@ pub struct Item {
     pub art_reading: TgsOptions,
     /// An Aseprite file's tags and layers as last read, shown while it is
     /// read again, so nothing under them moves.
-    pub aseprite_seen: Option<(Vec<Tag>, Vec<LayerInfo>)>,
+    pub aseprite_seen: Option<(Vec<Tag>, Vec<LayerInfo>, usize)>,
     pub input_thumb: Option<egui::TextureHandle>,
     /// The conversion waiting or running.
     pub job: Option<(Job, Format, Choices)>,
@@ -451,16 +451,19 @@ impl Item {
 
     /// The tags and layers of an Aseprite input, as read for the current
     /// format.
-    pub fn aseprite(&self) -> Option<(&[Tag], &[LayerInfo])> {
+    pub fn aseprite(&self) -> Option<(&[Tag], &[LayerInfo], usize)> {
         if self.kind != Kind::Aseprite {
             return None;
         }
         match self.format {
             Format::Webm | Format::Image => {
                 let readable = &self.video.ready()?.readable;
-                Some((readable.tags(), readable.layers()))
+                Some((readable.tags(), readable.layers(), readable.frame_count()))
             }
-            Format::Tgs => self.art.ready().map(|art| (&art.tags[..], &art.layers[..])),
+            Format::Tgs => {
+                let art = self.art.ready()?;
+                Some((&art.tags[..], &art.layers[..], art.frame_count))
+            }
         }
     }
 

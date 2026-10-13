@@ -119,7 +119,9 @@ pub fn convert(backend: &Backend, request: &Request, cancel: &CancelToken) -> Re
     // pixel art, drawn for ffmpeg with what a picture has: a sequence's
     // frames timed as by default, as frames are picked by time
     let (sequence, drawing) = (request.sequence.as_deref(), picture_options(&request.options));
-    let readable = crate::drawn::readable(&request.input, sequence, &drawing, cancel)?;
+    let mut readable = crate::drawn::readable(&request.input, sequence, &drawing, cancel)?;
+    // ffmpeg reads them from the file: not kept while it does
+    drop(readable.take_drawn());
     let input = readable.path();
     let source = backend.probe(input, cancel)?;
     // where frames start, to find the one that shows at a time; without

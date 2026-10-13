@@ -24,6 +24,9 @@ const SIDE: f32 = 300.0;
 const NARROWEST_SIDE: f32 = 240.0;
 /// The least the preview narrows to.
 const NARROWEST_PREVIEW: f32 = 200.0;
+/// Side of a `.tgs` result's small picture at its largest: shapes have no
+/// pixels, so this is as sharp as it needs.
+const TGS_INSET: usize = 256;
 /// Height kept for the timeline under a preview that plays: its 30 point
 /// track and the space around it.
 const TIMELINE: f32 = 38.0;
@@ -330,13 +333,16 @@ fn preview(
                                     sizes.scaling = Scaling::Sharp;
                                 }
                                 let key = inset_key((clip.id, frame, where_, sizes));
+                                let result = vec2(sizes.width as f32, sizes.height as f32);
+                                let label = label.as_deref();
                                 change =
-                                    inset.show(ui, place.0, place.1, key, label.as_deref(), || {
+                                    inset.show(ui, place.0, place.1, key, label, result, |most| {
+                                        let rgba = &clip.frames[frame];
                                         predict::webm(
-                                            &clip.frames[frame],
+                                            rgba,
                                             clip.width,
                                             where_,
-                                            &sizes,
+                                            &predict::within(&sizes, most),
                                         )
                                     });
                             }
@@ -357,11 +363,12 @@ fn preview(
                                 }
                             });
                             let key = inset_key((clip.id, frame, bounds, resize));
-                            change =
-                                inset.show(ui, place.0, place.1, key, label.as_deref(), || {
-                                    let rgba = &clip.frames[frame];
-                                    predict::tgs(rgba, clip.width, bounds, 256, resize)
-                                });
+                            let label = label.as_deref();
+                            let result = vec2(TGS_INSET as f32, TGS_INSET as f32);
+                            change = inset.show(ui, place.0, place.1, key, label, result, |most| {
+                                let rgba = &clip.frames[frame];
+                                predict::tgs(rgba, clip.width, bounds, most, resize)
+                            });
                         }
                     }
                 }

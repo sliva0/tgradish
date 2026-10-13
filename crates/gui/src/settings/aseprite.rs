@@ -13,8 +13,6 @@ use crate::widgets::{self, row, section, section_with};
 const LEVEL: f32 = 20.0;
 /// Where a level's line runs, from the start of its indent.
 const TRUNK: f32 = 9.0;
-/// Side of a tag's colour swatch.
-const SWATCH: f32 = 10.0;
 
 /// What the preset reads of an Aseprite file, which the item's choices go
 /// over: a tag, and layers shown and hidden.
@@ -43,13 +41,14 @@ impl Preset {
 
 /// The tag and layers to read, if there is a choice.
 pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
-    let read = item.aseprite().map(|(tags, layers)| (tags.to_vec(), layers.to_vec()));
+    let read =
+        item.aseprite().map(|(tags, layers, frames)| (tags.to_vec(), layers.to_vec(), frames));
     if read.is_some() {
         item.aseprite_seen.clone_from(&read);
     }
     // as last read, while it is read again
     let read = read.or_else(|| item.aseprite_seen.clone().filter(|_| item.input_reading()));
-    let Some((tags, layers)) = read else {
+    let Some((tags, layers, frames)) = read else {
         // a tag or layer the file no longer has, as after it was edited:
         // nothing to choose from until it reads again
         let failed = item.input_error().is_some();
@@ -86,22 +85,26 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         let hint = "Only the frames of one tag, in its direction";
         row(ui, "Tag", hint, Ok(()), |ui| {
             let read = choices.tag.clone().or(preset.tag.clone());
-            // as many as the file has, and as long: radios wrap
-            ui.horizontal_wrapped(|ui| {
-                // a preset's tag can be changed here, not left out
-                let all = egui::RadioButton::new(read.is_none(), "All frames");
-                let all = ui
-                    .add_enabled(preset.tag.is_none(), all)
-                    .on_disabled_hover_text("The preset reads one tag");
-                if all.clicked() {
+            // a preset's tag can be changed here, not left out
+            let all = egui::RadioButton::new(read.is_none(), "All frames");
+            let all = ui
+                .add_enabled(preset.tag.is_none(), all)
+                .on_disabled_hover_text("The preset reads one tag");
+            if all.clicked() {
+                choices.tag = None;
+            }
+            let picked = egui::ScrollArea::horizontal()
+                .id_salt("tags")
+                .show(ui, |ui| tag_strip(ui, &tags, frames, read.as_deref()))
+                .inner;
+            match picked {
+                // the one read again: all of it, unless the preset reads it
+                Some(name) if read.as_ref() == Some(&name) && preset.tag.is_none() => {
                     choices.tag = None;
                 }
-                for tag in &tags {
-                    if tag_radio(ui, read.as_ref() == Some(&tag.name), tag).clicked() {
-                        choices.tag = Some(tag.name.clone());
-                    }
-                }
-            });
+                Some(name) => choices.tag = Some(name),
+                None => {}
+            }
         });
     }
     if listed {
@@ -110,33 +113,148 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     }
 }
 
-/// A tag to pick, its colour beside its name, its frames on hover.
-fn tag_radio(ui: &mut egui::Ui, selected: bool, tag: &Tag) -> egui::Response {
-    // room for the swatch before the name
-    let response = ui.radio(selected, format!("     {}", tag.name));
-    if tag.colour[3] > 0 {
-        let spacing = ui.spacing();
-        let left = response.rect.left() + spacing.icon_width + spacing.icon_spacing + 1.0;
-        let swatch = egui::Rect::from_center_size(
-            egui::pos2(left + SWATCH / 2.0, response.rect.center().y),
-            egui::vec2(SWATCH, SWATCH),
-        );
-        let [red, green, blue, alpha] = tag.colour;
-        let colour = egui::Color32::from_rgba_unmultiplied(red, green, blue, alpha);
-        let outline = ui.visuals().widgets.noninteractive.bg_stroke;
-        ui.painter().rect(swatch, 2.0, colour, outline, egui::StrokeKind::Inside);
-    }
-    let direction = match tag.direction {
-        Direction::Forward => "",
-        Direction::Reverse => ", in reverse",
-        Direction::PingPong => ", ping-pong",
-        Direction::PingPongReverse => ", ping-pong in reverse",
+/// Width of a frame's cell under the tags, and height of its row.
+const CELL: f32 = 18.0;
+const CELLS_HIGH: f32 = 16.0;
+/// Height of a row of tags.
+const LANE: f32 = 20.0;
+
+/// Which row each tag goes in, top first, and how many rows: earlier tags
+/// higher, and none where its label or its bracket would cross another's,
+/// nor where a higher tag's bracket comes down through it.
+fn lanes(spans: &[(f32, f32, f32)]) -> (Vec<usize>, usize) {
+    // what each row holds across, and where brackets come down through it
+    let mut taken: Vec<Vec<(f32, f32)>> = Vec::new();
+    let mut lanes = Vec::new();
+    let crosses = |held: &[(f32, f32)], from: f32, to: f32| {
+        held.iter().any(|&(start, end)| from < end + 4.0 && start < to + 4.0)
     };
-    // as Aseprite counts them, from 1
-    let (from, to) = (tag.from + 1, tag.to + 1);
-    let frames =
-        if from == to { format!("Frame {from}") } else { format!("Frames {from} to {to}") };
-    response.on_hover_text(format!("{frames}{direction}"))
+    for &(left, right, end) in spans {
+        let lane = (0..=taken.len())
+            .find(|&lane| {
+                lane == taken.len()
+                    || (!crosses(&taken[lane], left, end)
+                        && taken[lane + 1..]
+                            .iter()
+                            .all(|held| !crosses(held, left, left) && !crosses(held, right, right)))
+            })
+            .unwrap();
+        if lane == taken.len() {
+            taken.push(Vec::new());
+        }
+        taken[lane].push((left, end));
+        for below in &mut taken[lane + 1..] {
+            below.push((left, left));
+            below.push((right, right));
+        }
+        lanes.push(lane);
+    }
+    let rows = taken.len();
+    (lanes, rows)
+}
+
+/// The tags of a `frames` long file as Aseprite shows them: a label of each
+/// tag's colour, its bracket from there over the frames it holds, and the
+/// frames numbered under them, those of the tag `read` lit. The name of a
+/// tag clicked, if one is.
+fn tag_strip(ui: &mut egui::Ui, tags: &[Tag], frames: usize, read: Option<&str>) -> Option<String> {
+    let frames = frames.max(tags.iter().map(|tag| tag.to as usize + 1).max().unwrap_or(0));
+    let font = egui::FontId::proportional(12.0);
+    let galleys: Vec<_> = tags
+        .iter()
+        .map(|tag| {
+            let [red, green, blue, _] = tag.colour;
+            // dark text on light colours, light on dark
+            let light = 0.299 * f32::from(red) + 0.587 * f32::from(green) + 0.114 * f32::from(blue);
+            let text = if light > 140.0 { egui::Color32::BLACK } else { egui::Color32::WHITE };
+            ui.painter().layout_no_wrap(tag.name.clone(), font.clone(), text)
+        })
+        .collect();
+    // across: where its bracket starts and ends, and how far its label goes
+    let spans: Vec<(f32, f32, f32)> = tags
+        .iter()
+        .zip(&galleys)
+        .map(|(tag, galley)| {
+            let left = tag.from as f32 * CELL + 3.0;
+            let right = (tag.to + 1) as f32 * CELL - 3.0;
+            (left, right, right.max(left + galley.size().x + 10.0))
+        })
+        .collect();
+    let (lanes, rows) = lanes(&spans);
+    let width = (frames as f32 * CELL).max(spans.iter().map(|span| span.2).fold(0.0, f32::max));
+    let size = egui::vec2(width, rows as f32 * LANE + CELLS_HIGH + 2.0);
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let visuals = ui.visuals().clone();
+    let painter = ui.painter_at(rect.expand(1.0));
+    let cells_top = rect.top() + rows as f32 * LANE + 2.0;
+    // the frames, numbered from 1 as Aseprite counts them
+    let lit = tags.iter().find(|tag| Some(tag.name.as_str()) == read);
+    for frame in 0..frames {
+        let cell = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + frame as f32 * CELL, cells_top),
+            egui::vec2(CELL - 1.0, CELLS_HIGH),
+        );
+        let held = lit.is_some_and(|tag| (tag.from as usize..=tag.to as usize).contains(&frame));
+        let fill = if held {
+            crate::theme::accent(&visuals).gamma_multiply(0.35)
+        } else {
+            visuals.extreme_bg_color
+        };
+        painter.rect_filled(cell, 1.0, fill);
+        painter.text(
+            cell.center(),
+            egui::Align2::CENTER_CENTER,
+            (frame + 1).to_string(),
+            egui::FontId::proportional(10.0),
+            visuals.weak_text_color(),
+        );
+    }
+    let mut picked = None;
+    for (((tag, galley), &(left, right, _)), &lane) in
+        tags.iter().zip(&galleys).zip(&spans).zip(&lanes)
+    {
+        let [red, green, blue, alpha] = tag.colour;
+        let alpha = if alpha == 0 { 255 } else { alpha };
+        let colour = egui::Color32::from_rgba_unmultiplied(red, green, blue, alpha);
+        let top = rect.top() + lane as f32 * LANE;
+        let label = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + left - 3.0, top + 1.0),
+            galley.size() + egui::vec2(8.0, 3.0),
+        );
+        // the bracket: down from the label's middle at the first frame, and
+        // at the last, joined along the top
+        let stroke = egui::Stroke::new(2.0, colour);
+        let middle = label.center().y;
+        let (left, right) = (rect.left() + left, rect.left() + right);
+        painter.hline(left..=right, middle, stroke);
+        painter.vline(left, middle..=cells_top - 1.0, stroke);
+        painter.vline(right, middle..=cells_top - 1.0, stroke);
+        let response = ui
+            .interact(label, ui.id().with(("tag", &tag.name)), egui::Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let picked_now = Some(tag.name.as_str()) == read;
+        let edge = if picked_now || response.hovered() {
+            egui::Stroke::new(1.5, visuals.strong_text_color())
+        } else {
+            egui::Stroke::NONE
+        };
+        painter.rect(label, 3.0, colour, edge, egui::StrokeKind::Outside);
+        painter.galley(label.min + egui::vec2(4.0, 1.5), galley.clone(), egui::Color32::BLACK);
+        let direction = match tag.direction {
+            Direction::Forward => "",
+            Direction::Reverse => ", in reverse",
+            Direction::PingPong => ", ping-pong",
+            Direction::PingPongReverse => ", ping-pong in reverse",
+        };
+        // as Aseprite counts them, from 1
+        let (from, to) = (tag.from + 1, tag.to + 1);
+        let held =
+            if from == to { format!("Frame {from}") } else { format!("Frames {from} to {to}") };
+        if response.on_hover_text(format!("{held}{direction}")).clicked() {
+            picked = Some(tag.name.clone());
+        }
+    }
+    picked
 }
 
 /// Whether each layer is the last of its group's, or of the top level's.

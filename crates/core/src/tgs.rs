@@ -445,6 +445,8 @@ struct Loaded {
     /// Tags and layers of an Aseprite file, which the options choose from.
     tags: Vec<frames::Tag>,
     layers: Vec<frames::LayerInfo>,
+    /// How many frames an Aseprite file has, its tags' or not.
+    frame_count: usize,
     /// A video, read through ffmpeg from where `start` says.
     video: Option<VideoPart>,
     /// What reading gave up, worth saying.
@@ -464,6 +466,7 @@ impl Loaded {
             animation,
             tags: Vec::new(),
             layers: Vec::new(),
+            frame_count: 0,
             video: None,
             warnings: Vec::new(),
         }
@@ -506,15 +509,16 @@ fn load(
     let chosen =
         crate::drawn::layers(options.show_layers.as_deref(), options.hide_layers.as_deref());
     // an Aseprite file is parsed once, for its tags, layers and frames
-    let (decoded, tags, layers) = match frames::Format::detect(&bytes) {
+    let (decoded, tags, layers, frame_count) = match frames::Format::detect(&bytes) {
         Some(frames::Format::Aseprite) => {
             let sprite = frames::Sprite::read_with(&bytes, &limits).map_err(decode_error(input))?;
             let tags = sprite.tags().to_vec();
-            (sprite.animation(tag.as_deref(), &chosen), tags, sprite.layers())
+            let count = sprite.frame_count();
+            (sprite.animation(tag.as_deref(), &chosen), tags, sprite.layers(), count)
         }
         _ => {
             let options = DecodeOptions { tag, layers: chosen, limits };
-            (frames::decode(&bytes, &options), Vec::new(), Vec::new())
+            (frames::decode(&bytes, &options), Vec::new(), Vec::new(), 0)
         }
     };
     let animation = match sheet {
@@ -522,7 +526,7 @@ fn load(
         None => decoded,
     }
     .map_err(decode_error(input))?;
-    Ok(Loaded { tags, layers, ..Loaded::art(animation) })
+    Ok(Loaded { tags, layers, frame_count, ..Loaded::art(animation) })
 }
 
 /// Whether converting `inputs` into a `.tgs` reads a video through ffmpeg.
@@ -658,6 +662,8 @@ pub struct Source {
     /// Layers of an Aseprite file, as its Layers panel lists them, which
     /// `show-layers` and `hide-layers` choose from.
     pub layers: Vec<frames::LayerInfo>,
+    /// How many frames an Aseprite file has, its tags' or not.
+    pub frame_count: usize,
 }
 
 /// Reads pixel art the way [`convert`] does, with the options that choose
@@ -679,7 +685,8 @@ pub fn read_source(
         .into_iter()
         .map(|frame| (frame.rgba, frame.duration.as_secs_f64()))
         .collect();
-    Ok(Source { width, height, frames, tags: loaded.tags, layers: loaded.layers })
+    let (tags, layers, frame_count) = (loaded.tags, loaded.layers, loaded.frame_count);
+    Ok(Source { width, height, frames, tags, layers, frame_count })
 }
 
 /// Whether `path` is a `.tgs` sticker: by its extension, or for other
