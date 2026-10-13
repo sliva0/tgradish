@@ -232,33 +232,46 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
         ui.label(format!("  • {}, about {after} after", reduction(&step.reduction)));
     }
     if !progress.attempts.is_empty() {
-        let grid = egui::Grid::new(("attempts", item.id)).num_columns(5).spacing([10.0, 4.0]);
-        grid.striped(true).show(ui, |ui| {
-            for header in ["Encode", "frame rate", "rate", "size", "likeness"] {
-                ui.label(RichText::new(header).weak());
-            }
-            ui.end_row();
-            for attempt in &progress.attempts {
-                let kept = if done.kept == Some(attempt.number) { " (kept)" } else { "" };
-                ui.label(format!("{}{kept}", attempt.number));
-                ui.label(format!("{:.2} fps", attempt.params.fps));
-                ui.label(match attempt.params.rate {
-                    tgradish_core::events::Rate::Bitrate(kbps) => format!("{kbps:.0} kbit/s"),
-                    tgradish_core::events::Rate::Crf(crf) => format!("quality {crf}"),
-                    tgradish_core::events::Rate::Lossless => "lossless".into(),
-                });
-                match attempt.bytes {
-                    Some(bytes) => {
-                        let colour = if attempt.fits { widgets::GOOD } else { widgets::BAD };
-                        ui.colored_label(colour, widgets::kib(bytes))
-                    }
-                    None => ui.label("—"),
-                };
-                ui.label(
-                    attempt.ssim.map(|ssim| format!("{:.1}%", ssim * 100.0)).unwrap_or_default(),
-                );
+        // narrow, for the column beside the preview: units in the headers,
+        // and sideways where it still doesn't fit
+        egui::ScrollArea::horizontal().id_salt(("attempts", item.id)).show(ui, |ui| {
+            let grid = egui::Grid::new(("attempts", item.id)).num_columns(5).spacing([10.0, 4.0]);
+            grid.striped(true).show(ui, |ui| {
+                let headers = [
+                    ("#", "Each encode in turn; ✔ the one kept"),
+                    ("fps", "Frames a second"),
+                    ("kbit/s", "Bitrate, or the quality it was encoded at"),
+                    ("KiB", "Size, green where it fits the limit"),
+                    ("alike", "How like the input it looks (SSIM)"),
+                ];
+                for (header, hint) in headers {
+                    ui.label(RichText::new(header).weak()).on_hover_text(hint);
+                }
                 ui.end_row();
-            }
+                for attempt in &progress.attempts {
+                    let kept = done.kept == Some(attempt.number);
+                    let number = attempt.number.to_string();
+                    let number = if kept { format!("✔ {number}") } else { number };
+                    let number = RichText::new(number);
+                    ui.label(if kept { number.strong() } else { number });
+                    ui.label(widgets::trimmed(attempt.params.fps));
+                    ui.label(match attempt.params.rate {
+                        tgradish_core::events::Rate::Bitrate(kbps) => format!("{kbps:.0}"),
+                        tgradish_core::events::Rate::Crf(crf) => format!("q {crf}"),
+                        tgradish_core::events::Rate::Lossless => "lossless".into(),
+                    });
+                    match attempt.bytes {
+                        Some(bytes) => {
+                            let colour = if attempt.fits { widgets::GOOD } else { widgets::BAD };
+                            ui.colored_label(colour, format!("{:.1}", bytes as f64 / 1024.0))
+                        }
+                        None => ui.label("—"),
+                    };
+                    let alike = attempt.ssim.map(|ssim| format!("{:.1}%", ssim * 100.0));
+                    ui.label(alike.unwrap_or_default());
+                    ui.end_row();
+                }
+            });
         });
     }
     for warning in &progress.warnings {

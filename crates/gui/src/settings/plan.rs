@@ -151,9 +151,9 @@ fn picture(options: &Options, used: (u32, u32)) -> Vec<String> {
         f64::from(scaled.1) / f64::from(used.1.max(1)),
     );
     if across > down * 1.005 {
-        steps.push(format!("Stretched ×{} across", number(across / down)));
+        steps.push(format!("Stretched ×{} across", widgets::trimmed(across / down)));
     } else if down > across * 1.005 {
-        steps.push(format!("Stretched ×{} down", number(down / across)));
+        steps.push(format!("Stretched ×{} down", widgets::trimmed(down / across)));
     }
     if scaled.0 > sizes.width || scaled.1 > sizes.height {
         steps.push(format!("Its middle cut to {} × {}", sizes.width, sizes.height));
@@ -196,9 +196,9 @@ fn time(item: &Item, used: &Used, tempo: f64, cut: bool, steps: &mut Vec<String>
         steps.push(format!("Cut to {from} to {to} of its {of}"));
     }
     if tempo > 1.0 + 1e-9 {
-        steps.push(format!("Sped up ×{}", number(tempo)));
+        steps.push(format!("Sped up ×{}", widgets::trimmed(tempo)));
     } else if tempo < 1.0 - 1e-9 {
-        steps.push(format!("Slowed down ×{}", number(tempo)));
+        steps.push(format!("Slowed down ×{}", widgets::trimmed(tempo)));
     }
     let played = (end - start) / tempo;
     if !telegram::too_long(played) {
@@ -210,12 +210,6 @@ fn time(item: &Item, used: &Used, tempo: f64, cut: bool, steps: &mut Vec<String>
     } else {
         steps.push(format!("Told Telegram it is short, so all {played} plays"));
     }
-}
-
-/// A number, with as few decimals as it needs.
-fn number(value: f64) -> String {
-    let text = format!("{value:.2}");
-    text.trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
 #[cfg(test)]

@@ -51,6 +51,12 @@ pub fn section_with(ui: &mut egui::Ui, title: &str, beside: impl FnOnce(&mut egu
     ui.add_space(4.0);
 }
 
+/// A number with as few decimals as it needs, at most two: 60, 29.97.
+pub fn trimmed(value: f64) -> String {
+    let text = format!("{value:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
 /// How wide `text` is in buttons' font, plus `padding`.
 pub fn text_width(ui: &egui::Ui, text: &str, padding: f32) -> f32 {
     let galley = egui::WidgetText::from(text).into_galley(

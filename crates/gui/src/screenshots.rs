@@ -63,6 +63,15 @@ fn screenshots() {
         harness.state_mut().items[0].view.playing = false;
         harness.run_steps(3);
         save(&mut harness, "video");
+        // made, its encodes listed beside the preview
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        harness.state_mut().items[0].view.playing = false;
+        harness.set_size(egui::vec2(1280.0, 1600.0));
+        harness.run_steps(3);
+        save(&mut harness, "video-made");
+        harness.set_size(egui::vec2(1280.0, 820.0));
         // every setting of a picture and its time, on a tall window: a
         // typed shape, a fixed integer scale, and a faster tempo
         let item = &mut harness.state_mut().items[0];
