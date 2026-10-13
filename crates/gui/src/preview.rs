@@ -10,6 +10,7 @@ use tgradish_core::convert;
 use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::presets::Format;
 use tgradish_core::telegram;
+use tgradish_core::tgs::TgsOptions;
 
 use crate::app::App;
 use crate::canvas::{self, Cropping, Inset, InsetChange, Picture, Screen};
@@ -17,8 +18,12 @@ use crate::item::{Framing, Item, Show, Zoom};
 use crate::result::{details, summary};
 use crate::{predict, settings, theme, timeline, widgets};
 
-/// Width of the column beside the preview.
+/// Width of the column beside the preview, and the least it narrows to
+/// before the preview does.
 const SIDE: f32 = 300.0;
+const NARROWEST_SIDE: f32 = 240.0;
+/// The least the preview narrows to.
+const NARROWEST_PREVIEW: f32 = 200.0;
 /// Height kept for the timeline under a preview that plays: its 30 point
 /// track and the space around it.
 const TIMELINE: f32 = 38.0;
@@ -52,19 +57,23 @@ impl App {
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
         egui::Panel::top("preview").exact_size(preview_height).show(ui, |ui| {
             ui.horizontal_top(|ui| {
-                let side = SIDE;
-                let width = (ui.available_width() - side - 16.0).max(200.0);
+                let room = ui.available_width() - 16.0;
+                let side = SIDE.min(room - NARROWEST_PREVIEW).max(NARROWEST_SIDE);
+                let width = (room - side).max(NARROWEST_PREVIEW);
                 ui.allocate_ui_with_layout(
                     vec2(width, ui.available_height()),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         let tempo = item.tempo(&self.presets, &self.config);
+                        // what a .tgs is made with, the preset's included
+                        let tgs = item.choices.tgs_options(&self.presets, &self.config);
                         preview(
                             ui,
                             &mut self.screen,
                             &mut self.inset,
                             item,
                             (tempo, &mut in_frames),
+                            &tgs.unwrap_or_default(),
                             &mut look,
                         );
                     },
@@ -83,6 +92,7 @@ impl App {
                                 ui.set_max_width(side - 12.0);
                                 ui.add_space(6.0);
                                 settings::make(ui, item, &context);
+                                settings::plan(ui, item, &context);
                                 summary(ui, item, queued);
                                 details(ui, item);
                             });
@@ -129,6 +139,7 @@ fn preview(
     inset: &mut Inset,
     item: &mut Item,
     (tempo, in_frames): (f64, &mut bool),
+    tgs: &TgsOptions,
     look: &mut ResultPreview,
 ) {
     let has_result = item.result_clip.ready().is_some();
@@ -331,15 +342,25 @@ fn preview(
                             }
                         }
                         Format::Tgs => {
-                            let keep = item.choices.tgs.keep_canvas.unwrap_or(false);
-                            let bounds = inset
-                                .tgs_bounds(inset_key((clip.id, where_, keep)), || {
-                                    predict::tgs_bounds(&clip.frames, clip.width, where_, keep)
-                                });
-                            let key = inset_key((clip.id, frame, bounds));
+                            let keep = tgs.keep_canvas.unwrap_or(false);
+                            let resize = tgs.resize.unwrap_or(Resize::Pad);
+                            let scale = tgs.pixel_scale;
+                            let key = inset_key((clip.id, where_, keep, resize, scale));
+                            let bounds = inset.tgs_bounds(key, || {
+                                let found =
+                                    || predict::tgs_bounds(&clip.frames, clip.width, where_, keep);
+                                // cut square on the art's grid, as converting does
+                                match resize {
+                                    Resize::Crop => predict::tgs_square(clip, where_, keep, scale)
+                                        .unwrap_or_else(found),
+                                    _ => found(),
+                                }
+                            });
+                            let key = inset_key((clip.id, frame, bounds, resize));
                             change =
                                 inset.show(ui, place.0, place.1, key, label.as_deref(), || {
-                                    predict::tgs(&clip.frames[frame], clip.width, bounds, 256)
+                                    let rgba = &clip.frames[frame];
+                                    predict::tgs(rgba, clip.width, bounds, 256, resize)
                                 });
                         }
                     }

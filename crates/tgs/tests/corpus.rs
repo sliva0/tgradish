@@ -71,7 +71,7 @@ fn encodes_valid_lottie() {
         let fast = encode::Settings { effort: encode::Effort::Fast, ..Default::default() };
         let scene = encode::painter(&anim, &fast, None, &|| false).unwrap();
         assert_eq!(scene.compare(&anim), None, "{}", file.name);
-        let json = lay_out(&scene, &anim, Some("tgradish".into())).to_json(Style::default());
+        let json = lay_out(&scene, &anim, Some("tgradish".into()), false).to_json(Style::default());
         let (stats, issues) = check(json.as_bytes(), None).unwrap();
         let errors: Vec<_> = issues.iter().filter(|i| i.severity == Severity::Error).collect();
         assert!(errors.is_empty(), "{}: {errors:?}", file.name);

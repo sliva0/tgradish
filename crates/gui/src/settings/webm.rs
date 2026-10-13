@@ -53,7 +53,8 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
     let fitting = if fit == Fit::Off { Err("Off encodes once") } else { Ok(()) };
     row(ui, "Encodes at most", "How many times fitting may encode", fitting, |ui| {
         let default = DEFAULT_ATTEMPTS;
-        auto_number(ui, &mut options.attempts, "Default", Some(default), default, |value| {
+        let automatic = ("Default", "As many as land just under the limit");
+        auto_number(ui, &mut options.attempts, automatic, Some(default), default, |value| {
             value.range(1..=MAX_ATTEMPTS)
         });
     });
@@ -109,7 +110,8 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
     let hint = "Constant quality from 0, the best, to 63";
     row(ui, "Quality (CRF)", hint, quality, |ui| {
         let default = DEFAULT_CRF;
-        auto_number(ui, &mut options.crf, "Default", Some(default), default, |value| {
+        let automatic = ("Default", "A good quality at sticker sizes");
+        auto_number(ui, &mut options.crf, automatic, Some(default), default, |value| {
             value.range(CRFS)
         });
     });
@@ -123,7 +125,8 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
         Fit::Crf | Fit::Fps | Fit::Length => Err("Encoded at a constant quality, not a bitrate"),
     };
     row(ui, "Bitrate", "Used unless only a quality is set", bitrate, |ui| {
-        auto_number(ui, &mut options.bitrate, "From the size limit", None, 600.0, |value| {
+        let automatic = ("From the size limit", "As much as the length lets fit");
+        auto_number(ui, &mut options.bitrate, automatic, None, 600.0, |value| {
             value.range(1.0..=50_000.0).speed(5.0).max_decimals(0).suffix(" kbit/s")
         });
     });

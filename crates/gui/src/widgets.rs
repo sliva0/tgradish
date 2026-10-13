@@ -23,24 +23,31 @@ pub fn seconds(value: f64) -> String {
     }
 }
 
-/// A heading over a group of settings, apart from the group before.
+/// A heading over a group of settings, apart from the group before by a
+/// line, unless it is the first of its column.
 pub fn section(ui: &mut egui::Ui, title: &str) {
-    ui.add_space(14.0);
-    let (line, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-    ui.painter().hline(
-        line.x_range(),
-        line.center().y,
-        ui.visuals().widgets.noninteractive.bg_stroke,
-    );
-    ui.add_space(4.0);
-    heading(ui, title);
+    section_with(ui, title, |_| {});
 }
 
-/// A heading over the first group of settings, which nothing is above.
-pub fn heading(ui: &mut egui::Ui, title: &str) {
+/// A [`section`] with more beside its title, as `beside` adds.
+pub fn section_with(ui: &mut egui::Ui, title: &str, beside: impl FnOnce(&mut egui::Ui)) {
+    // nothing above it yet
+    if ui.min_rect().height() >= 1.0 {
+        ui.add_space(14.0);
+        let (line, _) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+        ui.painter().hline(
+            line.x_range(),
+            line.center().y,
+            ui.visuals().widgets.noninteractive.bg_stroke,
+        );
+        ui.add_space(4.0);
+    }
     ui.add_space(4.0);
-    ui.label(RichText::new(title).strong().size(15.5));
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(title).strong().size(15.5));
+        beside(ui);
+    });
     ui.add_space(4.0);
 }
 
@@ -213,8 +220,13 @@ pub fn chosen_hint<T: PartialEq + Copy>(ui: &mut egui::Ui, value: T, choices: &[
 
 /// The small button that goes back to the preset's value.
 pub fn reset(ui: &mut egui::Ui) -> bool {
+    reset_to(ui, "Back to the preset's value")
+}
+
+/// A small button back to what `hint` says.
+pub fn reset_to(ui: &mut egui::Ui, hint: &str) -> bool {
     ui.add(egui::Button::new(RichText::new("⟲").size(13.0)).small().frame(false))
-        .on_hover_text("Back to the preset's value")
+        .on_hover_text(hint)
         .clicked()
 }
 
@@ -247,10 +259,11 @@ pub fn flag(
 /// segments, `automatic` and Custom, and the number beside them, greyed
 /// out while automatic. It shows `shown` then, the automatic value if it
 /// is known, and a newly set number starts from it, or from `start`.
+/// `automatic` is the label of its segment, and what it means on hover.
 pub fn auto_number<T: egui::emath::Numeric>(
     ui: &mut egui::Ui,
     value: &mut Option<T>,
-    automatic: &str,
+    automatic: (&str, &str),
     shown: Option<T>,
     start: T,
     edit: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
@@ -258,7 +271,7 @@ pub fn auto_number<T: egui::emath::Numeric>(
     let mut changed = false;
     ui.horizontal(|ui| {
         let mut custom = value.is_some();
-        let choices = [(false, automatic, ""), (true, "Custom", "")];
+        let choices = [(false, automatic.0, automatic.1), (true, "Custom", "")];
         if segments(ui, &mut custom, &choices, |_| Ok(())) {
             *value = custom.then(|| shown.unwrap_or(start));
             changed = true;
@@ -472,7 +485,7 @@ mod tests {
         // speed that fits a minute into 3 seconds
         let mut harness = egui_kittest::Harness::new_ui_state(
             |ui, value: &mut Option<f64>| {
-                auto_number(ui, value, "Automatic", Some(20.0), 1.0, |field| {
+                auto_number(ui, value, ("Automatic", ""), Some(20.0), 1.0, |field| {
                     field.range(0.1..=10.0)
                 });
             },
@@ -485,7 +498,7 @@ mod tests {
         let mut greyed = egui_kittest::Harness::new_ui_state(
             |ui, value: &mut Option<u32>| {
                 ui.add_enabled_ui(false, |ui| {
-                    auto_number(ui, value, "All", Some(4), 4, |field| field.range(1..=4));
+                    auto_number(ui, value, ("All", ""), Some(4), 4, |field| field.range(1..=4));
                 });
             },
             Some(20),

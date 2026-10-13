@@ -159,7 +159,21 @@ fn screenshots() {
     save(&mut harness, "large-preview");
     harness.state_mut().items.last_mut().unwrap().view.input_zoom = Zoom::default();
     // an Aseprite file's tag and layers, its sketch shown, as a video
-    let ase = crate::testing::corpus(dir.path(), "walker_2x.ase", "walker.ase");
+    // with groups of layers, one hidden, as artists keep them
+    use tgradish_corpus::encode::Layer;
+    let layer = |name, group, level, visible| Layer { name, group, level, visible };
+    let layers = [
+        layer("Body", true, 0, true),
+        layer("shading", false, 1, true),
+        layer("outline", false, 1, true),
+        layer("Effects", true, 0, false),
+        layer("sparkles", false, 1, true),
+        layer("sketch", false, 0, false),
+    ];
+    let walker = tgradish_corpus::sprite("walker_2x");
+    let bytes = tgradish_corpus::encode::aseprite_with(&walker, &[("idle", 0, 1)], &layers);
+    let ase = dir.path().join("walker.ase");
+    std::fs::write(&ase, bytes).unwrap();
     harness.state_mut().add(vec![ase]);
     finish(&mut harness);
     let item = harness.state_mut().items.last_mut().unwrap();
@@ -169,6 +183,18 @@ fn screenshots() {
     harness.state_mut().items.last_mut().unwrap().view.playing = false;
     harness.run_steps(3);
     save(&mut harness, "aseprite");
+    // full screen, and all of its settings, as a video and as a .tgs
+    harness.set_size(egui::vec2(1920.0, 1080.0));
+    harness.run_steps(3);
+    save(&mut harness, "wide");
+    harness.set_size(egui::vec2(1280.0, 1900.0));
+    harness.run_steps(3);
+    save(&mut harness, "settings-aseprite");
+    harness.state_mut().items.last_mut().unwrap().format = Format::Tgs;
+    finish(&mut harness);
+    harness.run_steps(3);
+    save(&mut harness, "settings-tgs");
+    harness.set_size(egui::vec2(1280.0, 820.0));
     let last = harness.state().items.len() - 1;
     harness.state_mut().items.remove(last);
     let shown = harness.state().items.last().unwrap().id;

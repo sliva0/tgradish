@@ -9,7 +9,7 @@ use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Spoof};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::tgs::TgsOptions;
-use tgradish_tgs::frames::LayerInfo;
+use tgradish_tgs::frames::{LayerInfo, Tag};
 
 use crate::jobs::Job;
 use crate::media::{Art, Clip, Load, Video};
@@ -346,6 +346,7 @@ impl Framing {
             tgs: TgsOptions {
                 keep_canvas: tgs.keep_canvas,
                 pixel_scale: tgs.pixel_scale,
+                resize: tgs.resize,
                 sheet: tgs.sheet.clone(),
                 sheet_frames: tgs.sheet_frames,
                 fps: tgs.fps,
@@ -391,6 +392,9 @@ pub struct Item {
     /// The input read as pixel art, for `.tgs`, with what it was read with.
     pub art: Load<Art>,
     pub art_reading: TgsOptions,
+    /// An Aseprite file's tags and layers as last read, shown while it is
+    /// read again, so nothing under them moves.
+    pub aseprite_seen: Option<(Vec<Tag>, Vec<LayerInfo>)>,
     pub input_thumb: Option<egui::TextureHandle>,
     /// The conversion waiting or running.
     pub job: Option<(Job, Format, Choices)>,
@@ -424,6 +428,7 @@ impl Item {
             still: None,
             art: Load::Idle,
             art_reading: TgsOptions::default(),
+            aseprite_seen: None,
             input_thumb: None,
             job: None,
             made: None,
@@ -446,7 +451,7 @@ impl Item {
 
     /// The tags and layers of an Aseprite input, as read for the current
     /// format.
-    pub fn aseprite(&self) -> Option<(&[String], &[LayerInfo])> {
+    pub fn aseprite(&self) -> Option<(&[Tag], &[LayerInfo])> {
         if self.kind != Kind::Aseprite {
             return None;
         }
@@ -456,6 +461,14 @@ impl Item {
                 Some((readable.tags(), readable.layers()))
             }
             Format::Tgs => self.art.ready().map(|art| (&art.tags[..], &art.layers[..])),
+        }
+    }
+
+    /// Whether the input is being read for the current format.
+    pub fn input_reading(&self) -> bool {
+        match self.format {
+            Format::Webm | Format::Image => self.video.is_loading(),
+            Format::Tgs => self.art.is_loading(),
         }
     }
 

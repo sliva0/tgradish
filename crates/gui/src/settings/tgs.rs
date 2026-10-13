@@ -63,8 +63,10 @@ pub(super) fn tgs_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context)
         let all = base.reductions.clone().unwrap_or_else(|| Reduction::ALL.to_vec());
         let mut chosen = options.reductions.clone().unwrap_or_else(|| all.clone());
         let mut changed = false;
-        ui.horizontal_wrapped(|ui| {
-            for (kind, text, hint) in REDUCTIONS {
+        // a list, closer than rows of settings
+        ui.spacing_mut().item_spacing.y = 2.0;
+        for (index, (kind, text, hint)) in REDUCTIONS.into_iter().enumerate() {
+            ui.horizontal(|ui| {
                 let mut on = chosen.contains(&kind);
                 let response = ui.checkbox(&mut on, text);
                 let response =
@@ -77,11 +79,11 @@ pub(super) fn tgs_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context)
                     }
                     changed = true;
                 }
-            }
-            if options.reductions.is_some() && widgets::reset(ui) {
-                options.reductions = None;
-            }
-        });
+                if index == 0 && options.reductions.is_some() && widgets::reset(ui) {
+                    options.reductions = None;
+                }
+            });
+        }
         if changed {
             // in fitting's order
             chosen.sort_by_key(|kind| Reduction::ALL.iter().position(|other| other == kind));
@@ -116,7 +118,8 @@ pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item) {
                 ui.add_space(14.0);
                 ui.label("Frames");
                 let all = columns * rows;
-                auto_number(ui, &mut options.sheet_frames, "All", Some(all), all, |value| {
+                let automatic = ("All", "Every cell but transparent ones at the end");
+                auto_number(ui, &mut options.sheet_frames, automatic, Some(all), all, |value| {
                     value.range(1..=all)
                 });
             });

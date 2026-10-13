@@ -14,7 +14,7 @@ use tgradish_core::ffmpeg::Probe;
 use tgradish_core::options::Options;
 use tgradish_core::preview::Preview;
 use tgradish_core::tgs::{self, TgsOptions};
-use tgradish_tgs::frames::LayerInfo;
+use tgradish_tgs::frames::{LayerInfo, Tag};
 
 /// Frames of a video or animation, as straight RGBA.
 pub struct Clip {
@@ -333,7 +333,7 @@ impl Video {
 pub struct Art {
     pub clip: Clip,
     /// Aseprite tags and layers.
-    pub tags: Vec<String>,
+    pub tags: Vec<Tag>,
     pub layers: Vec<LayerInfo>,
 }
 

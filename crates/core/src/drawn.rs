@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tgradish_tgs::frames::{self, Animation, LayerInfo, Layers, Limits};
+use tgradish_tgs::frames::{self, Animation, LayerInfo, Layers, Limits, Tag};
 
 use crate::CancelToken;
 use crate::error::{Error, Result};
@@ -18,7 +18,7 @@ use crate::options::Options;
 pub struct Readable {
     path: PathBuf,
     dir: Option<tempfile::TempDir>,
-    tags: Vec<String>,
+    tags: Vec<Tag>,
     layers: Vec<LayerInfo>,
 }
 
@@ -33,7 +33,7 @@ impl Readable {
     }
 
     /// The tags of the Aseprite file drawn, which `tag` chooses from.
-    pub fn tags(&self) -> &[String] {
+    pub fn tags(&self) -> &[Tag] {
         &self.tags
     }
 
@@ -95,8 +95,7 @@ pub fn readable(
             let animation = sprite
                 .animation(options.tag.as_deref(), &layers)
                 .map_err(|err| unreadable(err.to_string()))?;
-            let tags = sprite.tags().iter().map(|tag| tag.name.clone()).collect();
-            (animation, tags, sprite.layers())
+            (animation, sprite.tags().to_vec(), sprite.layers())
         }
         None if is_animated_webp(input) => {
             let unreadable = |message: String| Error::Probe { path: input.to_path_buf(), message };

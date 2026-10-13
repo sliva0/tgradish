@@ -41,6 +41,8 @@ pub struct Tag {
     pub from: u32,
     pub to: u32,
     pub direction: Direction,
+    /// The colour Aseprite shows it in, straight RGBA.
+    pub colour: [u8; 4],
 }
 
 impl Tag {
@@ -347,6 +349,8 @@ impl Sprite {
                 length.checked_sub(16).ok_or_else(|| error("a frame is too short"))?;
             let mut body = Reader::new(file.take(body_length)?);
             let chunks = if new_count != 0 { new_count } else { old_count.into() };
+            // user data chunks right after the tags are theirs, in order
+            let mut tag_data: Option<usize> = None;
             let mut cels = Vec::new();
             let mut changed = sprite.palettes.is_empty();
             for _ in 0..chunks {
@@ -354,13 +358,25 @@ impl Sprite {
                 let kind = body.u16()?;
                 let size = size.checked_sub(6).ok_or_else(|| error("a chunk is too short"))?;
                 let mut chunk = Reader::new(body.take(size)?);
+                let next_tag = tag_data.take();
                 match kind {
                     0x0004 | 0x0011 if !new_palette => {
                         old_palette = Some(read_old_palette(&mut chunk, kind == 0x0011)?);
                     }
                     0x2004 => sprite.layers.push(read_layer(&mut chunk)?),
                     0x2005 => cels.push(sprite.read_cel(&mut chunk, &mut spent)?),
-                    0x2018 => sprite.tags = read_tags(&mut chunk)?,
+                    0x2018 => {
+                        sprite.tags = read_tags(&mut chunk)?;
+                        tag_data = Some(0);
+                    }
+                    0x2020 if let Some(index) = next_tag => {
+                        if let (Some(tag), Some(colour)) =
+                            (sprite.tags.get_mut(index), read_user_colour(&mut chunk)?)
+                        {
+                            tag.colour = colour;
+                        }
+                        tag_data = Some(index + 1);
+                    }
                     0x2019 => {
                         new_palette = true;
                         read_palette(&mut chunk, &mut palette)?;
@@ -827,10 +843,25 @@ fn read_tags(chunk: &mut Reader) -> Result<Vec<Tag>> {
                 3 => Direction::PingPongReverse,
                 other => return Err(error(format!("unknown tag direction {other}"))),
             };
-            chunk.skip(2 + 6 + 3 + 1)?;
-            Ok(Tag { name: chunk.string()?, from, to, direction })
+            // repeats, and reserved
+            chunk.skip(2 + 6)?;
+            // the colour of files before Aseprite 1.3, which later ones
+            // keep in user data
+            let [red, green, blue] = chunk.array()?;
+            chunk.skip(1)?;
+            let colour = [red, green, blue, 255];
+            Ok(Tag { name: chunk.string()?, from, to, direction, colour })
         })
         .collect()
+}
+
+/// The colour a user data chunk gives what it belongs to, if it gives one.
+fn read_user_colour(chunk: &mut Reader) -> Result<Option<[u8; 4]>> {
+    let flags = chunk.u32()?;
+    if flags & 1 != 0 {
+        chunk.string()?;
+    }
+    Ok(if flags & 2 != 0 { Some(chunk.array()?) } else { None })
 }
 
 /// The palette chunk changes entries `from..=to` and sets the size.
@@ -1022,7 +1053,9 @@ mod tests {
 
     #[test]
     fn plays_tags_in_order() {
-        let tag = |from, to, direction| Tag { name: String::new(), from, to, direction }.frames();
+        let tag = |from, to, direction| {
+            Tag { name: String::new(), from, to, direction, colour: [0; 4] }.frames()
+        };
         assert_eq!(tag(2, 5, Direction::Forward), [2, 3, 4, 5]);
         assert_eq!(tag(2, 5, Direction::Reverse), [5, 4, 3, 2]);
         assert_eq!(tag(2, 5, Direction::PingPong), [2, 3, 4, 5, 4, 3]);
@@ -1065,6 +1098,45 @@ mod tests {
             sprite.animation(Some("nope"), &Layers::default()),
             Err(Error::NoSuchTag { available, .. }) if available == ["back", "on"]
         ));
+    }
+
+    #[test]
+    fn reads_tag_colours() {
+        // the colour in the tag, as older files keep it, and in user data
+        // after the tags, as newer ones do, which wins
+        let tag = |name: &str, rgb: [u8; 3]| {
+            let mut data = vec![0, 0, 0, 0, 0];
+            data.extend([0; 8]);
+            data.extend(rgb);
+            data.push(0);
+            data.extend(string(name));
+            data
+        };
+        let mut tags = 2u16.to_le_bytes().to_vec();
+        tags.extend([0; 8]);
+        tags.extend(tag("old", [1, 2, 3]));
+        tags.extend(tag("new", [4, 5, 6]));
+        let user_data = |colour: Option<[u8; 4]>| {
+            let mut data = u32::from(colour.is_some() as u8 * 2).to_le_bytes().to_vec();
+            data.extend(colour.unwrap_or_default());
+            chunk(0x2020, &data)
+        };
+        let bytes = file(
+            1,
+            1,
+            32,
+            1,
+            &[vec![
+                layer(1, 0, 0, 0, 255),
+                chunk(0x2018, &tags),
+                user_data(None),
+                user_data(Some([7, 8, 9, 200])),
+                image_cel(0, (0, 0), (1, 1), &RED, false),
+            ]],
+        );
+        let sprite = Sprite::read(&bytes).unwrap();
+        let colours: Vec<_> = sprite.tags().iter().map(|tag| tag.colour).collect();
+        assert_eq!(colours, [[1, 2, 3, 255], [7, 8, 9, 200]]);
     }
 
     #[test]

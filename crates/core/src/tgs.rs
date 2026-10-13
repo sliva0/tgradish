@@ -17,7 +17,7 @@ use tgradish_tgs::sticker::{self, Fit, Progress, Step};
 use crate::CancelToken;
 use crate::backend::{Backend, FramesRequest};
 use crate::error::{Error, Result};
-use crate::options::{Crop, Speed, TEMPOS};
+use crate::options::{Crop, Resize, Speed, TEMPOS};
 use crate::preview::Preview;
 use crate::telegram::{self, Target};
 
@@ -70,6 +70,11 @@ pub struct TgsOptions {
     /// The part of the input to use, in input pixels. [default: all of it]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
+    /// How art that isn't square fills the square sticker: pad (whole,
+    /// with transparent margins), crop (its middle, by whole art pixels) or
+    /// stretch (its art pixels no longer square). [default: pad]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resize: Option<Resize>,
     /// Keep the input's canvas, or the crop, instead of cropping to the
     /// visible pixels. [default: false]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -135,6 +140,7 @@ impl TgsOptions {
             reductions,
             compromise,
             crop,
+            resize,
             keep_canvas,
             pixel_scale,
             tag,
@@ -202,6 +208,16 @@ impl TgsOptions {
                         )));
                     }
                     tempo => tempo,
+                },
+                square: match self.resize.unwrap_or(Resize::Pad) {
+                    Resize::Pad => normalise::Square::Pad,
+                    Resize::Crop => normalise::Square::Crop,
+                    Resize::Stretch => normalise::Square::Stretch,
+                    Resize::Contain => {
+                        return Err(Error::InvalidOptions(
+                            "TGS stickers are square: resize pad, crop or stretch".into(),
+                        ));
+                    }
                 },
             },
             effort: match self.speed.unwrap_or(Speed::Best) {
@@ -298,17 +314,27 @@ pub struct TgsOutcome {
 pub const PREVIEW_MAX_SIDE: u32 = 1024;
 
 impl Preview {
-    fn of(anim: &tgradish_tgs::PixelAnim) -> Preview {
+    /// What `anim` shows, `stretch`ed square as the sticker is, or not.
+    fn of(anim: &tgradish_tgs::PixelAnim, stretch: bool) -> Preview {
         let grid = anim.grid();
         let width = *grid.columns.last().unwrap_or(&0);
         let height = *grid.rows.last().unwrap_or(&0);
         // input pixels per preview pixel
         let step = grid.scale().max(width.max(height).div_ceil(PREVIEW_MAX_SIDE)).max(1);
-        // the cell under the middle of each step
+        let most = width.max(height).div_ceil(step);
+        // the cell under the middle of each step, or stretched, of each of
+        // as many preview pixels as along the longer side
         let cells = |edges: &[u32], size: u32| -> Vec<usize> {
-            (0..size.div_ceil(step))
-                .map(|i| (i * step + step / 2).min(size - 1))
-                .map(|x| edges.partition_point(|&edge| edge <= x) - 1)
+            let middles: Vec<u32> = if stretch {
+                (0..most)
+                    .map(|i| ((2 * i + 1) as u64 * size as u64 / (2 * most) as u64) as u32)
+                    .collect()
+            } else {
+                (0..size.div_ceil(step)).map(|i| i * step + step / 2).collect()
+            };
+            middles
+                .into_iter()
+                .map(|x| edges.partition_point(|&edge| edge <= x.min(size - 1)) - 1)
                 .collect()
         };
         let (columns, rows) = (cells(&grid.columns, width), cells(&grid.rows, height));
@@ -417,7 +443,7 @@ pub(crate) fn read_sequence(
 struct Loaded {
     animation: frames::Animation,
     /// Tags and layers of an Aseprite file, which the options choose from.
-    tags: Vec<String>,
+    tags: Vec<frames::Tag>,
     layers: Vec<frames::LayerInfo>,
     /// A video, read through ffmpeg from where `start` says.
     video: Option<VideoPart>,
@@ -483,7 +509,7 @@ fn load(
     let (decoded, tags, layers) = match frames::Format::detect(&bytes) {
         Some(frames::Format::Aseprite) => {
             let sprite = frames::Sprite::read_with(&bytes, &limits).map_err(decode_error(input))?;
-            let tags = sprite.tags().iter().map(|tag| tag.name.clone()).collect();
+            let tags = sprite.tags().to_vec();
             (sprite.animation(tag.as_deref(), &chosen), tags, sprite.layers())
         }
         _ => {
@@ -628,7 +654,7 @@ pub struct Source {
     /// Straight RGBA, each frame with how long it shows, in seconds.
     pub frames: Vec<(Vec<u8>, f64)>,
     /// Tags of an Aseprite file, which `tag` can choose from.
-    pub tags: Vec<String>,
+    pub tags: Vec<frames::Tag>,
     /// Layers of an Aseprite file, as its Layers panel lists them, which
     /// `show-layers` and `hide-layers` choose from.
     pub layers: Vec<frames::LayerInfo>,
@@ -776,7 +802,10 @@ pub fn convert(
         layers: sticker.layers,
         rectangles: sticker.rectangles,
         issues: sticker.issues,
-        preview: Preview::of(&sticker.anim),
+        preview: Preview::of(
+            &sticker.anim,
+            settings.normalise.square == normalise::Square::Stretch,
+        ),
     };
     on_event(TgsEvent::Finished {
         output: outcome.output.clone(),
@@ -809,7 +838,8 @@ mod tests {
             (loaded.animation.width(), loaded.animation.frames().len(), loaded.tags)
         };
         let (width, frames, tags) = read(TgsOptions::default());
-        assert_eq!((tags, frames), (vec!["idle".to_string()], ase.sprite.frames.len()));
+        let names: Vec<_> = tags.iter().map(|tag| tag.name.as_str()).collect();
+        assert_eq!((names, frames), (vec!["idle"], ase.sprite.frames.len()));
         let idle = TgsOptions { tag: Some("idle".into()), ..TgsOptions::default() };
         assert_eq!(read(idle).1, 2);
         // a sheet is the first frame, whatever the tag
@@ -871,14 +901,49 @@ mod tests {
         let (red, blue) = ([255, 0, 0, 255], [0, 0, 255, 255]);
         // 3x2 art at 4x
         let art = anim(12, 8, &|x, y| if (x / 4 + y / 4) % 2 == 0 { red } else { blue });
-        let preview = Preview::of(&art);
+        let preview = Preview::of(&art, false);
         assert_eq!((preview.width, preview.height), (3, 2));
         assert_eq!(preview.frames[0].0, [red, blue, red, blue, red, blue].concat());
+        // stretched square: its rows twice as high
+        let preview = Preview::of(&art, true);
+        assert_eq!((preview.width, preview.height), (3, 3));
+        let rows = [[red, blue, red], [blue, red, blue], [blue, red, blue]];
+        assert_eq!(preview.frames[0].0, rows.concat().concat());
         // too wide to show a pixel per art pixel
         let wide = anim(4000, 2, &|x, _| if x % 2 == 0 { red } else { blue });
-        let preview = Preview::of(&wide);
+        let preview = Preview::of(&wide, false);
         assert_eq!((preview.width, preview.height), (1000, 1));
         assert_eq!(preview.frames[0].0.len(), 1000 * 4);
+    }
+
+    #[test]
+    fn makes_art_square_three_ways() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = tgradish_corpus::files();
+        let walker = files.iter().find(|file| file.name == "walker_2x.gif").unwrap();
+        let input = dir.path().join("walker.gif");
+        std::fs::write(&input, &walker.bytes).unwrap();
+        let make = |resize| {
+            let options = TgsOptions { resize: Some(resize), ..TgsOptions::default() };
+            let request = TgsRequest {
+                inputs: vec![input.clone()],
+                sequence: false,
+                output: dir.path().join(format!("{resize:?}.tgs")),
+                options,
+                overwrite: true,
+                backend: None,
+            };
+            convert(&request, &CancelToken::new(), &mut |_| {})
+        };
+        // taller than wide: padded keeps its shape, the others are square
+        let padded = make(Resize::Pad).unwrap();
+        assert!(padded.preview.width < padded.preview.height);
+        for resize in [Resize::Crop, Resize::Stretch] {
+            let made = make(resize).unwrap();
+            assert!(made.issues.is_empty(), "{resize:?}: {:?}", made.issues);
+            assert_eq!(made.preview.width, made.preview.height, "{resize:?}");
+        }
+        assert!(matches!(make(Resize::Contain), Err(Error::InvalidOptions(_))));
     }
 
     #[test]

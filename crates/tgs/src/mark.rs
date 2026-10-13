@@ -183,7 +183,7 @@ mod tests {
                 from: 0,
                 to: 60,
                 hidden: Vec::new(),
-                transform: Transform { position: [0.0, 0.0], scale: 1.0 },
+                transform: Transform { position: [0.0, 0.0], scale: [1.0, 1.0] },
                 items: vec![group(0), group(100)],
             }],
         }

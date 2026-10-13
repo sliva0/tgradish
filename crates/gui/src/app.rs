@@ -376,9 +376,8 @@ impl eframe::App for App {
         self.take_input(&ctx);
         self.pump(&ctx);
         self.find_fonts(&ctx);
-        // a narrow window takes room from the list first, leaving the
-        // preview and the column beside it theirs
-        let widest = (ctx.content_rect().width() - 710.0).clamp(260.0, 520.0);
+        // as wide as half the window
+        let widest = (ctx.content_rect().width() * 0.5).max(260.0);
         egui::Panel::left("files")
             .resizable(true)
             .default_size(410.0)

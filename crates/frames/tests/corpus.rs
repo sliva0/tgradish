@@ -59,6 +59,8 @@ fn plays_aseprite_tags() {
     let idle = decode(&ase.bytes, &tagged).unwrap();
     assert_eq!(idle.frames().len(), 2);
     assert_frames(&idle, &ase.sprite, 0, "idle");
+    let sprite = tgradish_frames::Sprite::read(&ase.bytes).unwrap();
+    assert_eq!(sprite.tags()[0].colour, tgradish_corpus::encode::TAG_COLOUR);
     let missing = DecodeOptions { tag: Some("run".into()), ..DecodeOptions::default() };
     assert!(matches!(decode(&ase.bytes, &missing), Err(Error::NoSuchTag { .. })));
     // only Aseprite files have tags and layers

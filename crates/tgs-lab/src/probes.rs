@@ -69,7 +69,7 @@ fn sprite_json(style: Style) -> Result<String> {
     let options = Options { keep_canvas: true, ..Options::default() };
     let (anim, _) = normalise(&sprite()?, &options)?;
     let scene = encode::painter(&anim, &Default::default(), None, &|| false)?;
-    Ok(lay_out(&scene, &anim, Some("tgradish probe".into())).to_json(style))
+    Ok(lay_out(&scene, &anim, Some("tgradish probe".into()), false).to_json(style))
 }
 
 fn group(rects: impl IntoIterator<Item = (f64, f64)>, colour: [u8; 4]) -> Item {
@@ -83,7 +83,7 @@ fn group(rects: impl IntoIterator<Item = (f64, f64)>, colour: [u8; 4]) -> Item {
 /// Layers of a `units`-wide grid filling the canvas's width, centred.
 fn grid_transform(units: f64, rows: f64) -> Transform {
     let scale = CANVAS / units;
-    Transform { position: [0.0, (CANVAS - rows * scale) / 2.0], scale }
+    Transform { position: [0.0, (CANVAS - rows * scale) / 2.0], scale: [scale, scale] }
 }
 
 /// A checkerboard drawn by many layers in turn, each moved a little,
@@ -105,7 +105,10 @@ fn near_2_mib() -> String {
                 id: None,
                 from: index * 180 / count,
                 to: (index + 1) * 180 / count,
-                transform: Transform { position: [f64::from(index % 16) * 8.0, 64.0], scale: 16.0 },
+                transform: Transform {
+                    position: [f64::from(index % 16) * 8.0, 64.0],
+                    scale: [16.0, 16.0],
+                },
                 items: vec![checker()],
                 hidden: Vec::new(),
             })
@@ -339,7 +342,7 @@ fn checkerboard_layers(count: u32, in_turn: bool) -> String {
                         (CANVAS - f64::from(tile_rows * SIDE) * scale) / 2.0
                             + f64::from(y * SIDE) * scale,
                     ],
-                    scale,
+                    scale: [scale, scale],
                 },
                 items: vec![group(checker_cells(SIDE * SIDE / 2, SIDE), colour)],
                 hidden: Vec::new(),
