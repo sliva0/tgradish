@@ -1,6 +1,7 @@
 //! The item's settings saved as a preset of the user's own, which the item
 //! takes up then: its own values over the preset it started from, of every
-//! format, but none that only make sense for its file.
+//! format, but none that only make sense for its file: its crop and cut,
+//! Aseprite tag and layers, title and sprite sheet layout.
 
 use eframe::egui;
 use tgradish_core::options::Options;
@@ -85,7 +86,6 @@ fn take_up(item: &mut Item, name: &str) {
         title: tgs.title.take(),
         sheet: tgs.sheet.take(),
         sheet_frames: tgs.sheet_frames.take(),
-        pixel_scale: tgs.pixel_scale.take(),
         tag: tgs.tag.take(),
         ..TgsOptions::default()
     };

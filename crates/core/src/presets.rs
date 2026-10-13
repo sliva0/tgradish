@@ -317,8 +317,9 @@ pub fn shareable(options: &Options) -> Options {
     }
 }
 
-/// [`shareable`] for `.tgs` options, which also leave out how the art is
-/// read: as a sprite sheet, and the size of its pixels.
+/// [`shareable`] for `.tgs` options, which also leave out a sprite sheet's
+/// layout; the size of the art's pixels stays, as files from one place
+/// often share it.
 pub fn shareable_tgs(options: &TgsOptions) -> TgsOptions {
     TgsOptions {
         target: None,
@@ -331,7 +332,6 @@ pub fn shareable_tgs(options: &TgsOptions) -> TgsOptions {
         title: None,
         sheet: None,
         sheet_frames: None,
-        pixel_scale: None,
         ..options.clone()
     }
 }
@@ -380,6 +380,8 @@ mod tests {
             speed: Some(Speed::Fast),
             lossless: Some(false),
             pixel_scale: Some(2),
+            // one file's: left out
+            sheet: Some("4x2".into()),
             ..TgsOptions::default()
         };
         let path = save(dir.path(), "my small", "Small ones", (&webm, &tgs), false).unwrap();
@@ -388,6 +390,7 @@ mod tests {
         assert_eq!(presets.get("my small").unwrap().description, "Small ones");
         assert_eq!(presets.webm("my small").unwrap(), shareable(&webm));
         assert_eq!(presets.tgs("my small").unwrap(), shareable_tgs(&tgs));
+        assert_eq!(presets.tgs("my small").unwrap().pixel_scale, Some(2));
         // there already, replaced only when asked
         let again = save(dir.path(), "my small", "", (&webm, &tgs), false);
         assert!(matches!(again, Err(Error::OutputExists(_))));
