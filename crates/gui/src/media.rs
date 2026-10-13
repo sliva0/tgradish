@@ -403,8 +403,9 @@ pub struct Art {
     /// Aseprite tags and layers.
     pub tags: Vec<Tag>,
     pub layers: Vec<LayerInfo>,
-    /// How many frames an Aseprite file has, its tags' or not.
-    pub frame_count: usize,
+    /// How long each frame of an Aseprite file shows, in seconds, its
+    /// tags' or not.
+    pub durations: Vec<f64>,
 }
 
 impl Art {
@@ -432,8 +433,8 @@ impl Art {
             }
             let (width, height) = (source.width, source.height);
             let clip = Clip { id: next_id(), width, height, frames, times, pixelated: true };
-            let (tags, layers, frame_count) = (source.tags, source.layers, source.frame_count);
-            Ok(Art { clip, tags, layers, frame_count })
+            let (tags, layers, durations) = (source.tags, source.layers, source.durations);
+            Ok(Art { clip, tags, layers, durations })
         })
     }
 }

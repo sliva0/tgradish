@@ -550,9 +550,9 @@ impl Sprite {
         &self.tags
     }
 
-    /// How many frames the file has, which tags count from 0.
-    pub fn frame_count(&self) -> usize {
-        self.frames.len()
+    /// How long each frame of the file shows, which tags count from 0.
+    pub fn durations(&self) -> Vec<Duration> {
+        self.frames.iter().map(|(duration, _)| *duration).collect()
     }
 
     pub fn width(&self) -> u32 {

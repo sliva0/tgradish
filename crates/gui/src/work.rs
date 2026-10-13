@@ -588,15 +588,29 @@ mod tests {
         finish(&mut harness);
         let item = &harness.state().items[0];
         assert_eq!((item.kind, item.format), (Kind::Aseprite, Format::Tgs));
-        let (tags, layers, frames) = item.aseprite().expect("read");
-        assert_eq!(frames, 8);
+        let (tags, layers, durations) = item.aseprite().expect("read");
+        assert_eq!(durations, [0.1; 8]);
         let tags: Vec<_> = tags.iter().map(|tag| tag.name.clone()).collect();
         let layers: Vec<_> = layers.iter().map(|l| (l.name.as_str(), l.visible)).collect();
         assert_eq!(
             (tags, layers),
             (vec!["idle".to_owned()], vec![("sketch", false), ("art", true)])
         );
-        // the idle tag's two frames, its sketch shown
+        // a tag played forward picks where the input starts and ends, and
+        // nothing is read again
+        harness.get_by_label("idle").click();
+        harness.run_steps(2);
+        let item = &harness.state().items[0];
+        assert!(!item.input_reading());
+        let (start, length) = (item.choices.start, item.choices.length.unwrap_or_default());
+        assert_eq!((item.choices.tag.as_deref(), start), (None, Some(0.0)));
+        assert!((length - 0.2).abs() < 1e-9, "{length}");
+        // picked again, all of it
+        harness.get_by_label("idle").click();
+        harness.run_steps(2);
+        let choices = &harness.state().items[0].choices;
+        assert_eq!((choices.start, choices.length), (None, None));
+        // the idle tag read as its own animation, its sketch shown
         let choices = &mut harness.state_mut().items[0].choices;
         choices.tag = Some("idle".into());
         choices.show_layers = Some(vec!["sketch".into()]);

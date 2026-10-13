@@ -190,6 +190,11 @@ fn time(item: &Item, used: &Used, tempo: f64, cut: bool, steps: &mut Vec<String>
     let Some(length) = item.input_length() else { return };
     let start = used.start.unwrap_or(0.0).clamp(0.0, length);
     let end = used.length.map_or(length, |used| (start + used).min(length));
+    if start > 1e-6 || end < length - 1e-6 {
+        let (from, to, of) =
+            (widgets::seconds(start), widgets::seconds(end), widgets::seconds(length));
+        steps.push(format!("Cut to {from} to {to} of its {of}"));
+    }
     if tempo > 1.0 + 1e-9 {
         steps.push(format!("Sped up ×{}", number(tempo)));
     } else if tempo < 1.0 - 1e-9 {

@@ -305,8 +305,9 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
 
 /// Width of the crop's number fields.
 const FIELD: f32 = 48.0;
-/// Side of the crop's picture.
-const SKETCH: f32 = 96.0;
+/// Side of the crop's picture: with the fields above and below it, as
+/// high as the fields beside them.
+const SKETCH: f32 = 36.0;
 
 /// A side of the crop that a field sets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -343,7 +344,7 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
             response.changed().then_some(value)
         };
         let (right, bottom) = (width - crop.x - crop.width, height - crop.y - crop.height);
-        egui::Grid::new(("crop", item.id)).spacing([4.0, 4.0]).show(ui, |ui| {
+        egui::Grid::new(("crop", item.id)).spacing([4.0, 2.0]).show(ui, |ui| {
             ui.label("");
             ui.vertical_centered(|ui| {
                 let most = height - bottom - 1;
