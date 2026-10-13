@@ -11,7 +11,7 @@ use super::libav;
 use crate::CancelToken;
 use crate::convert::Plan;
 use crate::error::{Error, Result};
-use crate::ffmpeg::Probe;
+use crate::ffmpeg::{Probe, Timing};
 
 /// Frame rate still images are repeated at, like ffmpeg's image demuxer.
 const STILL_FPS: i32 = 25;
@@ -187,23 +187,37 @@ impl Source {
 
     /// Where the stream's frames start, in seconds after the file's start,
     /// as its packets come: empty when some carry no time.
-    pub(super) fn frame_starts(mut self) -> Result<Vec<f64>> {
+    pub(super) fn frame_starts(self) -> Result<Vec<f64>> {
+        let times = self.packet_times()?.unwrap_or_default();
+        Ok(times.into_iter().map(|(start, _)| start).collect())
+    }
+
+    /// How the stream's frames play, from its packets: `None` when some
+    /// carry no time.
+    pub(super) fn timing(self) -> Result<Option<Timing>> {
+        Ok(self.packet_times()?.and_then(Timing::of))
+    }
+
+    /// Where each packet of the stream starts, in seconds after the file's
+    /// start, and how long it lasts, as they come: `None` when some carry
+    /// no time.
+    fn packet_times(mut self) -> Result<Option<Vec<(f64, f64)>>> {
         let (start, time_base) = (self.start, self.time_base);
+        let seconds = |units: i64| {
+            units as f64 * f64::from(time_base.numerator()) / f64::from(time_base.denominator())
+        };
         let decoding = &mut self.decoding;
-        let mut starts = Vec::new();
+        let mut times = Vec::new();
         loop {
             decoding.cancel.check()?;
             let mut packet = Packet::empty();
             match packet.read(&mut decoding.input) {
                 Ok(()) if packet.stream() == decoding.stream => match packet.pts() {
-                    Some(pts) => starts.push(
-                        (pts - start) as f64 * f64::from(time_base.numerator())
-                            / f64::from(time_base.denominator()),
-                    ),
-                    None => return Ok(Vec::new()),
+                    Some(pts) => times.push((seconds(pts - start), seconds(packet.duration()))),
+                    None => return Ok(None),
                 },
                 Ok(()) | Err(ff::Error::InvalidData) => {}
-                Err(ff::Error::Eof) => return Ok(starts),
+                Err(ff::Error::Eof) => return Ok(Some(times)),
                 Err(_) if decoding.cancel.is_cancelled() => return Err(Error::Cancelled),
                 Err(err) => return Err(libav("reading the input")(err)),
             }

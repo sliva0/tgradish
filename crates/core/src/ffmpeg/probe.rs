@@ -96,11 +96,48 @@ pub(crate) struct Facts {
     pub webm_alpha: bool,
     /// How many frames the stream says it has, if it says.
     pub frames: Option<u64>,
+    /// How its frames play, from its packets, where nothing else says:
+    /// see [`Facts::untimed`].
+    pub timing: Option<Timing>,
+}
+
+/// How the frames of a stream play, from its packets.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Timing {
+    pub frames: usize,
+    /// From the start of the first frame to the end of the last.
+    pub length: f64,
+}
+
+impl Timing {
+    /// From packets' starts and lengths in seconds: `None` without them.
+    pub(crate) fn of(packets: impl IntoIterator<Item = (f64, f64)>) -> Option<Timing> {
+        let (mut frames, mut first, mut end) = (0, f64::INFINITY, f64::NEG_INFINITY);
+        for (start, length) in packets {
+            frames += 1;
+            first = first.min(start);
+            end = end.max(start + length.max(0.0));
+        }
+        (frames > 0 && end > first).then_some(Timing { frames, length: end - first })
+    }
 }
 
 impl Facts {
+    fn still_image(&self) -> bool {
+        (self.format.contains("image2") || self.format.ends_with("_pipe"))
+            && self.codec != "gif"
+            && self.frames.is_none_or(|frames| frames <= 1)
+    }
+
+    /// Whether neither the stream nor the file says how long it plays, as
+    /// animated pictures, APNG and WebP, don't: its packets have to.
+    pub(crate) fn untimed(&self) -> bool {
+        !self.still_image() && self.durations == (None, None)
+    }
+
     pub(crate) fn probe(self, input: &Path) -> Result<Probe> {
-        let Facts { format, codec, pix_fmt, width, height, orientation, start, .. } = self;
+        let still_image = self.still_image();
+        let Facts { format, codec, pix_fmt, width, height, orientation, start, timing, .. } = self;
         if width == 0.0 || height == 0.0 {
             return Err(Error::Probe {
                 path: input.to_path_buf(),
@@ -116,21 +153,25 @@ impl Facts {
             "vp8" if self.webm_alpha => Some("libvpx".to_string()),
             _ => None,
         };
-        let still_image = (format.contains("image2") || format.ends_with("_pipe"))
-            && codec != "gif"
-            && self.frames.is_none_or(|frames| frames <= 1);
-        // the file's, where the stream has none, from where the video starts
+        // the file's, where the stream has none, from where the video
+        // starts, or else its packets'
         let (stream_duration, file_duration) = self.durations;
         let duration = match still_image {
             true => None,
-            false => stream_duration.or_else(|| {
-                file_duration.map(|duration| duration - start).filter(|duration| *duration > 0.0)
-            }),
+            false => stream_duration
+                .or_else(|| {
+                    let from_start = file_duration.map(|duration| duration - start);
+                    from_start.filter(|duration| *duration > 0.0)
+                })
+                .or(timing.map(|timing| timing.length)),
         };
+        // where the stream gives no average, its packets', rather than its
+        // base rate, which can be its time base
+        let counted = timing.map(|timing| timing.frames as f64 / timing.length);
         Ok(Probe {
             width: width.round() as u32,
             height: height.round() as u32,
-            fps: self.avg_fps.or(self.base_fps),
+            fps: self.avg_fps.or(counted).or(self.base_fps),
             base_fps: self.base_fps,
             duration,
             start,
@@ -170,7 +211,7 @@ pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Prob
         .ok_or_else(|| Error::NoVideo(input.to_path_buf()))?;
     let text = |value: &Value| value.as_str().unwrap_or_default().to_string();
     let time = |value: &Value| value.as_str()?.parse::<f64>().ok().filter(|t| t.is_finite());
-    Facts {
+    let mut facts = Facts {
         format: text(&json["format"]["format_name"]),
         codec: text(&stream["codec_name"]),
         pix_fmt: text(&stream["pix_fmt"]),
@@ -195,8 +236,32 @@ pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Prob
             .any(|tag| stream["tags"][tag].as_str() == Some("1")),
         // what isn't a number is many
         frames: stream["nb_frames"].as_str().map(|frames| frames.parse().unwrap_or(u64::MAX)),
+        timing: None,
+    };
+    if facts.untimed() {
+        facts.timing = timing(ffmpeg, input, cancel)?;
     }
-    .probe(input)
+    facts.probe(input)
+}
+
+/// How the frames of `input`'s first video stream play, from its packets:
+/// `None` when some carry no time.
+fn timing(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Option<Timing>> {
+    let mut cmd = Command::new(&ffmpeg.ffprobe);
+    cmd.args(["-v", "error", "-select_streams", "v:0", "-of", "compact"])
+        .args(["-show_entries", "packet=pts_time,duration_time"])
+        .arg(input);
+    let (mut packets, mut untimed) = (Vec::new(), false);
+    run(cmd, "ffprobe", cancel, &mut |output| {
+        let Output::Stdout(line) = output else { return };
+        let field = |name| compact_field(&line, "packet", name)?.parse::<f64>().ok();
+        match (field("pts_time"), field("duration_time")) {
+            (Some(start), Some(length)) => packets.push((start, length)),
+            _ if line.trim().starts_with("packet") => untimed = true,
+            _ => {}
+        }
+    })?;
+    Ok(if untimed { None } else { Timing::of(packets) })
 }
 
 /// The field `name` of a line of ffprobe's compact output about `section`:
