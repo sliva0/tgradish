@@ -280,10 +280,122 @@ pub fn user_dir() -> Option<PathBuf> {
     Some(crate::paths::config_dir()?.join("presets"))
 }
 
+/// Longest name a preset saved here can have.
+const LONGEST_NAME: usize = 64;
+
+/// Whether `name` can name a preset file: letters, digits, spaces, `-`
+/// and `_`, not starting with a space, at most 64 of them.
+pub fn check_name(name: &str) -> Result<()> {
+    let allowed = |c: char| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_');
+    if name.trim().is_empty() || name.starts_with(' ') || name.chars().count() > LONGEST_NAME {
+        return Err(Error::InvalidOptions(format!(
+            "a preset's name has 1 to {LONGEST_NAME} characters, not starting with a space"
+        )));
+    }
+    if !name.chars().all(allowed) {
+        return Err(Error::InvalidOptions(
+            "a preset's name has only letters, digits, spaces, - and _".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// The options of `options` a preset keeps: none that only make sense for
+/// one file, as what to make, its crop, its time, its tag and layers, its
+/// title.
+pub fn shareable(options: &Options) -> Options {
+    Options {
+        target: None,
+        tag: None,
+        show_layers: None,
+        hide_layers: None,
+        crop: None,
+        start: None,
+        length: None,
+        title: None,
+        ..options.clone()
+    }
+}
+
+/// [`shareable`] for `.tgs` options, which also leave out how the art is
+/// read: as a sprite sheet, and the size of its pixels.
+pub fn shareable_tgs(options: &TgsOptions) -> TgsOptions {
+    TgsOptions {
+        target: None,
+        tag: None,
+        show_layers: None,
+        hide_layers: None,
+        crop: None,
+        start: None,
+        length: None,
+        title: None,
+        sheet: None,
+        sheet_frames: None,
+        pixel_scale: None,
+        ..options.clone()
+    }
+}
+
+/// Writes a preset named `name` into `dir`, said to be `description`, of
+/// what [`shareable`] keeps of `webm` and `tgs`, and returns its file.
+/// One there already is replaced only with `replace`.
+pub fn save(
+    dir: &Path,
+    name: &str,
+    description: &str,
+    (webm, tgs): (&Options, &TgsOptions),
+    replace: bool,
+) -> Result<PathBuf> {
+    check_name(name)?;
+    let mut file = toml::Table::new();
+    if !description.is_empty() {
+        file.insert("description".into(), description.into());
+    }
+    file.insert("webm".into(), table(&shareable(webm)).into());
+    file.insert("tgs".into(), table(&shareable_tgs(tgs)).into());
+    let text = toml::to_string(&file).map_err(|err| Error::InvalidOptions(err.to_string()))?;
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join(format!("{name}.toml"));
+    crate::fsutil::write_output(&path, text.as_bytes(), replace)?;
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::telegram::Target;
+
+    #[test]
+    fn saves_presets_that_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let webm = Options {
+            fit: Some(Fit::Crf),
+            crf: Some(28),
+            // one file's: left out
+            crop: Some(crate::options::Crop { x: 0, y: 0, width: 8, height: 8 }),
+            title: Some("pig".into()),
+            ..Options::default()
+        };
+        let tgs = TgsOptions {
+            speed: Some(Speed::Fast),
+            lossless: Some(false),
+            pixel_scale: Some(2),
+            ..TgsOptions::default()
+        };
+        let path = save(dir.path(), "my small", "Small ones", (&webm, &tgs), false).unwrap();
+        assert_eq!(path, dir.path().join("my small.toml"));
+        let presets = Presets::load(Some(dir.path())).unwrap();
+        assert_eq!(presets.get("my small").unwrap().description, "Small ones");
+        assert_eq!(presets.webm("my small").unwrap(), shareable(&webm));
+        assert_eq!(presets.tgs("my small").unwrap(), shareable_tgs(&tgs));
+        // there already, replaced only when asked
+        let again = save(dir.path(), "my small", "", (&webm, &tgs), false);
+        assert!(matches!(again, Err(Error::OutputExists(_))));
+        assert!(save(dir.path(), "my small", "", (&webm, &tgs), true).is_ok());
+        for bad in ["", " lead", "a/b", "..", &"x".repeat(65)] {
+            assert!(check_name(bad).is_err(), "{bad:?}");
+        }
+    }
 
     fn write(dir: &Path, name: &str, text: &str) {
         std::fs::write(dir.join(format!("{name}.toml")), text).unwrap();

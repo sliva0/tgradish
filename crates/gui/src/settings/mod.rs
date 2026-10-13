@@ -6,6 +6,7 @@ mod aseprite;
 mod commands;
 mod picture;
 mod plan;
+mod save;
 mod tgs;
 mod time;
 mod webm;
@@ -29,6 +30,7 @@ use webm::webm_quality;
 
 pub(crate) use picture::{exact_of, ratio, resize_of, webm_sizes};
 pub use plan::plan;
+pub use save::presets_saved;
 
 /// What the settings depend on besides the item.
 pub struct Context<'a> {
@@ -40,6 +42,8 @@ pub struct Context<'a> {
     pub output: Option<std::path::PathBuf>,
     /// The config file the window reads and saves.
     pub config_path: Option<&'a std::path::Path>,
+    /// Where presets are saved, if anywhere.
+    pub presets_dir: Option<&'a std::path::Path>,
 }
 
 /// The built-in presets in the order of their speed, then the user's own.
@@ -167,6 +171,7 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             _ => {}
         }
     });
+    save::save_preset(ui, item, context);
 }
 
 /// Width of the settings from which they go in two columns.

@@ -52,6 +52,7 @@ impl App {
             extra_args,
             output,
             config_path: self.config_path.as_deref(),
+            presets_dir: self.presets_dir.as_deref(),
         };
         let height = ui.available_height();
         let preview_height =
