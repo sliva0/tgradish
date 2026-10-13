@@ -43,12 +43,17 @@
 //! `cargo xtask icons [--check]` makes the icons for menus and the Windows
 //! executable from the window's own, `crates/gui/assets/icon.png`;
 //! `--check` fails if they are out of date.
+//!
+//! `cargo xtask screenshot` renders the window at work from the synthetic
+//! art to `.github/screenshot.png`, the README's picture of it. Needs a
+//! GPU wgpu can use.
 
 mod ffmpeg;
 mod icons;
 mod licences;
 mod package;
 mod release;
+mod screenshot;
 
 use std::path::Path;
 use std::process::Command;
@@ -64,13 +69,15 @@ fn main() -> Result<()> {
         Some("licenses") => licences::crate_licenses(&args[1..]),
         Some("icons") => icons::icons(&args[1..]),
         Some("local-release") => release::local_release(&args[1..]),
+        Some("screenshot") => screenshot::screenshot(&args[1..]),
         _ => bail!(
             "usage: cargo xtask ffmpeg [--target TARGET] [--no-asm]\n       \
              cargo xtask ffmpeg-sources\n       \
              cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc 2.28]\n       \
              cargo xtask licenses [--check]\n       \
              cargo xtask icons [--check]\n       \
-             cargo xtask local-release [--targets TARGET,...] [--no-asm]\n\
+             cargo xtask local-release [--targets TARGET,...] [--no-asm]\n       \
+             cargo xtask screenshot\n\
              targets: linux-x86_64, linux-aarch64, windows-x86_64"
         ),
     }

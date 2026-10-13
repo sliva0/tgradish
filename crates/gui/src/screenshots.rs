@@ -178,8 +178,8 @@ fn screenshots() {
     save(&mut harness, "scaled");
 }
 
-/// The window at work, for the README: `TGRADISH_SCREENSHOTS` says
-/// where it goes.
+/// The window at work, for the README: `cargo xtask screenshot` puts it
+/// in `.github/screenshot.png`; `TGRADISH_SCREENSHOTS` says where it goes.
 #[test]
 #[ignore]
 fn readme_screenshot() {
@@ -189,16 +189,23 @@ fn readme_screenshot() {
     let dir = std::env::temp_dir().join("tgradish-readme");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    // the synthetic art the tests use
-    let names = ["hammer_4x.gif", "walker_2x.gif", "dance.gif", "slime_jittered.gif"];
-    let mut inputs = Vec::new();
-    for file in tgradish_corpus::files() {
-        if names.contains(&file.name.as_str()) {
-            let path = dir.join(&file.name);
+    // the synthetic art the tests use, named as people would
+    let names = [
+        ("walker_2x.ase", "walker.ase"),
+        ("hammer_4x.gif", "hammer.gif"),
+        ("slime_jittered.gif", "slime.gif"),
+        ("dance.gif", "dance.gif"),
+    ];
+    let files = tgradish_corpus::files();
+    let inputs: Vec<PathBuf> = names
+        .iter()
+        .map(|(corpus, name)| {
+            let file = files.iter().find(|file| file.name == *corpus).expect("in the corpus");
+            let path = dir.join(name);
             std::fs::write(&path, &file.bytes).unwrap();
-            inputs.push(path);
-        }
-    }
+            path
+        })
+        .collect();
     let mut config = Config::default();
     config.gui.output_dir = Some(dir.join("Stickers"));
     config.gui.theme = tgradish_core::config::Theme::Dark;
@@ -217,19 +224,36 @@ fn readme_screenshot() {
         });
     harness.state_mut().add(inputs);
     finish(&mut harness);
-    // one made, another chosen, with the result's small picture
-    let first = harness.state().items[0].id;
-    harness.state_mut().select(first);
-    harness.run_steps(2);
-    convert(&harness);
-    harness.run_steps(2);
-    finish(&mut harness);
-    let shown = harness.state().items[3].id;
+    // converting them all: two made, the slime under way and shown, with
+    // the result's small picture, and the dance next
+    for index in 0..2 {
+        let id = harness.state().items[index].id;
+        harness.state_mut().select(id);
+        harness.run_steps(2);
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+    }
+    let shown = harness.state().items[2].id;
     harness.state_mut().select(shown);
-    let item = &mut harness.state_mut().items[3];
+    let item = &mut harness.state_mut().items[2];
+    item.view.show = Show::Input;
     item.view.inset = true;
-    // a square crop, its handles out
-    item.choices.crop = Some(Crop { x: 0, y: 2, width: 40, height: 40 });
+    // drawn, and seeing whether it fits, as a moment of a real one is: a
+    // job made up, so the picture is the same each time
+    let mut job = Job::waiting(dir.join("Stickers/slime.sticker.tgs"));
+    job.status = Status::Running;
+    job.progress.tgs = Some(jobs::TgsStage::Fitting);
+    item.job = Some((job, Format::Tgs, item.choices.clone()));
+    let state = harness.state_mut();
+    let next = &mut state.items[3];
+    let job = Job::waiting(dir.join("Stickers/dance.sticker.tgs"));
+    next.job = Some((job, Format::Tgs, next.choices.clone()));
+    let id = next.id;
+    state.queue.push_back(id);
+    // the bars' moving band in one place each time, however many frames
+    // the conversions above took
+    harness.input_mut().time = Some(1000.5);
     harness.event(egui::Event::PointerGone);
     harness.run_steps(3);
     std::thread::sleep(Duration::from_millis(300));

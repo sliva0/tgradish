@@ -64,8 +64,8 @@ print "skipped" and pass without. `nix develop` gives everything below.
   (cmake, ninja and clang).
 - The window as pictures, which needs a GPU:
   `TGRADISH_SCREENSHOTS=/tmp/shots cargo test -p tgradish-gui -- --ignored screenshot`,
-  into a folder that exists. `tgradish-readme.png` is the README's
-  `.github/screenshot.png`.
+  into a folder that exists. `cargo xtask screenshot` renders the README's
+  `.github/screenshot.png` again, after the window changes.
 
 CI also runs `cargo fmt --all --check`, clippy with `-D warnings` with and
 without the window, `cargo xtask icons --check` and `cargo xtask licenses
