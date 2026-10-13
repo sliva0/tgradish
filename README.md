@@ -2,9 +2,9 @@
 
 Telegram stickers and emoji from videos, pictures and pixel art, in a window or on the command line, with the ability to bypass the 3 second limit:
 
-- video stickers and emoji (WebM) from any video, GIF or picture;
-- animated stickers (.tgs) from pixel art: GIF, APNG, WebP, Aseprite or a folder of frames;
-- image stickers and emoji (WebP) from a picture or a frame of a video.
+- video stickers and emoji (WebM) from any video, GIF, picture, Aseprite file or folder of frames;
+- animated stickers (.tgs) from pixel art: GIF, APNG, WebP, Aseprite, a folder of frames, or a video of it;
+- image stickers and emoji (WebP) from a picture, or a frame of a video or animation.
 
 ![tgradish turning pixel art into animated stickers](.github/screenshot.png)
 
@@ -40,7 +40,7 @@ The Python version, 1.x, is on the [`1.x`](https://github.com/sliva0/tgradish/tr
 
 ## Dependencies
 
-Video and image stickers are made with ffmpeg; animated .tgs stickers, `tgradish spoof` and `tgradish inspect` work without it.
+Video and image stickers are made with ffmpeg, as are animated .tgs stickers from videos; those from pixel art, `tgradish spoof` and `tgradish inspect` work without it.
 
 The release builds with ffmpeg built in, the `.deb` and `.rpm` packages and `tgradish-static-bin` need nothing else. The other builds, `cargo install` included, use `ffmpeg` and `ffprobe` from PATH; the Nix package brings its own.
 
@@ -59,6 +59,11 @@ tgradish convert ~/pig.mp4
 An animated sticker from pixel art:
 ``` console
 tgradish convert ~/walker.gif --format tgs
+```
+
+From an Aseprite file, only its `idle` tag, with its `sketch` layer hidden:
+``` console
+tgradish convert ~/walker.aseprite --format tgs --tag idle --hide-layers sketch
 ```
 
 
