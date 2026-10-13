@@ -10,6 +10,8 @@ mod tgs;
 mod time;
 mod webm;
 
+use std::collections::HashMap;
+
 use eframe::egui::{self, RichText};
 use tgradish_core::config::Config;
 use tgradish_core::presets::{Format, Presets};
@@ -175,62 +177,121 @@ const GUTTER: f32 = 24.0;
 /// Shows the settings under the preview: what goes in, how it looks and
 /// plays, and then the file that comes out, beside it where there is room.
 pub fn show(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
+    let parts = Part::of(item);
     if ui.available_width() < TWO_COLUMNS {
-        input(ui, item, context);
-        output(ui, item, context);
+        for &part in &parts {
+            part.show(ui, item, context);
+        }
         return;
+    }
+    // how high each part was last drawn
+    let id = egui::Id::new("settings heights");
+    let mut heights: HashMap<Part, f32> = ui.data(|data| data.get_temp(id)).unwrap_or_default();
+    let height = |part: Part| match part {
+        // as it is closed, so opening it moves nothing
+        Part::Commands => 30.0,
+        part => heights.get(&part).copied().unwrap_or_default(),
+    };
+    // the picture first on the left, the Aseprite file's on the right, and
+    // the rest each where there is less so far; to the right only where
+    // clearly less, so a part changing a little doesn't move another
+    let (mut left, mut right) = (vec![Part::Picture], Vec::new());
+    if parts.contains(&Part::Aseprite) {
+        right.push(Part::Aseprite);
+    }
+    let sum = |column: &[Part]| column.iter().map(|&part| height(part)).sum::<f32>();
+    for &part in parts.iter().filter(|&&part| !matches!(part, Part::Picture | Part::Aseprite)) {
+        if sum(&right) + BALANCE < sum(&left) {
+            right.push(part);
+        } else {
+            left.push(part);
+        }
     }
     let width = (ui.available_width() - GUTTER) / 2.0;
     let layout = egui::Layout::top_down(egui::Align::Min);
     let spacing = ui.spacing().item_spacing;
+    let mut drawn = HashMap::new();
     let columns = ui.horizontal_top(|ui| {
         // the gutter alone between them, their own spacing within
         ui.spacing_mut().item_spacing.x = 0.0;
-        ui.allocate_ui_with_layout(egui::vec2(width, 0.0), layout, |ui| {
-            ui.spacing_mut().item_spacing = spacing;
-            ui.set_width(width);
-            input(ui, item, context);
-        });
-        ui.add_space(GUTTER);
-        ui.allocate_ui_with_layout(egui::vec2(width, 0.0), layout, |ui| {
-            ui.spacing_mut().item_spacing = spacing;
-            ui.set_width(width);
-            output(ui, item, context);
-        });
+        for (index, column) in [left, right].into_iter().enumerate() {
+            if index == 1 {
+                ui.add_space(GUTTER);
+            }
+            ui.allocate_ui_with_layout(egui::vec2(width, 0.0), layout, |ui| {
+                ui.spacing_mut().item_spacing = spacing;
+                ui.set_width(width);
+                for part in column {
+                    // in the column itself, so a part knows what is above it
+                    let top = ui.cursor().top();
+                    part.show(ui, item, context);
+                    drawn.insert(part, (ui.min_rect().bottom() - top).max(0.0));
+                }
+            });
+        }
     });
     let rect = columns.response.rect;
     let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
     ui.painter().vline(rect.left() + width + GUTTER / 2.0, rect.y_range(), stroke);
-}
-
-/// What is read and how it looks and plays.
-fn input(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
-    // what is read comes first: it is what the rest is about
-    if item.kind == Kind::Aseprite {
-        aseprite(ui, item, context);
-    }
-    picture(ui, item, context);
-    match item.format {
-        Format::Webm | Format::Tgs => time(ui, item, context),
-        Format::Image => frame(ui, item),
+    // drawn at other heights: placed again on the next frame
+    let moved = drawn
+        .iter()
+        .any(|(part, height)| heights.get(part).is_none_or(|before| (before - height).abs() > 1.0));
+    if moved {
+        heights.extend(drawn);
+        ui.data_mut(|data| data.insert_temp(id, heights));
+        ui.ctx().request_repaint();
     }
 }
 
-/// The file that comes out, and the commands that make it.
-fn output(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
-    match item.format {
-        Format::Webm => webm_quality(ui, item, context),
-        Format::Tgs => tgs_quality(ui, item, context),
-        // lossless, or lossy where only that fits: nothing to choose
-        Format::Image => {}
+/// How much shorter the right column must be to take the next part.
+const BALANCE: f32 = 40.0;
+
+/// A part of the settings, which the columns share out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Part {
+    Aseprite,
+    Picture,
+    Time,
+    Quality,
+    Reading,
+    Advanced,
+    Commands,
+}
+
+impl Part {
+    /// The parts an item has, in order: what is read and how it looks and
+    /// plays, then the file that comes out and the commands that make it.
+    fn of(item: &Item) -> Vec<Part> {
+        let mut parts = Vec::new();
+        if item.kind == Kind::Aseprite {
+            parts.push(Part::Aseprite);
+        }
+        parts.extend([Part::Picture, Part::Time]);
+        match item.format {
+            Format::Webm => parts.extend([Part::Quality, Part::Advanced]),
+            Format::Tgs => parts.extend([Part::Quality, Part::Reading]),
+            // lossless, or lossy where only that fits: nothing to choose
+            Format::Image => {}
+        }
+        parts.push(Part::Commands);
+        parts
     }
-    if item.format == Format::Tgs {
-        reading(ui, item);
+
+    fn show(self, ui: &mut egui::Ui, item: &mut Item, context: &Context) {
+        match (self, item.format) {
+            (Part::Aseprite, _) => aseprite(ui, item, context),
+            (Part::Picture, _) => picture(ui, item, context),
+            (Part::Time, Format::Image) => frame(ui, item),
+            (Part::Time, _) => time(ui, item, context),
+            (Part::Quality, Format::Webm) => webm_quality(ui, item, context),
+            (Part::Quality, Format::Tgs) => tgs_quality(ui, item, context),
+            (Part::Reading, _) => reading(ui, item),
+            (Part::Advanced, _) => advanced(ui, item, context),
+            (Part::Commands, _) => commands(ui, item, context),
+            (Part::Quality, Format::Image) => {}
+        }
     }
-    if item.format == Format::Webm {
-        advanced(ui, item, context);
-    }
-    commands(ui, item, context);
 }
 
 #[cfg(test)]
