@@ -169,6 +169,14 @@ fn preview(
             if show == Show::Result && !has_result { Err(unseen) } else { Ok(()) }
         });
         item.view.show = show;
+        // where it came from
+        let original = ui
+            .add_enabled(item.pasted.is_none(), egui::Button::new("Show original"))
+            .on_hover_text("The input file, in its folder")
+            .on_disabled_hover_text("A pasted image has no file of its own");
+        if original.clicked() {
+            crate::system::reveal(&item.inputs[0]);
+        }
         // what doesn't fit is cut short or left out, the hint first
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if item.view.show == Show::Input {
