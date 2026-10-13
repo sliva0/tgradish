@@ -101,7 +101,7 @@ pub(crate) fn probe(input: &Path, cancel: &CancelToken) -> Result<Probe> {
             (video - file_start as f64 / f64::from(ff::ffi::AV_TIME_BASE)).max(0.0)
         }
     };
-    Facts {
+    let mut facts = Facts {
         format: context.format().name().to_string(),
         codec: stream.parameters().id().name().to_string(),
         pix_fmt: decoder.format().descriptor().map(|d| d.name().to_string()).unwrap_or_default(),
@@ -122,8 +122,12 @@ pub(crate) fn probe(input: &Path, cancel: &CancelToken) -> Result<Probe> {
             .any(|(key, value)| key.eq_ignore_ascii_case("alpha_mode") && value == "1"),
         // libavformat says 0 when it doesn't know
         frames: u64::try_from(stream.frames()).ok().filter(|&frames| frames > 0),
+        timing: None,
+    };
+    if facts.untimed() {
+        facts.timing = Source::open_file(input, None, cancel)?.timing()?;
     }
-    .probe(input)
+    facts.probe(input)
 }
 
 pub(crate) fn frame_starts(input: &Path, cancel: &CancelToken) -> Result<Vec<f64>> {
