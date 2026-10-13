@@ -11,7 +11,7 @@ use tgradish_core::presets::Format;
 use tgradish_core::tgs;
 
 use super::Context;
-use crate::item::Item;
+use crate::item::{Item, Kind};
 use crate::widgets::note;
 
 /// Text in a monospace box that can be selected and copied.
@@ -63,7 +63,8 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
     {
         args.extend(["--config".into(), path.display().to_string()]);
     }
-    if item.format != Format::Tgs {
+    // .tgs from pixel art needs no ffmpeg; from a video it does
+    if item.format != Format::Tgs || item.kind == Kind::Video {
         let ffmpeg = &context.config.ffmpeg;
         let from = match ffmpeg.choice {
             FfmpegChoice::Auto => None,
@@ -103,6 +104,9 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
     args.extend(match item.format {
         Format::Webm => tgradish_core::options::flags(&webm.merged(&Options {
             target: Some(choices.target),
+            tag: choices.tag.clone(),
+            show_layers: choices.show_layers.clone(),
+            hide_layers: choices.hide_layers.clone(),
             crop: choices.crop,
             start: choices.start,
             length: choices.length,
@@ -112,6 +116,9 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
             let picture = tgradish_core::still::picture_options(&webm);
             tgradish_core::options::flags(&picture.merged(&Options {
                 target: Some(choices.target),
+                tag: choices.tag.clone(),
+                show_layers: choices.show_layers.clone(),
+                hide_layers: choices.hide_layers.clone(),
                 crop: choices.crop,
                 start: choices.frame,
                 ..Options::default()
@@ -120,6 +127,9 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
         Format::Tgs => {
             tgradish_core::options::flags(&choices.tgs.clone().merged(&tgs::TgsOptions {
                 target: Some(choices.target),
+                tag: choices.tag.clone(),
+                show_layers: choices.show_layers.clone(),
+                hide_layers: choices.hide_layers.clone(),
                 crop: choices.crop,
                 start: choices.start,
                 length: choices.length,
@@ -167,11 +177,15 @@ pub(super) fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
 }
 
 fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String> {
+    if matches!(item.kind, Kind::Aseprite | Kind::Frames) {
+        return Err("ffmpeg reads a PNG each conversion draws of the pixel art".into());
+    }
     let video = item.video.ready().ok_or("the input isn't read yet")?;
     let options = item.choices.webm_options(context.presets, context.config)?;
     let auto = options.auto_scaling();
     let request = convert::Request {
         input: item.inputs[0].clone(),
+        sequence: None,
         output: context.output.clone(),
         options,
         overwrite: true,
@@ -238,6 +252,21 @@ mod tests {
         let line = command_line(&art, &plain).join(" ");
         assert!(line.starts_with("tgradish convert art.gif --format tgs"), "{line}");
         assert!(!line.contains("--preset"), "{line}");
+        // from a video it does
+        video.format = Format::Tgs;
+        let line = command_line(&video, &plain).join(" ");
+        assert!(line.starts_with("tgradish --ffmpeg-from system convert pig.mp4"), "{line}");
+
+        // what of an Aseprite file is read, whatever it is made into
+        let mut walk = Item::new(3, vec!["walk.ase".into()], false, Target::Sticker);
+        walk.choices.tag = Some("idle".into());
+        walk.choices.hide_layers = Some(vec!["sketch".into(), "back, old".into()]);
+        for format in [Format::Webm, Format::Tgs, Format::Image] {
+            walk.format = format;
+            let line = command_line(&walk, &plain);
+            let read = ["--tag", "idle", "--hide-layers", "sketch", "--hide-layers", "back, old"];
+            assert!(line.windows(read.len()).any(|words| words == read), "{format:?}: {line:?}");
+        }
     }
 
     #[test]

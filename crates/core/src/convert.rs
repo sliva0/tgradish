@@ -37,7 +37,11 @@ use crate::webm::{self, Patch};
 /// A conversion to run.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Request {
+    /// The input, or the first of a sequence's, which names the result.
     pub input: PathBuf,
+    /// The frames of one animation in several files: image files, or
+    /// folders of them, in name order.
+    pub sequence: Option<Vec<PathBuf>>,
     /// Defaults to the input with a `.sticker.webm` or `.emoji.webm`
     /// extension.
     pub output: Option<PathBuf>,
@@ -52,6 +56,7 @@ impl Request {
     pub fn new(input: PathBuf) -> Self {
         Self {
             input,
+            sequence: None,
             output: None,
             options: Options::default(),
             overwrite: false,
@@ -215,7 +220,7 @@ pub fn estimate_bitrate(length: f64, limit: u64) -> f64 {
 }
 
 pub fn default_output(input: &Path, target: Target) -> PathBuf {
-    input.with_extension(format!("{}.webm", target.name()))
+    crate::fsutil::beside(input, &format!("{}.webm", target.name()))
 }
 
 /// How a picture lands in the result.
@@ -375,7 +380,12 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     }
 
     let output = request.output.clone().unwrap_or_else(|| default_output(&request.input, target));
-    if same_file(&request.input, &output) {
+    // any of a sequence's frames too
+    let frames = match &request.sequence {
+        Some(frames) => crate::tgs::sequence_files(frames)?,
+        None => Vec::new(),
+    };
+    if std::iter::once(&request.input).chain(&frames).any(|input| same_file(input, &output)) {
         return Err(invalid("output would overwrite the input"));
     }
     if !request.overwrite && output.exists() {
@@ -703,8 +713,12 @@ pub fn convert(
     cancel: &CancelToken,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Outcome> {
-    let source = backend.probe(&request.input, cancel)?;
+    // pixel art, drawn for ffmpeg
+    let sequence = request.sequence.as_deref();
+    let readable = crate::drawn::readable(&request.input, sequence, &request.options, cancel)?;
+    let source = backend.probe(readable.path(), cancel)?;
     let (mut plan, warnings) = plan(request, source)?;
+    plan.input = readable.path().to_path_buf();
     choose_auto_scaling(backend, &mut plan, &request.options, cancel)?;
     if !plan.extra_args.is_empty() && !backend.supports_extra_args() {
         return Err(Error::InvalidOptions(
@@ -717,7 +731,9 @@ pub fn convert(
     for message in warnings {
         on_event(Event::Warning { message });
     }
-    on_event(Event::Started { plan: Box::new(plan.clone()) });
+    // the input as given, not as drawn for ffmpeg
+    let started = Plan { input: request.input.clone(), ..plan.clone() };
+    on_event(Event::Started { plan: Box::new(started) });
 
     let temp = tempfile::Builder::new().prefix("tgradish-").tempdir()?;
     let mut encoder = BackendEncoder {
@@ -805,6 +821,17 @@ mod tests {
         let sneaky = dir.path().join("..").join(name).join("input.mp4");
         let request =
             Request { output: Some(sneaky), overwrite: true, ..Request::new(input.clone()) };
+        assert!(matches!(plan(&request, source(4.84)), Err(Error::InvalidOptions(_))));
+        // nor any frame of a sequence
+        let (first, second) = (dir.path().join("1.png"), dir.path().join("2.webp"));
+        std::fs::write(&first, b"").unwrap();
+        std::fs::write(&second, b"").unwrap();
+        let request = Request {
+            sequence: Some(vec![first.clone(), second.clone()]),
+            output: Some(second),
+            overwrite: true,
+            ..Request::new(first)
+        };
         assert!(matches!(plan(&request, source(4.84)), Err(Error::InvalidOptions(_))));
     }
 

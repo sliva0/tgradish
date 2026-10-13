@@ -287,6 +287,17 @@ pub struct Options {
     /// What to make. Default: sticker.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<Target>,
+    /// Aseprite tag to use. Default: all frames.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// Aseprite layers to show, by name, hidden ones included. Default:
+    /// those the file shows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_layers: Option<Vec<String>>,
+    /// Aseprite layers to hide, by name; a hidden group hides the layers in
+    /// it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hide_layers: Option<Vec<String>>,
     /// The part of the picture to use, in input pixels. Default: all of it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
@@ -404,6 +415,9 @@ impl Options {
         }
         merge!(
             target,
+            tag,
+            show_layers,
+            hide_layers,
             crop,
             resize,
             scaling,
@@ -460,6 +474,12 @@ pub fn flags(options: &impl Serialize) -> Vec<String> {
                 for (key, value) in pairs {
                     let value = value.as_str().map_or_else(|| value.to_string(), str::to_owned);
                     flags.extend([flag.clone(), format!("{key}={value}")]);
+                }
+            }
+            // one each, as names can have commas
+            ("show-layers" | "hide-layers", Value::Array(names)) => {
+                for name in names.iter().filter_map(Value::as_str) {
+                    flags.extend([flag.clone(), name.to_owned()]);
                 }
             }
             ("extra-args", Value::Array(words)) => {

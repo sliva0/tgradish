@@ -3,8 +3,8 @@
 
 use std::path::Path;
 
-/// Videos, and TIFF pictures, which only ffmpeg reads: for video and image
-/// stickers.
+/// Videos, and TIFF pictures, which only ffmpeg reads: for any sticker,
+/// animated ones from the frames ffmpeg reads.
 pub const VIDEOS: &[&str] =
     &["mp4", "m4v", "mov", "mkv", "webm", "avi", "flv", "ts", "mts", "ogv", "tif", "tiff"];
 
@@ -12,8 +12,8 @@ pub const VIDEOS: &[&str] =
 /// any sticker.
 pub const IMAGES: &[&str] = &["png", "apng", "gif", "webp", "jpg", "jpeg", "bmp"];
 
-/// Aseprite files, which only the pixel art reader reads: for `.tgs`
-/// stickers.
+/// Aseprite files, which only the pixel art reader reads: for any sticker,
+/// drawn for ffmpeg for video and image ones.
 pub const ASEPRITE: &[&str] = &["ase", "aseprite"];
 
 /// The extension of `path`, in lower case; empty without one.

@@ -94,3 +94,43 @@ pub(crate) fn video_of(dir: &Path, size: &str, seconds: u32) -> Option<PathBuf> 
         }
     }
 }
+
+/// Whether ffmpeg is on PATH; tests that need it are skipped without.
+pub(crate) fn has_ffmpeg() -> bool {
+    let found = std::process::Command::new("ffmpeg").arg("-version").output().is_ok();
+    if !found {
+        eprintln!("skipped: needs ffmpeg on PATH");
+    }
+    found
+}
+
+/// The corpus file `name`, written to `dir` as `as_name`.
+pub(crate) fn corpus(dir: &Path, name: &str, as_name: &str) -> PathBuf {
+    let files = tgradish_corpus::files();
+    let file = files.iter().find(|file| file.name == name).expect("in the corpus");
+    let path = dir.join(as_name);
+    std::fs::write(&path, &file.bytes).unwrap();
+    path
+}
+
+/// The walker's 0.8 s walk as a lossless video, or `None` without ffmpeg.
+pub(crate) fn walking_video(dir: &Path) -> Option<PathBuf> {
+    let gif = corpus(dir, "walker_2x.gif", "walker.gif");
+    let video = dir.join("walker.mkv");
+    let made = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-y", "-i"])
+        .arg(&gif)
+        .args(["-c:v", "ffv1", "-pix_fmt", "bgra"])
+        .arg(&video)
+        .status();
+    match made {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("skipped: needs ffmpeg on PATH");
+            None
+        }
+        made => {
+            assert!(made.expect("ffmpeg runs").success(), "ffmpeg could not make the video");
+            Some(video)
+        }
+    }
+}

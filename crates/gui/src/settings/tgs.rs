@@ -8,7 +8,7 @@ use tgradish_core::tgs;
 use tgradish_tgs::reduce::Kind as Reduction;
 
 use super::Context;
-use crate::item::Item;
+use crate::item::{Item, Kind};
 use crate::widgets::{self, Choice, auto_number, chosen_hint, flag, preset_segments, row, section};
 
 const TGS_SPEEDS: [Choice<Speed>; 3] = [
@@ -90,57 +90,38 @@ pub(super) fn tgs_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context)
     });
 }
 
+/// How a picture is read: as a sprite sheet, or as it is.
 pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item) {
-    let tags = item.art.ready().map(|art| art.tags.clone()).unwrap_or_default();
-    let single = item.inputs.len() == 1 && !item.sequence;
-    if tags.is_empty() && !single {
+    if item.kind != Kind::Image || item.inputs.len() != 1 || item.sequence {
         return;
     }
     section(ui, "Reading the art");
     let options = &mut item.choices.tgs;
-    if !tags.is_empty() {
-        let hint = "Only the frames of one tag, in its direction";
-        row(ui, "Aseprite tag", hint, Ok(()), |ui| {
-            // as many as the file has, and as long: radios wrap
-            ui.horizontal_wrapped(|ui| {
-                if ui.radio(options.tag.is_none(), "All frames").clicked() {
-                    options.tag = None;
+    let hint = "Frames laid out in a grid of equal cells, row by row";
+    row(ui, "Sprite sheet", hint, Ok(()), |ui| {
+        let mut sheet = options.sheet.is_some();
+        if ui.checkbox(&mut sheet, "Read as a sprite sheet").changed() {
+            options.sheet = sheet.then(|| "4x1".to_owned());
+        }
+        let (mut columns, mut rows) = parse_sheet(options.sheet.as_deref()).unwrap_or((4, 1));
+        ui.add_enabled_ui(sheet, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Cells");
+                let a = ui.add(egui::DragValue::new(&mut columns).range(1..=256));
+                ui.label("×");
+                let b = ui.add(egui::DragValue::new(&mut rows).range(1..=256));
+                if sheet && (a.changed() || b.changed()) {
+                    options.sheet = Some(format!("{columns}x{rows}"));
                 }
-                for tag in &tags {
-                    if ui.radio(options.tag.as_ref() == Some(tag), tag).clicked() {
-                        options.tag = Some(tag.clone());
-                    }
-                }
-            });
-        });
-    }
-    if single && tags.is_empty() {
-        let hint = "Frames laid out in a grid of equal cells, row by row";
-        row(ui, "Sprite sheet", hint, Ok(()), |ui| {
-            let mut sheet = options.sheet.is_some();
-            if ui.checkbox(&mut sheet, "Read as a sprite sheet").changed() {
-                options.sheet = sheet.then(|| "4x1".to_owned());
-            }
-            let (mut columns, mut rows) = parse_sheet(options.sheet.as_deref()).unwrap_or((4, 1));
-            ui.add_enabled_ui(sheet, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Cells");
-                    let a = ui.add(egui::DragValue::new(&mut columns).range(1..=256));
-                    ui.label("×");
-                    let b = ui.add(egui::DragValue::new(&mut rows).range(1..=256));
-                    if sheet && (a.changed() || b.changed()) {
-                        options.sheet = Some(format!("{columns}x{rows}"));
-                    }
-                    ui.add_space(14.0);
-                    ui.label("Frames");
-                    let all = columns * rows;
-                    auto_number(ui, &mut options.sheet_frames, "All", Some(all), all, |value| {
-                        value.range(1..=all)
-                    });
+                ui.add_space(14.0);
+                ui.label("Frames");
+                let all = columns * rows;
+                auto_number(ui, &mut options.sheet_frames, "All", Some(all), all, |value| {
+                    value.range(1..=all)
                 });
             });
         });
-    }
+    });
 }
 
 fn parse_sheet(sheet: Option<&str>) -> Option<(u32, u32)> {

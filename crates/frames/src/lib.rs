@@ -14,7 +14,7 @@ mod aseprite;
 mod raster;
 mod sheet;
 
-pub use aseprite::{Direction, Sprite, Tag};
+pub use aseprite::{Direction, LayerInfo, Layers, Sprite, Tag};
 pub use sheet::{Sheet, sequence, split_sheet, sprite_sheet};
 
 /// Duration of still images in an animation when nothing else says how long
@@ -37,6 +37,10 @@ pub enum Error {
     NoSuchTag { name: String, available: Vec<String> },
     #[error("tags only exist in Aseprite files")]
     TagWithoutAseprite,
+    #[error("no layer named {name:?} (layers: {})", if available.is_empty() { "none".into() } else { available.join(", ") })]
+    NoSuchLayer { name: String, available: Vec<String> },
+    #[error("layers only exist in Aseprite files")]
+    LayersWithoutAseprite,
     #[error("image {index} is {width}x{height}, the first one is {first_width}x{first_height}")]
     SequenceSize { index: usize, width: u32, height: u32, first_width: u32, first_height: u32 },
     #[error("{width}x{height} doesn't split into {columns} columns and {rows} rows")]
@@ -130,6 +134,8 @@ impl Limits {
 pub struct DecodeOptions {
     /// Aseprite: only the frames of this tag, in its direction.
     pub tag: Option<String>,
+    /// Aseprite: layers to show or hide, over what the file shows.
+    pub layers: Layers,
     pub limits: Limits,
 }
 
@@ -140,10 +146,12 @@ pub fn decode(bytes: &[u8], options: &DecodeOptions) -> Result<Animation> {
     if format != Format::Aseprite && options.tag.is_some() {
         return Err(Error::TagWithoutAseprite);
     }
+    if format != Format::Aseprite && !options.layers.is_empty() {
+        return Err(Error::LayersWithoutAseprite);
+    }
     match format {
-        Format::Aseprite => {
-            Sprite::read_with(bytes, &options.limits)?.animation(options.tag.as_deref())
-        }
+        Format::Aseprite => Sprite::read_with(bytes, &options.limits)?
+            .animation(options.tag.as_deref(), &options.layers),
         _ => raster::decode(bytes, format, &options.limits),
     }
 }

@@ -215,9 +215,51 @@ fn makes_animated_stickers() {
     let mixed = tgradish(&["convert", a.to_str().unwrap(), "-o", "x.tgs", "--crf", "20"]);
     assert_eq!(mixed.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&mixed.stderr).contains("--crf"));
-    let sequence = tgradish(&["convert", a.to_str().unwrap(), "--sequence"]);
-    let stderr = String::from_utf8_lossy(&sequence.stderr);
-    assert!(stderr.contains("--format tgs"), "{stderr}");
+}
+
+#[test]
+fn makes_video_and_image_stickers_of_sequences() {
+    if Command::new("ffmpeg").arg("-version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let frames = dir.path().join("walk");
+    std::fs::create_dir(&frames).unwrap();
+    square_png(&frames.join("2.png"), [255, 0, 0, 255]);
+    square_png(&frames.join("10.png"), [0, 0, 255, 255]);
+    // two frames at 4 a second: half a second
+    let webm = dir.path().join("walk.webm");
+    let made = tgradish(&[
+        "--ffmpeg-from",
+        "system",
+        "convert",
+        frames.to_str().unwrap(),
+        "--sequence",
+        "-o",
+        webm.to_str().unwrap(),
+        "--fps",
+        "4",
+        "--preset",
+        "fast",
+    ]);
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let inspected = tgradish(&["--json", "inspect", webm.to_str().unwrap()]);
+    let info = &json_lines(&inspected)[0];
+    assert_eq!(info["info"]["video_frames"], 2, "{info}");
+    // a picture of the first, 2.png
+    let webp = dir.path().join("walk.webp");
+    let made = tgradish(&[
+        "--json",
+        "--ffmpeg-from",
+        "system",
+        "convert",
+        frames.to_str().unwrap(),
+        "--sequence",
+        "-o",
+        webp.to_str().unwrap(),
+    ]);
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    assert_eq!(&std::fs::read(&webp).unwrap()[8..12], b"WEBP");
 }
 
 #[test]

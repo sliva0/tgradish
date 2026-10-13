@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use tgradish_corpus::{File, Sprite, encode};
 use tgradish_frames::{
-    Animation, DecodeOptions, Error, Limits, Sheet, decode, sequence, sprite_sheet,
+    Animation, DecodeOptions, Error, Layers, Limits, Sheet, decode, sequence, sprite_sheet,
 };
 
 fn file(name: &str) -> File {
@@ -61,8 +61,11 @@ fn plays_aseprite_tags() {
     assert_frames(&idle, &ase.sprite, 0, "idle");
     let missing = DecodeOptions { tag: Some("run".into()), ..DecodeOptions::default() };
     assert!(matches!(decode(&ase.bytes, &missing), Err(Error::NoSuchTag { .. })));
-    // only Aseprite files have tags
+    // only Aseprite files have tags and layers
     assert_eq!(decode(&file("walker_2x.gif").bytes, &tagged), Err(Error::TagWithoutAseprite));
+    let layers = Layers { hide: vec!["Layer 1".into()], ..Layers::default() };
+    let layered = DecodeOptions { layers, ..DecodeOptions::default() };
+    assert_eq!(decode(&file("walker_2x.gif").bytes, &layered), Err(Error::LayersWithoutAseprite));
 }
 
 #[test]
@@ -161,7 +164,7 @@ fn survives_corrupted_files() {
         state
     };
     let limits = Limits { max_dimension: 4096, max_bytes: 64 << 20 };
-    let options = DecodeOptions { tag: None, limits };
+    let options = DecodeOptions { limits, ..DecodeOptions::default() };
     for _ in 0..3000 {
         let mut bytes = original.clone();
         for _ in 0..1 + next() % 8 {
@@ -193,11 +196,15 @@ fn counts_the_rgba_copy_of_still_images() {
     let image = image::RgbImage::from_pixel(256, 256, image::Rgb([1, 2, 3]));
     let mut bytes = Vec::new();
     image.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).unwrap();
-    let tight =
-        DecodeOptions { tag: None, limits: Limits { max_dimension: 4096, max_bytes: 300_000 } };
+    let tight = DecodeOptions {
+        limits: Limits { max_dimension: 4096, max_bytes: 300_000 },
+        ..DecodeOptions::default()
+    };
     assert!(matches!(decode(&bytes, &tight), Err(Error::TooLarge(_))));
-    let roomy =
-        DecodeOptions { tag: None, limits: Limits { max_dimension: 4096, max_bytes: 500_000 } };
+    let roomy = DecodeOptions {
+        limits: Limits { max_dimension: 4096, max_bytes: 500_000 },
+        ..DecodeOptions::default()
+    };
     assert_eq!(decode(&bytes, &roomy).unwrap().frames().len(), 1);
 }
 

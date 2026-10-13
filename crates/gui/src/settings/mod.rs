@@ -2,6 +2,7 @@
 //! under it.
 
 mod advanced;
+mod aseprite;
 mod commands;
 mod picture;
 mod tgs;
@@ -16,6 +17,7 @@ use tgradish_core::telegram::Target;
 use crate::item::{Item, Kind};
 use crate::widgets::{Choice, note, segments};
 use advanced::advanced;
+use aseprite::aseprite;
 use commands::commands;
 use picture::picture;
 use tgs::{reading, tgs_quality};
@@ -87,15 +89,8 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         ),
         (Format::Image, "Image", "A static sticker: one frame of a video, or a picture, as WebP"),
     ];
-    let refused = match item.kind {
-        Kind::Video => {
-            "Only pictures in PNG, GIF, WebP, JPEG, BMP or Aseprite files can become a TGS animation"
-        }
-        _ => "ffmpeg can't read Aseprite files or folders of frames",
-    };
     let mut format = item.format;
-    let allowed = |format| if item.kind.allows(format) { Ok(()) } else { Err(refused) };
-    if segments(ui, &mut format, &formats, allowed) {
+    if segments(ui, &mut format, &formats, |_| Ok(())) {
         item.format = format;
         item.format_guessed = false;
     }
@@ -172,7 +167,9 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
 
 /// Shows the settings under the preview.
 pub fn show(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
-    picture(ui, item, context);
+    // what is read comes first: it is what the rest is about
+    let read = item.kind == Kind::Aseprite && aseprite(ui, item, context);
+    picture(ui, item, context, !read);
     match item.format {
         Format::Webm | Format::Tgs => time(ui, item, context),
         Format::Image => frame(ui, item),

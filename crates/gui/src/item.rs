@@ -9,6 +9,7 @@ use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Spoof};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::tgs::TgsOptions;
+use tgradish_tgs::frames::LayerInfo;
 
 use crate::jobs::Job;
 use crate::media::{Art, Clip, Load, Video};
@@ -17,12 +18,16 @@ use crate::timeline::{Cut, Frames};
 /// What kind of input an item is, which limits what it can become.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// Videos and photos, which only ffmpeg reads: WebM only.
+    /// Videos and photos, which only ffmpeg reads: any format, `.tgs` from
+    /// the frames ffmpeg reads.
     Video,
-    /// Images and GIFs the pixel art reader reads too: either format.
+    /// Images and GIFs the pixel art reader reads too: any format.
     Image,
-    /// Aseprite files, folders of frames and several images as one
-    /// animation: `.tgs` only.
+    /// Aseprite files, which the pixel art reader draws for ffmpeg: any
+    /// format.
+    Aseprite,
+    /// Folders of frames and several images as one animation, which the
+    /// pixel art reader joins, and draws for ffmpeg: any format.
     Frames,
 }
 
@@ -32,7 +37,7 @@ impl Kind {
             [input] if !sequence && !input.is_dir() => {
                 let extension = inputs::extension(input);
                 if inputs::ASEPRITE.contains(&extension.as_str()) {
-                    Kind::Frames
+                    Kind::Aseprite
                 } else if inputs::IMAGES.contains(&extension.as_str()) {
                     Kind::Image
                 } else {
@@ -43,31 +48,29 @@ impl Kind {
         }
     }
 
-    pub fn allows(self, format: Format) -> bool {
-        match self {
-            Kind::Video => format != Format::Tgs,
-            Kind::Image => true,
-            Kind::Frames => format == Format::Tgs,
-        }
-    }
-
     /// The format to start with; images switch to `.tgs` once they turn
     /// out to be pixel art.
     pub fn first_format(self) -> Format {
         match self {
-            Kind::Frames => Format::Tgs,
+            Kind::Aseprite | Kind::Frames => Format::Tgs,
             Kind::Video | Kind::Image => Format::Webm,
         }
     }
 }
 
 /// What the user chose for an item: a preset, then their own values over
-/// it. Target, crop and times apply to both formats.
+/// it. Target, crop, times and what of an Aseprite file is read apply to
+/// every format.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Choices {
     /// `None` for the default preset of the format.
     pub preset: Option<String>,
     pub target: Target,
+    /// An Aseprite tag, and layers shown and hidden over what the file
+    /// shows.
+    pub tag: Option<String>,
+    pub show_layers: Option<Vec<String>>,
+    pub hide_layers: Option<Vec<String>>,
     pub crop: Option<Crop>,
     pub start: Option<f64>,
     pub length: Option<f64>,
@@ -84,6 +87,9 @@ impl Choices {
         Choices {
             preset: None,
             target,
+            tag: None,
+            show_layers: None,
+            hide_layers: None,
             crop: None,
             start: None,
             length: None,
@@ -111,6 +117,9 @@ impl Choices {
     pub fn webm_merged(&self, presets: &Presets, config: &Config) -> Result<Options, String> {
         let shared = Options {
             target: Some(self.target),
+            tag: self.tag.clone(),
+            show_layers: self.show_layers.clone(),
+            hide_layers: self.hide_layers.clone(),
             crop: self.crop,
             start: self.start,
             length: self.length,
@@ -136,6 +145,9 @@ impl Choices {
     pub fn tgs_options(&self, presets: &Presets, config: &Config) -> Result<TgsOptions, String> {
         let shared = TgsOptions {
             target: Some(self.target),
+            tag: self.tag.clone(),
+            show_layers: self.show_layers.clone(),
+            hide_layers: self.hide_layers.clone(),
             crop: self.crop,
             start: self.start,
             length: self.length,
@@ -150,10 +162,34 @@ impl Choices {
         let options = self.tgs_options(presets, config).unwrap_or_else(|_| self.tgs.clone());
         TgsOptions {
             tag: options.tag,
+            show_layers: options.show_layers,
+            hide_layers: options.hide_layers,
             sheet: options.sheet,
             sheet_frames: options.sheet_frames,
             fps: options.fps,
             ..TgsOptions::default()
+        }
+    }
+
+    /// The options that change how pixel art is drawn for ffmpeg for
+    /// `format`, the preset's included: an Aseprite file's tag and layers,
+    /// and how fast a sequence's frames play, which pictures leave at the
+    /// default, as making one does.
+    pub fn drawing(&self, format: Format, presets: &Presets, config: &Config) -> Options {
+        let shared = || Options {
+            tag: self.tag.clone(),
+            show_layers: self.show_layers.clone(),
+            hide_layers: self.hide_layers.clone(),
+            fps: self.webm.fps,
+            ..Options::default()
+        };
+        let options = self.webm_merged(presets, config).unwrap_or_else(|_| shared());
+        Options {
+            tag: options.tag,
+            show_layers: options.show_layers,
+            hide_layers: options.hide_layers,
+            fps: options.fps.filter(|_| format == Format::Webm),
+            ..Options::default()
         }
     }
 }
@@ -278,6 +314,8 @@ impl Default for View {
 pub struct Framing {
     format: Format,
     target: Target,
+    tag: Option<String>,
+    layers: (Option<Vec<String>>, Option<Vec<String>>),
     crop: Option<Crop>,
     start: Option<f64>,
     length: Option<f64>,
@@ -292,6 +330,8 @@ impl Framing {
         Framing {
             format: item.format,
             target: item.choices.target,
+            tag: item.choices.tag.clone(),
+            layers: (item.choices.show_layers.clone(), item.choices.hide_layers.clone()),
             crop: item.choices.crop,
             start: item.choices.start,
             length: item.choices.length,
@@ -306,7 +346,6 @@ impl Framing {
             tgs: TgsOptions {
                 keep_canvas: tgs.keep_canvas,
                 pixel_scale: tgs.pixel_scale,
-                tag: tgs.tag.clone(),
                 sheet: tgs.sheet.clone(),
                 sheet_frames: tgs.sheet_frames,
                 fps: tgs.fps,
@@ -340,8 +379,10 @@ pub struct Item {
     pub format_guessed: bool,
     pub choices: Choices,
     pub view: View,
-    /// The input read by ffmpeg, for WebM.
+    /// The input read by ffmpeg, for WebM and pictures, with how an
+    /// Aseprite file was drawn for it.
     pub video: Load<Video>,
+    pub video_drawing: Options,
     /// The part of the video that is played: where it starts and how long.
     pub part: Option<((f64, f64), Load<Clip>)>,
     /// The frame shown while paused, at the input's full size, and its
@@ -378,6 +419,7 @@ impl Item {
             choices: Choices::new(target),
             view: View::default(),
             video: Load::Idle,
+            video_drawing: Options::default(),
             part: None,
             still: None,
             art: Load::Idle,
@@ -399,6 +441,21 @@ impl Item {
             (1, None) if self.sequence => format!("{first} (frames)"),
             (1, None) => first,
             (n, None) => format!("{first} and {} more", n - 1),
+        }
+    }
+
+    /// The tags and layers of an Aseprite input, as read for the current
+    /// format.
+    pub fn aseprite(&self) -> Option<(&[String], &[LayerInfo])> {
+        if self.kind != Kind::Aseprite {
+            return None;
+        }
+        match self.format {
+            Format::Webm | Format::Image => {
+                let readable = &self.video.ready()?.readable;
+                Some((readable.tags(), readable.layers()))
+            }
+            Format::Tgs => self.art.ready().map(|art| (&art.tags[..], &art.layers[..])),
         }
     }
 
@@ -516,10 +573,9 @@ mod tests {
         assert_eq!(Kind::of(&path("a.gif"), false), Kind::Image);
         assert_eq!(Kind::of(&path("photo.JPG"), false), Kind::Image);
         assert_eq!(Kind::of(&path("a.mkv"), false), Kind::Video);
-        assert_eq!(Kind::of(&path("a.aseprite"), false), Kind::Frames);
+        assert_eq!(Kind::of(&path("a.aseprite"), false), Kind::Aseprite);
         assert_eq!(Kind::of(&[dir.path().to_path_buf()], false), Kind::Frames);
         assert_eq!(Kind::of(&[PathBuf::from("1.png"), PathBuf::from("2.png")], true), Kind::Frames);
-        assert!(!Kind::Video.allows(Format::Tgs) && !Kind::Frames.allows(Format::Webm));
     }
 
     #[test]

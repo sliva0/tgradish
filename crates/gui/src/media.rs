@@ -3,14 +3,18 @@
 
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
 use eframe::egui;
 use tgradish_core::CancelToken;
 use tgradish_core::backend::{Backend, Frames, FramesRequest};
+use tgradish_core::drawn::{self, Readable};
 use tgradish_core::ffmpeg::Probe;
+use tgradish_core::options::Options;
 use tgradish_core::preview::Preview;
 use tgradish_core::tgs::{self, TgsOptions};
+use tgradish_tgs::frames::LayerInfo;
 
 /// Frames of a video or animation, as straight RGBA.
 pub struct Clip {
@@ -224,12 +228,26 @@ pub struct Video {
     /// Where its frames start, in order: empty for a picture, or when they
     /// carry no times.
     pub starts: Vec<f64>,
+    /// What ffmpeg reads: the input, or an Aseprite file drawn for it.
+    pub readable: Arc<Readable>,
 }
 
 impl Video {
-    pub fn load(ctx: &egui::Context, backend: Backend, path: PathBuf) -> Task<Video> {
+    /// One file, or with `sequence` the frames of one animation; `drawing`
+    /// says how pixel art ffmpeg can't read is drawn for it.
+    pub fn load(
+        ctx: &egui::Context,
+        backend: Backend,
+        inputs: Vec<PathBuf>,
+        sequence: bool,
+        drawing: Options,
+    ) -> Task<Video> {
         Task::spawn(ctx, move |cancel| {
-            let probe = backend.probe(&path, cancel).map_err(|err| err.to_string())?;
+            let frames = (sequence || inputs.len() > 1).then_some(&inputs[..]);
+            let readable = drawn::readable(&inputs[0], frames, &drawing, cancel)
+                .map_err(|err| err.to_string())?;
+            let path = readable.path();
+            let probe = backend.probe(path, cancel).map_err(|err| err.to_string())?;
             let request = FramesRequest {
                 start: 0.0,
                 length: None,
@@ -238,19 +256,20 @@ impl Video {
                 max_frames: OVERVIEW_FRAMES,
             };
             let frames =
-                backend.frames(&path, &probe, &request, cancel).map_err(|err| err.to_string())?;
+                backend.frames(path, &probe, &request, cancel).map_err(|err| err.to_string())?;
             if frames.frames.is_empty() {
                 return Err("ffmpeg found no frames in it".into());
             }
             let starts = if probe.still_image {
                 Vec::new()
             } else {
-                match backend.frame_starts(&path, &probe, cancel) {
+                match backend.frame_starts(path, &probe, cancel) {
                     Err(err @ tgradish_core::Error::Cancelled) => return Err(err.to_string()),
                     starts => starts.unwrap_or_default(),
                 }
             };
-            Ok(Video { probe, overview: Clip::from_frames(frames), starts })
+            let overview = Clip::from_frames(frames);
+            Ok(Video { probe, overview, starts, readable: Arc::new(readable) })
         })
     }
 
@@ -260,10 +279,9 @@ impl Video {
         &self,
         ctx: &egui::Context,
         backend: Backend,
-        path: PathBuf,
         (start, length): (f64, f64),
     ) -> Task<Clip> {
-        let probe = self.probe.clone();
+        let (probe, readable) = (self.probe.clone(), self.readable.clone());
         Task::spawn(ctx, move |cancel| {
             let longer = probe.width.max(probe.height).max(1);
             let scale = (f64::from(DETAIL_SIDE) / f64::from(longer)).min(1.0);
@@ -276,8 +294,9 @@ impl Video {
                 max_side: DETAIL_SIDE,
                 max_frames: (DETAIL_BYTES / bytes).clamp(1, 600),
             };
+            let path = readable.path();
             let frames =
-                backend.frames(&path, &probe, &request, cancel).map_err(|err| err.to_string())?;
+                backend.frames(path, &probe, &request, cancel).map_err(|err| err.to_string())?;
             if frames.frames.is_empty() {
                 return Err("ffmpeg found no frames there".into());
             }
@@ -286,14 +305,9 @@ impl Video {
     }
 
     /// The frame shown at `time`, at full size.
-    pub fn load_still(
-        &self,
-        ctx: &egui::Context,
-        backend: Backend,
-        path: PathBuf,
-        time: f64,
-    ) -> Task<Clip> {
+    pub fn load_still(&self, ctx: &egui::Context, backend: Backend, time: f64) -> Task<Clip> {
         let (probe, starts) = (self.probe.clone(), self.starts.clone());
+        let readable = self.readable.clone();
         Task::spawn(ctx, move |cancel| {
             let fps = probe.fps_or_default();
             let start = tgradish_core::still::frame_start(time, &starts, fps);
@@ -304,8 +318,9 @@ impl Video {
                 max_side: probe.width.max(probe.height),
                 max_frames: 1,
             };
+            let path = readable.path();
             let frames =
-                backend.frames(&path, &probe, &request, cancel).map_err(|err| err.to_string())?;
+                backend.frames(path, &probe, &request, cancel).map_err(|err| err.to_string())?;
             if frames.frames.is_empty() {
                 return Err("ffmpeg found no frame there".into());
             }
@@ -317,22 +332,25 @@ impl Video {
 /// Pixel art read the way `.tgs` conversions read it.
 pub struct Art {
     pub clip: Clip,
-    /// Aseprite tags.
+    /// Aseprite tags and layers.
     pub tags: Vec<String>,
+    pub layers: Vec<LayerInfo>,
 }
 
 impl Art {
-    /// `options` choose what is read: an Aseprite tag, a sprite sheet's
-    /// layout and the frame rate of sheets and sequences.
+    /// `options` choose what is read: an Aseprite tag and layers, a sprite
+    /// sheet's layout and the frame rate of sheets and sequences. Videos
+    /// are read through `backend`.
     pub fn load(
         ctx: &egui::Context,
         inputs: Vec<PathBuf>,
         sequence: bool,
         options: TgsOptions,
+        backend: Option<Backend>,
     ) -> Task<Art> {
         Task::spawn(ctx, move |cancel| {
-            let source =
-                tgs::read_source(&inputs, sequence, &options, cancel).map_err(|e| e.to_string())?;
+            let source = tgs::read_source(&inputs, sequence, &options, backend.as_ref(), cancel)
+                .map_err(|e| e.to_string())?;
             if source.frames.is_empty() {
                 return Err("no frames".into());
             }
@@ -344,7 +362,7 @@ impl Art {
             }
             let (width, height) = (source.width, source.height);
             let clip = Clip { id: next_id(), width, height, frames, times, pixelated: true };
-            Ok(Art { clip, tags: source.tags })
+            Ok(Art { clip, tags: source.tags, layers: source.layers })
         })
     }
 }

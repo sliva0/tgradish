@@ -174,10 +174,13 @@ fn largest_scale(target: Target, used: (u32, u32)) -> ExactScale {
     }
 }
 
-pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
-    ui.add_space(4.0);
-    ui.label(RichText::new("Picture").strong().size(15.5));
-    ui.add_space(4.0);
+/// The picture's settings, `first` of all or after others.
+pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context, first: bool) {
+    if first {
+        widgets::heading(ui, "Picture");
+    } else {
+        widgets::section(ui, "Picture");
+    }
     let size = item.input_size();
     let exact = exact_of(item);
     // an exact scale holds the crop to the size it takes
