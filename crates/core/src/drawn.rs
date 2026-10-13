@@ -1,8 +1,8 @@
 //! Pixel art ffmpeg can't read, drawn for it: Aseprite files, with the
-//! tag and layers chosen, and the frames of an animation in several files,
-//! drawn by the pixel art reader into a temporary PNG, an animated one when
-//! it moves, which ffmpeg reads as it reads any other, for WebM and image
-//! stickers.
+//! tag and layers chosen, the frames of an animation in several files, and
+//! animated WebP, which ffmpeg reads only from version 8, drawn by the pixel
+//! art reader into a temporary PNG, an animated one when it moves, which
+//! ffmpeg reads as it reads any other, for WebM and image stickers.
 
 use std::path::{Path, PathBuf};
 
@@ -52,6 +52,16 @@ pub fn is_aseprite(path: &Path) -> bool {
         .is_ok_and(|()| frames::Format::detect(&start) == Some(frames::Format::Aseprite))
 }
 
+/// Whether `path` is an animated WebP, by its extended header's flags.
+fn is_animated_webp(path: &Path) -> bool {
+    let mut start = [0u8; 21];
+    std::fs::File::open(path)
+        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut start))
+        .is_ok_and(|()| {
+            (&start[..4], &start[8..16]) == (b"RIFF", b"WEBPVP8X") && start[20] & 0x02 != 0
+        })
+}
+
 /// The layers to show and hide, from the options that name them.
 pub fn layers(show: Option<&[String]>, hide: Option<&[String]>) -> Layers {
     let names = |list: Option<&[String]>| list.map(<[String]>::to_vec).unwrap_or_default();
@@ -60,8 +70,9 @@ pub fn layers(show: Option<&[String]>, hide: Option<&[String]>) -> Layers {
 
 /// `input` as ffmpeg can read it: an Aseprite file drawn with the tag and
 /// layers `options` choose; with `sequence`, the frames of one animation,
-/// image files or folders of them, `fps` a second, 10 unless it says; and
-/// anything else as it is. Only Aseprite files have tags and layers.
+/// image files or folders of them, `fps` a second, 10 unless it says; an
+/// animated WebP drawn as it is; and anything else as it is. Only Aseprite
+/// files have tags and layers.
 pub fn readable(
     input: &Path,
     sequence: Option<&[PathBuf]>,
@@ -86,6 +97,14 @@ pub fn readable(
                 .map_err(|err| unreadable(err.to_string()))?;
             let tags = sprite.tags().iter().map(|tag| tag.name.clone()).collect();
             (animation, tags, sprite.layers())
+        }
+        None if is_animated_webp(input) => {
+            let unreadable = |message: String| Error::Probe { path: input.to_path_buf(), message };
+            cancel.check()?;
+            let bytes = std::fs::read(input).map_err(|err| unreadable(err.to_string()))?;
+            let animation = frames::decode(&bytes, &frames::DecodeOptions::default())
+                .map_err(|err| unreadable(err.to_string()))?;
+            (animation, vec![], vec![])
         }
         None => {
             let path = input.to_path_buf();
@@ -269,5 +288,25 @@ mod tests {
         let (numerator, denominator) = fraction(std::f64::consts::PI / 10.0);
         let near = f64::from(numerator) / f64::from(denominator);
         assert!((near - std::f64::consts::PI / 10.0).abs() < 1e-6, "{near}");
+    }
+
+    #[test]
+    fn draws_animated_webp_for_ffmpeg() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = tgradish_corpus::files();
+        let glow = files.iter().find(|file| file.name == "glow.webp").unwrap();
+        let path = dir.path().join("glow.webp");
+        std::fs::write(&path, &glow.bytes).unwrap();
+        let drawn = readable(&path, None, &Options::default(), &CancelToken::new()).unwrap();
+        assert!(drawn.is_drawn());
+        let decode = |bytes: &[u8]| frames::decode(bytes, &frames::DecodeOptions::default());
+        let bytes = std::fs::read(drawn.path()).unwrap();
+        assert_eq!(decode(&bytes).unwrap(), decode(&glow.bytes).unwrap());
+        // a still one ffmpeg reads as it is
+        let still = dir.path().join("still.webp");
+        std::fs::write(&still, crate::still::encode(&[255, 0, 0, 255], 1, 1, None).unwrap())
+            .unwrap();
+        let as_is = readable(&still, None, &Options::default(), &CancelToken::new()).unwrap();
+        assert!(!as_is.is_drawn());
     }
 }
