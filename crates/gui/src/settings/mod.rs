@@ -178,20 +178,23 @@ const GUTTER: f32 = 24.0;
 /// plays, and then the file that comes out, beside it where there is room.
 pub fn show(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let parts = Part::of(item);
-    if ui.available_width() < TWO_COLUMNS {
+    if ui.available_width() >= TWO_COLUMNS {
+        columns(ui, item, context, &parts);
+    } else {
         for &part in &parts {
             part.show(ui, item, context);
         }
-        return;
     }
+    // long lines: under the columns, as wide as both
+    commands(ui, item, context);
+}
+
+/// `parts` in two columns, each part where there is less so far.
+fn columns(ui: &mut egui::Ui, item: &mut Item, context: &Context, parts: &[Part]) {
     // how high each part was last drawn
     let id = egui::Id::new("settings heights");
     let mut heights: HashMap<Part, f32> = ui.data(|data| data.get_temp(id)).unwrap_or_default();
-    let height = |part: Part| match part {
-        // as it is closed, so opening it moves nothing
-        Part::Commands => 30.0,
-        part => heights.get(&part).copied().unwrap_or_default(),
-    };
+    let height = |part: Part| heights.get(&part).copied().unwrap_or_default();
     // the picture first on the left, the Aseprite file's on the right, and
     // the rest each where there is less so far; to the right only where
     // clearly less, so a part changing a little doesn't move another
@@ -256,12 +259,11 @@ enum Part {
     Quality,
     Reading,
     Advanced,
-    Commands,
 }
 
 impl Part {
     /// The parts an item has, in order: what is read and how it looks and
-    /// plays, then the file that comes out and the commands that make it.
+    /// plays, then the file that comes out.
     fn of(item: &Item) -> Vec<Part> {
         let mut parts = Vec::new();
         if item.kind == Kind::Aseprite {
@@ -274,7 +276,6 @@ impl Part {
             // lossless, or lossy where only that fits: nothing to choose
             Format::Image => {}
         }
-        parts.push(Part::Commands);
         parts
     }
 
@@ -288,7 +289,6 @@ impl Part {
             (Part::Quality, Format::Tgs) => tgs_quality(ui, item, context),
             (Part::Reading, _) => reading(ui, item),
             (Part::Advanced, _) => advanced(ui, item, context),
-            (Part::Commands, _) => commands(ui, item, context),
             (Part::Quality, Format::Image) => {}
         }
     }
