@@ -246,9 +246,10 @@ pub struct OptionArgs {
     /// [default: balanced], and comes out larger for .tgs [default: best].
     #[arg(long, value_enum, help_heading = "Encoding")]
     pub speed: Option<SpeedArg>,
-    /// WebM: lossless encoding, only useful for tiny or static videos.
-    /// .tgs: never change the art to make it fit; report a sticker that is
-    /// too large instead.
+    /// WebM: lossless encoding, only useful for tiny or static videos
+    /// [default: false]. .tgs: never change the art to make it fit, but
+    /// report a sticker that is too large; --lossless=false lets fitting
+    /// change it [default: true].
     #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
           default_missing_value = "true", help_heading = "Encoding")]
     pub lossless: Option<bool>,
