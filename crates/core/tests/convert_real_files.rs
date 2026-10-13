@@ -967,3 +967,189 @@ fn makes_image_stickers_from_a_frame() {
         assert!(differ < first.len() / 100, "{differ} of {} channels differ", first.len());
     }
 }
+
+/// The corpus file `corpus`, written to `dir` as `name`.
+fn corpus_file(dir: &Path, corpus: &str, name: &str) -> PathBuf {
+    let files = tgradish_corpus::files();
+    let file = files.iter().find(|file| file.name == corpus).expect("in the corpus");
+    let path = dir.join(name);
+    std::fs::write(&path, &file.bytes).unwrap();
+    path
+}
+
+#[test]
+fn converts_aseprite_files_through_ffmpeg() {
+    let Some(backends) = backends() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let ase = corpus_file(dir.path(), "walker_2x.ase", "walker.ase");
+    for backend in &backends {
+        let name = name(backend);
+        // the idle tag: two frames of 100 ms
+        let options = Options { tag: Some("idle".into()), ..fast(Fit::Bitrate) };
+        let output = Some(dir.path().join(format!("{name}.webm")));
+        let request = Request { output, options, ..Request::new(ase.clone()) };
+        let mut events = Vec::new();
+        let made = convert(backend, &request, &CancelToken::new(), &mut |e| events.push(e));
+        let made = made.unwrap();
+        assert!(made.issues.is_empty(), "{name}: {:?}", made.issues);
+        // told as given, not as drawn for ffmpeg
+        let started = events.first();
+        assert!(matches!(started, Some(Event::Started { plan }) if plan.input == ase), "{name}");
+        let info = webm::inspect_file(&made.output).unwrap();
+        assert_eq!(info.video_frames, 2, "{name}");
+        // a picture of its first frame
+        let output = Some(dir.path().join(format!("{name}.webp")));
+        let picture = Request { output, ..request.clone() };
+        let made = tgradish_core::still::convert(backend, &picture, &CancelToken::new()).unwrap();
+        assert!(made.issues.is_empty(), "{name}: {:?}", made.issues);
+    }
+}
+
+/// The walker as a lossless video, its 0.8 s walk `loops` times.
+fn walking_video(dir: &Path, loops: u32) -> PathBuf {
+    let gif = corpus_file(dir, "walker_2x.gif", "walker.gif");
+    let video = dir.join(format!("walker-{loops}.mkv"));
+    let repeats = (loops - 1).to_string();
+    let (gif, out) = (gif.to_str().unwrap(), video.to_str().unwrap());
+    make(&["-stream_loop", &repeats, "-i", gif, "-c:v", "ffv1", "-pix_fmt", "bgra", out]);
+    video
+}
+
+#[test]
+fn makes_tgs_stickers_from_videos() {
+    use tgradish_core::tgs::{self, TgsOptions, TgsRequest};
+    let Some(backends) = backends() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let (once, long) = (walking_video(dir.path(), 1), walking_video(dir.path(), 5));
+    // raw H.264, where ffmpeg has x264
+    let raw = dir.path().join("walker.h264");
+    let made = Command::new("ffmpeg")
+        .args(["-v", "error", "-y", "-i"])
+        .arg(dir.path().join("walker.gif"))
+        .args(["-c:v", "libx264", "-qp", "0", "-f", "h264"])
+        .arg(&raw)
+        .status()
+        .unwrap();
+    let raw = made.success().then_some(raw);
+    let request = |input: &Path, output: String, options, backend| TgsRequest {
+        inputs: vec![input.to_path_buf()],
+        sequence: false,
+        output: dir.path().join(output),
+        options,
+        overwrite: true,
+        backend,
+    };
+    let sticker = |request: TgsRequest| tgs::convert(&request, &CancelToken::new(), &mut |_| {});
+    // what the video should come to: the GIF it was made of
+    let gif = dir.path().join("walker.gif");
+    let direct = sticker(request(&gif, "gif.tgs".into(), TgsOptions::default(), None)).unwrap();
+    for backend in &backends {
+        let name = name(backend);
+        let video = |input: &Path, options| {
+            let output = format!("{name}-{}.tgs", input.file_stem().unwrap().display());
+            sticker(request(input, output, options, Some(backend.clone())))
+        };
+        let made = video(&once, TgsOptions::default()).unwrap();
+        assert!(made.issues.is_empty() && !made.lossy, "{name}: {:?}", made.issues);
+        assert!(made.preview == direct.preview, "{name}: not the same as the GIF");
+        // the third walk, read from where it starts
+        let third = TgsOptions { start: Some(1.6), length: Some(0.8), ..TgsOptions::default() };
+        let made = video(&long, third).unwrap();
+        assert!(made.preview == direct.preview, "{name}: not the same as the GIF");
+        // at its own pace, what plays past 3 seconds is cut, and said
+        let own_pace = TgsOptions { tempo: Some(1.0), ..TgsOptions::default() };
+        assert!(video(&long, own_pace).unwrap().lossy, "{name}");
+        // all of it, played faster
+        let made = video(&long, TgsOptions::default()).unwrap();
+        assert!(made.issues.is_empty() && !made.lossy, "{name}: {:?}", made.issues);
+        // a cut between frames, as long as asked: 9 sixtieths
+        let cut = TgsOptions { length: Some(0.15), ..TgsOptions::default() };
+        let made = video(&once, cut).unwrap();
+        let ticks: u32 = made.preview.frames.iter().map(|(_, ticks)| ticks).sum();
+        assert_eq!(ticks, 9, "{name}");
+        let none = TgsOptions { length: Some(0.0), ..TgsOptions::default() };
+        assert!(video(&once, none).is_err(), "{name}");
+        // half of a frame of a second
+        let slow = dir.path().join("slow.mkv");
+        let out = slow.to_str().unwrap();
+        make(&["-f", "lavfi", "-i", "color=red:s=16x16:r=1:d=2", "-c:v", "ffv1", out]);
+        let half = TgsOptions { length: Some(0.5), ..TgsOptions::default() };
+        let made = video(&slow, half).unwrap();
+        let ticks: u32 = made.preview.frames.iter().map(|(_, ticks)| ticks).sum();
+        assert_eq!(ticks, 30, "{name}");
+        // a stream that doesn't say how long it is, nor when frames start
+        if let Some(raw) = &raw {
+            let made = video(raw, TgsOptions::default()).unwrap();
+            assert!(made.preview.frames.len() > 1, "{name}: read as a still");
+        }
+    }
+    // without ffmpeg, there is nothing to read a video with
+    let none = sticker(request(&once, "none.tgs".into(), TgsOptions::default(), None));
+    assert!(matches!(none, Err(Error::FfmpegNotFound(_))));
+}
+
+#[test]
+fn times_animated_pictures_by_their_frames() {
+    let Some(backends) = backends() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    // neither APNG nor WebP files say how long they play
+    let apng = corpus_file(dir.path(), "bounce.png", "bounce.png");
+    let webp = corpus_file(dir.path(), "glow.webp", "glow.webp");
+    // nor how fast, when as short as two frames
+    let ase = corpus_file(dir.path(), "walker_2x.ase", "walker.ase");
+    let idle = Options { tag: Some("idle".into()), ..Options::default() };
+    let two = tgradish_core::drawn::readable(&ase, None, &idle, &CancelToken::new()).unwrap();
+    let seconds = |name: &str| f64::from(tgradish_corpus::sprite(name).length()) / 1000.0;
+    for backend in &backends {
+        let name = name(backend);
+        for (path, length) in [(&apng, seconds("bounce")), (&webp, seconds("glow"))] {
+            let probe = backend.probe(path, &CancelToken::new()).unwrap();
+            let duration = probe.duration.unwrap_or_default();
+            assert!((duration - length).abs() < 1e-3, "{name}: {path:?} lasts {duration}");
+        }
+        let probe = backend.probe(two.path(), &CancelToken::new()).unwrap();
+        assert!((probe.duration.unwrap_or_default() - 0.2).abs() < 1e-3, "{name}");
+        assert!((probe.fps.unwrap_or_default() - 10.0).abs() < 1e-3, "{name}: {:?}", probe.fps);
+    }
+}
+
+#[test]
+fn makes_sequences_into_videos_and_pictures() {
+    let Some(backends) = backends() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    // a folder, its name dotted, of a red frame and a blue one
+    let folder = dir.path().join("walk.v2");
+    std::fs::create_dir(&folder).unwrap();
+    for (index, colour) in [[255, 0, 0, 255], [0, 0, 255, 255]].into_iter().enumerate() {
+        let mut canvas = tgradish_corpus::Canvas::new(8, 8);
+        canvas.rect(0, 0, 8, 8, colour);
+        let png = tgradish_corpus::encode::png(&canvas);
+        std::fs::write(folder.join(format!("{}.png", index + 1)), png).unwrap();
+    }
+    let sequence = Some(vec![folder.clone()]);
+    for backend in &backends {
+        let name = name(backend);
+        // four frames a second: half a second
+        let options = Options { fps: Some(4.0), ..fast(Fit::Bitrate) };
+        let request = Request {
+            sequence: sequence.clone(),
+            options,
+            overwrite: true,
+            ..Request::new(folder.clone())
+        };
+        let made = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
+        assert_eq!(made.output, dir.path().join("walk.v2.sticker.webm"), "{name}");
+        let info = webm::inspect_file(&made.output).unwrap();
+        assert_eq!(info.video_frames, 2, "{name}");
+        assert!((info.header_duration.unwrap() - 0.5).abs() < 1e-3, "{name}");
+        // a picture's frames come ten a second, whatever else says
+        let picture = |fps| {
+            let options = Options { start: Some(0.15), fps, ..Options::default() };
+            let request = Request { options, ..request.clone() };
+            let made = tgradish_core::still::convert(backend, &request, &CancelToken::new());
+            tgradish_core::still::preview(&made.unwrap().output).unwrap().frames[0].0[..4].to_vec()
+        };
+        assert_eq!(picture(None), [0, 0, 255, 255], "{name}");
+        assert_eq!(picture(Some(4.0)), [0, 0, 255, 255], "{name}");
+    }
+}

@@ -10,6 +10,7 @@ use tgradish_core::tgs::{self, TgsOptions};
 pub use crate::term::ColorChoice;
 
 const TGS: &str = "Animated stickers (.tgs)";
+const ASEPRITE: &str = "Aseprite files";
 
 /// Converts videos into Telegram video stickers and emoji, with the ability
 /// to bypass the 3 second limit, pictures and frames into image stickers,
@@ -122,8 +123,8 @@ pub struct ConvertArgs {
     /// Output file. Only with a single input, or with --sequence.
     #[arg(short, long, conflicts_with = "output_dir")]
     pub output: Option<PathBuf>,
-    /// Join the inputs (images, or directories of them) into one animated
-    /// sticker, in name order with numbers counted as numbers.
+    /// Join the inputs (images, or directories of them) into one animation,
+    /// in name order with numbers counted as numbers.
     #[arg(long, conflicts_with = "clipboard")]
     pub sequence: bool,
     #[command(flatten)]
@@ -151,9 +152,9 @@ pub struct WatchArgs {
 #[derive(Debug, Args)]
 pub struct ConversionArgs {
     /// What to make: webm (video sticker or emoji, from any video or image),
-    /// tgs (animated sticker, from pixel art) or image (image sticker or
-    /// emoji as WebP, from the frame at --start). [default: by the output's
-    /// extension, then webm]
+    /// tgs (animated sticker, from pixel art, or a video of it) or image
+    /// (image sticker or emoji as WebP, from the frame at --start).
+    /// [default: by the output's extension, then webm]
     #[arg(long, value_enum)]
     pub format: Option<FormatArg>,
     /// Directory for results. Default: next to each input, as
@@ -214,9 +215,10 @@ pub struct OptionArgs {
     /// seconds; what still lasts longer is cut]
     #[arg(long, value_name = "TIMES", help_heading = "Output")]
     pub tempo: Option<f64>,
-    /// Frame rate: of the result for WebM, at most 60 and at most the
-    /// input's at the tempo [default: the input's, at most 60], of sprite
-    /// sheets and image sequences for .tgs [default: 10].
+    /// Frame rate: how fast the frames of image sequences, and of sprite
+    /// sheets for .tgs, play [default: 10]; otherwise of the result for
+    /// WebM, at most 60 and at most the input's at the tempo [default: the
+    /// input's, at most 60].
     #[arg(long, help_heading = "Output")]
     pub fps: Option<f64>,
 
@@ -296,9 +298,6 @@ pub struct OptionArgs {
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..),
           help_heading = TGS)]
     pub pixel_scale: Option<u32>,
-    /// Aseprite tag to export. [default: all frames]
-    #[arg(long, help_heading = TGS)]
-    pub tag: Option<String>,
     /// Read the input as a sprite sheet of equal cells, frames row by row.
     #[arg(long, value_name = "COLUMNSxROWS", help_heading = TGS)]
     pub sheet: Option<String>,
@@ -306,6 +305,20 @@ pub struct OptionArgs {
     /// transparent ones at the end]
     #[arg(long, value_name = "N", help_heading = TGS)]
     pub sheet_frames: Option<u32>,
+
+    /// Tag to use. [default: all frames]
+    #[arg(long, help_heading = ASEPRITE)]
+    pub tag: Option<String>,
+    /// Layer to show, hidden ones too; repeat for more. [default: those the
+    /// file shows]
+    #[arg(long = "show-layers", visible_alias = "show-layer", value_name = "NAME",
+          help_heading = ASEPRITE)]
+    pub show_layers: Vec<String>,
+    /// Layer to hide; repeat for more. A hidden group hides the layers in
+    /// it.
+    #[arg(long = "hide-layers", visible_alias = "hide-layer", value_name = "NAME",
+          help_heading = ASEPRITE)]
+    pub hide_layers: Vec<String>,
 }
 
 impl OptionArgs {
@@ -318,7 +331,6 @@ impl OptionArgs {
                 given(self.compromise.is_some(), "--compromise"),
                 given(self.keep_canvas.is_some(), "--keep-canvas"),
                 given(self.pixel_scale.is_some(), "--pixel-scale"),
-                given(self.tag.is_some(), "--tag"),
                 given(self.sheet.is_some(), "--sheet"),
                 given(self.sheet_frames.is_some(), "--sheet-frames"),
             ],
@@ -341,7 +353,6 @@ impl OptionArgs {
                 given(self.compromise.is_some(), "--compromise"),
                 given(self.keep_canvas.is_some(), "--keep-canvas"),
                 given(self.pixel_scale.is_some(), "--pixel-scale"),
-                given(self.tag.is_some(), "--tag"),
                 given(self.sheet.is_some(), "--sheet"),
                 given(self.sheet_frames.is_some(), "--sheet-frames"),
             ],
@@ -378,6 +389,8 @@ impl OptionArgs {
             keep_canvas: self.keep_canvas,
             pixel_scale: self.pixel_scale,
             tag: self.tag.clone(),
+            show_layers: names(&self.show_layers),
+            hide_layers: names(&self.hide_layers),
             sheet: self.sheet.clone(),
             sheet_frames: self.sheet_frames,
             fps: self.fps,
@@ -389,6 +402,9 @@ impl OptionArgs {
     pub fn to_options(&self) -> Options {
         Options {
             target: self.target.map(Into::into),
+            tag: self.tag.clone(),
+            show_layers: names(&self.show_layers),
+            hide_layers: names(&self.hide_layers),
             crop: self.crop,
             resize: self.resize.map(Into::into),
             scaling: self.scaling.map(Into::into),
@@ -413,6 +429,11 @@ impl OptionArgs {
             extra_args: self.extra_args.clone().map(|words| words.0),
         }
     }
+}
+
+/// Names given, or `None` for none.
+fn names(given: &[String]) -> Option<Vec<String>> {
+    (!given.is_empty()).then(|| given.to_vec())
 }
 
 /// One argument split into several like a shell would.
@@ -567,6 +588,11 @@ mod tests {
             "--keep-canvas",
             "--fps",
             "12",
+            // what is read, for any format
+            "--tag",
+            "idle",
+            "--hide-layer",
+            "Back",
         ]);
         let Command::Convert(args) = cli.command else { panic!() };
         let options = &args.conversion.options;
@@ -575,6 +601,8 @@ mod tests {
             options.foreign(Format::Webm),
             ["--reductions", "--compromise", "--keep-canvas"]
         );
+        assert!(!options.foreign(Format::Image).iter().any(|flag| flag.contains("layer")));
+        assert!(!options.foreign(Format::Image).contains(&"--tag"));
         let tgs = options.to_tgs_options();
         assert_eq!(tgs.reductions.unwrap(), [tgs::Kind::MergeColours, tgs::Kind::DropFrames]);
         assert_eq!(tgs.compromise, Some(tgs::Compromise::Motion));
@@ -619,6 +647,10 @@ mod tests {
     fn writes_flags_that_read_back() {
         let webm = Options {
             target: Some(Target::Emoji),
+            tag: Some("idle".into()),
+            // names with commas and spaces, one flag each
+            show_layers: Some(vec!["Shadow, soft".into(), "Hat".into()]),
+            hide_layers: Some(vec!["Back ground".into()]),
             crop: Some(Crop { x: 1, y: 2, width: 30, height: 40 }),
             resize: Some(options::Resize::Pad),
             scaling: Some(options::Scaling::PixelPerfect),
@@ -655,6 +687,8 @@ mod tests {
             keep_canvas: Some(true),
             pixel_scale: Some(2),
             tag: Some("run".into()),
+            show_layers: Some(vec!["Outline".into()]),
+            hide_layers: Some(vec!["Sketch".into(), "Guides, old".into()]),
             sheet: Some("4x2".into()),
             sheet_frames: Some(7),
             fps: Some(12.5),

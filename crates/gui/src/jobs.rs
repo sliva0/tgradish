@@ -27,6 +27,8 @@ pub enum Plan {
     },
     Tgs {
         options: TgsOptions,
+        /// ffmpeg, which reads videos.
+        backend: Option<Backend>,
     },
     /// An image sticker: WebM's options, `start` the frame's time.
     Image {
@@ -347,13 +349,24 @@ fn run(
     if let Some(dir) = output.parent().filter(|dir| !dir.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
+    // the frames of one animation, which pixel art drawing joins
+    let frames = (sequence || inputs.len() > 1).then(|| inputs.clone());
     match plan {
         Plan::Webm { options, backend } => {
-            webm(options, backend, &inputs[0], output, overwrite, cancel, update)
+            let request = Request {
+                input: inputs[0].clone(),
+                sequence: frames,
+                output: Some(output),
+                options,
+                overwrite,
+                keep_temp: false,
+            };
+            webm(&request, backend, cancel, update)
         }
         Plan::Image { options, backend } => {
             let request = Request {
                 input: inputs[0].clone(),
+                sequence: frames,
                 output: Some(output),
                 options,
                 overwrite,
@@ -376,9 +389,9 @@ fn run(
                 preview,
             })
         }
-        Plan::Tgs { options } => {
+        Plan::Tgs { options, backend } => {
             let lossless = options.lossless.unwrap_or(false);
-            let request = TgsRequest { inputs, sequence, output, options, overwrite };
+            let request = TgsRequest { inputs, sequence, output, options, overwrite, backend };
             update(Box::new(move |progress| {
                 progress.tgs = Some(TgsStage::Reading);
                 progress.tgs_lossless = lossless;
@@ -421,23 +434,13 @@ fn run(
 }
 
 fn webm(
-    options: Options,
+    request: &Request,
     backend: Backend,
-    input: &Path,
-    output: PathBuf,
-    overwrite: bool,
     cancel: &CancelToken,
     update: Update,
 ) -> Result<Done, Error> {
-    let limit = options.target.unwrap_or_default().max_bytes();
-    let request = Request {
-        input: input.to_path_buf(),
-        output: Some(output),
-        options,
-        overwrite,
-        keep_temp: false,
-    };
-    let outcome = convert(&backend, &request, cancel, &mut |event| match event {
+    let limit = request.options.target.unwrap_or_default().max_bytes();
+    let outcome = convert(&backend, request, cancel, &mut |event| match event {
         Event::Started { plan } => {
             let planned = WebmPlan {
                 width: plan.width,

@@ -18,7 +18,11 @@ pub struct Sheet {
 
 /// Splits a still image into the frames of a sprite sheet.
 pub fn sprite_sheet(bytes: &[u8], sheet: &Sheet, limits: &Limits) -> Result<Animation> {
-    split_sheet(&decode(bytes, &DecodeOptions { tag: None, limits: *limits })?, sheet, limits)
+    split_sheet(
+        &decode(bytes, &DecodeOptions { limits: *limits, ..DecodeOptions::default() })?,
+        sheet,
+        limits,
+    )
 }
 
 /// Splits a decoded `image` into the frames of a sprite sheet, counting
@@ -88,7 +92,7 @@ pub fn sequence<'a>(
     for (index, bytes) in images.into_iter().enumerate() {
         // each image is decoded in what the ones before left of the budget
         let left = Limits { max_bytes: limits.max_bytes.saturating_sub(held), ..*limits };
-        let image = decode(bytes, &DecodeOptions { tag: None, limits: left })?;
+        let image = decode(bytes, &DecodeOptions { limits: left, ..DecodeOptions::default() })?;
         let (width, height) = (image.width(), image.height());
         let (first_width, first_height) = *size.get_or_insert((width, height));
         if (width, height) != (first_width, first_height) {

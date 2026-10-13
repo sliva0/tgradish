@@ -43,14 +43,14 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn backend(&self) -> Result<Backend> {
+    pub fn backend(&self) -> tgradish_core::Result<Backend> {
         // an explicit choice on the command line beats a path in the config
         let (choice, path) = match (self.global.ffmpeg_from, &self.global.ffmpeg) {
             (_, Some(path)) => (self.config.ffmpeg.choice, Some(path)),
             (Some(choice), None) => (choice.into(), None),
             (None, None) => (self.config.ffmpeg.choice, self.config.ffmpeg.path.as_ref()),
         };
-        Ok(Backend::select(choice, path.map(|p| p.as_path()))?)
+        Backend::select(choice, path.map(|p| p.as_path()))
     }
 }
 

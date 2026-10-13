@@ -13,7 +13,6 @@ use crate::Context;
 use crate::args::WatchArgs;
 use crate::convert::Converter;
 use tgradish_core::inputs;
-use tgradish_core::presets::Format;
 
 use crate::ui;
 
@@ -21,9 +20,9 @@ use crate::ui;
 /// locked or not readable yet.
 const MAX_FAILURES: u32 = 5;
 
-/// Whether `path` looks like an input for `format` rather than a result, a
-/// hidden file or a download in progress.
-fn is_input(path: &Path, format: Format) -> bool {
+/// Whether `path` looks like an input rather than a result, a hidden file
+/// or a download in progress.
+fn is_input(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else { return false };
     let name = name.to_lowercase();
     if name.starts_with('.') || name.starts_with('~') {
@@ -37,7 +36,7 @@ fn is_input(path: &Path, format: Format) -> bool {
     let extension = extension.as_str();
     inputs::VIDEOS.contains(&extension)
         || inputs::IMAGES.contains(&extension)
-        || format == Format::Tgs && inputs::ASEPRITE.contains(&extension)
+        || inputs::ASEPRITE.contains(&extension)
 }
 
 /// What a file looked like at one scan.
@@ -58,12 +57,11 @@ fn current_stamp(path: &Path) -> Option<Stamp> {
 struct Scan {
     files: HashMap<PathBuf, Stamp>,
     unreadable: Vec<(PathBuf, std::io::Error)>,
-    format: Format,
 }
 
 impl Scan {
-    fn run(dir: &Path, recursive: bool, format: Format) -> Scan {
-        let mut scan = Scan { format, ..Scan::default() };
+    fn run(dir: &Path, recursive: bool) -> Scan {
+        let mut scan = Scan::default();
         scan.visit(dir, recursive);
         scan
     }
@@ -87,7 +85,7 @@ impl Scan {
                     self.visit(&path, recursive);
                 }
             } else if file_type.is_file()
-                && is_input(&path, self.format)
+                && is_input(&path)
                 && let Some(stamp) = current_stamp(&path)
             {
                 self.files.insert(path, stamp);
@@ -174,7 +172,7 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
     let output_for = |path: &Path| converter.output_under(path, Some(&args.dir));
 
     let mut tracker = Tracker::default();
-    for (path, stamp) in Scan::run(&args.dir, args.recursive, converter.format()).files {
+    for (path, stamp) in Scan::run(&args.dir, args.recursive).files {
         if args.existing && !output_for(&path).exists() {
             tracker.pending.insert(path, stamp);
         } else {
@@ -200,7 +198,7 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
             return Ok(());
         }
 
-        let scan = Scan::run(&args.dir, args.recursive, converter.format());
+        let scan = Scan::run(&args.dir, args.recursive);
         let now_unreadable: HashSet<PathBuf> =
             scan.unreadable.iter().map(|(p, _)| p.clone()).collect();
         for (path, err) in &scan.unreadable {
@@ -268,17 +266,16 @@ mod tests {
 
     #[test]
     fn recognizes_inputs() {
-        let webm = |path: &str| is_input(Path::new(path), Format::Webm);
-        assert!(webm("dir/Pig.MP4"));
-        assert!(webm("cat.gif"));
-        assert!(!webm("pig.sticker.webm"));
-        assert!(!webm("pig.emoji.webm"));
-        assert!(!webm(".pig.mp4"));
-        assert!(!webm("pig.mp4.part"));
-        assert!(!webm("notes.txt"));
-        assert!(!webm("walk.ase"));
-        assert!(is_input(Path::new("walk.ase"), Format::Tgs));
-        assert!(!is_input(Path::new("walk.sticker.tgs"), Format::Tgs));
+        let input = |path: &str| is_input(Path::new(path));
+        assert!(input("dir/Pig.MP4"));
+        assert!(input("cat.gif"));
+        assert!(input("walk.ase"));
+        assert!(!input("pig.sticker.webm"));
+        assert!(!input("pig.emoji.webm"));
+        assert!(!input(".pig.mp4"));
+        assert!(!input("pig.mp4.part"));
+        assert!(!input("notes.txt"));
+        assert!(!input("walk.sticker.tgs"));
     }
 
     #[test]
@@ -306,7 +303,7 @@ mod tests {
         let locked = dir.path().join("locked");
         std::fs::create_dir(&locked).unwrap();
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-        let scan = Scan::run(dir.path(), true, Format::Webm);
+        let scan = Scan::run(dir.path(), true);
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
         // root can read anything, then there is nothing to report
         if scan.unreadable.is_empty() {

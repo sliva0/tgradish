@@ -6,6 +6,7 @@
 
 use eframe::egui;
 use tgradish_core::backend::Backend;
+use tgradish_core::options::Options;
 use tgradish_core::presets::Format;
 use tgradish_core::still;
 
@@ -75,19 +76,38 @@ impl App {
                     item.inputs.clone(),
                     item.sequence,
                     item.art_reading.clone(),
+                    backend.as_ref().ok().cloned(),
                 ));
                 reading += 1;
             } else if matches!(item.format, Format::Webm | Format::Image)
-                && item.video.is_idle()
                 && !(item.format_guessed && item.art.is_loading())
             {
-                item.video = match &backend {
-                    Ok(backend) => {
-                        Load::Loading(Video::load(ctx, backend.clone(), item.inputs[0].clone()))
+                // pixel art drawn again with another tag, layers or rate
+                let drawing = match item.kind {
+                    Kind::Aseprite | Kind::Frames => {
+                        item.choices.drawing(item.format, &self.presets, &self.config)
                     }
-                    Err(message) => Load::Failed(message.clone()),
+                    Kind::Video | Kind::Image => Options::default(),
                 };
-                reading += 1;
+                let redraw = item.video_drawing != drawing && !item.video.is_loading();
+                if item.video.is_idle() || redraw {
+                    if redraw {
+                        (item.part, item.still) = (None, None);
+                    }
+                    item.video_drawing = drawing.clone();
+                    let (inputs, sequence) = (item.inputs.clone(), item.sequence);
+                    item.video = match &backend {
+                        Ok(backend) => Load::Loading(Video::load(
+                            ctx,
+                            backend.clone(),
+                            inputs,
+                            sequence,
+                            drawing,
+                        )),
+                        Err(message) => Load::Failed(message.clone()),
+                    };
+                    reading += 1;
+                }
             }
             if is_selected && item.result_clip.is_idle() && item.made.is_some() {
                 load_result_clip(ctx, item, &backend);
@@ -109,13 +129,12 @@ impl App {
         }
         let range = item.range().map(|(start, end)| (start, end - start));
         let Some(video) = item.video.ready() else { return };
-        let path = item.inputs[0].clone();
         let still = video.probe.still_image;
         if !item.view.playing || still {
             let time = if still { 0.0 } else { item.view.time };
             let loaded = item.still.as_ref().is_some_and(|(at, _)| *at == time);
             if !loaded && settled(ctx, ("still", id), (time, 0.0), 0.25) {
-                let task = video.load_still(ctx, backend.clone(), path.clone(), time);
+                let task = video.load_still(ctx, backend.clone(), time);
                 item.still = Some((time, Load::Loading(task)));
             }
         } else {
@@ -125,7 +144,7 @@ impl App {
         if !item.part.as_ref().is_some_and(|(loaded, _)| *loaded == range)
             && settled(ctx, ("range", id), range, 0.4)
         {
-            let task = video.load_part(ctx, backend.clone(), path, range);
+            let task = video.load_part(ctx, backend.clone(), range);
             item.part = Some((range, Load::Loading(task)));
         }
     }
@@ -181,9 +200,10 @@ impl App {
                         backend.clone().map(|backend| Plan::Webm { options, backend })
                     })
                 }
-                Format::Tgs => choices
-                    .tgs_options(&self.presets, &self.config)
-                    .map(|options| Plan::Tgs { options }),
+                Format::Tgs => choices.tgs_options(&self.presets, &self.config).map(|options| {
+                    // ffmpeg, for videos
+                    Plan::Tgs { options, backend: backend.clone().ok() }
+                }),
                 Format::Image => {
                     choices.image_options(&self.presets, &self.config).and_then(|options| {
                         backend.clone().map(|backend| Plan::Image { options, backend })
@@ -299,7 +319,10 @@ mod tests {
     use tgradish_core::telegram;
 
     use super::*;
-    use crate::testing::{convert, finish, harness, made_job, square, video, video_of};
+    use crate::testing::{
+        convert, corpus, finish, harness, has_ffmpeg, made_job, square, video, video_of,
+        walking_video,
+    };
 
     #[test]
     fn converts_pixel_art() {
@@ -551,5 +574,106 @@ mod tests {
         finish(&mut harness);
         let item = &harness.state().items[1];
         assert_eq!((item.kind, item.format), (Kind::Image, Format::Image));
+    }
+
+    #[test]
+    fn makes_aseprite_files_into_every_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let ase = corpus(dir.path(), "walker_2x.ase", "walker.ase");
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![ase]);
+        finish(&mut harness);
+        let item = &harness.state().items[0];
+        assert_eq!((item.kind, item.format), (Kind::Aseprite, Format::Tgs));
+        let (tags, layers) = item.aseprite().expect("read");
+        let layers: Vec<_> = layers.iter().map(|l| (l.name.as_str(), l.visible)).collect();
+        assert_eq!(
+            (tags, layers.as_slice()),
+            (&["idle".to_owned()][..], &[("sketch", false), ("art", true)][..])
+        );
+        // the idle tag's two frames, its sketch shown
+        let choices = &mut harness.state_mut().items[0].choices;
+        choices.tag = Some("idle".into());
+        choices.show_layers = Some(vec!["sketch".into()]);
+        finish(&mut harness);
+        assert_eq!(harness.state().items[0].input_clip().unwrap().frames.len(), 2);
+        // drawn the same for ffmpeg, as a video and as a picture
+        if !has_ffmpeg() {
+            return;
+        }
+        for format in [Format::Webm, Format::Image] {
+            harness.state_mut().items[0].format = format;
+            finish(&mut harness);
+            let item = &harness.state().items[0];
+            assert_eq!(item.aseprite().map(|(tags, _)| tags.len()), Some(1), "{format:?}");
+            let length = item.input_length().unwrap_or_default();
+            assert!((length - 0.2).abs() < 1e-3, "{format:?}: {length}");
+            convert(&harness);
+            harness.run_steps(2);
+            finish(&mut harness);
+            let done = made_job(&harness.state().items[0]);
+            assert!(matches!(&done.status, Status::Done(_)), "{format:?}: {:?}", done.status);
+        }
+    }
+
+    #[test]
+    fn makes_videos_into_animations() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = walking_video(dir.path()) else { return };
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        assert_eq!(harness.state().items[0].kind, Kind::Video);
+        harness.state_mut().items[0].format = Format::Tgs;
+        finish(&mut harness);
+        // its frames, read through ffmpeg
+        let item = &harness.state().items[0];
+        assert_eq!(item.input_clip().map(|clip| clip.frames.len()), Some(8));
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let done = made_job(&harness.state().items[0]);
+        let Status::Done(done) = &done.status else { panic!("{:?}", done.status) };
+        assert!(done.output.extension().is_some_and(|ext| ext == "tgs"));
+    }
+
+    #[test]
+    fn makes_sequences_into_videos_and_pictures() {
+        if !has_ffmpeg() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let frames = dir.path().join("walk");
+        std::fs::create_dir(&frames).unwrap();
+        square(&frames.join("1.png"), [255, 0, 0, 255]);
+        square(&frames.join("2.png"), [0, 0, 255, 255]);
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![frames]);
+        finish(&mut harness);
+        assert_eq!(harness.state().items[0].kind, Kind::Frames);
+        // two frames, ten a second unless said
+        harness.state_mut().items[0].format = Format::Webm;
+        finish(&mut harness);
+        let length = harness.state().items[0].input_length().unwrap_or_default();
+        assert!((length - 0.2).abs() < 1e-3, "{length}");
+        harness.state_mut().items[0].choices.webm.fps = Some(4.0);
+        finish(&mut harness);
+        let length = harness.state().items[0].input_length().unwrap_or_default();
+        assert!((length - 0.5).abs() < 1e-3, "{length}");
+        for format in [Format::Webm, Format::Image] {
+            harness.state_mut().items[0].format = format;
+            finish(&mut harness);
+            convert(&harness);
+            harness.run_steps(2);
+            finish(&mut harness);
+            let done = made_job(&harness.state().items[0]);
+            assert!(matches!(&done.status, Status::Done(_)), "{format:?}: {:?}", done.status);
+        }
     }
 }

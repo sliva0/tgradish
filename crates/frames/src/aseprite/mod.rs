@@ -3,7 +3,8 @@
 //! is checked and malformed files are errors, never panics.
 //!
 //! Rendering follows Aseprite's: layers bottom to top, hidden and
-//! reference layers skipped, layer and cel opacity, every blend mode,
+//! reference layers skipped (hidden ones can be shown, and shown ones
+//! hidden, by name), layer and cel opacity, every blend mode,
 //! groups composited separately when the file asks for it, linked cels,
 //! per-cel z-index, and tilemaps. Flipped tiles are refused rather than
 //! drawn wrong.
@@ -56,6 +57,34 @@ impl Tag {
                 forward.clone().rev().chain(inner().rev()).collect::<Vec<_>>()
             }
         }
+    }
+}
+
+/// A layer as Aseprite's Layers panel lists it. Reference layers, which
+/// exports leave out, aren't listed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LayerInfo {
+    pub name: String,
+    /// A group, which shows or hides the layers in it.
+    pub group: bool,
+    /// How deep in groups it is: 0 outside them.
+    pub level: u16,
+    /// Shown in the file.
+    pub visible: bool,
+}
+
+/// Layers to show or hide by name, over what the file shows. A name stands
+/// for every layer of that name; one in both lists is hidden.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Layers {
+    pub show: Vec<String>,
+    pub hide: Vec<String>,
+}
+
+impl Layers {
+    /// Whether it leaves the file's choice as it is.
+    pub fn is_empty(&self) -> bool {
+        self.show.is_empty() && self.hide.is_empty()
     }
 }
 
@@ -186,7 +215,11 @@ enum LayerKind {
 
 #[derive(Debug, Clone)]
 struct Layer {
-    shown: bool,
+    name: String,
+    /// Shown in the file.
+    visible: bool,
+    /// For drawing over, never exported.
+    reference: bool,
     background: bool,
     kind: LayerKind,
     level: u16,
@@ -509,8 +542,58 @@ impl Sprite {
         self.height
     }
 
-    /// The frames of `tag`, or all frames. Hidden layers stay hidden.
-    pub fn animation(&self, tag: Option<&str>) -> Result<Animation> {
+    /// The layers, as Aseprite's Layers panel lists them: the top one first,
+    /// each group before the layers in it.
+    pub fn layers(&self) -> Vec<LayerInfo> {
+        let mut listed = Vec::new();
+        self.list_layers(self.layers.len(), &mut listed);
+        listed
+    }
+
+    fn list_layers(&self, parent: usize, listed: &mut Vec<LayerInfo>) {
+        // children are stored bottom first
+        for &index in self.children[parent].iter().rev() {
+            let layer = &self.layers[index];
+            if layer.reference {
+                continue;
+            }
+            let group = layer.kind == LayerKind::Group;
+            let (name, level, visible) = (layer.name.clone(), layer.level, layer.visible);
+            listed.push(LayerInfo { name, group, level, visible });
+            if group {
+                self.list_layers(index, listed);
+            }
+        }
+    }
+
+    /// Which layers are drawn: those the file shows, with `layers` over
+    /// them, and never reference layers.
+    fn shown(&self, layers: &Layers) -> Result<Vec<bool>> {
+        let named = |name: &String| self.layers.iter().any(|l| !l.reference && l.name == *name);
+        if let Some(name) = layers.show.iter().chain(&layers.hide).find(|name| !named(name)) {
+            let mut available: Vec<String> = Vec::new();
+            for layer in self.layers() {
+                if !available.contains(&layer.name) {
+                    available.push(layer.name);
+                }
+            }
+            return Err(Error::NoSuchLayer { name: name.clone(), available });
+        }
+        Ok(self
+            .layers
+            .iter()
+            .map(|layer| {
+                !layer.reference
+                    && !layers.hide.contains(&layer.name)
+                    && (layer.visible || layers.show.contains(&layer.name))
+            })
+            .collect())
+    }
+
+    /// The frames of `tag`, or all frames, with the layers the file shows
+    /// and `layers` changes.
+    pub fn animation(&self, tag: Option<&str>, layers: &Layers) -> Result<Animation> {
+        let shown = self.shown(layers)?;
         let order: Vec<u32> = match tag {
             None => (0..self.frames.len() as u32).collect(),
             Some(name) => self
@@ -531,7 +614,7 @@ impl Sprite {
             .into_iter()
             .map(|index| {
                 let (duration, _) = self.frames[index as usize];
-                let canvas = self.render(index as usize)?;
+                let canvas = self.render(index as usize, &shown)?;
                 Ok(Frame { rgba: canvas.into_iter().flatten().collect(), duration })
             })
             .collect::<Result<_>>()?;
@@ -556,14 +639,21 @@ impl Sprite {
         }
     }
 
-    fn render(&self, frame: usize) -> Result<Vec<Colour>> {
+    /// A frame, with the layers `shown` says.
+    fn render(&self, frame: usize, shown: &[bool]) -> Result<Vec<Colour>> {
         let mut canvas = vec![[0; 4]; self.width as usize * self.height as usize];
-        self.draw_children(self.layers.len(), frame, &mut canvas)?;
+        self.draw_children(self.layers.len(), frame, shown, &mut canvas)?;
         Ok(canvas)
     }
 
     /// Draws the children of a group (or of the top level) in order.
-    fn draw_children(&self, parent: usize, frame: usize, canvas: &mut [Colour]) -> Result<()> {
+    fn draw_children(
+        &self,
+        parent: usize,
+        frame: usize,
+        shown: &[bool],
+        canvas: &mut [Colour],
+    ) -> Result<()> {
         // a cel's z-index moves it among the layers, as Aseprite orders them
         let mut order: Vec<(i64, i64, usize)> = self.children[parent]
             .iter()
@@ -575,7 +665,7 @@ impl Sprite {
         order.sort_unstable();
         for (_, _, index) in order {
             let layer = &self.layers[index];
-            if !layer.shown {
+            if !shown[index] {
                 continue;
             }
             let opacity = if self.layer_opacity { layer.opacity } else { 255 };
@@ -584,12 +674,12 @@ impl Sprite {
             match layer.kind {
                 LayerKind::Group if self.composite_groups => {
                     let mut group = vec![[0; 4]; canvas.len()];
-                    self.draw_children(index, frame, &mut group)?;
+                    self.draw_children(index, frame, shown, &mut group)?;
                     for (back, src) in canvas.iter_mut().zip(group) {
                         *back = mode(*back, src, opacity);
                     }
                 }
-                LayerKind::Group => self.draw_children(index, frame, canvas)?,
+                LayerKind::Group => self.draw_children(index, frame, shown, canvas)?,
                 LayerKind::Image | LayerKind::Tilemap { .. } => {
                     if let Some((cel, content)) = self.cel(frame, index) {
                         let paint = Paint {
@@ -704,7 +794,7 @@ fn read_layer(chunk: &mut Reader) -> Result<Layer> {
     let blend = chunk.u16()?;
     let opacity = chunk.u8()?;
     chunk.skip(3)?;
-    chunk.string()?;
+    let name = chunk.string()?;
     let kind = match kind {
         0 => LayerKind::Image,
         1 => LayerKind::Group,
@@ -712,8 +802,9 @@ fn read_layer(chunk: &mut Reader) -> Result<Layer> {
         other => return Err(error(format!("unknown layer type {other}"))),
     };
     Ok(Layer {
-        // visible, and not a reference layer, which exports leave out
-        shown: flags & 1 != 0 && flags & 64 == 0,
+        name,
+        visible: flags & 1 != 0,
+        reference: flags & 64 != 0,
         background: flags & 8 != 0,
         kind,
         level,
@@ -806,12 +897,16 @@ mod tests {
     /// A layer chunk: flags (1 visible, 8 background, 64 reference), type
     /// (0 image, 1 group, 2 tilemap), level, blend mode, opacity.
     fn layer(flags: u16, kind: u16, level: u16, blend: u16, opacity: u8) -> Vec<u8> {
+        named("layer", flags, kind, level, blend, opacity)
+    }
+
+    fn named(name: &str, flags: u16, kind: u16, level: u16, blend: u16, opacity: u8) -> Vec<u8> {
         let mut data = Vec::new();
         for word in [flags, kind, level, 0, 0, blend] {
             data.extend(word.to_le_bytes());
         }
         data.extend([opacity, 0, 0, 0]);
-        data.extend(string("layer"));
+        data.extend(string(name));
         if kind == 2 {
             data.extend(7u32.to_le_bytes());
         }
@@ -922,7 +1017,7 @@ mod tests {
     }
 
     fn decode(bytes: &[u8]) -> Result<Animation> {
-        Sprite::read(bytes)?.animation(None)
+        Sprite::read(bytes)?.animation(None, &Layers::default())
     }
 
     #[test]
@@ -955,16 +1050,19 @@ mod tests {
         );
         let sprite = Sprite::read(&bytes).unwrap();
         let first = |tag| -> Vec<Colour> {
-            let animation = sprite.animation(tag).unwrap();
+            let animation = sprite.animation(tag, &Layers::default()).unwrap();
             (0..animation.frames().len()).map(|i| animation.pixel(i, 0, 0).unwrap()).collect()
         };
         assert_eq!(first(None), [RED, GREEN, RED]);
         // ping-pong reverse over 0..=2: 2, 1, 0, 1
         assert_eq!(first(Some("back")), [RED, GREEN, RED, GREEN]);
         assert_eq!(first(Some("on")), [GREEN, RED]);
-        assert_eq!(sprite.animation(None).unwrap().duration(), Duration::from_millis(150));
+        assert_eq!(
+            sprite.animation(None, &Layers::default()).unwrap().duration(),
+            Duration::from_millis(150)
+        );
         assert!(matches!(
-            sprite.animation(Some("nope")),
+            sprite.animation(Some("nope"), &Layers::default()),
             Err(Error::NoSuchTag { available, .. }) if available == ["back", "on"]
         ));
     }
@@ -1012,6 +1110,66 @@ mod tests {
         assert_eq!(pixels(&decode(&group(1 | 2)).unwrap(), 0), [[127, 0, 128, 255]]);
         // otherwise the group's opacity is ignored
         assert_eq!(pixels(&decode(&group(1)).unwrap(), 0), [BLUE]);
+    }
+
+    #[test]
+    fn shows_and_hides_layers_by_name() {
+        // bottom first: a red layer, a group of a green layer and a hidden
+        // blue one, a reference layer and a hidden blue layer
+        let bytes = file(
+            4,
+            1,
+            32,
+            1,
+            &[vec![
+                named("Back", 1, 0, 0, 0, 255),
+                named("Arms", 1, 1, 0, 0, 255),
+                named("Left", 1, 0, 1, 0, 255),
+                named("Right", 0, 0, 1, 0, 255),
+                named("Guide", 1 | 64, 0, 0, 0, 255),
+                named("Shadow", 0, 0, 0, 0, 255),
+                image_cel(0, (0, 0), (1, 1), &RED, false),
+                image_cel(2, (1, 0), (1, 1), &GREEN, false),
+                image_cel(3, (2, 0), (1, 1), &BLUE, false),
+                image_cel(4, (3, 0), (1, 1), &GREEN, false),
+                image_cel(5, (3, 0), (1, 1), &BLUE, false),
+            ]],
+        );
+        let sprite = Sprite::read(&bytes).unwrap();
+        let listed: Vec<_> = sprite
+            .layers()
+            .into_iter()
+            .map(|layer| (layer.name, layer.group, layer.level, layer.visible))
+            .collect();
+        let name = String::from;
+        assert_eq!(
+            listed,
+            [
+                (name("Shadow"), false, 0, false),
+                (name("Arms"), true, 0, true),
+                (name("Right"), false, 1, false),
+                (name("Left"), false, 1, true),
+                (name("Back"), false, 0, true),
+            ]
+        );
+        let drawn = |show: &[&str], hide: &[&str]| {
+            let names = |list: &[&str]| list.iter().map(|&n| n.to_owned()).collect();
+            let layers = Layers { show: names(show), hide: names(hide) };
+            sprite.animation(None, &layers).map(|animation| pixels(&animation, 0))
+        };
+        const CLEAR: Colour = [0; 4];
+        assert_eq!(drawn(&[], &[]), Ok(vec![RED, GREEN, CLEAR, CLEAR]));
+        assert_eq!(drawn(&["Right", "Shadow"], &[]), Ok(vec![RED, GREEN, BLUE, BLUE]));
+        // a hidden group hides what is in it, shown or not
+        assert_eq!(drawn(&["Right"], &["Arms"]), Ok(vec![RED, CLEAR, CLEAR, CLEAR]));
+        // named in both, hidden
+        assert_eq!(drawn(&["Back"], &["Back"]), Ok(vec![CLEAR, GREEN, CLEAR, CLEAR]));
+        // reference layers are never drawn, so can't be named
+        assert!(matches!(
+            drawn(&["Guide"], &[]),
+            Err(Error::NoSuchLayer { available, .. })
+                if available == ["Shadow", "Arms", "Right", "Left", "Back"]
+        ));
     }
 
     #[test]
@@ -1143,7 +1301,7 @@ mod tests {
         let roomy = Limits { max_dimension: 8192, max_bytes: 1 << 20 };
         // the canvas is fine, 100 MB of frames aren't
         let sprite = Sprite::read_with(&big, &roomy).unwrap();
-        assert!(matches!(sprite.animation(None), Err(Error::TooLarge(_))));
+        assert!(matches!(sprite.animation(None, &Layers::default()), Err(Error::TooLarge(_))));
         // nor is a cel that claims to be huge
         let cel = file(
             1,

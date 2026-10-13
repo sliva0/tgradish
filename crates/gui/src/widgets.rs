@@ -33,7 +33,13 @@ pub fn section(ui: &mut egui::Ui, title: &str) {
         line.center().y,
         ui.visuals().widgets.noninteractive.bg_stroke,
     );
-    ui.add_space(8.0);
+    ui.add_space(4.0);
+    heading(ui, title);
+}
+
+/// A heading over the first group of settings, which nothing is above.
+pub fn heading(ui: &mut egui::Ui, title: &str) {
+    ui.add_space(4.0);
     ui.label(RichText::new(title).strong().size(15.5));
     ui.add_space(4.0);
 }

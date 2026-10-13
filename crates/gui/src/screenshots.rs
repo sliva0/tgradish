@@ -158,6 +158,22 @@ fn screenshots() {
     harness.run_steps(3);
     save(&mut harness, "large-preview");
     harness.state_mut().items.last_mut().unwrap().view.input_zoom = Zoom::default();
+    // an Aseprite file's tag and layers, its sketch shown, as a video
+    let ase = crate::testing::corpus(dir.path(), "walker_2x.ase", "walker.ase");
+    harness.state_mut().add(vec![ase]);
+    finish(&mut harness);
+    let item = harness.state_mut().items.last_mut().unwrap();
+    item.choices.show_layers = Some(vec!["sketch".into()]);
+    item.format = Format::Webm;
+    finish(&mut harness);
+    harness.state_mut().items.last_mut().unwrap().view.playing = false;
+    harness.run_steps(3);
+    save(&mut harness, "aseprite");
+    let last = harness.state().items.len() - 1;
+    harness.state_mut().items.remove(last);
+    let shown = harness.state().items.last().unwrap().id;
+    harness.state_mut().select(shown);
+    harness.run_steps(3);
     // the narrowest list, its buttons leaving no room for the name
     harness.set_size(egui::vec2(900.0, 640.0));
     harness.ctx.memory_mut(|memory| memory.reset_areas());

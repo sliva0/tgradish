@@ -4,8 +4,8 @@
 //! quality that does.
 //!
 //! The picture is planned like a WebM sticker's, from the options a still
-//! picture has: target, crop, resize, scaling and exact scale, and `start`,
-//! where the frame is.
+//! picture has: target, crop, resize, scaling and exact scale, `start`,
+//! where the frame is, and an Aseprite file's tag and layers.
 
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -22,7 +22,7 @@ use crate::telegram::{self, Issue, Target};
 
 /// The input with a `.sticker.webp` or `.emoji.webp` extension.
 pub fn default_output(input: &Path, target: Target) -> PathBuf {
-    input.with_extension(format!("{}.webp", target.name()))
+    crate::fsutil::beside(input, &format!("{}.webp", target.name()))
 }
 
 /// What `convert --json` prints for an image: once it is made, or why it
@@ -58,6 +58,9 @@ pub struct Outcome {
 pub fn picture_options(options: &Options) -> Options {
     Options {
         target: options.target,
+        tag: options.tag.clone(),
+        show_layers: options.show_layers.clone(),
+        hide_layers: options.hide_layers.clone(),
         crop: options.crop,
         resize: options.resize,
         scaling: options.scaling,
@@ -113,19 +116,23 @@ pub fn plan(
 
 /// Makes an image sticker or emoji from the frame at `start`.
 pub fn convert(backend: &Backend, request: &Request, cancel: &CancelToken) -> Result<Outcome> {
-    let source = backend.probe(&request.input, cancel)?;
+    // pixel art, drawn for ffmpeg with what a picture has: a sequence's
+    // frames timed as by default, as frames are picked by time
+    let (sequence, drawing) = (request.sequence.as_deref(), picture_options(&request.options));
+    let readable = crate::drawn::readable(&request.input, sequence, &drawing, cancel)?;
+    let input = readable.path();
+    let source = backend.probe(input, cancel)?;
     // where frames start, to find the one that shows at a time; without
     // them, frames count as coming evenly, as before they were read
     let starts = match request.options.start {
-        Some(_) if !source.still_image => {
-            match backend.frame_starts(&request.input, &source, cancel) {
-                Err(Error::Cancelled) => return Err(Error::Cancelled),
-                starts => starts.unwrap_or_default(),
-            }
-        }
+        Some(_) if !source.still_image => match backend.frame_starts(input, &source, cancel) {
+            Err(Error::Cancelled) => return Err(Error::Cancelled),
+            starts => starts.unwrap_or_default(),
+        },
         _ => Vec::new(),
     };
     let (mut plan, warnings) = plan(request, source, &starts)?;
+    plan.input = input.to_path_buf();
     convert::choose_auto_scaling(backend, &mut plan, &request.options, cancel)?;
     let rgba = backend.still(&plan, cancel)?;
     cancel.check()?;

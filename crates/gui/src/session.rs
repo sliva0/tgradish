@@ -30,6 +30,12 @@ pub struct Session {
 struct SavedChoices {
     preset: Option<String>,
     target: Target,
+    #[serde(default)]
+    tag: Option<String>,
+    #[serde(default)]
+    show_layers: Option<Vec<String>>,
+    #[serde(default)]
+    hide_layers: Option<Vec<String>>,
     crop: Option<Crop>,
     start: Option<f64>,
     length: Option<f64>,
@@ -44,6 +50,9 @@ impl SavedChoices {
         SavedChoices {
             preset: choices.preset.clone(),
             target: choices.target,
+            tag: choices.tag.clone(),
+            show_layers: choices.show_layers.clone(),
+            hide_layers: choices.hide_layers.clone(),
             crop: choices.crop,
             start: choices.start,
             length: choices.length,
@@ -53,10 +62,14 @@ impl SavedChoices {
         }
     }
 
-    fn choices(self) -> Choices {
+    fn choices(mut self) -> Choices {
         Choices {
             preset: self.preset,
             target: self.target,
+            // kept with the .tgs options before every format read tags
+            tag: self.tag.or_else(|| self.tgs.tag.take()),
+            show_layers: self.show_layers,
+            hide_layers: self.hide_layers,
             crop: self.crop,
             start: self.start,
             length: self.length,

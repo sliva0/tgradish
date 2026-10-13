@@ -15,10 +15,11 @@ pub use tgradish_tgs::reduce::{Compromise, Kind, Reduction};
 use tgradish_tgs::sticker::{self, Fit, Progress, Step};
 
 use crate::CancelToken;
+use crate::backend::{Backend, FramesRequest};
 use crate::error::{Error, Result};
 use crate::options::{Crop, Speed, TEMPOS};
 use crate::preview::Preview;
-use crate::telegram::Target;
+use crate::telegram::{self, Target};
 
 /// Frame rate of still images, sprite sheets and image sequences unless
 /// `fps` says otherwise.
@@ -81,6 +82,14 @@ pub struct TgsOptions {
     /// Aseprite tag to export. [default: all frames]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
+    /// Aseprite layers to show, by name, hidden ones included. [default:
+    /// those the file shows]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_layers: Option<Vec<String>>,
+    /// Aseprite layers to hide, by name; a hidden group hides the layers in
+    /// it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hide_layers: Option<Vec<String>>,
     /// Read the input as a sprite sheet of COLUMNSxROWS equal cells, frames
     /// row by row, for example 4x2.
     #[schemars(regex(pattern = r"^[1-9][0-9]*x[1-9][0-9]*$"))]
@@ -129,6 +138,8 @@ impl TgsOptions {
             keep_canvas,
             pixel_scale,
             tag,
+            show_layers,
+            hide_layers,
             sheet,
             sheet_frames,
             fps,
@@ -152,13 +163,7 @@ impl TgsOptions {
     }
 
     fn frame_duration(&self) -> Result<Duration> {
-        let fps = self.fps.unwrap_or(DEFAULT_FPS);
-        let invalid = || Error::InvalidOptions(format!("fps {fps} is not between 0 and 60"));
-        if !(fps > 0.0 && fps <= 60.0) {
-            return Err(invalid());
-        }
-        // tiny rates give durations past what Duration holds
-        Duration::try_from_secs_f64(1.0 / fps).map_err(|_| invalid())
+        frame_duration(self.fps)
     }
 
     fn seconds(value: Option<f64>, name: &str) -> Result<Option<Duration>> {
@@ -253,18 +258,19 @@ pub enum TgsEvent {
 
 /// `NAME.sticker.tgs` or `NAME.emoji.tgs` next to the input.
 pub fn default_output(input: &Path, target: Target) -> PathBuf {
-    let name = input.file_name().map(PathBuf::from).unwrap_or_else(|| PathBuf::from("frames"));
-    input.with_file_name(name).with_extension(format!("{}.tgs", target.name()))
+    crate::fsutil::beside(input, &format!("{}.tgs", target.name()))
 }
 
 pub struct TgsRequest {
-    /// One animation or image, or with `sequence` the frames of one
+    /// One animation, image or video, or with `sequence` the frames of one
     /// animation (image files, or directories of them).
     pub inputs: Vec<PathBuf>,
     pub sequence: bool,
     pub output: PathBuf,
     pub options: TgsOptions,
     pub overwrite: bool,
+    /// ffmpeg, which reads videos; pixel art doesn't need it.
+    pub backend: Option<Backend>,
 }
 
 /// What converting made: all that [`TgsEvent::Finished`] says, whether or
@@ -326,7 +332,7 @@ impl Preview {
 
 /// Image files of a sequence, numbers sorted as numbers: `2.png` before
 /// `10.png`.
-fn sequence_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>> {
+pub(crate) fn sequence_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     for input in inputs {
         if input.is_dir() {
@@ -374,58 +380,244 @@ fn read(path: &Path) -> Result<Vec<u8>> {
         .map_err(|err| Error::Probe { path: path.to_path_buf(), message: err.to_string() })
 }
 
-/// The animation the inputs describe.
-/// Pixel art as [`convert`] reads it, with the tags of an Aseprite file,
-/// which `tag` can choose from, read from the same bytes. `cancel` is
-/// asked between files.
+/// How long each frame of a sequence or sprite sheet shows, at `fps`
+/// frames a second, [`DEFAULT_FPS`] unless it says.
+fn frame_duration(fps: Option<f64>) -> Result<Duration> {
+    let fps = fps.unwrap_or(DEFAULT_FPS);
+    let invalid = || Error::InvalidOptions(format!("fps {fps} is not between 0 and 60"));
+    if !(fps > 0.0 && fps <= 60.0) {
+        return Err(invalid());
+    }
+    // tiny rates give durations past what Duration holds
+    Duration::try_from_secs_f64(1.0 / fps).map_err(|_| invalid())
+}
+
+/// The frames of one animation in several files, `inputs`: image files,
+/// or folders of them, in name order, `fps` a second. `cancel` is asked
+/// between files.
+pub(crate) fn read_sequence(
+    inputs: &[PathBuf],
+    fps: Option<f64>,
+    cancel: &CancelToken,
+) -> Result<frames::Animation> {
+    let files = sequence_files(inputs)?;
+    let mut bytes = Vec::with_capacity(files.len());
+    for file in &files {
+        cancel.check()?;
+        bytes.push(read(file)?);
+    }
+    // a file can't be stopped part of the way, but the rest are left
+    let images = bytes.iter().map(Vec::as_slice).take_while(|_| !cancel.is_cancelled());
+    let animation = frames::sequence(images, frame_duration(fps)?, &Limits::default());
+    cancel.check()?;
+    animation.map_err(|err| Error::Probe { path: files[0].clone(), message: err.to_string() })
+}
+
+/// What the inputs hold, as [`convert`] reads them.
+struct Loaded {
+    animation: frames::Animation,
+    /// Tags and layers of an Aseprite file, which the options choose from.
+    tags: Vec<String>,
+    layers: Vec<frames::LayerInfo>,
+    /// A video, read through ffmpeg from where `start` says.
+    video: Option<VideoPart>,
+    /// What reading gave up, worth saying.
+    warnings: Vec<String>,
+}
+
+/// What of a video was read, from where `start` says.
+struct VideoPart {
+    /// How long the part used lasts, where that is known: what was read
+    /// can go on to the end of its last frame, or past what plays.
+    length: Option<Duration>,
+}
+
+impl Loaded {
+    fn art(animation: frames::Animation) -> Loaded {
+        Loaded {
+            animation,
+            tags: Vec::new(),
+            layers: Vec::new(),
+            video: None,
+            warnings: Vec::new(),
+        }
+    }
+}
+
+/// Pixel art as [`convert`] reads it, with the tags and layers of an
+/// Aseprite file, read from the same bytes; or a video, read through
+/// `backend`. `cancel` is asked between files.
 fn load(
     inputs: &[PathBuf],
     sequence: bool,
     options: &TgsOptions,
+    backend: Option<&Backend>,
     cancel: &CancelToken,
-) -> Result<(frames::Animation, Vec<String>)> {
+) -> Result<Loaded> {
     let limits = Limits::default();
     let decode_error = |path: &Path| {
         let path = path.to_path_buf();
         move |err: frames::Error| Error::Probe { path: path.clone(), message: err.to_string() }
     };
     if sequence || inputs.len() > 1 {
-        let files = sequence_files(inputs)?;
-        let mut bytes = Vec::with_capacity(files.len());
-        for file in &files {
-            cancel.check()?;
-            bytes.push(read(file)?);
-        }
-        // a file can't be stopped part of the way, but the rest are left
-        let images = bytes.iter().map(Vec::as_slice).take_while(|_| !cancel.is_cancelled());
-        let animation = frames::sequence(images, options.frame_duration()?, &limits);
-        cancel.check()?;
-        return Ok((animation.map_err(decode_error(&files[0]))?, Vec::new()));
+        return Ok(Loaded::art(read_sequence(inputs, options.fps, cancel)?));
     }
     let [input] = inputs else {
         return Err(Error::InvalidOptions("nothing to convert".into()));
     };
     cancel.check()?;
+    if !reads_as_art(input)? {
+        let backend = backend.ok_or_else(|| {
+            Error::FfmpegNotFound(format!("{} is a video, which ffmpeg reads", input.display()))
+        })?;
+        return read_video(backend, input, options, cancel);
+    }
     let bytes = read(input)?;
     cancel.check()?;
     let sheet = options.sheet_layout()?;
     // a sheet is one picture, whatever tag is asked for
     let tag = options.tag.clone().filter(|_| sheet.is_none());
-    // an Aseprite file is parsed once, for its tags and its frames
-    let (decoded, tags) = match frames::Format::detect(&bytes) {
+    let chosen =
+        crate::drawn::layers(options.show_layers.as_deref(), options.hide_layers.as_deref());
+    // an Aseprite file is parsed once, for its tags, layers and frames
+    let (decoded, tags, layers) = match frames::Format::detect(&bytes) {
         Some(frames::Format::Aseprite) => {
             let sprite = frames::Sprite::read_with(&bytes, &limits).map_err(decode_error(input))?;
             let tags = sprite.tags().iter().map(|tag| tag.name.clone()).collect();
-            (sprite.animation(tag.as_deref()), tags)
+            (sprite.animation(tag.as_deref(), &chosen), tags, sprite.layers())
         }
-        _ => (frames::decode(&bytes, &DecodeOptions { tag, limits }), Vec::new()),
+        _ => {
+            let options = DecodeOptions { tag, layers: chosen, limits };
+            (frames::decode(&bytes, &options), Vec::new(), Vec::new())
+        }
     };
     let animation = match sheet {
         Some(sheet) => decoded.and_then(|image| frames::split_sheet(&image, &sheet, &limits)),
         None => decoded,
     }
     .map_err(decode_error(input))?;
-    Ok((animation, tags))
+    Ok(Loaded { tags, layers, ..Loaded::art(animation) })
+}
+
+/// Whether converting `inputs` into a `.tgs` reads a video through ffmpeg.
+pub fn needs_ffmpeg(inputs: &[PathBuf], sequence: bool) -> bool {
+    match inputs {
+        [input] if !sequence => matches!(reads_as_art(input), Ok(false)),
+        _ => false,
+    }
+}
+
+/// Whether the pixel art reader reads `path`, by its first bytes: a
+/// picture or an Aseprite file, not a video.
+fn reads_as_art(path: &Path) -> Result<bool> {
+    let mut start = Vec::with_capacity(32);
+    std::fs::File::open(path)
+        .and_then(|file| std::io::Read::read_to_end(&mut std::io::Read::take(file, 32), &mut start))
+        .map_err(|err| Error::Probe { path: path.to_path_buf(), message: err.to_string() })?;
+    Ok(frames::Format::detect(&start).is_some())
+}
+
+/// Most frames a second a sticker shows.
+const STICKER_FPS: f64 = 60.0;
+
+/// The part of a video a sticker can show, read through ffmpeg: from
+/// `start`, for as long as `length` says and the tempo lets play in 3
+/// seconds, at most as many frames a second as the sticker shows at that
+/// tempo, and no more than fit in memory.
+fn read_video(
+    backend: &Backend,
+    input: &Path,
+    options: &TgsOptions,
+    cancel: &CancelToken,
+) -> Result<Loaded> {
+    let chosen =
+        crate::drawn::layers(options.show_layers.as_deref(), options.hide_layers.as_deref());
+    if options.tag.is_some() || !chosen.is_empty() {
+        return Err(Error::InvalidOptions("tags and layers are only in Aseprite files".into()));
+    }
+    if options.sheet.is_some() {
+        return Err(Error::InvalidOptions("a sprite sheet is a picture, not a video".into()));
+    }
+    let start = options.start.unwrap_or(0.0);
+    if start.is_nan() || start < 0.0 {
+        return Err(Error::InvalidOptions(format!("start {start} is not valid")));
+    }
+    if let Some(length) = options.length.filter(|length| length.is_nan() || *length <= 0.0) {
+        return Err(Error::InvalidOptions(format!("length {length} is not more than 0")));
+    }
+    let probe = backend.probe(input, cancel)?;
+    let unreadable = |message: String| Error::Probe { path: input.to_path_buf(), message };
+    let limits = Limits::default();
+    let frame_bytes = (probe.width as usize)
+        .checked_mul(probe.height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .filter(|_| probe.width.max(probe.height) <= limits.max_dimension);
+    // what ffmpeg prints is held beside the frames made of it
+    let fit = frame_bytes.map_or(0, |bytes| limits.max_bytes / 2 / bytes.max(1));
+    if fit == 0 {
+        let (width, height) = (probe.width, probe.height);
+        return Err(unreadable(format!("its frames, {width}x{height}, are too large to read")));
+    }
+    let available = probe.duration.filter(|_| !probe.still_image).map(|whole| whole - start);
+    if let Some(available) = available.filter(|&available| available <= 0.0) {
+        return Err(Error::InvalidOptions(format!(
+            "start {start} is past the end of the video, {:.3} s long",
+            start + available
+        )));
+    }
+    // what is used: as long as asked, as far as the video goes
+    let used = match (options.length, available) {
+        (Some(length), Some(available)) => Some(length.min(available)),
+        (length, available) => length.or(available),
+    };
+    // as fast as normalising plays it, which fits a long part into 3 s
+    let tempo = options
+        .tempo
+        .unwrap_or_else(|| used.map_or(1.0, |used| (used / telegram::MAX_SECONDS).max(1.0)));
+    let fps = probe.fps_or_default().min(STICKER_FPS / tempo);
+    let read = match (options.tempo, used) {
+        (None, Some(used)) => used,
+        // what plays in 3 s, or where the video doesn't say how long it is,
+        // as much as could at the fastest tempo; and a little more, so
+        // cutting the rest is noticed and said
+        (tempo, used) => {
+            let fastest = tempo.unwrap_or(*crate::options::TEMPOS.end());
+            let most = telegram::MAX_SECONDS * fastest + 2.0 / fps;
+            used.map_or(most, |used| used.min(most))
+        }
+    };
+    let wanted = (read * fps).ceil() as usize + 1;
+    let request = FramesRequest {
+        start,
+        length: Some(read),
+        fps,
+        max_side: probe.width.max(probe.height),
+        max_frames: wanted.min(fit),
+    };
+    let decoded = backend.frames(input, &probe, &request, cancel)?;
+    if decoded.frames.is_empty() {
+        return Err(Error::NoFrame { path: input.to_path_buf(), at: start });
+    }
+    let mut warnings = Vec::new();
+    if wanted > fit {
+        warnings.push(format!(
+            "read at {:.1} frames a second, as more of {}x{} wouldn't fit in memory",
+            decoded.fps, decoded.width, decoded.height
+        ));
+    }
+    // a picture shows as long as pictures do; a video's frames as it times
+    // them, the cut made after
+    let duration = if probe.still_image {
+        frames::DEFAULT_FRAME_DURATION
+    } else {
+        Duration::try_from_secs_f64(1.0 / decoded.fps).unwrap_or(frames::DEFAULT_FRAME_DURATION)
+    };
+    let frames = decoded.frames.into_iter().map(|rgba| frames::Frame { rgba, duration });
+    let animation = frames::Animation::new(decoded.width, decoded.height, frames.collect())
+        .map_err(|err| unreadable(err.to_string()))?;
+    // its last frame lasts a whole frame; the part used, as long as asked
+    let length = used.and_then(|used| Duration::try_from_secs_f64(used).ok());
+    Ok(Loaded { video: Some(VideoPart { length }), warnings, ..Loaded::art(animation) })
 }
 
 /// Pixel art as it is read, before anything is cropped or reduced.
@@ -437,25 +629,31 @@ pub struct Source {
     pub frames: Vec<(Vec<u8>, f64)>,
     /// Tags of an Aseprite file, which `tag` can choose from.
     pub tags: Vec<String>,
+    /// Layers of an Aseprite file, as its Layers panel lists them, which
+    /// `show-layers` and `hide-layers` choose from.
+    pub layers: Vec<frames::LayerInfo>,
 }
 
 /// Reads pixel art the way [`convert`] does, with the options that choose
-/// what is read: `tag`, `sheet`, `sheet_frames` and `fps`. `cancel` is
+/// what is read: `tag`, the layers, `sheet`, `sheet_frames` and `fps`; or a
+/// video through `backend`, as much as a sticker can show. `cancel` is
 /// asked between files.
 pub fn read_source(
     inputs: &[PathBuf],
     sequence: bool,
     options: &TgsOptions,
+    backend: Option<&Backend>,
     cancel: &CancelToken,
 ) -> Result<Source> {
-    let (animation, tags) = load(inputs, sequence, options, cancel)?;
-    let (width, height) = (animation.width(), animation.height());
-    let frames = animation
+    let loaded = load(inputs, sequence, options, backend, cancel)?;
+    let (width, height) = (loaded.animation.width(), loaded.animation.height());
+    let frames = loaded
+        .animation
         .into_frames()
         .into_iter()
         .map(|frame| (frame.rgba, frame.duration.as_secs_f64()))
         .collect();
-    Ok(Source { width, height, frames, tags })
+    Ok(Source { width, height, frames, tags: loaded.tags, layers: loaded.layers })
 }
 
 /// Whether `path` is a `.tgs` sticker: by its extension, or for other
@@ -526,16 +724,28 @@ pub fn convert(
         return Err(Error::OutputExists(request.output.clone()));
     }
     refuse_overwriting_inputs(request)?;
-    let settings = request.options.sticker_options()?;
-    let (animation, _) = load(&request.inputs, request.sequence, &request.options, cancel)?;
+    let mut settings = request.options.sticker_options()?;
+    let loaded = load(
+        &request.inputs,
+        request.sequence,
+        &request.options,
+        request.backend.as_ref(),
+        cancel,
+    )?;
+    if let Some(part) = &loaded.video {
+        // read from the start: as long as the part used
+        settings.normalise.start = Duration::ZERO;
+        settings.normalise.length = part.length;
+    }
     let input = request.inputs.first().cloned().unwrap_or_default();
     let sticker = sticker::make(
-        &animation,
+        &loaded.animation,
         &settings,
         &mut |progress| match progress {
             // what reading the art found worth saying, after it
             Progress::Normalised { report } => {
-                let warnings: Vec<String> = report.warnings.iter().map(|w| w.to_string()).collect();
+                let found = report.warnings.iter().map(|w| w.to_string());
+                let warnings: Vec<String> = loaded.warnings.iter().cloned().chain(found).collect();
                 on_event(TgsEvent::Started { input: input.clone(), report });
                 for message in warnings {
                     on_event(TgsEvent::Warning { message });
@@ -593,9 +803,10 @@ mod tests {
         let path = dir.path().join(&ase.name);
         std::fs::write(&path, &ase.bytes).unwrap();
         let read = |options: TgsOptions| {
-            let (animation, tags) =
-                load(std::slice::from_ref(&path), false, &options, &CancelToken::new()).unwrap();
-            (animation.width(), animation.frames().len(), tags)
+            let loaded =
+                load(std::slice::from_ref(&path), false, &options, None, &CancelToken::new());
+            let loaded = loaded.unwrap();
+            (loaded.animation.width(), loaded.animation.frames().len(), loaded.tags)
         };
         let (width, frames, tags) = read(TgsOptions::default());
         assert_eq!((tags, frames), (vec!["idle".to_string()], ase.sprite.frames.len()));
@@ -613,7 +824,7 @@ mod tests {
         let cancel = CancelToken::new();
         cancel.cancel();
         let both = [path.clone(), path.clone()];
-        let stopped = load(&both, true, &TgsOptions::default(), &cancel);
+        let stopped = load(&both, true, &TgsOptions::default(), None, &cancel);
         assert!(matches!(stopped, Err(Error::Cancelled)));
     }
 
@@ -628,6 +839,7 @@ mod tests {
             output,
             options: TgsOptions::default(),
             overwrite: true,
+            backend: None,
         };
         let err = convert(&request(input.clone()), &CancelToken::new(), &mut |_| {}).unwrap_err();
         assert!(err.to_string().contains("is an input"), "{err}");

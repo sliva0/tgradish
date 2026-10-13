@@ -9,7 +9,7 @@ use tgradish_core::telegram;
 use tgradish_core::tgs;
 
 use super::Context;
-use crate::item::Item;
+use crate::item::{Item, Kind};
 use crate::widgets::{self, Choice, auto_number, chosen_hint, note, preset_segments, row, section};
 
 const SPOOFS: [Choice<Spoof>; 3] = [
@@ -104,14 +104,31 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 (average, base) => average.or(base),
             };
             let most = peak.map(|fps| (fps * tempo).clamp(1.0, telegram::MAX_FPS));
-            let hint = "Fewer frames a second leave more bytes for each; more than the input's \
-                        would only repeat them. Automatic is the input's, at most 60";
-            let highest = most.unwrap_or(telegram::MAX_FPS);
-            row(ui, "Frame rate", hint, Ok(()), |ui| {
-                auto_number(ui, &mut options.fps, "Input's", chosen, highest.min(30.0), |value| {
-                    value.range(1.0..=highest).speed(0.1).max_decimals(2).suffix(" fps")
+            if item.kind == Kind::Frames {
+                // how fast its frames play, which the result's follows
+                let hint = "How fast the frames of the sequence play";
+                row(ui, "Frame rate", hint, Ok(()), |ui| {
+                    let default = Some(tgs::DEFAULT_FPS);
+                    auto_number(
+                        ui,
+                        &mut options.fps,
+                        "Default",
+                        default,
+                        tgs::DEFAULT_FPS,
+                        |value| value.range(0.1..=60.0).speed(0.1).max_decimals(2).suffix(" fps"),
+                    );
                 });
-            });
+            } else {
+                let hint = "Fewer frames a second leave more bytes for each; more than the \
+                            input's would only repeat them. Automatic is the input's, at most 60";
+                let highest = most.unwrap_or(telegram::MAX_FPS);
+                row(ui, "Frame rate", hint, Ok(()), |ui| {
+                    let most = highest.min(30.0);
+                    auto_number(ui, &mut options.fps, "Input's", chosen, most, |value| {
+                        value.range(1.0..=highest).speed(0.1).max_decimals(2).suffix(" fps")
+                    });
+                });
+            }
             let hint = "Telegram refuses stickers that say they last longer than 3 seconds";
             row(ui, "Over 3 seconds", hint, Ok(()), |ui| {
                 preset_segments(ui, &mut options.spoof, Spoof::Auto, &SPOOFS);

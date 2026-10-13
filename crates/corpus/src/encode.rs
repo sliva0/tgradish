@@ -94,8 +94,10 @@ pub fn webp(sprite: &Sprite) -> Vec<u8> {
     out
 }
 
-/// An Aseprite file in indexed colour, index 0 clear, with one layer and a
-/// cel per frame, and `tags` as `(name, first, last)` frames.
+/// An Aseprite file in indexed colour, index 0 clear, with a layer of the
+/// art, a cel per frame, and over it a hidden layer named "sketch", as
+/// artists leave them, of a 2x2 block at the top left in the first frame;
+/// and `tags` as `(name, first, last)` frames.
 pub fn aseprite(sprite: &Sprite, tags: &[(&str, u16, u16)]) -> Vec<u8> {
     let (width, height) = sprite.size();
     let mut palette: Vec<Colour> = vec![CLEAR];
@@ -139,6 +141,14 @@ pub fn aseprite(sprite: &Sprite, tags: &[(&str, u16, u16)]) -> Vec<u8> {
             data.extend([255, 0, 0, 0]);
             data.extend(string("art"));
             chunks.push(chunk(0x2004, &data));
+            // and a hidden one over it
+            let mut data = Vec::new();
+            for word in [0u16, 0, 0, 0, 0, 0] {
+                data.extend(word.to_le_bytes());
+            }
+            data.extend([255, 0, 0, 0]);
+            data.extend(string("sketch"));
+            chunks.push(chunk(0x2004, &data));
             if !tags.is_empty() {
                 let mut data = (tags.len() as u16).to_le_bytes().to_vec();
                 data.extend([0; 8]);
@@ -173,6 +183,15 @@ pub fn aseprite(sprite: &Sprite, tags: &[(&str, u16, u16)]) -> Vec<u8> {
         data.extend((height as u16).to_le_bytes());
         data.extend(zlib.finish().unwrap());
         chunks.push(chunk(0x2005, &data));
+        if index == 0 {
+            // layer 1 at 0, 0, opaque, raw: 2x2 of the art's first colour
+            let mut data = vec![1, 0, 0, 0, 0, 0, 255, 0, 0];
+            data.extend([0; 7]);
+            data.extend(2u16.to_le_bytes());
+            data.extend(2u16.to_le_bytes());
+            data.extend([1; 4]);
+            chunks.push(chunk(0x2005, &data));
+        }
 
         let data: Vec<u8> = chunks.concat();
         frames.extend(((data.len() + 16) as u32).to_le_bytes());

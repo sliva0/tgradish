@@ -100,14 +100,6 @@ impl<'a> Converter<'a> {
         Ok(Self { ctx, args, resolved, written: Default::default() })
     }
 
-    pub fn format(&self) -> Format {
-        match self.resolved {
-            Resolved::Webm { .. } => Format::Webm,
-            Resolved::Tgs { .. } => Format::Tgs,
-            Resolved::Image { .. } => Format::Image,
-        }
-    }
-
     /// Where the result for `input` goes, unless `-o` says otherwise.
     pub fn output_for(&self, input: &Path) -> PathBuf {
         self.output_under(input, None)
@@ -177,10 +169,13 @@ impl<'a> Converter<'a> {
         }
         let cancel = &self.ctx.cancel;
         let json = self.ctx.global.json;
+        // the frames of one animation, which pixel art drawing joins
+        let frames = (sequence || inputs.len() > 1).then(|| inputs.to_vec());
         match &self.resolved {
             Resolved::Webm { options, backend } => {
                 let request = Request {
                     input: input.to_path_buf(),
+                    sequence: frames.clone(),
                     output: Some(output),
                     options: options.clone(),
                     overwrite,
@@ -213,12 +208,18 @@ impl<'a> Converter<'a> {
                 }
             }
             Resolved::Tgs { options } => {
+                // only videos need ffmpeg
+                let backend = match tgs::needs_ffmpeg(inputs, sequence) {
+                    true => Some(self.ctx.backend()?),
+                    false => None,
+                };
                 let request = TgsRequest {
                     inputs: inputs.to_vec(),
                     sequence,
                     output,
                     options: options.clone(),
                     overwrite,
+                    backend,
                 };
                 if json {
                     tgs::convert(&request, cancel, &mut |event| {
@@ -237,6 +238,7 @@ impl<'a> Converter<'a> {
             Resolved::Image { options, backend } => {
                 let request = Request {
                     input: input.to_path_buf(),
+                    sequence: frames,
                     output: Some(output),
                     options: options.clone(),
                     overwrite,
@@ -303,10 +305,6 @@ fn explain(err: tgradish_core::Error) -> anyhow::Error {
 }
 
 pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
-    // before Converter::new, which looks for ffmpeg when making WebM
-    if args.sequence && format_of(&args.conversion, args.output.as_deref()) != Format::Tgs {
-        bail!("--sequence makes animated stickers; add --format tgs or an output ending in .tgs");
-    }
     let converter = Converter::new(ctx, &args.conversion, args.output.as_deref())?;
     if args.sequence {
         return converter

@@ -13,7 +13,7 @@ linked = ["dep:ffmpeg-next"]
 # link them statically, as release builds do
 linked-static = ["linked", "ffmpeg-next/static"]
 # reading files and images from the clipboard
-clipboard = ["dep:arboard", "dep:png"]
+clipboard = ["dep:arboard"]
 
 [dependencies]
 flate2.workspace = true
@@ -24,7 +24,7 @@ directories.workspace = true
 image-webp.workspace = true
 libwebp-sys.workspace = true
 ffmpeg-next = { workspace = true, optional = true }
-png = { workspace = true, optional = true }
+png.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
