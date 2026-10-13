@@ -115,9 +115,21 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
             value.range(CRFS)
         });
     });
-    row(ui, "Lossless", "", quality, |ui| {
-        let hint = "Only small for tiny or still pictures";
-        flag(ui, &mut options.lossless, false, "Lossless encoding", hint);
+    // ticked from any way of fitting: one that keeps a quality takes over
+    let keeps_quality = matches!(fit, Fit::Fps | Fit::Length | Fit::Off);
+    row(ui, "Lossless", "", Ok(()), |ui| {
+        let hint = if keeps_quality {
+            "Only small for tiny or still pictures"
+        } else {
+            "Only small for tiny or still pictures; ticked, fitting goes by frame rate, as \
+             lossless keeps no bitrate or quality to fit"
+        };
+        if flag(ui, &mut options.lossless, false, "Lossless encoding", hint)
+            && options.lossless == Some(true)
+            && !keeps_quality
+        {
+            options.fit = Some(Fit::Fps);
+        }
     });
     let bitrate = match fit {
         Fit::Off => Ok(()),

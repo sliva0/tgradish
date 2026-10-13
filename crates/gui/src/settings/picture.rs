@@ -393,22 +393,32 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
                 ui.end_row();
             });
             ui.add_space(4.0);
-            let whole = if exact.is_some() { "Middle" } else { "Whole picture" };
-            if ui
-                .add_enabled(item.choices.crop.is_some(), egui::Button::new(whole))
-                .on_hover_text(if exact.is_some() {
-                    "As much of the middle as the exact scale takes"
+            ui.horizontal(|ui| {
+                let cropped = item.choices.crop.is_some();
+                let whole = ui.add_enabled(cropped, egui::Button::new("Whole picture"));
+                let whole = whole.on_hover_text(if exact.is_some() {
+                    "All of the picture, or as much as the exact scale takes from its top left"
                 } else {
                     "All of the picture"
-                })
-                .clicked()
-            {
-                item.choices.crop = exact.and_then(|exact| {
+                });
+                if whole.clicked() {
+                    item.choices.crop = None;
+                }
+                // with an exact scale, as much of its middle as that takes
+                if let Some(exact) = exact {
                     let middle = (Keep::Middle, Keep::Middle);
                     let ratio = ratio(item.view.aspect, (width, height));
-                    exact.fit(full, middle, ratio, (width, height)).filter(|crop| *crop != full)
-                });
-            }
+                    let centred = exact
+                        .fit(full, middle, ratio, (width, height))
+                        .filter(|crop| *crop != full);
+                    let button = ui
+                        .add_enabled(item.choices.crop != centred, egui::Button::new("Middle"))
+                        .on_hover_text("As much of the middle as the exact scale takes");
+                    if button.clicked() {
+                        item.choices.crop = centred;
+                    }
+                }
+            });
         });
     });
     let Some((side, value)) = edited else { return };

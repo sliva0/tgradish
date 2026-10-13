@@ -299,9 +299,27 @@ fn row(
             }
         }
     }
+    // where the result will show, a way to make it, as wide as it says
+    let mut text_end = result.min.x;
+    if item.result_thumb.is_none() && !item.is_busy() && item.job.is_none() {
+        let width = widgets::text_width(ui, "Convert", 16.0).max(THUMB);
+        let button = egui::Rect::from_min_size(
+            egui::pos2(result.max.x - width, result.center().y - 12.0),
+            vec2(width, 24.0),
+        );
+        text_end = button.min.x;
+        // placed, so the rows below don't move
+        if ui
+            .place(button, egui::Button::new("Convert"))
+            .on_hover_text("Make its sticker")
+            .clicked()
+        {
+            action = Some(RowAction::Convert);
+        }
+    }
     let mut text = egui::Rect::from_min_max(
         egui::pos2(input.max.x + 10.0, inner.min.y),
-        egui::pos2(result.min.x - 8.0, inner.max.y),
+        egui::pos2(text_end - 8.0, inner.max.y),
     );
     if response.hovered() || response.contains_pointer() {
         let button =

@@ -15,6 +15,7 @@ use tgradish_core::tgs::TgsOptions;
 use crate::app::App;
 use crate::canvas::{self, Cropping, Inset, InsetChange, Picture, Screen};
 use crate::item::{Framing, Item, Show, Zoom};
+use crate::jobs::Status;
 use crate::result::{details, summary};
 use crate::{predict, settings, theme, timeline, widgets};
 
@@ -169,14 +170,34 @@ fn preview(
             if show == Show::Result && !has_result { Err(unseen) } else { Ok(()) }
         });
         item.view.show = show;
-        // where it came from
-        let original = ui
-            .add_enabled(item.pasted.is_none(), egui::Button::new("Show original"))
-            .on_hover_text("The input file, in its folder")
-            .on_disabled_hover_text("A pasted image has no file of its own");
-        if original.clicked() {
-            crate::system::reveal(&item.inputs[0]);
-        }
+        // where the input came from, and where the result went
+        let result = item.made.as_ref().and_then(|made| match &made.job.status {
+            Status::Done(done) => Some(done.output.clone()).filter(|output| output.exists()),
+            _ => None,
+        });
+        ui.menu_button("Show in folder", |ui| {
+            let input = ui
+                .add_enabled(item.pasted.is_none(), egui::Button::new("Input file"))
+                .on_hover_text(item.inputs[0].display().to_string())
+                .on_disabled_hover_text("A pasted image has no file of its own");
+            if input.clicked() {
+                crate::system::reveal(&item.inputs[0]);
+                ui.close();
+            }
+            let made = ui
+                .add_enabled(result.is_some(), egui::Button::new("Result"))
+                .on_disabled_hover_text("Convert it first");
+            let made = match &result {
+                Some(output) => made.on_hover_text(output.display().to_string()),
+                None => made,
+            };
+            if made.clicked()
+                && let Some(output) = &result
+            {
+                crate::system::reveal(output);
+                ui.close();
+            }
+        });
         // what doesn't fit is cut short or left out, the hint first
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if item.view.show == Show::Input {
