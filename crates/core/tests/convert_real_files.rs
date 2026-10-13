@@ -1092,9 +1092,15 @@ fn makes_tgs_stickers_from_videos() {
 fn times_animated_pictures_by_their_frames() {
     let Some(backends) = backends() else { return };
     let dir = tempfile::tempdir().unwrap();
-    // neither APNG nor WebP files say how long they play
+    // APNG files don't say how long they play, nor WebP ones, which ffmpeg
+    // reads only from version 8 and so get drawn as APNG
     let apng = corpus_file(dir.path(), "bounce.png", "bounce.png");
     let webp = corpus_file(dir.path(), "glow.webp", "glow.webp");
+    let drawn =
+        tgradish_core::drawn::readable(&webp, None, &Options::default(), &CancelToken::new());
+    let drawn = drawn.unwrap();
+    assert!(drawn.is_drawn());
+    let webp = drawn.path().to_path_buf();
     // nor how fast, when as short as two frames
     let ase = corpus_file(dir.path(), "walker_2x.ase", "walker.ase");
     let idle = Options { tag: Some("idle".into()), ..Options::default() };
