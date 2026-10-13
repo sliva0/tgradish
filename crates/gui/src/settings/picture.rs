@@ -468,14 +468,18 @@ fn edit_crop(crop: Crop, side: Side, value: u32, ratio: Option<f64>, size: (u32,
 /// A small picture of a `size` input with `crop` on it, dashed, around a
 /// mountain.
 fn sketch(ui: &mut egui::Ui, (width, height): (u32, u32), crop: Crop) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(SKETCH, SKETCH), egui::Sense::hover());
+    // as wide as the fields over and under it, so they line up
+    let room = egui::vec2(FIELD, SKETCH);
+    let (rect, _) = ui.allocate_exact_size(room, egui::Sense::hover());
     let visuals = ui.visuals();
     let (back, edge) = (visuals.extreme_bg_color, visuals.widgets.noninteractive.bg_stroke);
     let accent = crate::theme::accent(visuals);
     let weak = visuals.weak_text_color();
     let painter = ui.painter_at(rect);
-    // the input at its shape, its shorter side at least half the room
-    let scale = (SKETCH / width.max(height) as f32).max(SKETCH / 2.0 / width.min(height) as f32);
+    // the input at its shape, as large as fits, its shorter side at least
+    // half the room's
+    let fits = (room.x / width as f32).min(room.y / height as f32);
+    let scale = fits.max(room.min_elem() / 2.0 / width.min(height) as f32);
     let picture = egui::Rect::from_center_size(
         rect.center(),
         egui::vec2(width as f32 * scale, height as f32 * scale).min(rect.size()),
