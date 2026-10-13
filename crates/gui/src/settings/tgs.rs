@@ -47,10 +47,10 @@ pub(super) fn tgs_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context)
     let hint = "What happens when the art doesn't fit into 64 KiB as it is";
     row(ui, "If output is too large", hint, Ok(()), |ui| {
         let text = "Never change the art; report it instead";
-        flag(ui, &mut options.lossless, base.lossless.unwrap_or(false), text, "");
+        flag(ui, &mut options.lossless, base.lossless.unwrap_or(tgs::LOSSLESS), text, "");
     });
 
-    let lossless = options.lossless.or(base.lossless).unwrap_or(false);
+    let lossless = options.lossless.or(base.lossless).unwrap_or(tgs::LOSSLESS);
     let changes = if lossless { Err("The art is never changed, as set above") } else { Ok(()) };
     let hint = "Art that is mostly motion can lose frames or detail";
     row(ui, "Give up first", hint, changes, |ui| {
@@ -58,8 +58,8 @@ pub(super) fn tgs_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context)
         preset_segments(ui, &mut options.compromise, base, &COMPROMISES);
         chosen_hint(ui, options.compromise.unwrap_or(base), &COMPROMISES);
     });
-    let hint = "What fitting may give up to make it fit, least visible first";
-    row(ui, "May change", hint, changes, |ui| {
+    let hint = "What fitting may do to the art to fit it into 64 KiB, least visible first";
+    row(ui, "Ways to fit it", hint, changes, |ui| {
         let all = base.reductions.clone().unwrap_or_else(|| Reduction::ALL.to_vec());
         let mut chosen = options.reductions.clone().unwrap_or_else(|| all.clone());
         let mut changed = false;

@@ -390,7 +390,7 @@ fn run(
             })
         }
         Plan::Tgs { options, backend } => {
-            let lossless = options.lossless.unwrap_or(false);
+            let lossless = options.lossless.unwrap_or(tgs::LOSSLESS);
             let request = TgsRequest { inputs, sequence, output, options, overwrite, backend };
             update(Box::new(move |progress| {
                 progress.tgs = Some(TgsStage::Reading);

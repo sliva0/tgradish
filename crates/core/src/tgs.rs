@@ -25,6 +25,10 @@ use crate::telegram::{self, Target};
 /// `fps` says otherwise.
 pub const DEFAULT_FPS: f64 = 10.0;
 
+/// Whether the art is kept as it is unless asked otherwise: changing it to
+/// fit is the user's to choose.
+pub const LOSSLESS: bool = true;
+
 /// Largest `.tgs` Telegram accepts, in bytes.
 pub const MAX_BYTES: u64 = tgradish_tgs::limits::telegram::MAX_BYTES as u64;
 
@@ -56,7 +60,8 @@ pub struct TgsOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speed: Option<Speed>,
     /// Never change the art to make it fit; a sticker that is too large is
-    /// reported instead. [default: false]
+    /// reported instead. Set it to false to let fitting change it. [default:
+    /// true]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lossless: Option<bool>,
     /// Reductions fitting may use, least visible first. [default: all]
@@ -225,7 +230,7 @@ impl TgsOptions {
                 Speed::Balanced => Effort::Balanced,
                 Speed::Best => Effort::Best,
             },
-            fit: if self.lossless.unwrap_or(false) { Fit::Lossless } else { Fit::Auto },
+            fit: if self.lossless.unwrap_or(LOSSLESS) { Fit::Lossless } else { Fit::Auto },
             reductions: self.reductions.clone().unwrap_or_else(|| Kind::ALL.to_vec()),
             compromise: self.compromise.unwrap_or_default(),
             name,
@@ -953,6 +958,13 @@ mod tests {
             assert_eq!(made.preview.width, made.preview.height, "{resize:?}");
         }
         assert!(matches!(make(Resize::Contain), Err(Error::InvalidOptions(_))));
+    }
+
+    #[test]
+    fn keeps_the_art_unless_asked() {
+        let fit = |lossless| TgsOptions { lossless, ..TgsOptions::default() }.sticker_options();
+        assert_eq!(fit(None).unwrap().fit, Fit::Lossless);
+        assert_eq!(fit(Some(false)).unwrap().fit, Fit::Auto);
     }
 
     #[test]
