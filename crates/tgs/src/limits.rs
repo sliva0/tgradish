@@ -1,5 +1,9 @@
 //! What a `.tgs` file has to stay within to be accepted by Telegram and
-//! drawn by every client. Output is checked against all of these.
+//! drawn by every client. Output is checked against all of these, except
+//! where a stricter one covers the same thing: tlottie's layers, painted
+//! layers and shapes per layer go past Telegram's own limits on them, and
+//! its input size past Telegram Desktop's JSON limit and the unpacked
+//! size [`crate::file`] reads.
 
 /// Telegram's rules for animated stickers, from
 /// <https://core.telegram.org/stickers> and
