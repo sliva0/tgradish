@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
-use crate::normalise::{Edges, Grid, PixelAnim, PixelFrame, assemble, snap_to};
+use crate::normalise::{Edges, Grid, PixelAnim, PixelFrame, assemble, grid_starts, snap_to};
 use crate::{Error, Result};
 
 /// One reduction at one strength.
@@ -491,14 +491,11 @@ fn snap_to_grid(anim: &PixelAnim, scale: u32) -> Result<PixelAnim> {
     let height = *anim.grid.rows.last().unwrap();
     let pixels = expand(anim);
     let edges = Edges::count(&pixels, width, height);
-    let offset = edges.fit(scale).offset;
-    let starts = |offset: u32, size: u32| {
-        let mut starts = vec![0];
-        starts.extend((offset % scale..size).step_by(scale as usize).filter(|&start| start > 0));
-        starts.push(size);
-        starts
-    };
-    snapped(anim, &starts(offset.0, width), &starts(offset.1, height))
+    // a square cut from the middle cuts through art pixels at its sides
+    let offset = edges.fit(scale, !anim.grid.cut_at_sides()).offset;
+    let (columns, rows) =
+        (grid_starts(offset.0, width, scale), grid_starts(offset.1, height, scale));
+    snapped(anim, &columns, &rows)
 }
 
 fn downscale(anim: &PixelAnim, factor: f64) -> Result<PixelAnim> {
@@ -507,16 +504,23 @@ fn downscale(anim: &PixelAnim, factor: f64) -> Result<PixelAnim> {
     }
     let width = *anim.grid.columns.last().unwrap();
     let height = *anim.grid.rows.last().unwrap();
-    // the art's own pixels, grown by 1 / factor
+    // the art's own pixels, grown by 1 / factor, from where its grid
+    // starts: a crop may have cut its first art pixels
     let step = f64::from(anim.grid.scale().max(1)) / factor;
-    let edges = |size: u32| {
-        let mut edges: Vec<u32> =
-            (0..).map(|i| (f64::from(i) * step).round() as u32).take_while(|&e| e < size).collect();
+    let (across, down) = anim.grid.origin();
+    let edges = |size: u32, origin: u32| {
+        let mut edges = vec![0];
+        edges.extend(
+            (0..)
+                .map(|i| (f64::from(origin) + f64::from(i) * step).round() as u32)
+                .take_while(|&e| e < size)
+                .filter(|&e| e > 0),
+        );
         edges.dedup();
         edges.push(size);
         edges
     };
-    snapped(anim, &edges(width), &edges(height))
+    snapped(anim, &edges(width, across), &edges(height, down))
 }
 
 #[cfg(test)]
@@ -608,6 +612,15 @@ mod tests {
         assert_eq!(half.rgba(0)[..4], RED);
         assert!(error(&board, &half) > 0.0);
         assert_eq!(half.ticks(), board.ticks());
+
+        // 3x art, its first art pixel cut to 2 input pixels: halving joins
+        // whole art pixels from where they start
+        let row = (0..11).map(|x| if (x + 1) / 3 % 2 == 0 { RED } else { BLUE });
+        let pixels: Vec<[u8; 4]> = row.cycle().take(11 * 3).collect();
+        let cut = anim(11, 3, &[(&pixels, 100)]);
+        assert_eq!(cut.grid().columns, [0, 2, 5, 8, 11]);
+        let half = Reduction::Downscale { factor: 0.5 }.apply(&cut).unwrap();
+        assert_eq!(half.grid().columns, [0, 8, 11]);
     }
 
     #[test]
