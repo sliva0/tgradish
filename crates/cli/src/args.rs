@@ -86,7 +86,7 @@ pub enum Command {
     Watch(WatchArgs),
     /// Spoof the duration of an existing WebM so Telegram accepts it.
     Spoof(SpoofArgs),
-    /// Show properties of WebM and .tgs files and check them against
+    /// Show properties of WebM, WebP and .tgs files and check them against
     /// Telegram's requirements.
     Inspect(InspectArgs),
     /// Print a JSON description of options, presets and events for
@@ -165,7 +165,8 @@ pub struct ConversionArgs {
     #[arg(short = 'y', long)]
     pub overwrite: bool,
     /// Preset to start from: fast, balanced, best or one of your own, see
-    /// `tgradish preset list`. [default: balanced for webm, best for tgs]
+    /// `tgradish preset list`. [default: balanced for webm and image, best
+    /// for tgs, unless the config's preset or tgs-preset names another]
     #[arg(short, long)]
     pub preset: Option<String>,
     /// Options as a JSON object, applied after the preset and before other
@@ -191,8 +192,8 @@ pub struct OptionArgs {
     #[arg(long, value_name = "WxH+X+Y", help_heading = "Output")]
     pub crop: Option<Crop>,
     /// How to scale into the target size [default: contain for stickers,
-    /// pad for emoji]; .tgs stickers are square: pad, crop to whole art
-    /// pixels, or stretch them [default: pad].
+    /// pad for emoji]; .tgs stickers are square: pad the art, crop its
+    /// middle, or stretch it [default: pad].
     #[arg(long, value_enum, help_heading = "Output")]
     pub resize: Option<ResizeArg>,
     /// How pixels are scaled: smooth, sharp blocks for pixel art, or
@@ -277,8 +278,9 @@ pub struct OptionArgs {
     /// Title stored in the file.
     #[arg(long, help_heading = "Metadata")]
     pub title: Option<String>,
-    /// Mark the file as made by tgradish in its metadata and name. A mark
-    /// hidden in the picture stays either way. [default: true]
+    /// Mark the file as made by tgradish in its metadata, which for .tgs is
+    /// the sticker's Lottie name. A mark hidden in WebM and .tgs stickers
+    /// stays either way. [default: true]
     #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
           default_missing_value = "true", help_heading = "Metadata")]
     pub watermark: Option<bool>,
@@ -516,10 +518,11 @@ pub struct SpoofArgs {
 
 #[derive(Debug, Args)]
 pub struct InspectArgs {
-    /// WebM or .tgs files to inspect.
+    /// WebM, WebP or .tgs files to inspect.
     #[arg(required = true)]
     pub files: Vec<PathBuf>,
-    /// Check against this target instead of guessing from the size.
+    /// Check WebM and WebP files against this target instead of guessing
+    /// from the size. .tgs stickers and emoji have the same limits.
     #[arg(long, value_enum)]
     pub target: Option<TargetArg>,
 }
