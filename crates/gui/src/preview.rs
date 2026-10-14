@@ -7,7 +7,7 @@ use eframe::egui::{self, Color32, Rect, RichText, pos2, vec2};
 use tgradish_core::backend::Backend;
 use tgradish_core::config::ResultPreview;
 use tgradish_core::convert;
-use tgradish_core::options::{Crop, Resize, Scaling};
+use tgradish_core::options::{Crop, Options, Resize, Scaling};
 use tgradish_core::presets::Format;
 use tgradish_core::telegram;
 use tgradish_core::tgs::TgsOptions;
@@ -73,13 +73,15 @@ impl App {
                         let tempo = item.tempo(&self.presets, &self.config);
                         // what a .tgs is made with, the preset's included
                         let tgs = item.choices.tgs_options(&self.presets, &self.config);
+                        let webm = item.choices.webm_options(&self.presets, &self.config);
+                        let webm = webm.unwrap_or_else(|_| item.choices.webm.clone());
                         preview(
                             ui,
                             &mut self.screen,
                             &mut self.inset,
                             item,
                             (tempo, &mut in_frames),
-                            &tgs.unwrap_or_default(),
+                            (&webm, &tgs.unwrap_or_default()),
                             &mut look,
                         );
                     },
@@ -145,7 +147,7 @@ fn preview(
     inset: &mut Inset,
     item: &mut Item,
     (tempo, in_frames): (f64, &mut bool),
-    tgs: &TgsOptions,
+    (webm, tgs): (&Options, &TgsOptions),
     look: &mut ResultPreview,
 ) {
     let has_result = item.result_clip.ready().is_some();
@@ -264,7 +266,7 @@ fn preview(
         Format::Tgs => (item.art.ready().map(|art| &art.clip), None, None),
     };
     let target = item.choices.target;
-    let resize = settings::resize_of(item);
+    let resize = settings::resize_of(webm);
     let filling = (item.format != Format::Tgs && resize == Resize::Crop).then(|| {
         let (width, height) = target.box_size();
         f64::from(width) / f64::from(height)
@@ -333,7 +335,7 @@ fn preview(
                     inset.ease(ui.ctx(), item.id, (on, step, corner), layout);
                 ui.painter().rect_filled(rect, 0.0, theme::stage(ui.visuals().dark_mode));
                 let ratio = settings::ratio(item.view.aspect, size);
-                let exact = settings::exact_of(item);
+                let exact = settings::exact_of(webm).filter(|_| item.format != Format::Tgs);
                 // a `.tgs` square cut from the middle of what it shows
                 let kept = match item.format {
                     Format::Tgs if tgs.resize == Some(Resize::Crop) => {
@@ -354,7 +356,7 @@ fn preview(
                 let showing = on || inset.leaving();
                 let mut change = None;
                 let place = ((rect, room, align), (corner, step, on));
-                if let Some(label) = inset_label(item, size).filter(|_| showing) {
+                if let Some(label) = inset_label(item, size, webm).filter(|_| showing) {
                     let crop = item.choices.crop;
                     let where_ = predict::Part::of(crop, size, (clip.width, clip.height));
                     match item.format {
@@ -364,10 +366,10 @@ fn preview(
                             // a crop that doesn't suit the exact scale yet is made to
                             // fit on the next frame
                             if let Some(mut sizes) =
-                                settings::webm_sizes(item, crop.unwrap_or(full))
+                                settings::webm_sizes(webm, crop.unwrap_or(full))
                             {
                                 let art_key = inset_key((clip.id, where_));
-                                let scaling = item.choices.webm.scaling.unwrap_or(Scaling::Auto);
+                                let scaling = webm.scaling.unwrap_or(Scaling::Auto);
                                 if scaling == Scaling::Auto
                                     && sizes.enlarges(used) >= convert::AUTO_SHARP_FROM
                                     && inset.looks_like_art(art_key, || {
@@ -480,11 +482,11 @@ fn tgs_bounds(inset: &mut Inset, clip: &Clip, part: predict::Part, tgs: &TgsOpti
 /// What the label of an item's small picture of its result says under
 /// "Result": its size, which `.tgs` results, vectors, have none of in
 /// pixels. `None` while its size isn't known.
-fn inset_label(item: &Item, size: (u32, u32)) -> Option<Option<String>> {
+fn inset_label(item: &Item, size: (u32, u32), webm: &Options) -> Option<Option<String>> {
     match item.format {
         Format::Webm | Format::Image => {
             let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
-            let sizes = settings::webm_sizes(item, item.choices.crop.unwrap_or(full))?;
+            let sizes = settings::webm_sizes(webm, item.choices.crop.unwrap_or(full))?;
             Some(Some(format!("{} × {} px", sizes.width, sizes.height)))
         }
         Format::Tgs => Some(None),

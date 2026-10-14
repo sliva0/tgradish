@@ -4,8 +4,8 @@
 //! nothing of how it encodes.
 
 use eframe::egui;
-use tgradish_core::convert::{self, Sizes};
-use tgradish_core::options::{Crop, Options, Resize, Scaling, Spoof};
+use tgradish_core::convert;
+use tgradish_core::options::{Crop, Options, Resize, Spoof};
 use tgradish_core::presets::Format;
 use tgradish_core::telegram;
 use tgradish_core::tgs::TgsOptions;
@@ -115,28 +115,10 @@ fn read(item: &Item, used: &Used, steps: &mut Vec<String>) {
     }
 }
 
-/// The sizes a WebM or image result's picture has, as converting plans
-/// them: an exact scale keeps all of the picture, padded.
-fn sizes(options: &Options, used: (u32, u32)) -> Option<Sizes> {
-    let target = options.target.unwrap_or_default();
-    let base = if target.requires_exact_size() { Resize::Pad } else { Resize::Contain };
-    let scaling = options.scaling.unwrap_or(Scaling::Auto);
-    match options.exact_scale.filter(|_| scaling == Scaling::PixelPerfect) {
-        Some(scale) => {
-            let resize = options
-                .resize
-                .filter(|resize| matches!(resize, Resize::Contain | Resize::Pad))
-                .unwrap_or(base);
-            convert::exact_sizes(target, resize, used, scale).ok()
-        }
-        None => Some(convert::sizes(target, options.resize.unwrap_or(base), scaling, used)),
-    }
-}
-
 /// How a `used` picture is scaled, stretched, cut and padded into a WebM
 /// or image result.
 fn picture(options: &Options, used: (u32, u32)) -> Vec<String> {
-    let Some(sizes) = sizes(options, used) else { return Vec::new() };
+    let Ok(sizes) = convert::picture_sizes(options, used) else { return Vec::new() };
     let mut steps = Vec::new();
     let scaled = sizes.scaled;
     if scaled != used {
@@ -211,7 +193,7 @@ fn time(item: &Item, used: &Used, tempo: f64, cut: bool, steps: &mut Vec<String>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tgradish_core::options::ExactScale;
+    use tgradish_core::options::{ExactScale, Scaling};
     use tgradish_core::telegram::Target;
 
     #[test]

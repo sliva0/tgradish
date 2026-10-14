@@ -358,6 +358,24 @@ pub fn has_few_colours(frames: &[Vec<u8>], width: u32, crop: Option<Crop>, most:
 /// More colours than this is a photo or a video, not pixel art.
 pub const PIXEL_ART_COLOURS: usize = 256;
 
+/// How a result fills its box when not told: emoji must be exactly
+/// their size, so are padded; stickers keep the picture's shape.
+pub fn default_resize(target: Target) -> Resize {
+    if target.requires_exact_size() { Resize::Pad } else { Resize::Contain }
+}
+
+/// The sizes a WebM or image result of a `used` part of the input has, as
+/// `options` ask. Planning a conversion uses this, and so can front-ends
+/// showing what it will make, so the two can't disagree.
+pub fn picture_sizes(options: &Options, used: (u32, u32)) -> std::result::Result<Sizes, String> {
+    let target = options.target.unwrap_or_default();
+    let resize = options.resize.unwrap_or(default_resize(target));
+    match options.exact_scale {
+        Some(scale) => exact_sizes(target, resize, used, scale),
+        None => Ok(sizes(target, resize, options.scaling.unwrap_or(Scaling::Auto), used)),
+    }
+}
+
 /// Resolves options against the probed input. Returns the plan and warnings
 /// about options that were adjusted or ignored.
 pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
@@ -365,11 +383,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     let mut warnings = Vec::new();
 
     let target = o.target.unwrap_or_default();
-    let resize = o.resize.unwrap_or(if target.requires_exact_size() {
-        Resize::Pad
-    } else {
-        Resize::Contain
-    });
+    let resize = o.resize.unwrap_or(default_resize(target));
     if target.requires_exact_size() && resize == Resize::Contain {
         return Err(invalid(format!(
             "{} must be exactly {}x{}, use resize pad, crop or stretch",
@@ -525,10 +539,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         crop.check(source.width, source.height).map_err(invalid)?;
     }
     let used = o.crop.map_or((source.width, source.height), |crop| (crop.width, crop.height));
-    let sizes = match o.exact_scale {
-        Some(scale) => exact_sizes(target, resize, used, scale).map_err(invalid)?,
-        None => sizes(target, resize, o.scaling.unwrap_or(Scaling::Auto), used),
-    };
+    let sizes = picture_sizes(o, used).map_err(invalid)?;
 
     let plan = Plan {
         input: request.input.clone(),

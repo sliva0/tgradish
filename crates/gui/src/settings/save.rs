@@ -1,7 +1,9 @@
 //! The item's settings saved as a preset of the user's own, which the item
 //! takes up then: its own values over the preset it started from, of every
-//! format, but none that only make sense for its file: its crop and cut,
-//! Aseprite tag and layers, title and sprite sheet layout.
+//! format, but none that only make sense for its file: its title and
+//! sprite sheet layout, which the item keeps as its own. Its crop, cut,
+//! Aseprite tag and layers are kept apart from the preset's values in
+//! [`crate::item::Choices`] anyway, so they stay as they are.
 
 use eframe::egui;
 use eframe::egui::containers::menu::{MenuButton, MenuConfig};
@@ -96,7 +98,6 @@ fn take_up(item: &mut Item, name: &str) {
         title: tgs.title.take(),
         sheet: tgs.sheet.take(),
         sheet_frames: tgs.sheet_frames.take(),
-        tag: tgs.tag.take(),
         ..TgsOptions::default()
     };
 }
@@ -105,7 +106,7 @@ fn take_up(item: &mut Item, name: &str) {
 mod tests {
     use egui_kittest::kittest::Queryable;
     use tgradish_core::config::Config;
-    use tgradish_core::options::Fit;
+    use tgradish_core::options::{Fit, Resize};
     use tgradish_core::presets::Format;
 
     use crate::testing::{finish, harness, square};
@@ -122,6 +123,7 @@ mod tests {
         let item = &mut harness.state_mut().items[0];
         item.format = Format::Webm;
         item.choices.webm.fit = Some(Fit::Crf);
+        item.choices.webm.resize = Some(Resize::Crop);
         item.choices.webm.title = Some("only this one".into());
         harness.run_steps(2);
         harness.get_by_label("Save as preset…").click();
@@ -141,6 +143,9 @@ mod tests {
             (choices.webm.fit, choices.webm.title.as_deref()),
             (None, Some("only this one"))
         );
+        // what it makes, and shows, comes from the preset now
+        let effective = choices.webm_options(&state.presets, &state.config).unwrap();
+        assert_eq!(super::super::resize_of(&effective), Resize::Crop);
         let saved = state.presets.webm("by quality").unwrap();
         assert_eq!((saved.fit, saved.title), (Some(Fit::Crf), None));
         assert!(dir.path().join("presets/by quality.toml").is_file());
