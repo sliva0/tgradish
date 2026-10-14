@@ -107,27 +107,22 @@ jobs:
         with:
           path: target/ffmpeg/sources
           key: ffmpeg-sources-${{ hashFiles('xtask/src/ffmpeg.rs') }}
+      # the libraries built, which `xtask ffmpeg` keeps when they were made
+      # from its recipe; the key changes with it, and with the image they
+      # were built in. A tag's run only finds those main's runs saved, as
+      # one started by hand there
+      - uses: actions/cache@v6
+        with:
+          path: |
+            target/ffmpeg/prefix-${{ matrix.triple }}
+            target/ffmpeg/licenses-${{ matrix.triple }}
+          key: ffmpeg-${{ matrix.triple }}-${{ matrix.container || matrix.runner }}-${{ hashFiles('xtask/src/ffmpeg.rs') }}
 
       - run: cargo xtask ffmpeg --target ${{ matrix.target }}
 
+      # with the settings of xtask/src/build.rs, which local-release shares
       - name: Build tgradish with ffmpeg linked in
-        env:
-          PKG_CONFIG_PATH: ${{ github.workspace }}/target/ffmpeg/prefix-${{ matrix.triple }}/lib/pkgconfig
-          PKG_CONFIG_ALL_STATIC: "1"
-          PKG_CONFIG_ALLOW_CROSS: "1"
-          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
-          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
-          AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
-          # the stubs come last, so they only fill in headers MinGW lacks
-          BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_gnu: >-
-            -I/usr/x86_64-w64-mingw32/include
-            -I${{ github.workspace }}/xtask/mingw-stubs
-          # links winpthread and libgcc into the executable instead of
-          # depending on their DLLs; `xtask package` checks the result
-          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS: -C link-arg=-static
-        run: >
-          cargo build --release --locked -p tgradish
-          --features linked-static --target ${{ matrix.triple }}
+        run: cargo xtask build --target ${{ matrix.target }}
 
       - name: Package
         if: ${{ !matrix.container }}
@@ -139,7 +134,7 @@ jobs:
         if: matrix.container
         run: |
           cargo xtask package --target ${{ matrix.target }} --max-glibc 2.28
-          cargo build --release --locked -p tgradish --target ${{ matrix.triple }}
+          cargo xtask build --target ${{ matrix.target }} --system-ffmpeg
           cargo xtask package --target ${{ matrix.target }} --system-ffmpeg --max-glibc 2.28
 
       - uses: actions/upload-artifact@v7

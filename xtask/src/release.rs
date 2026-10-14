@@ -4,9 +4,10 @@
 
 use anyhow::{Context, Result, bail};
 
-use crate::ffmpeg::{ffmpeg_for, ffmpeg_prefix, recipe};
+use crate::build::build;
+use crate::ffmpeg::ensure_ffmpeg;
 use crate::package::package;
-use crate::{Target, cargo, run, workspace_root};
+use crate::{Target, workspace_root};
 
 /// Builds every release variant of `targets` and packs them into
 /// `target/release-artifacts`, building ffmpeg first where its libraries
@@ -32,48 +33,13 @@ pub fn local_release(args: &[String]) -> Result<()> {
     }
     let root = workspace_root();
     for target in targets {
-        let prefix = ffmpeg_prefix(target);
-        let built = std::fs::read_to_string(prefix.join("recipe.txt")).ok();
-        if built.as_deref() != Some(recipe(asm).as_str()) {
-            eprintln!("building ffmpeg for {}", target.name());
-            ffmpeg_for(target, asm)?;
-        }
-        let triple = target.triple();
-        let mut linked = cargo();
-        linked
-            .current_dir(root)
-            .args(["build", "--release", "--locked", "-p", "tgradish"])
-            .args(["--features", "linked-static", "--target", triple])
-            .env("PKG_CONFIG_PATH", prefix.join("lib/pkgconfig"))
-            .env("PKG_CONFIG_ALL_STATIC", "1");
-        if target.is_windows() {
-            let stubs = root.join("xtask/mingw-stubs");
-            linked
-                .env("PKG_CONFIG_ALLOW_CROSS", "1")
-                .env("CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER", "x86_64-w64-mingw32-gcc")
-                .env("CC_x86_64_pc_windows_gnu", "x86_64-w64-mingw32-gcc")
-                .env("AR_x86_64_pc_windows_gnu", "x86_64-w64-mingw32-ar")
-                // the stubs come last, so they only fill in headers MinGW lacks
-                .env(
-                    "BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_gnu",
-                    format!("-I/usr/x86_64-w64-mingw32/include -I{}", stubs.display()),
-                )
-                .env("CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS", "-C link-arg=-static");
-        }
-        run(&mut linked)?;
+        ensure_ffmpeg(target, asm)?;
+        build(target, false)?;
         package(target, false, None)?;
         // the build without ffmpeg goes where the linked one was, so after
         // that one is packed
         if !target.is_windows() {
-            run(cargo().current_dir(root).args([
-                "build",
-                "--release",
-                "--locked",
-                "-p",
-                "tgradish",
-                "--target",
-                triple,
-            ]))?;
+            build(target, true)?;
             package(target, true, None)?;
         }
     }
