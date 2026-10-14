@@ -160,7 +160,11 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
                 } else {
                     ("too large", widgets::BAD.gamma_multiply(0.45))
                 };
-                let text = format!("{text} → {}, {mark}", widgets::kib(bytes));
+                let size = match &progress.webm {
+                    Some(plan) => share(bytes, plan.limit),
+                    None => widgets::kib(bytes),
+                };
+                let text = format!("{text} → {size}, {mark}");
                 widgets::bar(ui, widgets::Fill::Share(1.0), &text, colour);
             }
             None => widgets::bar(ui, widgets::Fill::working(progress.fraction), &text, running),
@@ -229,17 +233,21 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
     if !progress.attempts.is_empty() {
         // narrow, for the column beside the preview: units in the headers,
         // and sideways where it still doesn't fit
+        // how like the input each looks, where any was scored
+        let scored = progress.attempts.iter().any(|attempt| attempt.ssim.is_some());
         egui::ScrollArea::horizontal().id_salt(("attempts", item.id)).show(ui, |ui| {
-            let grid = egui::Grid::new(("attempts", item.id)).num_columns(5).spacing([10.0, 4.0]);
+            let columns = if scored { 5 } else { 4 };
+            let grid =
+                egui::Grid::new(("attempts", item.id)).num_columns(columns).spacing([10.0, 4.0]);
             grid.striped(true).show(ui, |ui| {
                 let headers = [
                     ("#", "Each encode in turn; ✔ the one kept"),
                     ("fps", "Frames a second"),
                     ("kbit/s", "Bitrate, or the quality it was encoded at"),
-                    ("KiB", "Size, green where it fits the limit"),
+                    ("size", "Share of the size limit, green where it fits"),
                     ("alike", "How like the input it looks (SSIM)"),
                 ];
-                for (header, hint) in headers {
+                for &(header, hint) in &headers[..columns] {
                     ui.label(RichText::new(header).weak()).on_hover_text(hint);
                 }
                 ui.end_row();
@@ -258,12 +266,15 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
                     match attempt.bytes {
                         Some(bytes) => {
                             let colour = if attempt.fits { widgets::GOOD } else { widgets::BAD };
-                            ui.colored_label(colour, format!("{:.1}", bytes as f64 / 1024.0))
+                            ui.colored_label(colour, share(bytes, done.limit))
+                                .on_hover_text(widgets::kib(bytes))
                         }
                         None => ui.label("—"),
                     };
-                    let alike = attempt.ssim.map(|ssim| format!("{:.1}%", ssim * 100.0));
-                    ui.label(alike.unwrap_or_default());
+                    if scored {
+                        let alike = attempt.ssim.map(|ssim| format!("{:.1}%", ssim * 100.0));
+                        ui.label(alike.unwrap_or_default());
+                    }
                     ui.end_row();
                 }
             });
@@ -272,6 +283,11 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
     for warning in &progress.warnings {
         ui.colored_label(widgets::WARN, format!("⚠ {warning}"));
     }
+}
+
+/// `bytes` as a share of `limit`, as the attempts' sizes show.
+fn share(bytes: u64, limit: u64) -> String {
+    format!("{:.1}%", bytes as f64 / limit.max(1) as f64 * 100.0)
 }
 
 fn reduction(reduction: &tgradish_tgs::reduce::Reduction) -> String {

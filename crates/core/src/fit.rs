@@ -19,6 +19,10 @@ const AIM: f64 = 0.985;
 const AUTO_FPS_BPP: f64 = 0.12;
 /// `fit = auto` does not go below this frame rate.
 const AUTO_MIN_FPS: f64 = 8.0;
+/// Bitrate searches stop once an attempt looks this much like the input
+/// (SSIM): more bits can't make it look better, only larger, as with
+/// simple pictures, which come out well under the limit at any bitrate.
+const ALIKE_ENOUGH: f64 = 0.995;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Attempt {
@@ -39,6 +43,8 @@ pub trait Encoder {
 struct Search {
     /// Best attempt that fits.
     best: Option<Attempt>,
+    /// How like the input `best` looks, where the search scored it.
+    best_alike: Option<f64>,
     /// Size of the smallest attempt, to report when nothing fits.
     smallest: Option<u64>,
     used: u32,
@@ -52,13 +58,17 @@ impl Search {
 }
 
 /// Finds the largest `x` in `[min, max]` whose encode fits, assuming size
-/// grows roughly in proportion to `x` (bitrate, length).
+/// grows roughly in proportion to `x` (bitrate, length). With `alike`, an
+/// attempt that fits well under the limit is scored, and one that looks
+/// [`ALIKE_ENOUGH`] like the input ends the search.
+#[allow(clippy::too_many_arguments)]
 fn maximize(
     encoder: &mut dyn Encoder,
     budget: u32,
     (min, max): (f64, f64),
     initial: f64,
     limit: u64,
+    alike: bool,
     quantize: impl Fn(f64) -> f64,
     params: impl Fn(f64) -> Params,
 ) -> Result<Search> {
@@ -83,9 +93,20 @@ fn maximize(
             if below.is_none_or(|(bx, _)| x > bx) {
                 below = Some((x, attempt.bytes));
                 search.best = Some(attempt.clone());
+                search.best_alike = None;
             }
             if attempt.bytes as f64 >= limit_f * GOOD_ENOUGH {
                 break;
+            }
+            // more of the value would only be tried for a larger file
+            if alike {
+                let score = encoder.score(&attempt)?;
+                if below.is_some_and(|(bx, _)| bx == x) {
+                    search.best_alike = Some(score);
+                }
+                if score >= ALIKE_ENOUGH {
+                    break;
+                }
             }
         } else if above.is_none_or(|(ax, _)| x < ax) {
             above = Some((x, attempt.bytes));
@@ -186,6 +207,7 @@ fn fit_bitrate(
         range,
         initial,
         limit,
+        true,
         |kbps| round_to(kbps, 1),
         |kbps| Params { fps, length, rate: Rate::Bitrate(kbps) },
     )
@@ -228,7 +250,10 @@ fn fit_auto(encoder: &mut dyn Encoder, plan: &Plan, limit: u64) -> Result<Search
             break;
         }
 
-        let score = encoder.score(&candidate)?;
+        let score = match search.best_alike {
+            Some(score) => score,
+            None => encoder.score(&candidate)?,
+        };
         match best_score {
             // a lower frame rate looking worse means even lower ones will too
             Some(best) if score <= best => break,
@@ -236,6 +261,10 @@ fn fit_auto(encoder: &mut dyn Encoder, plan: &Plan, limit: u64) -> Result<Search
                 best_score = Some(score);
                 total.best = Some(candidate);
             }
+        }
+        // as good as the input already: fewer frames can't look better
+        if score >= ALIKE_ENOUGH {
+            break;
         }
     }
     Ok(total)
@@ -303,6 +332,7 @@ pub fn run(plan: &Plan, encoder: &mut dyn Encoder) -> Result<Attempt> {
             (range.min, range.max),
             range.max,
             limit,
+            false,
             |secs| round_to(secs, 2),
             |secs| Params { fps, length: secs, rate: quality },
         )?,
@@ -325,11 +355,19 @@ mod tests {
     struct FakeEncoder {
         calls: Vec<Params>,
         motion: f64,
+        /// A simple picture: no larger than this at any bitrate, and as
+        /// like the input as this.
+        simple: Option<(f64, f64)>,
+        scored: u32,
     }
 
     impl FakeEncoder {
         fn new(motion: f64) -> Self {
-            Self { calls: Vec::new(), motion }
+            Self { calls: Vec::new(), motion, simple: None, scored: 0 }
+        }
+
+        fn simple(bytes: f64, alike: f64) -> Self {
+            Self { simple: Some((bytes, alike)), ..Self::new(0.0) }
         }
     }
 
@@ -343,6 +381,7 @@ mod tests {
                 }
                 Rate::Lossless => 50_000.0 * params.fps * params.length,
             };
+            let bytes = self.simple.map_or(bytes, |(most, _)| bytes.min(most));
             Ok(Attempt {
                 number: self.calls.len() as u32,
                 params,
@@ -352,6 +391,10 @@ mod tests {
         }
 
         fn score(&mut self, attempt: &Attempt) -> Result<f64> {
+            self.scored += 1;
+            if let Some((_, alike)) = self.simple {
+                return Ok(alike);
+            }
             let Rate::Bitrate(kbps) = attempt.params.rate else { unreachable!() };
             let bits_per_frame = kbps / attempt.params.fps;
             Ok(1.0 - 1.0 / bits_per_frame - self.motion * (1.0 - attempt.params.fps / 30.0))
@@ -469,6 +512,25 @@ mod tests {
         // stopped after the second frame rate looked worse
         let rates: Vec<_> = encoder.calls.iter().map(|p| p.fps).collect();
         assert!(!rates.contains(&15.0), "{rates:?}");
+    }
+
+    #[test]
+    fn stops_once_it_looks_like_the_input() {
+        // a simple picture, a fifth of the limit at any bitrate: raising
+        // the bitrate or lowering the frame rate only wastes encodes
+        for fit in [Fit::Auto, Fit::Bitrate] {
+            let plan = test_plan(options(fit), 30.0);
+            let mut encoder = FakeEncoder::simple(MAX_BYTES as f64 / 5.0, 0.999);
+            let best = run(&plan, &mut encoder).unwrap();
+            assert_eq!(encoder.calls.len(), 1, "{fit:?}: {:?}", encoder.calls);
+            // scored once, not again to compare frame rates
+            assert_eq!((encoder.scored, best.number), (1, 1), "{fit:?}");
+        }
+        // not alike enough: the search goes on
+        let plan = test_plan(options(Fit::Bitrate), 3.0);
+        let mut encoder = FakeEncoder::simple(MAX_BYTES as f64 / 5.0, 0.98);
+        run(&plan, &mut encoder).unwrap();
+        assert!(encoder.calls.len() > 1);
     }
 
     #[test]
