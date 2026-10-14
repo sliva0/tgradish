@@ -166,6 +166,16 @@ impl PixelAnim {
         self.frames.iter().map(|frame| frame.ticks).sum()
     }
 
+    /// Where each frame starts, in 60 fps frames, and then the length.
+    pub fn starts(&self) -> Vec<u32> {
+        let mut starts = Vec::with_capacity(self.frames.len() + 1);
+        starts.push(0);
+        for frame in &self.frames {
+            starts.push(starts.last().unwrap() + frame.ticks);
+        }
+        starts
+    }
+
     /// A frame as RGBA at the input's resolution, cropped.
     pub fn rgba(&self, frame: usize) -> Vec<u8> {
         let (columns, rows) = (&self.grid.columns, &self.grid.rows);

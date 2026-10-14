@@ -743,11 +743,7 @@ impl<'a> Painter<'a> {
 
     fn encode(&self, order: &[u16]) -> Result<Scene, EncodeError> {
         let pieces = self.ordered_pieces(order)?;
-        let mut starts = Vec::with_capacity(self.frames() + 1);
-        starts.push(0);
-        for frame in self.anim.frames() {
-            starts.push(starts.last().unwrap() + frame.ticks);
-        }
+        let starts = self.anim.starts();
         Ok(Scene {
             width: self.anim.width(),
             height: self.anim.height(),
@@ -946,16 +942,16 @@ fn stack(
         std::collections::HashMap::new();
     for (rank, colour, piece) in pieces {
         let span = (piece.from, piece.to);
-        let key = (rank, piece.tile, colour, piece.rects.clone());
-        if reuse && let Some(&index) = same.get(&key) {
-            let spans = &mut shown[index].2;
-            match spans.last_mut() {
-                Some(last) if last.1 == span.0 => last.1 = span.1,
-                _ => spans.push(span),
-            }
-            continue;
-        }
         if reuse {
+            let key = (rank, piece.tile, colour, piece.rects.clone());
+            if let Some(&index) = same.get(&key) {
+                let spans = &mut shown[index].2;
+                match spans.last_mut() {
+                    Some(last) if last.1 == span.0 => last.1 = span.1,
+                    _ => spans.push(span),
+                }
+                continue;
+            }
             same.insert(key, shown.len());
         }
         shown.push((colour, piece.rects, vec![span]));
