@@ -472,10 +472,20 @@ pub struct Picture<'a> {
 pub struct Cropping<'a> {
     pub crop: &'a mut Option<Crop>,
     pub ratio: Option<f64>,
-    /// The ratio of a box the crop fills, cutting off the rest of it.
-    pub filling: Option<f64>,
+    /// What of the crop the result keeps, cutting off the rest.
+    pub kept: Option<Kept>,
     /// The size an exact scale holds the crop to.
     pub exact: Option<Exact>,
+}
+
+/// What of a crop a result keeps.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Kept {
+    /// Its middle, filling a box of this width to height ratio.
+    Ratio(f64),
+    /// This part of the picture, in input pixels: left, top, right and
+    /// bottom.
+    Part([usize; 4]),
 }
 
 /// Which edge of a crop stays put when its size changes.
@@ -762,15 +772,24 @@ pub fn show(
             painter.rect_filled(part, 0.0, shade);
         }
     }
-    // what filling the box cuts off
-    if let Some(ratio) = cropping.filling.map(|r| r as f32) {
-        let (width, height) = (on_screen.width(), on_screen.height());
-        let kept = if width / height > ratio {
-            vec2(height * ratio, height)
-        } else {
-            vec2(width, width / ratio)
+    // what the result cuts off
+    if let Some(kept) = cropping.kept {
+        let kept = match kept {
+            Kept::Ratio(ratio) => {
+                let ratio = ratio as f32;
+                let (width, height) = (on_screen.width(), on_screen.height());
+                let kept = if width / height > ratio {
+                    vec2(height * ratio, height)
+                } else {
+                    vec2(width, width / ratio)
+                };
+                Rect::from_center_size(on_screen.center(), kept)
+            }
+            Kept::Part([x0, y0, x1, y1]) => {
+                let at = |x: usize, y: usize| shown.min + vec2(x as f32, y as f32) * scale;
+                Rect::from_min_max(at(x0, y0), at(x1, y1))
+            }
         };
-        let kept = Rect::from_center_size(on_screen.center(), kept);
         let cut = Color32::from_black_alpha(110);
         for part in [
             Rect::from_min_max(on_screen.min, pos2(on_screen.max.x, kept.min.y)),

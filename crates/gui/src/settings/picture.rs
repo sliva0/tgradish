@@ -84,11 +84,7 @@ const SQUARES: [Choice<Resize>; 4] = [
 const TGS_SQUARES: [Choice<Resize>; 4] = [
     (Resize::Contain, "Off", ""),
     (Resize::Pad, "By padding", "Transparent margins fill the rest of the square"),
-    (
-        Resize::Crop,
-        "By cropping",
-        "The middle fills the square and the rest is cut off, by whole art pixels",
-    ),
+    (Resize::Crop, "By cropping", "The middle fills the square and the rest is cut off"),
     (
         Resize::Stretch,
         "By stretching",
