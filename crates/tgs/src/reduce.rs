@@ -234,12 +234,14 @@ impl Seen {
 
 /// How different two colours look: OKLab distance where both show, plus
 /// the difference in opacity (1 between transparent and opaque).
-pub fn distance(a: [u8; 4], b: [u8; 4]) -> f64 {
+fn distance(a: [u8; 4], b: [u8; 4]) -> f64 {
     Seen::of(a).distance(Seen::of(b))
 }
 
-/// How much `reduced` differs from `original`: the [`distance`] of every
-/// input pixel at every 60 fps frame, averaged.
+/// How much `reduced` differs from `original`: how different every input
+/// pixel looks at every 60 fps frame, averaged. Colours differ by their
+/// OKLab distance where both show, plus the difference in opacity (1
+/// between transparent and opaque).
 pub fn error(original: &PixelAnim, reduced: &PixelAnim) -> f64 {
     // the edges of both grids together; each piece is in one cell of each
     let overlay = |a: &[u32], b: &[u32]| {

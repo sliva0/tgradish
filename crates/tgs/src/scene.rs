@@ -142,7 +142,7 @@ impl Shape {
 
 /// The cells a group fills, kept for the box around its shapes only.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Coverage {
+pub(crate) struct Coverage {
     left: u32,
     top: u32,
     width: u32,
@@ -168,7 +168,7 @@ impl Coverage {
 
 impl Group {
     /// Cells the group fills.
-    pub fn coverage(&self) -> Coverage {
+    pub(crate) fn coverage(&self) -> Coverage {
         let (left, top, right, bottom) = self
             .shapes
             .iter()
@@ -237,7 +237,7 @@ impl Scene {
     }
 
     /// The scene at a frame, with `palette` alpha deciding what blends.
-    pub fn rasterise(&self, tick: u32, palette: &[[u8; 4]]) -> Vec<Paint> {
+    pub(crate) fn rasterise(&self, tick: u32, palette: &[[u8; 4]]) -> Vec<Paint> {
         let mut cells = vec![Paint::Clear; self.width as usize * self.height as usize];
         for group in self.visible(tick) {
             let opaque = palette[group.colour as usize][3] == 255;
