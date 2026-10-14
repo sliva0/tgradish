@@ -404,10 +404,131 @@ pub fn save(
     Ok(path)
 }
 
+/// Renames the preset `from` in `dir` to `to`, a name no other preset
+/// has, built in or not. One another preset extends keeps its name, as
+/// that one would break.
+pub fn rename(dir: &Path, from: &str, to: &str, presets: &Presets) -> Result<PathBuf> {
+    check_name(to)?;
+    if to != from && presets.iter().any(|(name, _)| name == to) {
+        return Err(Error::InvalidOptions(format!("another preset is named {to:?}")));
+    }
+    let extending = presets
+        .iter()
+        .filter_map(|(_, preset)| preset.ok())
+        .find(|preset| preset.extends.as_deref() == Some(from));
+    if let Some(other) = extending {
+        return Err(Error::InvalidOptions(format!(
+            "{:?} extends it: rename it there first",
+            other.name
+        )));
+    }
+    let (old, new) = (dir.join(format!("{from}.toml")), dir.join(format!("{to}.toml")));
+    // a name changed only in case names the same file where case doesn't
+    // matter; where it does, the other file is another preset's
+    if new.exists() && !same_file(&old, &new) {
+        return Err(Error::OutputExists(new));
+    }
+    std::fs::rename(&old, &new)?;
+    Ok(new)
+}
+
+/// Whether `a` and `b` are one file, under two names or the same.
+fn same_file(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (std::fs::metadata(a), std::fs::metadata(b)) {
+            (Ok(a), Ok(b)) => (a.dev(), a.ino()) == (b.dev(), b.ino()),
+            _ => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
+    }
+}
+
+/// Says the preset at `path` is `description`, keeping its options. The
+/// file is written anew, without any comments it had.
+pub fn describe(path: &Path, description: &str) -> Result<()> {
+    let text = std::fs::read_to_string(path)?;
+    let mut file: toml::Table = toml::from_str(&text)
+        .map_err(|err| Error::InvalidOptions(format!("{}: {err}", path.display())))?;
+    file.remove("description");
+    if !description.is_empty() {
+        file.insert("description".into(), description.into());
+    }
+    let text = toml::to_string(&file).map_err(|err| Error::InvalidOptions(err.to_string()))?;
+    crate::fsutil::write_output(path, text.as_bytes(), true)
+}
+
+/// Deletes the preset at `path`, and returns what it held, which
+/// [`restore`] puts back.
+pub fn remove(path: &Path) -> Result<String> {
+    let text = std::fs::read_to_string(path)?;
+    std::fs::remove_file(path)?;
+    Ok(text)
+}
+
+/// Puts back as `name` in `dir` a preset [`remove`] deleted, which held
+/// `text`, unless another of its name is there now.
+pub fn restore(dir: &Path, name: &str, text: &str) -> Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join(format!("{name}.toml"));
+    crate::fsutil::write_output(&path, text.as_bytes(), false)?;
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::telegram::Target;
+
+    #[test]
+    fn renames_describes_and_removes_presets() {
+        let dir = tempfile::tempdir().unwrap();
+        let webm = Options { crf: Some(28), ..Options::default() };
+        let tgs = TgsOptions::default();
+        save(dir.path(), "small", "Small ones", (&webm, &tgs), false).unwrap();
+        save(dir.path(), "other", "", (&webm, &tgs), false).unwrap();
+        let load = || Presets::load(Some(dir.path())).unwrap();
+
+        // not onto another, nor to a name that can't be a file's
+        assert!(rename(dir.path(), "small", "other", &load()).is_err());
+        assert!(rename(dir.path(), "small", "a/b", &load()).is_err());
+        rename(dir.path(), "small", "tiny", &load()).unwrap();
+        assert_eq!(load().webm("tiny").unwrap().crf, Some(28));
+        assert!(load().get("small").is_err());
+
+        // described anew, its options as they were
+        let path = dir.path().join("tiny.toml");
+        describe(&path, "Tiny ones").unwrap();
+        assert_eq!(load().get("tiny").unwrap().description, "Tiny ones");
+        describe(&path, "").unwrap();
+        assert_eq!(load().get("tiny").unwrap().description, "");
+        assert_eq!(load().webm("tiny").unwrap().crf, Some(28));
+
+        // gone, and back as it was
+        let text = remove(&path).unwrap();
+        assert!(load().get("tiny").is_err());
+        restore(dir.path(), "tiny", &text).unwrap();
+        assert_eq!(load().webm("tiny").unwrap().crf, Some(28));
+        assert!(matches!(restore(dir.path(), "tiny", &text), Err(Error::OutputExists(_))));
+
+        // not a built-in one's, which it would stand in for
+        assert!(rename(dir.path(), "tiny", "fast", &load()).is_err());
+        // nor another file's that differs in case alone, where case matters
+        save(dir.path(), "Tiny", "", (&webm, &tgs), false).unwrap();
+        if dir.path().join("tiny.toml").exists() && dir.path().join("Tiny.toml").exists() {
+            let other = std::fs::read_to_string(dir.path().join("Tiny.toml")).unwrap();
+            assert!(rename(dir.path(), "tiny", "Tiny", &load()).is_err());
+            assert_eq!(std::fs::read_to_string(dir.path().join("Tiny.toml")).unwrap(), other);
+        }
+
+        // one another extends keeps its name
+        write(dir.path(), "child", "extends = 'tiny'\n");
+        assert!(rename(dir.path(), "tiny", "small", &load()).is_err());
+    }
 
     #[test]
     fn saves_presets_that_read_back() {

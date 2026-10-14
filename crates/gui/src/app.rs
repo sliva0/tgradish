@@ -23,7 +23,7 @@ use crate::keys::direct_scrolling;
 use crate::outputs::{FileVersion, Written};
 use crate::widgets::toast;
 use crate::work::release;
-use crate::{accent, fallback, inspect, prefs, session, system, theme};
+use crate::{accent, fallback, inspect, prefs, preset_dialogs, session, system, theme};
 #[cfg(all(unix, not(target_os = "macos")))]
 use crate::{dnd, toplevel_icon};
 
@@ -62,6 +62,8 @@ pub(crate) struct App {
     pub(crate) screen: Screen,
     pub(crate) inset: Inset,
     pub(crate) prefs: prefs::Prefs,
+    /// A dialog of the user's presets, open over the window.
+    pub(crate) preset_dialog: Option<preset_dialogs::Dialog>,
     pub(crate) inspection: Option<inspect::Inspection>,
     /// The theme Settings showed last, to apply a change made there.
     pub(crate) prefs_theme: Option<tgradish_core::config::Theme>,
@@ -189,6 +191,7 @@ impl App {
             screen: Screen::default(),
             inset: Inset::default(),
             prefs: prefs::Prefs::default(),
+            preset_dialog: None,
             inspection: None,
             prefs_theme: None,
             session: None,
@@ -361,10 +364,15 @@ impl App {
         what: &str,
         change: impl Fn(&mut tgradish_core::config::GuiConfig),
     ) {
-        change(&mut self.config.gui);
+        self.keep_config(what, |config| change(&mut config.gui));
+    }
+
+    /// [`App::keep`] for any of the settings.
+    pub(crate) fn keep_config(&mut self, what: &str, change: impl Fn(&mut Config)) {
+        change(&mut self.config);
         if let Some(path) = &self.config_path {
             let saved = Config::load(path).and_then(|mut saved| {
-                change(&mut saved.gui);
+                change(&mut saved);
                 saved.save(path)
             });
             if let Err(err) = saved {
@@ -375,7 +383,10 @@ impl App {
 
     /// Whether a dialog is open over the window.
     pub(crate) fn dialog_open(&self) -> bool {
-        self.prefs.is_open() || self.prefs.about || self.inspection.is_some()
+        self.prefs.is_open()
+            || self.prefs.about
+            || self.inspection.is_some()
+            || self.preset_dialog.is_some()
     }
 }
 
@@ -412,12 +423,6 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.outputs.borrow_mut().clear();
-        // with the one just saved
-        if crate::settings::presets_saved(&ctx)
-            && let Ok(presets) = Presets::load(self.presets_dir.as_deref())
-        {
-            self.presets = presets;
-        }
         self.follow_accent(&ctx);
         if !self.config.gui.smooth_scrolling {
             direct_scrolling(&ctx);
@@ -448,6 +453,7 @@ impl eframe::App for App {
             self.prefs_theme = Some(self.config.gui.theme);
         }
         self.inspection_dialog(&ctx);
+        self.preset_dialogs(&ctx);
         if self.prefs.about {
             let modal = egui::Modal::new(egui::Id::new("about")).show(&ctx, |ui| {
                 ui.set_width(600.0);

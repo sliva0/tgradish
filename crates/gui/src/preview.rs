@@ -33,6 +33,11 @@ const TGS_INSET: usize = 256;
 /// Height kept for the timeline under a preview that plays: its 30 point
 /// track and the space around it.
 const TIMELINE: f32 = 38.0;
+/// Width of the bar over the preview below which it keeps to what is most
+/// needed: everything else takes about this much.
+const COMPACT_BAR: f32 = 520.0;
+/// Width below which even the folder button doesn't fit beside the rest.
+const NARROWEST_BAR: f32 = 280.0;
 
 impl App {
     pub(crate) fn main_panel(&mut self, ui: &mut egui::Ui) {
@@ -55,6 +60,7 @@ impl App {
             output,
             config_path: self.config_path.as_deref(),
             presets_dir: self.presets_dir.as_deref(),
+            in_frames: self.config.gui.timeline_frames,
         };
         let height = ui.available_height();
         let preview_height =
@@ -164,6 +170,10 @@ fn preview(
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         let mut show = item.view.show;
+        // a narrow column has room only for what is most needed; the
+        // narrowest leaves the folder to the bar under the settings
+        let compact = ui.available_width() < COMPACT_BAR;
+        let folder = ui.available_width() >= NARROWEST_BAR;
         let choices = [(Show::Input, "Input", ""), (Show::Result, "Result", "")];
         // .tgs results of before a restart, which tgradish can't draw
         let unseen = if item.made.as_ref().is_some_and(|made| made.format == Format::Tgs) {
@@ -180,7 +190,7 @@ fn preview(
             Status::Done(done) => Some(done.output.clone()).filter(|output| output.exists()),
             _ => None,
         });
-        ui.menu_button("Show in folder", |ui| {
+        let show_folder = |ui: &mut egui::Ui| {
             let input = ui
                 .add_enabled(item.pasted.is_none(), egui::Button::new("Input file"))
                 .on_hover_text(item.inputs[0].display().to_string())
@@ -202,7 +212,10 @@ fn preview(
                 crate::system::reveal(output);
                 ui.close();
             }
-        });
+        };
+        if folder {
+            ui.menu_button(if compact { "Folder" } else { "Show in folder" }, show_folder);
+        }
         // what doesn't fit is cut short or left out, the hint first
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if item.view.show == Show::Input {
@@ -213,23 +226,34 @@ fn preview(
                 ui.toggle_value(&mut item.view.inset, text)
                     .on_hover_text("What the result will look like, small, beside the input");
             }
-            // always there, so nothing beside them moves as zooming starts
+            // always there where there is room, so nothing beside them
+            // moves as zooming starts
             let zoom = item.view.zoom_mut();
             let zoomed = zoom.level > 1.0;
-            let fit = ui
-                .add_enabled(zoomed, egui::Button::new("Fit"))
-                .on_hover_text("Show all of it")
-                .on_disabled_hover_text("All of it shows");
-            if fit.clicked() {
-                *zoom = Zoom::default();
+            if zoomed || !compact {
+                let out = ui
+                    .add_enabled(zoomed, egui::Button::new("Zoom out"))
+                    .on_hover_text("Show all of it")
+                    .on_disabled_hover_text("All of it shows");
+                if out.clicked() {
+                    *zoom = Zoom::default();
+                }
+                let level = RichText::new(format!("{:.0}%", zoom.level * 100.0));
+                let level = if zoomed { level } else { level.weak() };
+                ui.add_sized(vec2(42.0, 18.0), egui::Label::new(level));
             }
-            let level = RichText::new(format!("{:.0}%", zoom.level * 100.0));
-            let level = if zoomed { level } else { level.weak() };
-            ui.add_sized(vec2(42.0, 18.0), egui::Label::new(level));
             if has_result && !item.result_is_current() {
-                let stale = RichText::new("made with earlier settings").color(widgets::WARN);
+                // the mark alone where the word doesn't fit
+                let text = "⚠ Outdated";
+                let text = if ui.available_width() >= widgets::text_width(ui, text, 4.0) {
+                    text
+                } else {
+                    "⚠"
+                };
+                let stale = RichText::new(text).color(widgets::WARN);
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.add(egui::Label::new(stale).truncate());
+                    ui.add(egui::Label::new(stale).truncate())
+                        .on_hover_text("The result was made with earlier settings");
                 });
             } else if ui.available_width() > 60.0 {
                 let hint = match (item.view.show, item.choices.crop.is_some()) {

@@ -146,6 +146,17 @@ pub fn row<R>(
 /// One choice of a [`segments`] row: its value, label and explanation.
 pub type Choice<'a, T> = (T, &'a str, &'a str);
 
+/// Whether a choice of [`segments`] can be picked.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Pick {
+    Yes,
+    /// Greyed out, as this says why.
+    No(&'static str),
+    /// Greyed out, as another setting rules it out, yet picking it changes
+    /// that setting, as this says.
+    Changes(&'static str),
+}
+
 /// Options side by side as one control, the chosen one lit. `enabled`
 /// says which can be picked, with why not. True when changed.
 pub fn segments<T: PartialEq + Copy>(
@@ -153,6 +164,19 @@ pub fn segments<T: PartialEq + Copy>(
     value: &mut T,
     choices: &[Choice<T>],
     enabled: impl Fn(T) -> Result<(), &'static str>,
+) -> bool {
+    picking(ui, value, choices, |option| match enabled(option) {
+        Ok(()) => Pick::Yes,
+        Err(why) => Pick::No(why),
+    })
+}
+
+/// [`segments`], each one picked as `pick` says.
+pub fn picking<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    value: &mut T,
+    choices: &[Choice<T>],
+    pick: impl Fn(T) -> Pick,
 ) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
@@ -177,12 +201,11 @@ pub fn segments<T: PartialEq + Copy>(
             } else {
                 button.frame_when_inactive(true)
             };
-            let allowed = enabled(option);
-            let response = ui.add_enabled(allowed.is_ok(), button);
-            let response = match allowed {
-                Err(why) => response.on_disabled_hover_text(why),
-                Ok(()) if !hint.is_empty() => response.on_hover_text(hint),
-                Ok(()) => response,
+            let response = match pick(option) {
+                Pick::No(why) => ui.add_enabled(false, button).on_disabled_hover_text(why),
+                Pick::Changes(what) => greyed(ui, true, |ui| ui.add(button)).on_hover_text(what),
+                Pick::Yes if !hint.is_empty() => ui.add(button).on_hover_text(hint),
+                Pick::Yes => ui.add(button),
             };
             if response.clicked() && !selected {
                 *value = option;
@@ -193,6 +216,29 @@ pub fn segments<T: PartialEq + Copy>(
     changed
 }
 
+/// One of several choices, on a button of its own styled as a
+/// [`segments`] option, its text cut short past `max_width`.
+pub fn choice(
+    ui: &mut egui::Ui,
+    selected: bool,
+    text: &str,
+    max_width: f32,
+    enabled: bool,
+) -> egui::Response {
+    let height = ui.spacing().interact_size.y;
+    let button = egui::Button::selectable(selected, text).truncate().min_size(vec2(0.0, height));
+    let button = if selected {
+        button.stroke(theme::on_outline(ui.visuals()))
+    } else {
+        button.frame_when_inactive(true)
+    };
+    ui.scope(|ui| {
+        ui.set_max_width(max_width);
+        ui.add_enabled(enabled, button)
+    })
+    .inner
+}
+
 /// [`segments`] for a value a preset may set.
 pub fn preset_segments<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
@@ -200,10 +246,21 @@ pub fn preset_segments<T: PartialEq + Copy>(
     base: T,
     choices: &[Choice<T>],
 ) -> bool {
+    preset_picking(ui, value, base, choices, |_| Pick::Yes)
+}
+
+/// [`preset_segments`], each one picked as `pick` says.
+pub fn preset_picking<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    value: &mut Option<T>,
+    base: T,
+    choices: &[Choice<T>],
+    pick: impl Fn(T) -> Pick,
+) -> bool {
     let mut current = value.unwrap_or(base);
     let mut changed = false;
     ui.horizontal(|ui| {
-        if segments(ui, &mut current, choices, |_| Ok(())) {
+        if picking(ui, &mut current, choices, pick) {
             *value = (current != base).then_some(current);
             changed = true;
         }
@@ -213,6 +270,22 @@ pub fn preset_segments<T: PartialEq + Copy>(
         }
     });
     changed
+}
+
+/// `contents` looking greyed out while `greyed`, yet live: for settings
+/// another rules out, which picking them changes. Hovered, they look as
+/// any other, which tells them from those greyed out for good.
+pub fn greyed<R>(ui: &mut egui::Ui, greyed: bool, contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.scope(|ui| {
+        if greyed {
+            let weak = ui.visuals().weak_text_color();
+            let widgets = &mut ui.visuals_mut().widgets;
+            widgets.inactive.fg_stroke.color = weak;
+            widgets.noninteractive.fg_stroke.color = weak;
+        }
+        contents(ui)
+    })
+    .inner
 }
 
 /// The explanation of the chosen option, under a row of them.
@@ -289,8 +362,9 @@ pub fn auto_number<T: egui::emath::Numeric>(
         let live = set && ui.is_enabled();
         let mut number = value.or(shown).unwrap_or(start);
         let mut field = edit(egui::DragValue::new(&mut number)).clamp_existing_to_range(live);
+        // unknown: a dash, without the unit
         if !set && shown.is_none() {
-            field = field.custom_formatter(|_, _| "—".to_owned());
+            field = field.custom_formatter(|_, _| "—".to_owned()).prefix("").suffix("");
         }
         let response = ui.add_enabled(set, field).on_disabled_hover_text("Pick Custom to set it");
         if live && response.changed() {

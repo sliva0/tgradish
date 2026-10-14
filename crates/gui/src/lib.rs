@@ -25,6 +25,7 @@ mod media;
 mod outputs;
 mod predict;
 mod prefs;
+mod preset_dialogs;
 mod preview;
 mod result;
 #[cfg(test)]

@@ -3,13 +3,14 @@
 //! made from a video has only the frame it is made of.
 
 use eframe::egui;
-use tgradish_core::options::{Spoof, TEMPOS};
+use tgradish_core::options::{DEFAULT_FAKE_DURATION, Spoof, TEMPOS};
 use tgradish_core::presets::Format;
 use tgradish_core::telegram;
 use tgradish_core::tgs;
 
 use super::Context;
 use crate::item::{Item, Kind};
+use crate::timeline;
 use crate::widgets::{self, Choice, auto_number, chosen_hint, note, preset_segments, row, section};
 
 const SPOOFS: [Choice<Spoof>; 3] = [
@@ -51,6 +52,11 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             item.choices.tgs_base(context.presets, context.config).ok().and_then(|base| base.tempo)
         }
     };
+    if let Some(length) = item.input_length() {
+        let hint = "Where the part of the input used starts and ends; the bar under the preview \
+                    sets it too";
+        row(ui, "Used part", hint, Ok(()), |ui| used_part(ui, item, length, context.in_frames));
+    }
     if animated {
         let hint = "How many times as fast as the input the result plays";
         row(ui, "Speed", hint, Ok(()), |ui| {
@@ -161,12 +167,18 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             let allowed = if honest { Err("Nothing is spoofed when cut at 3 s") } else { Ok(()) };
             let hint = "The duration written into the file, which Telegram reads";
             row(ui, "Spoof to", hint, allowed, |ui| {
-                // the default isn't shown: it is the tool's to choose
-                auto_number(
+                let custom = options.fake_duration.is_some();
+                let (automatic, shown) = match webm_base.fake_duration {
+                    Some(duration) => (("Preset's", "The duration the preset sets"), duration),
+                    None => {
+                        (("Default", "A short duration Telegram accepts"), DEFAULT_FAKE_DURATION)
+                    }
+                };
+                let changed = auto_number(
                     ui,
                     &mut options.fake_duration,
-                    ("Default", "A short duration Telegram accepts"),
-                    None,
+                    automatic,
+                    Some(shown),
                     telegram::MAX_SECONDS,
                     |value| {
                         value
@@ -176,6 +188,11 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                             .suffix(" s")
                     },
                 );
+                // one of your own starts at the most Telegram takes, rather
+                // than at the default's odd number
+                if changed && !custom && options.fake_duration.is_some() {
+                    options.fake_duration = Some(telegram::MAX_SECONDS);
+                }
             });
         }
         Format::Tgs if sequence => {
@@ -193,6 +210,66 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             });
         }
         Format::Tgs => {}
+    }
+}
+
+/// Where the used part starts and ends, typed: as the timeline counts,
+/// frames or seconds, with the other count under them.
+fn used_part(ui: &mut egui::Ui, item: &mut Item, length: f64, in_frames: bool) {
+    let frames = item.input_frames();
+    let choices = &mut item.choices;
+    let size = egui::vec2(72.0, ui.spacing().interact_size.y);
+    let mut counted = None;
+    ui.horizontal(|ui| {
+        match frames.as_deref() {
+            Some(frames) => {
+                let (mut first, mut after) = frames.part(length, choices.start, choices.length);
+                ui.label("From");
+                let field =
+                    timeline::boundary_field(&mut first, 0..=after - 1, frames, in_frames, false);
+                let start = ui.add_sized(size, field).on_hover_text("Its first frame").changed();
+                ui.label("to");
+                let range = first + 1..=frames.count();
+                let field = timeline::boundary_field(&mut after, range, frames, in_frames, true);
+                let end = ui.add_sized(size, field).on_hover_text("Its last frame").changed();
+                if start || end {
+                    frames.set_part((first, after), &mut choices.start, &mut choices.length);
+                }
+                let (first, after) = frames.part(length, choices.start, choices.length);
+                counted = Some(if in_frames {
+                    format!(
+                        "{} to {} of {}",
+                        widgets::seconds(frames.times[first]),
+                        widgets::seconds(frames.times[after]),
+                        widgets::seconds(length)
+                    )
+                } else if after - first == 1 {
+                    format!("Frame {} of {}", first + 1, frames.count())
+                } else {
+                    format!("Frames {} to {} of {}", first + 1, after, frames.count())
+                });
+            }
+            None => {
+                let (mut from, mut to) = timeline::part(length, choices.start, choices.length);
+                ui.label("From");
+                let start = ui.add_sized(size, timeline::seconds(&mut from, length)).changed();
+                ui.label("to");
+                let end = ui.add_sized(size, timeline::seconds(&mut to, length)).changed();
+                if start || end {
+                    let from = from.min(to - 0.01).max(0.0);
+                    let to = to.max(from + 0.01).min(length);
+                    timeline::set_part(length, (from, to), &mut choices.start, &mut choices.length);
+                }
+            }
+        }
+        if (choices.start.is_some() || choices.length.is_some())
+            && widgets::reset_to(ui, "All of the input")
+        {
+            (choices.start, choices.length) = (None, None);
+        }
+    });
+    if let Some(counted) = counted {
+        note(ui, counted);
     }
 }
 

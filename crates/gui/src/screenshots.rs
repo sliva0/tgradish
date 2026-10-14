@@ -10,14 +10,15 @@ use eframe::egui;
 use egui_kittest::Harness;
 use tgradish_core::config::{Config, ResultPreview};
 use tgradish_core::ffmpeg::FfmpegChoice;
-use tgradish_core::options::{Crop, Scaling};
+use tgradish_core::options::{Crop, Fit, Options, Scaling};
 use tgradish_core::presets::{Format, Presets};
+use tgradish_core::tgs::TgsOptions;
 
 use crate::app::{App, set_theme};
 use crate::item::{self, Show, Zoom};
 use crate::jobs::{self, Job, Status};
 use crate::testing::{convert, finish, square, video};
-use crate::{inspect, prefs};
+use crate::{inspect, prefs, preset_dialogs};
 
 /// Renders the window to `$TGRADISH_SCREENSHOTS/*.png` for a look at
 /// the layout: `TGRADISH_SCREENSHOTS=/tmp cargo test -p tgradish-gui
@@ -82,6 +83,12 @@ fn screenshots() {
         harness.set_size(egui::vec2(1280.0, 1500.0));
         harness.run_steps(3);
         save(&mut harness, "settings-webm");
+        // lossless: the ways of fitting it rules out greyed, yet live
+        let webm = &mut harness.state_mut().items[0].choices.webm;
+        (webm.lossless, webm.fit) = (Some(true), Some(Fit::Fps));
+        harness.set_size(egui::vec2(1280.0, 2800.0));
+        harness.run_steps(3);
+        save(&mut harness, "settings-lossless");
         harness.set_size(egui::vec2(1280.0, 820.0));
         let item = &mut harness.state_mut().items[0];
         (item.view.aspect, item.choices.webm) = (item::Aspect::Free, Default::default());
@@ -93,7 +100,40 @@ fn screenshots() {
             std::thread::sleep(Duration::from_millis(10));
         }
         save(&mut harness, "image");
+        // the last frame, lit to the end of the bar
+        let item = &mut harness.state_mut().items[0];
+        item.choices.frame = item.input_frames().map(|frames| frames.times[frames.count() - 1]);
+        harness.run_steps(3);
+        save(&mut harness, "image-last");
+        // a video made an animation, which it doesn't suit
+        harness.state_mut().items[0].format = Format::Tgs;
+        finish(&mut harness);
+        harness.run_steps(3);
+        save(&mut harness, "tgs-not-art");
         harness.state_mut().items[0].format = Format::Webm;
+        harness.run_steps(3);
+        // a preset of your own: its button, and the dialogs that save
+        // and manage them
+        let presets_dir = dir.path().join("presets");
+        let quick = Options { fit: Some(Fit::Bitrate), ..Options::default() };
+        let mine = (&quick, &TgsOptions::default());
+        tgradish_core::presets::save(&presets_dir, "my stickers", "Quick", mine, false).unwrap();
+        let state = harness.state_mut();
+        state.presets = Presets::load(Some(&presets_dir)).unwrap();
+        state.presets_dir = Some(presets_dir);
+        state.items[0].choices.preset = Some("my stickers".into());
+        harness.run_steps(3);
+        save(&mut harness, "presets");
+        preset_dialogs::ask(&harness.ctx, preset_dialogs::Ask::Manage);
+        harness.run_steps(3);
+        save(&mut harness, "manage-presets");
+        harness.state_mut().preset_dialog = None;
+        let id = harness.state().items[0].id;
+        preset_dialogs::ask(&harness.ctx, preset_dialogs::Ask::Save(id));
+        harness.run_steps(3);
+        save(&mut harness, "save-preset");
+        harness.state_mut().preset_dialog = None;
+        harness.state_mut().items[0].choices.preset = None;
         harness.run_steps(3);
     }
     // names in scripts the window's fonts lack, drawn with the system's

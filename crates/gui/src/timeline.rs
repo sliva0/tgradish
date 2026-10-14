@@ -136,12 +136,17 @@ enum Grab {
 }
 
 /// The used part as `(start, end)`, and as the item stores it.
-fn part(length: f64, start: Option<f64>, used: Option<f64>) -> (f64, f64) {
+pub(crate) fn part(length: f64, start: Option<f64>, used: Option<f64>) -> (f64, f64) {
     let from = start.unwrap_or(0.0).clamp(0.0, length);
     (from, used.map_or(length, |used| (from + used).min(length)))
 }
 
-fn set_part(length: f64, (from, to): (f64, f64), start: &mut Option<f64>, used: &mut Option<f64>) {
+pub(crate) fn set_part(
+    length: f64,
+    (from, to): (f64, f64),
+    start: &mut Option<f64>,
+    used: &mut Option<f64>,
+) {
     *start = (from > 1e-3).then_some(from);
     *used = (to < length - 1e-3).then_some(to - from);
 }
@@ -149,7 +154,7 @@ fn set_part(length: f64, (from, to): (f64, f64), start: &mut Option<f64>, used: 
 /// A field of a boundary between frames: its frame counted from 1, or
 /// where it is in seconds. `end` marks the boundary after the last frame
 /// used, which counts as that frame.
-fn boundary_field<'a>(
+pub(crate) fn boundary_field<'a>(
     boundary: &'a mut usize,
     range: RangeInclusive<usize>,
     frames: &'a Frames,
@@ -269,7 +274,8 @@ pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
     });
 }
 
-fn seconds(value: &mut f64, length: f64) -> egui::DragValue<'_> {
+/// A field of a time in the input, in seconds.
+pub(crate) fn seconds(value: &mut f64, length: f64) -> egui::DragValue<'_> {
     egui::DragValue::new(value).range(0.0..=length).speed(0.01).max_decimals(2).suffix(" s")
 }
 
@@ -474,8 +480,9 @@ pub fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &mut bool
 }
 
 /// Picks a frame of a video for a still picture: a frame either way, its
-/// number or time, and a bar to click or drag along. `frame` is where the
-/// picked frame starts, as the picture is made of it.
+/// number or time, and a bar to click or drag along, the frame lit on it
+/// for as long as it shows. `frame` is where the picked frame starts, as
+/// the picture is made of it.
 pub fn frame_picker(
     ui: &mut egui::Ui,
     frames: &Frames,
@@ -487,12 +494,20 @@ pub fn frame_picker(
         let mut index = frames.at(frame.unwrap_or(0.0));
         let last = frames.count() - 1;
         let mut picked = None;
-        let button = |text| egui::Button::new(text).min_size(vec2(26.0, 26.0));
-        if ui.add(button("<")).on_hover_text("The frame before (←)").clicked() {
-            picked = Some(index.saturating_sub(1));
+        // as large as the play button, which stands here in the other modes
+        let step = |ui: &mut egui::Ui, icon: &str, enabled: bool, hint: &str, end: &str| {
+            let button =
+                egui::Button::new(egui::RichText::new(icon).size(15.0)).min_size(vec2(30.0, 26.0));
+            ui.add_enabled(enabled, button)
+                .on_hover_text(hint)
+                .on_disabled_hover_text(end)
+                .clicked()
+        };
+        if step(ui, "⏴", index > 0, "The frame before (←)", "This is the first frame") {
+            picked = Some(index - 1);
         }
-        if ui.add(button(">")).on_hover_text("The frame after (→)").clicked() {
-            picked = Some((index + 1).min(last));
+        if step(ui, "⏵", index < last, "The frame after (→)", "This is the last frame") {
+            picked = Some(index + 1);
         }
         let field = boundary_field(&mut index, 0..=last, frames, *in_frames, false);
         if ui.add_sized(vec2(72.0, 24.0), field).on_hover_text("The frame").changed() {
@@ -500,10 +515,12 @@ pub fn frame_picker(
         }
         let width = (ui.available_width() - UNIT - 8.0).max(80.0);
         let (rect, response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click_and_drag());
+        // as the bar of the used part in the other modes
         let track = Rect::from_min_max(
-            pos2(rect.left() + 8.0, rect.top() + 11.0),
-            pos2(rect.right() - 8.0, rect.bottom() - 11.0),
+            pos2(rect.left() + 8.0, rect.top() + 9.0),
+            pos2(rect.right() - 8.0, rect.bottom() - 7.0),
         );
+        let x_of = |seconds: f64| track.left() + (seconds / length) as f32 * track.width();
         let seconds_at =
             |x: f32| (f64::from((x - track.left()) / track.width()) * length).clamp(0.0, length);
         if let Some(pointer) = response.interact_pointer_pos()
@@ -511,34 +528,45 @@ pub fn frame_picker(
         {
             picked = Some(frames.at(seconds_at(pointer.x)));
         }
-        if let Some(pointer) = response.hover_pos() {
+        let hovered = response.hover_pos().map(|pointer| {
             let text = time_text(seconds_at(pointer.x), Some(frames), *in_frames);
             response.clone().on_hover_text_at_pointer(text);
-        }
+            frames.at(seconds_at(pointer.x))
+        });
         if let Some(picked) = picked {
             index = picked;
             *frame = (picked > 0).then_some(frames.times[picked]);
         }
         unit(ui, in_frames, true);
+        // the span of a frame on the bar, at least wide enough to see
+        let span = |index: usize| {
+            let (from, to) = (x_of(frames.times[index]), x_of(frames.times[index + 1]));
+            let middle = (from + to) / 2.0;
+            let half = ((to - from) / 2.0).max(1.5);
+            Rect::from_min_max(
+                pos2(middle - half, track.top()),
+                pos2(middle + half, track.bottom()),
+            )
+        };
         let painter = ui.painter_at(rect);
         let visuals = ui.visuals();
+        // the other frames dimmed, as the unused part is in the other modes
         painter.rect_filled(track, 3.0, visuals.extreme_bg_color);
-        // the frame, marked like a playhead
-        let x = track.left() + (frames.times[index] / length) as f32 * track.width();
-        let marks = visuals.strong_text_color();
-        painter.line_segment(
-            [pos2(x, track.top() - 4.0), pos2(x, rect.bottom())],
-            Stroke::new(1.5, marks),
-        );
-        painter.add(Shape::convex_polygon(
-            vec![
-                pos2(x - 5.0, track.top() - 9.0),
-                pos2(x + 5.0, track.top() - 9.0),
-                pos2(x, track.top() - 2.0),
-            ],
-            marks,
-            Stroke::NONE,
-        ));
+        // the frame lit, the bar's rounded ends kept
+        painter.with_clip_rect(span(index)).rect_filled(track, 3.0, theme::accent(visuals));
+        // where frames meet, while they are far enough apart to tell
+        if track.width() / frames.count() as f32 >= MARKED_FRAME {
+            let gap = Stroke::new(1.0, visuals.panel_fill);
+            for &time in &frames.times[1..frames.count()] {
+                let x = x_of(time).round() + 0.5;
+                painter.line_segment([pos2(x, track.top()), pos2(x, track.bottom())], gap);
+            }
+        }
+        // the frame a click picks
+        if let Some(hovered) = hovered {
+            let outline = Stroke::new(1.0, visuals.strong_text_color());
+            painter.rect_stroke(span(hovered), 2.0, outline, egui::StrokeKind::Inside);
+        }
     });
 }
 
