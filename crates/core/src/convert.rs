@@ -777,7 +777,7 @@ pub fn convert(
     // checked again here: the output may have appeared while encoding
     crate::fsutil::write_output(&plan.output, &bytes, request.overwrite)?;
 
-    let info = webm::inspect_file(&plan.output)?;
+    let info = webm::inspect(&bytes)?;
     let issues = telegram::check(&info, plan.target);
     let temp_dir = request.keep_temp.then(|| temp.keep());
     on_event(Event::Finished {
