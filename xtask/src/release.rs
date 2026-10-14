@@ -37,8 +37,9 @@ pub fn local_release(args: &[String]) -> Result<()> {
         build(target, false)?;
         package(target, false, None)?;
         // the build without ffmpeg goes where the linked one was, so after
-        // that one is packed
-        if !target.is_windows() {
+        // that one is packed; only for glibc, as the AUR package tgradish-bin
+        // uses it
+        if !target.is_windows() && !target.is_musl() {
             build(target, true)?;
             package(target, true, None)?;
         }

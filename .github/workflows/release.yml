@@ -1,11 +1,12 @@
 name: release
 
 # Builds single-file tgradish binaries with ffmpeg linked statically, for
-# Linux (x86-64 and aarch64) and Windows (cross-compiled with mingw-w64),
-# the Linux ones also as .deb and .rpm packages, and Linux binaries that use
-# the system's ffmpeg instead. Tests them, and on a version tag drafts a
-# GitHub release with them and the ffmpeg sources the LGPL asks for. Pull
-# requests that touch the ffmpeg build run it too.
+# Linux (x86-64 and aarch64, for glibc and for musl) and Windows
+# (cross-compiled with mingw-w64), the glibc ones also as .deb and .rpm
+# packages, and glibc binaries that use the system's ffmpeg instead. Tests
+# them, and on a version tag drafts a GitHub release with them and the
+# ffmpeg sources the LGPL asks for. Pull requests that touch the ffmpeg
+# build run it too.
 on:
   push:
     tags: ["v*"]
@@ -57,6 +58,15 @@ jobs:
             triple: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
             container: quay.io/pypa/manylinux_2_28_aarch64
+          # for Alpine and other musl distributions, with Ubuntu's musl-gcc
+          - target: linux-musl-x86_64
+            triple: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+            container: ""
+          - target: linux-musl-aarch64
+            triple: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            container: ""
           # MinGW-w64 before 12 (Ubuntu 24.04 has 11) lacks d3d12video.h,
           # which ffmpeg-sys-next's bindings include: xtask/mingw-stubs has
           # an empty one
@@ -99,11 +109,15 @@ jobs:
           curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-      - name: Install build tools (Windows)
+      - name: Install build tools (Windows and musl)
         if: ${{ !matrix.container }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y nasm meson ninja-build pkg-config clang libclang-dev zip mingw-w64
+          sudo apt-get install -y nasm meson ninja-build pkg-config clang libclang-dev zip
+          case "${{ matrix.target }}" in
+            windows-*) sudo apt-get install -y mingw-w64 ;;
+            linux-musl-*) sudo apt-get install -y musl-tools ;;
+          esac
 
       - run: rustup target add ${{ matrix.triple }}
       - uses: Swatinem/rust-cache@v2
@@ -192,6 +206,64 @@ jobs:
           done
           # the system-ffmpeg build really uses the system's
           tgradish-*-system-ffmpeg/tgradish --json ffmpeg status | grep -q /usr/bin/ffmpeg
+
+  # runs the musl builds on Alpine: converting, and opening the window on
+  # virtual X11 and Wayland displays, drawn by Mesa's software renderer
+  test-musl:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-musl-x86_64
+            runner: ubuntu-24.04
+          - target: linux-musl-aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-${{ matrix.target }}
+          path: artifacts
+
+      # in a container started here, as the runner's actions don't run in
+      # Alpine's
+      - name: Convert and open the window on Alpine
+        run: |
+          cat > artifacts/test.sh <<'EOF'
+          set -ex
+          apk add -q xvfb weston weston-backend-headless weston-shell-desktop \
+            mesa-dri-gallium mesa-gl mesa-egl libxkbcommon libxkbcommon-x11 libx11 \
+            libxcursor libxi libxrender wayland-libs-client wayland-libs-egl dbus-libs
+          tar -xzf tgradish-*.tar.gz
+          bin=$(echo "$PWD"/tgradish-*/tgradish)
+          "$bin" --version
+          "$bin" ffmpeg status
+          # a 16 x 16 PNG: a red square in a transparent border
+          echo iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGF7gjobGf2LwqAGjBtDWgKEJAGe22M1pQ+POAAAAAElFTkSuQmCC | base64 -d > input.png
+          "$bin" convert input.png -o still.webm --length 1 --preset fast
+          # VP9 with alpha in, which needs the libvpx decoder
+          "$bin" convert still.webm -o out.webm --preset fast
+          "$bin" convert input.png -o out.tgs
+          "$bin" convert input.png -o out.webp
+          "$bin" inspect out.webm out.tgs out.webp
+          export XDG_RUNTIME_DIR=/tmp
+          # still open after a while: it found the system's libraries and drew
+          window() {
+            env "$1" "$bin" gui & pid=$!
+            sleep 10
+            kill -0 $pid
+            kill $pid
+          }
+          Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
+          sleep 2
+          window DISPLAY=:99
+          weston --backend=headless --renderer=gl --socket=wl-test &
+          sleep 2
+          window WAYLAND_DISPLAY=wl-test
+          EOF
+          docker run --rm -v "$PWD/artifacts:/test" -w /test alpine:latest sh test.sh
 
   # installs the .deb and .rpm on the distributions they are for, which
   # resolves their dependencies, and converts with what they installed
@@ -283,7 +355,7 @@ jobs:
           "$bin" convert still.webm -o out.webm --preset fast && exit 1 || true
 
   publish:
-    needs: [build, test-linux, test-packages, test-windows]
+    needs: [build, test-linux, test-musl, test-packages, test-windows]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
