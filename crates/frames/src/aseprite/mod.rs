@@ -306,7 +306,10 @@ impl Sprite {
             other => return Err(error(format!("unknown colour depth {other}"))),
         };
         let flags = header.u32()?;
+        // deprecated by each frame's own duration, but still the one to go
+        // by where a frame says 0
         let speed = header.u16()?;
+        // two DWORDs that must be 0
         header.skip(8)?;
         let transparent = header.u8()?;
         if width == 0 || height == 0 {
@@ -345,11 +348,15 @@ impl Sprite {
             }
             let old_count = file.u16()?;
             let duration = file.u16()?;
+            // reserved
             file.skip(2)?;
             let new_count = file.u32()?;
             let body_length =
                 length.checked_sub(16).ok_or_else(|| error("a frame is too short"))?;
             let mut body = Reader::new(file.take(body_length)?);
+            // the newer count, when set, overrides the old WORD one, which
+            // says 0xFFFF when there are more chunks than it holds; older
+            // files leave the newer one 0
             let chunks = if new_count != 0 { new_count } else { old_count.into() };
             // user data chunks right after the tags are theirs, in order
             let mut tag_data: Option<usize> = None;
@@ -391,6 +398,8 @@ impl Sprite {
                     _ => {}
                 }
             }
+            // a frame of 0 ms takes the header's deprecated speed, and the
+            // default when that is 0 too
             let duration = match (duration, speed) {
                 (0, 0) => DEFAULT_FRAME_DURATION,
                 (0, speed) => Duration::from_millis(speed.into()),
@@ -429,6 +438,7 @@ impl Sprite {
         let opacity = chunk.u8()?;
         let kind = chunk.u16()?;
         let z = chunk.i16()?.into();
+        // reserved
         chunk.skip(5)?;
         let content = match kind {
             0 | 2 => {
@@ -471,8 +481,11 @@ impl Sprite {
         let flags = chunk.u32()?;
         let count = chunk.u32()? as usize;
         let (width, height) = (chunk.u16()? as usize, chunk.u16()? as usize);
+        // the base index the interface numbers tiles from, and reserved
         chunk.skip(2 + 14)?;
         chunk.string()?;
+        // flag 1 links to an external file: its ID and the tileset's ID in
+        // it, skipped, since only tiles stored here (flag 2) are read
         if flags & 1 != 0 {
             chunk.skip(8)?;
         }
