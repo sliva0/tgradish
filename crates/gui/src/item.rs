@@ -13,7 +13,7 @@ use tgradish_tgs::frames::{LayerInfo, Tag};
 
 use crate::jobs::Job;
 use crate::media::{Art, Clip, Load, Video};
-use crate::timeline::{Cut, Frames};
+use crate::timeline::Frames;
 
 /// What kind of input an item is, which limits what it can become.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,6 +234,9 @@ pub fn shown(mut options: Options, effective: &Options) -> Options {
     options
 }
 
+/// An Aseprite file's tags, layers and frame durations.
+pub type AsepriteSeen = (Vec<Tag>, Vec<LayerInfo>, Vec<f64>);
+
 /// Which picture the preview shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Show {
@@ -401,7 +404,7 @@ pub struct Item {
     pub art_reading: TgsOptions,
     /// An Aseprite file's tags and layers as last read, shown while it is
     /// read again, so nothing under them moves.
-    pub aseprite_seen: Option<(Vec<Tag>, Vec<LayerInfo>, Vec<f64>)>,
+    pub aseprite_seen: Option<std::rc::Rc<AsepriteSeen>>,
     pub input_thumb: Option<egui::TextureHandle>,
     /// The conversion waiting or running.
     pub job: Option<(Job, Format, Choices)>,
@@ -517,19 +520,10 @@ impl Item {
     /// Where the input's frames start, which cuts land between: a video's
     /// as its packets time them, or else at its frame rate, and art's as
     /// it times them.
-    pub fn input_frames(&self) -> Option<Frames> {
+    pub fn input_frames(&self) -> Option<std::sync::Arc<Frames>> {
         match self.format {
-            Format::Webm | Format::Image => {
-                let (video, length) = (self.video.ready()?, self.input_length()?);
-                Frames::starting(&video.starts, length, Cut::Video).or_else(|| {
-                    let fps = video.probe.fps.or(video.probe.base_fps)?;
-                    Frames::even(length, fps, Cut::Video)
-                })
-            }
-            Format::Tgs => {
-                let art = self.art.ready().filter(|art| art.clip.is_animated())?;
-                Some(Frames { times: art.clip.times.clone(), cut: Cut::Art })
-            }
+            Format::Webm | Format::Image => self.video.ready()?.frames.clone(),
+            Format::Tgs => self.art.ready()?.frames.clone(),
         }
     }
 

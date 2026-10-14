@@ -459,7 +459,7 @@ fn preview(
                     // in the input's seconds, which the tempo makes 3 of the
                     // result's
                     limit: telegram::MAX_SECONDS * tempo,
-                    frames: frames.as_ref(),
+                    frames: frames.as_deref(),
                     in_frames,
                 },
             )
