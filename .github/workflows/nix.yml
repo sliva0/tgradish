@@ -5,10 +5,41 @@ name: nix
 on:
   push:
     branches: [main]
-    paths-ignore: ["**.md"]
+    paths:
+      # what the package is built from, the fileset in packaging/nix/package.nix
+      - flake.nix
+      - flake.lock
+      - packaging/nix/**
+      - Cargo.toml
+      - Cargo.lock
+      - crates/**
+      - xtask/**
+      - licenses/**
+      - LICENSE.txt
+      - .github/workflows/nix.yml
+      - "!crates/tgs-lab/**"
+      - "!**.md"
   pull_request:
-    paths-ignore: ["**.md"]
+    paths:
+      # as above
+      - flake.nix
+      - flake.lock
+      - packaging/nix/**
+      - Cargo.toml
+      - Cargo.lock
+      - crates/**
+      - xtask/**
+      - licenses/**
+      - LICENSE.txt
+      - .github/workflows/nix.yml
+      - "!crates/tgs-lab/**"
+      - "!**.md"
   workflow_dispatch:
+
+# a newer push makes an older run of the same branch or pull request moot
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   flake:

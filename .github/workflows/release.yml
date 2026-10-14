@@ -23,10 +23,20 @@ on:
       - crates/cli/tgradish.exe.manifest
       - crates/cli/assets/**
       - licenses/**
+      # features, dependencies and profiles
+      - Cargo.toml
+      - crates/core/Cargo.toml
+      - crates/cli/Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
       - .github/workflows/release.yml
   workflow_dispatch:
+
+# a newer push makes an older run of the same pull request moot; a tag's run
+# is never cut short
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always

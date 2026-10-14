@@ -7,6 +7,11 @@ on:
   pull_request:
     paths-ignore: ["**.md"]
 
+# a newer push makes an older run of the same branch or pull request moot
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -67,8 +72,12 @@ jobs:
           sudo apt-get install -y ffmpeg pkg-config clang libclang-dev \
             libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev \
             libswscale-dev libswresample-dev libavdevice-dev
-      - run: cargo clippy --workspace --all-targets --features tgradish/linked -- -D warnings
-      - run: cargo test --workspace --features tgradish/linked
+      # only core's code changes with the feature; the command line and the
+      # window are tested as they run with it, the other crates don't use it
+      - run: cargo clippy -p tgradish-core --all-targets --features linked -- -D warnings
+      - run: >
+          cargo test -p tgradish-core -p tgradish -p tgradish-gui
+          --features tgradish/linked
 
   # tgs-lab, a workspace of its own: .tgs output rendered with tlottie and
   # rlottie
