@@ -12,7 +12,7 @@ mod clip;
 pub mod encode;
 mod sprites;
 
-pub use canvas::{CLEAR, Canvas, Colour, Random};
+pub use canvas::{Canvas, Colour};
 pub use clip::{Clip, clip};
 
 /// An animation, and what it stands for.
