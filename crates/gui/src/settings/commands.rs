@@ -8,7 +8,6 @@ use tgradish_core::convert;
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{Options, Scaling};
 use tgradish_core::presets::Format;
-use tgradish_core::tgs;
 
 use super::Context;
 use crate::item::{Item, Kind};
@@ -121,39 +120,15 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
         args.extend(["--preset".into(), preset.to_owned()]);
     }
     args.extend(match item.format {
-        Format::Webm => tgradish_core::options::flags(&webm.merged(&Options {
-            target: Some(choices.target),
-            tag: choices.tag.clone(),
-            show_layers: choices.show_layers.clone(),
-            hide_layers: choices.hide_layers.clone(),
-            crop: choices.crop,
-            start: choices.start,
-            length: choices.length,
-            ..Options::default()
-        })),
+        Format::Webm => tgradish_core::options::flags(&webm.merged(&choices.shared_webm())),
         Format::Image => {
+            // a picture is one frame, where its start is
             let picture = tgradish_core::still::picture_options(&webm);
-            tgradish_core::options::flags(&picture.merged(&Options {
-                target: Some(choices.target),
-                tag: choices.tag.clone(),
-                show_layers: choices.show_layers.clone(),
-                hide_layers: choices.hide_layers.clone(),
-                crop: choices.crop,
-                start: choices.frame,
-                ..Options::default()
-            }))
+            let shared = Options { start: choices.frame, length: None, ..choices.shared_webm() };
+            tgradish_core::options::flags(&picture.merged(&shared))
         }
         Format::Tgs => {
-            tgradish_core::options::flags(&choices.tgs.clone().merged(&tgs::TgsOptions {
-                target: Some(choices.target),
-                tag: choices.tag.clone(),
-                show_layers: choices.show_layers.clone(),
-                hide_layers: choices.hide_layers.clone(),
-                crop: choices.crop,
-                start: choices.start,
-                length: choices.length,
-                ..tgs::TgsOptions::default()
-            }))
+            tgradish_core::options::flags(&choices.tgs.clone().merged(&choices.shared_tgs()))
         }
     });
     args

@@ -61,7 +61,9 @@ pub fn preset_names(presets: &Presets) -> Vec<(String, Result<String, String>)> 
     names
 }
 
-/// What a built-in preset does for `format`.
+/// What a built-in preset does for `format`. Core's own descriptions
+/// speak of every format at once, for the command line; the window shows
+/// only what the preset does for what is being made.
 pub fn builtin(name: &str, format: Format) -> Option<&'static str> {
     Some(match (name, format) {
         ("fast", Format::Webm) => {
