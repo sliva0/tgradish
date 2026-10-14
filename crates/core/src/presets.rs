@@ -164,12 +164,50 @@ fn builtin() -> Vec<Preset> {
 #[derive(Debug, Clone)]
 pub struct Presets {
     entries: BTreeMap<String, std::result::Result<Preset, String>>,
+    /// Each preset's options with what it extends applied, worked out
+    /// once as presets load: the window asks for them many times a frame,
+    /// and each would otherwise parse the TOML of the whole chain again.
+    resolved: BTreeMap<String, Resolved>,
+}
+
+/// A preset's options for either kind of result, or why they can't be
+/// had.
+#[derive(Debug, Clone)]
+struct Resolved {
+    webm: std::result::Result<Options, String>,
+    tgs: std::result::Result<TgsOptions, String>,
 }
 
 impl Presets {
     /// Built-in presets only.
     pub fn builtin() -> Self {
-        Self { entries: builtin().into_iter().map(|p| (p.name.clone(), Ok(p))).collect() }
+        let entries = builtin().into_iter().map(|p| (p.name.clone(), Ok(p))).collect();
+        Self { entries, resolved: BTreeMap::new() }.resolved()
+    }
+
+    /// The presets with every one's options worked out.
+    fn resolved(mut self) -> Self {
+        let message = |err: Error| match err {
+            Error::InvalidOptions(message) => message,
+            other => other.to_string(),
+        };
+        self.resolved = self
+            .entries
+            .keys()
+            .map(|name| {
+                let webm =
+                    self.fold(name, |preset| &preset.webm, Options::default(), Options::merged);
+                let tgs = self.fold(
+                    name,
+                    |preset| &preset.tgs,
+                    TgsOptions::default(),
+                    TgsOptions::merged,
+                );
+                let resolved = Resolved { webm: webm.map_err(message), tgs: tgs.map_err(message) };
+                (name.clone(), resolved)
+            })
+            .collect();
+        self
     }
 
     /// Built-in presets plus the `*.toml` files in `dir`, if it exists.
@@ -196,7 +234,7 @@ impl Presets {
                 .map_err(|err| format!("{}: {err}", path.display()));
             presets.entries.insert(name.to_string(), loaded);
         }
-        Ok(presets)
+        Ok(presets.resolved())
     }
 
     /// Presets from the user's config dir, see [`crate::paths::config_dir`].
@@ -249,12 +287,18 @@ impl Presets {
 
     /// Options of `name` for WebM results.
     pub fn webm(&self, name: &str) -> Result<Options> {
-        self.fold(name, |preset| &preset.webm, Options::default(), Options::merged)
+        match self.resolved.get(name) {
+            Some(resolved) => resolved.webm.clone().map_err(Error::InvalidOptions),
+            None => Err(self.get(name).expect_err("every preset is resolved")),
+        }
     }
 
     /// Options of `name` for `.tgs` results.
     pub fn tgs(&self, name: &str) -> Result<TgsOptions> {
-        self.fold(name, |preset| &preset.tgs, TgsOptions::default(), TgsOptions::merged)
+        match self.resolved.get(name) {
+            Some(resolved) => resolved.tgs.clone().map_err(Error::InvalidOptions),
+            None => Err(self.get(name).expect_err("every preset is resolved")),
+        }
     }
 
     fn fold<T: serde::de::DeserializeOwned>(
