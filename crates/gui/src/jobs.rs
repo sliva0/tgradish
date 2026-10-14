@@ -58,6 +58,8 @@ pub struct WebmPlan {
     pub length: f64,
     /// How many times fitting may encode.
     pub attempts: u32,
+    /// The size limit, in bytes, which sizes are shown as shares of.
+    pub limit: u64,
 }
 
 /// What a `.tgs` conversion is doing.
@@ -452,6 +454,7 @@ fn webm(
                 } else {
                     plan.attempts
                 },
+                limit,
             };
             update(Box::new(move |progress| progress.webm = Some(planned)));
         }
