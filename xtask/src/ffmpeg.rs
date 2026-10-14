@@ -257,7 +257,7 @@ impl Build {
                     .current_dir(&dir)
                     .arg("--static")
                     .arg(format!("--prefix={}", self.prefix.display()))
-                    .env("CFLAGS", "-O2 -fPIC");
+                    .env("CFLAGS", format!("-O2 -fPIC {}", c_flags(self.target).unwrap_or("")));
                 if self.target.is_musl() {
                     configure.env("CC", MUSL_GCC);
                 }
@@ -298,6 +298,9 @@ impl Build {
             .args(["--enable-static", "--disable-shared", "--enable-pic"])
             .args(["--disable-examples", "--disable-tools", "--disable-docs"])
             .args(["--disable-unit-tests", "--disable-vp8-encoder", "--enable-vp9"]);
+        if let Some(flags) = c_flags(self.target) {
+            configure.arg(format!("--extra-cflags={flags}"));
+        }
         if let Some(cross) = self.target.cross_prefix() {
             configure.env("CROSS", cross);
         }
@@ -318,6 +321,9 @@ impl Build {
             .arg(format!("--prefix={}", self.prefix.display()))
             .args(["--libdir=lib", "-Denable_tools=false", "-Denable_tests=false"])
             .arg(format!("-Denable_asm={}", self.asm));
+        if let Some(flags) = c_flags(self.target) {
+            setup.arg(format!("-Dc_args={flags}"));
+        }
         if let Some(cross) = self.target.cross_prefix() {
             let file = dir.join("cross.ini");
             std::fs::write(
@@ -349,7 +355,11 @@ impl Build {
             .args(["--enable-static", "--disable-shared"])
             .args(["--enable-zlib", "--enable-libvpx", "--enable-libdav1d"])
             .args(["--pkg-config-flags=--static", "--extra-version=tgradish"])
-            .arg(format!("--extra-cflags=-I{}/include", self.prefix.display()))
+            .arg(format!(
+                "--extra-cflags=-I{}/include {}",
+                self.prefix.display(),
+                c_flags(self.target).unwrap_or("")
+            ))
             .arg(format!("--extra-ldflags=-L{}/lib", self.prefix.display()))
             .env("PKG_CONFIG_PATH", self.prefix.join("lib/pkgconfig"));
         for (kind, names) in FFMPEG_COMPONENTS {
@@ -454,6 +464,19 @@ pub fn recipe(asm: bool) -> String {
             (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
         });
     format!("{sources:?}\n{FFMPEG_COMPONENTS:?}\nasm {asm}\nrecipe {this_file:016x}\n")
+}
+
+/// C compiler flags that `target`'s code needs beyond the compiler's own,
+/// for these libraries and the C parts of crates alike. Kept here, so a
+/// change to them makes ffmpeg builds out of date.
+pub fn c_flags(target: Target) -> Option<&'static str> {
+    match target {
+        // Ubuntu's gcc makes aarch64 atomics calls into libgcc, which sets
+        // them up with glibc's __getauxval, hidden in musl; atomics inline
+        // in the code link anywhere
+        Target::LinuxMuslArm64 => Some("-mno-outline-atomics"),
+        _ => None,
+    }
 }
 
 /// Where the static ffmpeg libraries of `target` go.

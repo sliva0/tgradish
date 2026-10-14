@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail, ensure};
 
-use crate::ffmpeg::ffmpeg_prefix;
+use crate::ffmpeg::{c_flags, ffmpeg_prefix};
 use crate::{MUSL_GCC, Target, cargo, output, run, workspace_root};
 
 /// The `build` task: [`build`] as its arguments ask.
@@ -91,6 +91,9 @@ pub fn build(target: Target, system_ffmpeg: bool) -> Result<()> {
                     static_unwinder(root, target)?.display()
                 ),
             );
+        if let Some(flags) = c_flags(target) {
+            cargo.env(format!("CFLAGS_{triple}"), flags);
+        }
         // ffmpeg's bindings, with libc's types as musl declares them
         if !system_ffmpeg {
             cargo.env(
