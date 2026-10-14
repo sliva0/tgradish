@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use serde_json::Value;
-use tgradish_corpus::Clip;
+use tgradish_corpus::{Canvas, Clip};
 
 fn tgradish(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_tgradish"))
@@ -163,16 +163,9 @@ fn events_schema_includes_errors() {
 
 /// A 4x4 PNG: a 2x2 square of `colour` on transparency.
 fn square_png(path: &Path, colour: [u8; 4]) {
-    let file = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
-    let mut encoder = png::Encoder::new(file, 4, 4);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let pixels: Vec<u8> = (0..16)
-        .flat_map(|i| {
-            if (1..3).contains(&(i % 4)) && (1..3).contains(&(i / 4)) { colour } else { [0; 4] }
-        })
-        .collect();
-    encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
+    let mut canvas = Canvas::new(4, 4);
+    canvas.rect(1, 1, 2, 2, colour);
+    std::fs::write(path, tgradish_corpus::encode::png(&canvas)).unwrap();
 }
 
 #[test]
