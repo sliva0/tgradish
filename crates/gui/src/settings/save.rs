@@ -4,6 +4,7 @@
 //! Aseprite tag and layers, title and sprite sheet layout.
 
 use eframe::egui;
+use eframe::egui::containers::menu::{MenuButton, MenuConfig};
 use tgradish_core::options::Options;
 use tgradish_core::presets;
 use tgradish_core::tgs::TgsOptions;
@@ -20,20 +21,29 @@ fn saved_id() -> egui::Id {
     egui::Id::new("preset saved")
 }
 
+/// Width of the fields of a new preset.
+const FIELD: f32 = 200.0;
+
 /// A button that saves the item's settings as a preset, named and
 /// described in what it opens.
 pub(super) fn save_preset(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let Some(dir) = context.presets_dir.map(std::path::Path::to_path_buf) else { return };
-    ui.menu_button("Save as preset…", |ui| {
+    // typing in it keeps it open
+    let config = MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    MenuButton::new("Save as preset…").config(config).ui(ui, |ui| {
         let id = ui.id().with(("new preset", item.id));
         let (mut name, mut description, mut problem): (String, String, Option<String>) =
             ui.data(|data| data.get_temp(id)).unwrap_or_default();
         egui::Grid::new(id.with("fields")).num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
             ui.label("Name");
-            ui.add(egui::TextEdit::singleline(&mut name).hint_text("my stickers"));
+            // as wide when it first opens, before it is measured
+            ui.add(
+                egui::TextEdit::singleline(&mut name).hint_text("my stickers").desired_width(FIELD),
+            );
             ui.end_row();
             ui.label("Description");
-            ui.add(egui::TextEdit::singleline(&mut description).hint_text("optional"));
+            let field = egui::TextEdit::singleline(&mut description).hint_text("optional");
+            ui.add(field.desired_width(FIELD));
             ui.end_row();
         });
         let name = name.trim_end().to_owned();
@@ -117,7 +127,7 @@ mod tests {
         harness.get_by_label("Save as preset…").click();
         harness.run_steps(2);
         let role = eframe::egui::accesskit::Role::TextInput;
-        harness.query_all_by_role(role).next().unwrap().focus();
+        harness.query_all_by_role(role).next().unwrap().click();
         harness.run_steps(2);
         harness.query_all_by_role(role).next().unwrap().type_text("by quality");
         harness.run_steps(2);
