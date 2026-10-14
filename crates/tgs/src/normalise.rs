@@ -299,13 +299,20 @@ fn nanos(duration: Duration) -> u64 {
     u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
 }
 
-/// Packs a pixel into a `u32` with every fully transparent pixel as 0.
-fn pack(rgba: &[u8]) -> Vec<u32> {
-    rgba.as_chunks::<4>()
-        .0
-        .iter()
-        .map(|&pixel| if pixel[3] == 0 { 0 } else { u32::from_le_bytes(pixel) })
-        .collect()
+/// Packs each pixel of `area`, in RGBA `width` pixels wide, into a `u32`
+/// with every fully transparent pixel as 0.
+fn pack(rgba: &[u8], width: u32, area: Rect) -> Vec<u32> {
+    let pixels = rgba.as_chunks::<4>().0;
+    let mut out = Vec::with_capacity(area.width as usize * area.height as usize);
+    for y in area.y..area.y + area.height {
+        let start = y as usize * width as usize + area.x as usize;
+        out.extend(
+            pixels[start..start + area.width as usize]
+                .iter()
+                .map(|&pixel| if pixel[3] == 0 { 0 } else { u32::from_le_bytes(pixel) }),
+        );
+    }
+    out
 }
 
 pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim, Report)> {
@@ -353,10 +360,7 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
         if shown == 0 {
             continue;
         }
-        let mut pixels = pack(&frame.rgba);
-        if options.crop.is_some() {
-            pixels = cut(&pixels, input_width, area);
-        }
+        let pixels = pack(&frame.rgba, input_width, area);
         match timed.last_mut() {
             Some((last, duration)) if *last == pixels => {
                 *duration += shown;
@@ -411,8 +415,13 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
         visible_area(&frames, area.width).ok_or(Error::Invisible)?
     };
     let mut crop = crop;
-    let mut pixels: Vec<Vec<u32>> =
-        frames.iter().map(|(pixels, _)| cut(pixels, area.width, crop)).collect();
+    let ticks: Vec<u32> = frames.iter().map(|&(_, ticks)| ticks).collect();
+    // frames the crop leaves whole are kept as they are, not copied
+    let whole = crop == Rect { x: 0, y: 0, width: area.width, height: area.height };
+    let mut pixels: Vec<Vec<u32>> = frames
+        .into_iter()
+        .map(|(pixels, _)| if whole { pixels } else { cut(&pixels, area.width, crop) })
+        .collect();
     let mut edges = Edges::count(&pixels, crop.width, crop.height);
 
     let mut snapped_pixels = 0;
@@ -445,7 +454,6 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
         None => likely_scale(edges.grid().scale()),
     };
 
-    let ticks: Vec<u32> = frames.iter().map(|&(_, ticks)| ticks).collect();
     // cut square before the colours are gathered: those cut off don't count
     if options.square == Square::Crop && crop.width != crop.height {
         let square = middle_square(crop.width, crop.height);
@@ -523,10 +531,11 @@ pub(crate) fn assemble(
     Ok(PixelAnim { width: cells_wide, height: cells_high, grid, palette, frames })
 }
 
-/// The largest square in the middle of a `width` by `height` picture.
-/// It may cut art pixels at its sides: the canvas shows only their part
+/// The largest square in the middle of a `width` by `height` picture,
+/// from its top left: what [`Square::Crop`] keeps of the art's crop. It
+/// may cut art pixels at its sides: the canvas shows only their part
 /// inside it.
-fn middle_square(width: u32, height: u32) -> Rect {
+pub fn middle_square(width: u32, height: u32) -> Rect {
     let side = width.min(height);
     Rect { x: (width - side) / 2, y: (height - side) / 2, width: side, height: side }
 }
@@ -550,7 +559,7 @@ fn visible_area(frames: &[(Vec<u32>, u32)], width: u32) -> Option<Rect> {
 fn cut(pixels: &[u32], width: u32, crop: Rect) -> Vec<u32> {
     let mut out = Vec::with_capacity(crop.width as usize * crop.height as usize);
     for y in crop.y..crop.y + crop.height {
-        let start = (y * width + crop.x) as usize;
+        let start = y as usize * width as usize + crop.x as usize;
         out.extend_from_slice(&pixels[start..start + crop.width as usize]);
     }
     out
