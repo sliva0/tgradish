@@ -68,6 +68,24 @@ pub fn text_width(ui: &egui::Ui, text: &str, padding: f32) -> f32 {
     galley.size().x + padding
 }
 
+/// Number fields added by `add` as wide as `digits` digits and `suffix`
+/// take, so that they keep their width as the number changes, typed or
+/// dragged: Ubuntu's digits are all as wide as each other.
+pub fn steady_numbers<R>(
+    ui: &mut egui::Ui,
+    digits: usize,
+    suffix: &str,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    ui.scope(|ui| {
+        let text = "0".repeat(digits) + suffix;
+        ui.spacing_mut().interact_size.x =
+            text_width(ui, &text, 2.0 * ui.spacing().button_padding.x);
+        add(ui)
+    })
+    .inner
+}
+
 /// A link to `url`, which takes a click as a link, rather than starting a
 /// selection as text does.
 pub fn link(

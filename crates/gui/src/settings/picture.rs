@@ -278,22 +278,25 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 .map(|report| report.scale);
             let hint = "How many input pixels one pixel of the art takes. Pixels off its grid are moved onto it";
             row(ui, "Art pixel size", hint, Ok(()), |ui| {
-                auto_number(
-                    ui,
-                    &mut item.choices.tgs.pixel_scale,
-                    ("Detected", "Found from the art: its smallest blocks of one colour"),
-                    detected,
-                    2,
-                    |value| value.range(1..=64).suffix(" px"),
-                );
+                widgets::steady_numbers(ui, 2, " px", |ui| {
+                    auto_number(
+                        ui,
+                        &mut item.choices.tgs.pixel_scale,
+                        ("Detected", "Found from the art: its smallest blocks of one colour"),
+                        detected,
+                        2,
+                        |value| value.range(1..=64).suffix(" px"),
+                    )
+                });
             });
         }
     }
 }
 
-/// Width of the crop's number fields.
-const FIELD: f32 = 62.0;
-/// Side of the crop's picture: with the fields above and below it, as
+/// Digits the crop's number fields have room for, at least: realistic
+/// pictures' sides take at most four.
+const DIGITS: usize = 4;
+/// Height of the crop's picture: with the fields above and below it, as
 /// high as the fields beside them.
 const SKETCH: f32 = 36.0;
 
@@ -320,47 +323,48 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
     // one of another picture, as before the file changed, isn't kept
     let crop = item.choices.crop.filter(|crop| crop.fits(width, height)).unwrap_or(full);
     let mut edited = None;
+    // as wide for any number the picture takes, so they don't move as
+    // the crop changes
+    let digits = DIGITS.max(width.max(height).to_string().len());
     ui.horizontal_top(|ui| {
         let field = |ui: &mut egui::Ui, value: u32, most: u32, hint: &str| {
             let mut value = value;
-            let response = ui
-                .add_sized(
-                    [FIELD, ui.spacing().interact_size.y],
-                    egui::DragValue::new(&mut value).range(0..=most).suffix(" px"),
-                )
-                .on_hover_text(hint);
-            response.changed().then_some(value)
+            let field = egui::DragValue::new(&mut value).range(0..=most).suffix(" px");
+            ui.add(field).on_hover_text(hint).changed().then_some(value)
         };
         let (right, bottom) = (width - crop.x - crop.width, height - crop.y - crop.height);
-        egui::Grid::new(("crop", item.id)).spacing([4.0, 2.0]).show(ui, |ui| {
-            ui.label("");
-            ui.vertical_centered(|ui| {
-                let most = height - bottom - 1;
-                let hint = "Top margin: pixels cut off the top";
-                edited = edited.or(field(ui, crop.y, most, hint).map(|v| (Side::Top, v)));
+        widgets::steady_numbers(ui, digits, " px", |ui| {
+            let wide = ui.spacing().interact_size.x;
+            egui::Grid::new(("crop", item.id)).spacing([4.0, 2.0]).show(ui, |ui| {
+                ui.label("");
+                ui.vertical_centered(|ui| {
+                    let most = height - bottom - 1;
+                    let hint = "Top margin: pixels cut off the top";
+                    edited = edited.or(field(ui, crop.y, most, hint).map(|v| (Side::Top, v)));
+                });
+                ui.end_row();
+                // beside the picture, halfway down it
+                let beside = egui::Layout::left_to_right(egui::Align::Center);
+                ui.allocate_ui_with_layout(egui::vec2(wide, SKETCH), beside, |ui| {
+                    let most = width - right - 1;
+                    let hint = "Left margin: pixels cut off the left";
+                    edited = edited.or(field(ui, crop.x, most, hint).map(|v| (Side::Left, v)));
+                });
+                sketch(ui, (width, height), crop, wide);
+                ui.allocate_ui_with_layout(egui::vec2(wide, SKETCH), beside, |ui| {
+                    let most = width - crop.x - 1;
+                    let hint = "Right margin: pixels cut off the right";
+                    edited = edited.or(field(ui, right, most, hint).map(|v| (Side::Right, v)));
+                });
+                ui.end_row();
+                ui.label("");
+                ui.vertical_centered(|ui| {
+                    let most = height - crop.y - 1;
+                    let hint = "Bottom margin: pixels cut off the bottom";
+                    edited = edited.or(field(ui, bottom, most, hint).map(|v| (Side::Bottom, v)));
+                });
+                ui.end_row();
             });
-            ui.end_row();
-            // beside the picture, halfway down it
-            let beside = egui::Layout::left_to_right(egui::Align::Center);
-            ui.allocate_ui_with_layout(egui::vec2(FIELD, SKETCH), beside, |ui| {
-                let most = width - right - 1;
-                let hint = "Left margin: pixels cut off the left";
-                edited = edited.or(field(ui, crop.x, most, hint).map(|v| (Side::Left, v)));
-            });
-            sketch(ui, (width, height), crop);
-            ui.allocate_ui_with_layout(egui::vec2(FIELD, SKETCH), beside, |ui| {
-                let most = width - crop.x - 1;
-                let hint = "Right margin: pixels cut off the right";
-                edited = edited.or(field(ui, right, most, hint).map(|v| (Side::Right, v)));
-            });
-            ui.end_row();
-            ui.label("");
-            ui.vertical_centered(|ui| {
-                let most = height - crop.y - 1;
-                let hint = "Bottom margin: pixels cut off the bottom";
-                edited = edited.or(field(ui, bottom, most, hint).map(|v| (Side::Bottom, v)));
-            });
-            ui.end_row();
         });
         ui.add_space(14.0);
         ui.vertical(|ui| {
@@ -368,14 +372,14 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
                 ui.label("Width");
                 let mut across = crop.width;
                 let field = egui::DragValue::new(&mut across).range(1..=width).suffix(" px");
-                if ui.add(field).changed() {
+                if widgets::steady_numbers(ui, digits, " px", |ui| ui.add(field)).changed() {
                     edited = Some((Side::Width, across));
                 }
                 ui.end_row();
                 ui.label("Height");
                 let mut down = crop.height;
                 let field = egui::DragValue::new(&mut down).range(1..=height).suffix(" px");
-                if ui.add(field).changed() {
+                if widgets::steady_numbers(ui, digits, " px", |ui| ui.add(field)).changed() {
                     edited = Some((Side::Height, down));
                 }
                 ui.end_row();
@@ -464,10 +468,9 @@ fn edit_crop(crop: Crop, side: Side, value: u32, ratio: Option<f64>, size: (u32,
 }
 
 /// A small picture of a `size` input with `crop` on it, dashed, around a
-/// mountain.
-fn sketch(ui: &mut egui::Ui, (width, height): (u32, u32), crop: Crop) {
-    // as wide as the fields over and under it, so they line up
-    let room = egui::vec2(FIELD, SKETCH);
+/// mountain, `wide` as the fields over and under it, so they line up.
+fn sketch(ui: &mut egui::Ui, (width, height): (u32, u32), crop: Crop, wide: f32) {
+    let room = egui::vec2(wide, SKETCH);
     let (rect, _) = ui.allocate_exact_size(room, egui::Sense::hover());
     let visuals = ui.visuals();
     let (back, edge) = (visuals.extreme_bg_color, visuals.widgets.noninteractive.bg_stroke);
@@ -574,10 +577,12 @@ fn aspect_ratio(
                 let why =
                     "The result is squared or has margins, so its size doesn't follow the crop";
                 ui.label("Result").on_disabled_hover_text(why);
-                let across = ui.add(egui::DragValue::new(&mut result_w).range(1..=box_w));
+                let digits = box_w.max(box_h).to_string().len();
+                let across = egui::DragValue::new(&mut result_w).range(1..=box_w);
+                let across = widgets::steady_numbers(ui, digits, "", |ui| ui.add(across));
                 ui.label("×");
-                let down =
-                    ui.add(egui::DragValue::new(&mut result_h).range(1..=box_h).suffix(" px"));
+                let down = egui::DragValue::new(&mut result_h).range(1..=box_h).suffix(" px");
+                let down = widgets::steady_numbers(ui, digits, " px", |ui| ui.add(down));
                 if follows && (across.changed() || down.changed()) {
                     (width, height) = reduced(result_w, result_h);
                     typed = true;
