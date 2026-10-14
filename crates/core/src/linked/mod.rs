@@ -21,7 +21,8 @@ use crate::convert::{Plan, frame_count};
 use crate::error::{Error, Result};
 use crate::events::{Params, Rate};
 use crate::ffmpeg::{Capabilities, Output, Probe};
-use crate::ffmpeg::{Facts, Orientation, picture_filter, video_filter};
+use crate::ffmpeg::{Facts, Orientation, frames_filter, picture_filter, read_seconds};
+use crate::ffmpeg::{ssim_graph, video_filter};
 
 /// Turns an ffmpeg error into ours, saying what was being done.
 fn libav(doing: &'static str) -> impl Fn(ff::Error) -> Error {
@@ -423,7 +424,7 @@ pub(crate) fn encode(
     init()?;
     cancel.check()?;
     let total = frame_count(params.length, params.fps);
-    let read = (total + 1) as f64 / params.fps;
+    let read = read_seconds(total, params.fps);
     let source = Source::open(plan, read, cancel)?;
     let pix_fmt = if plan.alpha { "yuva420p" } else { "yuv420p" };
     let chain = video_filter(plan, params.fps, params.length, pix_fmt);
@@ -459,15 +460,10 @@ pub(crate) fn frames(
     cancel: &CancelToken,
 ) -> Result<Vec<Vec<u8>>> {
     init()?;
-    let read = (count + 1) as f64 / fps;
+    let read = read_seconds(count as u64, fps);
     let source = Source::open_window(input, probe, start, read, cancel)?;
-    // one frame is the first from the start, which resampling can skip
-    let resample =
-        if probe.still_image || count == 1 { String::new() } else { format!("fps={fps},") };
-    let spec = format!(
-        "[in]{}{resample}scale={width}:{height}:flags=bilinear,setsar=1,format=rgba[out]",
-        probe.orientation.filters()
-    );
+    let chain = frames_filter(probe.still_image || count == 1, fps, (width, height));
+    let spec = format!("[in]{}{chain},format=rgba[out]", probe.orientation.filters());
     let Some(mut filtered) = Filtered::new(source, &spec)? else { return Ok(Vec::new()) };
     let mut frame = frame::Video::empty();
     let mut out = Vec::new();
@@ -502,7 +498,7 @@ pub(crate) fn ssim(plan: &Plan, candidate: &Path, fps: f64, cancel: &CancelToken
     init()?;
     let frames = frame_count(plan.length, plan.fps);
     let mut sources = [
-        Source::open(plan, (frames + 1) as f64 / plan.fps, cancel)?,
+        Source::open(plan, read_seconds(frames, plan.fps), cancel)?,
         Source::open_file(candidate, None, cancel)?,
     ];
     let mut next = [frame::Video::empty(), frame::Video::empty()];
@@ -514,15 +510,9 @@ pub(crate) fn ssim(plan: &Plan, candidate: &Path, fps: f64, cancel: &CancelToken
         return Err(Error::Libav("nothing to compare".into()));
     }
 
-    let retime = |fps: f64| format!("format=yuv420p,settb=AVTB,setpts=N/({fps}*TB)");
-    let reference = video_filter(plan, plan.fps, plan.length, "yuv420p");
-    let spec = format!(
-        "[source]{}{reference},{}[s];[attempt]{}[a];\
-         [s][a]ssim=eof_action=repeat[out]",
-        plan.source.orientation.filters(),
-        retime(plan.fps),
-        retime(fps),
-    );
+    // turned upright here, as ffmpeg's command line does itself
+    let upright = plan.source.orientation.filters();
+    let spec = ssim_graph(plan, fps, ("source", "attempt"), upright, "[out]");
     let inputs = [
         ("source", sources[0].buffer_args(&next[0])),
         ("attempt", sources[1].buffer_args(&next[1])),

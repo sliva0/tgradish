@@ -21,10 +21,10 @@ pub use args::commands;
 pub(crate) use args::encode_args;
 #[cfg(test)]
 pub(crate) use args::input_args;
-#[cfg(feature = "linked")]
-pub(crate) use args::picture_filter;
 #[cfg(any(feature = "linked", test))]
 pub(crate) use args::video_filter;
+#[cfg(feature = "linked")]
+pub(crate) use args::{frames_filter, picture_filter, read_seconds, ssim_graph};
 pub use locate::locate;
 pub use orientation::Orientation;
 #[cfg(feature = "linked")]
@@ -113,10 +113,7 @@ pub(crate) fn frames(
         cmd.args(["-c:v", decoder]);
     }
     cmd.arg("-i").arg(input);
-    // one frame is the first from the start, which resampling can skip
-    let resample =
-        if probe.still_image || count == 1 { String::new() } else { format!("fps={fps},") };
-    let filter = format!("{resample}scale={width}:{height}:flags=bilinear,setsar=1");
+    let filter = args::frames_filter(probe.still_image || count == 1, fps, (width, height));
     cmd.args(["-map", "0:v:0", "-frames:v", &count.to_string(), "-vf", &filter]);
     cmd.args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
     let frame = width as usize * height as usize * 4;
