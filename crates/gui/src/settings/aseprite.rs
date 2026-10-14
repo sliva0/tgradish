@@ -247,8 +247,10 @@ fn layer_list(ui: &mut egui::Ui, choices: &mut Choices, preset: &Preset, layers:
         let mut on = shows(&named(choices, preset), layer);
         let row = ui.horizontal(|ui| {
             ui.add_space(LEVEL * (level + 1) as f32);
-            let name = RichText::new(&layer.name);
+            // as Aseprite writes them, the background underlined
+            let name = RichText::new(&layer.name).monospace();
             let name = if layer.group { name.strong() } else { name };
+            let name = if layer.background { name.underline() } else { name };
             let response = ui
                 .add_enabled(hidden_from.is_none(), egui::Checkbox::new(&mut on, name))
                 .on_disabled_hover_text("Its group is hidden");
@@ -324,8 +326,13 @@ mod tests {
 
     #[test]
     fn names_layers_only_where_they_differ_from_the_file() {
-        let layer =
-            |name: &str, visible| LayerInfo { name: name.into(), group: false, level: 0, visible };
+        let layer = |name: &str, visible| LayerInfo {
+            name: name.into(),
+            group: false,
+            level: 0,
+            visible,
+            background: false,
+        };
         let (shadow, sketch) = (layer("Shadow", true), layer("Sketch", false));
         let none = Preset::default();
         let mut choices = Choices::new(Target::Sticker);

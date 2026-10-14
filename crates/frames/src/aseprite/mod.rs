@@ -73,6 +73,8 @@ pub struct LayerInfo {
     pub level: u16,
     /// Shown in the file.
     pub visible: bool,
+    /// The background layer, which is opaque and lies under the others.
+    pub background: bool,
 }
 
 /// Layers to show or hide by name, over what the file shows. A name stands
@@ -580,7 +582,8 @@ impl Sprite {
             }
             let group = layer.kind == LayerKind::Group;
             let (name, level, visible) = (layer.name.clone(), layer.level, layer.visible);
-            listed.push(LayerInfo { name, group, level, visible });
+            let background = layer.background;
+            listed.push(LayerInfo { name, group, level, visible, background });
             if group {
                 self.list_layers(index, listed);
             }
