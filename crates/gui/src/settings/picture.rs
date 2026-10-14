@@ -178,7 +178,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     // crop is kept to it, as the scale or the crop change, and the small
     // picture of the result counts on that from the next frame
     if let (Some(exact), Some(size)) = (exact, size) {
-        let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
+        let full = Crop::whole(size);
         let ratio = ratio(item.view.aspect, size);
         let start = (Keep::Start, Keep::Start);
         if let Some(fitted) = exact.fit(item.choices.crop.unwrap_or(full), start, ratio, size) {
@@ -316,7 +316,7 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
         note(ui, "once the input is read");
         return;
     };
-    let full = Crop { x: 0, y: 0, width, height };
+    let full = Crop::whole((width, height));
     // one of another picture, as before the file changed, isn't kept
     let crop = item.choices.crop.filter(|crop| crop.fits(width, height)).unwrap_or(full);
     let mut edited = None;
@@ -514,7 +514,7 @@ fn aspect_ratio(
     exact: Option<Exact>,
     effective: &Options,
 ) {
-    let full = size.map(|(width, height)| Crop { x: 0, y: 0, width, height });
+    let full = size.map(Crop::whole);
     let crop = item.choices.crop.or(full);
     let mut shape = match item.view.aspect {
         Aspect::Free => Shape::Free,
@@ -595,7 +595,7 @@ fn aspect_ratio(
 fn keep_aspect(item: &mut Item, size: Option<(u32, u32)>, exact: Option<Exact>) {
     let Some(size) = size else { return };
     let Some(r) = ratio(item.view.aspect, size) else { return };
-    let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
+    let full = Crop::whole(size);
     let mut cut = to_ratio(item.choices.crop.unwrap_or(full), r, size);
     if let Some(exact) = exact {
         cut = exact.fit(cut, (Keep::Middle, Keep::Middle), Some(r), size).unwrap_or(cut);
@@ -615,7 +615,7 @@ fn integer_scale(
     (integer, preset): (bool, Option<ExactScale>),
     effective: &Options,
 ) {
-    let full = size.map(|(width, height)| Crop { x: 0, y: 0, width, height });
+    let full = size.map(Crop::whole);
     let Some(crop) = item.choices.crop.or(full) else {
         note(ui, "once the input is read");
         return;

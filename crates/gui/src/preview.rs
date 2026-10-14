@@ -364,7 +364,7 @@ fn preview(
                     match item.format {
                         Format::Webm | Format::Image => {
                             let used = crop.map_or(size, |crop| (crop.width, crop.height));
-                            let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
+                            let full = Crop::whole(size);
                             // a crop that doesn't suit the exact scale yet is made to
                             // fit on the next frame
                             if let Some(mut sizes) =
@@ -495,7 +495,7 @@ fn tgs_bounds(inset: &mut Inset, clip: &Clip, part: predict::Part, tgs: &TgsOpti
 fn inset_label(item: &Item, size: (u32, u32), webm: &Options) -> Option<Option<String>> {
     match item.format {
         Format::Webm | Format::Image => {
-            let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
+            let full = Crop::whole(size);
             let sizes = settings::webm_sizes(webm, item.choices.crop.unwrap_or(full))?;
             Some(Some(format!("{} × {} px", sizes.width, sizes.height)))
         }

@@ -63,7 +63,7 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
             };
             read(item, &used, &mut steps);
             if let Some((width, height)) = item.input_size() {
-                let crop = options.crop.unwrap_or(Crop { x: 0, y: 0, width, height });
+                let crop = options.crop.unwrap_or(Crop::whole((width, height)));
                 steps.extend(picture(&options, (crop.width, crop.height)));
             }
             if item.format == Format::Webm {
