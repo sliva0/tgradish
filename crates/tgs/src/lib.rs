@@ -41,6 +41,8 @@ pub enum Error {
     CropOutside { crop: normalise::Rect, width: u32, height: u32 },
     #[error("the pixel scale must be at least 1")]
     ZeroScale,
+    #[error("the downscale factor {0} is not between 0 and 1")]
+    DownscaleFactor(f64),
     #[error("more than 65535 colours: this is not pixel art")]
     TooManyColours,
     #[error(transparent)]

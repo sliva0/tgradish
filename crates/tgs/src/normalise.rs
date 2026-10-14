@@ -196,6 +196,29 @@ impl PixelAnim {
         }
         out
     }
+
+    /// A frame as packed pixels (see [`pack`]) at the input's resolution,
+    /// cropped: [`PixelAnim::rgba`] without the bytes in between.
+    pub(crate) fn packed(&self, frame: usize) -> Vec<u32> {
+        let (columns, rows) = (&self.grid.columns, &self.grid.rows);
+        let width = *columns.last().unwrap() as usize;
+        let palette: Vec<u32> =
+            self.palette.iter().map(|&colour| u32::from_le_bytes(colour)).collect();
+        let mut out = Vec::with_capacity(width * *rows.last().unwrap() as usize);
+        let pixels = &self.frames[frame].pixels;
+        for (row, edges) in rows.windows(2).enumerate() {
+            // the first line of a row of cells, then copies of it
+            let start = out.len();
+            for (column, cell) in columns.windows(2).enumerate() {
+                let colour = palette[pixels[row * self.width as usize + column] as usize];
+                out.extend(std::iter::repeat_n(colour, (cell[1] - cell[0]) as usize));
+            }
+            for _ in edges[0] + 1..edges[1] {
+                out.extend_from_within(start..start + width);
+            }
+        }
+        out
+    }
 }
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

@@ -189,7 +189,7 @@ impl Reduction {
     }
 }
 
-/// A colour in OKLab, scaled by its alpha.
+/// A colour's RGB in OKLab.
 fn oklab([r, g, b, _]: [u8; 4]) -> [f64; 3] {
     let linear = |c: u8| {
         let c = f64::from(c) / 255.0;
@@ -206,17 +206,36 @@ fn oklab([r, g, b, _]: [u8; 4]) -> [f64; 3] {
     ]
 }
 
+/// A colour as [`distance`] compares it, worked out once for colours that
+/// are compared with many others.
+#[derive(Debug, Clone, Copy)]
+struct Seen {
+    lab: [f64; 3],
+    alpha: u8,
+}
+
+impl Seen {
+    fn of(colour: [u8; 4]) -> Seen {
+        Seen { lab: oklab(colour), alpha: colour[3] }
+    }
+
+    /// [`distance`] between the two colours.
+    fn distance(self, other: Seen) -> f64 {
+        if self.alpha == 0 && other.alpha == 0 {
+            return 0.0;
+        }
+        let alpha = f64::from(self.alpha.abs_diff(other.alpha)) / 255.0;
+        let shown = f64::from(self.alpha.min(other.alpha)) / 255.0;
+        let (a, b) = (self.lab, other.lab);
+        let colour = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+        alpha + colour * shown
+    }
+}
+
 /// How different two colours look: OKLab distance where both show, plus
 /// the difference in opacity (1 between transparent and opaque).
 pub fn distance(a: [u8; 4], b: [u8; 4]) -> f64 {
-    if a[3] == 0 && b[3] == 0 {
-        return 0.0;
-    }
-    let alpha = f64::from(a[3].abs_diff(b[3])) / 255.0;
-    let shown = f64::from(a[3].min(b[3])) / 255.0;
-    let (a, b) = (oklab(a), oklab(b));
-    let colour = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
-    alpha + colour * shown
+    Seen::of(a).distance(Seen::of(b))
 }
 
 /// How much `reduced` differs from `original`: the [`distance`] of every
@@ -335,15 +354,14 @@ fn merge_colours(anim: &PixelAnim, threshold: f64) -> PixelAnim {
     order.sort_by_key(|&colour| std::cmp::Reverse(counts[colour]));
     // palette indices fit u16, the palette's length may not
     let mut target: Vec<u16> = (0..anim.palette.len()).map(|colour| colour as u16).collect();
-    let mut kept: Vec<usize> = Vec::new();
+    // each colour is compared with many, so it is converted once
+    let seen: Vec<Seen> = anim.palette.iter().map(|&colour| Seen::of(colour)).collect();
+    let mut kept: Vec<(usize, Seen)> = Vec::new();
     for colour in order {
-        let near = kept
-            .iter()
-            .copied()
-            .find(|&other| distance(anim.palette[colour], anim.palette[other]) < threshold);
+        let near = kept.iter().find(|&&(_, other)| seen[colour].distance(other) < threshold);
         match near {
-            Some(other) => target[colour] = other as u16,
-            None => kept.push(colour),
+            Some(&(other, _)) => target[colour] = other as u16,
+            None => kept.push((colour, seen[colour])),
         }
     }
     let frames = anim
@@ -457,18 +475,19 @@ fn despeckle(anim: &PixelAnim) -> PixelAnim {
 
 /// Frames as packed pixels over the whole crop.
 fn expand(anim: &PixelAnim) -> Vec<Vec<u32>> {
-    (0..anim.frames.len())
-        .map(|frame| {
-            anim.rgba(frame).as_chunks::<4>().0.iter().map(|&p| u32::from_le_bytes(p)).collect()
-        })
-        .collect()
+    (0..anim.frames.len()).map(|frame| anim.packed(frame)).collect()
 }
 
-/// Snaps the pixels to cells with these edges and turns them into cells.
-fn snapped(anim: &PixelAnim, columns: &[u32], rows: &[u32]) -> Result<PixelAnim> {
+/// Snaps `pixels`, `anim` [`expand`]ed, to cells with these edges and
+/// turns them into cells.
+fn snapped(
+    anim: &PixelAnim,
+    mut pixels: Vec<Vec<u32>>,
+    columns: &[u32],
+    rows: &[u32],
+) -> Result<PixelAnim> {
     let width = *anim.grid.columns.last().unwrap();
     let height = *anim.grid.rows.last().unwrap();
-    let mut pixels = expand(anim);
     for frame in &mut pixels {
         snap_to(frame, width, columns, rows);
     }
@@ -486,12 +505,13 @@ fn snap_to_grid(anim: &PixelAnim, scale: u32) -> Result<PixelAnim> {
     let offset = edges.fit(scale, !anim.grid.cut_at_sides()).offset;
     let (columns, rows) =
         (grid_starts(offset.0, width, scale), grid_starts(offset.1, height, scale));
-    snapped(anim, &columns, &rows)
+    snapped(anim, pixels, &columns, &rows)
 }
 
 fn downscale(anim: &PixelAnim, factor: f64) -> Result<PixelAnim> {
+    // any other factor would make no edges or endless ones
     if !(factor > 0.0 && factor < 1.0) {
-        return Err(Error::ZeroScale);
+        return Err(Error::DownscaleFactor(factor));
     }
     let width = *anim.grid.columns.last().unwrap();
     let height = *anim.grid.rows.last().unwrap();
@@ -511,7 +531,7 @@ fn downscale(anim: &PixelAnim, factor: f64) -> Result<PixelAnim> {
         edges.push(size);
         edges
     };
-    snapped(anim, &edges(width, across), &edges(height, down))
+    snapped(anim, expand(anim), &edges(width, across), &edges(height, down))
 }
 
 #[cfg(test)]
@@ -612,6 +632,58 @@ mod tests {
         assert_eq!(cut.grid().columns, [0, 2, 5, 8, 11]);
         let half = Reduction::Downscale { factor: 0.5 }.apply(&cut).unwrap();
         assert_eq!(half.grid().columns, [0, 8, 11]);
+        for factor in [0.0, -0.5, 1.0, f64::NAN] {
+            let wrong = Reduction::Downscale { factor }.apply(&board);
+            assert!(matches!(wrong, Err(Error::DownscaleFactor(_))), "{factor}");
+        }
+    }
+
+    #[test]
+    fn merges_colours_as_comparing_each_pair_does() {
+        // a gradient of close colours, some translucent, across 3x art
+        let pixels: Vec<[u8; 4]> = (0..48u32)
+            .map(|i| {
+                let x = i % 16 / 3;
+                [(x * 9) as u8, (x * 5) as u8, 200, if x % 2 == 0 { 255 } else { 180 }]
+            })
+            .collect();
+        let a = anim(16, 3, &[(&pixels, 100)]);
+        let expanded: Vec<Vec<u32>> = (0..a.frames().len())
+            .map(|frame| {
+                a.rgba(frame).as_chunks::<4>().0.iter().map(|&p| u32::from_le_bytes(p)).collect()
+            })
+            .collect();
+        assert_eq!(expand(&a), expanded);
+        for threshold in [0.02, 0.05, 0.1, 0.3] {
+            // each colour in order of use joins the first kept colour near it
+            let mut counts = vec![0usize; a.palette.len()];
+            for frame in &a.frames {
+                frame.pixels.iter().for_each(|&colour| counts[colour as usize] += 1);
+            }
+            let mut order: Vec<usize> = (1..a.palette.len()).collect();
+            order.sort_by_key(|&colour| std::cmp::Reverse(counts[colour]));
+            let mut kept: Vec<usize> = Vec::new();
+            let mut target: Vec<u16> = (0..a.palette.len()).map(|colour| colour as u16).collect();
+            for colour in order {
+                match kept
+                    .iter()
+                    .find(|&&other| distance(a.palette[colour], a.palette[other]) < threshold)
+                {
+                    Some(&other) => target[colour] = other as u16,
+                    None => kept.push(colour),
+                }
+            }
+            let frames = a
+                .frames
+                .iter()
+                .map(|frame| PixelFrame {
+                    pixels: frame.pixels.iter().map(|&c| target[c as usize]).collect(),
+                    ticks: frame.ticks,
+                })
+                .collect();
+            let expected = compact(PixelAnim { frames, ..a.clone() });
+            assert_eq!(merge_colours(&a, threshold), expected, "{threshold}");
+        }
     }
 
     #[test]
