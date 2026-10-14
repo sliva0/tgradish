@@ -439,6 +439,9 @@ pub(crate) fn encode(
     let mut sent = 0;
     // fewer when the input is shorter
     while sent < total && filtered.next(&mut frame, cancel)? {
+        // as ffmpeg's command line does: a picture type left from decoding
+        // the input would make the encoder start a keyframe where the
+        // input had one, spending bytes the size limit can't spare
         frame.set_kind(ff::picture::Type::None);
         // SAFETY: setting a plain field of a frame we own
         unsafe { (*frame.as_mut_ptr()).duration = frame_duration };

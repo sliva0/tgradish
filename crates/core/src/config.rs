@@ -168,9 +168,8 @@ mod tests {
 
     #[test]
     fn reads_config() {
-        let config: Config =
-            toml::from_str("preset = 'emoji'\n[ffmpeg]\nuse = 'system'\n").unwrap();
-        assert_eq!(config.preset.as_deref(), Some("emoji"));
+        let config: Config = toml::from_str("preset = 'fast'\n[ffmpeg]\nuse = 'system'\n").unwrap();
+        assert_eq!(config.preset.as_deref(), Some("fast"));
         assert_eq!(config.ffmpeg.choice, FfmpegChoice::System);
         assert!(toml::from_str::<Config>("[ffmpeg]\nsource = 'system'\n").is_err());
     }

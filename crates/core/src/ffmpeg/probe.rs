@@ -71,6 +71,9 @@ fn pix_fmt_has_alpha(pix_fmt: &str) -> bool {
     ["yuva", "rgba", "bgra", "argb", "abgr", "gbrap", "ya8", "ya16"]
         .iter()
         .any(|prefix| pix_fmt.starts_with(prefix))
+        // a palette may hold transparent colours, as GIFs and 8-bit PNGs
+        // do, which ffprobe can't say: kept, at the cost of encoding alpha
+        // for those that have none
         || pix_fmt == "pal8"
 }
 
@@ -125,6 +128,8 @@ impl Timing {
 impl Facts {
     fn still_image(&self) -> bool {
         (self.format.contains("image2") || self.format.ends_with("_pipe"))
+            // an image demuxer may read a GIF, which can be animated
+            // without its frames being counted
             && self.codec != "gif"
             && self.frames.is_none_or(|frames| frames <= 1)
     }

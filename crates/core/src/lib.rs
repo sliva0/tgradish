@@ -1,12 +1,18 @@
 //! Everything tgradish's command line and window share: Telegram stickers
-//! and emoji as VP9 WebM from videos ([`convert`], fitted to the size
-//! limit by [`fit`]), as WebP pictures ([`still`]) and as `.tgs` from pixel
-//! art ([`tgs`], over the `tgradish-tgs` crate), and WebM inspection and
-//! duration spoofing ([`webm`]). ffmpeg runs through a
-//! [`backend::Backend`]: the ffmpeg programs ([`ffmpeg`]), or with the
-//! `linked` feature its libraries, used to do what those programs' command
-//! lines do. Presets, the user's config and the events front-ends follow
-//! are here too.
+//! and emoji made from videos, pictures, Aseprite files and sequences of
+//! images, as any of three kinds of result:
+//!
+//! - VP9 WebM ([`convert`]), fitted to the size limit by [`fit`];
+//! - WebP pictures ([`still`]);
+//! - `.tgs` vector animations ([`tgs`]), over the `tgradish-tgs` crate,
+//!   which turns pixel art into shapes.
+//!
+//! ffmpeg reads videos and encodes WebM through a [`backend::Backend`]:
+//! the ffmpeg programs ([`ffmpeg`]), or with the `linked` feature its
+//! libraries, made to do what those programs' command lines do. What
+//! ffmpeg can't read, tgradish reads itself, and draws for it ([`drawn`]).
+//! WebM inspection and duration spoofing ([`webm`]), presets, the user's
+//! config and the events front-ends follow are here too.
 
 pub mod backend;
 mod cancel;

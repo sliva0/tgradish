@@ -219,8 +219,9 @@ pub struct OptionArgs {
     pub tempo: Option<f64>,
     /// Frame rate: how fast the frames of image sequences, and of sprite
     /// sheets for .tgs, play [default: 10]; otherwise of the result for
-    /// WebM, at most 60 and at most the input's at the tempo [default: the
-    /// input's, at most 60].
+    /// WebM, at most 60, where more than the input's at the tempo only
+    /// repeats its frames [default: the input's at the tempo, from 1 to
+    /// 60].
     #[arg(long, help_heading = "Output")]
     pub fps: Option<f64>,
 

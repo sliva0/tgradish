@@ -438,6 +438,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         Some(length) if !(length > 0.0 && length.is_finite()) => {
             return Err(invalid("length must be more than 0 seconds"));
         }
+        // a hundredth of a second over is rounding, not worth a warning
         Some(length) if length > available + 0.01 => {
             warnings.push(format!("the input is only {available:.2} s long after start"));
             available
@@ -525,6 +526,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         (None, Fit::Auto | Fit::Bitrate | Fit::Off) => Range { min: 8.0, max: 50_000.0 },
         (None, Fit::Crf) => Range { min: 4.0, max: f64::from(*options::CRFS.end()) },
         (None, Fit::Fps) => Range { min: 1.0, max: fps.floor().max(1.0) },
+        // a tenth of a second is about the shortest that still moves
         (None, Fit::Length) => Range { min: length.min(0.1), max: length },
     };
 
@@ -632,7 +634,6 @@ fn looks_like_pixel_art(backend: &Backend, plan: &Plan, cancel: &CancelToken) ->
     Ok(is_pixel_art(&frames.frames, frames.width, plan.crop))
 }
 
-/// Result of a finished conversion.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 /// What converting made: all that [`Event::Finished`] says, whether or not
 /// events were followed.
@@ -699,6 +700,10 @@ impl Encoder for BackendEncoder<'_> {
         if params.rate == Rate::Lossless {
             self.run_pass(attempt, (1, 1), &params, Pass::Single, Some(&path))?;
         } else {
+            // the first pass's statistics are of the frames encoded, so
+            // they serve any attempt at the same frame rate and length;
+            // constant quality and a bitrate keep logs of their own, as
+            // libvpx's first pass differs between them
             let key = (
                 params.fps.to_bits(),
                 params.length.to_bits(),

@@ -1,8 +1,11 @@
-//! Pixel art ffmpeg can't read, drawn for it: Aseprite files, with the
-//! tag and layers chosen, the frames of an animation in several files, and
-//! animated WebP, which ffmpeg reads only from version 8, drawn by the pixel
-//! art reader into a temporary PNG, an animated one when it moves, which
-//! ffmpeg reads as it reads any other, for WebM and image stickers.
+//! Pixel art ffmpeg can't read, drawn for it, for WebM and image
+//! stickers. That is Aseprite files, with the tag and layers chosen; the
+//! frames of one animation in several files; and animated WebP, which
+//! ffmpeg reads only from version 8.
+//!
+//! tgradish's own reader draws them into a temporary PNG, an animated
+//! one when it moves, with each frame's own duration, which ffmpeg then
+//! reads as it reads any other input.
 
 use std::path::{Path, PathBuf};
 
