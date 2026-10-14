@@ -13,7 +13,8 @@ use tgradish_core::telegram;
 use tgradish_core::tgs::TgsOptions;
 
 use crate::app::App;
-use crate::canvas::{self, Cropping, Inset, InsetChange, Kept, Picture, Screen};
+use crate::canvas::{self, Cropping, Kept, Picture, Screen};
+use crate::inset::{self, Inset, InsetChange};
 use crate::item::{Framing, Item, Show, Zoom};
 use crate::jobs::Status;
 use crate::media::Clip;
@@ -312,16 +313,16 @@ fn preview(
                     Format::Tgs => "Result",
                 };
                 let text = ui.visuals().text_color();
-                let label = ui.painter().layout_no_wrap(widest.into(), canvas::INSET_LABEL, text);
+                let label = ui.painter().layout_no_wrap(widest.into(), inset::INSET_LABEL, text);
                 // the setting counts sizes from 1, for people
-                let largest = canvas::INSET_SIZES.len() as u8;
+                let largest = inset::INSET_SIZES.len() as u8;
                 let step = usize::from(look.size.clamp(1, largest)) - 1;
                 let corner = look.corner;
-                let (beside, room) = canvas::split(
+                let (beside, room) = inset::split(
                     rect,
                     size,
-                    canvas::label_box(label.size()),
-                    canvas::INSET_SIZES[step],
+                    inset::label_box(label.size()),
+                    inset::INSET_SIZES[step],
                     corner,
                 );
                 let on = item.view.inset;

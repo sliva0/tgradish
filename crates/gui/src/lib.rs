@@ -13,6 +13,7 @@ mod fallback;
 mod files;
 mod fonts;
 mod icon;
+mod inset;
 mod inspect;
 mod item;
 mod jobs;
