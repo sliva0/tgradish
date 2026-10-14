@@ -238,7 +238,7 @@ fn write_items(out: &mut String, items: &[Item], style: Style) {
 
 /// A number with at most `decimals` decimals, without trailing zeros,
 /// exponents or `-0`.
-pub fn number(value: f64, decimals: usize) -> String {
+fn number(value: f64, decimals: usize) -> String {
     let mut text = format!("{value:.decimals$}");
     if text.contains('.') {
         text.truncate(text.trim_end_matches('0').trim_end_matches('.').len());
@@ -260,7 +260,7 @@ fn shortest(low: f64, high: f64) -> String {
 
 /// A colour channel as a fraction. Renderers truncate `255 * fraction`, so
 /// this aims inside `[value, value + 1)` with a margin for float maths.
-pub fn channel(value: u8) -> String {
+fn channel(value: u8) -> String {
     match value {
         0 => "0".to_owned(),
         255 => "1".to_owned(),
@@ -269,7 +269,7 @@ pub fn channel(value: u8) -> String {
 }
 
 /// Alpha as fill opacity in percent; truncated like colour channels.
-pub fn opacity(alpha: u8) -> String {
+fn opacity(alpha: u8) -> String {
     shortest((f64::from(alpha) + 0.02) / 2.55, (f64::from(alpha) + 0.98) / 2.55)
 }
 
