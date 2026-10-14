@@ -585,4 +585,25 @@ mod tests {
         // gone after the first tick of the frame
         assert!(misses([200, 30, 30, 255], 1) > 0);
     }
+
+    /// The limits tgradish keeps output within are copied from the
+    /// renderer this crate builds, so they must change together.
+    #[test]
+    fn copied_limits_match_tlottie() {
+        let ours = tgradish_tgs::limits::TLOTTIE;
+        let theirs = Limits::default();
+        assert_eq!(ours.max_input_bytes, theirs.max_input_bytes);
+        assert_eq!(ours.max_nesting_depth, theirs.max_nesting_depth);
+        assert_eq!(ours.max_layers, theirs.max_layers);
+        assert_eq!(ours.max_painted_shape_layers, theirs.max_painted_shape_layers);
+        assert_eq!(ours.max_shapes_per_layer, theirs.max_shapes_per_layer);
+        assert_eq!(ours.max_paints_per_layer, theirs.max_paints_per_layer);
+        assert_eq!(ours.max_paint_source_items_per_layer, theirs.max_paint_source_items_per_layer);
+        assert_eq!(ours.max_path_points, theirs.max_path_points);
+        assert_eq!(ours.max_path_coordinate_abs, theirs.max_path_coordinate_abs);
+        assert_eq!(ours.max_keyframes, theirs.max_keyframes);
+        assert_eq!(ours.max_assets, theirs.max_assets);
+        assert_eq!(ours.max_precomp_expansion, theirs.max_precomp_expansion);
+        // max_group_depth is a private constant of tlottie's parser
+    }
 }
