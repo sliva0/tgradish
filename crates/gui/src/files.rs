@@ -338,9 +338,11 @@ fn row(
         egui::UiBuilder::new().max_rect(text).layout(egui::Layout::top_down(egui::Align::Min)),
     );
     child.spacing_mut().item_spacing.y = 2.0;
+    // nothing in it takes the click that selects the row
+    child.style_mut().interaction.selectable_labels = false;
     let strong = text_format(&child, child.visuals().strong_text_color());
     let (name, _) = drawable(&child, fallbacks, &item.name(), strong);
-    child.add(egui::Label::new(name).truncate().selectable(false));
+    child.add(egui::Label::new(name).truncate());
     let what = match (item.format, item.choices.target) {
         (Format::Webm, telegram::Target::Sticker) => "WebM sticker",
         (Format::Webm, telegram::Target::Emoji) => "WebM emoji",
@@ -349,7 +351,7 @@ fn row(
         (Format::Image, telegram::Target::Sticker) => "Image sticker",
         (Format::Image, telegram::Target::Emoji) => "Image emoji",
     };
-    child.add(egui::Label::new(RichText::new(what).small().weak()).selectable(false));
+    child.add(egui::Label::new(RichText::new(what).small().weak()));
     status(&mut child, item, queued);
     let response = response.on_hover_ui(|ui| {
         let plain = text_format(ui, ui.visuals().text_color());
