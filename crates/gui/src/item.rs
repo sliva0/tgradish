@@ -159,7 +159,14 @@ impl Choices {
     /// The options that change what pixel art is read as, the preset's
     /// included.
     pub fn reading(&self, presets: &Presets, config: &Config) -> TgsOptions {
-        let options = self.tgs_options(presets, config).unwrap_or_else(|_| self.tgs.clone());
+        // a broken preset still leaves the item's own
+        let own = || TgsOptions {
+            tag: self.tag.clone(),
+            show_layers: self.show_layers.clone(),
+            hide_layers: self.hide_layers.clone(),
+            ..self.tgs.clone()
+        };
+        let options = self.tgs_options(presets, config).unwrap_or_else(|_| own());
         TgsOptions {
             tag: options.tag,
             show_layers: options.show_layers,
