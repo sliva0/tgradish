@@ -174,7 +174,9 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let effective =
         item.choices.webm_options(presets, config).unwrap_or_else(|_| item.choices.webm.clone());
     let exact = exact_of(&effective).filter(|_| item.format != Format::Tgs);
-    // an exact scale holds the crop to the size it takes
+    // an exact scale holds the crop to the size it takes: this is where a
+    // crop is kept to it, as the scale or the crop change, and the small
+    // picture of the result counts on that from the next frame
     if let (Some(exact), Some(size)) = (exact, size) {
         let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
         let ratio = ratio(item.view.aspect, size);

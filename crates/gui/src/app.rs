@@ -46,7 +46,8 @@ pub(crate) struct App {
     /// Results this window wrote, which it replaces when making them again.
     pub(crate) written: HashMap<PathBuf, Written>,
     /// Files found in the way, by their size and time: whether tgradish
-    /// made them, so they may be replaced.
+    /// made them, so they may be replaced. Working out where results go
+    /// fills it in, though it only borrows the window, hence the cell.
     pub(crate) made_by_tgradish: std::cell::RefCell<HashMap<PathBuf, (FileVersion, bool)>>,
     /// Where each item's result goes, worked out once a frame: it looks
     /// at the other items and at files on disk, and is asked for several

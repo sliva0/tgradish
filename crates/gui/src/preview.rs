@@ -313,7 +313,9 @@ fn preview(
                 };
                 let text = ui.visuals().text_color();
                 let label = ui.painter().layout_no_wrap(widest.into(), canvas::INSET_LABEL, text);
-                let step = usize::from(look.size.clamp(1, 5)) - 1;
+                // the setting counts sizes from 1, for people
+                let largest = canvas::INSET_SIZES.len() as u8;
+                let step = usize::from(look.size.clamp(1, largest)) - 1;
                 let corner = look.corner;
                 let (beside, room) = canvas::split(
                     rect,

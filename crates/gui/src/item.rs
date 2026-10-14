@@ -112,10 +112,10 @@ impl Choices {
         presets.tgs(self.preset_name(Format::Tgs, config)).map_err(|err| err.to_string())
     }
 
-    /// The preset's WebM options with the item's over them, those of
-    /// hidden settings too.
-    pub fn webm_merged(&self, presets: &Presets, config: &Config) -> Result<Options, String> {
-        let shared = Options {
+    /// The choices every format shares, as WebM options: what is made,
+    /// and what of the input is read and used.
+    pub fn shared_webm(&self) -> Options {
+        Options {
             target: Some(self.target),
             tag: self.tag.clone(),
             show_layers: self.show_layers.clone(),
@@ -124,8 +124,27 @@ impl Choices {
             start: self.start,
             length: self.length,
             ..Options::default()
-        };
-        Ok(self.webm_base(presets, config)?.merged(&self.webm).merged(&shared))
+        }
+    }
+
+    /// The same, as `.tgs` options.
+    pub fn shared_tgs(&self) -> TgsOptions {
+        TgsOptions {
+            target: Some(self.target),
+            tag: self.tag.clone(),
+            show_layers: self.show_layers.clone(),
+            hide_layers: self.hide_layers.clone(),
+            crop: self.crop,
+            start: self.start,
+            length: self.length,
+            ..TgsOptions::default()
+        }
+    }
+
+    /// The preset's WebM options with the item's over them, those of
+    /// hidden settings too.
+    pub fn webm_merged(&self, presets: &Presets, config: &Config) -> Result<Options, String> {
+        Ok(self.webm_base(presets, config)?.merged(&self.webm).merged(&self.shared_webm()))
     }
 
     /// Everything a WebM conversion gets.
@@ -143,29 +162,14 @@ impl Choices {
 
     /// Everything a `.tgs` conversion gets.
     pub fn tgs_options(&self, presets: &Presets, config: &Config) -> Result<TgsOptions, String> {
-        let shared = TgsOptions {
-            target: Some(self.target),
-            tag: self.tag.clone(),
-            show_layers: self.show_layers.clone(),
-            hide_layers: self.hide_layers.clone(),
-            crop: self.crop,
-            start: self.start,
-            length: self.length,
-            ..TgsOptions::default()
-        };
-        Ok(self.tgs_base(presets, config)?.merged(&self.tgs).merged(&shared))
+        Ok(self.tgs_base(presets, config)?.merged(&self.tgs).merged(&self.shared_tgs()))
     }
 
     /// The options that change what pixel art is read as, the preset's
     /// included.
     pub fn reading(&self, presets: &Presets, config: &Config) -> TgsOptions {
         // a broken preset still leaves the item's own
-        let own = || TgsOptions {
-            tag: self.tag.clone(),
-            show_layers: self.show_layers.clone(),
-            hide_layers: self.hide_layers.clone(),
-            ..self.tgs.clone()
-        };
+        let own = || self.tgs.clone().merged(&self.shared_tgs());
         let options = self.tgs_options(presets, config).unwrap_or_else(|_| own());
         TgsOptions {
             tag: options.tag,
@@ -319,7 +323,9 @@ impl Default for View {
 }
 
 /// The choices that change which part of the input is used and how it is
-/// fitted: changing them is something to look at on the input.
+/// fitted: changing them is something to look at on the input, so the
+/// preview turns back to it. A new setting of that kind belongs here, or
+/// changing it leaves the old result in view.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Framing {
     format: Format,
