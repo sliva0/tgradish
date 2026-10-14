@@ -14,11 +14,17 @@ use image::{AnimationDecoder, DynamicImage, Frames, ImageDecoder, ImageError};
 
 use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Format, Frame, Limits, Result};
 
-pub(crate) fn decode(bytes: &[u8], format: Format, limits: &Limits) -> Result<Animation> {
-    let error = |err: ImageError| match err {
+/// The `image` crate's errors as ours: a codec stopped by its limits says
+/// the input is too large, anything else that it doesn't decode.
+fn image_error(format: Format) -> impl Fn(ImageError) -> Error + Copy {
+    move |err| match err {
         ImageError::Limits(err) => Error::TooLarge(err.to_string()),
         err => Error::Decode { format, message: err.to_string() },
-    };
+    }
+}
+
+pub(crate) fn decode(bytes: &[u8], format: Format, limits: &Limits) -> Result<Animation> {
+    let error = image_error(format);
     // the codecs check sizes against these before they allocate
     let mut codec_limits = image::Limits::default();
     codec_limits.max_image_width = Some(limits.max_dimension);
@@ -79,10 +85,7 @@ fn collect(
     let mut size = None;
     let mut out = Vec::new();
     for frame in frames {
-        let frame = frame.map_err(|err| match err {
-            ImageError::Limits(err) => Error::TooLarge(err.to_string()),
-            err => Error::Decode { format, message: err.to_string() },
-        })?;
+        let frame = frame.map_err(image_error(format))?;
         let duration = delay(Duration::from(frame.delay()));
         let buffer = frame.into_buffer();
         let (width, height) = *size.get_or_insert(buffer.dimensions());
@@ -110,7 +113,7 @@ fn still(mut decoder: impl ImageDecoder, format: Format, limits: &Limits) -> Res
     if decoder.total_bytes().saturating_add(rgba) > limits.max_bytes as u64 {
         return Err(Error::TooLarge(format!("a {width}x{height} image")));
     }
-    let error = |err: ImageError| Error::Decode { format, message: err.to_string() };
+    let error = image_error(format);
     // photos are often stored sideways, with the way up in their metadata
     let orientation = decoder.orientation().map_err(error)?;
     let mut image = DynamicImage::from_decoder(decoder).map_err(error)?;
