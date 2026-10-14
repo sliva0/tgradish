@@ -27,9 +27,9 @@ pub(crate) use args::video_filter;
 pub(crate) use args::{frames_filter, picture_filter, read_seconds, ssim_graph};
 pub use locate::locate;
 pub use orientation::Orientation;
+pub use probe::Probe;
 #[cfg(feature = "linked")]
 pub(crate) use probe::{Facts, Timing};
-pub use probe::Probe;
 pub(crate) use probe::{frame_starts, probe};
 pub(crate) use process::{Output, run};
 pub(crate) use ssim::ssim;

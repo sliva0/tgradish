@@ -5,6 +5,7 @@ use console::style;
 use serde_json::json;
 use tgradish_core::backend::BackendInfo;
 use tgradish_core::config::Config;
+use tgradish_core::inspect::{self, Inspected};
 use tgradish_core::presets::{self, Format, Presets};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::webm::{self, Patch, WebmInfo};
@@ -163,55 +164,8 @@ fn print_failure(ctx: &Context, path: &std::path::Path, err: &impl std::fmt::Dis
 pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
     let mut failed = 0;
     for (i, path) in args.files.iter().enumerate() {
-        if still::is_image(path) {
-            match still::inspect_file(path) {
-                Ok(info) => {
-                    let target = args.target.map_or_else(|| info.target(), Into::into);
-                    let issues = info.issues(target);
-                    if ctx.global.json {
-                        let line = json!({
-                            "file": path, "format": "image", "target": target,
-                            "info": info, "issues": issues,
-                        });
-                        crate::json_line(&line);
-                    } else {
-                        if i > 0 {
-                            println!();
-                        }
-                        print_image(path, &info, target, &issues);
-                    }
-                }
-                Err(err) if args.files.len() > 1 => {
-                    failed += 1;
-                    print_failure(ctx, path, &err);
-                }
-                Err(err) => return Err(err).with_context(|| format!("{}", path.display())),
-            }
-            continue;
-        }
-        if tgs::is_sticker(path) {
-            match tgs::inspect_file(path) {
-                Ok((stats, issues)) if ctx.global.json => {
-                    let line =
-                        json!({ "file": path, "format": "tgs", "stats": stats, "issues": issues });
-                    crate::json_line(&line);
-                }
-                Ok((stats, issues)) => {
-                    if i > 0 {
-                        println!();
-                    }
-                    print_sticker(path, &stats, &issues);
-                }
-                Err(err) if args.files.len() > 1 => {
-                    failed += 1;
-                    print_failure(ctx, path, &err);
-                }
-                Err(err) => return Err(err).with_context(|| format!("{}", path.display())),
-            }
-            continue;
-        }
-        let info = match webm::inspect_file(path) {
-            Ok(info) => info,
+        let inspected = match inspect::inspect(path, args.target.map(Into::into)) {
+            Ok(inspected) => inspected,
             Err(err) if args.files.len() > 1 => {
                 failed += 1;
                 print_failure(ctx, path, &err);
@@ -219,24 +173,23 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
             }
             Err(err) => return Err(err).with_context(|| format!("{}", path.display())),
         };
-        let target = args.target.map_or_else(|| info.target(), Into::into);
         if ctx.global.json {
             #[derive(serde::Serialize)]
             struct Line<'a> {
                 file: &'a std::path::Path,
-                format: &'static str,
-                target: Target,
-                info: &'a WebmInfo,
-                issues: Vec<telegram::Issue>,
+                #[serde(flatten)]
+                inspected: &'a Inspected,
             }
-            let issues = telegram::check(&info, target);
-            let line = Line { file: path, format: "webm", target, info: &info, issues };
-            crate::json_line(&line);
-        } else {
-            if i > 0 {
-                println!();
-            }
-            print_info(path, &info, target);
+            crate::json_line(&Line { file: path, inspected: &inspected });
+            continue;
+        }
+        if i > 0 {
+            println!();
+        }
+        match &inspected {
+            Inspected::Image { target, info, issues } => print_image(path, info, *target, issues),
+            Inspected::Tgs { stats, issues } => print_sticker(path, stats, issues),
+            Inspected::Webm { target, info, .. } => print_info(path, info, *target),
         }
     }
     if failed > 0 {
