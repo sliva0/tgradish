@@ -456,8 +456,14 @@ pub fn flags(options: &impl Serialize) -> Vec<String> {
     let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(options) else {
         return Vec::new();
     };
+    // to nine decimals, far finer than any cut between frames, so the
+    // noise of sums and differences of times doesn't print as
+    // 0.07999999999999996
     let number = |value: &serde_json::Value| match value.as_f64() {
-        Some(n) if n.fract() == 0.0 && n.abs() < 1e15 => format!("{}", n as i64),
+        Some(n) if n.abs() < 1e15 => {
+            let n = (n * 1e9).round() / 1e9;
+            if n.fract() == 0.0 { format!("{}", n as i64) } else { format!("{n}") }
+        }
         Some(n) => format!("{n}"),
         None => value.to_string(),
     };
@@ -530,6 +536,26 @@ pub const TEMPOS: std::ops::RangeInclusive<f64> = tgradish_tgs::normalise::TEMPO
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flags_print_numbers_plainly() {
+        let options = Options {
+            // as a cut of 0.12 s from 0.04 s comes out
+            length: Some(0.12 - 0.04),
+            start: Some(0.1 + 1e-6),
+            crf: Some(30),
+            ..Default::default()
+        };
+        let flags = flags(&options);
+        let value = |flag: &str| {
+            let at = flags.iter().position(|f| f == flag).unwrap();
+            flags[at + 1].clone()
+        };
+        assert_eq!(
+            (value("--length"), value("--start"), value("--crf")),
+            ("0.08".to_owned(), "0.100001".to_owned(), "30".to_owned())
+        );
+    }
 
     #[test]
     fn merges_set_values_only() {
