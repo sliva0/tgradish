@@ -15,6 +15,38 @@ use tgradish_core::config::Config;
 
 use crate::args::{Cli, Command, Global};
 
+/// musl's own malloc is slow at what tgradish does: `.tgs` stickers take up
+/// to 1.6 times as long, videos 5–7% longer. mimalloc stands in for it in
+/// the whole program, ffmpeg's C code too (its `override` feature), which
+/// brings musl builds level with glibc's.
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+/// mimalloc keeps freed memory for a second before handing it back, which
+/// raises the peak of a video's conversion by up to a quarter over 10 ms; at
+/// 10 ms it is near glibc's, as fast. Unless MIMALLOC_PURGE_DELAY says.
+#[cfg(target_env = "musl")]
+#[allow(unsafe_code)]
+fn return_freed_memory_sooner() {
+    use libmimalloc_sys::{mi_option_get, mi_option_set, mi_option_t};
+    // mi_option_purge_delay in mimalloc.h, which the bindings don't name
+    const PURGE_DELAY: mi_option_t = 15;
+    // its default, which also shows the number still names the delay
+    const DEFAULT: std::ffi::c_long = 1000;
+    if std::env::var_os("MIMALLOC_PURGE_DELAY").is_some() {
+        return;
+    }
+    // SAFETY: mimalloc reads and writes options without synchronising, so
+    // this runs first in main, before any other thread; and only once the
+    // default above shows the bundled mimalloc numbers the delay as 15
+    unsafe {
+        if mi_option_get(PURGE_DELAY) == DEFAULT {
+            mi_option_set(PURGE_DELAY, 10);
+        }
+    }
+}
+
 /// Ends the program with an exit code, after the command already reported
 /// why.
 #[derive(Debug, thiserror::Error)]
@@ -136,6 +168,8 @@ mod windows_console {
 }
 
 fn main() -> ExitCode {
+    #[cfg(target_env = "musl")]
+    return_freed_memory_sooner();
     #[cfg(feature = "gui")]
     if started_outside_a_terminal() {
         return match tgradish_gui::run(tgradish_gui::Launch::default()) {

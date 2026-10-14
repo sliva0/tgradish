@@ -79,6 +79,22 @@ jobs:
           cargo test -p tgradish-core -p tgradish -p tgradish-gui
           --features tgradish/linked
 
+  # what only musl builds have, their allocator, and the crates' C parts
+  # built with musl-gcc
+  musl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup target add x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: >
+          cargo clippy -p tgradish --target x86_64-unknown-linux-musl --all-targets
+          -- -D warnings
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+
   # tgs-lab, a workspace of its own: .tgs output rendered with tlottie and
   # rlottie
   lab:

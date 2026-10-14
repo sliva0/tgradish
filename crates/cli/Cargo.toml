@@ -35,6 +35,11 @@ toml.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_System_Console"], optional = true }
 
+# in place of musl's malloc, for the whole program
+[target.'cfg(target_env = "musl")'.dependencies]
+libmimalloc-sys.workspace = true
+mimalloc.workspace = true
+
 [build-dependencies]
 embed-resource.workspace = true
 
