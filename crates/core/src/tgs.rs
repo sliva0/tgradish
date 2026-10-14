@@ -503,7 +503,8 @@ fn read_video(
         .checked_mul(probe.height as usize)
         .and_then(|pixels| pixels.checked_mul(4))
         .filter(|_| probe.width.max(probe.height) <= limits.max_dimension);
-    // what ffmpeg prints is held beside the frames made of it
+    // half the budget: normalising holds a copy of the frames it keeps
+    // beside them
     let fit = frame_bytes.map_or(0, |bytes| limits.max_bytes / 2 / bytes.max(1));
     if fit == 0 {
         let (width, height) = (probe.width, probe.height);

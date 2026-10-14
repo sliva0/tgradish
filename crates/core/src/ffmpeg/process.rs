@@ -119,11 +119,52 @@ pub(crate) fn run_bytes(
     program: &'static str,
     cancel: &CancelToken,
 ) -> Result<Vec<u8>> {
+    run_reading(cmd, program, cancel, |stdout| {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes).map(|_| bytes)
+    })
+}
+
+/// Runs `cmd` and returns what it writes to stdout as pieces of `len`
+/// bytes, such as frames of raw video, each read into its own buffer
+/// rather than all into one and copied out. A last piece cut short is
+/// left out.
+pub(crate) fn run_pieces(
+    cmd: Command,
+    program: &'static str,
+    len: usize,
+    cancel: &CancelToken,
+) -> Result<Vec<Vec<u8>>> {
+    run_reading(cmd, program, cancel, |stdout| {
+        let mut pieces = Vec::new();
+        // pieces of nothing would never end
+        if len == 0 {
+            std::io::copy(stdout, &mut std::io::sink())?;
+            return Ok(pieces);
+        }
+        loop {
+            let mut piece = vec![0; len];
+            match stdout.read_exact(&mut piece) {
+                Ok(()) => pieces.push(piece),
+                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(pieces),
+                Err(err) => return Err(err),
+            }
+        }
+    })
+}
+
+/// Runs `cmd`, reading its stdout with `read`, and its stderr for the
+/// tail to fail with.
+fn run_reading<T>(
+    cmd: Command,
+    program: &'static str,
+    cancel: &CancelToken,
+    read: impl FnOnce(&mut ChildStdout) -> std::io::Result<T>,
+) -> Result<T> {
     let (child, mut stdout, stderr) = spawn(cmd, cancel)?;
     let (tx, rx) = mpsc::channel();
     let stderr_thread = spawn_reader(stderr, tx, |line| Some(Output::Line(line)));
-    let mut bytes = Vec::new();
-    let read = stdout.read_to_end(&mut bytes);
+    let read = read(&mut stdout);
     let _ = stderr_thread.join();
     let lines: Vec<String> = rx
         .into_iter()
@@ -133,8 +174,7 @@ pub(crate) fn run_bytes(
         })
         .collect();
     wait(&child, program, cancel, &lines[lines.len().saturating_sub(STDERR_TAIL)..])?;
-    read?;
-    Ok(bytes)
+    Ok(read?)
 }
 
 fn spawn_reader(

@@ -119,9 +119,8 @@ pub(crate) fn frames(
     let filter = format!("{resample}scale={width}:{height}:flags=bilinear,setsar=1");
     cmd.args(["-map", "0:v:0", "-frames:v", &count.to_string(), "-vf", &filter]);
     cmd.args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
-    let out = process::run_bytes(cmd, "ffmpeg", cancel)?;
     let frame = width as usize * height as usize * 4;
-    Ok(out.chunks_exact(frame).map(<[u8]>::to_vec).collect())
+    process::run_pieces(cmd, "ffmpeg", frame, cancel)
 }
 
 /// The planned frame at the plan's start, cropped, scaled and padded as the
