@@ -40,17 +40,6 @@ const NFPM: [(&str, Source); 2] = [
     ),
 ];
 
-/// Version of the tgradish crates, from the workspace manifest.
-fn workspace_version(root: &Path) -> Result<String> {
-    let manifest = std::fs::read_to_string(root.join("Cargo.toml"))?;
-    let package = manifest.split("[workspace.package]").nth(1).context("no [workspace.package]")?;
-    let line = package
-        .lines()
-        .find(|line| line.trim_start().starts_with("version"))
-        .context("no workspace version")?;
-    Ok(line.split('"').nth(1).context("malformed version")?.to_string())
-}
-
 fn sha256_file(path: &Path) -> Result<()> {
     let dir = path.parent().unwrap();
     let name = path.file_name().unwrap();
@@ -147,7 +136,8 @@ pub fn package_release(args: &[String]) -> Result<()> {
 pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)>) -> Result<()> {
     ensure!(!(system_ffmpeg && target.is_windows()), "Windows builds always link ffmpeg in");
     let root = workspace_root();
-    let version = workspace_version(root)?;
+    // xtask shares the workspace's version, so this is tgradish's
+    let version = env!("CARGO_PKG_VERSION");
     let triple = target.triple();
     let binary = root.join("target").join(triple).join("release").join(target.exe("tgradish"));
     ensure!(binary.is_file(), "{} is missing, build it first", binary.display());
@@ -245,7 +235,7 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
 
     // with ffmpeg built in, as the system's may be too old or lack codecs
     if !target.is_windows() && !system_ffmpeg {
-        for package in linux_packages(root, target, &version, &stage)? {
+        for package in linux_packages(root, target, version, &stage)? {
             sha256_file(&package)?;
             println!("{}", package.display());
         }
