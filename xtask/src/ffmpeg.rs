@@ -9,7 +9,7 @@ use std::process::Command;
 
 use anyhow::{Result, bail, ensure};
 
-use crate::{Target, output, run, workspace_root};
+use crate::{MUSL_GCC, Target, output, run, workspace_root};
 
 /// An archive pinned by its hash: a library of the ffmpeg build, or a tool
 /// a task downloads.
@@ -252,11 +252,16 @@ impl Build {
         let dir = self.fetch(&ZLIB)?;
         match self.target.cross_prefix() {
             None => {
-                run(Command::new("./configure")
+                let mut configure = Command::new("./configure");
+                configure
                     .current_dir(&dir)
                     .arg("--static")
                     .arg(format!("--prefix={}", self.prefix.display()))
-                    .env("CFLAGS", "-O2 -fPIC"))?;
+                    .env("CFLAGS", "-O2 -fPIC");
+                if self.target.is_musl() {
+                    configure.env("CC", MUSL_GCC);
+                }
+                run(&mut configure)?;
                 self.make(&dir)?;
             }
             Some(cross) => {
@@ -281,8 +286,8 @@ impl Build {
         let dir = self.fetch(&LIBVPX)?;
         let target = match (self.target, self.asm) {
             (_, false) => "generic-gnu",
-            (Target::LinuxX64, true) => "x86_64-linux-gcc",
-            (Target::LinuxArm64, true) => "arm64-linux-gcc",
+            (Target::LinuxX64 | Target::LinuxMuslX64, true) => "x86_64-linux-gcc",
+            (Target::LinuxArm64 | Target::LinuxMuslArm64, true) => "arm64-linux-gcc",
             (Target::WindowsX64, true) => "x86_64-win64-gcc",
         };
         let mut configure = Command::new("./configure");
@@ -295,6 +300,10 @@ impl Build {
             .args(["--disable-unit-tests", "--disable-vp8-encoder", "--enable-vp9"]);
         if let Some(cross) = self.target.cross_prefix() {
             configure.env("CROSS", cross);
+        }
+        // configure links its checks with gcc unless told
+        if self.target.is_musl() {
+            configure.env("CC", MUSL_GCC).env("LD", MUSL_GCC);
         }
         run(&mut configure)?;
         self.make(&dir)
@@ -320,6 +329,9 @@ impl Build {
                 ),
             )?;
             setup.arg("--cross-file").arg(&file);
+        }
+        if self.target.is_musl() {
+            setup.env("CC", MUSL_GCC);
         }
         run(&mut setup)?;
         run(Command::new("ninja").current_dir(&dir).args(["-C", "build", "install"]))
@@ -362,6 +374,9 @@ impl Build {
                 .arg("--pkg-config=pkg-config")
                 // no libgcc or winpthreads DLLs next to the executables
                 .arg("--extra-ldexeflags=-static");
+        }
+        if self.target.is_musl() {
+            configure.arg(format!("--cc={MUSL_GCC}"));
         }
         run(&mut configure)?;
         check_components(&dir)?;

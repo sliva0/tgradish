@@ -1,10 +1,11 @@
-//! Release archives of a built tgradish, and for Linux builds with ffmpeg
+//! Release archives of a built tgradish, and for glibc builds with ffmpeg
 //! built in also a .deb and an .rpm. Each holds the binary with every
 //! notice it needs, and for Linux its menu entry and icons. Binaries are
 //! checked before they are packed, since a release must run where it says
-//! it does: Windows ones without MinGW's DLLs, Linux ones on a glibc as old
-//! as asked. nfpm, which writes the packages, is downloaded pinned by its
-//! hash, like ffmpeg's sources.
+//! it does: Windows ones without MinGW's DLLs, glibc ones on a glibc as old
+//! as asked, musl ones linked to nothing that musl distributions may lack.
+//! nfpm, which writes the packages, is downloaded pinned by its hash, like
+//! ffmpeg's sources.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -214,6 +215,9 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
     if target.is_windows() {
         check_dll_imports(&binary)?;
     }
+    if target.is_musl() {
+        check_musl_links(&binary, target)?;
+    }
     if let Some(max) = max_glibc {
         check_glibc(&binary, max)?;
     }
@@ -233,8 +237,9 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
     sha256_file(&archive)?;
     println!("{}", archive.display());
 
-    // with ffmpeg built in, as the system's may be too old or lack codecs
-    if !target.is_windows() && !system_ffmpeg {
+    // with ffmpeg built in, as the system's may be too old or lack codecs;
+    // musl distributions have packages of their own
+    if !target.is_windows() && !target.is_musl() && !system_ffmpeg {
         for package in linux_packages(root, target, version, &stage)? {
             sha256_file(&package)?;
             println!("{}", package.display());
@@ -339,6 +344,7 @@ fn linux_packages(
     let arch = match target {
         Target::LinuxX64 => "amd64",
         Target::LinuxArm64 => "arm64",
+        Target::LinuxMuslX64 | Target::LinuxMuslArm64 => bail!("musl builds have no .deb or .rpm"),
         Target::WindowsX64 => bail!("Windows has no .deb or .rpm"),
     };
     let config = format!(
@@ -382,6 +388,33 @@ fn linux_packages(
             .arg(path))?;
     }
     Ok(packages.into_iter().map(|(_, path)| path).collect())
+}
+
+/// What a musl build may be linked to: musl alone, by the name musl-gcc
+/// links it as, which musl's loader takes for itself. The window's
+/// libraries are loaded when it opens, so the command line runs without
+/// them, and the unwinder is linked in (see `static_unwinder` in build.rs).
+const MUSL_LINKS: [&str; 1] = ["libc.so"];
+
+/// Fails if a musl build doesn't start with musl's loader where musl
+/// distributions keep it, or is linked to more than [`MUSL_LINKS`], as
+/// to a glibc library the build machine has.
+fn check_musl_links(exe: &Path, target: Target) -> Result<()> {
+    let headers = output(Command::new("readelf").args(["-l", "-d"]).arg(exe))?;
+    let loader = target.musl_loader();
+    ensure!(
+        headers.contains(&format!("[Requesting program interpreter: {loader}]")),
+        "{} doesn't start with {loader}",
+        exe.display()
+    );
+    let links: Vec<&str> = headers
+        .lines()
+        .filter_map(|line| line.split_once("Shared library: [")?.1.strip_suffix(']'))
+        .collect();
+    let foreign: Vec<_> = links.iter().filter(|link| !MUSL_LINKS.contains(link)).collect();
+    ensure!(foreign.is_empty(), "{} is linked to {foreign:?} besides musl", exe.display());
+    println!("linked to: {}", links.join(", "));
+    Ok(())
 }
 
 /// `2.28` as `(2, 28)`; `2.2.5` is `(2, 2)`.

@@ -70,8 +70,8 @@ without. `nix develop` gives everything below.
   `.github/screenshot.png`.
 
 CI also runs `cargo fmt --all --check`, clippy with `-D warnings` with and
-without the window, `cargo xtask icons --check` and `cargo xtask licenses
---check`.
+without the window and for musl, `cargo xtask icons --check` and `cargo
+xtask licenses --check`.
 
 Keep your own test files in `references/`, which git ignores.
 
@@ -99,11 +99,13 @@ parts. Paths and commands say "licenses", prose says "licences".
    `--locked`. A test checks the manifest, and the release workflow the
    PKGBUILDs.
 2. `cargo xtask local-release` builds every variant into
-   `target/release-artifacts`, Windows with mingw-w64. Try them.
+   `target/release-artifacts`, Windows with mingw-w64. `--targets` picks
+   others, as `linux-musl-x86_64`, made with musl-gcc (musl-tools on
+   Debian and Ubuntu, musl on Arch). Try them.
 3. Push a `vX.Y.Z` tag. The release workflow builds everything, tests the
-   packages on Ubuntu, Debian, Fedora, openSUSE and Windows, and drafts a
-   release with the archives, packages, checksums and ffmpeg's sources.
-   Check the draft, then publish it.
+   packages on Ubuntu, Debian, Fedora, openSUSE and Windows, and the musl
+   builds on Alpine, and drafts a release with the archives, packages,
+   checksums and ffmpeg's sources. Check the draft, then publish it.
 4. In each `packaging/aur/*` folder, `updpkgsums`, then
    `makepkg --printsrcinfo > .SRCINFO`, and push to the AUR.
 
