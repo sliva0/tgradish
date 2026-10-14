@@ -32,6 +32,9 @@ const WEBM_SPEEDS: [Choice<Speed>; 3] = [
     (Speed::Best, "Best", "Slow: minutes for long videos"),
 ];
 
+/// The label of a value the preset sets.
+const PRESETS: (&str, &str) = ("Preset's", "The value the preset sets");
+
 pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     section(ui, "Size and quality");
     let base = item.choices.webm_base(context.presets, context.config).unwrap_or_default();
@@ -52,8 +55,10 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
     // for it
     let fitting = if fit == Fit::Off { Err("Off encodes once") } else { Ok(()) };
     row(ui, "Encodes at most", "How many times fitting may encode", fitting, |ui| {
-        let default = DEFAULT_ATTEMPTS;
-        let automatic = ("Default", "As many as land just under the limit");
+        let (automatic, default) = match base.attempts {
+            Some(attempts) => (PRESETS, attempts),
+            None => (("Default", "As many as land just under the limit"), DEFAULT_ATTEMPTS),
+        };
         auto_number(ui, &mut options.attempts, automatic, Some(default), default, |value| {
             value.range(1..=MAX_ATTEMPTS)
         });
@@ -109,8 +114,10 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
     };
     let hint = "Constant quality from 0, the best, to 63";
     row(ui, "Quality (CRF)", hint, quality, |ui| {
-        let default = DEFAULT_CRF;
-        let automatic = ("Default", "A good quality at sticker sizes");
+        let (automatic, default) = match base.crf {
+            Some(crf) => (PRESETS, crf),
+            None => (("Default", "A good quality at sticker sizes"), DEFAULT_CRF),
+        };
         auto_number(ui, &mut options.crf, automatic, Some(default), default, |value| {
             value.range(CRFS)
         });
@@ -124,7 +131,8 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
             "Only small for tiny or still pictures; ticked, fitting goes by frame rate, as \
              lossless keeps no bitrate or quality to fit"
         };
-        if flag(ui, &mut options.lossless, false, "Lossless encoding", hint)
+        let preset = base.lossless.unwrap_or(false);
+        if flag(ui, &mut options.lossless, preset, "Lossless encoding", hint)
             && options.lossless == Some(true)
             && !keeps_quality
         {

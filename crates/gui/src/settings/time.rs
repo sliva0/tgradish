@@ -41,11 +41,12 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         }
         Format::Tgs => None,
     };
+    // what the preset sets, which the item's own values go over
+    let webm_base = item.choices.webm_base(context.presets, context.config).unwrap_or_default();
+    let spoof = item.choices.webm.spoof.or(webm_base.spoof).unwrap_or(Spoof::Auto);
     // a preset's tempo is what the automatic choice stands for
     let preset_tempo = match item.format {
-        Format::Webm | Format::Image => {
-            item.choices.webm_base(context.presets, context.config).ok().and_then(|base| base.tempo)
-        }
+        Format::Webm | Format::Image => webm_base.tempo,
         Format::Tgs => {
             item.choices.tgs_base(context.presets, context.config).ok().and_then(|base| base.tempo)
         }
@@ -89,7 +90,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 }
             });
             // .tgs results, and honest WebM ones, last 3 seconds at most
-            let cut = item.format == Format::Tgs || item.choices.webm.spoof == Some(Spoof::Never);
+            let cut = item.format == Format::Tgs || spoof == Spoof::Never;
             match played {
                 Some(played) if cut && telegram::too_long(played) => note(
                     ui,
@@ -144,8 +145,9 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             }
             let hint = "Telegram refuses stickers that say they last longer than 3 seconds";
             row(ui, "Over 3 seconds", hint, Ok(()), |ui| {
-                preset_segments(ui, &mut options.spoof, Spoof::Auto, &SPOOFS);
-                let spoof = options.spoof.unwrap_or(Spoof::Auto);
+                let preset = webm_base.spoof.unwrap_or(Spoof::Auto);
+                preset_segments(ui, &mut options.spoof, preset, &SPOOFS);
+                let spoof = options.spoof.unwrap_or(preset);
                 chosen_hint(ui, spoof, &SPOOFS);
                 if let Some(played) = played
                     && spoof == Spoof::Auto
@@ -155,7 +157,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                     note(ui, format!("Plays all {played}: Telegram is told it is shorter"));
                 }
             });
-            let honest = options.spoof == Some(Spoof::Never);
+            let honest = options.spoof.or(webm_base.spoof) == Some(Spoof::Never);
             let allowed = if honest { Err("Nothing is spoofed when cut at 3 s") } else { Ok(()) };
             let hint = "The duration written into the file, which Telegram reads";
             row(ui, "Spoof to", hint, allowed, |ui| {
