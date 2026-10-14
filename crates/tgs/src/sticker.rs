@@ -427,7 +427,8 @@ fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R>
     }
 }
 
-fn zopfli_iterations(effort: Effort) -> u64 {
+/// How many zopfli iterations stickers are packed with at `effort`.
+pub fn zopfli_iterations(effort: Effort) -> u64 {
     match effort {
         Effort::Fast => 5,
         Effort::Balanced => 15,

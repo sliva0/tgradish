@@ -1,5 +1,5 @@
 //! Runs pixel art through the encoder: the synthetic corpus of
-//! `tgradish-corpus`, or the GIF, WebP and Aseprite files of a folder. A
+//! `tgradish-corpus`, or the pictures of a folder that tgradish reads. A
 //! folder's `README.md` may give older sizes to compare with, in a
 //! Markdown table with the file name in backticks in its first column and
 //! the size in its seventh, like pixelart2tgs 1.x's.
@@ -10,15 +10,17 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use tgradish_tgs::encode::{Settings, painter};
 use tgradish_tgs::file;
-use tgradish_tgs::frames::{DecodeOptions, decode};
+use tgradish_tgs::frames::{DecodeOptions, Format, decode};
 use tgradish_tgs::layout::lay_out;
 use tgradish_tgs::lottie::Style;
 use tgradish_tgs::normalise::{Options, normalise};
+use tgradish_tgs::sticker::zopfli_iterations;
 
 use crate::verify::{self, Renderer};
 
 pub struct Bench {
-    /// gzip -9 instead of zopfli, for quick runs.
+    /// gzip -9 instead of zopfli as hard as stickers of the effort are
+    /// packed, for quick runs.
     pub fast: bool,
     /// Render every result and count wrong cells and seams.
     pub verify: bool,
@@ -52,17 +54,17 @@ fn folder(dir: &Path) -> Result<(Files, Vec<(String, u64)>)> {
         .with_context(|| format!("cannot read {}", dir.display()))?
         .map(|entry| entry.map(|entry| entry.path()))
         .collect::<Result<_, _>>()?;
-    paths.retain(|path| {
-        matches!(path.extension().and_then(|e| e.to_str()), Some("gif" | "webp" | "ase"))
-    });
+    paths.retain(|path| path.is_file());
     paths.sort();
-    let files = paths
-        .iter()
-        .map(|path| {
-            let name = path.file_name().unwrap().to_string_lossy().into_owned();
-            Ok((name, std::fs::read(path)?))
-        })
-        .collect::<Result<_>>()?;
+    let mut files = Vec::new();
+    for path in paths {
+        let bytes =
+            std::fs::read(&path).with_context(|| format!("cannot read {}", path.display()))?;
+        // by content, as decoding goes, so any extension or case is taken
+        if Format::detect(&bytes).is_some() {
+            files.push((path.file_name().unwrap().to_string_lossy().into_owned(), bytes));
+        }
+    }
     Ok((files, sizes_from_1x(&readme)))
 }
 
@@ -119,13 +121,9 @@ pub fn run(dir: Option<&Path>, bench: &Bench) -> Result<()> {
             .with_context(|| name.clone())?;
         let json = lay_out(&scene, &anim, name_tag.clone(), false).to_json(bench.style);
         let packed = if bench.fast {
-            use std::io::Write;
-            let mut encoder =
-                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
-            encoder.write_all(json.as_bytes())?;
-            encoder.finish()?
+            file::pack_quick(json.as_bytes())
         } else {
-            file::pack(json.as_bytes(), 15)
+            file::pack(json.as_bytes(), zopfli_iterations(bench.settings.effort))
         };
         let ms = started.elapsed().as_millis();
         let groups: usize = scene.layers.iter().map(|layer| layer.groups.len()).sum();
