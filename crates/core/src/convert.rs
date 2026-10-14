@@ -159,6 +159,21 @@ pub fn read_from(start: f64, previous: f64) -> f64 {
     start - ((start - previous) / 4.0).min(1e-3)
 }
 
+/// What fitting searches where no range is asked for, for a result of
+/// `fps` frames a second, `length` seconds long: bitrates from what still
+/// makes a picture to far past any sticker, libvpx's CRF short of its
+/// near-lossless end, which no sticker fits, frame rates up to the
+/// result's, and lengths from a tenth of a second, about the shortest
+/// that still moves.
+pub fn default_fit_range(fit: Fit, fps: f64, length: f64) -> Range {
+    match fit {
+        Fit::Auto | Fit::Bitrate | Fit::Off => Range { min: 8.0, max: 50_000.0 },
+        Fit::Crf => Range { min: 4.0, max: f64::from(*options::CRFS.end()) },
+        Fit::Fps => Range { min: 1.0, max: fps.floor().max(1.0) },
+        Fit::Length => Range { min: length.min(0.1), max: length },
+    }
+}
+
 /// Duration of [`frame_count`] frames, as written into the file header.
 pub fn encoded_length(length: f64, fps: f64) -> f64 {
     frame_count(length, fps) as f64 / fps
@@ -520,14 +535,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
             check_range(Range { min: range.min.min(length), max: length }, fit, length)?
         }
         (Some(range), _) => check_range(range, fit, length)?,
-        // searched where nothing narrower is asked: bitrates from what still
-        // makes a picture to far past any sticker, and libvpx's CRF short of
-        // its near-lossless end, which no sticker fits
-        (None, Fit::Auto | Fit::Bitrate | Fit::Off) => Range { min: 8.0, max: 50_000.0 },
-        (None, Fit::Crf) => Range { min: 4.0, max: f64::from(*options::CRFS.end()) },
-        (None, Fit::Fps) => Range { min: 1.0, max: fps.floor().max(1.0) },
-        // a tenth of a second is about the shortest that still moves
-        (None, Fit::Length) => Range { min: length.min(0.1), max: length },
+        (None, fit) => default_fit_range(fit, fps, length),
     };
 
     let encoder_options = o.encoder_options.clone().unwrap_or_default();

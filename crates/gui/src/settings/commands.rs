@@ -170,10 +170,11 @@ pub(super) fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     });
 }
 
-fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String> {
-    if matches!(item.kind, Kind::Aseprite | Kind::Frames) {
-        return Err("ffmpeg reads a PNG each conversion draws of the pixel art".into());
-    }
+/// What converting the item to WebM would ask for, and plans to make.
+pub(super) fn planned(
+    item: &Item,
+    context: &Context,
+) -> Result<(convert::Request, convert::Plan), String> {
     let video = item.video.ready().ok_or("the input isn't read yet")?;
     let options = item.choices.webm_options(context.presets, context.config)?;
     let request = convert::Request {
@@ -184,8 +185,16 @@ fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String
         overwrite: true,
         keep_temp: false,
     };
-    let (mut plan, _) =
-        convert::plan(&request, video.probe.clone()).map_err(|err| err.to_string())?;
+    let (plan, _) = convert::plan(&request, video.probe.clone()).map_err(|err| err.to_string())?;
+    Ok((request, plan))
+}
+
+fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String> {
+    if matches!(item.kind, Kind::Aseprite | Kind::Frames) {
+        return Err("ffmpeg reads a PNG each conversion draws of the pixel art".into());
+    }
+    let video = item.video.ready().ok_or("the input isn't read yet")?;
+    let (request, mut plan) = planned(item, context)?;
     // as converting decides it, guessed from the frames the window has
     // read, which are those converting reads unless the input is long
     let clip = &video.overview;
@@ -226,6 +235,7 @@ mod tests {
             output: None,
             config_path: Some(std::path::Path::new("/elsewhere/config.toml")),
             presets_dir: None,
+            in_frames: false,
         };
         let mut video = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
         video.format = Format::Webm;
@@ -282,6 +292,7 @@ mod tests {
             output: None,
             config_path: default_config.as_deref(),
             presets_dir: None,
+            in_frames: false,
         };
         let mut item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
         item.format = Format::Webm;

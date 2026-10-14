@@ -10,10 +10,15 @@ use crate::jobs::Status;
 use crate::outputs::Written;
 use crate::{system, widgets};
 
+/// Room the right of the bar takes, at least: the result's name and the
+/// button that shows its folder.
+const SAVES_TO: f32 = 300.0;
+
 impl App {
     pub(crate) fn actions(&mut self, ui: &mut egui::Ui, id: u64) {
         let output = self.item(id).map(|item| self.output_for(item));
         let queued = self.queue.iter().position(|&other| other == id);
+        let presets_kept = self.presets_dir.is_some();
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
         let mut convert = false;
         let mut replace = None;
@@ -62,6 +67,25 @@ impl App {
                     };
                     if ui.add(button).on_hover_text(hint).clicked() {
                         convert = true;
+                    }
+                    if presets_kept {
+                        // an icon alone where the file's name and folder need the room
+                        let text = "Save current settings as preset…";
+                        let room = ui.available_width() - SAVES_TO;
+                        let save = if room >= widgets::text_width(ui, text, 16.0) {
+                            egui::Button::new(text)
+                        } else {
+                            egui::Button::new(RichText::new("💾").size(15.0))
+                        };
+                        let hint = "Save current settings as preset: keep them as a preset of \
+                                    your own, for any file to start from";
+                        let save = save.min_size(vec2(32.0, 32.0));
+                        if ui.add(save).on_hover_text(hint).clicked() {
+                            crate::preset_dialogs::ask(
+                                ui.ctx(),
+                                crate::preset_dialogs::Ask::Save(id),
+                            );
+                        }
                     }
                     if let Some(failed) = &item.failed {
                         match &failed.job.status {

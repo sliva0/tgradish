@@ -292,7 +292,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
 }
 
 /// Width of the crop's number fields.
-const FIELD: f32 = 48.0;
+const FIELD: f32 = 62.0;
 /// Side of the crop's picture: with the fields above and below it, as
 /// high as the fields beside them.
 const SKETCH: f32 = 36.0;
@@ -326,7 +326,7 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
             let response = ui
                 .add_sized(
                     [FIELD, ui.spacing().interact_size.y],
-                    egui::DragValue::new(&mut value).range(0..=most),
+                    egui::DragValue::new(&mut value).range(0..=most).suffix(" px"),
                 )
                 .on_hover_text(hint);
             response.changed().then_some(value)
@@ -645,7 +645,7 @@ fn integer_scale(
             ui.spacing_mut().item_spacing.x = 3.0;
             let current = scale_step(scale.unwrap_or(guess));
             let mut step = current;
-            if ui.small_button("-").on_hover_text("Smaller").clicked() {
+            if ui.small_button("−").on_hover_text("Smaller").clicked() {
                 step -= 1;
             }
             ui.add(
