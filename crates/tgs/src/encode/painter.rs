@@ -379,8 +379,10 @@ impl<'a> Painter<'a> {
                 }
             }
         }
+        // a tile that can't be drawn within the limits rules tiling out, as
+        // it does splitting: the colour is still drawn some other way
         if tiles
-            && let Ok(tiled) = self.tiled_pieces(&own, later)
+            && let Ok(Some(tiled)) = self.tiled_pieces(&own, later)
             && cheaper(&best, tiled_cost(&tiled))
         {
             best = Some((tiled_cost(&tiled), tiled));
@@ -396,18 +398,19 @@ impl<'a> Painter<'a> {
     /// Tiles are drawn in reading order, and a tile also covers the cells
     /// of its colour in later tiles next to its own: the seam invariant
     /// between two tiles, which shows every cell in its own tile's group.
+    /// `None` when the colour fits in one tile, where tiling can't help.
     fn tiled_pieces(
         &self,
         own: &[Mask],
         later: &[Mask],
-    ) -> Result<Vec<(Place, Piece)>, EncodeError> {
+    ) -> Result<Option<Vec<(Place, Piece)>>, EncodeError> {
         let (width, height) = (self.anim.width(), self.anim.height());
         let size = TILE;
         let mut any = self.empty();
         own.iter().for_each(|mask| any.union(mask));
-        let Some((x0, y0, w, h)) = any.bounds() else { return Ok(Vec::new()) };
+        let Some((x0, y0, w, h)) = any.bounds() else { return Ok(None) };
         if w <= size && h <= size {
-            return Err(EncodeError::TooManyRects { rects: 0 });
+            return Ok(None);
         }
         let mut pieces = Vec::new();
         let (columns, rows) = (width.div_ceil(size), height.div_ceil(size));
@@ -466,7 +469,7 @@ impl<'a> Painter<'a> {
                 pieces.push((Place::Main, piece));
             }
         }
-        Ok(pieces)
+        Ok(Some(pieces))
     }
 
     /// The cores of a colour: for each stretch of frames where most of its
