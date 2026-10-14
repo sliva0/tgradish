@@ -37,92 +37,23 @@ impl Accent {
 #[cfg(all(unix, not(target_os = "macos")))]
 use portal::follow;
 
-/// The desktop portal's accent, through libdbus: the library file dialogs
-/// load too, loaded the same way when it is needed, so tgradish starts
-/// without it.
+/// The desktop portal's accent, through libdbus.
 #[cfg(all(unix, not(target_os = "macos")))]
 #[allow(unsafe_code)]
 mod portal {
-    use std::ffi::{CStr, c_char, c_int, c_void};
+    use std::ffi::{CStr, c_char};
 
     use eframe::egui::Color32;
 
-    type Connection = c_void;
-    type Message = c_void;
-
-    /// libdbus's DBusError and DBusMessageIter, which callers allocate:
-    /// opaque here, and larger than libdbus's own on any machine, as
-    /// aligned.
-    #[repr(C)]
-    struct Error([u64; 8]);
-
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    struct Iter([u64; 16]);
-
-    const SESSION: c_int = 0;
-    const STRING: c_int = b's' as c_int;
-    const VARIANT: c_int = b'v' as c_int;
-    const STRUCT: c_int = b'r' as c_int;
-    const DOUBLE: c_int = b'd' as c_int;
+    use crate::dbus::{
+        Connection, DOUBLE, Dbus, Error, Iter, Message, SESSION, STRING, STRUCT, VARIANT,
+    };
 
     const DESTINATION: &CStr = c"org.freedesktop.portal.Desktop";
     const PATH: &CStr = c"/org/freedesktop/portal/desktop";
     const INTERFACE: &CStr = c"org.freedesktop.portal.Settings";
     const NAMESPACE: &CStr = c"org.freedesktop.appearance";
     const KEY: &CStr = c"accent-color";
-
-    macro_rules! functions {
-        ($($name:ident: fn($($arg:ty),*) $(-> $ret:ty)?;)*) => {
-            /// The functions of libdbus used here, the last three only to
-            /// test with.
-            #[cfg_attr(not(test), allow(dead_code))]
-            struct Dbus {
-                $($name: unsafe extern "C" fn($($arg),*) $(-> $ret)?,)*
-                _library: libloading::Library,
-            }
-
-            impl Dbus {
-                fn load() -> Option<Dbus> {
-                    // SAFETY: loading libdbus runs no code of its own, and
-                    // each function has the type its header declares
-                    unsafe {
-                        let library = libloading::Library::new("libdbus-1.so.3").ok()?;
-                        $(let $name = *library.get(concat!(stringify!($name), "\0").as_bytes()).ok()?;)*
-                        Some(Dbus { $($name,)* _library: library })
-                    }
-                }
-            }
-        };
-    }
-
-    functions! {
-        dbus_error_init: fn(*mut Error);
-        dbus_error_free: fn(*mut Error);
-        dbus_bus_get_private: fn(c_int, *mut Error) -> *mut Connection;
-        dbus_bus_add_match: fn(*mut Connection, *const c_char, *mut Error);
-        dbus_connection_send_with_reply_and_block:
-            fn(*mut Connection, *mut Message, c_int, *mut Error) -> *mut Message;
-        dbus_connection_read_write: fn(*mut Connection, c_int) -> u32;
-        dbus_connection_pop_message: fn(*mut Connection) -> *mut Message;
-        dbus_connection_close: fn(*mut Connection);
-        dbus_connection_set_exit_on_disconnect: fn(*mut Connection, u32);
-        dbus_connection_unref: fn(*mut Connection);
-        dbus_message_new_method_call:
-            fn(*const c_char, *const c_char, *const c_char, *const c_char) -> *mut Message;
-        dbus_message_unref: fn(*mut Message);
-        dbus_message_is_signal: fn(*mut Message, *const c_char, *const c_char) -> u32;
-        dbus_message_iter_init: fn(*mut Message, *mut Iter) -> u32;
-        dbus_message_iter_init_append: fn(*mut Message, *mut Iter);
-        dbus_message_iter_append_basic: fn(*mut Iter, c_int, *const c_void) -> u32;
-        dbus_message_iter_get_arg_type: fn(*mut Iter) -> c_int;
-        dbus_message_iter_get_basic: fn(*mut Iter, *mut c_void);
-        dbus_message_iter_next: fn(*mut Iter) -> u32;
-        dbus_message_iter_recurse: fn(*mut Iter, *mut Iter);
-        dbus_message_new_signal: fn(*const c_char, *const c_char, *const c_char) -> *mut Message;
-        dbus_message_iter_open_container: fn(*mut Iter, c_int, *const c_char, *mut Iter) -> u32;
-        dbus_message_iter_close_container: fn(*mut Iter, *mut Iter) -> u32;
-    }
 
     /// Reads the accent, then follows the portal's changes to it, on a
     /// connection of its own, until the session bus goes away.
