@@ -758,7 +758,7 @@ pub fn convert(
         attempts: 0,
         pass_logs: HashMap::new(),
     };
-    let best = fit::run(&plan, &mut encoder, plan.target.max_bytes())?;
+    let best = fit::run(&plan, &mut encoder)?;
     cancel.check()?;
     let spoofed = plan.spoofs(encoded_length(best.params.length, best.params.fps));
 

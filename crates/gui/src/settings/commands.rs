@@ -221,7 +221,7 @@ fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String
             plan.scaling = Scaling::Sharp;
         }
     }
-    let params = tgradish_core::fit::first_params(&plan, plan.target.max_bytes());
+    let params = tgradish_core::fit::first_params(&plan);
     Ok(tgradish_core::ffmpeg::commands(&plan, &params)
         .iter()
         .map(|args| {
