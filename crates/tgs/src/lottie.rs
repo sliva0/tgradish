@@ -62,8 +62,9 @@ pub struct Transform {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
-    /// Drawn top first; ends with its fill and an [`Item::GroupTransform`]
-    /// with no opacity keyframes.
+    /// Drawn top first; ends with its fill and an [`Item::GroupTransform`],
+    /// which has opacity keyframes only when the group is hidden while its
+    /// layer shows, as a shape drawn once for several spans of frames is.
     Group(Vec<Item>),
     Rect {
         centre: [f64; 2],
@@ -92,6 +93,8 @@ impl Animation {
         if style.tgs_key {
             out.push_str("\"tgs\":1,");
         }
+        // `v` is the bodymovin version the file says it follows: everything
+        // written here is in 5.7, and Telegram accepted it in upload probes
         write!(
             out,
             "\"v\":\"5.7.2\",\"fr\":{FPS},\"ip\":0,\"op\":{},\"w\":{CANVAS},\"h\":{CANVAS},",
@@ -116,6 +119,9 @@ impl Animation {
 impl Layer {
     fn write(&self, out: &mut String, style: Style) {
         let Transform { position: [x, y], scale: [across, down] } = self.transform;
+        // Lottie scales in percent. Positions are in canvas pixels, where 4
+        // decimals are far below what shows; shapes take 6, since the
+        // scale magnifies their units up to the whole canvas.
         let (across, down) = (number(across * 100.0, 4), number(down * 100.0, 4));
         if let Some(id) = &self.id {
             write!(out, "{{\"ln\":{},", serde_json::Value::from(id.as_str())).unwrap();

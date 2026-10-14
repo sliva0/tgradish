@@ -1,7 +1,8 @@
 //! Checks any Lottie JSON against Telegram's sticker rules, the limits
 //! its server has beyond them, Telegram Desktop's limit on JSON and the
-//! parse limits of tlottie, Telegram's renderer. Shapes, paints and their sources are counted the way tlottie's
-//! parser counts them (`src/composition/parse.rs`).
+//! parse limits of tlottie, Telegram's renderer. Shapes, paints and their
+//! sources are counted the way tlottie's parser counts them
+//! (`src/composition/parse.rs`).
 
 use std::collections::{BTreeSet, HashMap};
 
