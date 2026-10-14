@@ -1,18 +1,23 @@
 //! Development tasks, run with `cargo xtask <task>`.
 //!
-//! `cargo xtask ffmpeg [--target TARGET] [--no-asm]` builds the minimal
-//! static ffmpeg libraries that release builds link in: only what tgradish
-//! needs to decode common inputs and encode VP9 WebM. Runs on Linux, for the
-//! machine's own architecture; Windows builds are cross-compiled with
-//! mingw-w64. Needs a C toolchain, make, pkg-config, nasm (x86-64, unless
-//! --no-asm), meson, ninja, curl and tar. Targets are `linux-x86_64`,
-//! `linux-aarch64` and `windows-x86_64`.
+//! `cargo xtask ffmpeg [--target TARGET] [--no-asm] [--force]` builds the
+//! minimal static ffmpeg libraries that release builds link in: only what
+//! tgradish needs to decode common inputs and encode VP9 WebM. Runs on
+//! Linux, for the machine's own architecture; Windows builds are
+//! cross-compiled with mingw-w64. Needs a C toolchain, make, pkg-config,
+//! nasm (x86-64, unless --no-asm), meson, ninja, curl and tar. Targets are
+//! `linux-x86_64`, `linux-aarch64` and `windows-x86_64`.
 //!
 //! The static libraries end up in `target/ffmpeg/prefix-<triple>`, and the
 //! licences of everything in them in `target/ffmpeg/licenses-<triple>`.
+//! Libraries already built from the same recipe, the sources and
+//! everything in `xtask/src/ffmpeg.rs`, are kept unless `--force` is given.
 //! ffmpeg is configured without GPL parts, so it is LGPL 2.1 or later.
-//! Point `PKG_CONFIG_PATH` at the prefix's `lib/pkgconfig` to build
-//! tgradish with `--features linked-static`.
+//!
+//! `cargo xtask build --target TARGET [--system-ffmpeg]` builds tgradish
+//! for release with those libraries linked in, or with `--system-ffmpeg`
+//! without them, into `target/<triple>/release`; Windows with mingw-w64.
+//! The release workflow and `local-release` both build with it.
 //!
 //! `cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc
 //! 2.28]` packs a built tgradish into a release archive. With
@@ -44,6 +49,7 @@
 //! executable from the window's own, `crates/gui/assets/icon.png`;
 //! `--check` fails if they are out of date.
 
+mod build;
 mod ffmpeg;
 mod icons;
 mod licences;
@@ -60,13 +66,15 @@ fn main() -> Result<()> {
     match args.first().map(String::as_str) {
         Some("ffmpeg") => ffmpeg::build_ffmpeg(&args[1..]),
         Some("ffmpeg-sources") => ffmpeg::package_sources(),
+        Some("build") => build::build_release(&args[1..]),
         Some("package") => package::package_release(&args[1..]),
         Some("licenses") => licences::crate_licenses(&args[1..]),
         Some("icons") => icons::icons(&args[1..]),
         Some("local-release") => release::local_release(&args[1..]),
         _ => bail!(
-            "usage: cargo xtask ffmpeg [--target TARGET] [--no-asm]\n       \
+            "usage: cargo xtask ffmpeg [--target TARGET] [--no-asm] [--force]\n       \
              cargo xtask ffmpeg-sources\n       \
+             cargo xtask build --target TARGET [--system-ffmpeg]\n       \
              cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc 2.28]\n       \
              cargo xtask licenses [--check]\n       \
              cargo xtask icons [--check]\n       \

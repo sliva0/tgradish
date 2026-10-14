@@ -187,7 +187,6 @@ struct Build {
     sources: PathBuf,
     /// Install prefix for the libraries.
     prefix: PathBuf,
-    out: PathBuf,
 }
 
 /// Downloads the archive of `source` into `dir`, unless it is there, and
@@ -386,7 +385,7 @@ impl Build {
     /// Collects the licenses of everything in the build, and where its
     /// sources come from, for release archives.
     fn stage_licenses(&self) -> Result<PathBuf> {
-        let stage = self.out.join(format!("licenses-{}", self.target.triple()));
+        let stage = ffmpeg_licenses(self.target);
         if stage.exists() {
             std::fs::remove_dir_all(&stage)?;
         }
@@ -408,29 +407,38 @@ impl Build {
     }
 }
 
-/// The `ffmpeg` task.
+/// The `ffmpeg` task: [`ensure_ffmpeg`], or with `--force` [`ffmpeg_for`].
 pub fn build_ffmpeg(args: &[String]) -> Result<()> {
     let mut target = Target::host();
     let mut asm = true;
+    let mut force = false;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--target" => target = Target::parse(iter.next())?,
             "--no-asm" => asm = false,
+            "--force" => force = true,
             other => bail!("unknown argument {other:?}"),
         }
     }
-    ffmpeg_for(target, asm)
+    if force { ffmpeg_for(target, asm) } else { ensure_ffmpeg(target, asm) }
 }
 
-/// What an ffmpeg build is made of: sources, parts and whether assembly is
-/// in, so a build from another recipe is known to be out of date.
+/// What an ffmpeg build is made of: sources, parts, whether assembly is in,
+/// and this file, which holds every flag the libraries are configured with.
+/// A build from another recipe is out of date, as is one from before an
+/// edit here, the same as the release workflow's cache of builds is.
 pub fn recipe(asm: bool) -> String {
     let sources: Vec<String> = LIBRARIES
         .iter()
         .map(|source| format!("{} {} {}", source.name, source.version, source.sha256))
         .collect();
-    format!("{sources:?}\n{FFMPEG_COMPONENTS:?}\nasm {asm}\n")
+    // FNV-1a, which stays the same from one Rust release to the next
+    let this_file =
+        include_str!("ffmpeg.rs").bytes().fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+        });
+    format!("{sources:?}\n{FFMPEG_COMPONENTS:?}\nasm {asm}\nrecipe {this_file:016x}\n")
 }
 
 /// Where the static ffmpeg libraries of `target` go.
@@ -438,17 +446,38 @@ pub fn ffmpeg_prefix(target: Target) -> PathBuf {
     workspace_root().join("target/ffmpeg").join(format!("prefix-{}", target.triple()))
 }
 
+/// Where the licences of the libraries of `target` are gathered, for
+/// release archives.
+pub fn ffmpeg_licenses(target: Target) -> PathBuf {
+    workspace_root().join("target/ffmpeg").join(format!("licenses-{}", target.triple()))
+}
+
+/// Builds the static ffmpeg libraries of `target` unless they are there
+/// from `recipe(asm)` already, with their licences, as when the release
+/// workflow restored them from its cache.
+pub fn ensure_ffmpeg(target: Target, asm: bool) -> Result<()> {
+    let prefix = ffmpeg_prefix(target);
+    let built = std::fs::read_to_string(prefix.join("recipe.txt")).ok();
+    let licenses = ffmpeg_licenses(target);
+    if built.as_deref() != Some(recipe(asm).as_str()) || !licenses.is_dir() {
+        eprintln!("building ffmpeg for {}", target.name());
+        return ffmpeg_for(target, asm);
+    }
+    eprintln!("ffmpeg for {} is up to date; --force builds it again", target.name());
+    carry_licenses(&licenses)?;
+    println!("{}\n{}", prefix.display(), licenses.display());
+    Ok(())
+}
+
 /// Builds the static ffmpeg libraries of `target` into its prefix, and
 /// keeps `licenses/ffmpeg` up to date with what is in them.
 pub fn ffmpeg_for(target: Target, asm: bool) -> Result<()> {
-    let root = workspace_root().join("target/ffmpeg");
     let build = Build {
         target,
         asm,
         jobs: std::thread::available_parallelism().map_or(4, |n| n.get()).to_string(),
-        sources: root.join("sources"),
+        sources: workspace_root().join("target/ffmpeg/sources"),
         prefix: ffmpeg_prefix(target),
-        out: root,
     };
     std::fs::create_dir_all(&build.sources)?;
     if build.prefix.exists() {
@@ -463,16 +492,22 @@ pub fn ffmpeg_for(target: Target, asm: bool) -> Result<()> {
         build.static_pthread()?;
     }
     let licenses = build.stage_licenses()?;
-    // what binaries carry, see crates/core/build.rs
-    let carried = workspace_root().join("licenses/ffmpeg");
-    std::fs::create_dir_all(&carried)?;
-    for entry in std::fs::read_dir(&licenses)? {
-        let entry = entry?;
-        std::fs::copy(entry.path(), carried.join(entry.file_name()))?;
-    }
+    carry_licenses(&licenses)?;
     forget_linked_ffmpeg(target)?;
     std::fs::write(build.prefix.join("recipe.txt"), recipe(asm))?;
     println!("{}\n{}", build.prefix.display(), licenses.display());
+    Ok(())
+}
+
+/// Copies the gathered licences into `licenses/ffmpeg`, which binaries
+/// carry (see crates/core/build.rs).
+fn carry_licenses(licenses: &Path) -> Result<()> {
+    let carried = workspace_root().join("licenses/ffmpeg");
+    std::fs::create_dir_all(&carried)?;
+    for entry in std::fs::read_dir(licenses)? {
+        let entry = entry?;
+        std::fs::copy(entry.path(), carried.join(entry.file_name()))?;
+    }
     Ok(())
 }
 
