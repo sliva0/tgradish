@@ -6,7 +6,7 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::process::Command;
 
-use super::args::{input_args, video_filter};
+use super::args::{input_args, ssim_graph};
 use super::{Ffmpeg, Output, run};
 use crate::CancelToken;
 use crate::convert::Plan;
@@ -24,18 +24,8 @@ pub fn ssim(
     cancel: &CancelToken,
     on_line: &mut dyn FnMut(String),
 ) -> Result<f64> {
-    // Timestamps are rebuilt from frame numbers: WebM stores whole
-    // milliseconds, which would pair some frames with their neighbours.
-    let retime = |fps: f64| format!("format=yuv420p,settb=AVTB,setpts=N/({fps}*TB)");
-    let reference = video_filter(plan, plan.fps, plan.length, "yuv420p");
-    // the first ssim input sets the timeline; the attempt's last frame is
-    // repeated if it ends earlier
-    let graph = format!(
-        "[1:v]{reference},{}[source];\
-         [0:v]{}[attempt];[source][attempt]ssim=eof_action=repeat",
-        retime(plan.fps),
-        retime(fps),
-    );
+    // ffmpeg turns inputs upright itself
+    let graph = ssim_graph(plan, fps, ("1:v", "0:v"), "", "");
 
     let mut cmd = Command::new(&ffmpeg.ffmpeg);
     cmd.args(["-hide_banner", "-nostdin", "-nostats", "-loglevel", "info", "-i"])

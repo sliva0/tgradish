@@ -18,6 +18,44 @@ fn num(value: f64) -> String {
     text.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
+/// How many seconds to read for `count` frames at `fps`: one frame more,
+/// as [`input_args`] says why. Both backends read this much.
+pub(crate) fn read_seconds(count: u64, fps: f64) -> f64 {
+    (count + 1) as f64 / fps
+}
+
+/// The filters that make preview frames of `width` by `height` at `fps`,
+/// or the first frame alone when `once`: resampling to a frame rate can
+/// skip a short first frame.
+pub(crate) fn frames_filter(once: bool, fps: f64, (width, height): (u32, u32)) -> String {
+    let resample = if once { String::new() } else { format!("fps={fps},") };
+    format!("{resample}scale={width}:{height}:flags=bilinear,setsar=1")
+}
+
+/// The filter graph comparing an attempt at `fps` with the source made as
+/// `plan` says, for `fit = auto`: the source's pad, `source`, goes
+/// through `before` and the plan's filters, the attempt's is `attempt`,
+/// and the scores leave by `out`, if named. Timestamps are rebuilt from
+/// frame numbers: WebM stores whole milliseconds, which would pair some
+/// frames with their neighbours. The source, the first input of `ssim`,
+/// sets the timeline, and the attempt's last frame is repeated if it ends
+/// earlier.
+pub(crate) fn ssim_graph(
+    plan: &Plan,
+    fps: f64,
+    (source, attempt): (&str, &str),
+    before: &str,
+    out: &str,
+) -> String {
+    let retime = |fps: f64| format!("format=yuv420p,settb=AVTB,setpts=N/({fps}*TB)");
+    let reference = video_filter(plan, plan.fps, plan.length, "yuv420p");
+    format!(
+        "[{source}]{before}{reference},{}[s];[{attempt}]{}[a];[s][a]ssim=eof_action=repeat{out}",
+        retime(plan.fps),
+        retime(fps),
+    )
+}
+
 /// Input options and the input itself, for a clip of `length` seconds at
 /// `fps`. Reads one frame more than needed, so `-t`, which counts in the
 /// input's own rounded times, never cuts off the last frame the filter
@@ -30,7 +68,7 @@ pub(crate) fn input_args(plan: &Plan, length: f64, fps: f64) -> Vec<OsString> {
         args.extend(["-ss".into(), num(plan.source.seek(plan.start)).into()]);
     }
     // in the input's time, which the tempo stretches or squeezes
-    let read = (frame_count(length, fps) + 1) as f64 / fps * plan.tempo;
+    let read = read_seconds(frame_count(length, fps), fps) * plan.tempo;
     args.extend(["-t".into(), num(read).into()]);
     if let Some(decoder) = &plan.source.decoder {
         args.extend(["-c:v".into(), decoder.into()]);
