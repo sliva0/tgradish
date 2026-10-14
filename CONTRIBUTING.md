@@ -54,8 +54,9 @@ for @Stickers to accept or refuse.
 cargo test --workspace
 ```
 
-needs `ffmpeg` and `ffprobe` with libvpx on PATH; tests that need them
-print "skipped" and pass without. `nix develop` gives everything below.
+needs `ffmpeg` and `ffprobe` on PATH, with libvpx, and libx264 for the
+video clips of the corpus; tests that need them print "skipped" and pass
+without. `nix develop` gives everything below.
 
 - The built-in ffmpeg: `cargo test --workspace --features tgradish/linked`,
   with ffmpeg's development files, pkg-config and libclang.
@@ -91,8 +92,12 @@ parts. Paths and commands say "licenses", prose says "licences".
 ## Releasing
 
 1. Set the version in `Cargo.toml`: `[workspace.package]` and the
-   workspace's own crates under `[workspace.dependencies]`, and `pkgver` in
-   each `packaging/aur/*/PKGBUILD`.
+   workspace's own crates under `[workspace.dependencies]`; in
+   `crates/cli/tgradish.exe.manifest`, with a fourth number, 0; and
+   `pkgver` in each `packaging/aur/*/PKGBUILD`. Then refresh `Cargo.lock`
+   with `cargo update --workspace` and commit it, as release builds use
+   `--locked`. A test checks the manifest, and the release workflow the
+   PKGBUILDs.
 2. `cargo xtask local-release` builds every variant into
    `target/release-artifacts`, Windows with mingw-w64. Try them.
 3. Push a `vX.Y.Z` tag. The release workflow builds everything, tests the
@@ -101,3 +106,8 @@ parts. Paths and commands say "licenses", prose says "licences".
    Check the draft, then publish it.
 4. In each `packaging/aur/*` folder, `updpkgsums`, then
    `makepkg --printsrcinfo > .SRCINFO`, and push to the AUR.
+
+None of the crates is on crates.io yet. If the libraries are published,
+it is in the order they depend on each other: `tgradish-frames`,
+`tgradish-tgs`, `tgradish-core`, `tgradish-gui`, then `tgradish`. The
+corpus, tgs-lab and xtask are `publish = false`, and stay that way.
