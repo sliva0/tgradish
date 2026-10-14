@@ -241,10 +241,10 @@ fn fit_auto(encoder: &mut dyn Encoder, plan: &Plan, limit: u64) -> Result<Search
     Ok(total)
 }
 
-/// What fitting encodes first, for `limit` bytes: what it then changes
+/// What fitting encodes first: what it then changes
 /// depends on the sizes that come out. Found by running [`run`] with an
 /// encoder that stops at its first attempt, so it always agrees with it.
-pub fn first_params(plan: &Plan, limit: u64) -> Params {
+pub fn first_params(plan: &Plan) -> Params {
     /// Notes the first attempt asked for, and stops the search there.
     struct First(Option<Params>);
     impl Encoder for First {
@@ -257,13 +257,15 @@ pub fn first_params(plan: &Plan, limit: u64) -> Params {
         }
     }
     let mut first = First(None);
-    let _ = run(plan, &mut first, limit);
+    let _ = run(plan, &mut first);
     first.0.expect("every search encodes at least once")
 }
 
-/// Runs the search configured in `plan` and returns the attempt to keep.
-/// With `fit = off` that is the single attempt, even if it is too big.
-pub fn run(plan: &Plan, encoder: &mut dyn Encoder, limit: u64) -> Result<Attempt> {
+/// Runs the search configured in `plan` and returns the attempt to keep:
+/// the best under its target's size limit. With `fit = off` that is the
+/// single attempt, even if it is too big.
+pub fn run(plan: &Plan, encoder: &mut dyn Encoder) -> Result<Attempt> {
+    let limit = plan.target.max_bytes();
     let (fps, length, budget) = (plan.fps, plan.length, plan.attempts);
     let quality = if plan.lossless { Rate::Lossless } else { Rate::Crf(plan.crf) };
     let range = plan.fit_range;
@@ -390,8 +392,8 @@ mod tests {
         for fit in [Fit::Off, Fit::Auto, Fit::Bitrate, Fit::Crf, Fit::Fps, Fit::Length] {
             let plan = test_plan(Options { fit: Some(fit), ..Options::default() }, 4.84);
             let mut encoder = FakeEncoder::new(0.0);
-            let _ = run(&plan, &mut encoder, MAX_BYTES);
-            assert_eq!(encoder.calls.first(), Some(&first_params(&plan, MAX_BYTES)), "{fit:?}");
+            let _ = run(&plan, &mut encoder);
+            assert_eq!(encoder.calls.first(), Some(&first_params(&plan)), "{fit:?}");
         }
     }
 
@@ -400,7 +402,7 @@ mod tests {
         for duration in [1.0, 3.0, 12.6, 60.0] {
             let plan = test_plan(options(Fit::Bitrate), duration);
             let mut encoder = FakeEncoder::new(0.0);
-            let best = run(&plan, &mut encoder, MAX_BYTES).unwrap();
+            let best = run(&plan, &mut encoder).unwrap();
             assert_good_fit(&best);
             assert!(encoder.calls.len() <= 3, "{duration} s took {:?}", encoder.calls);
         }
@@ -411,7 +413,7 @@ mod tests {
         for bitrate in [1.0, 20_000.0] {
             let plan = test_plan(Options { bitrate: Some(bitrate), ..options(Fit::Bitrate) }, 3.0);
             let mut encoder = FakeEncoder::new(0.0);
-            assert_good_fit(&run(&plan, &mut encoder, MAX_BYTES).unwrap());
+            assert_good_fit(&run(&plan, &mut encoder).unwrap());
         }
     }
 
@@ -419,7 +421,7 @@ mod tests {
     fn reports_when_nothing_fits() {
         let fit_range = Some(Range { min: 2000.0, max: 4000.0 });
         let plan = test_plan(Options { fit_range, ..options(Fit::Bitrate) }, 3.0);
-        let result = run(&plan, &mut FakeEncoder::new(0.0), MAX_BYTES);
+        let result = run(&plan, &mut FakeEncoder::new(0.0));
         assert!(matches!(result, Err(Error::NothingFits { .. })));
     }
 
@@ -427,7 +429,7 @@ mod tests {
     fn crf_fit_finds_smallest_fitting_value() {
         let plan = test_plan(options(Fit::Crf), 3.0);
         let mut encoder = FakeEncoder::new(0.0);
-        let best = run(&plan, &mut encoder, MAX_BYTES).unwrap();
+        let best = run(&plan, &mut encoder).unwrap();
         let Rate::Crf(crf) = best.params.rate else { panic!() };
         // one step better quality must not fit
         let better = encoder.encode(Params { rate: Rate::Crf(crf - 1), ..best.params }).unwrap();
@@ -438,11 +440,11 @@ mod tests {
     #[test]
     fn fps_and_length_fits_stay_in_range() {
         let plan = test_plan(Options { crf: Some(30), ..options(Fit::Fps) }, 3.0);
-        let best = run(&plan, &mut FakeEncoder::new(0.0), MAX_BYTES).unwrap();
+        let best = run(&plan, &mut FakeEncoder::new(0.0)).unwrap();
         assert!((1.0..=30.0).contains(&best.params.fps) && best.bytes <= MAX_BYTES);
 
         let plan = test_plan(Options { crf: Some(30), ..options(Fit::Length) }, 10.0);
-        let best = run(&plan, &mut FakeEncoder::new(0.0), MAX_BYTES).unwrap();
+        let best = run(&plan, &mut FakeEncoder::new(0.0)).unwrap();
         assert!(best.params.length < 10.0);
         assert_good_fit(&best);
     }
@@ -452,7 +454,7 @@ mod tests {
         let plan = test_plan(options(Fit::Auto), 30.0);
         assert_eq!(auto_frame_rates(&plan, MAX_BYTES), [30.0, 20.0, 15.0]);
         let mut encoder = FakeEncoder::new(0.0);
-        let best = run(&plan, &mut encoder, MAX_BYTES).unwrap();
+        let best = run(&plan, &mut encoder).unwrap();
         assert!(best.params.fps < 30.0);
         assert!(encoder.calls.len() as u32 <= plan.attempts);
         assert_good_fit(&best);
@@ -462,7 +464,7 @@ mod tests {
     fn auto_keeps_fps_for_moving_videos() {
         let plan = test_plan(options(Fit::Auto), 30.0);
         let mut encoder = FakeEncoder::new(1.0);
-        let best = run(&plan, &mut encoder, MAX_BYTES).unwrap();
+        let best = run(&plan, &mut encoder).unwrap();
         assert_eq!(best.params.fps, 30.0);
         // stopped after the second frame rate looked worse
         let rates: Vec<_> = encoder.calls.iter().map(|p| p.fps).collect();
@@ -486,13 +488,13 @@ mod tests {
             ..options(Fit::Length)
         };
         let plan = test_plan(exact, 10.0);
-        let best = run(&plan, &mut FakeEncoder::new(0.0), MAX_BYTES).unwrap();
+        let best = run(&plan, &mut FakeEncoder::new(0.0)).unwrap();
         assert_eq!(best.params.length, 2.996);
 
         let fit_range = Some(Range { min: 1.0, max: 1.04 });
         let plan = test_plan(Options { fit_range, ..options(Fit::Bitrate) }, 3.0);
         let mut encoder = FakeEncoder::new(0.0);
-        run(&plan, &mut encoder, MAX_BYTES).unwrap();
+        run(&plan, &mut encoder).unwrap();
         for params in encoder.calls {
             let Rate::Bitrate(kbps) = params.rate else { panic!() };
             assert!((1.0..=1.04).contains(&kbps), "{kbps}");
@@ -503,7 +505,7 @@ mod tests {
     fn off_encodes_once() {
         let plan = test_plan(Options { crf: Some(10), ..options(Fit::Off) }, 3.0);
         let mut encoder = FakeEncoder::new(0.0);
-        let best = run(&plan, &mut encoder, MAX_BYTES).unwrap();
+        let best = run(&plan, &mut encoder).unwrap();
         assert_eq!(encoder.calls.len(), 1);
         assert_eq!(best.params.rate, Rate::Crf(10));
         assert!(best.bytes > MAX_BYTES);
