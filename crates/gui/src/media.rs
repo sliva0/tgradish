@@ -16,6 +16,8 @@ use tgradish_core::preview::Preview;
 use tgradish_core::tgs::{self, TgsOptions};
 use tgradish_tgs::frames::{LayerInfo, Tag};
 
+use crate::timeline::{self, Cut};
+
 /// Frames of a video or animation, as straight RGBA.
 pub struct Clip {
     /// Tells clips apart, so a texture showing one knows when it changes.
@@ -243,6 +245,10 @@ pub struct Video {
     /// The overview is every frame at its full size, as pixel art drawn
     /// for ffmpeg is: nothing more is read to play or pause it.
     pub complete: bool,
+    /// Where its frames start, which cuts land between: as its packets
+    /// time them, or else at its frame rate. Worked out once, as the
+    /// timeline and keys ask for it every frame.
+    pub frames: Option<Arc<timeline::Frames>>,
 }
 
 /// Most bytes of drawn frames shown as they are, rather than read again
@@ -293,7 +299,8 @@ impl Video {
                 }
             };
             let overview = Clip::from_frames(frames);
-            Ok(Video { probe, overview, starts, readable: Arc::new(readable), complete: false })
+            let readable = Arc::new(readable);
+            Ok(Video { probe, overview, starts, readable, complete: false, frames: None }.timed())
         })
     }
 
@@ -338,7 +345,21 @@ impl Video {
         // a picture as ffmpeg times one, a frame at its default rate
         let times = if still { vec![0.0, 1.0 / probe.fps_or_default()] } else { times };
         let overview = Clip { id: next_id(), width, height, frames, times, pixelated: true };
-        Video { probe, overview, starts, readable: Arc::new(readable), complete: true }
+        let readable = Arc::new(readable);
+        Video { probe, overview, starts, readable, complete: true, frames: None }.timed()
+    }
+
+    /// With [`Video::frames`] worked out.
+    fn timed(mut self) -> Video {
+        let length = self.probe.duration.filter(|_| !self.probe.still_image);
+        let frames = length.and_then(|length| {
+            timeline::Frames::starting(&self.starts, length, Cut::Video).or_else(|| {
+                let fps = self.probe.fps.or(self.probe.base_fps)?;
+                timeline::Frames::even(length, fps, Cut::Video)
+            })
+        });
+        self.frames = frames.map(Arc::new);
+        self
     }
 
     /// `length` seconds from `start` at up to 30 frames a second, for
@@ -406,6 +427,8 @@ pub struct Art {
     /// How long each frame of an Aseprite file shows, in seconds, its
     /// tags' or not.
     pub durations: Vec<f64>,
+    /// Where its frames start, when it is animated.
+    pub frames: Option<Arc<timeline::Frames>>,
 }
 
 impl Art {
@@ -434,7 +457,10 @@ impl Art {
             let (width, height) = (source.width, source.height);
             let clip = Clip { id: next_id(), width, height, frames, times, pixelated: true };
             let (tags, layers, durations) = (source.tags, source.layers, source.durations);
-            Ok(Art { clip, tags, layers, durations })
+            let frames = clip
+                .is_animated()
+                .then(|| Arc::new(timeline::Frames { times: clip.times.clone(), cut: Cut::Art }));
+            Ok(Art { clip, tags, layers, durations, frames })
         })
     }
 }

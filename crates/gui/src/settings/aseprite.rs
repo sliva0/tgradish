@@ -1,6 +1,8 @@
 //! What of an Aseprite file is read, whatever it is made into: the frames
 //! of one tag, and which layers show.
 
+use std::rc::Rc;
+
 use eframe::egui::{self, RichText};
 use tgradish_core::presets::Format;
 use tgradish_tgs::frames::{Direction, LayerInfo, Tag};
@@ -41,15 +43,20 @@ impl Preset {
 
 /// The tag and layers to read, if there is a choice.
 pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
-    let read = item
-        .aseprite()
-        .map(|(tags, layers, durations)| (tags.to_vec(), layers.to_vec(), durations.to_vec()));
-    if read.is_some() {
-        item.aseprite_seen.clone_from(&read);
+    // kept, copied only when it changes, to show while it is read again
+    let fresh = item.aseprite().map(|(tags, layers, durations)| {
+        let seen = item.aseprite_seen.as_deref();
+        let same =
+            seen.is_some_and(|(t, l, d)| (&t[..], &l[..], &d[..]) == (tags, layers, durations));
+        (!same).then(|| Rc::new((tags.to_vec(), layers.to_vec(), durations.to_vec())))
+    });
+    let read = fresh.is_some();
+    if let Some(Some(changed)) = fresh {
+        item.aseprite_seen = Some(changed);
     }
-    // as last read, while it is read again
-    let read = read.or_else(|| item.aseprite_seen.clone().filter(|_| item.input_reading()));
-    let Some((tags, layers, frames)) = read else {
+    let shown = read || item.input_reading();
+    let read = item.aseprite_seen.clone().filter(|_| shown);
+    let Some(read) = read else {
         // a tag or layer the file no longer has, as after it was edited:
         // nothing to choose from until it reads again
         let failed = item.input_error().is_some();
@@ -68,6 +75,7 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         });
         return;
     };
+    let (tags, layers, frames) = &*read;
     // a hidden layer, even the only one, is one to show
     let listed = layers.len() >= 2 || layers.iter().any(|layer| !layer.visible);
     if tags.is_empty() && !listed {
@@ -86,11 +94,11 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     if !tags.is_empty() {
         let hint = "Picks the frames of a tag: as where it starts and ends, or read in its \
                     own order where it plays backwards or there and back";
-        row(ui, "Tag", hint, Ok(()), |ui| tag_row(ui, choices, &preset, &tags, &frames, format));
+        row(ui, "Tag", hint, Ok(()), |ui| tag_row(ui, choices, &preset, tags, frames, format));
     }
     if listed {
         let hint = "Which layers show, the top one first; a hidden group hides the layers in it";
-        row(ui, "Layers", hint, Ok(()), |ui| layer_list(ui, choices, &preset, &layers));
+        row(ui, "Layers", hint, Ok(()), |ui| layer_list(ui, choices, &preset, layers));
     }
 }
 
