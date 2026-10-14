@@ -3,9 +3,10 @@
 use std::path::{Path, PathBuf};
 
 use eframe::egui;
+use tgradish_core::inspect::{self, Inspected};
+use tgradish_core::still;
 use tgradish_core::telegram::{self, Target};
-use tgradish_core::webm::{self, WebmInfo};
-use tgradish_core::{still, tgs};
+use tgradish_core::webm::WebmInfo;
 use tgradish_tgs::check::Stats;
 use tgradish_tgs::limits::{self, telegram as server};
 
@@ -29,33 +30,17 @@ pub struct Inspection {
 
 impl Inspection {
     pub fn of(path: &Path) -> Inspection {
-        let (found, problems) = if still::is_image(path) {
-            match still::inspect_file(path) {
-                Ok(info) => {
-                    let target = info.target();
-                    let problems = info.issues(target).iter().map(Problem::refused).collect();
-                    (Found::Image { info, target }, problems)
-                }
-                Err(err) => (Found::Failed(err.to_string()), Vec::new()),
+        let (found, problems) = match inspect::inspect(path, None) {
+            Ok(Inspected::Image { target, info, issues }) => {
+                (Found::Image { info, target }, issues.iter().map(Problem::refused).collect())
             }
-        } else if tgs::is_sticker(path) {
-            match tgs::inspect_file(path) {
-                Ok((stats, issues)) => {
-                    let problems = issues.into_iter().map(Problem::of_tgs).collect();
-                    (Found::Tgs(Box::new(stats)), problems)
-                }
-                Err(err) => (Found::Failed(err.to_string()), Vec::new()),
+            Ok(Inspected::Tgs { stats, issues }) => {
+                (Found::Tgs(stats), issues.into_iter().map(Problem::of_tgs).collect())
             }
-        } else {
-            match webm::inspect_file(path) {
-                Ok(info) => {
-                    let target = info.target();
-                    let problems =
-                        telegram::check(&info, target).iter().map(Problem::refused).collect();
-                    (Found::Webm { info: Box::new(info), target }, problems)
-                }
-                Err(err) => (Found::Failed(err.to_string()), Vec::new()),
+            Ok(Inspected::Webm { target, info, issues }) => {
+                (Found::Webm { info, target }, issues.iter().map(Problem::refused).collect())
             }
+            Err(err) => (Found::Failed(err.to_string()), Vec::new()),
         };
         Inspection { path: path.to_path_buf(), found, problems }
     }

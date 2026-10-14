@@ -205,17 +205,20 @@ pub fn read_file(path: &std::path::Path) -> Option<Mark> {
 /// name of `.tgs` stickers; in WebM files both apps and the signature in
 /// padding; in WebP images the tool their XMP names.
 pub fn made_by_tgradish(path: &std::path::Path) -> bool {
-    if crate::still::is_image(path) {
-        let tool = std::fs::read(path).ok().and_then(|webp| crate::still::creator_tool(&webp));
-        tool.as_deref().is_some_and(is_tool_id)
-    } else if crate::tgs::is_sticker(path) {
-        let Ok(json) = crate::tgs::read_json(path) else { return false };
-        serde_json::from_slice::<serde_json::Value>(&json)
-            .ok()
-            .and_then(|value| value.get("nm")?.as_str().map(tgradish_name))
-            .unwrap_or(false)
-    } else {
-        crate::webm::inspect_file(path).is_ok_and(|info| {
+    match crate::inspect::Kind::of(path) {
+        crate::inspect::Kind::Image => {
+            let webp = std::fs::read(path).ok();
+            let tool = webp.and_then(|webp| crate::still::creator_tool(&webp));
+            tool.as_deref().is_some_and(is_tool_id)
+        }
+        crate::inspect::Kind::Tgs => {
+            let Ok(json) = crate::tgs::read_json(path) else { return false };
+            serde_json::from_slice::<serde_json::Value>(&json)
+                .ok()
+                .and_then(|value| value.get("nm")?.as_str().map(tgradish_name))
+                .unwrap_or(false)
+        }
+        crate::inspect::Kind::Webm => crate::webm::inspect_file(path).is_ok_and(|info| {
             let app = |app: &Option<String>| app.as_deref().is_some_and(is_tool_id);
             app(&info.writing_app)
                 && app(&info.muxing_app)
@@ -225,7 +228,7 @@ pub fn made_by_tgradish(path: &std::path::Path) -> bool {
                         .and_then(|tool| tool.strip_suffix(' '))
                         .is_some_and(is_tool_id)
                 })
-        })
+        }),
     }
 }
 
