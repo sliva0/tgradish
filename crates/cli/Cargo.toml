@@ -10,7 +10,7 @@ repository.workspace = true
 [features]
 default = ["gui"]
 # the window, `tgradish gui`
-gui = ["dep:tgradish-gui"]
+gui = ["dep:tgradish-gui", "dep:windows-sys"]
 # ffmpeg linked into the binary instead of separate executables
 linked = ["tgradish-core/linked"]
 linked-static = ["tgradish-core/linked-static"]
@@ -31,8 +31,9 @@ shlex.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 
+# closes the console Windows opens for the window
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_System_Console"] }
+windows-sys = { workspace = true, features = ["Win32_System_Console"], optional = true }
 
 [build-dependencies]
 embed-resource.workspace = true
