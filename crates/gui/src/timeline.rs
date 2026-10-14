@@ -179,6 +179,10 @@ const KEYS: &str = "Space: play or pause\n← →: a frame back or on, with Shif
                     [ ]: start or end the used part at the frame shown\n\
                     Ctrl+← →, Alt+← →: move its start or its end";
 
+/// How wide frames are on the bar, at least, for where they meet to be
+/// marked.
+const MARKED_FRAME: f32 = 6.0;
+
 /// Width of [`unit`]'s two buttons.
 const UNIT: f32 = 122.0;
 
@@ -204,8 +208,18 @@ fn unit(ui: &mut egui::Ui, in_frames: &mut bool, known: bool) {
 /// Shows the timeline.
 pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
     let Timeline { length, start, used, time, playing, limit, frames, in_frames } = timeline;
+    // one frame used has nothing to play
+    let still = frames.is_some_and(|frames| {
+        let (first, after) = frames.part(length, *start, *used);
+        after - first == 1
+    });
+    if still {
+        *playing = false;
+    }
     ui.horizontal(|ui| {
-        play_button(ui, playing);
+        ui.add_enabled_ui(!still, |ui| play_button(ui, playing))
+            .response
+            .on_disabled_hover_text("One frame is used: there is nothing to play");
         let size = vec2(64.0, 24.0);
         match frames {
             Some(frames) => {
@@ -372,6 +386,16 @@ fn bar(
         3.0,
         visuals.extreme_bg_color,
     );
+    // where frames meet, while they are far enough apart to tell
+    if let Some(frames) = frames
+        && track.width() / frames.count() as f32 >= MARKED_FRAME
+    {
+        let gap = Stroke::new(1.0, visuals.panel_fill);
+        for &time in &frames.times[1..frames.count()] {
+            let x = x_of(time).round() + 0.5;
+            painter.line_segment([pos2(x, track.top()), pos2(x, track.bottom())], gap);
+        }
+    }
     // Telegram plays 3 seconds; longer stickers are spoofed, sped up or cut
     if to - from > limit + 1e-3 {
         let x = x_of(from + limit);
