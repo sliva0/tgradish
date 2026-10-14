@@ -14,8 +14,9 @@ use tgradish_core::presets::Presets;
 
 use crate::Launch;
 use crate::about::about;
-use crate::canvas::{Inset, Screen};
+use crate::canvas::Screen;
 use crate::fonts::fonts;
+use crate::inset::Inset;
 use crate::item::Item;
 use crate::jobs::Job;
 use crate::keys::direct_scrolling;
