@@ -396,7 +396,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     let output = request.output.clone().unwrap_or_else(|| default_output(&request.input, target));
     // any of a sequence's frames too
     let frames = match &request.sequence {
-        Some(frames) => crate::tgs::sequence_files(frames)?,
+        Some(frames) => crate::source::sequence_files(frames)?,
         None => Vec::new(),
     };
     if std::iter::once(&request.input).chain(&frames).any(|input| same_file(input, &output)) {

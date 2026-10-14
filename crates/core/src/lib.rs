@@ -31,6 +31,7 @@ pub mod paths;
 pub mod presets;
 pub mod preview;
 pub mod protocol;
+mod source;
 pub mod still;
 pub mod telegram;
 pub mod tgs;

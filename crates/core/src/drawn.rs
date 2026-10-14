@@ -5,13 +5,13 @@
 //! ffmpeg reads as it reads any other, for WebM and image stickers.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use tgradish_tgs::frames::{self, Animation, LayerInfo, Layers, Limits, Tag};
 
 use crate::CancelToken;
 use crate::error::{Error, Result};
 use crate::options::Options;
+use crate::source::{self, Aseprite};
 
 /// An input as ffmpeg reads it: the file itself, or pixel art drawn into a
 /// temporary PNG, which lasts as long as this does.
@@ -19,10 +19,8 @@ use crate::options::Options;
 pub struct Readable {
     path: PathBuf,
     dir: Option<tempfile::TempDir>,
-    tags: Vec<Tag>,
-    layers: Vec<LayerInfo>,
-    /// How long each frame of the Aseprite file shows, in seconds.
-    durations: Vec<f64>,
+    /// What the Aseprite file drawn tells of itself.
+    aseprite: Aseprite,
     /// What was drawn, until it is taken, and whether it is a still picture.
     drawn: Option<(Animation, bool)>,
 }
@@ -45,19 +43,19 @@ impl Readable {
 
     /// The tags of the Aseprite file drawn, which `tag` chooses from.
     pub fn tags(&self) -> &[Tag] {
-        &self.tags
+        &self.aseprite.tags
     }
 
     /// The layers of the Aseprite file drawn, as its Layers panel lists
     /// them, which `show-layers` and `hide-layers` choose from.
     pub fn layers(&self) -> &[LayerInfo] {
-        &self.layers
+        &self.aseprite.layers
     }
 
     /// How long each frame of the Aseprite file drawn shows, in seconds,
     /// its tags' or not.
     pub fn durations(&self) -> &[f64] {
-        &self.durations
+        &self.aseprite.durations
     }
 }
 
@@ -101,35 +99,25 @@ pub fn readable(
     if !aseprite && (options.tag.is_some() || !layers.is_empty()) {
         return Err(Error::InvalidOptions("tags and layers are only in Aseprite files".into()));
     }
-    let (animation, tags, listed, durations) = match sequence {
-        Some(frames) => {
-            (crate::tgs::read_sequence(frames, options.fps, cancel)?, vec![], vec![], vec![])
-        }
+    let (animation, aseprite) = match sequence {
+        Some(frames) => (source::read_sequence(frames, options.fps, cancel)?, Aseprite::default()),
         None if aseprite => {
-            let unreadable = |message: String| Error::Probe { path: input.to_path_buf(), message };
             cancel.check()?;
-            let bytes = std::fs::read(input).map_err(|err| unreadable(err.to_string()))?;
-            let sprite = frames::Sprite::read_with(&bytes, &Limits::default())
-                .map_err(|err| unreadable(err.to_string()))?;
-            let animation = sprite
-                .animation(options.tag.as_deref(), &layers)
-                .map_err(|err| unreadable(err.to_string()))?;
-            let durations = sprite.durations().iter().map(Duration::as_secs_f64).collect();
-            (animation, sprite.tags().to_vec(), sprite.layers(), durations)
+            let bytes = source::read(input)?;
+            source::aseprite(&bytes, options.tag.as_deref(), &layers, &Limits::default())
+                .map_err(|err| source::unreadable(input, err))?
         }
         None if is_animated_webp(input) => {
-            let unreadable = |message: String| Error::Probe { path: input.to_path_buf(), message };
             cancel.check()?;
-            let bytes = std::fs::read(input).map_err(|err| unreadable(err.to_string()))?;
+            let bytes = source::read(input)?;
             let animation = frames::decode(&bytes, &frames::DecodeOptions::default())
-                .map_err(|err| unreadable(err.to_string()))?;
-            (animation, vec![], vec![], vec![])
+                .map_err(|err| source::unreadable(input, err))?;
+            (animation, Aseprite::default())
         }
         None => {
             let path = input.to_path_buf();
-            let (tags, layers, drawn) = (Vec::new(), Vec::new(), None);
-            let durations = Vec::new();
-            return Ok(Readable { path, dir: None, tags, layers, durations, drawn });
+            let aseprite = Aseprite::default();
+            return Ok(Readable { path, dir: None, aseprite, drawn: None });
         }
     };
     cancel.check()?;
@@ -142,7 +130,7 @@ pub fn readable(
     write_png(&path, &animation, animated)
         .map_err(|err| Error::Io(std::io::Error::other(err.to_string())))?;
     let drawn = Some((animation, !animated));
-    Ok(Readable { path, dir: Some(dir), tags, layers: listed, durations, drawn })
+    Ok(Readable { path, dir: Some(dir), aseprite, drawn })
 }
 
 /// Writes `animation` as a PNG, `animated` with each frame lasting its own
