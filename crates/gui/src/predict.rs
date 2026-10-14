@@ -36,15 +36,19 @@ impl Part {
 }
 
 /// Whether `part` of `clip` looks like pixel art, as conversions decide
-/// when scaling is automatic.
-pub fn looks_like_art(clip: &crate::media::Clip, part: Part) -> bool {
+/// when scaling is automatic: by as many frames as they look at, from
+/// `start` seconds on. The clip may have fewer frames a second than the
+/// conversion reads, so this can see a little further in.
+pub fn looks_like_art(clip: &crate::media::Clip, part: Part, start: f64) -> bool {
     let crop = Crop {
         x: part.x as u32,
         y: part.y as u32,
         width: (part.width.round() as u32).max(1),
         height: (part.height.round() as u32).max(1),
     };
-    let frames = &clip.frames[..clip.frames.len().min(3)];
+    let first = clip.index_at(start);
+    let samples = tgradish_core::convert::PIXEL_ART_SAMPLES;
+    let frames = &clip.frames[first..clip.frames.len().min(first + samples)];
     tgradish_core::convert::is_pixel_art(frames, clip.width, Some(crop))
 }
 

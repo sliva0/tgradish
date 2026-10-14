@@ -591,14 +591,32 @@ pub(crate) fn choose_auto_scaling(
     options: &Options,
     cancel: &CancelToken,
 ) -> Result<()> {
-    if options.auto_scaling()
-        && plan.enlarges() >= AUTO_SHARP_FROM
-        && looks_like_pixel_art(backend, plan, cancel)?
-    {
+    let mut looked = Ok(false);
+    if turns_sharp(options, plan.enlarges(), || {
+        looked = looks_like_pixel_art(backend, plan, cancel);
+        *looked.as_ref().unwrap_or(&false)
+    }) {
         plan.scaling = Scaling::Sharp;
     }
-    Ok(())
+    looked.map(|_| ())
 }
+
+/// Whether auto scaling, as `options` leave it, gives a picture made
+/// `enlarges` times as large sharp pixels: when it is that much larger
+/// and `looks_like_art`, which is asked only then, as it reads frames.
+/// Front-ends showing what a conversion makes ask this too.
+pub fn turns_sharp(
+    options: &Options,
+    enlarges: f64,
+    looks_like_art: impl FnOnce() -> bool,
+) -> bool {
+    options.auto_scaling() && enlarges >= AUTO_SHARP_FROM && looks_like_art()
+}
+
+/// How many frames auto scaling looks at to tell pixel art from filmed
+/// pictures, from where the used part starts: enough to see more than a
+/// title card, few enough to read quickly.
+pub const PIXEL_ART_SAMPLES: usize = 3;
 
 /// A few frames of the planned part at full size, to tell pixel art from
 /// filmed pictures.
@@ -608,7 +626,7 @@ fn looks_like_pixel_art(backend: &Backend, plan: &Plan, cancel: &CancelToken) ->
         length: Some((plan.length * plan.tempo).min(telegram::MAX_SECONDS)),
         fps: plan.fps,
         max_side: plan.source.width.max(plan.source.height),
-        max_frames: 3,
+        max_frames: PIXEL_ART_SAMPLES,
     };
     let frames = backend.frames(&plan.input, &plan.source, &request, cancel)?;
     Ok(is_pixel_art(&frames.frames, frames.width, plan.crop))

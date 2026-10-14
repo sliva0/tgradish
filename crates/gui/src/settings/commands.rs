@@ -201,7 +201,6 @@ fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String
     }
     let video = item.video.ready().ok_or("the input isn't read yet")?;
     let options = item.choices.webm_options(context.presets, context.config)?;
-    let auto = options.auto_scaling();
     let request = convert::Request {
         input: item.inputs[0].clone(),
         sequence: None,
@@ -212,14 +211,14 @@ fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String
     };
     let (mut plan, _) =
         convert::plan(&request, video.probe.clone()).map_err(|err| err.to_string())?;
-    // as converting decides it, on the input's frames
-    if auto && plan.enlarges() >= convert::AUTO_SHARP_FROM {
-        let size = (video.probe.width, video.probe.height);
-        let clip = &video.overview;
-        let part = crate::predict::Part::of(plan.crop, size, (clip.width, clip.height));
-        if crate::predict::looks_like_art(clip, part) {
-            plan.scaling = Scaling::Sharp;
-        }
+    // as converting decides it, guessed from the frames the window has
+    // read, which are those converting reads unless the input is long
+    let clip = &video.overview;
+    let size = (video.probe.width, video.probe.height);
+    let part = crate::predict::Part::of(plan.crop, size, (clip.width, clip.height));
+    let looks = || crate::predict::looks_like_art(clip, part, plan.start);
+    if convert::turns_sharp(&request.options, plan.enlarges(), looks) {
+        plan.scaling = Scaling::Sharp;
     }
     let params = tgradish_core::fit::first_params(&plan);
     Ok(tgradish_core::ffmpeg::commands(&plan, &params)

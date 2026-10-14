@@ -368,14 +368,14 @@ fn preview(
                             if let Some(mut sizes) =
                                 settings::webm_sizes(webm, crop.unwrap_or(full))
                             {
-                                let art_key = inset_key((clip.id, where_));
-                                let scaling = webm.scaling.unwrap_or(Scaling::Auto);
-                                if scaling == Scaling::Auto
-                                    && sizes.enlarges(used) >= convert::AUTO_SHARP_FROM
-                                    && inset.looks_like_art(art_key, || {
-                                        predict::looks_like_art(clip, where_)
+                                let start = webm.start.unwrap_or(0.0);
+                                let art_key = inset_key((clip.id, where_, start.to_bits()));
+                                let looks = || {
+                                    inset.looks_like_art(art_key, || {
+                                        predict::looks_like_art(clip, where_, start)
                                     })
-                                {
+                                };
+                                if convert::turns_sharp(webm, sizes.enlarges(used), looks) {
                                     sizes.scaling = Scaling::Sharp;
                                 }
                                 let key = inset_key((clip.id, frame, where_, sizes));
