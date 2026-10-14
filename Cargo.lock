@@ -471,7 +471,6 @@ dependencies = [
  "cexpr",
  "clang-sys",
  "itertools 0.13.0",
- "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
@@ -2816,16 +2815,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
 
 [[package]]
-name = "prettyplease"
-version = "0.2.37"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
-dependencies = [
- "proc-macro2",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "proc-macro-crate"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3063,32 +3052,6 @@ dependencies = [
  "wayland-protocols",
  "web-sys",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "rgb"
-version = "0.8.53"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
-
-[[package]]
-name = "rlottie"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74b1485b7d3d35af9d248389250ebd0ab92ee9c989f1bb607d0aae51b1c66f6a"
-dependencies = [
- "rgb",
- "rlottie-sys",
-]
-
-[[package]]
-name = "rlottie-sys"
-version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8f260ceb76c75bdfd86ae215f0680ebbcbcfaefe0b2fa5eff0bdd4a4a4c62ba"
-dependencies = [
- "bindgen",
- "pkg-config",
 ]
 
 [[package]]
@@ -3614,19 +3577,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tgs-lab"
-version = "2.0.0"
-dependencies = [
- "anyhow",
- "png",
- "rlottie",
- "serde_json",
- "tgradish-corpus",
- "tgradish-tgs",
- "tlottie",
-]
-
-[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3679,11 +3629,6 @@ dependencies = [
  "weezl",
  "zune-jpeg",
 ]
-
-[[package]]
-name = "tlottie"
-version = "1.0.6"
-source = "git+https://github.com/dkaraush/tlottie?rev=92df98dc209bc39b1e567ec74a8c86a0af5239de#92df98dc209bc39b1e567ec74a8c86a0af5239de"
 
 [[package]]
 name = "tokio"

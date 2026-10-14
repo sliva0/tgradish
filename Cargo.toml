@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "xtask"]
+# a workspace of its own, see its manifest
+exclude = ["crates/tgs-lab"]
 
 [workspace.package]
 version = "2.0.0"
@@ -72,10 +74,6 @@ opt-level = 2
 opt-level = 2
 
 [profile.dev.package.miniz_oxide]
-opt-level = 2
-
-# tgs-lab's tests render every frame of stickers
-[profile.dev.package.tlottie]
 opt-level = 2
 
 [profile.release]

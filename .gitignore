@@ -1,4 +1,6 @@
 /target/
+# tgs-lab, a workspace of its own
+/crates/tgs-lab/target/
 
 # local test media
 /references/

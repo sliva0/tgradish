@@ -1,19 +1,24 @@
+# A workspace of its own, left out of the repository's: tlottie isn't on
+# crates.io, and rlottie builds a C++ library, so in the shared Cargo.lock
+# they would make everyone who builds tgradish fetch them. Run it with
+# `cargo run --manifest-path crates/tgs-lab/Cargo.toml -- ...`.
+[workspace]
+
 [package]
 name = "tgs-lab"
 description = "Render checks and benchmarks for tgradish's .tgs output"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
 publish = false
 
 [dependencies]
-tgradish-tgs = { workspace = true, features = ["threads"] }
-tgradish-corpus.workspace = true
+tgradish-tgs = { path = "../tgs", features = ["threads"] }
+tgradish-corpus = { path = "../corpus" }
 
-anyhow.workspace = true
-png.workspace = true
-serde_json.workspace = true
-# not on crates.io, so only this unpublished crate depends on it
+anyhow = "1.0.104"
+png = "0.18.1"
+serde_json = { version = "1.0.151", features = ["preserve_order", "unbounded_depth"] }
 tlottie = { git = "https://github.com/dkaraush/tlottie", rev = "92df98dc209bc39b1e567ec74a8c86a0af5239de" }
 # builds Telegram's fork of rlottie, which needs git, cmake and libclang
 rlottie = { version = "0.5.4", default-features = false, features = ["vendor-telegram"], optional = true }
@@ -21,5 +26,24 @@ rlottie = { version = "0.5.4", default-features = false, features = ["vendor-tel
 [features]
 rlottie = ["dep:rlottie"]
 
-[lints]
-workspace = true
+# the repository's
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# the encoder searches a lot, and the tests render every frame of
+# stickers, which take minutes without optimisation; as in the repository's
+# workspace
+[profile.dev.package.tgradish-tgs]
+opt-level = 2
+
+[profile.dev.package.zopfli]
+opt-level = 2
+
+[profile.dev.package.miniz_oxide]
+opt-level = 2
+
+[profile.dev.package.tlottie]
+opt-level = 2
