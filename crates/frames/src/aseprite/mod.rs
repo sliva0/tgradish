@@ -639,7 +639,7 @@ impl Sprite {
             .map(|index| {
                 let (duration, _) = self.frames[index as usize];
                 let canvas = self.render(index as usize, &shown)?;
-                Ok(Frame { rgba: canvas.into_iter().flatten().collect(), duration })
+                Ok(Frame { rgba: canvas.into_flattened(), duration })
             })
             .collect::<Result<_>>()?;
         Animation::new(self.width, self.height, frames)
