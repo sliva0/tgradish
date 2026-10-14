@@ -475,8 +475,16 @@ fn preview(
 /// `part` used, cut to what is visible unless it keeps the canvas.
 fn tgs_bounds(inset: &mut Inset, clip: &Clip, part: predict::Part, tgs: &TgsOptions) -> [usize; 4] {
     let keep = tgs.keep_canvas.unwrap_or(false);
-    let key = inset_key((clip.id, part, keep));
-    inset.tgs_bounds(key, || predict::tgs_bounds(&clip.frames, clip.width, part, keep))
+    // only the frames the cut keeps, every one it overlaps, as normalising
+    // reads them
+    let start = tgs.start.unwrap_or(0.0);
+    let end = tgs.length.map_or(f64::INFINITY, |length| start + length);
+    let spans = clip.times.windows(2).take(clip.frames.len());
+    let first = spans.clone().position(|span| span[1] > start).unwrap_or(0);
+    let after = spans.filter(|span| span[0] < end).count().max(first + 1);
+    let used = &clip.frames[first..after.min(clip.frames.len())];
+    let key = inset_key((clip.id, part, keep, first, after));
+    inset.tgs_bounds(key, || predict::tgs_bounds(used, clip.width, part, keep))
 }
 
 /// What the label of an item's small picture of its result says under
