@@ -182,6 +182,7 @@ pub fn check(info: &WebmInfo, target: Target) -> Vec<Issue> {
         issues.push(Issue::TooLong { seconds, max: MAX_SECONDS });
     }
     if let Some(fps) = info.fps()
+        // rates read back from a file's timestamps round a little over
         && fps > MAX_FPS + 0.01
     {
         issues.push(Issue::TooManyFps { fps, max: MAX_FPS });

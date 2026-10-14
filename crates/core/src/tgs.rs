@@ -1,5 +1,8 @@
-//! Animated stickers (`.tgs`) from pixel art: options, events and the
-//! file handling around `tgradish-tgs`, which works on bytes only.
+//! Animated stickers (`.tgs`): options, events and the reading and
+//! writing of files around `tgradish-tgs`, which works on frames in
+//! memory only. Pixel art is read by tgradish itself; videos, read
+//! through ffmpeg, are taken as pixel art too, their frames at the rate
+//! a sticker can play. Previews of what was made are drawn here as well.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

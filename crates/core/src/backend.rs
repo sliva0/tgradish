@@ -186,7 +186,7 @@ impl Backend {
         cancel: &CancelToken,
     ) -> Result<crate::preview::Preview> {
         let probe = self.probe(path, cancel)?;
-        let fps = probe.fps_or_default().clamp(1.0, 60.0);
+        let fps = probe.fps_or_default().clamp(1.0, crate::preview::TICKS);
         // spoofed stickers say in their header that they are shorter than
         // they play; their frames tell the truth
         let played = crate::webm::inspect_file(path).ok().and_then(|info| info.content_duration);
@@ -205,7 +205,8 @@ impl Backend {
         };
         let frames = self.frames(path, &probe, &request, cancel)?;
         // whole 60 fps frames, rounding where each starts
-        let start = |index: usize| (index as f64 * 60.0 / frames.fps).round() as u32;
+        let start =
+            |index: usize| (index as f64 * crate::preview::TICKS / frames.fps).round() as u32;
         let rgba = frames
             .frames
             .into_iter()

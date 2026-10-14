@@ -1,4 +1,6 @@
-//! Progress reporting for conversions.
+//! What a WebM conversion reports as it goes, for front-ends to follow.
+//! `.tgs` and WebP conversions report their own, [`crate::tgs::TgsEvent`]
+//! and [`crate::still::StillEvent`].
 
 use std::path::PathBuf;
 

@@ -269,8 +269,8 @@ fn fit(
             high = quality - 1;
         }
     }
-    let smallest = || encode(Some(0.0)).map(|webp| (webp, Encoding::Lossy { quality: 0 }));
-    best.map_or_else(smallest, Ok)
+    // the search only ends without a fit at quality 0, which returns above
+    Ok(best.expect("a quality that fits"))
 }
 
 /// `webp` with `xmp` metadata: in the extended format, which says what
