@@ -29,9 +29,10 @@ pub use locate::locate;
 pub use orientation::Orientation;
 #[cfg(feature = "linked")]
 pub(crate) use probe::{Facts, Timing};
-pub use probe::{Probe, frame_starts, probe};
+pub use probe::Probe;
+pub(crate) use probe::{frame_starts, probe};
 pub(crate) use process::{Output, run};
-pub use ssim::ssim;
+pub(crate) use ssim::ssim;
 
 /// Where to look for ffmpeg.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

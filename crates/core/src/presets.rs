@@ -347,7 +347,7 @@ pub fn check_name(name: &str) -> Result<()> {
 /// The options of `options` a preset keeps: none that only make sense for
 /// one file, as what to make, its crop, its time, its tag and layers, its
 /// title.
-pub fn shareable(options: &Options) -> Options {
+pub(crate) fn shareable(options: &Options) -> Options {
     Options {
         target: None,
         tag: None,
@@ -364,7 +364,7 @@ pub fn shareable(options: &Options) -> Options {
 /// [`shareable`] for `.tgs` options, which also leave out a sprite sheet's
 /// layout; the size of the art's pixels stays, as files from one place
 /// often share it.
-pub fn shareable_tgs(options: &TgsOptions) -> TgsOptions {
+pub(crate) fn shareable_tgs(options: &TgsOptions) -> TgsOptions {
     TgsOptions {
         target: None,
         tag: None,

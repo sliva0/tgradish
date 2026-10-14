@@ -275,6 +275,7 @@ pub fn encode_element(id: u32, data: &[u8], min_size_len: usize) -> Option<Vec<u
     Some(out)
 }
 
+#[cfg(test)]
 pub fn encode_uint(id: u32, value: u64) -> Vec<u8> {
     let bytes = value.to_be_bytes();
     let skip = bytes.iter().take_while(|&&b| b == 0).count().min(7);

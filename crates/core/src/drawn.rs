@@ -63,7 +63,7 @@ impl Readable {
 }
 
 /// Whether `path` is an Aseprite file, by its first bytes.
-pub fn is_aseprite(path: &Path) -> bool {
+pub(crate) fn is_aseprite(path: &Path) -> bool {
     let mut start = [0u8; 6];
     std::fs::File::open(path)
         .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut start))
