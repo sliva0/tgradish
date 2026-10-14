@@ -517,12 +517,22 @@ mod tests {
 
         // not a built-in one's, which it would stand in for
         assert!(rename(dir.path(), "tiny", "fast", &load()).is_err());
-        // nor another file's that differs in case alone, where case matters
-        save(dir.path(), "Tiny", "", (&webm, &tgs), false).unwrap();
-        if dir.path().join("tiny.toml").exists() && dir.path().join("Tiny.toml").exists() {
-            let other = std::fs::read_to_string(dir.path().join("Tiny.toml")).unwrap();
-            assert!(rename(dir.path(), "tiny", "Tiny", &load()).is_err());
-            assert_eq!(std::fs::read_to_string(dir.path().join("Tiny.toml")).unwrap(), other);
+        // a name changed in case alone: another file's where case matters,
+        // which stays as it is, and the same file where it doesn't
+        let capital = dir.path().join("Tiny.toml");
+        match save(dir.path(), "Tiny", "", (&webm, &tgs), false) {
+            Err(Error::OutputExists(_)) => {
+                rename(dir.path(), "tiny", "Tiny", &load()).unwrap();
+                assert_eq!(load().webm("Tiny").unwrap().crf, Some(28));
+                rename(dir.path(), "Tiny", "tiny", &load()).unwrap();
+            }
+            saved => {
+                saved.unwrap();
+                let other = std::fs::read_to_string(&capital).unwrap();
+                assert!(rename(dir.path(), "tiny", "Tiny", &load()).is_err());
+                assert_eq!(std::fs::read_to_string(&capital).unwrap(), other);
+                remove(&capital).unwrap();
+            }
         }
 
         // one another extends keeps its name
