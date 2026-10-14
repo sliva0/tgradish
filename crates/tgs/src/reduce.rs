@@ -219,15 +219,6 @@ pub fn distance(a: [u8; 4], b: [u8; 4]) -> f64 {
     alpha + colour * shown
 }
 
-/// Where each frame starts, and the total.
-fn starts(anim: &PixelAnim) -> Vec<u32> {
-    let mut starts = vec![0];
-    for frame in &anim.frames {
-        starts.push(starts.last().unwrap() + frame.ticks);
-    }
-    starts
-}
-
 /// How much `reduced` differs from `original`: the [`distance`] of every
 /// input pixel at every 60 fps frame, averaged.
 pub fn error(original: &PixelAnim, reduced: &PixelAnim) -> f64 {
@@ -247,7 +238,7 @@ pub fn error(original: &PixelAnim, reduced: &PixelAnim) -> f64 {
     };
     let columns = overlay(&original.grid.columns, &reduced.grid.columns);
     let rows = overlay(&original.grid.rows, &reduced.grid.rows);
-    let (before, after) = (starts(original), starts(reduced));
+    let (before, after) = (original.starts(), reduced.starts());
     let mut ticks: Vec<u32> = before.iter().chain(&after).copied().collect();
     ticks.sort_unstable();
     ticks.dedup();
