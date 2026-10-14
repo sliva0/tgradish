@@ -19,6 +19,7 @@ use crate::backend::{Backend, FramesRequest};
 use crate::error::{Error, Result};
 use crate::options::{Crop, Resize, Speed, TEMPOS};
 use crate::preview::Preview;
+use crate::source::{self, Aseprite};
 use crate::telegram::{self, Target};
 
 /// Frame rate of still images, sprite sheets and image sequences unless
@@ -174,7 +175,7 @@ impl TgsOptions {
     }
 
     fn frame_duration(&self) -> Result<Duration> {
-        frame_duration(self.fps)
+        crate::source::frame_duration(self.fps)
     }
 
     fn seconds(value: Option<f64>, name: &str) -> Result<Option<Duration>> {
@@ -363,89 +364,6 @@ impl Preview {
     }
 }
 
-/// Image files of a sequence, numbers sorted as numbers: `2.png` before
-/// `10.png`.
-pub(crate) fn sequence_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>> {
-    let mut files = Vec::new();
-    for input in inputs {
-        if input.is_dir() {
-            let mut found: Vec<PathBuf> = std::fs::read_dir(input)?
-                .map(|entry| entry.map(|entry| entry.path()))
-                .collect::<std::io::Result<_>>()?;
-            found.retain(|path| path.is_file() && crate::inputs::is_frame(path));
-            files.extend(found);
-        } else {
-            files.push(input.clone());
-        }
-    }
-    // the order the user gave is usually a shell's, which puts 10 before 2
-    files.sort_by(|a, b| natural_order(a, b));
-    if files.is_empty() {
-        return Err(Error::InvalidOptions("the sequence has no images".into()));
-    }
-    Ok(files)
-}
-
-/// Compares paths with runs of digits as numbers.
-fn natural_order(a: &Path, b: &Path) -> std::cmp::Ordering {
-    let pieces = |path: &Path| -> Vec<(String, u128)> {
-        let text = path.to_string_lossy();
-        let mut out = Vec::new();
-        let mut rest = text.as_ref();
-        while !rest.is_empty() {
-            let digits = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
-            if digits > 0 {
-                out.push((String::new(), rest[..digits].parse().unwrap_or(u128::MAX)));
-                rest = &rest[digits..];
-            } else {
-                let letters = rest.find(|c: char| c.is_ascii_digit()).unwrap_or(rest.len());
-                out.push((rest[..letters].to_lowercase(), 0));
-                rest = &rest[letters..];
-            }
-        }
-        out
-    };
-    pieces(a).cmp(&pieces(b)).then_with(|| a.cmp(b))
-}
-
-fn read(path: &Path) -> Result<Vec<u8>> {
-    std::fs::read(path)
-        .map_err(|err| Error::Probe { path: path.to_path_buf(), message: err.to_string() })
-}
-
-/// How long each frame of a sequence or sprite sheet shows, at `fps`
-/// frames a second, [`DEFAULT_FPS`] unless it says.
-fn frame_duration(fps: Option<f64>) -> Result<Duration> {
-    let fps = fps.unwrap_or(DEFAULT_FPS);
-    let invalid = || Error::InvalidOptions(format!("fps {fps} is not between 0 and 60"));
-    if !(fps > 0.0 && fps <= 60.0) {
-        return Err(invalid());
-    }
-    // tiny rates give durations past what Duration holds
-    Duration::try_from_secs_f64(1.0 / fps).map_err(|_| invalid())
-}
-
-/// The frames of one animation in several files, `inputs`: image files,
-/// or folders of them, in name order, `fps` a second. `cancel` is asked
-/// between files.
-pub(crate) fn read_sequence(
-    inputs: &[PathBuf],
-    fps: Option<f64>,
-    cancel: &CancelToken,
-) -> Result<frames::Animation> {
-    let files = sequence_files(inputs)?;
-    let mut bytes = Vec::with_capacity(files.len());
-    for file in &files {
-        cancel.check()?;
-        bytes.push(read(file)?);
-    }
-    // a file can't be stopped part of the way, but the rest are left
-    let images = bytes.iter().map(Vec::as_slice).take_while(|_| !cancel.is_cancelled());
-    let animation = frames::sequence(images, frame_duration(fps)?, &Limits::default());
-    cancel.check()?;
-    animation.map_err(|err| Error::Probe { path: files[0].clone(), message: err.to_string() })
-}
-
 /// What the inputs hold, as [`convert`] reads them.
 struct Loaded {
     animation: frames::Animation,
@@ -492,12 +410,8 @@ fn load(
     cancel: &CancelToken,
 ) -> Result<Loaded> {
     let limits = Limits::default();
-    let decode_error = |path: &Path| {
-        let path = path.to_path_buf();
-        move |err: frames::Error| Error::Probe { path: path.clone(), message: err.to_string() }
-    };
     if sequence || inputs.len() > 1 {
-        return Ok(Loaded::art(read_sequence(inputs, options.fps, cancel)?));
+        return Ok(Loaded::art(source::read_sequence(inputs, options.fps, cancel)?));
     }
     let [input] = inputs else {
         return Err(Error::InvalidOptions("nothing to convert".into()));
@@ -509,31 +423,30 @@ fn load(
         })?;
         return read_video(backend, input, options, cancel);
     }
-    let bytes = read(input)?;
+    let bytes = source::read(input)?;
     cancel.check()?;
     let sheet = options.sheet_layout()?;
     // a sheet is one picture, whatever tag is asked for
     let tag = options.tag.clone().filter(|_| sheet.is_none());
     let chosen =
         crate::drawn::layers(options.show_layers.as_deref(), options.hide_layers.as_deref());
-    // an Aseprite file is parsed once, for its tags, layers and frames
-    let (decoded, tags, layers, durations) = match frames::Format::detect(&bytes) {
+    let decoded = match frames::Format::detect(&bytes) {
         Some(frames::Format::Aseprite) => {
-            let sprite = frames::Sprite::read_with(&bytes, &limits).map_err(decode_error(input))?;
-            let tags = sprite.tags().to_vec();
-            let durations = sprite.durations().iter().map(Duration::as_secs_f64).collect();
-            (sprite.animation(tag.as_deref(), &chosen), tags, sprite.layers(), durations)
+            source::aseprite(&bytes, tag.as_deref(), &chosen, &limits)
         }
         _ => {
             let options = DecodeOptions { tag, layers: chosen, limits };
-            (frames::decode(&bytes, &options), Vec::new(), Vec::new(), Vec::new())
+            frames::decode(&bytes, &options).map(|animation| (animation, Aseprite::default()))
         }
     };
-    let animation = match sheet {
-        Some(sheet) => decoded.and_then(|image| frames::split_sheet(&image, &sheet, &limits)),
+    let (animation, aseprite) = match sheet {
+        Some(sheet) => decoded.and_then(|(image, aseprite)| {
+            Ok((frames::split_sheet(&image, &sheet, &limits)?, aseprite))
+        }),
         None => decoded,
     }
-    .map_err(decode_error(input))?;
+    .map_err(|err| source::unreadable(input, err))?;
+    let Aseprite { tags, layers, durations } = aseprite;
     Ok(Loaded { tags, layers, durations, ..Loaded::art(animation) })
 }
 
@@ -556,7 +469,7 @@ fn reads_as_art(path: &Path) -> Result<bool> {
 }
 
 /// Most frames a second a sticker shows.
-const STICKER_FPS: f64 = 60.0;
+const STICKER_FPS: f64 = tgradish_tgs::limits::telegram::FPS as f64;
 
 /// The part of a video a sticker can show, read through ffmpeg: from
 /// `start`, for as long as `length` says and the tempo lets play in 3
@@ -713,7 +626,7 @@ pub fn is_sticker(path: &Path) -> bool {
 /// The Lottie JSON of a `.tgs` (or plain Lottie JSON) file, and the
 /// file's size when it was packed.
 fn read_lottie(path: &Path) -> Result<(Vec<u8>, Option<usize>)> {
-    let bytes = read(path)?;
+    let bytes = source::read(path)?;
     if bytes.starts_with(&[0x1f, 0x8b]) {
         let json = tgradish_tgs::file::unpack(&bytes)
             .map_err(|err| Error::Probe { path: path.to_path_buf(), message: err.to_string() })?;
@@ -741,7 +654,7 @@ pub fn inspect_file(path: &Path) -> Result<(Stats, Vec<Issue>)> {
 fn refuse_overwriting_inputs(request: &TgsRequest) -> Result<()> {
     let Ok(output) = request.output.canonicalize() else { return Ok(()) };
     let inputs = if request.sequence || request.inputs.len() > 1 {
-        sequence_files(&request.inputs)?
+        source::sequence_files(&request.inputs)?
     } else {
         request.inputs.clone()
     };
@@ -896,16 +809,6 @@ mod tests {
     }
 
     #[test]
-    fn sorts_listed_files_too() {
-        let dir = tempfile::tempdir().unwrap();
-        let files: Vec<PathBuf> = ["10.png", "2.png"].map(|name| dir.path().join(name)).to_vec();
-        assert_eq!(
-            sequence_files(&files).unwrap(),
-            [dir.path().join("2.png"), dir.path().join("10.png")]
-        );
-    }
-
-    #[test]
     fn previews_a_pixel_per_art_pixel() {
         let anim = |width: u32, height: u32, colour: &dyn Fn(u32, u32) -> [u8; 4]| {
             let rgba =
@@ -973,14 +876,6 @@ mod tests {
     fn refuses_tiny_frame_rates() {
         let slow = TgsOptions { fps: Some(1e-100), ..Default::default() };
         assert!(matches!(slow.frame_duration(), Err(Error::InvalidOptions(_))));
-    }
-
-    #[test]
-    fn orders_numbers_naturally() {
-        let mut files: Vec<PathBuf> =
-            ["f10.png", "f2.png", "f1.png", "F3.png"].map(PathBuf::from).to_vec();
-        files.sort_by(|a, b| natural_order(a, b));
-        assert_eq!(files, ["f1.png", "f2.png", "F3.png", "f10.png"].map(PathBuf::from));
     }
 
     #[test]
