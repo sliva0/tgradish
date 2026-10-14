@@ -90,17 +90,36 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
         Format::Tgs => args.extend(["--format".into(), "tgs".into()]),
         Format::Image => args.extend(["--format".into(), "image".into()]),
     }
+    let choices = &item.choices;
+    let (presets, config) = (context.presets, context.config);
+    // what is set over the preset, as far as it has a say
+    let base = choices.webm_base(presets, config).unwrap_or_default();
+    let merged = base.clone().merged(&choices.webm);
+    let effective = crate::item::shown(merged.clone(), &merged);
+    let mut webm = crate::item::shown(choices.webm.clone(), &merged);
+    // the preset's values the window sets aside, as their settings are
+    // greyed out, which the command line would otherwise take up again
+    if base.lossless == Some(true) && effective.lossless != Some(true) {
+        webm.lossless = Some(false);
+    }
+    if base.resize.is_some() && effective.resize.is_none() {
+        webm.resize = Some(convert::default_resize(choices.target));
+    }
+    // and one it can't be told to set aside: then everything the window
+    // uses goes on the command line, over a built-in preset that sets
+    // nothing more than it
+    let whole =
+        item.format != Format::Tgs && base.exact_scale.is_some() && effective.exact_scale.is_none();
     // image stickers take their picture settings from the preset too;
     // named unless it is the format's own, as the window's settings may
     // choose another than the config file
-    let preset = item.choices.preset_name(item.format, context.config);
-    if item.choices.preset.is_some() || preset != item.format.default_preset() {
+    let preset = choices.preset_name(item.format, config);
+    if whole {
+        args.extend(["--preset".into(), "balanced".into()]);
+        webm = effective;
+    } else if choices.preset.is_some() || preset != item.format.default_preset() {
         args.extend(["--preset".into(), preset.to_owned()]);
     }
-    let choices = &item.choices;
-    // what is set over the preset, as far as it has a say
-    let merged = choices.webm_merged(context.presets, context.config).unwrap_or_default();
-    let webm = crate::item::shown(choices.webm.clone(), &merged);
     args.extend(match item.format {
         Format::Webm => tgradish_core::options::flags(&webm.merged(&Options {
             target: Some(choices.target),
@@ -268,6 +287,43 @@ mod tests {
             let read = ["--tag", "idle", "--hide-layers", "sketch", "--hide-layers", "back, old"];
             assert!(line.windows(read.len()).any(|words| words == read), "{format:?}: {line:?}");
         }
+    }
+
+    #[test]
+    fn sets_aside_what_the_window_does() {
+        use tgradish_core::options::{ExactScale, Fit, Scaling};
+        use tgradish_core::presets::Presets;
+        use tgradish_core::telegram::Target;
+
+        let dir = tempfile::tempdir().unwrap();
+        let preset = "[webm]\nfit = 'off'\nlossless = true\nexact-scale = '2'\n";
+        std::fs::write(dir.path().join("still.toml"), preset).unwrap();
+        let presets = Presets::load(Some(dir.path())).unwrap();
+        let config = Config::default();
+        let default_config = Config::default_path();
+        let context = Context {
+            presets: &presets,
+            config: &config,
+            extra_args: false,
+            output: None,
+            config_path: default_config.as_deref(),
+            presets_dir: None,
+        };
+        let mut item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
+        item.format = Format::Webm;
+        item.choices.preset = Some("still".into());
+        item.choices.webm.scaling = Some(Scaling::PixelPerfect);
+        // fitting a bitrate greys out lossless, which the command line
+        // would take up from the preset and refuse
+        item.choices.webm.fit = Some(Fit::Auto);
+        let line = command_line(&item, &context).join(" ");
+        assert!(line.contains("--preset still") && line.contains("--lossless=false"), "{line}");
+        // without integer scaling the preset's scale has no say, which the
+        // command line can't be told
+        item.choices.webm.scaling = Some(Scaling::Smooth);
+        let line = command_line(&item, &context).join(" ");
+        assert!(line.contains("--preset balanced") && !line.contains("--exact-scale"), "{line}");
+        assert_eq!(presets.webm("still").unwrap().exact_scale, Some(ExactScale { up: 2, down: 1 }));
     }
 
     #[test]
