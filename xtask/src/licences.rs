@@ -74,6 +74,9 @@ fn sorted_sections(text: &str) -> String {
             let title = lines.next().unwrap_or_default();
             let mut crates: Vec<&str> = lines.collect();
             crates.sort_by_key(|line| line.trim().to_lowercase());
+            // a crate with two copies of a licence, as libmimalloc-sys has
+            // for each mimalloc it bundles, is named once
+            crates.dedup();
             format!("{title}\n{}\n\n{body}", crates.join("\n"))
         })
         .collect();
