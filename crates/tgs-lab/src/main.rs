@@ -1,19 +1,21 @@
 //! Development tool for tgradish's `.tgs` output: renders stickers with
 //! tlottie, the renderer in Telegram's current clients, shows what
 //! normalising does to inputs, and verifies encodings against their art.
+//! A workspace of its own, so these run from its folder, or anywhere with
+//! `--manifest-path` pointing at its `Cargo.toml`.
 //!
 //! ```console
-//! cargo run -p tgs-lab -- info sticker.tgs
-//! cargo run -p tgs-lab -- render sticker.tgs --frame 10 --size 512 out.png
-//! cargo run -p tgs-lab -- normalise art.gif
-//! cargo run -p tgs-lab -- encode art.gif out.tgs [--runs]
-//! cargo run -p tgs-lab -- verify art.gif [out.tgs]
-//! cargo run --release -p tgs-lab -- probes DIR [ART]
-//! cargo run --release -p tgs-lab -- limits DIR [ART...]
-//! cargo run --release -p tgs-lab -- sizes DIR [1X.tgs...]
-//! cargo run --release -p tgs-lab -- features DIR
-//! cargo run -p tgs-lab -- corpus DIR
-//! cargo run --release -p tgs-lab -- bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--no-reuse] [--fast-effort|--best] [--full]
+//! cargo run -- info sticker.tgs
+//! cargo run -- render sticker.tgs --frame 10 --size 512 out.png
+//! cargo run -- normalise art.gif
+//! cargo run -- encode art.gif out.tgs [--runs]
+//! cargo run -- verify art.gif [out.tgs]
+//! cargo run --release -- probes DIR [ART]
+//! cargo run --release -- limits DIR [ART...]
+//! cargo run --release -- sizes DIR [1X.tgs...]
+//! cargo run --release -- features DIR
+//! cargo run -- corpus DIR
+//! cargo run --release -- bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--no-reuse] [--fast-effort|--best] [--full]
 //!                    [--save FILE] [--against FILE] [DIR]
 //! ```
 

@@ -9,8 +9,8 @@
 | `crates/core` (`tgradish-core`) | What the command line and the window share: planning WebM conversions and fitting them to the size limit, image stickers, `.tgs` conversion of files, WebM inspection and duration spoofing, presets, the config file, and the events front-ends follow. ffmpeg runs through a `Backend`: the `ffmpeg` and `ffprobe` programs, or with the `linked` feature its libraries, used to do exactly what those command lines do. |
 | `crates/gui` (`tgradish-gui`) | The egui window, which calls core directly. |
 | `crates/cli` (`tgradish`) | The binary: arguments and terminal output. It includes the window unless built with `--no-default-features`. |
-| `crates/corpus` | Test art drawn in code, and video clips made with ffmpeg, so nothing in the repository belongs to anyone else. `cargo run -p tgs-lab -- corpus DIR` writes it all out. |
-| `crates/tgs-lab` | Encoder research: benchmarks, renders checked against tlottie and rlottie, and the probes that measured Telegram's limits. |
+| `crates/corpus` | Test art drawn in code, and video clips made with ffmpeg, so nothing in the repository belongs to anyone else. `tgs-lab corpus DIR` writes it all out. |
+| `crates/tgs-lab` | Encoder research: benchmarks, renders checked against tlottie and rlottie, and the probes that measured Telegram's limits. A workspace of its own with its own `Cargo.lock`, so tlottie, which isn't on crates.io, and rlottie stay out of what packagers fetch: run it from its folder, as `cargo run -- corpus DIR`, or with `--manifest-path crates/tgs-lab/Cargo.toml`. |
 | `xtask` | Release builds with ffmpeg built in, packages, licences and icons; its module docs list the tasks. |
 
 ### Times in videos
@@ -40,8 +40,8 @@ misses, fitting aims a little lower and goes again. `crates/tgs/src/sticker.rs`
 explains each constant involved.
 
 The encoder's weights, such as `TILE` and `CORE_SHARE`, were measured on
-the corpus. `cargo run --release -p tgs-lab -- bench --save before.tsv`
-records how it encodes now, and after a change `bench --against
+the corpus. `cargo run --release -- bench --save before.tsv` in
+`crates/tgs-lab` records how it encodes now, and after a change `bench --against
 before.tsv` compares;
 `--verify` also renders every result and counts wrong cells. tlottie's
 limits in `crates/tgs/src/limits.rs` come from its source, at the version
@@ -60,7 +60,8 @@ print "skipped" and pass without. `nix develop` gives everything below.
 - The built-in ffmpeg: `cargo test --workspace --features tgradish/linked`,
   with ffmpeg's development files, pkg-config and libclang.
 - `.tgs` on one thread, as for the web: `cargo test -p tgradish-tgs`.
-- Renders with rlottie too: `cargo test -p tgs-lab --features rlottie`
+- tgs-lab, which renders with tlottie, and with rlottie too:
+  `cargo test --manifest-path crates/tgs-lab/Cargo.toml --features rlottie`
   (cmake, ninja and clang).
 - The window as pictures, which needs a GPU:
   `TGRADISH_SCREENSHOTS=/tmp/shots cargo test -p tgradish-gui -- --ignored screenshot`,

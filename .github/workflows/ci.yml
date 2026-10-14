@@ -70,17 +70,23 @@ jobs:
       - run: cargo clippy --workspace --all-targets --features tgradish/linked -- -D warnings
       - run: cargo test --workspace --features tgradish/linked
 
-  # .tgs output rendered with rlottie too; the check job covers tlottie
-  rlottie:
+  # tgs-lab, a workspace of its own: .tgs output rendered with tlottie and
+  # rlottie
+  lab:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/tgs-lab -> target
       - name: Install what Telegram's rlottie builds with
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang libclang-dev
-      - run: cargo clippy -p tgs-lab --all-targets --features rlottie -- -D warnings
-      - run: cargo test -p tgs-lab --features rlottie
+      - run: cargo fmt --manifest-path crates/tgs-lab/Cargo.toml --check
+      - run: >
+          cargo clippy --manifest-path crates/tgs-lab/Cargo.toml --all-targets
+          --features rlottie -- -D warnings
+      - run: cargo test --manifest-path crates/tgs-lab/Cargo.toml --features rlottie
 
   # the libraries a web page can run, with no files, processes or threads
   wasm:

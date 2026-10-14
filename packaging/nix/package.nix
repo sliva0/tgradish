@@ -37,7 +37,8 @@ rustPlatform.buildRustPackage {
     fileset = lib.fileset.unions [
       ../../Cargo.toml
       ../../Cargo.lock
-      ../../crates
+      # tgs-lab is a workspace of its own, which the package doesn't build
+      (lib.fileset.difference ../../crates ../../crates/tgs-lab)
       ../../xtask
       # licence notices the binary carries, see crates/core/build.rs
       ../../LICENSE.txt
@@ -45,11 +46,7 @@ rustPlatform.buildRustPackage {
     ];
   };
 
-  cargoLock = {
-    lockFile = ../../Cargo.lock;
-    # tlottie, which only the unpublished tgs-lab uses
-    allowBuiltinFetchGit = true;
-  };
+  cargoLock.lockFile = ../../Cargo.lock;
 
   cargoBuildFlags = [ "--package=tgradish" ];
   cargoTestFlags = [
