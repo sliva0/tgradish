@@ -12,15 +12,15 @@ use serde_json::{Value, json};
 use tgradish_tgs::check::check;
 use tgradish_tgs::frames::{Animation as Frames, Frame};
 use tgradish_tgs::layout::lay_out;
+use tgradish_tgs::limits::telegram::{self, MAX_BYTES};
 use tgradish_tgs::lottie::{Animation, Item, Layer, Style, Transform};
 use tgradish_tgs::normalise::{Options, normalise};
 use tgradish_tgs::scene::FillRule;
 use tgradish_tgs::{encode, file};
 
-const CANVAS: f64 = 512.0;
+const CANVAS: f64 = telegram::CANVAS as f64;
 /// Raw JSON of the large probe, just under Telegram Desktop's 2 MiB.
 const NEAR_2_MIB: usize = 2_000_000;
-const MAX_TGS: usize = 64 * 1024;
 
 pub(crate) struct Probe {
     pub(crate) file: String,
@@ -486,7 +486,7 @@ fn packed_to(sprite: &str, bytes: usize) -> Result<Vec<u8>> {
     let mut lottie = parse(sprite);
     let mut with = |length: usize, last: char| {
         lottie["nm"] = json!(format!("tgradish probe {}{last}", &noise[..length]));
-        gzip(lottie.to_string().as_bytes())
+        file::pack_quick(lottie.to_string().as_bytes())
     };
     // the shortest noise reaching `bytes`, then its last character varied
     // until the size is exact
@@ -504,13 +504,6 @@ fn packed_to(sprite: &str, bytes: usize) -> Result<Vec<u8>> {
         }
     }
     anyhow::bail!("no name packs to exactly {bytes} bytes")
-}
-
-fn gzip(json: &[u8]) -> Vec<u8> {
-    use std::io::Write;
-    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
-    encoder.write_all(json).expect("compressing into memory can't fail");
-    encoder.finish().expect("compressing into memory can't fail")
 }
 
 /// `json` with every rectangle's size written with more digits: the same
@@ -984,7 +977,7 @@ fn save_packed(
             .map_err(anyhow::Error::msg)
             .with_context(|| probe.file.clone())?;
         ensure!(
-            packed.is_some() || tgs.len() <= MAX_TGS,
+            packed.is_some() || tgs.len() <= MAX_BYTES,
             "{} is {} bytes, over 64 KiB",
             probe.file,
             tgs.len()
@@ -1021,7 +1014,7 @@ mod tests {
         assert_eq!(probes.len(), 12);
         for probe in &probes {
             // gzip -9 packs worse than zopfli
-            assert!(file::quick_size(probe.json.as_bytes()) <= MAX_TGS, "{}", probe.file);
+            assert!(file::quick_size(probe.json.as_bytes()) <= MAX_BYTES, "{}", probe.file);
             let pixels = Renderer::new(probe.json.as_bytes()).unwrap().render(0, 64).unwrap();
             assert!(pixels.iter().any(|pixel| pixel[3] > 0), "{} draws nothing", probe.file);
         }
@@ -1034,7 +1027,7 @@ mod tests {
         let probes = limit_probes(Vec::new()).unwrap();
         assert_eq!(probes.len(), 32);
         for probe in &probes {
-            assert!(file::quick_size(probe.json.as_bytes()) <= MAX_TGS, "{}", probe.file);
+            assert!(file::quick_size(probe.json.as_bytes()) <= MAX_BYTES, "{}", probe.file);
             let (stats, _) = check(probe.json.as_bytes(), None).unwrap();
             assert_eq!((stats.width, stats.height, stats.frames), (CANVAS, CANVAS, 180.0));
             let number = |prefix: &str| -> Option<usize> {

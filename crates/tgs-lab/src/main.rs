@@ -31,7 +31,7 @@ use tgradish_tgs::frames::{DecodeOptions, decode};
 use tgradish_tgs::layout::lay_out;
 use tgradish_tgs::lottie::Style;
 use tgradish_tgs::normalise::{Options, Report, normalise};
-use tgradish_tgs::{encode, file};
+use tgradish_tgs::{encode, file, sticker};
 
 use crate::verify::{Renderer, straight};
 
@@ -161,7 +161,8 @@ fn encode_file(args: &[String]) -> Result<()> {
     };
     let (input, output) = (Path::new(input), Path::new(output));
     let (anim, _) = load(input)?;
-    let tgs = file::pack(encoded(&anim, runs)?.as_bytes(), 15);
+    let iterations = sticker::zopfli_iterations(encode::Effort::default());
+    let tgs = file::pack(encoded(&anim, runs)?.as_bytes(), iterations);
     std::fs::write(output, &tgs).with_context(|| format!("cannot write {}", output.display()))?;
     println!("{}: {} bytes", output.display(), tgs.len());
     Ok(())
