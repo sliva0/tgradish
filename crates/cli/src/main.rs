@@ -180,3 +180,21 @@ fn main() -> ExitCode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// Windows reads the executable's version from its manifest, which
+    /// can't take it from Cargo.toml: it is written out by hand, with a
+    /// fourth number.
+    #[test]
+    fn windows_manifest_has_the_version() {
+        let manifest = include_str!("../tgradish.exe.manifest");
+        let version = format!(
+            "name=\"tgradish\" version=\"{}.{}.{}.0\"",
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            env!("CARGO_PKG_VERSION_MINOR"),
+            env!("CARGO_PKG_VERSION_PATCH")
+        );
+        assert!(manifest.contains(&version), "tgradish.exe.manifest should have {version}");
+    }
+}

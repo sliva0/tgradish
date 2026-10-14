@@ -71,7 +71,8 @@ jobs:
       - uses: actions/checkout@v5
 
       # archives are named after the version in Cargo.toml, the release
-      # after the tag
+      # after the tag, and the AUR packages download it by their pkgver; a
+      # test holds the Windows manifest to Cargo.toml
       - name: Check the tag is the version
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
@@ -81,6 +82,12 @@ jobs:
             echo "the tag is $GITHUB_REF_NAME, but Cargo.toml says $version"
             exit 1
           fi
+          for pkgbuild in packaging/aur/*/PKGBUILD; do
+            if ! grep -qx "pkgver=$version" "$pkgbuild"; then
+              echo "$pkgbuild doesn't say pkgver=$version"
+              exit 1
+            fi
+          done
 
       - name: Install build tools (Linux)
         if: matrix.container
