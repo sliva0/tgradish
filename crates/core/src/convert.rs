@@ -341,7 +341,7 @@ pub fn has_few_colours(frames: &[Vec<u8>], width: u32, crop: Option<Crop>, most:
     let mut colours = std::collections::HashSet::new();
     for rgba in frames {
         let height = (rgba.len() / 4) as u32 / width.max(1);
-        let Crop { x, y, width: w, height: h } = crop.unwrap_or(Crop { x: 0, y: 0, width, height });
+        let Crop { x, y, width: w, height: h } = crop.unwrap_or(Crop::whole((width, height)));
         for row in y..(y + h).min(height) {
             let start = (row * width + x) as usize * 4;
             let end = (row * width + (x + w).min(width)) as usize * 4;

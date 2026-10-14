@@ -21,7 +21,7 @@ impl Part {
     /// `crop`, in input pixels of an `input` sized picture, on a frame of
     /// `frame` pixels.
     pub fn of(crop: Option<Crop>, input: (u32, u32), frame: (u32, u32)) -> Part {
-        let crop = crop.unwrap_or(Crop { x: 0, y: 0, width: input.0, height: input.1 });
+        let crop = crop.unwrap_or(Crop::whole(input));
         let (sx, sy) = (
             f64::from(frame.0) / f64::from(input.0.max(1)),
             f64::from(frame.1) / f64::from(input.1.max(1)),

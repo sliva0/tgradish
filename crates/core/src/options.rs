@@ -135,6 +135,11 @@ pub struct Crop {
 }
 
 impl Crop {
+    /// All of a picture of `size`.
+    pub fn whole((width, height): (u32, u32)) -> Crop {
+        Crop { x: 0, y: 0, width, height }
+    }
+
     /// Whether the crop lies within a `width` by `height` picture.
     pub fn fits(&self, width: u32, height: u32) -> bool {
         self.width > 0

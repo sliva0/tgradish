@@ -649,7 +649,7 @@ pub fn show(
         let y = ((point.y - shown.min.y) / scale).clamp(0.0, size.1 as f32);
         pos2(x, y)
     };
-    let full = Crop { x: 0, y: 0, width: size.0, height: size.1 };
+    let full = Crop::whole(size);
     let crop = cropping.crop.unwrap_or(full);
     let on_screen = Rect::from_min_size(
         shown.min + vec2(crop.x as f32, crop.y as f32) * scale,
