@@ -7,18 +7,46 @@ use std::path::Path;
 /// Opens the folder holding `path`, with the file selected where the
 /// system can do that.
 pub(crate) fn reveal(path: &Path) {
-    let folder = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     #[cfg(target_os = "windows")]
-    let command = std::process::Command::new("explorer").arg("/select,").arg(path).spawn();
+    wait_for(std::process::Command::new("explorer").arg("/select,").arg(path).spawn());
     #[cfg(target_os = "macos")]
-    let command = std::process::Command::new("open").arg("-R").arg(path).spawn();
+    wait_for(std::process::Command::new("open").arg("-R").arg(path).spawn());
+    // the file manager is asked over D-Bus, which may start it and so takes
+    // a while; the folder alone where none answers
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let command = {
-        let _ = path;
-        std::process::Command::new("xdg-open").arg(folder).spawn()
-    };
-    let _ = folder;
-    wait_for(command);
+    {
+        let path = path.to_path_buf();
+        let _ = std::thread::Builder::new().name("reveal".into()).spawn(move || {
+            let selected = path
+                .canonicalize()
+                .ok()
+                .and_then(|path| std::ffi::CString::new(file_uri(&path)).ok())
+                .is_some_and(|uri| crate::dbus::show_items(&uri));
+            if !selected {
+                let folder =
+                    path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+                if let Ok(mut child) = std::process::Command::new("xdg-open").arg(folder).spawn() {
+                    let _ = child.wait();
+                }
+            }
+        });
+    }
+}
+
+/// `path`, absolute, as a file:// address, its bytes beyond letters,
+/// digits and `-._~/` escaped.
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn file_uri(path: &Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    let mut uri = String::from("file://");
+    for &byte in path.as_os_str().as_bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~/".contains(&byte) {
+            uri.push(char::from(byte));
+        } else {
+            uri.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    uri
 }
 
 /// Opens a web address in the system's browser; anything else, which
@@ -61,6 +89,15 @@ mod tests {
 
     use super::*;
     use crate::testing::harness;
+
+    #[test]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    fn names_files_as_addresses() {
+        assert_eq!(
+            file_uri(Path::new("/tmp/a b/ü,1%.webm")),
+            "file:///tmp/a%20b/%C3%BC%2C1%25.webm"
+        );
+    }
 
     #[test]
     fn opens_links() {

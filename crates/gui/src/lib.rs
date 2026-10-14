@@ -8,6 +8,9 @@ mod actions;
 mod app;
 mod canvas;
 #[cfg(all(unix, not(target_os = "macos")))]
+#[allow(unsafe_code)]
+mod dbus;
+#[cfg(all(unix, not(target_os = "macos")))]
 mod dnd;
 mod fallback;
 mod files;
