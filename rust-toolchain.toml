@@ -1,3 +1,7 @@
+# The newest stable rather than a pinned release: distributions build
+# tgradish with the stable Rust they ship, and CI following the newest
+# finds what a new release breaks before they do. Nothing here needs a
+# particular release.
 [toolchain]
 channel = "stable"
 components = ["clippy", "rustfmt"]
