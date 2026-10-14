@@ -367,7 +367,9 @@ impl Framing {
     }
 }
 
-/// A finished conversion: the job and what it was made from.
+/// A finished conversion: the job and what it was made from. As
+/// [`Item::made`], its status is always [`crate::jobs::Status::Done`]; as
+/// [`Item::failed`], never.
 pub struct Made {
     pub job: Job,
     pub format: Format,

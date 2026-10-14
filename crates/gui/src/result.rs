@@ -32,44 +32,39 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
         ui,
         if item.result_is_current() { "Result" } else { "Result, from earlier settings" },
     );
-    match &made.job.status {
-        Status::Done(done) => {
-            widgets::gauge(
-                ui,
-                done.bytes,
-                done.limit,
-                format!("{} of {}", widgets::kib(done.bytes), widgets::kib(done.limit)),
-            );
-            ui.add_space(4.0);
-            widgets::problems(ui, &done.problems);
-            if let Some(plan) = &made.job.progress.webm {
-                let spoofed = if done.spoofed { ", duration spoofed" } else { "" };
-                widgets::note(
-                    ui,
-                    format!(
-                        "{} × {} px, {:.2} fps, {}{spoofed}",
-                        plan.width,
-                        plan.height,
-                        plan.fps,
-                        widgets::seconds(plan.length)
-                    ),
-                );
-            }
-            if done.lossy {
-                widgets::note(ui, "Changed to fit: see Details below");
-            }
-            if made.job.replaces {
-                ui.colored_label(widgets::WARN, "⚠ Replaced an earlier result made by tgradish");
-            }
-        }
-        Status::Failed(message) => {
-            ui.colored_label(widgets::BAD, message);
-        }
-        Status::Exists(path) => {
-            ui.colored_label(widgets::WARN, format!("{} is in the way", path.display()));
-        }
-        Status::Cancelled => widgets::note(ui, "Stopped before it was done"),
-        Status::Waiting | Status::Running => {}
+    // a result is only kept once it is done
+    let Status::Done(done) = &made.job.status else { return };
+    widgets::gauge(
+        ui,
+        done.bytes,
+        done.limit,
+        format!("{} of {}", widgets::kib(done.bytes), widgets::kib(done.limit)),
+    );
+    ui.add_space(4.0);
+    widgets::problems(ui, &done.problems);
+    if let Some(plan) = &made.job.progress.webm {
+        let spoofed = if done.spoofed { ", duration spoofed" } else { "" };
+        // the encode kept, which fitting may have made at a lower
+        // frame rate or shorter than planned
+        let progress = &made.job.progress;
+        let kept = progress.attempts.iter().find(|attempt| Some(attempt.number) == done.kept);
+        let (fps, length) =
+            kept.map_or((plan.fps, plan.length), |kept| (kept.params.fps, kept.params.length));
+        widgets::note(
+            ui,
+            format!(
+                "{} × {} px, {fps:.2} fps, {}{spoofed}",
+                plan.width,
+                plan.height,
+                widgets::seconds(length)
+            ),
+        );
+    }
+    if done.lossy {
+        widgets::note(ui, "Changed to fit: see Details below");
+    }
+    if made.job.replaces {
+        ui.colored_label(widgets::WARN, "⚠ Replaced an earlier result made by tgradish");
     }
 }
 
