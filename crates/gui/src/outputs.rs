@@ -30,9 +30,19 @@ impl Written {
 pub(crate) type FileVersion = (u64, Option<std::time::SystemTime>);
 
 impl App {
+    /// Where an item's result goes, as worked out this frame.
+    pub(crate) fn output_for(&self, item: &Item) -> PathBuf {
+        if let Some(output) = self.outputs.borrow().get(&item.id) {
+            return output.clone();
+        }
+        let output = self.work_out_output(item);
+        self.outputs.borrow_mut().insert(item.id, output.clone());
+        output
+    }
+
     /// Where an item's result goes: next to its input or in the folder
     /// for results, numbered if another file in the window has the name.
-    pub(crate) fn output_for(&self, item: &Item) -> PathBuf {
+    pub(crate) fn work_out_output(&self, item: &Item) -> PathBuf {
         let dir = self.config.gui.output_dir.clone().filter(|dir| !dir.as_os_str().is_empty());
         let input = &item.inputs[0];
         let next_to_input = match item.format {

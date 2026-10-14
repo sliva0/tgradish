@@ -48,6 +48,15 @@ pub(crate) struct App {
     /// Files found in the way, by their size and time: whether tgradish
     /// made them, so they may be replaced.
     pub(crate) made_by_tgradish: std::cell::RefCell<HashMap<PathBuf, (FileVersion, bool)>>,
+    /// Where each item's result goes, worked out once a frame: it looks
+    /// at the other items and at files on disk, and is asked for several
+    /// times a frame. Cleared as each frame starts.
+    pub(crate) outputs: std::cell::RefCell<HashMap<u64, PathBuf>>,
+    /// The ffmpeg found for the settings, and when: looking for it
+    /// searches the PATH, so it is looked for again only every few
+    /// seconds, to notice one installed meanwhile, or when the settings
+    /// change.
+    pub(crate) found_backend: std::cell::RefCell<Option<FoundBackend>>,
     pub(crate) screen: Screen,
     pub(crate) inset: Inset,
     pub(crate) prefs: prefs::Prefs,
@@ -173,6 +182,8 @@ impl App {
             queue: VecDeque::new(),
             written: HashMap::new(),
             made_by_tgradish: Default::default(),
+            outputs: Default::default(),
+            found_backend: Default::default(),
             screen: Screen::default(),
             inset: Inset::default(),
             prefs: prefs::Prefs::default(),
@@ -222,7 +233,20 @@ impl App {
 
     pub(crate) fn backend(&self) -> Result<Backend, String> {
         let ffmpeg = &self.config.ffmpeg;
-        Backend::select(ffmpeg.choice, ffmpeg.path.as_deref()).map_err(|err| err.to_string())
+        let settings = (ffmpeg.choice, ffmpeg.path.clone());
+        let mut found = self.found_backend.borrow_mut();
+        match &*found {
+            Some(seen) if seen.settings == settings && seen.when.elapsed() < LOOK_AGAIN => {
+                seen.backend.clone()
+            }
+            _ => {
+                let backend = Backend::select(ffmpeg.choice, ffmpeg.path.as_deref())
+                    .map_err(|err| err.to_string());
+                let when = std::time::Instant::now();
+                *found = Some(FoundBackend { settings, when, backend: backend.clone() });
+                backend
+            }
+        }
     }
 
     pub(crate) fn item(&self, id: u64) -> Option<&Item> {
@@ -317,7 +341,8 @@ impl App {
     /// Queues the item for converting with its settings as they are now.
     pub(crate) fn enqueue(&mut self, id: u64) {
         let Some(item) = self.item(id) else { return };
-        let output = self.output_for(item);
+        // as things are now, not as they were when the frame started
+        let output = self.work_out_output(item);
         let item = self.item_mut(id).expect("found above");
         if let Some((job, ..)) = &item.job {
             job.cancel();
@@ -362,6 +387,16 @@ pub(crate) fn set_theme(ctx: &egui::Context, theme: tgradish_core::config::Theme
     });
 }
 
+/// How long an ffmpeg found, or not found, is taken as it is.
+const LOOK_AGAIN: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The ffmpeg found for the settings `settings`, at `when`.
+pub(crate) struct FoundBackend {
+    settings: (tgradish_core::ffmpeg::FfmpegChoice, Option<PathBuf>),
+    when: std::time::Instant,
+    backend: Result<Backend, String>,
+}
+
 impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.save_session();
@@ -374,6 +409,7 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.outputs.borrow_mut().clear();
         // with the one just saved
         if crate::settings::presets_saved(&ctx)
             && let Ok(presets) = Presets::load(self.presets_dir.as_deref())
