@@ -32,11 +32,8 @@ impl Placement {
     pub fn new(grid: &Grid, stretch: bool) -> Placement {
         let width = f64::from(*grid.columns.last().unwrap());
         let height = f64::from(*grid.rows.last().unwrap());
-        let unit = grid.scale();
-        let origin_of = |edges: &[u32]| if edges.len() > 2 { edges[1] % unit } else { 0 };
-        // where the art pixel grid starts: the first inner edge, modulo the scale
-        let (origin_x, origin_y) = (origin_of(&grid.columns), origin_of(&grid.rows));
-        let unit = f64::from(unit);
+        let (origin_x, origin_y) = grid.origin();
+        let unit = f64::from(grid.scale());
         let coordinates = |edges: &[u32], origin: u32| {
             edges.iter().map(|&edge| (f64::from(edge) - f64::from(origin)) / unit - SHIFT).collect()
         };

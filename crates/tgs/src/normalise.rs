@@ -85,8 +85,9 @@ pub struct Grid {
 
 impl Grid {
     /// The largest size every cell is a multiple of: the art's pixel scale
-    /// when the input is an exact upscale. Cells on the edges don't count
-    /// when there are others, since the canvas can cut art pixels.
+    /// when the input is an exact upscale. Along a side of three cells or
+    /// more, those at its ends don't count, since the canvas or a crop can
+    /// cut art pixels there.
     pub fn scale(&self) -> u32 {
         let sizes = |edges: &[u32]| {
             let sizes: Vec<u32> = edges.windows(2).map(|w| w[1] - w[0]).collect();
@@ -96,6 +97,27 @@ impl Grid {
             }
         };
         sizes(&self.columns).into_iter().chain(sizes(&self.rows)).fold(0, gcd)
+    }
+
+    /// Where the art's pixel grid starts across and down: how far into the
+    /// first cell the second begins, modulo the scale. Not 0 where the
+    /// canvas or a crop cut the first art pixels.
+    pub fn origin(&self) -> (u32, u32) {
+        let unit = self.scale().max(1);
+        let origin = |edges: &[u32]| if edges.len() > 2 { edges[1] % unit } else { 0 };
+        (origin(&self.columns), origin(&self.rows))
+    }
+
+    /// Whether the canvas or a crop cut art pixels at the sides, so the
+    /// cells there are smaller than the rest.
+    pub fn cut_at_sides(&self) -> bool {
+        let unit = self.scale().max(1);
+        let cut = |edges: &[u32]| {
+            let (first, last) =
+                (edges[1] - edges[0], edges[edges.len() - 1] - edges[edges.len() - 2]);
+            edges.len() > 2 && (!first.is_multiple_of(unit) || !last.is_multiple_of(unit))
+        };
+        cut(&self.columns) || cut(&self.rows)
     }
 }
 
@@ -189,7 +211,8 @@ pub struct Report {
     /// Size in cells (see [`PixelAnim`]).
     pub width: u32,
     pub height: u32,
-    /// The art's pixel scale: every cell is a multiple of it.
+    /// The art's pixel scale: every cell is a multiple of it, but those a
+    /// crop cuts at the sides.
     pub scale: u32,
     /// A larger scale most of the art follows, with the share of colour
     /// edges on its grid; forcing it snaps the rest.
@@ -365,7 +388,8 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
         Some(scale @ 2..) => {
             // anything larger than the art makes it one cell either way
             let scale = scale.min(crop.width.max(crop.height));
-            let offset = edges.fit(scale).offset;
+            // the crop is the visible pixels', or the canvas
+            let offset = edges.fit(scale, true).offset;
             for frame in &mut pixels {
                 snapped_pixels += snap(frame, crop.width, crop.height, scale, offset);
             }
@@ -373,6 +397,20 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
         }
         _ => {}
     }
+
+    // a larger scale the art likely has, judged before a square is cut
+    // from its middle, through its art pixels
+    let likely_scale = |scale: u32| {
+        (scale + 1..=MAX_LIKELY_SCALE)
+            .rev()
+            .map(|candidate| (candidate, edges.fit(candidate, true).fit))
+            .find(|&(_, fit)| fit >= LIKELY_FIT)
+            .map(|(scale, fit)| LikelyScale { scale, fit })
+    };
+    let likely_scale = match options.pixel_scale {
+        Some(_) => None,
+        None => likely_scale(edges.grid().scale()),
+    };
 
     let ticks: Vec<u32> = frames.iter().map(|&(_, ticks)| ticks).collect();
     // cut square before the colours are gathered: those cut off don't count
@@ -386,15 +424,8 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
     let (width, height, grid) = (anim.width, anim.height, anim.grid.clone());
 
     let scale = grid.scale();
-    let likely_scale = if options.pixel_scale.is_some() {
-        None
-    } else {
-        (scale + 1..=MAX_LIKELY_SCALE)
-            .rev()
-            .map(|candidate| (candidate, edges.fit(candidate).fit))
-            .find(|&(_, fit)| fit >= LIKELY_FIT)
-            .map(|(scale, fit)| LikelyScale { scale, fit })
-    };
+    // larger than the scale the cut art has, the likely one is no news
+    let likely_scale = likely_scale.filter(|likely| likely.scale > scale);
     let colours = anim.palette.len() - 1;
     let mut warnings = Vec::new();
     if colours > MANY_COLOURS {
@@ -547,11 +578,15 @@ impl Edges {
     }
 
     /// How well colour edges line up with a grid of `scale`, at its best
-    /// offset.
-    pub(crate) fn fit(&self, scale: u32) -> GridFit {
+    /// offset. The `borders` of the crop count as edges where they lie on
+    /// the art's grid, as those of the visible pixels do; where a crop cut
+    /// through art pixels they would mislead, and only edges inside count.
+    pub(crate) fn fit(&self, scale: u32, borders: bool) -> GridFit {
+        let skip = usize::from(!borders);
+        let counted = |counts: &[u64]| counts.len() - 2 * skip;
         let best = |counts: &[u64]| {
             let mut on_grid = vec![0u64; scale as usize];
-            for (at, count) in counts.iter().enumerate() {
+            for (at, count) in counts.iter().enumerate().skip(skip).take(counted(counts)) {
                 on_grid[at % scale as usize] += count;
             }
             let (offset, &count) = on_grid
@@ -562,22 +597,28 @@ impl Edges {
             (offset as u32, count)
         };
         let ((x, on_columns), (y, on_rows)) = (best(&self.columns), best(&self.rows));
-        let total: u64 = self.columns.iter().chain(&self.rows).sum();
+        let sum = |counts: &[u64]| counts.iter().skip(skip).take(counted(counts)).sum::<u64>();
+        let total = sum(&self.columns) + sum(&self.rows);
         let fit = if total == 0 { 1.0 } else { (on_columns + on_rows) as f64 / total as f64 };
         GridFit { offset: (x, y), fit }
     }
 }
 
-/// Fills every cell of the grid with its most common colour (the one
-/// nearest its centre on ties). Returns how many pixels changed.
+/// Fills every cell of the grid with its most common colour (the one at
+/// its centre on ties, then the largest). Returns how many pixels changed.
 fn snap(pixels: &mut [u32], width: u32, height: u32, scale: u32, offset: (u32, u32)) -> u64 {
-    let starts = |offset: u32, size: u32| {
-        let mut starts = vec![0];
-        starts.extend((offset % scale..size).step_by(scale as usize).filter(|&start| start > 0));
-        starts.push(size);
-        starts
-    };
-    snap_to(pixels, width, &starts(offset.0, width), &starts(offset.1, height))
+    let (columns, rows) =
+        (grid_starts(offset.0, width, scale), grid_starts(offset.1, height, scale));
+    snap_to(pixels, width, &columns, &rows)
+}
+
+/// Edges of a grid of `scale` along a side of `size` pixels, starting at
+/// `offset`: from 0 to the size, cells at the ends cut short.
+pub(crate) fn grid_starts(offset: u32, size: u32, scale: u32) -> Vec<u32> {
+    let mut starts = vec![0];
+    starts.extend((offset % scale..size).step_by(scale as usize).filter(|&start| start > 0));
+    starts.push(size);
+    starts
 }
 
 /// Fills every cell between `columns` and `rows` (edges in pixels, from 0

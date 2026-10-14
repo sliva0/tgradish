@@ -326,13 +326,7 @@ impl Preview {
         let height = *grid.rows.last().unwrap_or(&0);
         // input pixels per preview pixel: an art pixel, unless the canvas
         // cuts those at the sides, which then show only in part
-        let whole = |edges: &[u32], size: u32| {
-            let unit = grid.scale().max(1);
-            let last = size - edges[edges.len().max(2) - 2];
-            edges.len() <= 2 || (edges[1].is_multiple_of(unit) && last.is_multiple_of(unit))
-        };
-        let unit =
-            if whole(&grid.columns, width) && whole(&grid.rows, height) { grid.scale() } else { 1 };
+        let unit = if grid.cut_at_sides() { 1 } else { grid.scale() };
         let step = unit.max(width.max(height).div_ceil(PREVIEW_MAX_SIDE)).max(1);
         let most = width.max(height).div_ceil(step);
         // the cell under the middle of each step, or stretched, of each of
