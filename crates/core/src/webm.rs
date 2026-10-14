@@ -131,7 +131,8 @@ impl WebmInfo {
 /// Longest fake duration [`patch`] accepts, in seconds (a year).
 pub const MAX_FAKE_DURATION: f64 = 365.0 * 24.0 * 3600.0;
 
-/// Prefix of the signature text written into padding.
+/// Prefix of the signature text written into padding, which [`inspect`]
+/// looks for: [`crate::signature`] must start with it.
 pub const SIGNATURE_PREFIX: &str = "tgradish";
 
 /// Metadata changes applied by [`patch`]. `None` fields are left as they are.

@@ -189,8 +189,8 @@ impl TgsOptions {
     /// The settings for the tgs crate.
     pub fn sticker_options(&self) -> Result<sticker::Options> {
         let name = match (self.watermark.unwrap_or(true), &self.title) {
-            (true, Some(title)) => Some(format!("{title} (made with tgradish)")),
-            (true, None) => Some(format!("made with tgradish {}", env!("CARGO_PKG_VERSION"))),
+            (true, Some(title)) => Some(format!("{title}{}", crate::TITLED)),
+            (true, None) => Some(format!("{}{}", crate::UNTITLED, crate::TOOL_ID)),
             (false, title) => title.clone(),
         };
         Ok(sticker::Options {
