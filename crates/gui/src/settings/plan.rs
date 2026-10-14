@@ -10,6 +10,8 @@ use tgradish_core::presets::Format;
 use tgradish_core::telegram;
 use tgradish_core::tgs::TgsOptions;
 
+use tgradish_tgs::frames::Direction;
+
 use super::Context;
 use crate::item::{Item, Kind};
 use crate::widgets;
@@ -18,22 +20,25 @@ use crate::widgets;
 pub fn plan(ui: &mut egui::Ui, item: &Item, context: &Context) {
     let animated = item.input_length().is_some();
     let title = match (item.kind, animated) {
-        (Kind::Video, true) => "The video will be",
-        (Kind::Video | Kind::Image, false) => "The picture will be",
-        (Kind::Image, true) => "The animation will be",
-        (Kind::Aseprite | Kind::Frames, _) => "The art will be",
+        (Kind::Video, true) => "The video will be:",
+        (Kind::Video | Kind::Image, false) => "The picture will be:",
+        (Kind::Image, true) => "The animation will be:",
+        (Kind::Aseprite | Kind::Frames, _) => "The art will be:",
     };
     widgets::section(ui, title);
     for step in steps(item, context) {
-        ui.add(egui::Label::new(format!("– {step}")).wrap());
+        // wrapped lines start under the text, not the bullet
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.label("•");
+            ui.add(egui::Label::new(step).wrap());
+        });
     }
 }
 
 /// What of the input is read and used, whichever the format.
 struct Used<'a> {
     tag: Option<&'a str>,
-    /// How many layers are named to show, and to hide.
-    layers: (usize, usize),
     crop: Option<Crop>,
     start: Option<f64>,
     length: Option<f64>,
@@ -43,7 +48,6 @@ struct Used<'a> {
 fn steps(item: &Item, context: &Context) -> Vec<String> {
     let (presets, config) = (context.presets, context.config);
     let mut steps = Vec::new();
-    let count = |list: &Option<Vec<String>>| list.as_ref().map_or(0, Vec::len);
     match item.format {
         Format::Webm | Format::Image => {
             let options = match item.format {
@@ -53,7 +57,6 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
             let Ok(options) = options else { return steps };
             let used = Used {
                 tag: options.tag.as_deref(),
-                layers: (count(&options.show_layers), count(&options.hide_layers)),
                 crop: options.crop,
                 start: options.start,
                 length: options.length,
@@ -72,7 +75,6 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
             let Ok(options) = item.choices.tgs_options(presets, config) else { return steps };
             let used = Used {
                 tag: options.tag.as_deref(),
-                layers: (count(&options.show_layers), count(&options.hide_layers)),
                 crop: options.crop,
                 start: options.start,
                 length: options.length,
@@ -84,38 +86,33 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
         }
     }
     if let Some(name) = context.output.as_ref().and_then(|output| output.file_name()) {
-        steps.push(format!("Converted into {}", name.to_string_lossy()));
+        steps.push(format!("Saved as {}", name.to_string_lossy()));
     }
     steps
 }
 
 /// What is read of the input and cut from it.
 fn read(item: &Item, used: &Used, steps: &mut Vec<String>) {
-    if item.kind == Kind::Aseprite {
-        if let Some(tag) = used.tag {
-            steps.push(format!("Read from its “{tag}” tag"));
-        }
-        match used.layers {
-            (0, 0) => {}
-            (shown, 0) => steps.push(format!("Drawn with {} shown", layers(shown))),
-            (0, hidden) => steps.push(format!("Drawn with {} hidden", layers(hidden))),
-            (shown, hidden) => {
-                steps.push(format!("Drawn with {} shown and {hidden} hidden", layers(shown)))
-            }
-        }
+    if item.kind == Kind::Aseprite
+        && let Some(name) = used.tag
+    {
+        let tags = item.aseprite().map_or(&[][..], |(tags, ..)| tags);
+        let direction = match tags.iter().find(|tag| tag.name == name).map(|tag| tag.direction) {
+            Some(Direction::Reverse) => ", in reverse",
+            Some(Direction::PingPong) => ", there and back",
+            Some(Direction::PingPongReverse) => ", back and there",
+            Some(Direction::Forward) | None => "",
+        };
+        steps.push(format!("Played as its “{name}” tag{direction}"));
     }
-    if let (Some(crop), Some((width, height))) = (used.crop, item.input_size()) {
-        steps.push(format!("Cropped to {} × {} of {width} × {height}", crop.width, crop.height));
+    if let Some(crop) = used.crop {
+        steps.push(format!("Cropped to {} × {}", crop.width, crop.height));
     }
     if item.format == Format::Image
         && let Some(frame) = used.start.filter(|_| item.input_length().is_some())
     {
-        steps.push(format!("Its frame at {} taken", widgets::seconds(frame)));
+        steps.push(format!("Frame at {} taken", widgets::seconds(frame)));
     }
-}
-
-fn layers(count: usize) -> String {
-    if count == 1 { "1 layer".into() } else { format!("{count} layers") }
 }
 
 /// The sizes a WebM or image result's picture has, as converting plans
@@ -156,11 +153,10 @@ fn picture(options: &Options, used: (u32, u32)) -> Vec<String> {
         steps.push(format!("Stretched ×{} down", widgets::trimmed(down / across)));
     }
     if scaled.0 > sizes.width || scaled.1 > sizes.height {
-        steps.push(format!("Its middle cut to {} × {}", sizes.width, sizes.height));
+        steps.push(format!("Middle cut to {} × {}", sizes.width, sizes.height));
     }
     if sizes.pads() {
-        steps
-            .push(format!("Padded to {} × {} with transparent margins", sizes.width, sizes.height));
+        steps.push(format!("Padded to {} × {}", sizes.width, sizes.height));
     }
     steps
 }
@@ -168,20 +164,19 @@ fn picture(options: &Options, used: (u32, u32)) -> Vec<String> {
 /// How a `.tgs` result's art is cut and squared.
 fn art(options: &TgsOptions, steps: &mut Vec<String>) {
     if !options.keep_canvas.unwrap_or(false) {
-        steps.push("Cut to its visible pixels".into());
+        steps.push("Trimmed to its visible pixels".into());
     }
     if let Some(scale) = options.pixel_scale {
-        steps.push(format!("Its pixels moved onto a grid of {scale} × {scale}"));
+        steps.push(format!("Pixels aligned to a {scale} × {scale} grid"));
     }
     steps.push(
         match options.resize.unwrap_or(Resize::Pad) {
-            Resize::Crop => "Cropped to a square, by whole art pixels",
+            Resize::Crop => "Cropped to a square",
             Resize::Stretch => "Stretched to a square",
-            Resize::Pad | Resize::Contain => "Padded to a square with transparent margins",
+            Resize::Pad | Resize::Contain => "Padded to a square",
         }
         .into(),
     );
-    steps.push("Drawn as vector shapes".into());
 }
 
 /// How the result plays at `tempo`: faster or slower, and how its length
@@ -191,14 +186,15 @@ fn time(item: &Item, used: &Used, tempo: f64, cut: bool, steps: &mut Vec<String>
     let start = used.start.unwrap_or(0.0).clamp(0.0, length);
     let end = used.length.map_or(length, |used| (start + used).min(length));
     if start > 1e-6 || end < length - 1e-6 {
-        let (from, to, of) =
-            (widgets::seconds(start), widgets::seconds(end), widgets::seconds(length));
-        steps.push(format!("Cut to {from} to {to} of its {of}"));
+        // a range of seconds, with one unit
+        let from = widgets::seconds(start).trim_end_matches(" s").to_owned();
+        let (to, of) = (widgets::seconds(end), widgets::seconds(length));
+        steps.push(format!("Cut to {from}–{to} of {of}"));
     }
     if tempo > 1.0 + 1e-9 {
-        steps.push(format!("Sped up ×{}", widgets::trimmed(tempo)));
+        steps.push(format!("Sped up by a factor of {}", widgets::trimmed(tempo)));
     } else if tempo < 1.0 - 1e-9 {
-        steps.push(format!("Slowed down ×{}", widgets::trimmed(tempo)));
+        steps.push(format!("Slowed down by a factor of {}", widgets::trimmed(1.0 / tempo)));
     }
     let played = (end - start) / tempo;
     if !telegram::too_long(played) {
@@ -206,9 +202,9 @@ fn time(item: &Item, used: &Used, tempo: f64, cut: bool, steps: &mut Vec<String>
     }
     let played = widgets::seconds(played);
     if cut {
-        steps.push(format!("Cut at 3 s of the {played} it plays"));
+        steps.push(format!("Cut at 3 s of {played}"));
     } else {
-        steps.push(format!("Told Telegram it is short, so all {played} plays"));
+        steps.push(format!("Duration spoofed, so all {played} plays"));
     }
 }
 
@@ -229,7 +225,7 @@ mod tests {
             ..Options::default()
         };
         let steps = picture(&exact, (64, 40));
-        assert_eq!(steps, ["Scaled to 128 × 80", "Padded to 512 × 80 with transparent margins"]);
+        assert_eq!(steps, ["Scaled to 128 × 80", "Padded to 512 × 80"]);
         // stretched to a square
         let stretched = Options { resize: Some(Resize::Stretch), ..Options::default() };
         assert_eq!(picture(&stretched, (64, 40)), ["Scaled to 512 × 512", "Stretched ×1.6 down"]);
@@ -239,6 +235,6 @@ mod tests {
             resize: Some(Resize::Crop),
             ..Options::default()
         };
-        assert_eq!(picture(&cut, (64, 40)), ["Scaled to 160 × 100", "Its middle cut to 100 × 100"]);
+        assert_eq!(picture(&cut, (64, 40)), ["Scaled to 160 × 100", "Middle cut to 100 × 100"]);
     }
 }
