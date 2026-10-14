@@ -143,7 +143,7 @@ fn size_issue(width: u64, height: u64, target: Target) -> Option<Issue> {
 
 /// Lists everything that would make Telegram reject an image sticker or
 /// emoji of `bytes` bytes, `width` by `height` pixels, as `target`.
-pub fn check_still(width: u32, height: u32, bytes: u64, target: Target) -> Vec<Issue> {
+pub(crate) fn check_still(width: u32, height: u32, bytes: u64, target: Target) -> Vec<Issue> {
     let mut issues: Vec<Issue> =
         size_issue(u64::from(width), u64::from(height), target).into_iter().collect();
     if bytes > MAX_STILL_BYTES {

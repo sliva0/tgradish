@@ -320,7 +320,7 @@ pub struct TgsOutcome {
 
 /// The longest side of a `.tgs` preview: plenty for a window, and within
 /// what any GPU takes as a texture.
-pub const PREVIEW_MAX_SIDE: u32 = 1024;
+pub(crate) const PREVIEW_MAX_SIDE: u32 = 1024;
 
 impl Preview {
     /// What `anim` shows, `stretch`ed square as the sticker is, or not.
@@ -641,7 +641,7 @@ fn read_lottie(path: &Path) -> Result<(Vec<u8>, Option<usize>)> {
 }
 
 /// The Lottie JSON of a `.tgs` (or plain Lottie JSON) file.
-pub fn read_json(path: &Path) -> Result<Vec<u8>> {
+pub(crate) fn read_json(path: &Path) -> Result<Vec<u8>> {
     read_lottie(path).map(|(json, _)| json)
 }
 

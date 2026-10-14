@@ -21,7 +21,7 @@ pub mod clipboard;
 pub mod config;
 pub mod convert;
 pub mod drawn;
-pub mod ebml;
+pub(crate) mod ebml;
 mod error;
 pub mod events;
 pub mod ffmpeg;
