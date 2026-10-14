@@ -205,6 +205,14 @@ fn screenshots() {
     harness.run_steps(3);
     save(&mut harness, "settings-tgs");
     harness.set_size(egui::vec2(1280.0, 820.0));
+    // cut square: what is cut off greyed out
+    let item = harness.state_mut().items.last_mut().unwrap();
+    item.choices.tgs.resize = Some(tgradish_core::options::Resize::Crop);
+    item.choices.show_layers = None;
+    item.view.show = Show::Input;
+    finish(&mut harness);
+    harness.run_steps(3);
+    save(&mut harness, "tgs-crop");
     let last = harness.state().items.len() - 1;
     harness.state_mut().items.remove(last);
     let shown = harness.state().items.last().unwrap().id;

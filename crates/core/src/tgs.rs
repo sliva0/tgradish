@@ -76,7 +76,7 @@ pub struct TgsOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
     /// How art that isn't square fills the square sticker: pad (whole,
-    /// with transparent margins), crop (its middle, by whole art pixels) or
+    /// with transparent margins), crop (its middle) or
     /// stretch (its art pixels no longer square). [default: pad]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resize: Option<Resize>,
@@ -324,8 +324,16 @@ impl Preview {
         let grid = anim.grid();
         let width = *grid.columns.last().unwrap_or(&0);
         let height = *grid.rows.last().unwrap_or(&0);
-        // input pixels per preview pixel
-        let step = grid.scale().max(width.max(height).div_ceil(PREVIEW_MAX_SIDE)).max(1);
+        // input pixels per preview pixel: an art pixel, unless the canvas
+        // cuts those at the sides, which then show only in part
+        let whole = |edges: &[u32], size: u32| {
+            let unit = grid.scale().max(1);
+            let last = size - edges[edges.len().max(2) - 2];
+            edges.len() <= 2 || (edges[1].is_multiple_of(unit) && last.is_multiple_of(unit))
+        };
+        let unit =
+            if whole(&grid.columns, width) && whole(&grid.rows, height) { grid.scale() } else { 1 };
+        let step = unit.max(width.max(height).div_ceil(PREVIEW_MAX_SIDE)).max(1);
         let most = width.max(height).div_ceil(step);
         // the cell under the middle of each step, or stretched, of each of
         // as many preview pixels as along the longer side

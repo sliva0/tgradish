@@ -221,34 +221,11 @@ pub fn tgs_bounds(frames: &[Vec<u8>], width: u32, part: Part, keep_canvas: bool)
     if right > left && bottom > top { [left, top, right, bottom] } else { [x0, y0, x1, y1] }
 }
 
-/// What of `clip` a `.tgs` cropped square shows: `part` of it, cut to
-/// what is visible unless `keep_canvas`, and to a square on the art's grid
-/// of `pixel_scale` or the one found, as converting cuts it; `None` where
-/// converting wouldn't read it.
-pub fn tgs_square(
-    clip: &crate::media::Clip,
-    part: Part,
-    keep_canvas: bool,
-    pixel_scale: Option<u32>,
-) -> Option<[usize; 4]> {
-    use tgradish_tgs::frames::{Animation, Frame};
-    use tgradish_tgs::normalise::{Options, Rect, Square, normalise};
-    let height = (clip.frames.first()?.len() / 4) as u32 / clip.width.max(1);
-    let duration = std::time::Duration::from_millis(100);
-    let frames = clip.frames.iter().map(|rgba| Frame { rgba: rgba.clone(), duration });
-    let animation = Animation::new(clip.width, height, frames.collect()).ok()?;
-    let side = |at: f64, length: f64, most: u32| {
-        let start = (at.round().max(0.0) as u32).min(most.saturating_sub(1));
-        (start, ((at + length).round() as u32).clamp(start + 1, most) - start)
-    };
-    let (x, width) = side(part.x, part.width, clip.width);
-    let (y, height) = side(part.y, part.height, height);
-    let crop = Some(Rect { x, y, width, height });
-    let options =
-        Options { crop, keep_canvas, pixel_scale, square: Square::Crop, ..Options::default() };
-    let (_, report) = normalise(&animation, &options).ok()?;
-    let Rect { x, y, width, height } = report.crop;
-    Some([x as usize, y as usize, (x + width) as usize, (y + height) as usize])
+/// The middle square of `bounds`, as converting cuts a `.tgs` square.
+pub fn middle_square([x0, y0, x1, y1]: [usize; 4]) -> [usize; 4] {
+    let side = (x1 - x0).min(y1 - y0);
+    let (x, y) = (x0 + (x1 - x0 - side) / 2, y0 + (y1 - y0 - side) / 2);
+    [x, y, x + side, y + side]
 }
 
 /// The `.tgs` result of `rgba`, a frame `width` pixels wide: `bounds` of
@@ -263,10 +240,7 @@ pub fn tgs(
     resize: Resize,
 ) -> egui::ColorImage {
     if resize == Resize::Crop {
-        // the middle square, as the conversion cuts it but for its grid
-        let square = (x1 - x0).min(y1 - y0);
-        (x0, y0) = (x0 + (x1 - x0 - square) / 2, y0 + (y1 - y0 - square) / 2);
-        (x1, y1) = (x0 + square, y0 + square);
+        [x0, y0, x1, y1] = middle_square([x0, y0, x1, y1]);
     }
     let (w, h) = ((x1 - x0).max(1), (y1 - y0).max(1));
     let (scale_x, scale_y) = match resize {
@@ -348,23 +322,8 @@ mod tests {
 
     #[test]
     fn crops_squares_as_converting_does() {
-        // 5x4 art pixels at 3x, every pixel its own colour: a square of
-        // four across, by whole art pixels, the middle one but for a pixel
-        let rgba: Vec<u8> = (0..12u32)
-            .flat_map(|y| {
-                (0..15u32).flat_map(move |x| [(x / 3 * 40) as u8, (y / 3 * 60) as u8, 7, 255])
-            })
-            .collect();
-        let clip = crate::media::Clip {
-            id: 0,
-            width: 15,
-            height: 12,
-            frames: vec![rgba],
-            times: vec![0.0, 0.1],
-            pixelated: true,
-        };
-        let part = Part::of(None, (15, 12), (15, 12));
-        assert_eq!(tgs_square(&clip, part, false, None), Some([3, 0, 15, 12]));
+        assert_eq!(middle_square([0, 0, 15, 12]), [1, 0, 13, 12]);
+        assert_eq!(middle_square([2, 1, 6, 10]), [2, 3, 6, 7]);
     }
 
     #[test]

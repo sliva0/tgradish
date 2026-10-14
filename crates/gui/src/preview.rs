@@ -13,9 +13,10 @@ use tgradish_core::telegram;
 use tgradish_core::tgs::TgsOptions;
 
 use crate::app::App;
-use crate::canvas::{self, Cropping, Inset, InsetChange, Picture, Screen};
+use crate::canvas::{self, Cropping, Inset, InsetChange, Kept, Picture, Screen};
 use crate::item::{Framing, Item, Show, Zoom};
 use crate::jobs::Status;
+use crate::media::Clip;
 use crate::result::{details, summary};
 use crate::{predict, settings, theme, timeline, widgets};
 
@@ -333,7 +334,20 @@ fn preview(
                 ui.painter().rect_filled(rect, 0.0, theme::stage(ui.visuals().dark_mode));
                 let ratio = settings::ratio(item.view.aspect, size);
                 let exact = settings::exact_of(item);
-                let cropping = Cropping { crop: &mut item.choices.crop, ratio, filling, exact };
+                // a `.tgs` square cut from the middle of what it shows
+                let kept = match item.format {
+                    Format::Tgs if tgs.resize == Some(Resize::Crop) => {
+                        let where_ =
+                            predict::Part::of(item.choices.crop, size, (clip.width, clip.height));
+                        let [x0, y0, x1, y1] =
+                            predict::middle_square(tgs_bounds(inset, clip, where_, tgs));
+                        let across = |x: usize| x * size.0 as usize / clip.width.max(1) as usize;
+                        let down = |y: usize| y * size.1 as usize / clip.height.max(1) as usize;
+                        Some(Kept::Part([across(x0), down(y0), across(x1), down(y1)]))
+                    }
+                    _ => filling.map(Kept::Ratio),
+                };
+                let cropping = Cropping { crop: &mut item.choices.crop, ratio, kept, exact };
                 let zoom = &mut item.view.input_zoom;
                 canvas::show(ui, screen, (rect, input_area), &picture, zoom, Some(cropping));
                 // after the crop moved
@@ -378,20 +392,8 @@ fn preview(
                             }
                         }
                         Format::Tgs => {
-                            let keep = tgs.keep_canvas.unwrap_or(false);
                             let resize = tgs.resize.unwrap_or(Resize::Pad);
-                            let scale = tgs.pixel_scale;
-                            let key = inset_key((clip.id, where_, keep, resize, scale));
-                            let bounds = inset.tgs_bounds(key, || {
-                                let found =
-                                    || predict::tgs_bounds(&clip.frames, clip.width, where_, keep);
-                                // cut square on the art's grid, as converting does
-                                match resize {
-                                    Resize::Crop => predict::tgs_square(clip, where_, keep, scale)
-                                        .unwrap_or_else(found),
-                                    _ => found(),
-                                }
-                            });
+                            let bounds = tgs_bounds(inset, clip, where_, tgs);
                             let key = inset_key((clip.id, frame, bounds, resize));
                             let label = label.as_deref();
                             let result = vec2(TGS_INSET as f32, TGS_INSET as f32);
@@ -465,6 +467,14 @@ fn preview(
         }
         _ => {}
     }
+}
+
+/// What of `clip` a `.tgs` result shows, before it is made square: the
+/// `part` used, cut to what is visible unless it keeps the canvas.
+fn tgs_bounds(inset: &mut Inset, clip: &Clip, part: predict::Part, tgs: &TgsOptions) -> [usize; 4] {
+    let keep = tgs.keep_canvas.unwrap_or(false);
+    let key = inset_key((clip.id, part, keep));
+    inset.tgs_bounds(key, || predict::tgs_bounds(&clip.frames, clip.width, part, keep))
 }
 
 /// What the label of an item's small picture of its result says under
