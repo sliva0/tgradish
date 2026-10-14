@@ -17,7 +17,7 @@ use crate::widgets::note;
 /// Text in a monospace box that can be selected and copied.
 fn code(ui: &mut egui::Ui, text: &str) {
     ui.horizontal_top(|ui| {
-        let width = (ui.available_width() - 60.0).max(200.0);
+        let width = (ui.available_width() - 40.0).max(200.0);
         let mut shown = text;
         ui.add(
             egui::TextEdit::multiline(&mut shown)
@@ -25,7 +25,7 @@ fn code(ui: &mut egui::Ui, text: &str) {
                 .desired_rows(1)
                 .desired_width(width),
         );
-        if ui.small_button("Copy").clicked() {
+        if ui.button("🗐").on_hover_text("Copy").clicked() {
             ui.ctx().copy_text(text.to_owned());
         }
     });
