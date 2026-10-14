@@ -239,8 +239,7 @@ fn is_tool_id(text: &str) -> bool {
 /// Whether `name` is one tgradish gives stickers: `made with tgradish
 /// VERSION`, or a title followed by ` (made with tgradish)`.
 fn tgradish_name(name: &str) -> bool {
-    name.strip_prefix("made with ").is_some_and(is_tool_id)
-        || name.ends_with(" (made with tgradish)")
+    name.strip_prefix(crate::UNTITLED).is_some_and(is_tool_id) || name.ends_with(crate::TITLED)
 }
 
 #[cfg(test)]
@@ -284,6 +283,15 @@ mod tests {
         assert!(!tgradish_name("tgradish tutorial"));
         assert!(!tgradish_name("made with tgradish 2.x"));
         assert!(is_tool_id(crate::TOOL_ID) && !is_tool_id("tgradish-ish 1.0"));
+        // as stickers are named
+        let named = |title: Option<&str>| {
+            let options =
+                crate::tgs::TgsOptions { title: title.map(Into::into), ..Default::default() };
+            options.sticker_options().unwrap().name.unwrap()
+        };
+        assert!(tgradish_name(&named(None)) && tgradish_name(&named(Some("dance"))));
+        // and how inspecting finds the signature in WebM padding
+        assert!(crate::signature().starts_with(crate::webm::SIGNATURE_PREFIX));
     }
 
     #[test]

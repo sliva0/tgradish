@@ -310,11 +310,8 @@ fn xmp(title: Option<&str>, mark: bool) -> Vec<u8> {
     let escape = |text: &str| {
         text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
     };
-    let tool = if mark {
-        format!(" xmp:CreatorTool=\"tgradish {}\"", env!("CARGO_PKG_VERSION"))
-    } else {
-        String::new()
-    };
+    let tool =
+        if mark { format!(" xmp:CreatorTool=\"{}\"", crate::TOOL_ID) } else { String::new() };
     let title = title.map_or(String::new(), |title| {
         format!(
             "<dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">{}</rdf:li></rdf:Alt></dc:title>",

@@ -46,6 +46,12 @@ pub const TOOL_ID: &str = concat!("tgradish ", env!("CARGO_PKG_VERSION"));
 /// [`mark`] looks for: changing it stops older files being recognised.
 pub const REPOSITORY: &str = "https://github.com/sliva0/tgradish";
 
+/// What a `.tgs` sticker made without a title is named, before
+/// [`TOOL_ID`]; with a title, [`TITLED`] follows it. [`mark`] reads these
+/// back to know a sticker as tgradish's, so they must stay as they are.
+pub(crate) const UNTITLED: &str = "made with ";
+pub(crate) const TITLED: &str = " (made with tgradish)";
+
 /// Text hidden in WebM padding to mark files made or modified by tgradish.
 pub fn signature() -> String {
     format!("{TOOL_ID} {REPOSITORY}")
