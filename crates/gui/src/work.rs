@@ -277,14 +277,18 @@ fn settle(ctx: &egui::Context, item: &mut Item) {
     }
 }
 
-/// Frees an item's big frames; its thumbnails stay.
+/// Frees an item's big frames; its thumbnails stay. All are read again
+/// when it is selected.
 pub(crate) fn release(item: &mut Item) {
     if item.video.ready().is_some() {
         item.video = Load::Idle;
     }
+    if item.art.ready().is_some() {
+        item.art = Load::Idle;
+    }
     item.part = None;
     item.still = None;
-    if item.result_clip.ready().is_some_and(|clip| !clip.pixelated) {
+    if item.result_clip.ready().is_some() {
         item.result_clip = Load::Idle;
     }
 }
@@ -305,7 +309,12 @@ fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backe
             Ok(preview) => Load::Ready(Clip::from_preview(preview, true)),
             Err(err) => Load::Failed(err.to_string()),
         },
-        _ => return,
+        // drawn when it was made
+        (Format::Tgs, _) => match &done.preview {
+            Some(preview) => Load::Ready(Clip::from_preview(preview.clone(), true)),
+            None => return,
+        },
+        (Format::Webm, Err(_)) => return,
     };
 }
 
@@ -474,6 +483,38 @@ mod tests {
         let item = &harness.state().items[0];
         assert!(matches!(item.failed.as_ref().unwrap().job.status, Status::Failed(_)));
         assert!(item.made.is_some() && !item.result_is_current());
+    }
+
+    #[test]
+    fn gives_back_the_frames_of_items_not_looked_at() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = harness(Config::default());
+        let arts: Vec<_> = (0..5)
+            .map(|n| {
+                let art = dir.path().join(format!("{n}.png"));
+                square(&art, [255, 0, 0, 255]);
+                art
+            })
+            .collect();
+        harness.state_mut().add(arts);
+        finish(&mut harness);
+        harness.get(egui_kittest::kittest::by().label_contains("Convert all")).click();
+        harness.run_steps(2);
+        finish(&mut harness);
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        for &id in &ids {
+            harness.state_mut().select(id);
+            finish(&mut harness);
+        }
+        // the first, looked at longest ago, keeps only its thumbnails
+        let first = &harness.state().items[0];
+        assert!(first.art.is_idle() && first.result_clip.is_idle());
+        assert!(first.input_thumb.is_some() && first.result_thumb.is_some());
+        // and reads it all again when looked at
+        harness.state_mut().select(ids[0]);
+        finish(&mut harness);
+        let first = &harness.state().items[0];
+        assert!(first.art.ready().is_some() && first.result_clip.ready().is_some());
     }
 
     #[test]
