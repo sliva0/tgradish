@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use eframe::egui;
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use tgradish_core::config::{Config, ResultPreview};
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{Crop, Fit, Options, Scaling};
@@ -31,6 +32,15 @@ fn screenshots() {
     let out =
         PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
     crate::l10n::choose(None);
+    walk(|harness, name| {
+        let image = harness.render().expect("rendering needs a GPU");
+        image.save(out.join(format!("tgradish-{name}.png"))).unwrap();
+    });
+}
+
+/// Takes the window through each state worth a picture, handing each to
+/// `save` by name. Needs a GPU wgpu can use, and ffmpeg.
+pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     let dir = tempfile::tempdir().unwrap();
     let frames = dir.path().join("dance");
     std::fs::create_dir(&frames).unwrap();
@@ -54,10 +64,6 @@ fn screenshots() {
             app
         });
     harness.run_steps(3);
-    let save = |harness: &mut Harness<App>, name: &str| {
-        let image = harness.render().expect("rendering needs a GPU");
-        image.save(out.join(format!("tgradish-{name}.png"))).unwrap();
-    };
     save(&mut harness, "empty");
     if let Some(video) = video(dir.path(), "640x360") {
         harness.state_mut().add(vec![video]);
@@ -67,6 +73,17 @@ fn screenshots() {
         harness.state_mut().items[0].view.playing = false;
         harness.run_steps(3);
         save(&mut harness, "video");
+        // the menus of adding files and of the folders
+        harness.get_by_label("⏷").click();
+        harness.run_steps(2);
+        save(&mut harness, "add-menu");
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+        harness.get_by_label(&crate::l10n::fl!("show-folder")).click();
+        harness.run_steps(2);
+        save(&mut harness, "folder-menu");
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
         // made, its encodes listed beside the preview
         convert(&harness);
         harness.run_steps(2);

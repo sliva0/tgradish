@@ -3887,6 +3887,7 @@ dependencies = [
  "fluent-syntax",
  "i18n-embed",
  "i18n-embed-fl",
+ "image",
  "libloading",
  "png",
  "raw-window-handle",
@@ -5049,6 +5050,7 @@ version = "2.0.0"
 dependencies = [
  "anyhow",
  "png",
+ "serde_json",
 ]
 
 [[package]]

@@ -91,14 +91,22 @@ and scripts read its output.
 
 A translation is a copy of that file in a folder named for its language, as
 `crates/gui/i18n/de/tgradish.ftl`, with `language-name` its name for itself.
-What it leaves out shows in English. The window follows the system's
-language, or the one picked in Settings; `TGRADISH_LANG=de` picks one for a
-run, and `TGRADISH_LANG=pseudo` shows English with longer, accented words, to
-see where text won't fit. The screenshots test takes `TGRADISH_LANG` too. The
-tests check every file reads as Fluent, that translations only take the
-arguments English does, and that the window's fonts draw them: a script
-they lack, as Chinese or Arabic, needs a font added first, and egui doesn't
-yet lay out text that runs right to left.
+What it leaves out shows in English, though a message that puts in
+another's words, as `{ save }`, needs that one translated too. The window
+follows the system's language, or the one picked in Settings;
+`TGRADISH_LANG=de` picks one for a run, and `TGRADISH_LANG=pseudo` shows
+English with longer, accented words, to see where text won't fit. The
+screenshots test takes `TGRADISH_LANG` too. The tests check every file
+reads as Fluent, that translations only take the arguments English does and
+put in only messages they have, and that the window's fonts draw them: a
+script they lack, as Chinese or Arabic, needs a font added first, and egui
+doesn't yet lay out text that runs right to left.
+
+`cargo xtask strings` writes `target/strings/index.html`: each of the
+window's messages with its comment, beside pictures of where it shows, and
+the command line's help pages and the messages its sources print, each with
+a name to refer to it by. It takes `TGRADISH_LANG` as well, to see a
+translation in place.
 
 ## Licences
 
