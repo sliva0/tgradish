@@ -127,10 +127,21 @@ pub use record::seen;
 #[cfg(test)]
 pub mod record {
     use std::cell::RefCell;
+    use std::collections::BTreeSet;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     thread_local! {
         static SEEN: RefCell<Option<Vec<(&'static str, String)>>> = const { RefCell::new(None) };
     }
+
+    /// Every message given on any thread since `remember`, in order, for
+    /// those the window keeps and shows later, as notices and errors.
+    static EVER: Mutex<(Vec<Said>, BTreeSet<Said>)> = Mutex::new((Vec::new(), BTreeSet::new()));
+
+    /// A message given: its name and words.
+    type Said = (&'static str, String);
+    static REMEMBER: AtomicBool = AtomicBool::new(false);
 
     /// `text`, noted for `id` if recording.
     pub fn seen(id: &'static str, text: String) -> String {
@@ -139,7 +150,23 @@ pub mod record {
                 seen.push((id, text.clone()));
             }
         });
+        if REMEMBER.load(Ordering::Relaxed) {
+            let (order, all) = &mut *EVER.lock().unwrap();
+            if all.insert((id, text.clone())) {
+                order.push((id, text.clone()));
+            }
+        }
         text
+    }
+
+    /// Starts noting every message given, on any thread, for `everything`.
+    pub fn remember() {
+        REMEMBER.store(true, Ordering::Relaxed);
+    }
+
+    /// The messages given since `remember`, from the `from`th on.
+    pub fn since(from: usize) -> Vec<(&'static str, String)> {
+        EVER.lock().unwrap().0.get(from..).map(<[_]>::to_vec).unwrap_or_default()
     }
 
     /// Starts noting the messages shown on this thread, forgetting those

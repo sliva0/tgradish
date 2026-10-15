@@ -368,7 +368,10 @@ impl Page<'_> {
         writeln!(
             html,
             "<section id=window><p class=about>{} texts, {pictured} of them seen in the \
-             pictures; the rest show only in states the pictures don't reach, as errors. \
+             pictures. The pictures are taken by putting the window through a set of \
+             states, scrolling and hovering in each; a text marked as having no picture shows \
+             only in a state none of them reaches, as an error that is hard to cause, or as a \
+             part of a longer message, which is pictured whole. \
              Each says where it shows above its words, which are \
              as written in <code>crates/gui/i18n/en-GB/tgradish.ftl</code>: {{ $name }} is \
              filled in, {{ other-message }} puts in another's words. Hovering a picture shows \
@@ -473,7 +476,7 @@ impl Page<'_> {
                 }
                 html.push_str("</div>");
             }
-            _ => html.push_str("<p class=unseen>Not seen in the pictures</p>"),
+            _ => html.push_str("<p class=unseen>No picture: no state pictured shows it</p>"),
         }
         html.push_str("</div>\n");
         Ok(())
