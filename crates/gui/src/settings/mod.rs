@@ -69,7 +69,7 @@ pub fn preset_names(presets: &Presets) -> Vec<(String, Result<String, String>)> 
 /// What a built-in preset does for `format`. Core's own descriptions
 /// speak of every format at once, for the command line; the window shows
 /// only what the preset does for what is being made.
-pub fn builtin(name: &str, format: Format) -> Option<String> {
+pub fn builtin_description(name: &str, format: Format) -> Option<String> {
     Some(match (name, format) {
         ("fast", Format::Webm) => fl!("preset-fast", "webm"),
         ("balanced", Format::Webm) => fl!("preset-balanced", "webm"),
@@ -162,7 +162,13 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             .iter()
             .filter(|(name, _)| BUILTIN.contains(&name.as_str()))
             .map(|(name, description)| {
-                let description = description.as_deref().unwrap_or("").to_owned();
+                // the built-in one's words for what is being made, or
+                // those of the user's file standing in for it
+                let builtin = context.presets.get(name).is_ok_and(|preset| preset.path.is_none());
+                let description = match builtin.then(|| builtin_description(name, item.format)) {
+                    Some(Some(text)) => text,
+                    _ => description.as_deref().unwrap_or("").to_owned(),
+                };
                 (name.as_str(), preset_label(name), description)
             })
             .collect();
@@ -199,7 +205,7 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         if chosen != current {
             item.choices.preset = (chosen != default).then(|| chosen.to_owned());
         }
-        match (builtin(chosen, item.format), context.presets.get(chosen)) {
+        match (builtin_description(chosen, item.format), context.presets.get(chosen)) {
             _ if image => note(ui, nothing),
             (Some(text), Ok(preset)) if preset.path.is_none() => note(ui, text),
             (_, Ok(preset)) => note(ui, preset.description.clone()),

@@ -52,7 +52,7 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
     row(ui, &fl!("fitting"), &fl!("fitting", "hint"), Ok(()), |ui| {
         let fits = fits();
         let pick = |fit: Fit| match lossless && !keeps_quality(fit) {
-            true => Pick::Changes(fl!("fit-off", "lossless")),
+            true => Pick::Changes(fl!("fitting", "lossless")),
             false => Pick::Yes,
         };
         if preset_picking(ui, &mut options.fit, base_fit, &fits, pick)
@@ -78,13 +78,14 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
             Some(attempts) => (presets, attempts),
             None => ((defaults.0.as_str(), defaults.1.as_str()), DEFAULT_ATTEMPTS),
         };
-        auto_number(ui, &mut options.attempts, automatic, Some(default), default, |value| {
-            value
-                .range(1..=MAX_ATTEMPTS)
-                .custom_formatter(|n, _| fl!("attempts-times", count = n))
-                .custom_parser(|text| {
-                    text.trim().trim_end_matches(char::is_alphabetic).trim().parse().ok()
-                })
+        // the number alone in its field, which takes it typed, and the
+        // word for it beside
+        ui.horizontal(|ui| {
+            auto_number(ui, &mut options.attempts, automatic, Some(default), default, |value| {
+                value.range(1..=MAX_ATTEMPTS)
+            });
+            let count = options.attempts.unwrap_or(default);
+            ui.label(fl!("attempts-times", count = count));
         });
     });
     let unit = match fit {

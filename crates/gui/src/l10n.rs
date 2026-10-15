@@ -49,14 +49,25 @@ pub(crate) use fl;
 /// would not fit.
 const VARIABLE: &str = "TGRADISH_LANG";
 
-/// The languages there are translations for, English first.
-pub fn languages() -> Vec<LanguageIdentifier> {
-    LOADER.available_languages(&Files).unwrap_or_default()
-}
-
-/// What `language` calls itself.
-pub fn name(language: &LanguageIdentifier) -> String {
-    LOADER.select_languages(&[language]).get("language-name")
+/// The languages there are translations for, English first, each with
+/// what it calls itself.
+pub fn languages() -> &'static [(LanguageIdentifier, String)] {
+    static LANGUAGES: LazyLock<Vec<(LanguageIdentifier, String)>> = LazyLock::new(|| {
+        let languages = LOADER.available_languages(&Files).unwrap_or_default();
+        languages
+            .into_iter()
+            .map(|language| {
+                // its own file alone, as the window's loads only those shown
+                let loader = FluentLanguageLoader::new(LOADER.domain(), language.clone());
+                let name = match loader.load_languages(&Files, std::slice::from_ref(&language)) {
+                    Ok(()) => loader.get("language-name"),
+                    Err(_) => language.to_string(),
+                };
+                (language, name)
+            })
+            .collect()
+    });
+    &LANGUAGES
 }
 
 /// Shows the window in `language`, as a tag, or in the system's when
@@ -355,6 +366,26 @@ mod tests {
                     unknown.is_empty(),
                     "{tag}'s {id} takes {unknown:?}, which English doesn't"
                 );
+            }
+        }
+    }
+
+    /// What a translation puts in from another message, it has itself:
+    /// English stands in for whole messages a translation lacks, not for
+    /// those another puts in, which would show as `{save}`.
+    #[test]
+    fn translations_put_in_only_what_they_have() {
+        for (tag, text) in files() {
+            let resource = parse(&tag, &text);
+            let had: BTreeSet<String> = patterns(&resource)
+                .into_iter()
+                .map(|(id, _)| id.split('.').next().unwrap_or_default().to_owned())
+                .collect();
+            for (id, pattern) in patterns(&resource) {
+                let mut found = Parts::default();
+                parts(pattern, &mut found);
+                let lacking: Vec<_> = found.references.difference(&had).collect();
+                assert!(lacking.is_empty(), "{tag}'s {id} puts in {lacking:?}, which it lacks");
             }
         }
     }
