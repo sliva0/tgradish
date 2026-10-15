@@ -52,6 +52,12 @@
 //! `cargo xtask icons [--check]` makes the icons for menus and the Windows
 //! executable from the window's own, `crates/gui/assets/icon.png`;
 //! `--check` fails if they are out of date.
+//!
+//! `cargo xtask strings [--no-pictures]` writes `target/strings/index.html`,
+//! a page of the words tgradish shows, to review them or translate the
+//! window's: each message beside pictures of where it shows, and the
+//! command line's help pages and messages. The pictures need a GPU wgpu can
+//! use and ffmpeg; `--no-pictures` keeps those made last time.
 
 mod build;
 mod ffmpeg;
@@ -59,6 +65,7 @@ mod icons;
 mod licences;
 mod package;
 mod release;
+mod strings;
 
 use std::path::Path;
 use std::process::Command;
@@ -75,6 +82,7 @@ fn main() -> Result<()> {
         Some("licenses") => licences::crate_licenses(&args[1..]),
         Some("icons") => icons::icons(&args[1..]),
         Some("local-release") => release::local_release(&args[1..]),
+        Some("strings") => strings::strings(&args[1..]),
         _ => bail!(
             "usage: cargo xtask ffmpeg [--target TARGET] [--no-asm] [--force]\n       \
              cargo xtask ffmpeg-sources\n       \
@@ -82,7 +90,8 @@ fn main() -> Result<()> {
              cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc 2.28]\n       \
              cargo xtask licenses [--check]\n       \
              cargo xtask icons [--check]\n       \
-             cargo xtask local-release [--targets TARGET,...] [--no-asm]\n\
+             cargo xtask local-release [--targets TARGET,...] [--no-asm]\n       \
+             cargo xtask strings [--no-pictures]\n\
              targets: {}",
             Target::names()
         ),

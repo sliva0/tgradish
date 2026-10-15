@@ -46,6 +46,8 @@ workspace = true
 [dev-dependencies]
 fluent-bundle.workspace = true
 fluent-syntax.workspace = true
+# the pictures of crates/gui/src/strings.rs, cut to their parts
+image.workspace = true
 egui_kittest.workspace = true
 egui-wgpu.workspace = true
 tgradish-corpus.workspace = true

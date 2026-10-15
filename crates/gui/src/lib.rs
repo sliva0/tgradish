@@ -33,6 +33,8 @@ mod result;
 mod screenshots;
 mod session;
 mod settings;
+#[cfg(test)]
+mod strings;
 mod system;
 #[cfg(test)]
 pub(crate) mod testing;

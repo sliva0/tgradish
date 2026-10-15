@@ -563,6 +563,28 @@ mod tests {
         Cli::command().debug_assert();
     }
 
+    /// Every help page, as `--help` prints it, into
+    /// `$TGRADISH_STRINGS/cli.json`, for `cargo xtask strings`.
+    #[test]
+    #[ignore]
+    fn help_pages() {
+        fn pages(command: &clap::Command, path: &str, out: &mut Vec<serde_json::Value>) {
+            let mut command = command.clone().term_width(100);
+            let text = command.render_long_help().to_string();
+            out.push(serde_json::json!({ "command": path, "text": text }));
+            for sub in command.get_subcommands().filter(|sub| sub.get_name() != "help") {
+                pages(sub, &format!("{path} {}", sub.get_name()), out);
+            }
+        }
+        let out = std::path::PathBuf::from(std::env::var_os("TGRADISH_STRINGS").unwrap());
+        let mut cli = Cli::command().bin_name("tgradish");
+        cli.build();
+        let mut all = Vec::new();
+        pages(&cli, "tgradish", &mut all);
+        let json = serde_json::to_string_pretty(&all).unwrap();
+        std::fs::write(out.join("cli.json"), json).unwrap();
+    }
+
     /// Front-ends rely on every option of either format having a flag of
     /// the same name.
     #[test]
