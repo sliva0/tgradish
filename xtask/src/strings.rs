@@ -396,22 +396,30 @@ impl Page<'_> {
         html.push_str("</section>\n<section id=cli hidden>\n");
         html.push_str(
             "<p class=about>The command line stays in English. Each line has a name to refer \
-             to it by: a help page's lines by the command and line number, the messages in \
-             the sources by file and line.</p>\n<h2>Help pages</h2>\n",
+             to it by: the name over its block, then its number, as <code>convert:23</code> \
+             for a help page's line, or <code>core/src/error.rs:34</code> for a message in \
+             the sources. Hovering a number shows the whole name.</p>\n<h2>Help pages</h2>\n",
         );
         for page in help.as_array().map(Vec::as_slice).unwrap_or_default() {
             let command = page["command"].as_str().unwrap_or_default();
             let short = command.trim_start_matches("tgradish").trim();
             let short = if short.is_empty() { "tgradish" } else { short };
-            writeln!(html, "<h3>{}</h3><div class=help>", escape(command))?;
+            let prefix = short.replace(' ', "-");
+            writeln!(
+                html,
+                "<h3>{} <code class=prefix>{}:</code></h3><div class=help>",
+                escape(command),
+                escape(&prefix)
+            )?;
             let text = page["text"].as_str().unwrap_or_default();
             for (number, line) in text.lines().enumerate() {
-                let name = format!("{}:{}", short.replace(' ', "-"), number + 1);
+                let name = format!("{prefix}:{}", number + 1);
                 writeln!(
                     html,
-                    "<div class=line id=\"help-{0}\"><span class=ln>{0}</span><span \
-                     class=text>{1}</span></div>",
+                    "<div class=line id=\"help-{0}\"><span class=ln title=\"{0}\">{1}</span>\
+                     <span class=text>{2}</span></div>",
                     escape(&name),
+                    number + 1,
                     escape(line)
                 )?;
             }
@@ -422,14 +430,15 @@ impl Page<'_> {
             writeln!(html, "<h3>{}</h3>", escape(name))?;
             for (file, found) in files {
                 let short = file.trim_start_matches("crates/");
-                writeln!(html, "<h4>{}</h4><div class=help>", escape(short))?;
+                writeln!(html, "<h4>{}:</h4><div class=help>", escape(short))?;
                 for (line, text) in found {
                     let name = format!("{short}:{line}");
                     writeln!(
                         html,
-                        "<div class=line id=\"src-{0}\"><span class=ln>{0}</span><span \
-                         class=text>{1}</span></div>",
+                        "<div class=line id=\"src-{0}\"><span class=ln title=\"{0}\">{1}</span>\
+                         <span class=text>{2}</span></div>",
                         escape(&name),
+                        line,
                         escape(text)
                     )?;
                 }
@@ -562,9 +571,18 @@ pre { margin: 0; white-space: pre-wrap; font: 14.5px/1.45 system-ui, sans-serif;
 .mark { position: absolute; border: 2px solid var(--mark); border-radius: 4px; box-shadow: 0 0 0 2px #fff8; }
 .unseen { margin: 0; color: var(--weak); font-size: 13px; text-align: right; }
 .help { font: 13px/1.5 ui-monospace, monospace; border: 1px solid var(--line); border-radius: 6px; padding: 6px 0; }
-.line { display: grid; grid-template-columns: 170px 1fr; }
+.line { display: grid; grid-template-columns: 4.5em 1fr; }
+.prefix { font-weight: normal; color: var(--weak); margin-left: 6px; }
 .line:hover { background: #8881; }
-.ln { color: var(--weak); text-align: right; padding-right: 14px; user-select: all; }
+.ln { color: var(--weak); text-align: right; padding-right: 14px; }
+@media (max-width: 760px) {
+  body { padding: 0 12px 60px; }
+  header { flex-wrap: wrap; }
+  header input { width: 100%; margin-left: 0; }
+  .pattern { grid-template-columns: 1fr; }
+  .places { justify-content: flex-start; }
+  .line { grid-template-columns: 3.2em 1fr; }
+}
 .text { white-space: pre-wrap; }
 [hidden] { display: none !important; }
 </style>

@@ -1,8 +1,5 @@
 ### The window's words in British English, which every other language
 ### falls back on for what it lacks.
-
-# The language's name for itself, as the Settings dialog lists it.
-language-name = English
 ###
 ### A comment above a message says where it is shown, or what it means
 ### when its words don't. Arguments, as { $count }, are filled in by the
@@ -15,6 +12,9 @@ language-name = English
 ### { other-message } puts in another message's words, as where a hint
 ### names a button, so the two stay the same; { -term } does so for a
 ### term, which is only put in others.
+
+# The language's name for itself, as the Settings dialog lists it.
+language-name = English
 
 
 ## Shared by many places
