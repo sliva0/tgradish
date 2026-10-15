@@ -165,7 +165,8 @@ fn issue_text(issue: &telegram::Issue, target: telegram::Target) -> String {
             }
         }
         &Issue::TooBig { bytes, max } => {
-            fl!("issue-too-big", size = widgets::kib(bytes), limit = widgets::kib(max))
+            let (size, limit) = sizes(bytes, max);
+            fl!("issue-too-big", size = size, limit = limit)
         }
         &Issue::TooLong { seconds, max } => fl!(
             "issue-too-long",
@@ -177,6 +178,13 @@ fn issue_text(issue: &telegram::Issue, target: telegram::Target) -> String {
         }
         Issue::Animated => fl!("issue-animated"),
     }
+}
+
+/// `bytes` against a `limit`, in KiB, or in bytes where KiB round both
+/// to the same.
+fn sizes(bytes: u64, limit: u64) -> (String, String) {
+    let (size, most) = (widgets::kib(bytes), widgets::kib(limit));
+    if size == most { (format!("{bytes} B"), format!("{limit} B")) } else { (size, most) }
 }
 
 /// What went wrong, in the window's words where people meet it, and as
@@ -201,7 +209,8 @@ pub(crate) fn failure(err: &Error) -> String {
             fl!("no-frame-at", name = name(path), seconds = widgets::seconds(*at))
         }
         &Error::NothingFits { smallest, limit } => {
-            fl!("nothing-fits", limit = widgets::kib(limit), smallest = widgets::kib(smallest))
+            let (smallest, limit) = sizes(smallest, limit);
+            fl!("nothing-fits", limit = limit, smallest = smallest)
         }
         Error::Clipboard(details) => fl!("clipboard-failed", details = details.as_str()),
         // as a preset's settings are wrong: what is wrong, without the

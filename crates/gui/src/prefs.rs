@@ -198,10 +198,10 @@ fn sections(ui: &mut egui::Ui, prefs: &mut Prefs, config: &mut Config, presets: 
         row(ui, &fl!("language"), &fl!("language", "hint"), Ok(()), |ui| {
             // the system's, then each by its own name
             let tags: Vec<Option<String>> = std::iter::once(None)
-                .chain(languages.iter().map(|language| Some(language.to_string())))
+                .chain(languages.iter().map(|(language, _)| Some(language.to_string())))
                 .collect();
-            let names =
-                std::iter::once(fl!("as-the-system")).chain(languages.iter().map(l10n::name));
+            let names = std::iter::once(fl!("as-the-system"))
+                .chain(languages.iter().map(|(_, name)| name.clone()));
             let choices: Vec<widgets::Choice<usize>> =
                 names.enumerate().map(|(index, name)| (index, name, String::new())).collect();
             let mut index = tags.iter().position(|tag| *tag == gui.language).unwrap_or(0);
@@ -246,7 +246,7 @@ fn sections(ui: &mut egui::Ui, prefs: &mut Prefs, config: &mut Config, presets: 
             .iter()
             .map(|(name, description)| {
                 let builtin = presets.get(name).is_ok_and(|preset| preset.path.is_none());
-                let hint = settings::builtin(name, format).filter(|_| builtin);
+                let hint = settings::builtin_description(name, format).filter(|_| builtin);
                 let description = description.as_deref().unwrap_or("").to_owned();
                 (name.as_str(), settings::preset_label(name), hint.unwrap_or(description))
             })

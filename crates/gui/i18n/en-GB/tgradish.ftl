@@ -441,8 +441,11 @@ size-and-quality = Size and quality
 # A value a preset sets, beside a number the window picks unless asked for one.
 from-preset-value = Preset's
     .hint = The value the preset sets
+# How the result is made to fit the size limit; .lossless is the hover of
+# the ways a quality can't go with, while lossless encoding is ticked.
 fitting = Getting under the limit
     .hint = What tgradish changes to land just under the size limit
+    .lossless = Lossless encoding keeps no bitrate or quality to fit: picking this unticks { lossless-encoding }
 fit-auto = Best looking
     .hint = Tries a few frame rates, fits the bitrate for each and keeps the one most like the input
 fit-bitrate = Bitrate
@@ -455,7 +458,6 @@ fit-length = Length
     .hint = Fits the length at constant quality, cutting the end
 fit-off = Off
     .hint = Encodes once with the values below, even if it comes out too large
-    .lossless = Lossless encoding keeps no bitrate or quality to fit: picking this unticks { lossless-encoding }
 encoder = VP9 encoder
     .hint = Faster encoding looks worse at the same size
 encoder-fast = Fast
@@ -469,10 +471,10 @@ attempts = Encodes up to
     .hint = How many times fitting may encode, at most
 attempts-default = Default
     .hint = Enough to land within a few percent of the limit for most inputs
-# The number of encodes in its field, as "8 times".
+# After the number of encodes, which its field shows alone.
 attempts-times = { $count ->
-    [one] { $count } time
-   *[other] { $count } times
+    [one] time
+   *[other] times
 }
 search-within = Search within
     .hint = The range fitting searches, in the fitted value's unit
@@ -844,7 +846,7 @@ clipboard-failed = Couldn't paste from the clipboard: { $details }
 ## Saving and managing presets
 
 save-preset-title = Save settings as a preset
-save-preset-note = This file's settings, for any file to start from, but for those that only suit it: sticker or emoji, crop, used part, tag and layers
+save-preset-note = This file's settings, for any file to start from, but for those that only suit it: sticker or emoji, crop, used part, tag, layers and sprite sheet
 preset-name = Name
     .placeholder = my stickers
 preset-description = Description
