@@ -12,11 +12,15 @@ tgradish-core = { workspace = true, features = ["clipboard"] }
 tgradish-tgs.workspace = true
 
 eframe.workspace = true
+i18n-embed.workspace = true
+i18n-embed-fl.workspace = true
 png.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 skrifa.workspace = true
+sys-locale.workspace = true
 rfd.workspace = true
+rust-embed.workspace = true
 shlex.workspace = true
 tempfile.workspace = true
 
@@ -40,6 +44,8 @@ windows-sys = { workspace = true, features = ["Win32_System_Registry"] }
 workspace = true
 
 [dev-dependencies]
+fluent-bundle.workspace = true
+fluent-syntax.workspace = true
 egui_kittest.workspace = true
 egui-wgpu.workspace = true
 tgradish-corpus.workspace = true

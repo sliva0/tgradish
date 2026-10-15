@@ -3,6 +3,7 @@
 use eframe::egui::{self, Color32, RichText, vec2};
 
 use crate::jobs::Problem;
+use crate::l10n::fl;
 use crate::theme;
 
 /// Colours that say how things are: Breeze's, the same in either theme.
@@ -100,12 +101,6 @@ pub fn link(
     response
 }
 
-/// `n` and what it counts, which takes an "s" for any number but one.
-pub fn count(n: impl std::fmt::Display, what: &str) -> String {
-    let n = n.to_string();
-    format!("{n} {what}{}", if n == "1" { "" } else { "s" })
-}
-
 /// Weaker text explaining something.
 pub fn note(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(RichText::new(text.into()).weak().size(12.5));
@@ -162,17 +157,17 @@ pub fn row<R>(
 }
 
 /// One choice of a [`segments`] row: its value, label and explanation.
-pub type Choice<'a, T> = (T, &'a str, &'a str);
+pub type Choice<T> = (T, String, String);
 
 /// Whether a choice of [`segments`] can be picked.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Pick {
     Yes,
     /// Greyed out, as this says why.
-    No(&'static str),
+    No(String),
     /// Greyed out, as another setting rules it out, yet picking it changes
     /// that setting, as this says.
-    Changes(&'static str),
+    Changes(String),
 }
 
 /// Options side by side as one control, the chosen one lit. `enabled`
@@ -181,7 +176,7 @@ pub fn segments<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     value: &mut T,
     choices: &[Choice<T>],
-    enabled: impl Fn(T) -> Result<(), &'static str>,
+    enabled: impl Fn(T) -> Result<(), String>,
 ) -> bool {
     picking(ui, value, choices, |option| match enabled(option) {
         Ok(()) => Pick::Yes,
@@ -202,7 +197,8 @@ pub fn picking<T: PartialEq + Copy>(
         let last = choices.len().saturating_sub(1);
         let radius = ui.visuals().widgets.inactive.corner_radius.nw;
         let height = ui.spacing().interact_size.y;
-        for (index, &(option, text, hint)) in choices.iter().enumerate() {
+        for (index, (option, text, hint)) in choices.iter().enumerate() {
+            let option = *option;
             let round = |at_end: bool| if at_end { radius } else { 0 };
             let corners = egui::CornerRadius {
                 nw: round(index == 0),
@@ -211,7 +207,7 @@ pub fn picking<T: PartialEq + Copy>(
                 se: round(index == last),
             };
             let selected = *value == option;
-            let mut button = egui::Button::selectable(selected, text)
+            let mut button = egui::Button::selectable(selected, text.as_str())
                 .corner_radius(corners)
                 .min_size(vec2(0.0, height));
             button = if selected {
@@ -222,7 +218,7 @@ pub fn picking<T: PartialEq + Copy>(
             let response = match pick(option) {
                 Pick::No(why) => ui.add_enabled(false, button).on_disabled_hover_text(why),
                 Pick::Changes(what) => greyed(ui, true, |ui| ui.add(button)).on_hover_text(what),
-                Pick::Yes if !hint.is_empty() => ui.add(button).on_hover_text(hint),
+                Pick::Yes if !hint.is_empty() => ui.add(button).on_hover_text(hint.as_str()),
                 Pick::Yes => ui.add(button),
             };
             if response.clicked() && !selected {
@@ -308,16 +304,16 @@ pub fn greyed<R>(ui: &mut egui::Ui, greyed: bool, contents: impl FnOnce(&mut egu
 
 /// The explanation of the chosen option, under a row of them.
 pub fn chosen_hint<T: PartialEq + Copy>(ui: &mut egui::Ui, value: T, choices: &[Choice<T>]) {
-    if let Some(&(_, _, hint)) = choices.iter().find(|(option, ..)| *option == value)
+    if let Some((_, _, hint)) = choices.iter().find(|(option, ..)| *option == value)
         && !hint.is_empty()
     {
-        note(ui, hint);
+        note(ui, hint.as_str());
     }
 }
 
 /// The small button that goes back to the preset's value.
 pub fn reset(ui: &mut egui::Ui) -> bool {
-    reset_to(ui, "Back to the preset's value")
+    reset_to(ui, &fl!("back-to-preset"))
 }
 
 /// A small button back to what `hint` says.
@@ -368,7 +364,10 @@ pub fn auto_number<T: egui::emath::Numeric>(
     let mut changed = false;
     ui.horizontal(|ui| {
         let mut custom = value.is_some();
-        let choices = [(false, automatic.0, automatic.1), (true, "Custom", "")];
+        let choices = [
+            (false, automatic.0.to_owned(), automatic.1.to_owned()),
+            (true, fl!("custom"), String::new()),
+        ];
         if segments(ui, &mut custom, &choices, |_| Ok(())) {
             *value = custom.then(|| shown.unwrap_or(start));
             changed = true;
@@ -384,7 +383,7 @@ pub fn auto_number<T: egui::emath::Numeric>(
         if !set && shown.is_none() {
             field = field.custom_formatter(|_, _| "—".to_owned()).prefix("").suffix("");
         }
-        let response = ui.add_enabled(set, field).on_disabled_hover_text("Pick Custom to set it");
+        let response = ui.add_enabled(set, field).on_disabled_hover_text(fl!("custom", "hint"));
         if live && response.changed() {
             *value = Some(number);
             changed = true;
@@ -466,7 +465,7 @@ pub fn bar_sized(ui: &mut egui::Ui, size: egui::Vec2, fill: Fill, text: &str, co
 /// Telegram's problems with a result, or that it has none.
 pub fn problems(ui: &mut egui::Ui, problems: &[Problem]) {
     if problems.is_empty() {
-        ui.colored_label(GOOD, "✔ Telegram should accept it");
+        ui.colored_label(GOOD, format!("✔ {}", fl!("telegram-accepts")));
     }
     for problem in problems {
         let (colour, mark) = if problem.refused { (BAD, "✖") } else { (WARN, "⚠") };
@@ -518,7 +517,7 @@ pub(crate) fn toast(ctx: &egui::Context, message: &str) -> bool {
                 ui.horizontal(|ui| {
                     ui.colored_label(WARN, "⚠");
                     ui.label(message);
-                    if ui.small_button("OK").clicked() {
+                    if ui.small_button(fl!("ok")).clicked() {
                         open = false;
                     }
                 });
@@ -541,15 +540,6 @@ pub(crate) fn toast(ctx: &egui::Context, message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn counts_one_without_an_s() {
-        assert_eq!((count(1, "frame"), count(2, "frame")), ("1 frame".into(), "2 frames".into()));
-        assert_eq!(
-            (count(1.0, "frame"), count(0usize, "layer")),
-            ("1 frame".into(), "0 layers".into())
-        );
-    }
 
     #[test]
     fn takes_clicks_on_links_rather_than_selecting() {

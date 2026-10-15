@@ -11,6 +11,7 @@ use tgradish_core::telegram::Target;
 use super::Context;
 use crate::canvas::{Exact, Keep};
 use crate::item::{Aspect, Item};
+use crate::l10n::fl;
 use crate::widgets::{
     self, Choice, auto_number, chosen_hint, flag, note, preset_segments, row, segments,
 };
@@ -23,11 +24,13 @@ enum Shape {
     Custom,
 }
 
-const SHAPES: [Choice<Shape>; 3] = [
-    (Shape::Free, "Free", "Any shape"),
-    (Shape::Preserve, "Preserve", "The input's own shape"),
-    (Shape::Custom, "Custom", "A shape you type: as a ratio, or as the result's size"),
-];
+fn shapes() -> [Choice<Shape>; 3] {
+    [
+        (Shape::Free, fl!("shape-free"), fl!("shape-free", "hint")),
+        (Shape::Preserve, fl!("shape-preserve"), fl!("shape-preserve", "hint")),
+        (Shape::Custom, fl!("shape-custom"), fl!("shape-custom", "hint")),
+    ]
+}
 
 /// The width to height ratio `aspect` keeps for a `size` input.
 pub(crate) fn ratio(aspect: Aspect, size: (u32, u32)) -> Option<f64> {
@@ -69,48 +72,33 @@ fn reduced(width: u32, height: u32) -> (f64, f64) {
 }
 
 /// How WebM results become square, if they do.
-const SQUARES: [Choice<Resize>; 4] = [
-    (Resize::Contain, "Off", "The result keeps the crop's shape"),
-    (Resize::Pad, "By padding", "Transparent bars fill the rest of the square"),
-    (
-        Resize::Crop,
-        "By cropping",
-        "The middle fills the square and the rest is cut off: the preview dims it",
-    ),
-    (Resize::Stretch, "By stretching", "The picture is stretched to the square"),
-];
+fn squares() -> [Choice<Resize>; 4] {
+    [
+        (Resize::Contain, fl!("square-off"), fl!("square-off", "hint")),
+        (Resize::Pad, fl!("square-pad"), fl!("square-pad", "hint")),
+        (Resize::Crop, fl!("square-crop"), fl!("square-crop", "hint")),
+        (Resize::Stretch, fl!("square-stretch"), fl!("square-stretch", "hint")),
+    ]
+}
 
 /// How TGS stickers, which are always square, become so.
-const TGS_SQUARES: [Choice<Resize>; 4] = [
-    (Resize::Contain, "Off", ""),
-    (Resize::Pad, "By padding", "Transparent margins fill the rest of the square"),
-    (Resize::Crop, "By cropping", "The middle fills the square and the rest is cut off"),
-    (
-        Resize::Stretch,
-        "By stretching",
-        "The art is stretched to the square: its pixels stop being square",
-    ),
-];
+fn tgs_squares() -> [Choice<Resize>; 4] {
+    [
+        (Resize::Contain, fl!("square-off"), String::new()),
+        (Resize::Pad, fl!("square-pad"), fl!("square-pad", "tgs")),
+        (Resize::Crop, fl!("square-crop"), fl!("square-crop", "tgs")),
+        (Resize::Stretch, fl!("square-stretch"), fl!("square-stretch", "tgs")),
+    ]
+}
 
-const SCALINGS: [Choice<Scaling>; 4] = [
-    (
-        Scaling::Auto,
-        "Auto",
-        "Sharp pixels for pixel art made twice as large or more, smooth otherwise",
-    ),
-    (Scaling::Smooth, "Smooth", "Neighbouring pixels blend, in linear light so edges don't darken"),
-    (
-        Scaling::Sharp,
-        "Sharp pixels",
-        "Each pixel becomes a block; only block edges between result pixels blend",
-    ),
-    (
-        Scaling::PixelPerfect,
-        "Integer",
-        "Each pixel becomes the same whole number of result pixels, or whole blocks of them \
-         become one; transparent margins fill the rest",
-    ),
-];
+fn scalings() -> [Choice<Scaling>; 4] {
+    [
+        (Scaling::Auto, fl!("scaling-auto"), fl!("scaling-auto", "hint")),
+        (Scaling::Smooth, fl!("scaling-smooth"), fl!("scaling-smooth", "hint")),
+        (Scaling::Sharp, fl!("scaling-sharp"), fl!("scaling-sharp", "hint")),
+        (Scaling::PixelPerfect, fl!("scaling-integer"), fl!("scaling-integer", "hint")),
+    ]
+}
 
 /// Where a `crop` of the input lands in a WebM or image result made with
 /// `options`, everything the conversion gets; `None` when its exact scale
@@ -165,7 +153,7 @@ fn largest_scale(target: Target, used: (u32, u32)) -> ExactScale {
 }
 
 pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
-    widgets::section(ui, "Picture");
+    widgets::section(ui, &fl!("picture"));
     let size = item.input_size();
     let (presets, config) = (context.presets, context.config);
     // what the preset sets, which the item's own values go over, and
@@ -185,89 +173,82 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             item.choices.crop = (fitted != full).then_some(fitted);
         }
     }
-    let crop_hint = "The part of the input to use, in its pixels. Drag on the preview to change it";
-    row(ui, "Crop", crop_hint, Ok(()), |ui| crop_box(ui, item, size, exact));
+    row(ui, &fl!("crop"), &fl!("crop", "hint"), Ok(()), |ui| crop_box(ui, item, size, exact));
 
-    let aspect_hint = "The width to height ratio the crop keeps while you drag it";
-    row(ui, "Aspect ratio", aspect_hint, Ok(()), |ui| {
+    row(ui, &fl!("aspect-ratio"), &fl!("aspect-ratio", "hint"), Ok(()), |ui| {
         aspect_ratio(ui, item, size, exact, &effective)
     });
 
     match item.format {
         Format::Webm | Format::Image => {
             let target = item.choices.target;
-            let hint = "How the result becomes square: stickers needn't be, emoji must";
-            row(ui, "Force into square", hint, Ok(()), |ui| {
+            row(ui, &fl!("square"), &fl!("square", "hint"), Ok(()), |ui| {
+                let squares = squares();
                 let base = base.resize.unwrap_or(convert::default_resize(target));
                 let mut resize = resize_of(&effective);
                 ui.horizontal(|ui| {
                     let allowed = |option| match option {
                         Resize::Contain if target.requires_exact_size() => {
-                            Err("Emoji must be square")
+                            Err(fl!("square-off", "emoji"))
                         }
                         Resize::Crop | Resize::Stretch if exact.is_some() => {
-                            Err("A fixed integer scale keeps all of the picture: pad it instead")
+                            Err(fl!("square-exact"))
                         }
                         _ => Ok(()),
                     };
-                    if segments(ui, &mut resize, &SQUARES, allowed) {
+                    if segments(ui, &mut resize, &squares, allowed) {
                         item.choices.webm.resize = (resize != base).then_some(resize);
                     }
                     if item.choices.webm.resize.is_some() && widgets::reset(ui) {
                         item.choices.webm.resize = None;
                     }
                 });
-                chosen_hint(ui, resize, &SQUARES);
+                chosen_hint(ui, resize, &squares);
             });
 
-            row(ui, "Scaling", "How the input's pixels become the result's", Ok(()), |ui| {
+            row(ui, &fl!("scaling"), &fl!("scaling", "hint"), Ok(()), |ui| {
+                let scalings = scalings();
                 let preset = base.scaling.unwrap_or(Scaling::Auto);
-                preset_segments(ui, &mut item.choices.webm.scaling, preset, &SCALINGS);
+                preset_segments(ui, &mut item.choices.webm.scaling, preset, &scalings);
                 let scaling = item.choices.webm.scaling.unwrap_or(preset);
-                chosen_hint(ui, scaling, &SCALINGS);
+                chosen_hint(ui, scaling, &scalings);
             });
             let integer = effective.scaling == Some(Scaling::PixelPerfect);
-            let allowed = if integer { Ok(()) } else { Err("Only with Integer scaling") };
-            let hint = "How many result pixels each input pixel becomes, or how many input pixels make one";
+            let only = fl!("integer-scale", "only");
+            let allowed = if integer { Ok(()) } else { Err(only.as_str()) };
             let preset = base.exact_scale;
-            row(ui, "Integer scale", hint, allowed, |ui| {
+            row(ui, &fl!("integer-scale"), &fl!("integer-scale", "hint"), allowed, |ui| {
                 integer_scale(ui, item, size, (integer, preset), &effective)
             });
         }
         Format::Tgs => {
             let preset = item.choices.tgs_base(context.presets, context.config).ok();
-            let hint = "How the art becomes square, as TGS stickers are";
-            row(ui, "Force into square", hint, Ok(()), |ui| {
+            row(ui, &fl!("square"), &fl!("square", "tgs"), Ok(()), |ui| {
+                let squares = tgs_squares();
                 let base = preset.as_ref().and_then(|base| base.resize).unwrap_or(Resize::Pad);
                 let mut resize = item.choices.tgs.resize.unwrap_or(base);
                 ui.horizontal(|ui| {
                     let allowed = |option| match option {
-                        Resize::Contain => Err("TGS stickers are always square"),
+                        Resize::Contain => Err(fl!("square-off", "tgs")),
                         _ => Ok(()),
                     };
-                    if segments(ui, &mut resize, &TGS_SQUARES, allowed) {
+                    if segments(ui, &mut resize, &squares, allowed) {
                         item.choices.tgs.resize = (resize != base).then_some(resize);
                     }
                     if item.choices.tgs.resize.is_some() && widgets::reset(ui) {
                         item.choices.tgs.resize = None;
                     }
                 });
-                chosen_hint(ui, resize, &TGS_SQUARES);
+                chosen_hint(ui, resize, &squares);
             });
             let base = preset.and_then(|base| base.keep_canvas).unwrap_or(false);
-            let hint = "Rows and columns that are transparent in every frame";
-            row(ui, "Margins", hint, Ok(()), |ui| {
+            row(ui, &fl!("margins"), &fl!("margins", "hint"), Ok(()), |ui| {
                 let mut auto = item.choices.tgs.keep_canvas.map(|keep| !keep);
-                if flag(
-                    ui,
-                    &mut auto,
-                    !base,
-                    "Auto crop empty margins",
-                    "Cuts the art to the smallest rectangle with visible pixels in any frame, so it fills the square",
-                ) {
+                let (text, hint) = (fl!("auto-crop"), fl!("auto-crop", "hint"));
+                if flag(ui, &mut auto, !base, &text, &hint) {
                     item.choices.tgs.keep_canvas = auto.map(|auto| !auto);
                 }
-                note(ui, "Applies on top of the manual crop");
+                note(ui, fl!("auto-crop", "after"));
             });
             // what the last conversion found, if it looked for it
             let detected = item
@@ -276,13 +257,13 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 .filter(|made| made.format == Format::Tgs && made.choices.tgs.pixel_scale.is_none())
                 .and_then(|made| made.job.progress.report.as_ref())
                 .map(|report| report.scale);
-            let hint = "How many input pixels one pixel of the art takes. Pixels off its grid are moved onto it";
-            row(ui, "Art pixel size", hint, Ok(()), |ui| {
+            row(ui, &fl!("art-pixel"), &fl!("art-pixel", "hint"), Ok(()), |ui| {
+                let detected_text = (fl!("art-pixel-detected"), fl!("art-pixel-detected", "hint"));
                 widgets::steady_numbers(ui, 2, " px", |ui| {
                     auto_number(
                         ui,
                         &mut item.choices.tgs.pixel_scale,
-                        ("Detected", "Found from the art: its smallest blocks of one colour"),
+                        (&detected_text.0, &detected_text.1),
                         detected,
                         2,
                         |value| value.range(1..=64).suffix(" px"),
@@ -316,7 +297,7 @@ enum Side {
 /// follow, and the shape it keeps is kept.
 fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact: Option<Exact>) {
     let Some((width, height)) = size else {
-        note(ui, "once the input is read");
+        note(ui, fl!("once-read"));
         return;
     };
     let full = Crop::whole((width, height));
@@ -339,29 +320,29 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
                 ui.label("");
                 ui.vertical_centered(|ui| {
                     let most = height - bottom - 1;
-                    let hint = "Top margin: pixels cut off the top";
-                    edited = edited.or(field(ui, crop.y, most, hint).map(|v| (Side::Top, v)));
+                    let hint = fl!("margin-top");
+                    edited = edited.or(field(ui, crop.y, most, &hint).map(|v| (Side::Top, v)));
                 });
                 ui.end_row();
                 // beside the picture, halfway down it
                 let beside = egui::Layout::left_to_right(egui::Align::Center);
                 ui.allocate_ui_with_layout(egui::vec2(wide, SKETCH), beside, |ui| {
                     let most = width - right - 1;
-                    let hint = "Left margin: pixels cut off the left";
-                    edited = edited.or(field(ui, crop.x, most, hint).map(|v| (Side::Left, v)));
+                    let hint = fl!("margin-left");
+                    edited = edited.or(field(ui, crop.x, most, &hint).map(|v| (Side::Left, v)));
                 });
                 sketch(ui, (width, height), crop, wide);
                 ui.allocate_ui_with_layout(egui::vec2(wide, SKETCH), beside, |ui| {
                     let most = width - crop.x - 1;
-                    let hint = "Right margin: pixels cut off the right";
-                    edited = edited.or(field(ui, right, most, hint).map(|v| (Side::Right, v)));
+                    let hint = fl!("margin-right");
+                    edited = edited.or(field(ui, right, most, &hint).map(|v| (Side::Right, v)));
                 });
                 ui.end_row();
                 ui.label("");
                 ui.vertical_centered(|ui| {
                     let most = height - crop.y - 1;
-                    let hint = "Bottom margin: pixels cut off the bottom";
-                    edited = edited.or(field(ui, bottom, most, hint).map(|v| (Side::Bottom, v)));
+                    let hint = fl!("margin-bottom");
+                    edited = edited.or(field(ui, bottom, most, &hint).map(|v| (Side::Bottom, v)));
                 });
                 ui.end_row();
             });
@@ -369,14 +350,14 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
         ui.add_space(14.0);
         ui.vertical(|ui| {
             egui::Grid::new(("crop size", item.id)).spacing([6.0, 4.0]).show(ui, |ui| {
-                ui.label("Width");
+                ui.label(fl!("width"));
                 let mut across = crop.width;
                 let field = egui::DragValue::new(&mut across).range(1..=width).suffix(" px");
                 if widgets::steady_numbers(ui, digits, " px", |ui| ui.add(field)).changed() {
                     edited = Some((Side::Width, across));
                 }
                 ui.end_row();
-                ui.label("Height");
+                ui.label(fl!("height"));
                 let mut down = crop.height;
                 let field = egui::DragValue::new(&mut down).range(1..=height).suffix(" px");
                 if widgets::steady_numbers(ui, digits, " px", |ui| ui.add(field)).changed() {
@@ -387,11 +368,11 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 let cropped = item.choices.crop.is_some();
-                let whole = ui.add_enabled(cropped, egui::Button::new("Whole picture"));
+                let whole = ui.add_enabled(cropped, egui::Button::new(fl!("whole-picture")));
                 let whole = whole.on_hover_text(if exact.is_some() {
-                    "All of the picture, or as much as the exact scale takes from its top left"
+                    fl!("whole-picture", "exact")
                 } else {
-                    "All of the picture"
+                    fl!("whole-picture", "hint")
                 });
                 if whole.clicked() {
                     item.choices.crop = None;
@@ -404,8 +385,8 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
                         .fit(full, middle, ratio, (width, height))
                         .filter(|crop| *crop != full);
                     let button = ui
-                        .add_enabled(item.choices.crop != centred, egui::Button::new("Middle"))
-                        .on_hover_text("As much of the middle as the exact scale takes");
+                        .add_enabled(item.choices.crop != centred, egui::Button::new(fl!("middle")))
+                        .on_hover_text(fl!("middle", "hint"));
                     if button.clicked() {
                         item.choices.crop = centred;
                     }
@@ -524,7 +505,7 @@ fn aspect_ratio(
         Aspect::Input => Shape::Preserve,
         Aspect::Ratio(..) => Shape::Custom,
     };
-    if segments(ui, &mut shape, &SHAPES, |_| Ok(())) {
+    if segments(ui, &mut shape, &shapes(), |_| Ok(())) {
         item.view.aspect = match shape {
             Shape::Free => Aspect::Free,
             Shape::Preserve => Aspect::Input,
@@ -543,7 +524,7 @@ fn aspect_ratio(
         _ => crop.map_or((1.0, 1.0), |c| reduced(c.width, c.height)),
     };
     let mut typed = false;
-    let pick = "Pick Custom to type a shape";
+    let pick = fl!("shape-custom", "pick");
     ui.add_enabled_ui(custom, |ui| {
         ui.horizontal(|ui| {
             fn side(value: &mut f64) -> egui::DragValue<'_> {
@@ -556,11 +537,11 @@ fn aspect_ratio(
                         text.trim_end_matches('0').trim_end_matches('.').to_owned()
                     })
             }
-            let across = ui.add(side(&mut width)).on_hover_text("Width");
-            typed |= across.on_disabled_hover_text(pick).changed();
+            let across = ui.add(side(&mut width)).on_hover_text(fl!("width"));
+            typed |= across.on_disabled_hover_text(pick.as_str()).changed();
             ui.label(":");
-            let down = ui.add(side(&mut height)).on_hover_text("Height");
-            typed |= down.on_disabled_hover_text(pick).changed();
+            let down = ui.add(side(&mut height)).on_hover_text(fl!("height"));
+            typed |= down.on_disabled_hover_text(pick.as_str()).changed();
             if item.format == Format::Tgs {
                 return;
             }
@@ -574,9 +555,7 @@ fn aspect_ratio(
                 sizes.map_or((box_w, box_h), |s| (s.width, s.height));
             ui.add_space(14.0);
             ui.add_enabled_ui(follows, |ui| {
-                let why =
-                    "The result is squared or has margins, so its size doesn't follow the crop";
-                ui.label("Result").on_disabled_hover_text(why);
+                ui.label(fl!("ratio-result")).on_disabled_hover_text(fl!("ratio-result", "fixed"));
                 let digits = box_w.max(box_h).to_string().len();
                 let across = egui::DragValue::new(&mut result_w).range(1..=box_w);
                 let across = widgets::steady_numbers(ui, digits, "", |ui| ui.add(across));
@@ -622,7 +601,7 @@ fn integer_scale(
 ) {
     let full = size.map(Crop::whole);
     let Some(crop) = item.choices.crop.or(full) else {
-        note(ui, "once the input is read");
+        note(ui, fl!("once-read"));
         return;
     };
     let target = item.choices.target;
@@ -636,12 +615,8 @@ fn integer_scale(
     ui.horizontal(|ui| {
         let mut fixed = scale.is_some();
         let choices = [
-            (
-                false,
-                "Largest that fits",
-                "The largest whole multiple that keeps the crop within the result",
-            ),
-            (true, "Fixed", "This scale; the crop can be at most what it fits into the result"),
+            (false, fl!("scale-largest"), fl!("scale-largest", "hint")),
+            (true, fl!("scale-fixed"), fl!("scale-fixed", "hint")),
         ];
         if segments(ui, &mut fixed, &choices, |_| Ok(())) {
             chosen = fixed.then_some(guess);
@@ -650,7 +625,7 @@ fn integer_scale(
             ui.spacing_mut().item_spacing.x = 3.0;
             let current = scale_step(scale.unwrap_or(guess));
             let mut step = current;
-            if ui.small_button("−").on_hover_text("Smaller").clicked() {
+            if ui.small_button("−").on_hover_text(fl!("smaller")).clicked() {
                 step -= 1;
             }
             ui.add(
@@ -662,9 +637,9 @@ fn integer_scale(
                     // a scale kept for integer scaling shows as it is
                     .clamp_existing_to_range(integer),
             )
-            .on_hover_text("Type 3 for three times as large, or 1/3 for a third")
-            .on_disabled_hover_text("Pick Fixed to choose a scale");
-            if ui.small_button("+").on_hover_text("Larger").clicked() {
+            .on_hover_text(fl!("scale-field"))
+            .on_disabled_hover_text(fl!("scale-field", "pick"));
+            if ui.small_button("+").on_hover_text(fl!("larger")).clicked() {
                 step += 1;
             }
             let step = step.clamp(lowest, highest);
@@ -679,30 +654,37 @@ fn integer_scale(
         return;
     }
     if !integer {
-        note(ui, "Whole scales apply with Integer scaling only");
+        note(ui, fl!("scale-unused"));
         return;
     }
     let Some(sizes) = webm_sizes(effective, crop) else {
-        note(ui, "The crop doesn't suit this scale yet");
+        note(ui, fl!("scale-unsuited"));
         return;
     };
-    let made = format!("{} × {} px", sizes.scaled.0, sizes.scaled.1);
-    let margins = if sizes.pads() {
-        format!("; transparent margins fill the rest of the {} × {}", sizes.width, sizes.height)
-    } else {
-        String::new()
+    let makes = |scale: String| {
+        let (width, height) = sizes.scaled;
+        if sizes.pads() {
+            let (box_width, box_height) = (sizes.width, sizes.height);
+            fl!(
+                "scale-makes-padded",
+                scale = scale,
+                width = width,
+                height = height,
+                box_width = box_width,
+                box_height = box_height
+            )
+        } else {
+            fl!("scale-makes", scale = scale, width = width, height = height)
+        }
     };
     note(
         ui,
         match scale {
-            Some(scale) => format!("{} makes the crop {made}{margins}", scale_text(scale)),
+            Some(scale) => makes(scale_text(scale)),
             None if sizes.scaling == Scaling::PixelPerfect => {
-                let times = sizes.scaled.0 / crop.width.max(1);
-                format!("×{times} makes the crop {made}{margins}")
+                makes(format!("×{}", sizes.scaled.0 / crop.width.max(1)))
             }
-            None => "The crop is larger than the result, so it shrinks with sharp pixels: a \
-                     fixed scale like ×1/2 shrinks it by whole blocks"
-                .into(),
+            None => fl!("scale-shrinks"),
         },
     );
 }

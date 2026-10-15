@@ -11,6 +11,7 @@ use tgradish_core::presets::Format;
 
 use super::Context;
 use crate::item::{Item, Kind};
+use crate::l10n::fl;
 use crate::widgets::note;
 
 /// Text in a monospace box that can be selected and copied.
@@ -24,17 +25,14 @@ fn code(ui: &mut egui::Ui, text: &str) {
                 .desired_rows(1)
                 .desired_width(width),
         );
-        if ui.button("🗐").on_hover_text("Copy").clicked() {
+        if ui.button("🗐").on_hover_text(fl!("copy")).clicked() {
             ui.ctx().copy_text(text.to_owned());
         }
     });
 }
 
-/// The shell commands are written for: PowerShell on Windows, a POSIX
-/// shell elsewhere.
-const SHELL: &str = if cfg!(windows) { "PowerShell" } else { "a POSIX shell" };
-
-/// `args` as [`SHELL`] takes them.
+/// `args` as the shell commands are written for takes them: PowerShell on
+/// Windows, a POSIX shell elsewhere.
 fn shell_line<S: AsRef<str>>(args: &[S]) -> String {
     let args: Vec<&str> = args.iter().map(AsRef::as_ref).collect();
     if cfg!(windows) {
@@ -138,36 +136,39 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
 /// ffmpeg commands that encode it.
 pub(super) fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     ui.add_space(10.0);
-    egui::CollapsingHeader::new(RichText::new("Commands").strong()).id_salt("commands").show(ui, |ui| {
-        note(ui, format!("The same conversion on the command line, for {SHELL}:"));
-        code(ui, &shell_line(&command_line(item, context)));
-        if item.pasted.is_some() {
-            note(ui, "A pasted image is kept in a temporary folder, gone when the window closes");
-        }
-        if item.format != Format::Webm {
-            return;
-        }
-        ui.add_space(6.0);
-        match ffmpeg_commands(item, context) {
-            Ok(lines) => {
-                note(
-                    ui,
-                    if context.extra_args {
-                        "The ffmpeg commands of the first encode; fitting changes the rate, and \
-                         maybe the frame rate, between encodes:"
-                    } else {
-                        "What the built-in ffmpeg does for the first encode, as commands for the \
-                         system's ffmpeg; fitting changes the rate, and maybe the frame rate, \
-                         between encodes:"
-                    },
-                );
-                for line in lines {
-                    code(ui, &line);
-                }
+    egui::CollapsingHeader::new(RichText::new(fl!("commands")).strong()).id_salt("commands").show(
+        ui,
+        |ui| {
+            note(
+                ui,
+                if cfg!(windows) { fl!("commands-powershell") } else { fl!("commands-posix") },
+            );
+            code(ui, &shell_line(&command_line(item, context)));
+            if item.pasted.is_some() {
+                note(ui, fl!("pasted-temporary"));
             }
-            Err(why) => note(ui, format!("No ffmpeg commands: {why}")),
-        }
-    });
+            if item.format != Format::Webm {
+                return;
+            }
+            ui.add_space(6.0);
+            match ffmpeg_commands(item, context) {
+                Ok(lines) => {
+                    note(
+                        ui,
+                        if context.extra_args {
+                            fl!("ffmpeg-commands")
+                        } else {
+                            fl!("ffmpeg-commands", "builtin")
+                        },
+                    );
+                    for line in lines {
+                        code(ui, &line);
+                    }
+                }
+                Err(why) => note(ui, fl!("no-ffmpeg-commands", why = why)),
+            }
+        },
+    );
 }
 
 /// What converting the item to WebM would ask for, and plans to make.
@@ -175,7 +176,7 @@ pub(super) fn planned(
     item: &Item,
     context: &Context,
 ) -> Result<(convert::Request, convert::Plan), String> {
-    let video = item.video.ready().ok_or("the input isn't read yet")?;
+    let video = item.video.ready().ok_or_else(|| fl!("no-ffmpeg-commands", "unread"))?;
     let options = item.choices.webm_options(context.presets, context.config)?;
     let request = convert::Request {
         input: item.inputs[0].clone(),
@@ -191,9 +192,9 @@ pub(super) fn planned(
 
 fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String> {
     if matches!(item.kind, Kind::Aseprite | Kind::Frames) {
-        return Err("ffmpeg reads a PNG each conversion draws of the pixel art".into());
+        return Err(fl!("no-ffmpeg-commands", "art"));
     }
-    let video = item.video.ready().ok_or("the input isn't read yet")?;
+    let video = item.video.ready().ok_or_else(|| fl!("no-ffmpeg-commands", "unread"))?;
     let (request, mut plan) = planned(item, context)?;
     // as converting decides it, guessed from the frames the window has
     // read, which are those converting reads unless the input is long

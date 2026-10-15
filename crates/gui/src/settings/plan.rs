@@ -14,18 +14,19 @@ use tgradish_tgs::frames::Direction;
 
 use super::Context;
 use crate::item::{Item, Kind};
+use crate::l10n::fl;
 use crate::widgets;
 
 /// The steps, under a heading naming what the input is.
 pub fn plan(ui: &mut egui::Ui, item: &Item, context: &Context) {
     let animated = item.input_length().is_some();
     let title = match (item.kind, animated) {
-        (Kind::Video, true) => "The video will be:",
-        (Kind::Video | Kind::Image, false) => "The picture will be:",
-        (Kind::Image, true) => "The animation will be:",
-        (Kind::Aseprite | Kind::Frames, _) => "The art will be:",
+        (Kind::Video, true) => fl!("plan-video"),
+        (Kind::Video | Kind::Image, false) => fl!("plan-picture"),
+        (Kind::Image, true) => fl!("plan-animation"),
+        (Kind::Aseprite | Kind::Frames, _) => fl!("plan-art"),
     };
-    widgets::section(ui, title);
+    widgets::section(ui, &title);
     for step in steps(item, context) {
         // wrapped lines start under the text, not the bullet
         ui.horizontal_top(|ui| {
@@ -86,7 +87,7 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
         }
     }
     if let Some(name) = context.output.as_ref().and_then(|output| output.file_name()) {
-        steps.push(format!("Saved as {}", name.to_string_lossy()));
+        steps.push(fl!("plan-saved", name = name.to_string_lossy()));
     }
     steps
 }
@@ -97,21 +98,20 @@ fn read(item: &Item, used: &Used, steps: &mut Vec<String>) {
         && let Some(name) = used.tag
     {
         let tags = item.aseprite().map_or(&[][..], |(tags, ..)| tags);
-        let direction = match tags.iter().find(|tag| tag.name == name).map(|tag| tag.direction) {
-            Some(Direction::Reverse) => ", in reverse",
-            Some(Direction::PingPong) => ", there and back",
-            Some(Direction::PingPongReverse) => ", back and there",
-            Some(Direction::Forward) | None => "",
-        };
-        steps.push(format!("Played as its “{name}” tag{direction}"));
+        steps.push(match tags.iter().find(|tag| tag.name == name).map(|tag| tag.direction) {
+            Some(Direction::Reverse) => fl!("plan-tag-reverse", tag = name),
+            Some(Direction::PingPong) => fl!("plan-tag-ping-pong", tag = name),
+            Some(Direction::PingPongReverse) => fl!("plan-tag-pong-ping", tag = name),
+            Some(Direction::Forward) | None => fl!("plan-tag", tag = name),
+        });
     }
     if let Some(crop) = used.crop {
-        steps.push(format!("Cropped to {} × {}", crop.width, crop.height));
+        steps.push(fl!("plan-cropped", width = crop.width, height = crop.height));
     }
     if item.format == Format::Image
         && let Some(frame) = used.start.filter(|_| item.input_length().is_some())
     {
-        steps.push(format!("Frame at {} taken", widgets::seconds(frame)));
+        steps.push(fl!("plan-frame", time = widgets::seconds(frame)));
     }
 }
 
@@ -122,7 +122,7 @@ fn picture(options: &Options, used: (u32, u32)) -> Vec<String> {
     let mut steps = Vec::new();
     let scaled = sizes.scaled;
     if scaled != used {
-        steps.push(format!("Scaled to {} × {}", scaled.0, scaled.1));
+        steps.push(fl!("plan-scaled", width = scaled.0, height = scaled.1));
     }
     // more one way than the other: stretched
     let (across, down) = (
@@ -130,15 +130,16 @@ fn picture(options: &Options, used: (u32, u32)) -> Vec<String> {
         f64::from(scaled.1) / f64::from(used.1.max(1)),
     );
     if across > down * 1.005 {
-        steps.push(format!("Stretched ×{} across", widgets::trimmed(across / down)));
+        steps.push(fl!("plan-stretched-across", factor = widgets::trimmed(across / down)));
     } else if down > across * 1.005 {
-        steps.push(format!("Stretched ×{} down", widgets::trimmed(down / across)));
+        steps.push(fl!("plan-stretched-down", factor = widgets::trimmed(down / across)));
     }
-    if scaled.0 > sizes.width || scaled.1 > sizes.height {
-        steps.push(format!("Middle cut to {} × {}", sizes.width, sizes.height));
+    let (width, height) = (sizes.width, sizes.height);
+    if scaled.0 > width || scaled.1 > height {
+        steps.push(fl!("plan-middle-cut", width = width, height = height));
     }
     if sizes.pads() {
-        steps.push(format!("Padded to {} × {}", sizes.width, sizes.height));
+        steps.push(fl!("plan-padded", width = width, height = height));
     }
     steps
 }
@@ -146,19 +147,16 @@ fn picture(options: &Options, used: (u32, u32)) -> Vec<String> {
 /// How a `.tgs` result's art is cut and squared.
 fn art(options: &TgsOptions, steps: &mut Vec<String>) {
     if !options.keep_canvas.unwrap_or(false) {
-        steps.push("Trimmed to its visible pixels".into());
+        steps.push(fl!("plan-trimmed"));
     }
     if let Some(scale) = options.pixel_scale {
-        steps.push(format!("Pixels aligned to a {scale} × {scale} grid"));
+        steps.push(fl!("plan-grid", scale = scale));
     }
-    steps.push(
-        match options.resize.unwrap_or(Resize::Pad) {
-            Resize::Crop => "Cropped to a square",
-            Resize::Stretch => "Stretched to a square",
-            Resize::Pad | Resize::Contain => "Padded to a square",
-        }
-        .into(),
-    );
+    steps.push(match options.resize.unwrap_or(Resize::Pad) {
+        Resize::Crop => fl!("plan-square-crop"),
+        Resize::Stretch => fl!("plan-square-stretch"),
+        Resize::Pad | Resize::Contain => fl!("plan-square-pad"),
+    });
 }
 
 /// How the result plays at `tempo`: faster or slower, and how its length
@@ -171,12 +169,12 @@ fn time(item: &Item, used: &Used, tempo: f64, cut: bool, steps: &mut Vec<String>
         // a range of seconds, with one unit
         let from = widgets::seconds(start).trim_end_matches(" s").to_owned();
         let (to, of) = (widgets::seconds(end), widgets::seconds(length));
-        steps.push(format!("Cut to {from}–{to} of {of}"));
+        steps.push(fl!("plan-cut", from = from, to = to, length = of));
     }
     if tempo > 1.0 + 1e-9 {
-        steps.push(format!("Sped up by a factor of {}", widgets::trimmed(tempo)));
+        steps.push(fl!("plan-faster", factor = widgets::trimmed(tempo)));
     } else if tempo < 1.0 - 1e-9 {
-        steps.push(format!("Slowed down by a factor of {}", widgets::trimmed(1.0 / tempo)));
+        steps.push(fl!("plan-slower", factor = widgets::trimmed(1.0 / tempo)));
     }
     let played = (end - start) / tempo;
     if !telegram::too_long(played) {
@@ -184,9 +182,9 @@ fn time(item: &Item, used: &Used, tempo: f64, cut: bool, steps: &mut Vec<String>
     }
     let played = widgets::seconds(played);
     if cut {
-        steps.push(format!("Cut at 3 s of {played}"));
+        steps.push(fl!("plan-cut-3-s", played = played));
     } else {
-        steps.push(format!("Duration spoofed, so all {played} plays"));
+        steps.push(fl!("plan-spoofed", played = played));
     }
 }
 

@@ -307,7 +307,7 @@ fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backe
         // small enough to read at once
         (Format::Image, _) => match still::preview(&done.output) {
             Ok(preview) => Load::Ready(Clip::from_preview(preview, true)),
-            Err(err) => Load::Failed(err.to_string()),
+            Err(err) => Load::Failed(crate::jobs::failure(&err)),
         },
         // drawn when it was made
         (Format::Tgs, _) => match &done.preview {

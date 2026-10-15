@@ -9,6 +9,7 @@ use tgradish_tgs::frames::{Direction, LayerInfo, Tag};
 
 use super::Context;
 use crate::item::{Choices, Item};
+use crate::l10n::fl;
 use crate::widgets::{self, row, section, section_with};
 
 /// Indent of each level of groups in the list of layers.
@@ -66,10 +67,10 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         if !(chosen && failed) {
             return;
         }
-        section(ui, "Aseprite file");
+        section(ui, &fl!("aseprite-file"));
         ui.horizontal(|ui| {
-            widgets::note(ui, "It doesn't read with the tag and layers chosen");
-            if ui.button("Read all of it").clicked() {
+            widgets::note(ui, fl!("unreadable-choices"));
+            if ui.button(fl!("read-all")).clicked() {
                 (choices.tag, choices.show_layers, choices.hide_layers) = (None, None, None);
             }
         });
@@ -83,7 +84,7 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     }
     // with a sign that it is being read again
     let reading = item.input_reading();
-    section_with(ui, "Aseprite file", |ui| {
+    section_with(ui, &fl!("aseprite-file"), |ui| {
         if reading {
             ui.add(egui::Spinner::new().size(12.0));
         }
@@ -92,13 +93,14 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let format = item.format;
     let choices = &mut item.choices;
     if !tags.is_empty() {
-        let hint = "Picks the frames of a tag: as where it starts and ends, or read in its \
-                    own order where it plays backwards or there and back";
-        row(ui, "Tag", hint, Ok(()), |ui| tag_row(ui, choices, &preset, tags, frames, format));
+        row(ui, &fl!("tag"), &fl!("tag", "hint"), Ok(()), |ui| {
+            tag_row(ui, choices, &preset, tags, frames, format)
+        });
     }
     if listed {
-        let hint = "Which layers show, the top one first; a hidden group hides the layers in it";
-        row(ui, "Layers", hint, Ok(()), |ui| layer_list(ui, choices, &preset, layers));
+        row(ui, &fl!("layers"), &fl!("layers", "hint"), Ok(()), |ui| {
+            layer_list(ui, choices, &preset, layers)
+        });
     }
 }
 
@@ -144,11 +146,11 @@ fn tag_row(
     let picks: Vec<bool> = tags.iter().map(picked).collect();
     ui.horizontal_wrapped(|ui| {
         // a preset's tag can be changed here, not left out
-        let all = egui::Button::new("All frames").selected(whole && !picks.contains(&true));
+        let all = egui::Button::new(fl!("all-frames")).selected(whole && !picks.contains(&true));
         let all = ui
             .add_enabled(preset.tag.is_none(), all)
-            .on_hover_text("Every frame of the file")
-            .on_disabled_hover_text("The preset reads one tag");
+            .on_hover_text(fl!("all-frames", "hint"))
+            .on_disabled_hover_text(fl!("all-frames", "preset"));
         if all.clicked() {
             choices.tag = None;
             (choices.start, choices.length) = (None, None);
@@ -209,17 +211,19 @@ fn tag_button(ui: &mut egui::Ui, tag: &Tag, picked: bool) -> egui::Response {
     // inside, so nothing around it cuts the outline off
     ui.painter().rect(rect, 4.0, colour, edge, egui::StrokeKind::Inside);
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, text);
-    let direction = match tag.direction {
-        Direction::Forward => "",
-        Direction::Reverse => ", in reverse",
-        Direction::PingPong => ", there and back",
-        Direction::PingPongReverse => ", back and there",
-    };
     // as Aseprite counts them, from 1
     let (from, to) = (tag.from + 1, tag.to + 1);
-    let frames =
-        if from == to { format!("Frame {from}") } else { format!("Frames {from} to {to}") };
-    response.on_hover_text(format!("{frames}{direction}"))
+    let frames = if from == to {
+        fl!("tag-frame", number = from)
+    } else {
+        fl!("tag-frames", from = from, to = to)
+    };
+    response.on_hover_text(match tag.direction {
+        Direction::Forward => frames,
+        Direction::Reverse => fl!("tag-reverse", frames = frames),
+        Direction::PingPong => fl!("tag-ping-pong", frames = frames),
+        Direction::PingPongReverse => fl!("tag-pong-ping", frames = frames),
+    })
 }
 
 /// Whether each layer is the last of its group's, or of the top level's.
@@ -261,18 +265,18 @@ fn layer_list(ui: &mut egui::Ui, choices: &mut Choices, preset: &Preset, layers:
             let name = if layer.background { name.underline() } else { name };
             let response = ui
                 .add_enabled(hidden_from.is_none(), egui::Checkbox::new(&mut on, name))
-                .on_disabled_hover_text("Its group is hidden");
+                .on_disabled_hover_text(fl!("layers", "group-hidden"));
             if response.changed() {
                 set(choices, preset, layer, on);
             }
             // the first ends with a way back to the preset's or the file's
             let back = match (&preset.show, &preset.hide) {
-                (None, None) => "Back to the layers the file shows",
-                _ => "Back to the layers the preset shows",
+                (None, None) => fl!("layers", "file"),
+                _ => fl!("layers", "preset"),
             };
             if index == 0
                 && (choices.show_layers.is_some() || choices.hide_layers.is_some())
-                && widgets::reset_to(ui, back)
+                && widgets::reset_to(ui, &back)
             {
                 (choices.show_layers, choices.hide_layers) = (None, None);
             }

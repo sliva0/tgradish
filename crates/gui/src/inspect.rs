@@ -13,6 +13,7 @@ use tgradish_tgs::limits::{self, telegram as server};
 use crate::app::App;
 use crate::fonts::drawable_in;
 use crate::jobs::Problem;
+use crate::l10n::fl;
 use crate::widgets::{self, gauge, label, note, problems};
 
 pub enum Found {
@@ -32,13 +33,15 @@ impl Inspection {
     pub fn of(path: &Path) -> Inspection {
         let (found, problems) = match inspect::inspect(path, None) {
             Ok(Inspected::Image { target, info, issues }) => {
-                (Found::Image { info, target }, issues.iter().map(Problem::refused).collect())
+                let problems = issues.iter().map(|issue| Problem::refused(issue, target));
+                (Found::Image { info, target }, problems.collect())
             }
             Ok(Inspected::Tgs { stats, issues }) => {
                 (Found::Tgs(stats), issues.into_iter().map(Problem::of_tgs).collect())
             }
             Ok(Inspected::Webm { target, info, issues }) => {
-                (Found::Webm { info, target }, issues.iter().map(Problem::refused).collect())
+                let problems = issues.iter().map(|issue| Problem::refused(issue, target));
+                (Found::Webm { info, target }, problems.collect())
             }
             Err(err) => (Found::Failed(err.to_string()), Vec::new()),
         };
@@ -61,7 +64,7 @@ fn budget(ui: &mut egui::Ui, name: &str, hint: &str, used: u64, limit: u64, text
 }
 
 fn of(used: impl std::fmt::Display, limit: impl std::fmt::Display) -> String {
-    format!("{used} of {limit}")
+    fl!("of-limit", used = used.to_string(), limit = limit.to_string())
 }
 
 pub fn show(ui: &mut egui::Ui, inspection: &Inspection) {
@@ -79,75 +82,92 @@ pub fn show(ui: &mut egui::Ui, inspection: &Inspection) {
 }
 
 fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target) {
-    note(ui, format!("A video {}", target.name()));
+    note(
+        ui,
+        match target {
+            Target::Sticker => fl!("inspect-webm-sticker"),
+            Target::Emoji => fl!("inspect-webm-emoji"),
+        },
+    );
     ui.add_space(6.0);
     grid(ui, "inspect-webm", |ui| {
         let limit = target.max_bytes();
         let size = of(widgets::kib(info.file_size), widgets::kib(limit));
-        budget(ui, "Size", "Telegram refuses larger files", info.file_size, limit, size);
+        let (name, hint) = (fl!("inspect-size"), fl!("inspect-size", "hint"));
+        budget(ui, &name, &hint, info.file_size, limit, size);
         let max = telegram::MAX_SECONDS;
         match (info.header_duration, info.content_duration) {
             (Some(header), content) => {
                 let text = if info.spoofed() {
-                    format!("{header:.3} s in the header, spoofed")
+                    fl!("inspect-duration", "spoofed", seconds = format!("{header:.3}"))
                 } else {
                     of(widgets::seconds(header), widgets::seconds(max))
                 };
-                let hint = "Telegram reads the duration in the header; spoofing makes it short";
-                budget(ui, "Duration", hint, (header * 1000.0) as u64, (max * 1000.0) as u64, text);
+                let (name, hint) = (fl!("inspect-duration"), fl!("inspect-duration", "hint"));
+                let (used, most) = ((header * 1000.0) as u64, (max * 1000.0) as u64);
+                budget(ui, &name, &hint, used, most, text);
                 if let Some(content) = content.filter(|_| info.spoofed()) {
-                    label(ui, "Plays", "How long the video really is");
+                    label(ui, &fl!("inspect-plays"), &fl!("inspect-plays", "hint"));
                     ui.label(widgets::seconds(content));
                     ui.end_row();
                 }
             }
             (None, Some(content)) => {
-                label(ui, "Duration", "");
-                ui.label(format!("{}, none in the header", widgets::seconds(content)));
+                label(ui, &fl!("inspect-duration"), "");
+                let seconds = widgets::seconds(content);
+                ui.label(fl!("inspect-duration", "no-header", seconds = seconds));
                 ui.end_row();
             }
             (None, None) => {}
         }
         if let Some(fps) = info.fps() {
             let most = telegram::MAX_FPS;
-            let text = format!(
-                "{fps:.2} fps of {most:.0}, {}",
-                widgets::count(info.video_frames, "frame")
+            let text = fl!(
+                "inspect-frame-rate",
+                "value",
+                fps = format!("{fps:.2}"),
+                most = format!("{most:.0}"),
+                frames = fl!("count-frames", count = info.video_frames)
             );
-            budget(ui, "Frame rate", "", (fps * 100.0) as u64, (most * 100.0) as u64, text);
+            let name = fl!("inspect-frame-rate");
+            budget(ui, &name, "", (fps * 100.0) as u64, (most * 100.0) as u64, text);
         }
-        label(ui, "Picture", "");
+        label(ui, &fl!("inspect-picture"), "");
         match &info.video {
             Some(video) => {
                 let codec = if video.codec_id == "V_VP9" { "VP9" } else { video.codec_id.as_str() };
-                let alpha = if video.alpha { ", with transparency" } else { "" };
-                ui.label(format!("{} × {} px, {codec}{alpha}", video.width, video.height));
+                let (width, height) = (video.width, video.height);
+                ui.label(if video.alpha {
+                    fl!("inspect-video", "alpha", width = width, height = height, codec = codec)
+                } else {
+                    fl!("inspect-video", width = width, height = height, codec = codec)
+                });
             }
             None => {
-                ui.label("none");
+                ui.label(fl!("inspect-picture", "none"));
             }
         }
         ui.end_row();
         if info.audio_tracks > 0 {
-            label(ui, "Audio", "");
-            ui.label(widgets::count(info.audio_tracks, "track"));
+            label(ui, &fl!("inspect-audio"), "");
+            ui.label(fl!("count-tracks", count = info.audio_tracks));
             ui.end_row();
         }
         if let Some(title) = &info.title {
-            label(ui, "Title", "");
+            label(ui, &fl!("inspect-title"), "");
             ui.add(egui::Label::new(title).truncate());
             ui.end_row();
         }
-        label(ui, "Made with", "The programs that wrote the file, as it says");
+        label(ui, &fl!("inspect-made-with"), &fl!("inspect-made-with", "hint"));
         let made = match (&info.writing_app, &info.muxing_app) {
             (Some(writing), Some(muxing)) if writing != muxing => format!("{writing}, {muxing}"),
             (Some(app), _) | (None, Some(app)) => app.clone(),
-            (None, None) => "unknown".into(),
+            (None, None) => fl!("inspect-made-with", "unknown"),
         };
         ui.add(egui::Label::new(made).truncate());
         ui.end_row();
         if let Some(signature) = &info.signature {
-            label(ui, "Note", "Text in the file's padding, which players skip");
+            label(ui, &fl!("inspect-note"), &fl!("inspect-note", "hint"));
             ui.add(egui::Label::new(signature).truncate());
             ui.end_row();
         }
@@ -155,89 +175,76 @@ fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target) {
 }
 
 fn image(ui: &mut egui::Ui, info: &still::Info, target: Target) {
-    note(ui, format!("An image {}", target.name()));
+    note(
+        ui,
+        match target {
+            Target::Sticker => fl!("inspect-image-sticker"),
+            Target::Emoji => fl!("inspect-image-emoji"),
+        },
+    );
     ui.add_space(6.0);
     grid(ui, "inspect-image", |ui| {
         let limit = telegram::MAX_STILL_BYTES;
         let size = of(widgets::kib(info.bytes), widgets::kib(limit));
-        budget(ui, "Size", "Telegram refuses larger files", info.bytes, limit, size);
-        label(ui, "Picture", "");
-        let kind = if info.lossy { "lossy" } else { "lossless" };
-        let alpha = if info.alpha { ", with transparency" } else { "" };
-        ui.label(format!("{} × {} px, WebP, {kind}{alpha}", info.width, info.height));
+        let (name, hint) = (fl!("inspect-size"), fl!("inspect-size", "hint"));
+        budget(ui, &name, &hint, info.bytes, limit, size);
+        label(ui, &fl!("inspect-picture"), "");
+        let (width, height) = (info.width, info.height);
+        ui.label(match (info.lossy, info.alpha) {
+            (false, false) => fl!("inspect-webp", width = width, height = height),
+            (false, true) => fl!("inspect-webp", "alpha", width = width, height = height),
+            (true, false) => fl!("inspect-webp", "lossy", width = width, height = height),
+            (true, true) => fl!("inspect-webp", "lossy-alpha", width = width, height = height),
+        });
         ui.end_row();
-        label(ui, "Made with", "The program its metadata names");
-        ui.add(egui::Label::new(info.made_with.as_deref().unwrap_or("unknown")).truncate());
+        label(ui, &fl!("inspect-made-with"), &fl!("inspect-made-with", "image"));
+        let made = info.made_with.clone().unwrap_or_else(|| fl!("inspect-made-with", "unknown"));
+        ui.add(egui::Label::new(made).truncate());
         ui.end_row();
     });
 }
 
 fn animation(ui: &mut egui::Ui, stats: &Stats) {
-    note(
-        ui,
-        format!("A vector animation, {} × {} at {} fps", stats.width, stats.height, stats.fps),
-    );
+    let (width, height, fps) = (stats.width, stats.height, stats.fps);
+    note(ui, fl!("inspect-tgs", width = width, height = height, fps = fps));
     ui.add_space(6.0);
     grid(ui, "inspect-tgs", |ui| {
         if let Some(name) = &stats.name {
-            label(ui, "Name", "The animation's own name, which Telegram doesn't show");
+            label(ui, &fl!("inspect-name"), &fl!("inspect-name", "hint"));
             ui.add(egui::Label::new(name).truncate());
             ui.end_row();
         }
         if let Some(bytes) = stats.tgs_bytes {
             let (bytes, limit) = (bytes as u64, server::MAX_BYTES as u64);
             let text = of(widgets::kib(bytes), widgets::kib(limit));
-            budget(ui, "Size", "Telegram refuses larger stickers", bytes, limit, text);
+            let (name, hint) = (fl!("inspect-size"), fl!("inspect-size", "tgs"));
+            budget(ui, &name, &hint, bytes, limit, text);
         }
         let seconds = if stats.fps > 0.0 { stats.frames / stats.fps } else { 0.0 };
-        let text = format!(
-            "{} of 3.00 s, {}",
-            widgets::seconds(seconds),
-            widgets::count(stats.frames, "frame")
-        );
-        budget(
-            ui,
-            "Length",
-            "Animated stickers last at most 3 seconds",
-            (seconds * 1000.0) as u64,
-            3000,
-            text,
-        );
-        let refused = "Telegram refuses more";
+        let frames = fl!("count-frames", count = stats.frames);
+        let text =
+            fl!("inspect-length", "value", seconds = widgets::seconds(seconds), frames = frames);
+        let (name, hint) = (fl!("inspect-length"), fl!("inspect-length", "hint"));
+        budget(ui, &name, &hint, (seconds * 1000.0) as u64, 3000, text);
+        let refused = fl!("inspect-refuses-more");
         let cost = server::cost(stats.shapes, stats.layers);
-        budget(
-            ui,
-            "Drawing cost",
-            "Shapes plus 9 for each layer, as Telegram counts them",
-            cost as u64,
-            server::MAX_COST as u64,
-            of(cost, server::MAX_COST),
-        );
+        let (name, hint) = (fl!("inspect-cost"), fl!("inspect-cost", "hint"));
+        let most = server::MAX_COST as u64;
+        budget(ui, &name, &hint, cost as u64, most, of(cost, server::MAX_COST));
         let (layers, most) = (stats.layers as u64, server::MAX_LAYERS as u64);
-        budget(ui, "Layers", refused, layers, most, of(layers, most));
+        budget(ui, &fl!("inspect-layers"), &refused, layers, most, of(layers, most));
         let (shapes, most) =
             (stats.max_shapes_per_layer as u64, server::MAX_SHAPES_PER_LAYER as u64);
-        budget(ui, "Most shapes in a layer", refused, shapes, most, of(shapes, most));
+        budget(ui, &fl!("inspect-shapes"), &refused, shapes, most, of(shapes, most));
         let (points, most) = (stats.max_paint_points as u64, server::MAX_PAINT_POINTS as u64);
-        budget(
-            ui,
-            "Most points in a fill",
-            "Path points one fill paints; Telegram refuses more",
-            points,
-            most,
-            of(points, most),
-        );
+        let (name, hint) = (fl!("inspect-points"), fl!("inspect-points", "hint"));
+        budget(ui, &name, &hint, points, most, of(points, most));
         let (json, desktop) = (stats.json_bytes as u64, limits::MAX_RAW_JSON as u64);
-        budget(
-            ui,
-            "Unpacked",
-            "Telegram Desktop doesn't play larger animations",
-            json,
-            desktop,
-            of(widgets::kib(json), widgets::kib(desktop)),
-        );
+        let (name, hint) = (fl!("inspect-unpacked"), fl!("inspect-unpacked", "hint"));
+        let text = of(widgets::kib(json), widgets::kib(desktop));
+        budget(ui, &name, &hint, json, desktop, text);
         if !stats.features.is_empty() {
-            label(ui, "Features", "Lottie features beyond shapes and transforms");
+            label(ui, &fl!("inspect-features"), &fl!("inspect-features", "hint"));
             ui.label(stats.features.iter().copied().collect::<Vec<_>>().join(", "));
             ui.end_row();
         }
@@ -267,8 +274,8 @@ impl App {
             show(ui, inspection);
             ui.separator();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                close = ui.button("Close").clicked();
-                another = ui.button("Inspect another…").clicked();
+                close = ui.button(fl!("close")).clicked();
+                another = ui.button(fl!("inspect-another")).clicked();
             });
         });
         if close || modal.should_close() {
@@ -281,8 +288,9 @@ impl App {
 
     /// Asks for a sticker to inspect.
     pub(crate) fn pick_inspected(&mut self) {
-        if let Some(file) =
-            rfd::FileDialog::new().add_filter("stickers", &["webm", "tgs", "webp"]).pick_file()
+        if let Some(file) = rfd::FileDialog::new()
+            .add_filter(fl!("stickers-filter"), &["webm", "tgs", "webp"])
+            .pick_file()
         {
             self.inspection = Some(Inspection::of(&file));
         }

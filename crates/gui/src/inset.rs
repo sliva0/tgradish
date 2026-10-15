@@ -7,6 +7,7 @@ use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Sense, Stroke, Vec2, p
 use tgradish_core::config::Corner;
 
 use crate::canvas::MARGIN;
+use crate::l10n::fl;
 use crate::widgets;
 
 /// The small picture of what the result will look like, beside the input
@@ -163,9 +164,9 @@ impl Inset {
         let label = match details {
             Some(details) => {
                 let scale = (fits(full) * ppp * 100.0).round();
-                format!("Result at {scale}%\n{details}")
+                format!("{}\n{details}", fl!("inset-label", scale = scale))
             }
-            None => "Result".to_owned(),
+            None => fl!("inset-label", "plain"),
         };
         let galley = painter.layout_no_wrap(label, INSET_LABEL, Color32::PLACEHOLDER);
         let boxed = label_box(galley.size());
@@ -198,7 +199,7 @@ impl Inset {
             let label = ui.interact(behind, id.with("label"), Sense::drag());
             let held = [
                 ui.interact(frame.expand(4.0), id, Sense::drag()),
-                if on_buttons { label } else { label.on_hover_text("Drag it to another corner") },
+                if on_buttons { label } else { label.on_hover_text(fl!("inset-label", "drag")) },
             ];
             let pointer = ui.input(|input| input.pointer.latest_pos());
             let origin = ui.input(|input| input.pointer.press_origin());
@@ -292,10 +293,10 @@ impl Inset {
         row.spacing_mut().interact_size = Vec2::splat(SIZE_BUTTON);
         let button = |text| egui::Button::new(text).min_size(vec2(SIZE_BUTTON, SIZE_BUTTON));
         let last = INSET_SIZES.len() - 1;
-        if row.add_enabled(size > 0, button("−")).on_hover_text("Smaller").clicked() {
+        if row.add_enabled(size > 0, button("−")).on_hover_text(fl!("inset-smaller")).clicked() {
             change = Some(InsetChange::Size(size - 1));
         }
-        if row.add_enabled(size < last, button("+")).on_hover_text("Larger").clicked() {
+        if row.add_enabled(size < last, button("+")).on_hover_text(fl!("inset-larger")).clicked() {
             change = Some(InsetChange::Size(size + 1));
         }
         change

@@ -19,6 +19,9 @@ use tgradish_tgs::check::{Issue, Severity};
 use tgradish_tgs::normalise::Report;
 use tgradish_tgs::sticker::Step;
 
+use crate::l10n::fl;
+use crate::widgets;
+
 /// What a job converts with, fixed when it starts.
 pub enum Plan {
     Webm {
@@ -129,14 +132,88 @@ pub struct Problem {
 }
 
 impl Problem {
-    /// Something Telegram refuses.
-    pub fn refused(issue: impl std::fmt::Display) -> Problem {
-        Problem { refused: true, text: issue.to_string() }
+    /// Something Telegram refuses in a result for `target`.
+    pub fn refused(issue: &telegram::Issue, target: telegram::Target) -> Problem {
+        Problem { refused: true, text: issue_text(issue, target) }
     }
 
     /// What checking a `.tgs` found, which may only be frowned on.
     pub fn of_tgs(issue: Issue) -> Problem {
         Problem { refused: issue.severity == Severity::Error, text: issue.message }
+    }
+}
+
+/// Telegram's `issues` with a result for `target`, as problems.
+fn refused(issues: &[telegram::Issue], target: telegram::Target) -> Vec<Problem> {
+    issues.iter().map(|issue| Problem::refused(issue, target)).collect()
+}
+
+/// What Telegram would refuse, in the window's words.
+fn issue_text(issue: &telegram::Issue, target: telegram::Target) -> String {
+    use telegram::Issue;
+    match issue {
+        Issue::NotWebm { doc_type } => fl!("issue-not-webm", container = doc_type.as_str()),
+        Issue::NoVideo => fl!("issue-no-video"),
+        Issue::NotVp9 { codec_id } => fl!("issue-not-vp9", codec = codec_id.as_str()),
+        Issue::HasAudio => fl!("issue-audio"),
+        &Issue::WrongSize { width, height, .. } => {
+            let side = target.box_size().0;
+            if target.requires_exact_size() {
+                fl!("issue-size", width = width, height = height, side = side)
+            } else {
+                fl!("issue-size", "sticker", width = width, height = height, side = side)
+            }
+        }
+        &Issue::TooBig { bytes, max } => {
+            fl!("issue-too-big", size = widgets::kib(bytes), limit = widgets::kib(max))
+        }
+        &Issue::TooLong { seconds, max } => fl!(
+            "issue-too-long",
+            seconds = format!("{seconds:.3} s"),
+            limit = widgets::seconds(max)
+        ),
+        &Issue::TooManyFps { fps, max } => {
+            fl!("issue-too-many-fps", fps = format!("{fps:.2}"), limit = format!("{max:.0}"))
+        }
+        Issue::Animated => fl!("issue-animated"),
+    }
+}
+
+/// What went wrong, in the window's words where people meet it, and as
+/// tgradish-core says it otherwise.
+pub(crate) fn failure(err: &Error) -> String {
+    let name = |path: &Path| {
+        let name = path.file_name().map(|name| name.to_string_lossy().into_owned());
+        name.unwrap_or_else(|| path.display().to_string())
+    };
+    match err {
+        Error::FfmpegNotFound(details) => fl!("ffmpeg-not-found", details = details.as_str()),
+        Error::Ffmpeg { program, status, stderr } => {
+            let program = program.to_string();
+            let failed = fl!("program-failed", program = program, status = status.as_str());
+            format!("{failed}\n{stderr}")
+        }
+        Error::Probe { path, message } => {
+            fl!("unreadable-file", name = name(path), details = message.as_str())
+        }
+        Error::NoVideo(path) => fl!("no-video", name = name(path)),
+        Error::NoFrame { path, at } => {
+            fl!("no-frame-at", name = name(path), seconds = widgets::seconds(*at))
+        }
+        &Error::NothingFits { smallest, limit } => {
+            fl!("nothing-fits", limit = widgets::kib(limit), smallest = widgets::kib(smallest))
+        }
+        Error::Clipboard(details) => fl!("clipboard-failed", details = details.as_str()),
+        // as a preset's settings are wrong: what is wrong, without the
+        // command line's "invalid options"
+        Error::InvalidOptions(details) => {
+            let mut chars = details.chars();
+            chars
+                .next()
+                .map(|first| first.to_uppercase().chain(chars).collect())
+                .unwrap_or_default()
+        }
+        _ => err.to_string(),
     }
 }
 
@@ -175,7 +252,7 @@ impl Done {
                     spoofed,
                     json_bytes: None,
                     shapes: None,
-                    problems: telegram::check(&info, target).iter().map(Problem::refused).collect(),
+                    problems: refused(&telegram::check(&info, target), target),
                     preview: None,
                 })
             }
@@ -191,7 +268,7 @@ impl Done {
                     spoofed: false,
                     json_bytes: None,
                     shapes: None,
-                    problems: issues.iter().map(Problem::refused).collect(),
+                    problems: refused(&issues, target),
                     preview: None,
                 })
             }
@@ -228,6 +305,8 @@ pub enum Status {
 enum Message {
     Progress(Box<dyn FnOnce(&mut Progress) + Send>),
     Finished(Result<Done, Error>),
+    /// The conversion panicked, as this says.
+    Crashed(String),
 }
 
 /// One conversion of an item, waiting, running or finished.
@@ -291,15 +370,16 @@ impl Job {
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
                 run(plan, inputs, sequence, output, overwrite, &cancel, &update)
             }));
-            let result = result.unwrap_or_else(|panic| {
-                let message = panic
-                    .downcast_ref::<&str>()
-                    .copied()
-                    .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
-                    .unwrap_or("no details");
-                Err(Error::InvalidOptions(format!("tgradish crashed: {message}")))
+            send(match result {
+                Ok(result) => Message::Finished(result),
+                Err(panic) => Message::Crashed(
+                    panic
+                        .downcast_ref::<&str>()
+                        .map(|text| (*text).to_owned())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_default(),
+                ),
             });
-            send(Message::Finished(result));
         });
     }
 
@@ -325,8 +405,12 @@ impl Job {
                         Ok(done) => Status::Done(Box::new(done)),
                         Err(Error::Cancelled) => Status::Cancelled,
                         Err(Error::OutputExists(path)) => Status::Exists(path),
-                        Err(err) => Status::Failed(err.to_string()),
+                        Err(err) => Status::Failed(failure(&err)),
                     };
+                }
+                Message::Crashed(details) => {
+                    finished = true;
+                    self.status = Status::Failed(fl!("crashed", details = details));
                 }
             }
         }
@@ -374,6 +458,7 @@ fn run(
                 overwrite,
                 keep_temp: false,
             };
+            let target = request.options.target.unwrap_or_default();
             let outcome = still::convert(&backend, &request, cancel)?;
             let warnings = outcome.warnings.clone();
             update(Box::new(move |progress| progress.warnings.extend(warnings)));
@@ -387,7 +472,7 @@ fn run(
                 spoofed: false,
                 json_bytes: None,
                 shapes: None,
-                problems: outcome.issues.iter().map(Problem::refused).collect(),
+                problems: refused(&outcome.issues, target),
                 preview,
             })
         }
@@ -497,7 +582,7 @@ fn webm(
         spoofed: outcome.spoofed,
         json_bytes: None,
         shapes: None,
-        problems: outcome.issues.iter().map(Problem::refused).collect(),
+        problems: refused(&outcome.issues, request.options.target.unwrap_or_default()),
         preview: None,
     })
 }
