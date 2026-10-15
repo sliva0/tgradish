@@ -12,6 +12,7 @@ use tgradish_core::tgs::TgsOptions;
 use tgradish_tgs::frames::{LayerInfo, Tag};
 
 use crate::jobs::Job;
+use crate::l10n::fl;
 use crate::media::{Art, Clip, Load, Video};
 use crate::timeline::Frames;
 
@@ -460,10 +461,13 @@ impl Item {
         let first = self.inputs.first().and_then(|p| p.file_name());
         let first = first.map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         match (self.inputs.len(), &self.pasted) {
-            (_, Some(_)) => "pasted image".into(),
-            (1, None) if self.sequence => format!("{first} (frames)"),
+            (_, Some(_)) => fl!("name-pasted"),
+            (1, None) if self.sequence => fl!("name-frames", name = first),
             (1, None) => first,
-            (n, None) => format!("{first} and {} more", n - 1),
+            (n, None) => {
+                let more = n - 1;
+                fl!("name-and-more", name = first, more = more)
+            }
         }
     }
 

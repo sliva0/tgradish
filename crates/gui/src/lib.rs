@@ -21,6 +21,7 @@ mod inspect;
 mod item;
 mod jobs;
 mod keys;
+mod l10n;
 mod media;
 mod outputs;
 mod predict;

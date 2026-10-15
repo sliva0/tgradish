@@ -2,6 +2,8 @@
 //! Ignored unless asked for, as they need a GPU wgpu can use and somewhere
 //! to put them. This makes both:
 //! `TGRADISH_SCREENSHOTS=/tmp/x cargo test -p tgradish-gui -- --ignored screenshots`
+//! With `TGRADISH_LANG` they are in that language, as `pseudo` for English
+//! made longer, to see where longer words would not fit.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -28,6 +30,7 @@ use crate::{inspect, prefs, preset_dialogs};
 fn screenshots() {
     let out =
         PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
+    crate::l10n::choose(None);
     let dir = tempfile::tempdir().unwrap();
     let frames = dir.path().join("dance");
     std::fs::create_dir(&frames).unwrap();
@@ -285,6 +288,7 @@ fn screenshots() {
 fn readme_screenshot() {
     let out =
         PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
+    crate::l10n::choose(None);
     // a folder whose name reads well where results are said to go
     let dir = std::env::temp_dir().join("tgradish-readme");
     let _ = std::fs::remove_dir_all(&dir);

@@ -18,6 +18,7 @@ use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::Target;
 
 use crate::item::{Item, Kind};
+use crate::l10n::fl;
 use crate::preset_dialogs::{self, Ask, is_users};
 use crate::widgets::{self, Choice, note, segments};
 use advanced::advanced;
@@ -68,59 +69,54 @@ pub fn preset_names(presets: &Presets) -> Vec<(String, Result<String, String>)> 
 /// What a built-in preset does for `format`. Core's own descriptions
 /// speak of every format at once, for the command line; the window shows
 /// only what the preset does for what is being made.
-pub fn builtin(name: &str, format: Format) -> Option<&'static str> {
+pub fn builtin(name: &str, format: Format) -> Option<String> {
     Some(match (name, format) {
-        ("fast", Format::Webm) => {
-            "Fits only the bitrate, with the fast encoder: seconds, but blurrier"
-        }
-        ("balanced", Format::Webm) => "Tries a few frame rates and keeps the one that looks best",
-        ("best", Format::Webm) => {
-            "Like balanced, with the slowest encoder: minutes for long videos"
-        }
-        ("fast", Format::Tgs) => "Under a second, a few percent larger",
-        ("balanced", Format::Tgs) => "Between fast and best",
-        ("best", Format::Tgs) => "The smallest file, in a few seconds",
+        ("fast", Format::Webm) => fl!("preset-fast", "webm"),
+        ("balanced", Format::Webm) => fl!("preset-balanced", "webm"),
+        ("best", Format::Webm) => fl!("preset-best", "webm"),
+        ("fast", Format::Tgs) => fl!("preset-fast", "tgs"),
+        ("balanced", Format::Tgs) => fl!("preset-balanced", "tgs"),
+        ("best", Format::Tgs) => fl!("preset-best", "tgs"),
         _ => return None,
     })
 }
 
-pub fn capitalised(name: &str) -> String {
-    let mut chars = name.chars();
-    chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default()
+/// What a preset is called: the built-in ones in the window's language,
+/// the user's own as they named them.
+pub fn preset_label(name: &str) -> String {
+    match name {
+        "fast" => fl!("preset-fast"),
+        "balanced" => fl!("preset-balanced"),
+        "best" => fl!("preset-best"),
+        _ => name.to_owned(),
+    }
 }
 
 /// What to make: format, target and preset. Narrow, for beside the
 /// preview.
 pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
-    ui.label(RichText::new("Make").strong().size(15.5));
+    ui.label(RichText::new(fl!("make")).strong().size(15.5));
     ui.add_space(4.0);
     let formats = [
-        (Format::Webm, "Video", "A video sticker: VP9 in WebM, from any video or picture"),
-        (
-            Format::Tgs,
-            "Animation",
-            "An animated sticker for pixel art: each pixel becomes a shape, so it stays crisp at \
-             any size and the file stays small. Best for custom emoji, which are only 100 × 100 \
-             px. Not for ordinary video or photos: use Video for those",
-        ),
-        (Format::Image, "Image", "A static sticker: one frame of a video, or a picture, as WebP"),
+        (Format::Webm, fl!("format-video"), fl!("format-video", "hint")),
+        (Format::Tgs, fl!("format-animation"), fl!("format-animation", "hint")),
+        (Format::Image, fl!("format-image"), fl!("format-image", "hint")),
     ];
     let mut format = item.format;
     if segments(ui, &mut format, &formats, |_| Ok(())) {
         item.format = format;
         item.format_guessed = false;
     }
-    let targets = [(Target::Sticker, "Sticker", ""), (Target::Emoji, "Custom emoji", "")];
-    segments(ui, &mut item.choices.target, &targets, |_| Ok(()));
+    segments(ui, &mut item.choices.target, &targets(), |_| Ok(()));
     // .tgs animations are vectors: square, but of no size in pixels
     note(
         ui,
         match (item.format, item.choices.target) {
-            (Format::Webm, Target::Sticker) => "WebM, 512 px on the longer side, up to 256 KiB",
-            (Format::Webm, Target::Emoji) => "WebM, 100 × 100 px, up to 64 KiB",
-            (Format::Tgs, _) => "TGS, square, up to 64 KiB",
-            (Format::Image, Target::Sticker) => "WebP, 512 px on the longer side, up to 512 KiB",
-            (Format::Image, Target::Emoji) => "WebP, 100 × 100 px",
+            (Format::Webm, Target::Sticker) => fl!("needs-webm-sticker"),
+            (Format::Webm, Target::Emoji) => fl!("needs-webm-emoji"),
+            (Format::Tgs, _) => fl!("needs-tgs"),
+            (Format::Image, Target::Sticker) => fl!("needs-image-sticker"),
+            (Format::Image, Target::Emoji) => fl!("needs-image-emoji"),
         },
     );
     // picked for what isn't pixel art, which would come out blocky; the
@@ -130,31 +126,27 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         && !matches!(item.kind, Kind::Aseprite | Kind::Frames)
         && item.art.ready().is_some_and(|art| !art.clip.looks_like_pixel_art());
     if not_art {
-        ui.colored_label(
-            widgets::WARN,
-            "⚠ Animation is for pixel art, drawn as shapes so it stays crisp. This doesn't look \
-             like pixel art: Video suits it better.",
-        );
+        ui.colored_label(widgets::WARN, format!("⚠ {}", fl!("not-pixel-art")));
     }
 
     // presets say how to encode videos and animations; a picture has
     // nothing to choose there
     ui.add_space(8.0);
     let image = item.format == Format::Image;
-    let nothing = "Pictures are saved as they are: there is nothing to encode";
+    let nothing = fl!("preset", "image");
     ui.add_enabled_ui(!image, |ui| {
         let users =
             context.presets.iter().any(|(_, preset)| preset.is_err() || preset.is_ok_and(is_users));
         ui.horizontal(|ui| {
-            ui.label("Preset")
-                .on_hover_text("How hard to work on the result; your own values below go on top")
-                .on_disabled_hover_text(nothing);
+            ui.label(fl!("preset"))
+                .on_hover_text(fl!("preset", "hint"))
+                .on_disabled_hover_text(nothing.as_str());
             // where the user's own are renamed or deleted, once there are any
             if users && context.presets_dir.is_some() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let manage = egui::Button::new(RichText::new("Manage…").small()).frame(false);
-                    let hint = "Rename, describe or delete your presets";
-                    if ui.add(manage).on_hover_text(hint).clicked() {
+                    let manage = egui::Button::new(RichText::new(fl!("manage-presets")).small())
+                        .frame(false);
+                    if ui.add(manage).on_hover_text(fl!("manage-presets", "hint")).clicked() {
                         preset_dialogs::ask(ui.ctx(), Ask::Manage);
                     }
                 });
@@ -166,13 +158,12 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         let mut chosen = current.as_str();
         // the built-in three side by side, none lit while one of the
         // user's is chosen
-        let labels: Vec<String> = BUILTIN.iter().map(|name| capitalised(name)).collect();
         let speeds: Vec<Choice<&str>> = names
             .iter()
             .filter(|(name, _)| BUILTIN.contains(&name.as_str()))
-            .zip(&labels)
-            .map(|((name, description), label)| {
-                (name.as_str(), label.as_str(), description.as_deref().unwrap_or(""))
+            .map(|(name, description)| {
+                let description = description.as_deref().unwrap_or("").to_owned();
+                (name.as_str(), preset_label(name), description)
             })
             .collect();
         // a file of the user's may stand in for one, and be broken
@@ -180,7 +171,7 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             names.iter().any(|(other, description)| other == name && description.is_err())
         };
         segments(ui, &mut chosen, &speeds, |name| {
-            if broken(name) { Err("This preset's file is broken") } else { Ok(()) }
+            if broken(name) { Err(fl!("preset", "broken")) } else { Ok(()) }
         });
         // the user's own under them, a button each
         let own: Vec<_> =
@@ -191,13 +182,14 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 for (name, description) in own {
                     let response =
                         widgets::choice(ui, chosen == name, name, 150.0, description.is_ok());
-                    let response = match description {
-                        Err(_) => response.on_disabled_hover_text("This preset's file is broken"),
-                        Ok(description) if !description.is_empty() => {
-                            response.on_hover_text(format!("{name}: {description}"))
-                        }
-                        Ok(_) => response.on_hover_text(name),
-                    };
+                    let response =
+                        match description {
+                            Err(_) => response.on_disabled_hover_text(fl!("preset", "broken")),
+                            Ok(description) if !description.is_empty() => response.on_hover_text(
+                                fl!("preset-described", name = name, description = description),
+                            ),
+                            Ok(_) => response.on_hover_text(name),
+                        };
                     if response.clicked() {
                         chosen = name;
                     }
@@ -214,6 +206,14 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             _ => {}
         }
     });
+}
+
+/// Stickers or emoji, for picking which a file becomes.
+pub fn targets() -> [Choice<Target>; 2] {
+    [
+        (Target::Sticker, fl!("target-sticker"), String::new()),
+        (Target::Emoji, fl!("target-emoji"), String::new()),
+    ]
 }
 
 /// Width of the settings from which they go in two columns.

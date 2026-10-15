@@ -10,18 +10,17 @@ use tgradish_core::tgs;
 
 use super::Context;
 use crate::item::{Item, Kind};
+use crate::l10n::fl;
 use crate::timeline;
 use crate::widgets::{self, Choice, auto_number, chosen_hint, note, preset_segments, row, section};
 
-const SPOOFS: [Choice<Spoof>; 3] = [
-    (
-        Spoof::Auto,
-        "Spoof when longer",
-        "Longer stickers get a short duration written into them: Telegram accepts them and plays all of it",
-    ),
-    (Spoof::Always, "Always spoof", "Even short stickers get the short duration"),
-    (Spoof::Never, "Cut at 3 s", "Keep the file honest and cut it at 3 seconds"),
-];
+fn spoofs() -> [Choice<Spoof>; 3] {
+    [
+        (Spoof::Auto, fl!("spoof-auto"), fl!("spoof-auto", "hint")),
+        (Spoof::Always, fl!("spoof-always"), fl!("spoof-always", "hint")),
+        (Spoof::Never, fl!("spoof-never"), fl!("spoof-never", "hint")),
+    ]
+}
 
 pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let animated = item.input_length().is_some();
@@ -30,7 +29,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     if !animated && !sequence {
         return;
     }
-    section(ui, "Time");
+    section(ui, &fl!("time"));
     // how long the used part lasts, and plays
     let used = item.range().map(|(start, end)| end - start);
     let tempo = item.tempo(context.presets, context.config);
@@ -53,43 +52,34 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         }
     };
     if let Some(length) = item.input_length() {
-        let hint = "Where the part of the input used starts and ends; the bar under the preview \
-                    sets it too";
-        row(ui, "Used part", hint, Ok(()), |ui| used_part(ui, item, length, context.in_frames));
+        row(ui, &fl!("used-part"), &fl!("used-part", "hint"), Ok(()), |ui| {
+            used_part(ui, item, length, context.in_frames)
+        });
     }
     if animated {
-        let hint = "How many times as fast as the input the result plays";
-        row(ui, "Speed", hint, Ok(()), |ui| {
+        row(ui, &fl!("speed"), &fl!("speed", "hint"), Ok(()), |ui| {
             ui.horizontal(|ui| {
                 // a .tgs plays a longer part fast enough to fit 3 s
                 let fitted = used.is_some_and(telegram::too_long);
+                let preset = (fl!("from-preset"), fl!("from-preset", "speed"));
+                let input = (fl!("from-input"), fl!("from-input", "speed"));
+                let fits = (fl!("fits-3-s"), fl!("fits-3-s", "hint"));
                 let (value, automatic) = match (item.format, preset_tempo) {
-                    (Format::Tgs, Some(_)) => {
-                        (&mut item.choices.tgs.tempo, ("Preset's", "The speed the preset sets"))
-                    }
+                    (Format::Tgs, Some(_)) => (&mut item.choices.tgs.tempo, preset),
                     (Format::Webm | Format::Image, Some(_)) => {
-                        (&mut item.choices.webm.tempo, ("Preset's", "The speed the preset sets"))
+                        (&mut item.choices.webm.tempo, preset)
                     }
-                    (Format::Webm | Format::Image, None) => {
-                        (&mut item.choices.webm.tempo, ("Input's", "As fast as the input plays"))
-                    }
-                    (Format::Tgs, None) if fitted => (
-                        &mut item.choices.tgs.tempo,
-                        ("Fits 3 s", "As fast as fits the used part into 3 seconds"),
-                    ),
-                    (Format::Tgs, None) => {
-                        (&mut item.choices.tgs.tempo, ("Input's", "As fast as the input plays"))
-                    }
+                    (Format::Webm | Format::Image, None) => (&mut item.choices.webm.tempo, input),
+                    (Format::Tgs, None) if fitted => (&mut item.choices.tgs.tempo, fits),
+                    (Format::Tgs, None) => (&mut item.choices.tgs.tempo, input),
                 };
+                let automatic = (automatic.0.as_str(), automatic.1.as_str());
                 auto_number(ui, value, automatic, Some(tempo), 1.0, |value| {
                     value.range(TEMPOS).speed(0.01).max_decimals(2).prefix("×")
                 });
                 if item.format == Format::Webm
                     && let Some(used) = used
-                    && ui
-                        .button("Fit 3 s")
-                        .on_hover_text("Plays the used part in 3 seconds")
-                        .clicked()
+                    && ui.button(fl!("fit-3-s")).on_hover_text(fl!("fit-3-s", "hint")).clicked()
                 {
                     item.choices.webm.tempo =
                         Some((used / telegram::MAX_SECONDS).clamp(*TEMPOS.start(), *TEMPOS.end()));
@@ -100,13 +90,13 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             match played {
                 Some(played) if cut && telegram::too_long(played) => note(
                     ui,
-                    format!(
-                        "Plays {} of the {}: the rest is cut off",
-                        widgets::seconds(telegram::MAX_SECONDS * tempo),
-                        widgets::seconds(used.unwrap_or_default())
+                    fl!(
+                        "plays-cut",
+                        kept = widgets::seconds(telegram::MAX_SECONDS * tempo),
+                        used = widgets::seconds(used.unwrap_or_default())
                     ),
                 ),
-                Some(played) => note(ui, format!("Plays {}", widgets::seconds(played))),
+                Some(played) => note(ui, fl!("plays", played = widgets::seconds(played))),
                 None => {}
             }
         });
@@ -125,55 +115,58 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             let most = peak.map(|fps| (fps * tempo).clamp(1.0, telegram::MAX_FPS));
             if item.kind == Kind::Frames {
                 // how fast its frames play, which the result's follows
-                let hint = "How fast the frames of the sequence play";
-                row(ui, "Frame rate", hint, Ok(()), |ui| {
+                row(ui, &fl!("frame-rate"), &fl!("frame-rate", "sequence"), Ok(()), |ui| {
                     let default = Some(tgs::DEFAULT_FPS);
+                    let automatic = (fl!("default-rate"), fl!("default-rate", "hint"));
                     auto_number(
                         ui,
                         &mut options.fps,
-                        ("Default", "Ten frames a second"),
+                        (&automatic.0, &automatic.1),
                         default,
                         tgs::DEFAULT_FPS,
                         |value| value.range(0.1..=60.0).speed(0.1).max_decimals(2).suffix(" fps"),
                     );
                 });
             } else {
-                let hint = "Fewer frames a second leave more bytes for each; more than the \
-                            input's would only repeat them. Automatic is the input's, at most 60";
                 let highest = most.unwrap_or(telegram::MAX_FPS);
-                row(ui, "Frame rate", hint, Ok(()), |ui| {
+                row(ui, &fl!("frame-rate"), &fl!("frame-rate", "hint"), Ok(()), |ui| {
                     let most = highest.min(30.0);
-                    let automatic = ("Input's", "The input's rate at the speed, at most 60 fps");
+                    let automatic = (fl!("from-input"), fl!("from-input", "rate"));
+                    let automatic = (automatic.0.as_str(), automatic.1.as_str());
                     auto_number(ui, &mut options.fps, automatic, chosen, most, |value| {
                         value.range(1.0..=highest).speed(0.1).max_decimals(2).suffix(" fps")
                     });
                 });
             }
-            let hint = "Telegram refuses stickers that say they last longer than 3 seconds";
-            row(ui, "Over 3 seconds", hint, Ok(()), |ui| {
+            row(ui, &fl!("over-3-s"), &fl!("over-3-s", "hint"), Ok(()), |ui| {
+                let spoofs = spoofs();
                 let preset = webm_base.spoof.unwrap_or(Spoof::Auto);
-                preset_segments(ui, &mut options.spoof, preset, &SPOOFS);
+                preset_segments(ui, &mut options.spoof, preset, &spoofs);
                 let spoof = options.spoof.unwrap_or(preset);
-                chosen_hint(ui, spoof, &SPOOFS);
+                chosen_hint(ui, spoof, &spoofs);
                 if let Some(played) = played
                     && spoof == Spoof::Auto
                     && telegram::too_long(played)
                 {
                     let played = widgets::seconds(played);
-                    note(ui, format!("Plays all {played}: Telegram is told it is shorter"));
+                    note(ui, fl!("plays-spoofed", played = played));
                 }
             });
             let honest = options.spoof.or(webm_base.spoof) == Some(Spoof::Never);
-            let allowed = if honest { Err("Nothing is spoofed when cut at 3 s") } else { Ok(()) };
-            let hint = "The duration written into the file, which Telegram reads";
-            row(ui, "Spoof to", hint, allowed, |ui| {
+            let why = fl!("spoof-to", "honest");
+            let allowed = if honest { Err(why.as_str()) } else { Ok(()) };
+            row(ui, &fl!("spoof-to"), &fl!("spoof-to", "hint"), allowed, |ui| {
                 let custom = options.fake_duration.is_some();
                 let (automatic, shown) = match webm_base.fake_duration {
-                    Some(duration) => (("Preset's", "The duration the preset sets"), duration),
-                    None => {
-                        (("Default", "A short duration Telegram accepts"), DEFAULT_FAKE_DURATION)
+                    Some(duration) => {
+                        ((fl!("from-preset"), fl!("from-preset", "duration")), duration)
                     }
+                    None => (
+                        (fl!("default-duration"), fl!("default-duration", "hint")),
+                        DEFAULT_FAKE_DURATION,
+                    ),
                 };
+                let automatic = (automatic.0.as_str(), automatic.1.as_str());
                 let changed = auto_number(
                     ui,
                     &mut options.fake_duration,
@@ -196,13 +189,13 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             });
         }
         Format::Tgs if sequence => {
-            let hint = "How fast the frames of a sequence or sprite sheet play";
-            row(ui, "Frame rate", hint, Ok(()), |ui| {
+            row(ui, &fl!("frame-rate"), &fl!("frame-rate", "sheet"), Ok(()), |ui| {
                 let default = Some(tgs::DEFAULT_FPS);
+                let automatic = (fl!("default-rate"), fl!("default-rate", "hint"));
                 auto_number(
                     ui,
                     &mut item.choices.tgs.fps,
-                    ("Default", "Ten frames a second"),
+                    (&automatic.0, &automatic.1),
                     default,
                     tgs::DEFAULT_FPS,
                     |value| value.range(0.1..=60.0).speed(0.1).max_decimals(2).suffix(" fps"),
@@ -224,36 +217,39 @@ fn used_part(ui: &mut egui::Ui, item: &mut Item, length: f64, in_frames: bool) {
         match frames.as_deref() {
             Some(frames) => {
                 let (mut first, mut after) = frames.part(length, choices.start, choices.length);
-                ui.label("From");
+                ui.label(fl!("part-from"));
                 let field =
                     timeline::boundary_field(&mut first, 0..=after - 1, frames, in_frames, false);
-                let start = ui.add_sized(size, field).on_hover_text("Its first frame").changed();
-                ui.label("to");
+                let start = ui.add_sized(size, field).on_hover_text(fl!("part-first")).changed();
+                ui.label(fl!("part-to"));
                 let range = first + 1..=frames.count();
                 let field = timeline::boundary_field(&mut after, range, frames, in_frames, true);
-                let end = ui.add_sized(size, field).on_hover_text("Its last frame").changed();
+                let end = ui.add_sized(size, field).on_hover_text(fl!("part-last")).changed();
                 if start || end {
                     frames.set_part((first, after), &mut choices.start, &mut choices.length);
                 }
                 let (first, after) = frames.part(length, choices.start, choices.length);
+                let count = frames.count();
                 counted = Some(if in_frames {
-                    format!(
-                        "{} to {} of {}",
-                        widgets::seconds(frames.times[first]),
-                        widgets::seconds(frames.times[after]),
-                        widgets::seconds(length)
+                    fl!(
+                        "part-seconds",
+                        from = widgets::seconds(frames.times[first]),
+                        to = widgets::seconds(frames.times[after]),
+                        length = widgets::seconds(length)
                     )
                 } else if after - first == 1 {
-                    format!("Frame {} of {}", first + 1, frames.count())
+                    let number = first + 1;
+                    fl!("part-frame", number = number, count = count)
                 } else {
-                    format!("Frames {} to {} of {}", first + 1, after, frames.count())
+                    let first = first + 1;
+                    fl!("part-frames", first = first, last = after, count = count)
                 });
             }
             None => {
                 let (mut from, mut to) = timeline::part(length, choices.start, choices.length);
-                ui.label("From");
+                ui.label(fl!("part-from"));
                 let start = ui.add_sized(size, timeline::seconds(&mut from, length)).changed();
-                ui.label("to");
+                ui.label(fl!("part-to"));
                 let end = ui.add_sized(size, timeline::seconds(&mut to, length)).changed();
                 if start || end {
                     let from = from.min(to - 0.01).max(0.0);
@@ -263,7 +259,7 @@ fn used_part(ui: &mut egui::Ui, item: &mut Item, length: f64, in_frames: bool) {
             }
         }
         if (choices.start.is_some() || choices.length.is_some())
-            && widgets::reset_to(ui, "All of the input")
+            && widgets::reset_to(ui, &fl!("all-of-input"))
         {
             (choices.start, choices.length) = (None, None);
         }
@@ -276,10 +272,8 @@ fn used_part(ui: &mut egui::Ui, item: &mut Item, length: f64, in_frames: bool) {
 /// Which frame of a video an image sticker is made of.
 pub(super) fn frame(ui: &mut egui::Ui, item: &mut Item) {
     let Some(length) = item.input_length() else { return };
-    section(ui, "Frame");
-    let hint =
-        "The time of the frame the picture is made of; the bar under the preview picks it too";
-    row(ui, "Frame at", hint, Ok(()), |ui| {
+    section(ui, &fl!("frame"));
+    row(ui, &fl!("frame-at"), &fl!("frame-at", "hint"), Ok(()), |ui| {
         let Some(frames) = item.input_frames() else { return };
         let mut at = item.choices.frame.unwrap_or(0.0);
         let field = egui::DragValue::new(&mut at).range(0.0..=length).speed(0.01).max_decimals(3);
@@ -289,7 +283,8 @@ pub(super) fn frame(ui: &mut egui::Ui, item: &mut Item) {
             item.choices.frame = (index > 0).then_some(frames.times[index]);
         }
         let index = frames.at(item.choices.frame.unwrap_or(0.0));
-        note(ui, format!("Frame {} of {}", index + 1, frames.count()));
+        let (number, count) = (index + 1, frames.count());
+        note(ui, fl!("part-frame", number = number, count = count));
     });
 }
 

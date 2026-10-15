@@ -18,6 +18,8 @@ use tgradish_core::tgs::TgsOptions;
 
 use crate::app::App;
 use crate::item::Item;
+use crate::jobs::failure;
+use crate::l10n::fl;
 use crate::widgets;
 
 /// A dialog the settings ask the window for.
@@ -129,6 +131,31 @@ enum Change {
     Undo(u64),
 }
 
+/// What is wrong with `name` as a preset's, as tgradish-core checks it.
+fn name_problem(name: &str) -> Option<String> {
+    presets::check_name(name).err()?;
+    let most = presets::LONGEST_NAME;
+    let long = name.trim().is_empty() || name.starts_with(' ') || name.chars().count() > most;
+    Some(if long { fl!("preset-name-length", most = most) } else { fl!("preset-name-characters") })
+}
+
+/// What keeps the preset `from` from being renamed `to`, as far as the
+/// window can tell before trying.
+fn rename_problem(from: &str, to: &str, presets: &Presets) -> Option<String> {
+    if let Some(problem) = name_problem(to) {
+        return Some(problem);
+    }
+    if to != from && presets.iter().any(|(name, _)| name == to) {
+        return Some(fl!("preset-name-taken", name = to));
+    }
+    // one another preset extends would break
+    let other = presets
+        .iter()
+        .filter_map(|(_, preset)| preset.ok())
+        .find(|preset| preset.extends.as_deref() == Some(from))?;
+    Some(fl!("preset-extended", other = other.name.as_str()))
+}
+
 /// A dialog's title, with a cross in the corner, level with it, that
 /// closes it.
 fn title(ui: &mut egui::Ui, text: &str) -> bool {
@@ -137,7 +164,7 @@ fn title(ui: &mut egui::Ui, text: &str) -> bool {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let side = ui.spacing().interact_size.y;
             let cross = egui::Button::new("✖").frame(false).min_size(vec2(side, side));
-            ui.add(cross).on_hover_text("Close").clicked()
+            ui.add(cross).on_hover_text(fl!("close")).clicked()
         })
         .inner
     })
@@ -187,7 +214,9 @@ impl App {
     fn reload_presets(&mut self) {
         match Presets::load(self.presets_dir.as_deref()) {
             Ok(presets) => self.presets = presets,
-            Err(err) => self.message = Some(format!("Your presets couldn't be read: {err}")),
+            Err(err) => {
+                self.message = Some(fl!("presets-unreadable", error = failure(&err)));
+            }
         }
     }
 
@@ -204,27 +233,24 @@ impl App {
         let name = saving.name.trim_end().to_owned();
         // a built-in one's name would stand in for it, for every file
         let builtin = self.presets.get(&name).is_ok_and(|preset| !is_users(preset));
-        let valid = match presets::check_name(&name) {
-            Err(err) => Err(err.to_string()),
-            Ok(()) if builtin => Err(format!("{name:?} is a built-in preset's name")),
-            Ok(()) => Ok(()),
+        let valid = match name_problem(&name) {
+            Some(problem) => Err(problem),
+            None if builtin => Err(fl!("preset-name-builtin", name = name.as_str())),
+            None => Ok(()),
         };
         let exists = valid.is_ok() && dir.join(format!("{name}.toml")).exists();
         let (mut close, mut save) = (false, false);
         let modal = egui::Modal::new(egui::Id::new("save preset")).show(ctx, |ui| {
             ui.set_width(400.0);
-            close = title(ui, "Save settings as a preset");
-            widgets::note(
-                ui,
-                "This file's settings, for any file to start from: all but its crop, cut and title",
-            );
+            close = title(ui, &fl!("save-preset-title"));
+            widgets::note(ui, fl!("save-preset-note"));
             ui.add_space(8.0);
             egui::Grid::new("save preset fields").num_columns(2).spacing([10.0, 8.0]).show(
                 ui,
                 |ui| {
-                    ui.label("Name");
+                    ui.label(fl!("preset-name"));
                     let field = egui::TextEdit::singleline(&mut saving.name)
-                        .hint_text("my stickers")
+                        .hint_text(fl!("preset-name", "placeholder"))
                         .desired_width(270.0);
                     let field = ui.add(field);
                     if !saving.focused {
@@ -236,16 +262,16 @@ impl App {
                         save = valid.is_ok();
                     }
                     ui.end_row();
-                    ui.label("Description");
+                    ui.label(fl!("preset-description"));
                     let field = egui::TextEdit::singleline(&mut saving.description)
-                        .hint_text("optional")
+                        .hint_text(fl!("preset-description", "placeholder"))
                         .desired_width(270.0);
                     ui.add(field);
                     ui.end_row();
                 },
             );
             if exists {
-                widgets::note(ui, "A preset of this name is there already: saving replaces it");
+                widgets::note(ui, fl!("preset-exists"));
             }
             if let Some(problem) = &saving.problem {
                 ui.colored_label(widgets::BAD, problem);
@@ -253,14 +279,15 @@ impl App {
             ui.add_space(4.0);
             ui.separator();
             ui.horizontal(|ui| {
-                let text = if exists { "Replace" } else { "Save" };
-                let button = ui.add_enabled(valid.is_ok(), main_button(text));
+                let text = if exists { fl!("replace") } else { fl!("save") };
+                let button = ui.add_enabled(valid.is_ok(), main_button(&text));
                 let button = match &valid {
                     Err(err) if !name.is_empty() => button.on_disabled_hover_text(err),
-                    _ => button.on_disabled_hover_text("Name it first"),
+                    _ => button.on_disabled_hover_text(fl!("name-it-first")),
                 };
                 save |= button.clicked();
-                close |= ui.add(egui::Button::new("Cancel").min_size(vec2(0.0, 28.0))).clicked();
+                let cancel = egui::Button::new(fl!("cancel")).min_size(vec2(0.0, 28.0));
+                close |= ui.add(cancel).clicked();
             });
         });
         if close || modal.should_close() {
@@ -284,7 +311,7 @@ impl App {
                 None
             }
             Err(err) => {
-                saving.problem = Some(err.to_string());
+                saving.problem = Some(failure(&err));
                 Some(saving)
             }
         }
@@ -302,23 +329,19 @@ impl App {
         let mut changes = Vec::new();
         let modal = egui::Modal::new(egui::Id::new("manage presets")).show(ctx, |ui| {
             ui.set_width(560.0);
-            close = title(ui, "Your presets");
-            widgets::note(
-                ui,
-                "Changes are kept as you make them. Fast, Balanced and Best are built in and \
-                 stay as they are.",
-            );
+            close = title(ui, &fl!("your-presets"));
+            widgets::note(ui, fl!("your-presets-note"));
             ui.add_space(8.0);
             if managing.rows.is_empty() && managing.deleted.is_empty() {
-                widgets::note(ui, "None yet: Save current settings as preset, under the preview.");
+                widgets::note(ui, fl!("no-presets"));
             }
             // the list scrolls, its title and Close staying in sight
             let room = (ctx.content_rect().height() - 240.0).max(120.0);
             egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
                 egui::Grid::new("presets").num_columns(3).spacing([8.0, 6.0]).show(ui, |ui| {
                     if !managing.rows.is_empty() {
-                        ui.label(RichText::new("Name").weak());
-                        ui.label(RichText::new("Description").weak());
+                        ui.label(RichText::new(fl!("preset-name")).weak());
+                        ui.label(RichText::new(fl!("preset-description")).weak());
                         ui.end_row();
                     }
                     for row in &mut managing.rows {
@@ -333,12 +356,12 @@ impl App {
                         }
                         match &row.broken {
                             Some(why) => {
-                                ui.colored_label(widgets::BAD, "Its file can't be read")
+                                ui.colored_label(widgets::BAD, fl!("preset-broken"))
                                     .on_hover_text(why);
                             }
                             None => {
                                 let field = egui::TextEdit::singleline(&mut row.typed_description)
-                                    .hint_text("no description")
+                                    .hint_text(fl!("preset-description", "none"))
                                     .vertical_align(egui::Align::Center);
                                 if ui.add_sized(vec2(300.0, line), field).lost_focus()
                                     && row.typed_description.trim() != row.description
@@ -350,7 +373,7 @@ impl App {
                         let cross =
                             RichText::new("✖").size(12.0).color(ui.visuals().weak_text_color());
                         let delete = egui::Button::new(cross).frame(false);
-                        if ui.add(delete).on_hover_text("Delete it").clicked() {
+                        if ui.add(delete).on_hover_text(fl!("delete-it")).clicked() {
                             changes.push(Change::Delete(row.id));
                         }
                         ui.end_row();
@@ -362,8 +385,8 @@ impl App {
                 });
                 for deleted in &managing.deleted {
                     ui.horizontal(|ui| {
-                        widgets::note(ui, format!("Deleted “{}”", deleted.name));
-                        if ui.button("Undo").on_hover_text("Put it back").clicked() {
+                        widgets::note(ui, fl!("deleted", name = deleted.name.as_str()));
+                        if ui.button(fl!("undo")).on_hover_text(fl!("undo", "hint")).clicked() {
                             changes.push(Change::Undo(deleted.id));
                         }
                     });
@@ -372,7 +395,8 @@ impl App {
             ui.add_space(4.0);
             ui.separator();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                close |= ui.add(egui::Button::new("Close").min_size(vec2(90.0, 28.0))).clicked();
+                let button = egui::Button::new(fl!("close")).min_size(vec2(90.0, 28.0));
+                close |= ui.add(button).clicked();
             });
         });
         // in the order asked, as a field left by clicking a button asks
@@ -391,13 +415,17 @@ impl App {
                 let Some(index) = row(id) else { return };
                 let row = &mut managing.rows[index];
                 let to = row.typed_name.trim_end().to_owned();
+                if let Some(problem) = rename_problem(&row.name, &to, &self.presets) {
+                    row.problem = Some(problem);
+                    return;
+                }
                 match presets::rename(dir, &row.name, &to, &self.presets) {
                     Ok(_) => {
                         let from = std::mem::replace(&mut row.name, to.clone());
                         row.problem = None;
                         self.follow_preset(&from, Some(&to));
                     }
-                    Err(err) => row.problem = Some(err.to_string()),
+                    Err(err) => row.problem = Some(failure(&err)),
                 }
             }
             Change::Describe(id) => {
@@ -406,7 +434,7 @@ impl App {
                 let description = row.typed_description.trim().to_owned();
                 match presets::describe(&file(&row.name), &description) {
                     Ok(()) => (row.description, row.problem) = (description, None),
-                    Err(err) => row.problem = Some(err.to_string()),
+                    Err(err) => row.problem = Some(failure(&err)),
                 }
             }
             Change::Delete(id) => {
@@ -427,7 +455,7 @@ impl App {
                         self.follow_preset(&name, None);
                         managing.deleted.push(Deleted { id, name, text, items, defaults });
                     }
-                    Err(err) => managing.rows[index].problem = Some(err.to_string()),
+                    Err(err) => managing.rows[index].problem = Some(failure(&err)),
                 }
             }
             Change::Undo(id) => {
@@ -446,7 +474,7 @@ impl App {
                             }
                         }
                         let (webm, tgs) = deleted.defaults;
-                        self.keep_config("default preset", |config| {
+                        self.keep_config(|config| {
                             if webm {
                                 config.preset = name.clone();
                             }
@@ -463,7 +491,9 @@ impl App {
                         managing.rows.insert(at, row);
                         return;
                     }
-                    Err(err) => self.message = Some(format!("It couldn't be put back: {err}")),
+                    Err(err) => {
+                        self.message = Some(fl!("not-put-back", error = failure(&err)));
+                    }
                 }
             }
         }
@@ -480,7 +510,7 @@ impl App {
         }
         let names = |name: &Option<String>| name.as_deref() == Some(from);
         if names(&self.config.preset) || names(&self.config.tgs_preset) {
-            self.keep_config("default preset", |config| {
+            self.keep_config(|config| {
                 for name in [&mut config.preset, &mut config.tgs_preset] {
                     if name.as_deref() == Some(from) {
                         *name = to.map(str::to_owned);

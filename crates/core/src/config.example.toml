@@ -11,6 +11,7 @@ output-dir = "/home/me/stickers"  # results go here instead of next to inputs
 overwrite = false                  # replace existing results
 target = "sticker"                 # what new files become, or "emoji"
 smooth-scrolling = false           # ease scrolling instead of following the wheel
+language = "en-GB"                 # the window's; the system's if left out
 theme = "system"                   # or "light" or "dark"
 forget-files = false               # don't reopen the files of last time
 timeline-frames = false            # count the timeline in frames, not seconds

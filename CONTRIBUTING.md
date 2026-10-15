@@ -80,6 +80,26 @@ Keep your own test files in `references/`, which git ignores.
 Comments say why, in plain British English, and doc comments go on items;
 the code says what. Commit messages say what changed and why.
 
+### Translations
+
+The window's words are in `crates/gui/i18n/en-GB/tgradish.ftl`, in
+[Fluent](https://projectfluent.org/fluent/guide/), and code asks for them
+with `fl!("message-id")`, which fails to compile if English lacks the
+message or the arguments given. Each message's comment says where it is
+shown. The command line stays English: clap can't translate its own words,
+and scripts read its output.
+
+A translation is a copy of that file in a folder named for its language, as
+`crates/gui/i18n/de/tgradish.ftl`, with `language-name` its name for itself.
+What it leaves out shows in English. The window follows the system's
+language, or the one picked in Settings; `TGRADISH_LANG=de` picks one for a
+run, and `TGRADISH_LANG=pseudo` shows English with longer, accented words, to
+see where text won't fit. The screenshots test takes `TGRADISH_LANG` too. The
+tests check every file reads as Fluent, that translations only take the
+arguments English does, and that the window's fonts draw them: a script
+they lack, as Chinese or Arabic, needs a font added first, and egui doesn't
+yet lay out text that runs right to left.
+
 ## Licences
 
 tgradish is MIT. Every binary carries every notice it needs

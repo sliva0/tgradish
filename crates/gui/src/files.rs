@@ -10,6 +10,7 @@ use crate::app::{App, set_theme};
 use crate::fonts::{drawable, missing_note, text_format};
 use crate::item::Item;
 use crate::jobs::Status;
+use crate::l10n::fl;
 use crate::{fallback, icon, theme, widgets};
 
 /// Side of the thumbnails in the list.
@@ -23,46 +24,34 @@ impl App {
     fn theme_button(&mut self, ui: &mut egui::Ui) {
         let dark = ui.visuals().dark_mode;
         let (icon, hint, theme) = if dark {
-            ("☀", "Light theme", tgradish_core::config::Theme::Light)
+            ("☀", fl!("light-theme"), tgradish_core::config::Theme::Light)
         } else {
-            ("🌓", "Dark theme", tgradish_core::config::Theme::Dark)
+            ("🌓", fl!("dark-theme"), tgradish_core::config::Theme::Dark)
         };
         if !ui.button(icon).on_hover_text(hint).clicked() {
             return;
         }
         set_theme(ui.ctx(), theme);
-        self.keep("theme", |gui| gui.theme = theme);
+        self.keep(|gui| gui.theme = theme);
     }
 
     fn add_menu(&mut self, ui: &mut egui::Ui) {
-        if ui
-            .button("A folder of frames…")
-            .on_hover_text("Its images, in name order, as one animation")
-            .clicked()
-        {
+        if ui.button(fl!("add-folder")).on_hover_text(fl!("add-folder", "hint")).clicked() {
             if let Some(dir) = rfd::FileDialog::new().pick_folder() {
                 self.add(vec![dir]);
             }
             ui.close();
         }
-        if ui
-            .button("Images as one animation…")
-            .on_hover_text("The images picked, in name order")
-            .clicked()
-        {
+        if ui.button(fl!("add-images")).on_hover_text(fl!("add-images", "hint")).clicked() {
             if let Some(files) = rfd::FileDialog::new()
-                .add_filter("images", &[inputs::IMAGES, inputs::ASEPRITE].concat())
+                .add_filter(fl!("images-filter"), &[inputs::IMAGES, inputs::ASEPRITE].concat())
                 .pick_files()
             {
                 self.add_frames(files);
             }
             ui.close();
         }
-        if ui
-            .button("From the clipboard")
-            .on_hover_text("Copied files, paths or an image (Ctrl+V)")
-            .clicked()
-        {
+        if ui.button(fl!("add-pasted")).on_hover_text(fl!("add-pasted", "hint")).clicked() {
             self.paste();
             ui.close();
         }
@@ -81,22 +70,18 @@ impl App {
         let header = vec2(ui.available_width(), icon_side);
         let layout = egui::Layout::right_to_left(egui::Align::Center);
         ui.allocate_ui_with_layout(header, layout, |ui| {
-            if ui.button("⚙").on_hover_text("Settings").clicked() {
+            if ui.button("⚙").on_hover_text(fl!("settings")).clicked() {
                 self.prefs.open();
             }
             self.theme_button(ui);
-            if ui
-                .button("🔬")
-                .on_hover_text("Inspect a sticker: check a file against Telegram's rules")
-                .clicked()
-            {
+            if ui.button("🔬").on_hover_text(fl!("inspect")).clicked() {
                 self.pick_inspected();
             }
             // a split button: files, or the rest from its arrow
             ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.x = 1.0;
                 ui.menu_button("⏷", |ui| self.add_menu(ui));
-                if ui.button("Add files…").clicked() {
+                if ui.button(fl!("add-files")).clicked() {
                     self.pick_files();
                 }
             });
@@ -127,14 +112,12 @@ impl App {
         egui::Panel::bottom("files-footer").show(ui, |ui| {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                let text = if changed > 0 {
-                    format!("Convert all ({changed})")
-                } else {
-                    "Convert all".into()
-                };
                 if ui
-                    .add_enabled(changed > 0, egui::Button::new(text))
-                    .on_hover_text("Every file without an up-to-date result")
+                    .add_enabled(
+                        changed > 0,
+                        egui::Button::new(fl!("convert-all", count = changed)),
+                    )
+                    .on_hover_text(fl!("convert-all", "hint"))
                     .clicked()
                 {
                     let ids: Vec<u64> = self
@@ -147,7 +130,7 @@ impl App {
                         self.enqueue(id);
                     }
                 }
-                if !self.items.is_empty() && ui.button("Remove all").clicked() {
+                if !self.items.is_empty() && ui.button(fl!("remove-all")).clicked() {
                     let ids: Vec<u64> = self.items.iter().map(|item| item.id).collect();
                     for id in ids {
                         self.remove(id);
@@ -160,7 +143,7 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             if self.items.is_empty() {
                 ui.add_space(20.0);
-                widgets::note(ui, "Files you add show up here.");
+                widgets::note(ui, fl!("no-files"));
             }
             let mut clicked = None;
             let mut removed = None;
@@ -176,7 +159,7 @@ impl App {
                     None => {}
                 }
                 response.context_menu(|ui| {
-                    if ui.button("Remove").clicked() {
+                    if ui.button(fl!("remove")).clicked() {
                         removed = Some(item.id);
                         ui.close();
                     }
@@ -216,31 +199,28 @@ impl App {
         ui.painter().extend(dashes);
         ui.vertical_centered(|ui| {
             ui.add_space((ui.available_height() / 2.0 - 110.0).max(40.0));
-            ui.label(RichText::new("Drop videos, GIFs, images or Aseprite files here").size(22.0));
+            ui.label(RichText::new(fl!("drop-here")).size(22.0));
             ui.add_space(6.0);
-            widgets::note(
-                ui,
-                "Videos become WebM stickers, pictures image stickers; pixel art can also become a crisp TGS animation.",
-            );
+            widgets::note(ui, fl!("drop-here-note"));
             ui.add_space(18.0);
             ui.horizontal(|ui| {
                 let width = 400.0;
                 ui.add_space((ui.available_width() - width).max(0.0) / 2.0);
-                let add = egui::Button::new(RichText::new("Add files…").strong())
+                let add = egui::Button::new(RichText::new(fl!("add-files")).strong())
                     .min_size(vec2(130.0, 34.0));
                 if ui.add(add).clicked() {
                     self.pick_files();
                 }
                 if ui
-                    .add(egui::Button::new("A folder of frames…").min_size(vec2(150.0, 34.0)))
+                    .add(egui::Button::new(fl!("add-folder")).min_size(vec2(150.0, 34.0)))
                     .clicked()
                     && let Some(dir) = rfd::FileDialog::new().pick_folder()
                 {
                     self.add(vec![dir]);
                 }
                 if ui
-                    .add(egui::Button::new("Paste").min_size(vec2(90.0, 34.0)))
-                    .on_hover_text("Ctrl+V")
+                    .add(egui::Button::new(fl!("paste")).min_size(vec2(90.0, 34.0)))
+                    .on_hover_text(fl!("paste", "hint"))
                     .clicked()
                 {
                     self.paste();
@@ -294,7 +274,7 @@ fn row(
                 .fill(widgets::WARN)
                 .corner_radius(4.0);
             // placed, so the rows below don't move
-            if ui.place(badge, button).on_hover_text("Settings changed: convert again").clicked() {
+            if ui.place(badge, button).on_hover_text(fl!("row-convert-again")).clicked() {
                 action = Some(RowAction::Convert);
             }
         }
@@ -317,11 +297,11 @@ fn row(
         painter.text(
             at(13.0),
             egui::Align2::CENTER_CENTER,
-            "Convert",
+            fl!("convert"),
             FontId::proportional(11.0),
             colour,
         );
-        if button.on_hover_text("Make its sticker").clicked() {
+        if button.on_hover_text(fl!("convert", "hint")).clicked() {
             action = Some(RowAction::Convert);
         }
     }
@@ -336,7 +316,7 @@ fn row(
         // placed, so the rows below don't move
         if ui
             .place(button, egui::Button::new("✖").small().frame(false))
-            .on_hover_text("Remove it from the list")
+            .on_hover_text(fl!("remove-file"))
             .clicked()
         {
             action = Some(RowAction::Remove);
@@ -351,14 +331,7 @@ fn row(
     let strong = text_format(&child, child.visuals().strong_text_color());
     let (name, _) = drawable(&child, fallbacks, &item.name(), strong);
     child.add(egui::Label::new(name).truncate());
-    let what = match (item.format, item.choices.target) {
-        (Format::Webm, telegram::Target::Sticker) => "WebM sticker",
-        (Format::Webm, telegram::Target::Emoji) => "WebM emoji",
-        (Format::Tgs, telegram::Target::Sticker) => "TGS sticker",
-        (Format::Tgs, telegram::Target::Emoji) => "TGS emoji",
-        (Format::Image, telegram::Target::Sticker) => "Image sticker",
-        (Format::Image, telegram::Target::Emoji) => "Image emoji",
-    };
+    let what = kind(item.format, item.choices.target);
     child.add(egui::Label::new(RichText::new(what).small().weak()));
     status(&mut child, item, queued);
     let response = response.on_hover_ui(|ui| {
@@ -423,8 +396,8 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
         (Some(_), _) => {
             ui.label(
                 small(match queued {
-                    Some(0) | None => "next".into(),
-                    Some(n) => format!("waiting, {n} ahead"),
+                    Some(0) | None => fl!("row-next"),
+                    Some(n) => fl!("row-waiting", ahead = n),
                 })
                 .weak(),
             );
@@ -434,23 +407,34 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
                 let refused = done.problems.iter().any(|p| p.refused);
                 let colour = if refused { widgets::BAD } else { widgets::GOOD };
                 let mark = if refused { "✖" } else { "✔" };
-                let stale = if item.result_is_current() { "" } else { " · settings changed" };
-                ui.colored_label(
-                    colour,
-                    small(format!("{mark} {}{stale}", widgets::kib(done.bytes))),
-                );
+                let size = widgets::kib(done.bytes);
+                let size =
+                    if item.result_is_current() { size } else { fl!("row-stale", size = size) };
+                ui.colored_label(colour, small(format!("{mark} {size}")));
             }
             Status::Failed(_) => {
-                ui.colored_label(widgets::BAD, small("✖ failed".into()));
+                ui.colored_label(widgets::BAD, small(format!("✖ {}", fl!("row-failed"))));
             }
             Status::Exists(_) => {
-                ui.colored_label(widgets::WARN, small("a file is in the way".into()));
+                ui.colored_label(widgets::WARN, small(fl!("row-exists")));
             }
             Status::Cancelled => {
-                ui.label(small("stopped".into()).weak());
+                ui.label(small(fl!("row-stopped")).weak());
             }
             Status::Waiting | Status::Running => {}
         },
         (None, None) => {}
+    }
+}
+
+/// What a result in `format` for `target` is called.
+pub(crate) fn kind(format: Format, target: telegram::Target) -> String {
+    match (format, target) {
+        (Format::Webm, telegram::Target::Sticker) => fl!("webm-sticker"),
+        (Format::Webm, telegram::Target::Emoji) => fl!("webm-emoji"),
+        (Format::Tgs, telegram::Target::Sticker) => fl!("tgs-sticker"),
+        (Format::Tgs, telegram::Target::Emoji) => fl!("tgs-emoji"),
+        (Format::Image, telegram::Target::Sticker) => fl!("image-sticker"),
+        (Format::Image, telegram::Target::Emoji) => fl!("image-emoji"),
     }
 }

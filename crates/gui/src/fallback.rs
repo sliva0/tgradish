@@ -27,7 +27,7 @@ struct Found {
 }
 
 /// Every character the font `index` of `bytes` has.
-fn characters(bytes: &[u8], index: u32) -> Vec<char> {
+pub(crate) fn characters(bytes: &[u8], index: u32) -> Vec<char> {
     skrifa::FontRef::from_index(bytes, index)
         .map(|font| {
             font.charmap().mappings().filter_map(|(code, _)| char::from_u32(code)).collect()

@@ -17,6 +17,7 @@ use crate::canvas::{self, Cropping, Kept, Picture, Screen};
 use crate::inset::{self, Inset, InsetChange};
 use crate::item::{Framing, Item, Show, Zoom};
 use crate::jobs::Status;
+use crate::l10n::fl;
 use crate::media::Clip;
 use crate::result::{details, summary};
 use crate::{predict, settings, theme, timeline, widgets};
@@ -33,11 +34,9 @@ const TGS_INSET: usize = 256;
 /// Height kept for the timeline under a preview that plays: its 30 point
 /// track and the space around it.
 const TIMELINE: f32 = 38.0;
-/// Width of the bar over the preview below which it keeps to what is most
-/// needed: everything else takes about this much.
-const COMPACT_BAR: f32 = 520.0;
-/// Width below which even the folder button doesn't fit beside the rest.
-const NARROWEST_BAR: f32 = 280.0;
+
+/// Width of the zoom level, as 400%, beside Zoom out.
+const ZOOM_LEVEL: f32 = 42.0;
 
 impl App {
     pub(crate) fn main_panel(&mut self, ui: &mut egui::Ui) {
@@ -138,10 +137,10 @@ impl App {
             });
         });
         if in_frames != self.config.gui.timeline_frames {
-            self.keep("timeline's unit", |gui| gui.timeline_frames = in_frames);
+            self.keep(|gui| gui.timeline_frames = in_frames);
         }
         if look != self.config.gui.result_preview {
-            self.keep("result preview's size and place", |gui| gui.result_preview = look);
+            self.keep(|gui| gui.result_preview = look);
         }
     }
 }
@@ -168,21 +167,44 @@ fn preview(
         item.view.show = Show::Input;
     }
     ui.add_space(6.0);
+    // the result's small picture's toggle, as it says it then, or under
+    // the bar where even its short name doesn't fit beside the rest
+    let toggle = |ui: &mut egui::Ui, inset: &mut bool, text: String| {
+        ui.toggle_value(inset, text).on_hover_text(fl!("result-preview", "hint"));
+    };
+    let mut toggle_below = false;
     ui.horizontal(|ui| {
         let mut show = item.view.show;
         // a narrow column has room only for what is most needed; the
-        // narrowest leaves the folder to the bar under the settings
-        let compact = ui.available_width() < COMPACT_BAR;
-        let folder = ui.available_width() >= NARROWEST_BAR;
-        let choices = [(Show::Input, "Input", ""), (Show::Result, "Result", "")];
+        // narrowest leaves the folder to the bar under the settings. What
+        // each takes is measured, as words are longer in some languages
+        let gap = ui.spacing().item_spacing.x;
+        let button =
+            |text: &str| widgets::text_width(ui, text, 2.0 * ui.spacing().button_padding.x) + gap;
+        let shows = button(&fl!("show-input")) + button(&fl!("show-result"));
+        let everything = shows
+            + button(&fl!("show-folder"))
+            + button(&fl!("zoom-out"))
+            + ZOOM_LEVEL
+            + gap
+            + button(&fl!("result-preview"));
+        let least = shows + button(&fl!("show-folder", "short"));
+        let least = least + button(&fl!("result-preview", "short"));
+        let compact = ui.available_width() < everything;
+        let folder = ui.available_width() >= least;
+        toggle_below = ui.available_width() < shows + button(&fl!("result-preview", "short"));
+        let choices = [
+            (Show::Input, fl!("show-input"), String::new()),
+            (Show::Result, fl!("show-result"), String::new()),
+        ];
         // .tgs results of before a restart, which tgradish can't draw
         let unseen = if item.made.as_ref().is_some_and(|made| made.format == Format::Tgs) {
-            "This window can only show .tgs results it made itself; convert again to see it"
+            fl!("tgs-unseen")
         } else {
-            "Convert it first"
+            fl!("convert-first")
         };
         widgets::segments(ui, &mut show, &choices, |show| {
-            if show == Show::Result && !has_result { Err(unseen) } else { Ok(()) }
+            if show == Show::Result && !has_result { Err(unseen.clone()) } else { Ok(()) }
         });
         item.view.show = show;
         // where the input came from, and where the result went
@@ -192,16 +214,16 @@ fn preview(
         });
         let show_folder = |ui: &mut egui::Ui| {
             let input = ui
-                .add_enabled(item.pasted.is_none(), egui::Button::new("Input file"))
+                .add_enabled(item.pasted.is_none(), egui::Button::new(fl!("folder-input")))
                 .on_hover_text(item.inputs[0].display().to_string())
-                .on_disabled_hover_text("A pasted image has no file of its own");
+                .on_disabled_hover_text(fl!("folder-input", "pasted"));
             if input.clicked() {
                 crate::system::reveal(&item.inputs[0]);
                 ui.close();
             }
             let made = ui
-                .add_enabled(result.is_some(), egui::Button::new("Result"))
-                .on_disabled_hover_text("Convert it first");
+                .add_enabled(result.is_some(), egui::Button::new(fl!("folder-result")))
+                .on_disabled_hover_text(fl!("convert-first"));
             let made = match &result {
                 Some(output) => made.on_hover_text(output.display().to_string()),
                 None => made,
@@ -214,17 +236,20 @@ fn preview(
             }
         };
         if folder {
-            ui.menu_button(if compact { "Folder" } else { "Show in folder" }, show_folder);
+            let text = if compact { fl!("show-folder", "short") } else { fl!("show-folder") };
+            ui.menu_button(text, show_folder);
         }
         // what doesn't fit is cut short or left out, the hint first
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if item.view.show == Show::Input {
-                let full = "Result preview";
+            if item.view.show == Show::Input && !toggle_below {
+                let full = fl!("result-preview");
                 let room = ui.available_width();
-                let text =
-                    if room >= widgets::text_width(ui, full, 8.0) { full } else { "Preview" };
-                ui.toggle_value(&mut item.view.inset, text)
-                    .on_hover_text("What the result will look like, small, beside the input");
+                let text = if room >= widgets::text_width(ui, &full, 8.0) {
+                    full
+                } else {
+                    fl!("result-preview", "short")
+                };
+                toggle(ui, &mut item.view.inset, text);
             }
             // always there where there is room, so nothing beside them
             // moves as zooming starts
@@ -232,39 +257,44 @@ fn preview(
             let zoomed = zoom.level > 1.0;
             if zoomed || !compact {
                 let out = ui
-                    .add_enabled(zoomed, egui::Button::new("Zoom out"))
-                    .on_hover_text("Show all of it")
-                    .on_disabled_hover_text("All of it shows");
+                    .add_enabled(zoomed, egui::Button::new(fl!("zoom-out")))
+                    .on_hover_text(fl!("zoom-out", "hint"))
+                    .on_disabled_hover_text(fl!("zoom-out", "all"));
                 if out.clicked() {
                     *zoom = Zoom::default();
                 }
                 let level = RichText::new(format!("{:.0}%", zoom.level * 100.0));
                 let level = if zoomed { level } else { level.weak() };
-                ui.add_sized(vec2(42.0, 18.0), egui::Label::new(level));
+                ui.add_sized(vec2(ZOOM_LEVEL, 18.0), egui::Label::new(level));
             }
             if has_result && !item.result_is_current() {
                 // the mark alone where the word doesn't fit
-                let text = "⚠ Outdated";
-                let text = if ui.available_width() >= widgets::text_width(ui, text, 4.0) {
+                let text = format!("⚠ {}", fl!("outdated"));
+                let text = if ui.available_width() >= widgets::text_width(ui, &text, 4.0) {
                     text
                 } else {
-                    "⚠"
+                    "⚠".to_owned()
                 };
                 let stale = RichText::new(text).color(widgets::WARN);
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add(egui::Label::new(stale).truncate())
-                        .on_hover_text("The result was made with earlier settings");
+                        .on_hover_text(fl!("outdated", "hint"));
                 });
             } else if ui.available_width() > 60.0 {
                 let hint = match (item.view.show, item.choices.crop.is_some()) {
-                    (Show::Input, false) => "Drag to crop · wheel to zoom · right button to pan",
-                    (Show::Input, true) => "Drag the crop or its edges · double-click for all",
-                    (Show::Result, _) => "Wheel to zoom · right button to pan",
+                    (Show::Input, false) => fl!("input-hint"),
+                    (Show::Input, true) => fl!("crop-hint"),
+                    (Show::Result, _) => fl!("result-hint"),
                 };
                 ui.add(egui::Label::new(RichText::new(hint).weak().size(12.5)).truncate());
             }
         });
     });
+    if toggle_below && item.view.show == Show::Input {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+            toggle(ui, &mut item.view.inset, fl!("result-preview"));
+        });
+    }
 
     let length = item.input_length();
     let result_length =
@@ -300,7 +330,7 @@ fn preview(
     match item.view.show {
         Show::Input => {
             if let Some(message) = error {
-                message_in(ui, rect, &format!("Couldn't read it: {message}"), widgets::BAD);
+                message_in(ui, rect, &fl!("unreadable", error = message), widgets::BAD);
             } else if let (Some(clip), Some(size)) = (overview, input_size) {
                 // a picture is one frame: shown still, where it is picked
                 let picking = item.format == Format::Image;
@@ -333,11 +363,13 @@ fn preview(
                 // with room for its longest label, eased into place when it
                 // is turned on or off, resized or moved
                 let widest = match item.format {
-                    Format::Webm | Format::Image => "Result at 100%\n512 × 512 px",
-                    Format::Tgs => "Result",
+                    Format::Webm | Format::Image => {
+                        format!("{}\n{}", fl!("inset-label", scale = 100), "512 × 512 px")
+                    }
+                    Format::Tgs => fl!("inset-label", "plain"),
                 };
                 let text = ui.visuals().text_color();
-                let label = ui.painter().layout_no_wrap(widest.into(), inset::INSET_LABEL, text);
+                let label = ui.painter().layout_no_wrap(widest, inset::INSET_LABEL, text);
                 // the setting counts sizes from 1, for people
                 let largest = inset::INSET_SIZES.len() as u8;
                 let step = usize::from(look.size.clamp(1, largest)) - 1;
@@ -439,7 +471,7 @@ fn preview(
                     None => {}
                 }
             } else {
-                message_in(ui, rect, "Reading…", ui.visuals().weak_text_color());
+                message_in(ui, rect, &fl!("reading"), ui.visuals().weak_text_color());
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
             }
         }

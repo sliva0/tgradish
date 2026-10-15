@@ -4,6 +4,7 @@
 
 use eframe::egui::{self, RichText, vec2};
 
+use crate::l10n::fl;
 use crate::{icon, widgets};
 
 /// tgradish's version and the licences of what it is made of.
@@ -13,17 +14,13 @@ pub(crate) fn about(ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.label(RichText::new(format!("tgradish {}", env!("CARGO_PKG_VERSION"))).heading());
             ui.horizontal(|ui| {
-                ui.label("Telegram stickers from videos and pixel art. MIT licence;");
-                widgets::link(ui, "source code", tgradish_core::REPOSITORY);
+                ui.label(fl!("about-summary"));
+                widgets::link(ui, fl!("source-code"), tgradish_core::REPOSITORY);
             });
         });
     });
     ui.add_space(6.0);
-    widgets::note(
-        ui,
-        "tgradish is built from other people's work too. Their licences ask for these notices \
-         to go with every copy, so the program carries them:",
-    );
+    widgets::note(ui, fl!("about-notices"));
     ui.add_space(4.0);
     egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(360.0).show(ui, |ui| {
         let notices = ui.ctx().memory_mut(|memory| {
@@ -41,7 +38,7 @@ pub(crate) fn about(ui: &mut egui::Ui) {
                     if notice.title.starts_with("ffmpeg: what") {
                         widgets::link(
                             ui,
-                            "The exact sources of the ffmpeg built in, with this release",
+                            fl!("ffmpeg-sources"),
                             format!(
                                 "{}/releases/tag/v{}",
                                 tgradish_core::REPOSITORY,

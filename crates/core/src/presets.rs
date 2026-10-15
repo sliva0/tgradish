@@ -325,7 +325,7 @@ pub fn user_dir() -> Option<PathBuf> {
 }
 
 /// Longest name a preset saved here can have.
-const LONGEST_NAME: usize = 64;
+pub const LONGEST_NAME: usize = 64;
 
 /// Whether `name` can name a preset file: letters, digits, spaces, `-`
 /// and `_`, not starting with a space, at most 64 of them.

@@ -6,6 +6,7 @@ use eframe::egui::{self, Color32};
 
 use crate::app::App;
 use crate::fallback;
+use crate::l10n::fl;
 
 /// The window's fonts: Ubuntu Light for text, JetBrains Mono NL for
 /// commands, and a few symbols; small subsets, see `assets/fonts`.
@@ -122,16 +123,10 @@ pub(crate) fn missing_note(missing: &[char]) -> Option<String> {
             codes.push(code);
         }
     }
-    let (them, are, their) = match codes.len() {
-        0 => return None,
-        1 => ("it", "is", "its"),
-        _ => ("them", "are", "their"),
-    };
-    Some(format!(
-        "No font was found for {}, neither among the window's own nor the system's, so {them} {are} \
-         shown by {their} code. The file itself is fine.",
-        codes.join(", ")
-    ))
+    if codes.is_empty() {
+        return None;
+    }
+    Some(fl!("no-font", count = codes.len(), codes = codes.join(", ")))
 }
 
 #[cfg(test)]

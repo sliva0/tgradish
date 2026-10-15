@@ -35,6 +35,8 @@ pub struct GuiConfig {
     pub target: Option<crate::telegram::Target>,
     /// Ease scrolling over a few frames instead of following the wheel.
     pub smooth_scrolling: bool,
+    /// The window's language, as a tag like `de`; the system's when unset.
+    pub language: Option<String>,
     /// Light or dark, or as the system has it.
     pub theme: Theme,
     /// Start with no files, rather than those open when the window last

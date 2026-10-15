@@ -16,6 +16,8 @@ use tgradish_core::preview::Preview;
 use tgradish_core::tgs::{self, TgsOptions};
 use tgradish_tgs::frames::{LayerInfo, Tag};
 
+use crate::jobs::failure;
+use crate::l10n::fl;
 use crate::timeline::{self, Cut};
 
 /// Frames of a video or animation, as straight RGBA.
@@ -150,7 +152,7 @@ impl<T: Send + 'static> Task<T> {
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| work(&token)))
-                .unwrap_or_else(|_| Err("tgradish crashed while reading this".into()));
+                .unwrap_or_else(|_| Err(fl!("reading-crashed")));
             let _ = sender.send(result);
             ctx.request_repaint();
         });
@@ -164,7 +166,7 @@ impl<T> Task<T> {
         match self.receiver.try_recv() {
             Ok(result) => Some(result),
             Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => Some(Err("stopped".into())),
+            Err(TryRecvError::Disconnected) => Some(Err(fl!("reading-stopped"))),
         }
     }
 }
@@ -268,7 +270,7 @@ impl Video {
         Task::spawn(ctx, move |cancel| {
             let frames = (sequence || inputs.len() > 1).then_some(&inputs[..]);
             let mut readable = drawn::readable(&inputs[0], frames, &drawing, cancel)
-                .map_err(|err| err.to_string())?;
+                .map_err(|err| failure(&err))?;
             // pixel art drawn here, shown as it was drawn, without ffmpeg
             if let Some((animation, still)) = readable.take_drawn() {
                 let bytes = animation.frames().iter().map(|frame| frame.rgba.len()).sum::<usize>();
@@ -277,7 +279,7 @@ impl Video {
                 }
             }
             let path = readable.path();
-            let probe = backend.probe(path, cancel).map_err(|err| err.to_string())?;
+            let probe = backend.probe(path, cancel).map_err(|err| failure(&err))?;
             let request = FramesRequest {
                 start: 0.0,
                 length: None,
@@ -286,9 +288,9 @@ impl Video {
                 max_frames: OVERVIEW_FRAMES,
             };
             let frames =
-                backend.frames(path, &probe, &request, cancel).map_err(|err| err.to_string())?;
+                backend.frames(path, &probe, &request, cancel).map_err(|err| failure(&err))?;
             if frames.frames.is_empty() {
-                return Err("ffmpeg found no frames in it".into());
+                return Err(fl!("no-frames"));
             }
             let starts = if probe.still_image {
                 Vec::new()
@@ -385,9 +387,9 @@ impl Video {
             };
             let path = readable.path();
             let frames =
-                backend.frames(path, &probe, &request, cancel).map_err(|err| err.to_string())?;
+                backend.frames(path, &probe, &request, cancel).map_err(|err| failure(&err))?;
             if frames.frames.is_empty() {
-                return Err("ffmpeg found no frames there".into());
+                return Err(fl!("no-frames-there"));
             }
             Ok(Clip::from_frames(frames))
         })
@@ -409,9 +411,9 @@ impl Video {
             };
             let path = readable.path();
             let frames =
-                backend.frames(path, &probe, &request, cancel).map_err(|err| err.to_string())?;
+                backend.frames(path, &probe, &request, cancel).map_err(|err| failure(&err))?;
             if frames.frames.is_empty() {
-                return Err("ffmpeg found no frame there".into());
+                return Err(fl!("no-frame-there"));
             }
             Ok(Clip::from_frames(frames))
         })
@@ -444,9 +446,9 @@ impl Art {
     ) -> Task<Art> {
         Task::spawn(ctx, move |cancel| {
             let source = tgs::read_source(&inputs, sequence, &options, backend.as_ref(), cancel)
-                .map_err(|e| e.to_string())?;
+                .map_err(|err| failure(&err))?;
             if source.frames.is_empty() {
-                return Err("no frames".into());
+                return Err(fl!("art-no-frames"));
             }
             let mut times = vec![0.0];
             let mut frames = Vec::with_capacity(source.frames.len());
@@ -469,9 +471,9 @@ impl Art {
 pub fn load_result(ctx: &egui::Context, backend: Backend, path: &Path) -> Task<Clip> {
     let path = path.to_path_buf();
     Task::spawn(ctx, move |cancel| {
-        let preview = backend.preview(&path, RESULT_SIDE, cancel).map_err(|err| err.to_string())?;
+        let preview = backend.preview(&path, RESULT_SIDE, cancel).map_err(|err| failure(&err))?;
         if preview.frames.is_empty() {
-            return Err("no frames".into());
+            return Err(fl!("result-no-frames"));
         }
         Ok(Clip::from_preview(preview, false))
     })

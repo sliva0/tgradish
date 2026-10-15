@@ -1,0 +1,6 @@
+# The window's translations, see src/l10n.rs
+fallback_language = "en-GB"
+
+[fluent]
+assets_dir = "i18n"
+domain = "tgradish"

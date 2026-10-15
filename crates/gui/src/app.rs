@@ -20,6 +20,7 @@ use crate::inset::Inset;
 use crate::item::Item;
 use crate::jobs::Job;
 use crate::keys::direct_scrolling;
+use crate::l10n::fl;
 use crate::outputs::{FileVersion, Written};
 use crate::widgets::toast;
 use crate::work::release;
@@ -95,16 +96,14 @@ pub(crate) struct App {
 impl App {
     pub(crate) fn new(launch: Launch) -> App {
         let config_path = launch.config_path.or_else(Config::default_path);
-        let mut message = None;
-        let mut config = match config_path.as_deref().map(Config::load) {
-            Some(Ok(config)) => config,
-            Some(Err(err)) => {
-                message =
-                    Some(format!("The settings couldn't be read, so defaults are used: {err}"));
-                Config::default()
-            }
-            None => Config::default(),
+        let (mut config, unreadable) = match config_path.as_deref().map(Config::load) {
+            Some(Ok(config)) => (config, None),
+            Some(Err(err)) => (Config::default(), Some(err)),
+            None => (Config::default(), None),
         };
+        // before anything is said
+        crate::l10n::choose(config.gui.language.as_deref());
+        let mut message = unreadable.map(|err| fl!("settings-unreadable", error = err.to_string()));
         // as on the command line: a path beats a choice
         if let Some(choice) = launch.ffmpeg_choice {
             config.ffmpeg.choice = choice;
@@ -114,7 +113,7 @@ impl App {
             config.ffmpeg.path = Some(path);
         }
         let presets = Presets::load_user().unwrap_or_else(|err| {
-            message = Some(format!("Your presets couldn't be read: {err}"));
+            message = Some(fl!("presets-unreadable", error = err.to_string()));
             Presets::builtin()
         });
         let mut app = App::with(config, config_path, presets, message);
@@ -138,8 +137,7 @@ impl App {
                 self.select(id);
             }
             if gone > 0 {
-                let files = if gone == 1 { "file is" } else { "files are" };
-                self.message = Some(format!("{gone} {files} gone since last time"));
+                self.message = Some(fl!("files-gone", count = gone));
             }
         }
         self.session = Some((path, saved));
@@ -161,7 +159,7 @@ impl App {
         match saved_now {
             Ok(json) => self.session = Some((path.clone(), json)),
             Err(err) => {
-                self.message = Some(format!("The open files couldn't be kept: {err}"));
+                self.message = Some(fl!("session-unsaved", error = err.to_string()));
                 // once is enough
                 self.session = None;
             }
@@ -246,7 +244,7 @@ impl App {
             }
             _ => {
                 let backend = Backend::select(ffmpeg.choice, ffmpeg.path.as_deref())
-                    .map_err(|err| err.to_string());
+                    .map_err(|err| crate::jobs::failure(&err));
                 let when = std::time::Instant::now();
                 *found = Some(FoundBackend { settings, when, backend: backend.clone() });
                 backend
@@ -325,7 +323,7 @@ impl App {
                 let id = self.push(item);
                 self.select(id);
             }
-            Err(err) => self.message = Some(err.to_string()),
+            Err(err) => self.message = Some(crate::jobs::failure(&err)),
         }
     }
 
@@ -359,16 +357,12 @@ impl App {
 
     /// Changes a setting of the window, and keeps that change in the config
     /// file at once, without the rest of what Settings changed.
-    pub(crate) fn keep(
-        &mut self,
-        what: &str,
-        change: impl Fn(&mut tgradish_core::config::GuiConfig),
-    ) {
-        self.keep_config(what, |config| change(&mut config.gui));
+    pub(crate) fn keep(&mut self, change: impl Fn(&mut tgradish_core::config::GuiConfig)) {
+        self.keep_config(|config| change(&mut config.gui));
     }
 
     /// [`App::keep`] for any of the settings.
-    pub(crate) fn keep_config(&mut self, what: &str, change: impl Fn(&mut Config)) {
+    pub(crate) fn keep_config(&mut self, change: impl Fn(&mut Config)) {
         change(&mut self.config);
         if let Some(path) = &self.config_path {
             let saved = Config::load(path).and_then(|mut saved| {
@@ -376,7 +370,7 @@ impl App {
                 saved.save(path)
             });
             if let Err(err) = saved {
-                self.message = Some(format!("The {what} couldn't be saved: {err}"));
+                self.message = Some(fl!("setting-unsaved", error = err.to_string()));
             }
         }
     }
@@ -460,7 +454,7 @@ impl eframe::App for App {
                 about(ui);
                 ui.separator();
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.button("Close").clicked()
+                    ui.button(fl!("close")).clicked()
                 })
                 .inner
             });
@@ -481,7 +475,7 @@ impl eframe::App for App {
             painter.text(
                 screen.center(),
                 egui::Align2::CENTER_CENTER,
-                "Drop to add",
+                fl!("drop-to-add"),
                 egui::FontId::proportional(30.0),
                 Color32::WHITE,
             );

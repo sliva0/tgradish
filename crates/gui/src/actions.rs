@@ -7,6 +7,7 @@ use eframe::egui::{self, RichText, vec2};
 use crate::app::App;
 use crate::fonts::{drawable, missing_note, text_format};
 use crate::jobs::Status;
+use crate::l10n::fl;
 use crate::outputs::Written;
 use crate::{system, widgets};
 
@@ -27,16 +28,16 @@ impl App {
                 Some((job, ..)) if job.is_running() => {
                     // until the conversion gets to its next check
                     let stopping = job.is_stopping();
-                    let text = if stopping { "Stopping…" } else { "Stop" };
+                    let text = if stopping { fl!("stopping") } else { fl!("stop") };
                     let stop = egui::Button::new(text).min_size(vec2(140.0, 32.0));
                     if ui.add_enabled(!stopping, stop).clicked() {
                         job.cancel();
                     }
-                    widgets::note(ui, "Converting: progress is beside the preview");
+                    widgets::note(ui, fl!("converting-note"));
                 }
                 Some((job, ..)) => {
                     if ui
-                        .add(egui::Button::new("Don't convert").min_size(vec2(140.0, 32.0)))
+                        .add(egui::Button::new(fl!("dont-convert")).min_size(vec2(140.0, 32.0)))
                         .clicked()
                     {
                         job.cancel();
@@ -47,38 +48,35 @@ impl App {
                         widgets::note(
                             ui,
                             if ahead == 0 {
-                                "Next to convert".to_owned()
+                                fl!("next-to-convert")
                             } else {
-                                format!("Waiting for {ahead} more")
+                                fl!("waiting-for", ahead = ahead)
                             },
                         );
                     }
                 }
                 None => {
                     let current = item.result_is_current();
-                    let text = if item.made.is_some() { "Convert again" } else { "Convert" };
+                    let text =
+                        if item.made.is_some() { fl!("convert-again") } else { fl!("convert") };
                     let button = egui::Button::new(RichText::new(text).strong().size(15.0))
                         .min_size(vec2(140.0, 32.0))
-                        .shortcut_text("Ctrl+Enter");
-                    let hint = if current {
-                        "Makes it again with the same settings"
-                    } else {
-                        "Makes it with these settings"
-                    };
+                        .shortcut_text(fl!("convert-keys"));
+                    let hint =
+                        if current { fl!("convert-again-hint") } else { fl!("convert-hint") };
                     if ui.add(button).on_hover_text(hint).clicked() {
                         convert = true;
                     }
                     if presets_kept {
                         // an icon alone where the file's name and folder need the room
-                        let text = "Save current settings as preset…";
+                        let text = fl!("save-preset");
                         let room = ui.available_width() - SAVES_TO;
-                        let save = if room >= widgets::text_width(ui, text, 16.0) {
+                        let save = if room >= widgets::text_width(ui, &text, 16.0) {
                             egui::Button::new(text)
                         } else {
                             egui::Button::new(RichText::new("💾").size(15.0))
                         };
-                        let hint = "Save current settings as preset: keep them as a preset of \
-                                    your own, for any file to start from";
+                        let hint = fl!("save-preset", "hint");
                         let save = save.min_size(vec2(32.0, 32.0));
                         if ui.add(save).on_hover_text(hint).clicked() {
                             crate::preset_dialogs::ask(
@@ -90,18 +88,16 @@ impl App {
                     if let Some(failed) = &item.failed {
                         match &failed.job.status {
                             Status::Failed(message) => {
-                                ui.colored_label(widgets::BAD, format!("Failed: {message}"));
+                                let failed = fl!("failed", error = message.as_str());
+                                ui.colored_label(widgets::BAD, failed);
                             }
                             Status::Exists(path) => {
-                                ui.colored_label(
-                                    widgets::WARN,
-                                    "A file not made here is in the way:",
-                                );
-                                if ui.button("Replace it").clicked() {
+                                ui.colored_label(widgets::WARN, fl!("in-the-way"));
+                                if ui.button(fl!("replace-it")).clicked() {
                                     replace = Some(path.clone());
                                 }
                             }
-                            Status::Cancelled => widgets::note(ui, "Stopped"),
+                            Status::Cancelled => widgets::note(ui, fl!("stopped")),
                             Status::Done(_) | Status::Waiting | Status::Running => {}
                         }
                     }
@@ -109,9 +105,6 @@ impl App {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let Some(output) = &output else { return };
-                if output.exists() && ui.button("Show in folder").clicked() {
-                    system::reveal(output);
-                }
                 let name = output
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -120,6 +113,16 @@ impl App {
                 let fallbacks = &self.fallbacks;
                 let strong = text_format(ui, ui.visuals().strong_text_color());
                 let (name, missing) = drawable(ui, fallbacks, &name, strong);
+                // the button's short name where the long one leaves the
+                // name no room, as in narrow windows or long words
+                let named = ui.painter().layout_job(name.clone()).size().x;
+                let full = fl!("show-in-folder");
+                let padding = 2.0 * ui.spacing().button_padding.x + ui.spacing().item_spacing.x;
+                let fits = widgets::text_width(ui, &full, padding) + named <= ui.available_width();
+                let text = if fits { full } else { fl!("show-folder", "short") };
+                if output.exists() && ui.button(text).clicked() {
+                    system::reveal(output);
+                }
                 ui.label(name).on_hover_ui(|ui| {
                     let plain = text_format(ui, ui.visuals().text_color());
                     ui.label(drawable(ui, fallbacks, &output.display().to_string(), plain).0);
@@ -128,9 +131,10 @@ impl App {
                     }
                 });
                 let weak = text_format(ui, ui.visuals().weak_text_color());
-                let saves = format!("Saves to {folder}{}", std::path::MAIN_SEPARATOR);
+                let folder = format!("{folder}{}", std::path::MAIN_SEPARATOR);
+                let saves = fl!("saves-to", folder = folder);
                 ui.add(egui::Label::new(drawable(ui, fallbacks, &saves, weak).0).truncate())
-                    .on_hover_text("Settings chooses where results go");
+                    .on_hover_text(fl!("saves-to", "hint"));
             });
         });
         let shortcut = !self.dialog_open()

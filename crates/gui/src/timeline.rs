@@ -8,6 +8,7 @@ use std::ops::RangeInclusive;
 use eframe::egui::{self, CursorIcon, PointerButton, Rect, Sense, Shape, Stroke, pos2, vec2};
 use tgradish_core::convert::read_from;
 
+use crate::l10n::fl;
 use crate::{theme, widgets};
 
 /// How a cut between frames is written, so converting keeps the frames
@@ -178,12 +179,6 @@ pub(crate) fn boundary_field<'a>(
     }
 }
 
-/// What the keys over the preview do, for the play button's hover.
-const KEYS: &str = "Space: play or pause\n← →: a frame back or on, with Shift ten\n\
-                    Home, End: the first or last frame used\n\
-                    [ ]: start or end the used part at the frame shown\n\
-                    Ctrl+← →, Alt+← →: move its start or its end";
-
 /// How wide frames are on the bar, at least, for where they meet to be
 /// marked.
 const MARKED_FRAME: f32 = 6.0;
@@ -195,14 +190,14 @@ const UNIT: f32 = 122.0;
 /// allow, greyed out without them.
 fn unit(ui: &mut egui::Ui, in_frames: &mut bool, known: bool) {
     let choices = [
-        (false, "Seconds", "Times in seconds"),
-        (true, "Frames", "Times as frame numbers, from 1"),
+        (false, fl!("in-seconds"), fl!("in-seconds", "hint")),
+        (true, fl!("in-frames"), fl!("in-frames", "hint")),
     ];
     let mut shown = *in_frames && known;
     ui.scope(|ui| {
         ui.spacing_mut().interact_size.y = 24.0;
         widgets::segments(ui, &mut shown, &choices, |_| {
-            if known { Ok(()) } else { Err("Where the input's frames are isn't known") }
+            if known { Ok(()) } else { Err(fl!("in-frames", "unknown")) }
         });
     });
     if known {
@@ -224,13 +219,13 @@ pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
     ui.horizontal(|ui| {
         ui.add_enabled_ui(!still, |ui| play_button(ui, playing))
             .response
-            .on_disabled_hover_text("One frame is used: there is nothing to play");
+            .on_disabled_hover_text(fl!("nothing-to-play"));
         let size = vec2(64.0, 24.0);
         match frames {
             Some(frames) => {
                 let (mut first, after) = frames.part(length, *start, *used);
                 let field = boundary_field(&mut first, 0..=after - 1, frames, *in_frames, false);
-                let hint = "Where the used part starts: its first frame";
+                let hint = fl!("part-start", "frame");
                 if ui.add_sized(size, field).on_hover_text(hint).changed() {
                     frames.set_part((first, after), start, used);
                     *time = frames.times[first];
@@ -239,7 +234,7 @@ pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
             None => {
                 let (mut from, to) = part(length, *start, *used);
                 let field = seconds(&mut from, length);
-                let hint = "Where the used part starts";
+                let hint = fl!("part-start");
                 if ui.add_sized(size, field).on_hover_text(hint).changed() {
                     from = from.min(to - 0.01).max(0.0);
                     set_part(length, (from, to), start, used);
@@ -255,7 +250,7 @@ pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
                 let (first, mut after) = frames.part(length, *start, *used);
                 let range = first + 1..=frames.count();
                 let field = boundary_field(&mut after, range, frames, *in_frames, true);
-                let hint = "Where the used part ends: its last frame";
+                let hint = fl!("part-end", "frame");
                 if ui.add_sized(size, field).on_hover_text(hint).changed() {
                     frames.set_part((first, after), start, used);
                 }
@@ -264,7 +259,7 @@ pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
             None => {
                 let (from, mut to) = part(length, *start, *used);
                 let field = seconds(&mut to, length);
-                if ui.add_sized(size, field).on_hover_text("Where the used part ends").changed() {
+                if ui.add_sized(size, field).on_hover_text(fl!("part-end")).changed() {
                     to = to.max(from + 0.01).min(length);
                     set_part(length, (from, to), start, used);
                 }
@@ -282,7 +277,10 @@ pub(crate) fn seconds(value: &mut f64, length: f64) -> egui::DragValue<'_> {
 /// What the pointer is over, as the numbers count.
 fn time_text(time: f64, frames: Option<&Frames>, in_frames: bool) -> String {
     match frames {
-        Some(frames) if in_frames => format!("frame {}", frames.at(time) + 1),
+        Some(frames) if in_frames => {
+            let number = frames.at(time) + 1;
+            fl!("frame-number", number = number)
+        }
         _ => widgets::seconds(time),
     }
 }
@@ -495,7 +493,7 @@ pub fn frame_picker(
         let last = frames.count() - 1;
         let mut picked = None;
         // as large as the play button, which stands here in the other modes
-        let step = |ui: &mut egui::Ui, icon: &str, enabled: bool, hint: &str, end: &str| {
+        let step = |ui: &mut egui::Ui, icon: &str, enabled: bool, hint: String, end: String| {
             let button =
                 egui::Button::new(egui::RichText::new(icon).size(15.0)).min_size(vec2(30.0, 26.0));
             ui.add_enabled(enabled, button)
@@ -503,14 +501,14 @@ pub fn frame_picker(
                 .on_disabled_hover_text(end)
                 .clicked()
         };
-        if step(ui, "⏴", index > 0, "The frame before (←)", "This is the first frame") {
+        if step(ui, "⏴", index > 0, fl!("frame-before"), fl!("frame-before", "first")) {
             picked = Some(index - 1);
         }
-        if step(ui, "⏵", index < last, "The frame after (→)", "This is the last frame") {
+        if step(ui, "⏵", index < last, fl!("frame-after"), fl!("frame-after", "last")) {
             picked = Some(index + 1);
         }
         let field = boundary_field(&mut index, 0..=last, frames, *in_frames, false);
-        if ui.add_sized(vec2(72.0, 24.0), field).on_hover_text("The frame").changed() {
+        if ui.add_sized(vec2(72.0, 24.0), field).on_hover_text(fl!("frame-picked")).changed() {
             picked = Some(index);
         }
         let width = (ui.available_width() - UNIT - 8.0).max(80.0);
@@ -574,7 +572,7 @@ fn play_button(ui: &mut egui::Ui, playing: &mut bool) {
     let icon = if *playing { "⏸" } else { "▶" };
     if ui
         .add(egui::Button::new(egui::RichText::new(icon).size(15.0)).min_size(vec2(30.0, 26.0)))
-        .on_hover_text(KEYS)
+        .on_hover_text(fl!("play-keys"))
         .clicked()
     {
         *playing = !*playing;

@@ -31,9 +31,11 @@ pub(crate) fn harness(config: Config) -> Harness<'static, App> {
         .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin(), None))
 }
 
-/// Clicks the selected item's Convert button, which shows its shortcut.
+/// Clicks the selected item's Convert button, which shows its shortcut,
+/// in whichever language the window is in.
 pub(crate) fn convert(harness: &Harness<App>) {
-    harness.get(egui_kittest::kittest::by().label_contains("Ctrl+Enter")).click();
+    let keys = crate::l10n::fl!("convert-keys");
+    harness.get(egui_kittest::kittest::by().label_contains(&keys)).click();
 }
 
 /// Steps the window until no item is busy.
