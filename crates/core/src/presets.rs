@@ -13,7 +13,7 @@
 //! [webm]            # options for WebM results, and for image results
 //! crf = 40          # where a still picture has them
 //!
-//! [tgs]             # options for .tgs results
+//! [tgs]             # options for TGS results
 //! speed = "balanced"
 //! ```
 //!
@@ -139,20 +139,22 @@ fn builtin() -> Vec<Preset> {
     vec![
         preset(
             "fast",
-            "Quick: WebM fits only the bitrate, with the fast encoder; .tgs comes out a few \
-             percent larger",
+            "WebM fits only the bitrate, with the fast encoder: takes seconds, but blurrier. TGS \
+             takes under a second, a few percent larger",
             Options { fit: Some(Fit::Bitrate), speed: Some(Speed::Fast), ..Default::default() },
             speed(Speed::Fast),
         ),
         preset(
             "balanced",
-            "Good looking WebM in reasonable time: tries a few frame rates",
+            "WebM tries a few frame rates and keeps the one that looks best. TGS is between fast \
+             and best",
             Options { fit: Some(Fit::Auto), speed: Some(Speed::Balanced), ..Default::default() },
             speed(Speed::Balanced),
         ),
         preset(
             "best",
-            "Best looking WebM, slowly; the smallest .tgs, in seconds",
+            "WebM is like balanced, with the slowest encoder: takes minutes for long videos. TGS \
+             takes a few seconds, the smallest file",
             Options { fit: Some(Fit::Auto), speed: Some(Speed::Best), ..Default::default() },
             speed(Speed::Best),
         ),

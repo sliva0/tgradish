@@ -9,7 +9,7 @@ use tgradish_core::tgs::{self, TgsOptions};
 
 pub use crate::term::ColorChoice;
 
-const TGS: &str = "Animated stickers (.tgs)";
+const TGS: &str = "Animated stickers (TGS)";
 const ASEPRITE: &str = "Aseprite files";
 
 /// Converts videos into Telegram video stickers and emoji, with the ability
@@ -86,8 +86,8 @@ pub enum Command {
     Watch(WatchArgs),
     /// Spoof the duration of an existing WebM so Telegram accepts it.
     Spoof(SpoofArgs),
-    /// Show properties of WebM, WebP and .tgs files and check them against
-    /// Telegram's requirements.
+    /// Show properties of WebM, WebP and TGS files and check them against
+    /// Telegram's limits.
     Inspect(InspectArgs),
     /// Print a JSON description of options, presets and events for
     /// front-ends.
@@ -151,9 +151,10 @@ pub struct WatchArgs {
 /// Flags shared by `convert` and `watch`.
 #[derive(Debug, Args)]
 pub struct ConversionArgs {
-    /// What to make: webm (video sticker or emoji, from any video or image),
-    /// tgs (animated sticker, from pixel art, or a video of it) or image
-    /// (image sticker or emoji as WebP, from the frame at --start).
+    /// What to make: webm (video sticker or emoji: VP9 in WebM, from any
+    /// video or picture), tgs (animated sticker or emoji: TGS, meant for
+    /// pixel art, or a video of it) or image (static sticker or emoji: WebP,
+    /// from any picture or the frame at --start).
     /// [default: by the output's extension, then webm]
     #[arg(long, value_enum)]
     pub format: Option<FormatArg>,
@@ -192,7 +193,7 @@ pub struct OptionArgs {
     #[arg(long, value_name = "WxH+X+Y", help_heading = "Output")]
     pub crop: Option<Crop>,
     /// How to scale into the target size [default: contain for stickers,
-    /// pad for emoji]; .tgs stickers are square: pad the art, crop its
+    /// pad for emoji]; TGS must be square: pad the pixel art, crop its
     /// middle, or stretch it [default: pad].
     #[arg(long, value_enum, help_heading = "Output")]
     pub resize: Option<ResizeArg>,
@@ -213,20 +214,20 @@ pub struct OptionArgs {
     #[arg(short = 't', long, value_name = "SECONDS", help_heading = "Output")]
     pub length: Option<f64>,
     /// How many times as fast as the input the result plays, 0.1 to 10.
-    /// [default: 1 for WebM; for .tgs, as fast as fits a long input into 3
+    /// [default: 1 for WebM; for TGS, as fast as fits a long input into 3
     /// seconds; what still lasts longer is cut]
     #[arg(long, value_name = "TIMES", help_heading = "Output")]
     pub tempo: Option<f64>,
     /// Frame rate: how fast the frames of image sequences, and of sprite
-    /// sheets for .tgs, play [default: 10]; otherwise of the result for
+    /// sheets for TGS, play [default: 10]; otherwise of the result for
     /// WebM, at most 60, where more than the input's at the tempo only
     /// repeats its frames [default: the input's at the tempo, from 1 to
     /// 60].
     #[arg(long, help_heading = "Output")]
     pub fps: Option<f64>,
 
-    /// What to tune to get close to the size limit: 256 KB for stickers, 64
-    /// KB for emoji. [default: auto]
+    /// What to tune to get close to the file size limit: 256 KiB for
+    /// stickers, 64 KiB for emoji. [default: auto]
     #[arg(short, long, value_enum, help_heading = "Size fitting")]
     pub fit: Option<FitArg>,
     /// Maximum number of encodes while fitting. [default: 8]
@@ -245,11 +246,11 @@ pub struct OptionArgs {
     #[arg(long, value_parser = clap::value_parser!(u8).range(0..=63), help_heading = "Encoding")]
     pub crf: Option<u8>,
     /// Encoder speed. Faster looks worse at the same size for WebM
-    /// [default: balanced], and comes out larger for .tgs [default: best].
+    /// [default: balanced], and comes out larger for TGS [default: best].
     #[arg(long, value_enum, help_heading = "Encoding")]
     pub speed: Option<SpeedArg>,
-    /// WebM: lossless encoding, only useful for tiny or static videos
-    /// [default: false]. .tgs: never change the art to make it fit, but
+    /// WebM: lossless encoding, only small for tiny or still pictures
+    /// [default: false]. TGS: never change the pixel art to make it fit, but
     /// report a sticker that is too large; --lossless=false lets fitting
     /// change it [default: true].
     #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
@@ -272,15 +273,15 @@ pub struct OptionArgs {
     /// [default: auto, only when needed]
     #[arg(long, value_enum, help_heading = "Metadata")]
     pub spoof: Option<SpoofArg>,
-    /// Duration written into the header when spoofing. [default: a short
+    /// Duration encoded into the metadata when spoofing. [default: a short
     /// one Telegram accepts]
     #[arg(long, value_name = "SECONDS", help_heading = "Metadata")]
     pub fake_duration: Option<f64>,
     /// Title stored in the file.
     #[arg(long, help_heading = "Metadata")]
     pub title: Option<String>,
-    /// Mark the file as made by tgradish in its metadata, which for .tgs is
-    /// the sticker's Lottie name. A mark hidden in WebM and .tgs stickers
+    /// Mark the file as made by tgradish in its metadata, which for TGS is
+    /// the sticker's Lottie name. A mark hidden in WebM and TGS stickers
     /// stays either way. [default: true]
     #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
           default_missing_value = "true", help_heading = "Metadata")]
@@ -292,7 +293,7 @@ pub struct OptionArgs {
     pub reductions: Vec<KindArg>,
     /// What fitting gives up first: motion (frames merged and dropped, full
     /// detail), detail (smooth motion, a coarser picture), or auto, whatever
-    /// changes the art least. [default: auto]
+    /// changes the pixel art least. [default: auto]
     #[arg(long, value_enum, help_heading = TGS)]
     pub compromise: Option<CompromiseArg>,
     /// Keep the input's canvas instead of cropping to the visible pixels.
@@ -503,7 +504,7 @@ pub struct SpoofArgs {
     /// Replace an existing output file.
     #[arg(short = 'y', long)]
     pub overwrite: bool,
-    /// Duration to write into the header. [default: a short one Telegram
+    /// Duration to encode into the metadata. [default: a short one Telegram
     /// accepts]
     #[arg(short, long, value_name = "SECONDS", default_value_t = options::DEFAULT_FAKE_DURATION,
           hide_default_value = true)]
@@ -519,11 +520,11 @@ pub struct SpoofArgs {
 
 #[derive(Debug, Args)]
 pub struct InspectArgs {
-    /// WebM, WebP or .tgs files to inspect.
+    /// WebM, WebP or TGS files to inspect.
     #[arg(required = true)]
     pub files: Vec<PathBuf>,
     /// Check WebM and WebP files against this target instead of guessing
-    /// from the size. .tgs stickers and emoji have the same limits.
+    /// from the size. TGS stickers and emoji have the same limits.
     #[arg(long, value_enum)]
     pub target: Option<TargetArg>,
 }

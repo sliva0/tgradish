@@ -167,7 +167,8 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
     if !(args.interval > 0.0 && args.interval.is_finite()) {
         bail!("--interval must be more than 0");
     }
-    std::fs::read_dir(&args.dir).with_context(|| format!("cannot read {}", args.dir.display()))?;
+    std::fs::read_dir(&args.dir)
+        .with_context(|| format!("couldn't read {}", args.dir.display()))?;
     let converter = Converter::new(ctx, &args.conversion, None)?;
     let output_for = |path: &Path| converter.output_under(path, Some(&args.dir));
 
@@ -203,7 +204,7 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
             scan.unreadable.iter().map(|(p, _)| p.clone()).collect();
         for (path, err) in &scan.unreadable {
             if !unreadable.contains(path) {
-                warn(ctx, format!("cannot read {}: {err}", path.display()));
+                warn(ctx, format!("couldn't read {}: {err}", path.display()));
             }
         }
         unreadable = now_unreadable;

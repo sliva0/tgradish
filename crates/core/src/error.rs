@@ -12,7 +12,7 @@ pub enum Error {
     FfmpegNotFound(String),
     #[error("{program} failed ({status}):\n{stderr}")]
     Ffmpeg { program: &'static str, status: String, stderr: String },
-    #[error("could not read {path}: {message}")]
+    #[error("couldn't read {path}: {message}")]
     Probe { path: PathBuf, message: String },
     #[error("{0} has no video stream")]
     NoVideo(PathBuf),
@@ -31,13 +31,13 @@ pub enum Error {
     Cancelled,
     #[error("ffmpeg: {0}")]
     Libav(String),
-    #[error("could not paste from the clipboard: {0}")]
+    #[error("couldn't paste from the clipboard: {0}")]
     Clipboard(String),
     #[error(transparent)]
     Webm(#[from] WebmError),
     #[error(transparent)]
     Tgs(#[from] tgradish_tgs::Error),
-    #[error("could not encode the WebP: {0}")]
+    #[error("couldn't encode the WebP: {0}")]
     Webp(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),

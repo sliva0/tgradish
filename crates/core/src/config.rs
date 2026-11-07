@@ -147,7 +147,7 @@ impl Config {
     /// existing file are lost.
     pub fn save(&self, path: &Path) -> Result<()> {
         let text = toml::to_string(self)
-            .map_err(|err| Error::InvalidOptions(format!("cannot write the config: {err}")))?;
+            .map_err(|err| Error::InvalidOptions(format!("couldn't write the config: {err}")))?;
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }

@@ -37,7 +37,7 @@ impl App {
                 }
                 Some((job, ..)) => {
                     if ui
-                        .add(egui::Button::new(fl!("dont-convert")).min_size(vec2(140.0, 32.0)))
+                        .add(egui::Button::new(fl!("cancel-waiting")).min_size(vec2(140.0, 32.0)))
                         .clicked()
                     {
                         job.cancel();

@@ -24,11 +24,11 @@ ok = OK
 close = Close
 # The small button beside a setting a preset can set, back to the preset's
 # value when it has been changed.
-back-to-preset = Back to the preset's value
+back-to-preset = Go back to the preset's value
 # Beside a number the window picks unless asked for one: that it should be
 # the number typed next to it.
 custom = Custom
-    .hint = Pick { custom } to set it
+    .hint = Pick "{ custom }" to set it
 # What a result is, in the list of files and over the settings.
 webm-sticker = WebM sticker
 webm-emoji = WebM emoji
@@ -88,11 +88,11 @@ drop-to-add = Drop to add
 settings = Settings
 light-theme = Switch to the light theme
 dark-theme = Switch to the dark theme
-inspect = Inspect a sticker: check a file against Telegram's rules
+inspect = Inspect a sticker: check a file against Telegram's limits
 add-files = Add files…
 # The menu beside Add files…
 add-folder = A folder of frames…
-    .hint = Its images, in name order, as one animation
+    .hint = In name order, as one animation
 add-images = Images as one animation…
     .hint = The images picked, in name order
 add-pasted = From the clipboard
@@ -103,7 +103,7 @@ convert-all = { $count ->
     [0] Convert all
    *[other] Convert all ({ $count })
 }
-    .hint = Every file without an up-to-date result
+    .hint = Convert every file without an up-to-date result
 remove-all = Remove all
 no-files = Files you add show up here.
 remove = Remove
@@ -122,7 +122,7 @@ row-exists = a file is in the way
 row-stopped = stopped
 # The large area shown while no files are open.
 drop-here = Drop videos, GIFs, images or Aseprite files here
-drop-here-note = Videos become WebM stickers and pictures image stickers; pixel art can also become a crisp TGS animation.
+drop-here-note = To convert into video, animated, or image sticker
 paste = Paste
     .hint = Ctrl+V
 # A file's name in the list when it is more than its first input.
@@ -142,26 +142,26 @@ no-font = { $count ->
 stop = Stop
 stopping = Stopping…
 converting-note = Converting: progress is beside the preview
-# A file waiting to be converted, which can be taken out of the queue.
-dont-convert = Don't convert
+# The button on a file waiting to be converted, which takes it out of the queue.
+cancel-waiting = Cancel
 next-to-convert = Next to convert
 waiting-for = Waiting for { $ahead } more
 convert-again = Convert again
 # The keys that convert the file picked, shown on its Convert button.
 convert-keys = Ctrl+Enter
-convert-hint = Makes it with these settings
-convert-again-hint = Makes it again with the same settings
+convert-hint = Make it with current settings
+convert-again-hint = Make it again with the same settings
 -save-settings = Save current settings as preset
 save-preset = { -save-settings }…
-    .hint = { -save-settings }: keep them as a preset of your own, for any file to start from
+    .hint = Keep them as a preset of your own, for any file to start from
 failed = Failed: { $error }
-in-the-way = A file tgradish didn't make is in the way:
+in-the-way = A file not from tgradish is in the way:
 replace-it = Replace it
 stopped = Stopped
 show-in-folder = Show in folder
 # Before the folder a file's result goes to.
 saves-to = Saves to { $folder }
-    .hint = Where results go is set in { settings }
+    .hint = Where results go is set in "{ settings }"
 
 
 ## Reading a file to show it
@@ -192,7 +192,7 @@ show-input = Input
 show-result = Result
 # Why the result can't be shown yet.
 convert-first = Convert it first
-tgs-unseen = This window can only show .tgs results it made itself; convert again to see it
+tgs-unseen = This window can only show TGS results it made itself; convert again to see it
 # A menu of the folders the file and its result are in; "Folder" where
 # there is no room for more.
 show-folder = Show in folder
@@ -203,14 +203,14 @@ folder-result = Result
 # Turns on the result's small picture.
 result-preview = Result preview
     .short = Preview
-    .hint = What the result will look like, small, beside the input
+    .hint = Show / hide small preview beside the input
 zoom-out = Zoom out
     .hint = Show all of it
-    .all = All of it shows
+    .all = Already fully zoomed out
 # The result no longer matches the settings; "⚠" alone where there is no
 # room for the word.
 outdated = Outdated
-    .hint = The result was made with earlier settings
+    .hint = Current result file was made with earlier settings
 # How the mouse works on the preview.
 input-hint = Drag to crop · wheel to zoom · right button to pan
 crop-hint = Drag the crop or its edges · double-click for all
@@ -224,11 +224,13 @@ reading = Reading…
 # The play button's hover: the keys that work over the preview. A line
 # can't start with [, so it is written {"["} there.
 play-keys =
-    Space: play or pause
-    ← →: a frame back or on, with Shift ten
-    Home, End: the first or last frame used
-    {"["} ]: start or end the used part at the frame shown
-    Ctrl+← →, Alt+← →: move its start or its end
+    Space — play or pause
+    ← / → — one frame back or forward
+    Shift+← / → — ten frames back or forward
+    Home / End — the first or last frame used
+    {"["} / ] — start or end the used part at the frame shown
+    Ctrl+← / → — move the used part's start
+    Alt+← / → — move the used part's end
 nothing-to-play = One frame is used: there is nothing to play
 # Whether the timeline counts seconds or frames.
 in-seconds = Seconds
@@ -256,9 +258,9 @@ make = Make
 format-video = Video
     .hint = A video sticker or emoji: VP9 in WebM, from any video or picture
 format-animation = Animation
-    .hint = An animated sticker for pixel art: each pixel becomes a shape, so it stays crisp at any size and the file stays small. Best for custom emoji, which are only 100 × 100 px. Not for ordinary video or photos: use { format-video } for those
+    .hint = An animated sticker or emoji: TGS file. This option is meant for pixel art: TGS is a vector format, so it stays crisp at any size. Best for custom emoji, which are only 100 × 100 px. Not for ordinary video or photos: use "{ format-video }" for those
 format-image = Image
-    .hint = A static sticker or emoji: one frame of a video, or a picture, as WebP
+    .hint = A static sticker or emoji: WebP, from any picture or one frame of a video
 target-sticker = Sticker
 target-emoji = Custom emoji
 # What Telegram asks of what is being made.
@@ -267,24 +269,24 @@ needs-webm-emoji = WebM, 100 × 100 px, up to 64 KiB
 needs-tgs = TGS, square, up to 64 KiB
 needs-image-sticker = WebP, 512 px on the longer side, up to 512 KiB
 needs-image-emoji = WebP, 100 × 100 px
-not-pixel-art = { format-animation } is for pixel art, drawn as shapes so it stays crisp. This doesn't look like pixel art: { format-video } suits it better.
+not-pixel-art = "{ format-animation }" is meant for pixel art, converted to vector so it stays crisp. This doesn't look like pixel art: "{ format-video }" suits it better.
 preset = Preset
     .hint = How hard to work on the result; your own values below go on top
-    .image = A picture needs no preset: it is saved lossless where that fits, otherwise at the best quality that does
+    .image = A picture needs no preset: it is saved lossless where that fits, otherwise at the best quality which still fits
     .broken = This preset's file is broken
 manage-presets = Manage…
     .hint = Rename, describe or delete your presets
 # The built-in presets, from the quickest; each says what it does for
 # videos (.webm) and for animations (.tgs).
 preset-fast = Fast
-    .webm = Fits only the bitrate, with the fast encoder: seconds, but blurrier
-    .tgs = Under a second, a few percent larger
+    .webm = Fits only the bitrate, with the fast encoder: takes seconds, but blurrier
+    .tgs = Takes under a second, a few percent larger
 preset-balanced = Balanced
     .webm = Tries a few frame rates and keeps the one that looks best
     .tgs = Between fast and best
 preset-best = Best
-    .webm = Like balanced, with the slowest encoder: minutes for long videos
-    .tgs = The smallest file, in a few seconds
+    .webm = Like balanced, with the slowest encoder: takes minutes for long videos
+    .tgs = Takes a few seconds, the smallest file
 # One of the user's own presets, with what they said it is.
 preset-described = { $name }: { $description }
 
@@ -304,10 +306,10 @@ margin-bottom = Bottom margin: pixels cut off the bottom
 width = Width
 height = Height
 whole-picture = Whole picture
-    .hint = All of the picture
-    .exact = All of the picture, or as much as the exact scale takes from its top left
+    .hint = Use all of the picture
+    .exact = Use all of the picture, or as much as the fixed scale takes from its top left
 middle = Middle
-    .hint = As much of the middle as the exact scale takes
+    .hint = Use as much of the middle as the fixed scale takes
 aspect-ratio = Aspect ratio
     .hint = The width to height ratio the crop keeps while you drag it
 shape-free = Free
@@ -316,41 +318,41 @@ shape-preserve = Preserve
     .hint = The input's own shape
 shape-custom = Custom
     .hint = A shape you type: as a ratio, or as the result's size
-    .pick = Pick { shape-custom } to type a shape
+    .pick = Pick "{ shape-custom }" to type a shape
 # Beside the ratio: the size of the result, which can be typed instead.
 ratio-result = Result
     .fixed = The result is squared or has margins, so its size doesn't follow the crop
 square = Force into square
-    .hint = How the result becomes square: stickers needn't be, emoji must
-    .tgs = How the art becomes square, as TGS stickers are
+    .hint = How the result becomes square
+    .tgs = How the pixel art becomes square (as all TGS must be)
 square-off = Off
     .hint = The result keeps the crop's shape
     .emoji = Emoji must be square
-    .tgs = TGS stickers are always square
+    .tgs = TGS must be square
 square-pad = By padding
-    .hint = Transparent bars fill the rest of the square
+    .hint = Transparent margins fill the rest of the square
     .tgs = Transparent margins fill the rest of the square
 square-crop = By cropping
     .hint = The middle fills the square and the rest is cut off: the preview dims it
     .tgs = The middle fills the square and the rest is cut off
 square-stretch = By stretching
     .hint = The picture is stretched to the square
-    .tgs = The art is stretched to the square: its pixels stop being square
+    .tgs = The pixel art is stretched to the square (its pixels stop being square)
 # Why cropping or stretching into a square can't be picked.
-square-exact = A fixed integer scale keeps all of the picture: pad it instead
+square-exact = Fixed integer scale keeps all of the picture: pad it instead
 scaling = Scaling
     .hint = How the input's pixels become the result's
 scaling-auto = Auto
     .hint = Sharp pixels for pixel art made twice as large or more, smooth otherwise
 scaling-smooth = Smooth
-    .hint = Neighbouring pixels blend, in linear light so edges don't darken
+    .hint = Neighbouring pixels blend
 scaling-sharp = Sharp pixels
-    .hint = Each pixel becomes a block; only block edges between result pixels blend
+    .hint = Each pixel becomes a block, and blocks blend only at their edges
 scaling-integer = Integer
     .hint = Each pixel becomes the same whole number of result pixels, or whole blocks of them become one; transparent margins fill the rest
 integer-scale = Integer scale
     .hint = How many result pixels each input pixel becomes, or how many input pixels make one
-    .only = Only with { scaling-integer } scaling
+    .only = Only with "{ scaling-integer }" scaling
 scale-largest = Largest that fits
     .hint = The largest whole multiple that keeps the crop within the result
 scale-fixed = Fixed
@@ -358,8 +360,8 @@ scale-fixed = Fixed
 smaller = Smaller
 larger = Larger
 scale-field = Type 3 for three times as large, or 1/3 for a third
-    .pick = Pick { scale-fixed } to choose a scale
-scale-unused = Whole scales apply with { scaling-integer } scaling only
+    .pick = Pick "{ scale-fixed }" to choose a scale
+scale-unused = Whole scales apply with "{ scaling-integer }" scaling only
 scale-unsuited = The crop doesn't suit this scale yet
 # What a whole scale, as ×3 or ×1/2, makes of the crop; then, if the result
 # has transparent margins, the size of the whole result.
@@ -367,14 +369,14 @@ scale-makes = { $scale } makes the crop { $width } × { $height } px
 scale-makes-padded = { $scale } makes the crop { $width } × { $height } px; transparent margins fill the rest of the { $box_width } × { $box_height }
 scale-shrinks = The crop is larger than the result, so it shrinks with sharp pixels: a fixed scale like ×1/2 shrinks it by whole blocks
 margins = Margins
-    .hint = Rows and columns that are transparent in every frame
+    .hint = Edge rows and columns that are transparent in all input frames
 auto-crop = Auto crop empty margins
-    .hint = Cuts the art to the smallest rectangle with visible pixels in any frame, so it fills the square
+    .hint = Cuts the pixel art to the smallest rectangle with visible pixels in any frame
     .after = Applies after the crop above
 art-pixel = Art pixel size
-    .hint = How many input pixels one pixel of the art takes. Pixels off its grid are moved onto it
+    .hint = How many input pixels one art pixel takes. Pixels off its grid are moved onto it
 art-pixel-detected = Detected
-    .hint = Found from the art: its smallest blocks of one colour
+    .hint = Found from the pixel art: its smallest blocks of one colour
 
 
 ## Settings: time
@@ -405,7 +407,7 @@ from-input = Input's
 fits-3-s = Fits 3 s
     .hint = As fast as fits the used part into 3 seconds
 fit-3-s = Fit 3 s
-    .hint = Plays the used part in 3 seconds
+    .hint = Set the speed so the used part plays in 3 seconds
 # How long the result plays: all of the used part, or as much of it, in the
 # input's time, as fits 3 seconds.
 plays = Plays { $played }
@@ -420,14 +422,14 @@ default-rate = Default
 over-3-s = Over 3 seconds
     .hint = Telegram refuses stickers that say they last longer than 3 seconds
 spoof-auto = Spoof when longer
-    .hint = Stickers longer than 3 seconds get a short duration written into them: Telegram accepts them and plays all of it
+    .hint = Stickers longer than 3 seconds get a short duration encoded into them: Telegram accepts them and plays all of it
 spoof-always = Always spoof
-    .hint = Even short stickers get the short duration
+    .hint = Even short stickers get the short duration encoded into them
 spoof-never = Cut at 3 s
-    .hint = Keeps the file honest and cuts it at 3 seconds
+    .hint = Doesn't spoof the metadata and cuts the video at 3 seconds
 spoof-to = Spoof to
-    .hint = The duration written into the file, which Telegram reads
-    .honest = Nothing is spoofed when { spoof-never } is picked
+    .hint = The duration encoded into the metadata, which Telegram reads
+    .honest = Nothing is spoofed when "{ spoof-never }" is picked
 default-duration = Default
     .hint = A short duration Telegram accepts
 frame = Frame
@@ -444,8 +446,8 @@ from-preset-value = Preset's
 # How the result is made to fit the size limit; .lossless is the hover of
 # the ways a quality can't go with, while lossless encoding is ticked.
 fitting = Getting under the limit
-    .hint = What tgradish changes to land just under the size limit
-    .lossless = Lossless encoding keeps no bitrate or quality to fit: picking this unticks { lossless-encoding }
+    .hint = What tgradish changes to land just under the file size limit
+    .lossless = Lossless encoding keeps no bitrate or quality to fit: picking this unticks "{ lossless-encoding }"
 fit-auto = Best looking
     .hint = Tries a few frame rates, fits the bitrate for each and keeps the one most like the input
 fit-bitrate = Bitrate
@@ -461,16 +463,16 @@ fit-off = Off
 encoder = VP9 encoder
     .hint = Faster encoding looks worse at the same size
 encoder-fast = Fast
-    .hint = Seconds; visibly worse at the same size
+    .hint = Takes seconds, but visibly worse at the same size
 encoder-balanced = Balanced
 encoder-best = Best
-    .hint = Slow: minutes for long videos
+    .hint = Slow: takes minutes for long videos
 # Why a setting of fitting can't be changed.
-fitting-off = { fit-off } encodes once
+fitting-off = "{ fit-off }" encodes once
 attempts = Encodes up to
     .hint = How many times fitting may encode, at most
 attempts-default = Default
-    .hint = Enough to land within a few percent of the limit for most inputs
+    .hint = Enough to land within a few percent of the file size limit for most inputs
 # After the number of encodes, which its field shows alone.
 attempts-times = { $count ->
     [one] time
@@ -492,12 +494,12 @@ crf-default = Default
 lossless = Lossless
 lossless-encoding = Lossless encoding
     .hint = Only small for tiny or still pictures
-    .switches = Only small for tiny or still pictures. Lossless encoding keeps no bitrate or quality to fit: ticking this switches fitting to { fit-fps }
+    .switches = Only small for tiny or still pictures. Lossless encoding keeps no bitrate or quality to fit: ticking this switches fitting to "{ fit-fps }"
 bitrate = Bitrate
     .hint = Used unless only a quality is set
     .fitted = Fitting finds the bitrate
     .constant = Encoded at a constant quality, not a bitrate
-bitrate-auto = From the size limit
+bitrate-auto = From the file size limit
     .hint = As much as the length lets fit
 
 
@@ -506,26 +508,26 @@ bitrate-auto = From the size limit
 tgs-encoder = TGS encoder
     .hint = How hard to look for a small encoding
 tgs-fast = Fast
-    .hint = Under a second; a few percent larger
+    .hint = Takes under a second, a few percent larger
 tgs-balanced = Balanced
 tgs-best = Best
-    .hint = A few seconds; the smallest
+    .hint = Takes a few seconds, the smallest file
 too-large = If it doesn't fit
-    .hint = What happens when the art doesn't fit into 64 KiB as it is
-never-change = Never change the art; report it instead
-    .set = The art is never changed, as set above
+    .hint = What happens when the pixel art doesn't fit into 64 KiB as it is
+never-change = Never change the pixel art; report it instead
+    .set = The pixel art is never changed, as set above
 give-up = Give up first
-    .hint = When the art has to change to fit: its motion or its detail
+    .hint = When the pixel art has to change to fit: its motion or its detail
 give-up-either = Either
-    .hint = Whatever changes the art least for the bytes it saves
+    .hint = Whatever changes the pixel art least for the bytes it saves
 give-up-motion = Motion
     .hint = Frames merge and drop first: full detail, choppier motion
 give-up-detail = Detail
     .hint = The picture coarsens first: smooth motion, less detail
 ways-to-fit = Ways to fit it
-    .hint = What fitting may do to the art to fit it into 64 KiB, least visible first
+    .hint = What fitting may do to the pixel art to fit it into 64 KiB, least visible first
 reduce-snap = Snap to the pixel grid
-    .hint = Moves stray pixels onto the art's grid
+    .hint = Moves stray pixels onto the art pixel grid
 reduce-colours = Merge similar colours
     .hint = Colours that hardly differ become one
 reduce-specks = Remove specks
@@ -536,7 +538,7 @@ reduce-drop = Drop frames
     .hint = Shows every other frame, or fewer
 reduce-resolution = Lower the resolution
     .hint = Fewer, larger art pixels
-reading-art = Reading the art
+reading-art = Reading the pixel art
 sprite-sheet = Sprite sheet
     .hint = Frames laid out in a grid of equal cells, row by row
 read-as-sheet = Read as a sprite sheet
@@ -566,8 +568,8 @@ tag-pong-ping = { $frames }, back and there
 layers = Layers
     .hint = Which layers show, the top one first; a hidden group hides the layers in it
     .group-hidden = Its group is hidden
-    .file = Back to the layers the file shows
-    .preset = Back to the layers the preset shows
+    .file = Go back to the layers the file shows
+    .preset = Go back to the layers the preset shows
 
 
 ## Settings: encoder options, folded away under the rest
@@ -589,7 +591,7 @@ example-qmax = Never worse than quality 50 anywhere
 ffmpeg-arguments = ffmpeg arguments
     .hint = Raw arguments added before the output, split like a shell would
     .placeholder = For example: -qmin 4
-    .system = Only with the system's ffmpeg, which { settings } can pick
+    .system = Only with the system's ffmpeg, which "{ settings }" can pick
 
 
 ## What converting will do, beside the preview, step by step
@@ -597,11 +599,11 @@ ffmpeg-arguments = ffmpeg arguments
 plan-video = The video will be:
 plan-picture = The picture will be:
 plan-animation = The animation will be:
-plan-art = The art will be:
-plan-tag = Played as its “{ $tag }” tag
-plan-tag-reverse = Played as its “{ $tag }” tag, in reverse
-plan-tag-ping-pong = Played as its “{ $tag }” tag, there and back
-plan-tag-pong-ping = Played as its “{ $tag }” tag, back and there
+plan-art = The pixel art will be:
+plan-tag = Played as its "{ $tag }" tag
+plan-tag-reverse = Played as its "{ $tag }" tag, in reverse
+plan-tag-ping-pong = Played as its "{ $tag }" tag, there and back
+plan-tag-pong-ping = Played as its "{ $tag }" tag, back and there
 plan-cropped = Cropped to { $width } × { $height }
 plan-frame = Frame at { $time } taken
 plan-scaled = Scaled to { $width } × { $height }
@@ -641,12 +643,12 @@ no-ffmpeg-commands = No ffmpeg commands: { $why }
 ## The Settings dialog
 
 save = Save
-    .hint = Keep these settings for next time
+    .hint = Keep current settings for next time
 saved-to = Saved to { $path }
 not-saved = Couldn't save: { $error }
 no-home = There is no home folder to keep settings in
 about-and-licences = About and licences…
-settings-note = Changes apply now; { save } keeps them between restarts
+settings-note = Changes apply now; "{ save }" keeps them between restarts
 ffmpeg-use = Use
     .hint = Videos are read, and WebM stickers made, with ffmpeg
 ffmpeg-auto = Automatic
@@ -663,7 +665,7 @@ ffmpeg-found = { $path }, found on PATH
 for-example = For example: { $example }
 choose = Choose…
 check = Check
-    .hint = Whether this ffmpeg can make stickers
+    .hint = Check whether this ffmpeg can make stickers
 # What checking ffmpeg found, its version as "8.0".
 ffmpeg-ready = ffmpeg { $version } with VP9: ready
 ffmpeg-no-vp9 = ffmpeg { $version } can't encode VP9 with libvpx
@@ -706,8 +708,8 @@ changed-to-fit = Changed to fit: how is listed below
 replaced-earlier = Replaced an earlier result made by tgradish
 converting = Converting
 # The stages of making a TGS animation, each a bar.
-stage-reading = Reading the art
-stage-drawing = Drawing it as shapes
+stage-reading = Reading the pixel art
+stage-drawing = Converting to vector
 stage-kept-too-large = Kept as it is: about { $size }, too large
 stage-kept = Kept as it is
 stage-fitting-steps = { $count ->
@@ -728,8 +730,8 @@ encode-done = Encode { $number }: { $fps } fps, { $rate } → { $size }, fits
 rate-quality = quality { $crf }
 rate-lossless = lossless
 encodes-up-to = { $count ->
-    [one] Up to { $count } encode, until one lands just under the limit
-   *[other] Up to { $count } encodes, until one lands just under the limit
+    [one] Up to { $count } encode, until one lands just under the file size limit
+   *[other] Up to { $count } encodes, until one lands just under the file size limit
 }
 # How a TGS animation was made: its art's size, then how many colours and
 # frames it has.
@@ -737,7 +739,7 @@ art-size = { $width } × { $height } art pixels
     .scaled = { $width } × { $height } art pixels, each { $scale } × { $scale } input pixels
 art-summary = { $size }; { $colours }, { $frames }
 art-tempo = Plays { $tempo }× as fast as the input
-art-off-grid = Most of it looks like { $scale }× art with some pixels off the grid; an art pixel size of { $scale } snaps them
+art-off-grid = Most of it looks like { $scale }× pixel art with some pixels off the grid; an art pixel size of { $scale } snaps them
 # The shapes of a TGS animation, and how large its JSON is before it is
 # compressed.
 art-shapes = { $layers } of { $rectangles }, { $size } unpacked
@@ -755,7 +757,7 @@ column-number = Each encode in turn; ✔ the one kept
 column-fps = Frames a second
 column-rate = Bitrate, or the quality it was encoded at
 column-size = size
-    .hint = Share of the size limit, green where it fits
+    .hint = Share of the file size limit, green where it fits
 column-alike = alike
     .hint = How like the input it looks (SSIM)
 # A quality, short, in the table's rate column.
@@ -768,7 +770,7 @@ issue-audio = It has an audio track
 issue-size = Its size is { $width } × { $height } px, where Telegram takes { $side } × { $side } px
     .sticker = Its size is { $width } × { $height } px, where Telegram takes one side of { $side } px and the other at most that
 issue-too-big = It is { $size }, over the limit of { $limit }
-issue-too-long = Its header says it lasts { $seconds }, over the limit of { $limit }
+issue-too-long = Its metadata says it lasts { $seconds }, over the limit of { $limit }
 issue-too-many-fps = Its frame rate is { $fps } fps, over the limit of { $limit } fps
 issue-animated = It is animated, where image stickers are one picture
 
@@ -787,9 +789,9 @@ inspect-size = Size
     .hint = Telegram refuses larger files
     .tgs = Telegram refuses larger stickers
 inspect-duration = Duration
-    .hint = Telegram reads the duration in the header; spoofing makes it short
-    .spoofed = { $seconds } s in the header, spoofed
-    .no-header = { $seconds }, none in the header
+    .hint = Telegram reads the duration in the metadata; spoofing makes it short
+    .spoofed = { $seconds } s in the metadata, spoofed
+    .no-header = { $seconds }, none in the metadata
 inspect-plays = Plays
     .hint = How long the video really is
 inspect-frame-rate = Frame rate
@@ -845,7 +847,7 @@ clipboard-failed = Couldn't paste from the clipboard: { $details }
 
 ## Saving and managing presets
 
-save-preset-title = Save settings as a preset
+save-preset-title = { -save-settings }
 save-preset-note = This file's settings, for any file to start from, but for those that only suit it: sticker or emoji, crop, used part, tag, layers and sprite sheet
 preset-name = Name
     .placeholder = my stickers
@@ -859,15 +861,15 @@ cancel = Cancel
 # What a preset's name can't be.
 preset-name-length = A preset's name has 1 to { $most } characters, not starting with a space
 preset-name-characters = A preset's name has only letters, digits, spaces, - and _
-preset-name-builtin = “{ $name }” is a built-in preset's name
-preset-name-taken = Another preset is named “{ $name }”
-preset-extended = “{ $other }” extends it: rename it there first
+preset-name-builtin = "{ $name }" is a built-in preset's name
+preset-name-taken = Another preset is named "{ $name }"
+preset-extended = "{ $other }" extends it: rename it there first
 your-presets = Your presets
-your-presets-note = Changes are kept as you make them. { preset-fast }, { preset-balanced } and { preset-best } are built in and stay as they are.
-no-presets = None yet: { -save-settings }, under the preview.
+your-presets-note = Changes are kept as you make them. "{ preset-fast }", "{ preset-balanced }" and "{ preset-best }" are built in and stay as they are.
+no-presets = None yet: "{ -save-settings }", under the preview.
 preset-broken = Its file can't be read
 delete-it = Delete it
-deleted = Deleted “{ $name }”
+deleted = Deleted "{ $name }"
 undo = Undo
     .hint = Put it back
 not-put-back = It couldn't be put back: { $error }
