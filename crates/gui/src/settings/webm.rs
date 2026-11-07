@@ -13,8 +13,8 @@ use super::{Context, commands};
 use crate::item::Item;
 use crate::l10n::fl;
 use crate::widgets::{
-    Choice, Pick, auto_number, chosen_hint, flag, greyed, preset_picking, preset_segments, row,
-    section, segments,
+    self, Choice, Pick, auto_number, chosen_hint, flag, greyed, preset_picking, preset_segments,
+    row, section, segments,
 };
 
 fn fits() -> [Choice<Fit>; 6] {
@@ -88,12 +88,7 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
             ui.label(fl!("attempts-times", count = count));
         });
     });
-    let unit = match fit {
-        Fit::Auto | Fit::Bitrate | Fit::Off => " kbit/s",
-        Fit::Fps => " fps",
-        Fit::Length => " s",
-        Fit::Crf => "",
-    };
+    let bounds = RangeBounds::of(fit);
     let mut asked_custom = false;
     row(ui, &fl!("search-within"), &fl!("search-within", "hint"), fitting, |ui| {
         ui.horizontal(|ui| {
@@ -114,11 +109,11 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
             let mut shown = set.unwrap_or(Range { min: 0.0, max: 0.0 });
             let pick = fl!("custom", "hint");
             let low = ui
-                .add_enabled(set.is_some(), range_field(&mut shown.min, unit, set.is_some()))
+                .add_enabled(set.is_some(), bounds.field(&mut shown.min, set.is_some()))
                 .on_disabled_hover_text(pick.as_str());
             ui.label(fl!("range-to"));
             let high = ui
-                .add_enabled(set.is_some(), range_field(&mut shown.max, unit, set.is_some()))
+                .add_enabled(set.is_some(), bounds.field(&mut shown.max, set.is_some()))
                 .on_disabled_hover_text(pick.as_str());
             if set.is_some() && (low.changed() || high.changed()) {
                 shown.max = shown.max.max(shown.min);
@@ -187,9 +182,38 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
     });
 }
 
-/// A field of an end of the range fitting searches, in `unit`; shown as
-/// "—" unless `set`, as fitting chooses the range then.
-fn range_field<'a>(value: &'a mut f64, unit: &'static str, set: bool) -> egui::DragValue<'a> {
-    let field = egui::DragValue::new(value).speed(0.5).max_decimals(2);
-    if set { field.suffix(unit) } else { field.custom_formatter(|_, _| "—".to_owned()) }
+/// What the ends of the range fitting searches can be, as planning checks
+/// them: whole frame rates up to Telegram's, libvpx's CRFs, and bitrates as
+/// the bitrate field takes them. Lengths beyond the video's are cut to it.
+struct RangeBounds {
+    range: std::ops::RangeInclusive<f64>,
+    decimals: usize,
+    speed: f64,
+    unit: &'static str,
+}
+
+impl RangeBounds {
+    fn of(fit: Fit) -> Self {
+        let (range, decimals, speed, unit) = match fit {
+            Fit::Auto | Fit::Bitrate | Fit::Off => (1.0..=50_000.0, 0, 5.0, " kbit/s"),
+            Fit::Fps => (1.0..=telegram::MAX_FPS, 0, 0.1, " fps"),
+            Fit::Length => (0.01..=3600.0, 2, 0.01, " s"),
+            Fit::Crf => (f64::from(*CRFS.start())..=f64::from(*CRFS.end()), 0, 0.1, ""),
+        };
+        Self { range, decimals, speed, unit }
+    }
+
+    /// A field of one end, shown as "—" unless `set`, as fitting chooses
+    /// the range then; whole numbers without a decimal point.
+    fn field<'a>(&self, value: &'a mut f64, set: bool) -> egui::DragValue<'a> {
+        let field = egui::DragValue::new(value)
+            .range(self.range.clone())
+            .speed(self.speed)
+            .max_decimals(self.decimals);
+        if set {
+            field.suffix(self.unit).custom_formatter(|value, _| widgets::trimmed(value))
+        } else {
+            field.custom_formatter(|_, _| "—".to_owned())
+        }
+    }
 }
