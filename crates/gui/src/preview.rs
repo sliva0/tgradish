@@ -310,7 +310,15 @@ fn preview(
     let dt = ui.input(|input| f64::from(input.stable_dt.min(0.1)));
     let range = item.range();
     let input_size = item.input_size();
-    let error = item.input_error().map(str::to_owned);
+    // "Couldn't read it" says which file: once is enough, as when ffprobe
+    // fails on one of the inputs
+    let error = item.input_error().map(|message| {
+        let said = item.inputs.iter().filter_map(|path| path.file_name()).find_map(|name| {
+            let name = name.to_string_lossy();
+            message.strip_prefix(&fl!("unreadable-file", name = name, details = ""))
+        });
+        said.unwrap_or(message).to_owned()
+    });
     // fields rather than methods, so the view and crop can change
     let (overview, part, still) = match item.format {
         Format::Webm | Format::Image => (
@@ -571,11 +579,15 @@ fn inset_key(parts: impl std::fmt::Debug) -> u64 {
 fn message_in(ui: &egui::Ui, rect: egui::Rect, text: &str, colour: Color32) {
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, theme::stage(ui.visuals().dark_mode));
-    painter.text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        text,
+    // wrapped, as an error can run longer than the preview is wide
+    let mut job = egui::text::LayoutJob::simple(
+        text.to_owned(),
         egui::FontId::proportional(15.0),
         colour,
+        (rect.width() - 32.0).max(80.0),
     );
+    job.halign = egui::Align::Center;
+    let galley = painter.layout_job(job);
+    let at = rect.center() - galley.rect.center().to_vec2();
+    painter.galley(at, galley, colour);
 }
