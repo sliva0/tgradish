@@ -124,7 +124,14 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                         (&automatic.0, &automatic.1),
                         default,
                         tgs::DEFAULT_FPS,
-                        |value| value.range(0.1..=60.0).speed(0.1).max_decimals(2).suffix(" fps"),
+                        |value| {
+                            value
+                                .range(0.1..=60.0)
+                                .speed(0.1)
+                                .max_decimals(2)
+                                .suffix(" fps")
+                                .custom_formatter(|v, _| widgets::trimmed(v))
+                        },
                     );
                 });
             } else {
@@ -134,7 +141,12 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                     let automatic = (fl!("from-input"), fl!("from-input", "rate"));
                     let automatic = (automatic.0.as_str(), automatic.1.as_str());
                     auto_number(ui, &mut options.fps, automatic, chosen, most, |value| {
-                        value.range(1.0..=highest).speed(0.1).max_decimals(2).suffix(" fps")
+                        value
+                            .range(1.0..=highest)
+                            .speed(0.1)
+                            .max_decimals(2)
+                            .suffix(" fps")
+                            .custom_formatter(|v, _| widgets::trimmed(v))
                     });
                 });
             }
@@ -198,7 +210,14 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                     (&automatic.0, &automatic.1),
                     default,
                     tgs::DEFAULT_FPS,
-                    |value| value.range(0.1..=60.0).speed(0.1).max_decimals(2).suffix(" fps"),
+                    |value| {
+                        value
+                            .range(0.1..=60.0)
+                            .speed(0.1)
+                            .max_decimals(2)
+                            .suffix(" fps")
+                            .custom_formatter(|v, _| widgets::trimmed(v))
+                    },
                 );
             });
         }
