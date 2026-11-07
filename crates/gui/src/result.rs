@@ -2,7 +2,7 @@
 //! doing, beside the preview: its size against Telegram's limit, the
 //! progress of each part, and how it was made to fit.
 
-use eframe::egui::{self, RichText};
+use eframe::egui::{self, Color32, RichText, vec2};
 
 use crate::item::Item;
 use crate::jobs::{self, Job, Status};
@@ -238,9 +238,17 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
         let scored = progress.attempts.iter().any(|attempt| attempt.ssim.is_some());
         egui::ScrollArea::horizontal().id_salt(("attempts", item.id)).show(ui, |ui| {
             let columns = if scored { 5 } else { 4 };
-            let grid =
-                egui::Grid::new(("attempts", item.id)).num_columns(columns).spacing([10.0, 4.0]);
+            // the kept attempt's tick in a column of its own, so the
+            // numbers stay in line
+            let grid = egui::Grid::new(("attempts", item.id))
+                .num_columns(columns + 1)
+                .spacing([10.0, 4.0]);
             grid.striped(true).show(ui, |ui| {
+                // as wide as the tick from the start, so nothing moves when
+                // one is kept
+                let font = egui::TextStyle::Body.resolve(ui.style());
+                let tick = ui.painter().layout_no_wrap("✔".into(), font, Color32::PLACEHOLDER);
+                ui.allocate_exact_size(vec2(tick.size().x, 0.0), egui::Sense::hover());
                 let headers = [
                     ("#".to_owned(), fl!("column-number")),
                     ("fps".to_owned(), fl!("column-fps")),
@@ -254,9 +262,8 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
                 ui.end_row();
                 for attempt in &progress.attempts {
                     let kept = done.kept == Some(attempt.number);
-                    let number = attempt.number.to_string();
-                    let number = if kept { format!("✔ {number}") } else { number };
-                    let number = RichText::new(number);
+                    ui.label(if kept { "✔" } else { "" });
+                    let number = RichText::new(attempt.number.to_string());
                     ui.label(if kept { number.strong() } else { number });
                     ui.label(widgets::trimmed(attempt.params.fps));
                     ui.label(match attempt.params.rate {
