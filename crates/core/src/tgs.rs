@@ -63,7 +63,7 @@ pub struct TgsOptions {
     /// [default: best]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speed: Option<Speed>,
-    /// Never change the art to make it fit; a sticker that is too large is
+    /// Never change the pixel art to make it fit; a sticker that is too large is
     /// reported instead. Set it to false to let fitting change it. [default:
     /// true]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -73,7 +73,7 @@ pub struct TgsOptions {
     pub reductions: Option<Vec<Kind>>,
     /// What fitting gives up first: motion (frames merged and dropped,
     /// full detail), detail (smooth motion, a coarser picture), or auto,
-    /// whatever changes the art least. [default: auto]
+    /// whatever changes the pixel art least. [default: auto]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compromise: Option<Compromise>,
     /// The part of the input to use, in input pixels. [default: all of it]

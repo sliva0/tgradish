@@ -40,7 +40,7 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
     };
     let replace = args.overwrite || output == args.input;
     let report = webm::patch_file(&args.input, &output, &changes, replace)
-        .with_context(|| format!("could not spoof {}", args.input.display()))?;
+        .with_context(|| format!("couldn't spoof {}", args.input.display()))?;
 
     if ctx.global.json {
         print_json(&json!({ "output": output, "report": report }));
@@ -48,7 +48,7 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
     }
     if args.duration > telegram::MAX_SECONDS {
         eprintln!(
-            "{} {} is longer than {} s, Telegram will still reject it",
+            "{} {} is longer than {} s, Telegram will still refuse it",
             ui::warning_label(),
             ui::seconds(args.duration),
             telegram::MAX_SECONDS
@@ -63,7 +63,7 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
         ui::status(
             "Spoofed",
             format!(
-                "{}: header duration {old} → {}",
+                "{}: metadata duration {old} → {}",
                 term::link_out(style(output.display()).bold(), &output),
                 ui::seconds(args.duration)
             )
@@ -130,7 +130,7 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
     let header = info.header_duration.map_or("none".into(), ui::seconds);
     let content = info.content_duration.map_or("unknown".into(), ui::seconds);
     let spoofed = if info.spoofed() { " (spoofed)" } else { "" };
-    let duration = format!("{header} in header, {content} of video{spoofed}");
+    let duration = format!("{header} in metadata, {content} of video{spoofed}");
     println!("{}", ui::field("duration", duration));
     if let Some(title) = &info.title {
         println!("{}", ui::field("title", title));
@@ -196,7 +196,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
         if ctx.global.json {
             return Err(crate::Exit(1).into());
         }
-        bail!("{failed} of {} could not be read", ui::count(args.files.len(), "file"));
+        bail!("{failed} of {} couldn't be read", ui::count(args.files.len(), "file"));
     }
     Ok(())
 }
@@ -317,7 +317,7 @@ pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
                 let vp9 = if caps.libvpx_vp9 { style("yes").green() } else { style("no").red() };
                 println!("libvpx-vp9 encoder  {vp9}");
                 if !caps.libvpx_vp9 {
-                    bail!("this ffmpeg cannot encode VP9 with libvpx, stickers need it");
+                    bail!("this ffmpeg can't encode VP9 with libvpx, stickers need it");
                 }
             }
         }

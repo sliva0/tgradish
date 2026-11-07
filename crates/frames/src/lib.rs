@@ -31,7 +31,7 @@ pub enum Error {
     FrameSize { index: usize, len: usize, width: u32, height: u32, expected: usize },
     #[error("not a GIF, PNG, WebP, JPEG, BMP or Aseprite file")]
     UnknownFormat,
-    #[error("cannot decode the {format} file: {message}")]
+    #[error("couldn't decode the {format} file: {message}")]
     Decode { format: Format, message: String },
     #[error("no tag named {name:?} (tags: {})", if available.is_empty() { "none".into() } else { available.join(", ") })]
     NoSuchTag { name: String, available: Vec<String> },

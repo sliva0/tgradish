@@ -92,7 +92,7 @@ impl<'a> Converter<'a> {
         };
         if let Some(dir) = &args.output_dir {
             std::fs::create_dir_all(dir)
-                .with_context(|| format!("could not create {}", dir.display()))?;
+                .with_context(|| format!("couldn't create {}", dir.display()))?;
         }
         if ctx.global.json {
             listen_for_cancel(ctx);
@@ -273,7 +273,7 @@ impl<'a> Converter<'a> {
         }
         eprintln!("{}", ui::status("Made", line));
         for issue in &outcome.issues {
-            eprintln!("{} Telegram will reject it: {issue}", ui::warning_label());
+            eprintln!("{} Telegram will refuse it: {issue}", ui::warning_label());
         }
         if term::shows_pictures()
             && let Ok(preview) = still::preview(&outcome.output)
@@ -514,7 +514,7 @@ impl Printer {
                     ui::params(&params),
                 );
                 for issue in issues {
-                    eprintln!("{} Telegram will reject it: {issue}", ui::warning_label());
+                    eprintln!("{} Telegram will refuse it: {issue}", ui::warning_label());
                 }
             }
             _ => {}
@@ -564,12 +564,12 @@ impl TgsPrinter {
                     line.push_str(&format!(", played {:.2}x as fast", report.tempo));
                 }
                 if report.trimmed {
-                    line.push_str(", trimmed to 3 s");
+                    line.push_str(", cut at 3 s");
                 }
                 self.bar.line(ui::status("Read", ui::dim(line)));
                 if let Some(likely) = report.likely_scale {
                     self.bar.line(format!(
-                        "{} the art looks like {}x with {:.1}% of its edges off that grid; \
+                        "{} the pixel art looks like {}x with {:.1}% of its edges off that grid; \
                          --pixel-scale {} snaps them",
                         ui::warning_label(),
                         likely.scale,
@@ -578,7 +578,7 @@ impl TgsPrinter {
                     ));
                 }
                 term::progress(Some(0.1));
-                self.spinner("Drawing", "the art as shapes".into());
+                self.spinner("Converting", "to vector".into());
             }
             TgsEvent::TooLarge { bytes } if !self.quiet => {
                 self.lossless = Some(bytes);
@@ -658,7 +658,9 @@ fn reduction_text(reduction: &tgradish_core::tgs::Reduction) -> String {
             format!("merged frames differing in under {:.1}% of the area", changed * 100.0)
         }
         Reduction::DropFrames { share } => format!("dropped {:.0}% of frames", share * 100.0),
-        Reduction::Despeckle => "removed lone pixels".to_string(),
-        Reduction::Downscale { factor } => format!("scaled the art to {:.0}%", factor * 100.0),
+        Reduction::Despeckle => "removed single stray pixels".to_string(),
+        Reduction::Downscale { factor } => {
+            format!("lowered the resolution to {:.0}%", factor * 100.0)
+        }
     }
 }

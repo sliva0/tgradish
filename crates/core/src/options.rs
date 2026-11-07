@@ -33,22 +33,22 @@ pub enum Resize {
 pub enum Scaling {
     /// Sharp for pixel art made at least twice as large, smooth otherwise.
     Auto,
-    /// Neighbouring pixels blend, in linear light so edges don't darken.
+    /// Neighbouring pixels blend.
     Smooth,
-    /// Each pixel becomes a block; only block edges that fall between
-    /// output pixels blend. Keeps pixel art crisp at any size.
+    /// Each pixel becomes a block, and blocks blend only at their edges.
+    /// Keeps pixel art crisp at any size.
     Sharp,
     /// Each pixel becomes the same whole number of output pixels, and
     /// transparent margins fill the rest of the box.
     PixelPerfect,
 }
 
-/// What to tune so the file ends up just under the size limit.
+/// What to tune so the file ends up just under the file size limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum Fit {
     /// Try a few frame rates, fit the bitrate for each and keep the one that
-    /// looks most like the source (by SSIM). Slowest, best looking.
+    /// looks most like the input (by SSIM). Slowest, best looking.
     Auto,
     /// Fit the bitrate at the configured frame rate.
     Bitrate,
@@ -58,7 +58,7 @@ pub enum Fit {
     Fps,
     /// Fit the length at constant quality.
     Length,
-    /// Encode once with the given settings, even if the result is too big.
+    /// Encode once with the given settings, even if the result is too large.
     Off,
 }
 
@@ -83,7 +83,7 @@ impl Speed {
     }
 }
 
-/// When to spoof the duration header.
+/// When to spoof the duration in the metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum Spoof {
@@ -319,8 +319,8 @@ pub struct Options {
     /// rest. Overrides `scaling`, and `resize` must be contain or pad.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exact_scale: Option<ExactScale>,
-    /// What to tune to get close to the size limit: 256 KB for stickers, 64
-    /// KB for emoji. Default: auto.
+    /// What to tune to get close to the file size limit: 256 KiB for
+    /// stickers, 64 KiB for emoji. Default: auto.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fit: Option<Fit>,
     /// Maximum number of encodes while fitting. Default: 8.
@@ -353,7 +353,7 @@ pub struct Options {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<f64>,
     /// Target bitrate in kbit/s. Used when not fitting bitrate. Default:
-    /// estimated from the size limit.
+    /// estimated from the file size limit.
     #[schemars(range(min = 1.0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bitrate: Option<f64>,
@@ -365,15 +365,15 @@ pub struct Options {
     /// Encoder speed. Default: balanced.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speed: Option<Speed>,
-    /// Lossless encoding. Only useful for tiny or static videos. Default:
+    /// Lossless encoding. Only small for tiny or still pictures. Default:
     /// false.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lossless: Option<bool>,
-    /// When to spoof the duration header so Telegram accepts videos longer
-    /// than 3 seconds. Default: auto.
+    /// When to spoof the duration in the metadata so Telegram accepts videos
+    /// longer than 3 seconds. Default: auto.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spoof: Option<Spoof>,
-    /// Duration written into the header when spoofing, in seconds. Default:
+    /// Duration encoded into the metadata when spoofing, in seconds. Default:
     /// a short one Telegram accepts.
     #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 3))]
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -1,5 +1,5 @@
 preset = "balanced"   # preset used when none is given, for WebM and images
-tgs-preset = "best"   # the same for .tgs
+tgs-preset = "best"   # the same for TGS
 
 [ffmpeg]
 use = "auto"          # auto (built in if there is one, else system),

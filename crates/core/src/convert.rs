@@ -466,7 +466,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     let mut length = used / tempo;
     if spoof == Spoof::Never && length > telegram::MAX_SECONDS {
         warnings.push(format!(
-            "cutting to {} s because spoofing is off; Telegram rejects longer videos",
+            "cutting to {} s because spoofing is off; Telegram refuses longer videos",
             telegram::MAX_SECONDS
         ));
         length = telegram::MAX_SECONDS;

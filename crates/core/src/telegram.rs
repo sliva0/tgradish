@@ -113,7 +113,7 @@ impl std::fmt::Display for Issue {
             }
             Issue::TooBig { bytes, max } => write!(f, "file is {bytes} bytes, limit is {max}"),
             Issue::TooLong { seconds, max } => {
-                write!(f, "header duration is {seconds:.3} s, limit is {max} s")
+                write!(f, "metadata duration is {seconds:.3} s, limit is {max} s")
             }
             Issue::TooManyFps { fps, max } => {
                 write!(f, "frame rate is {fps:.2} fps, limit is {max}")
