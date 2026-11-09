@@ -25,9 +25,13 @@ use crate::{predict, settings, theme, timeline, widgets};
 /// Width of the column beside the preview, and the least it narrows to
 /// before the preview does.
 const SIDE: f32 = 300.0;
-const NARROWEST_SIDE: f32 = 240.0;
-/// The least the preview narrows to.
-const NARROWEST_PREVIEW: f32 = 200.0;
+const NARROWEST_SIDE: f32 = 228.0;
+/// The least the preview narrows to, which holds the row under it.
+const NARROWEST_PREVIEW: f32 = 366.0;
+/// The least the part of the window beside the list of files narrows to,
+/// before the list has to give way: the preview and the column beside it,
+/// which also makes room for the settings' widest rows.
+pub(crate) const NARROWEST_MAIN: f32 = 640.0;
 /// Side of a `.tgs` result's small picture at its largest: shapes have no
 /// pixels, so this is as sharp as it needs.
 const TGS_INSET: usize = 256;
@@ -69,7 +73,8 @@ impl App {
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
         egui::Panel::top("preview").exact_size(preview_height).show(ui, |ui| {
             ui.horizontal_top(|ui| {
-                let room = ui.available_width() - 16.0;
+                // less the gap between the two, with its line
+                let room = ui.available_width() - 30.0;
                 let side = SIDE.min(room - NARROWEST_PREVIEW).max(NARROWEST_SIDE);
                 let width = (room - side).max(NARROWEST_PREVIEW);
                 ui.allocate_ui_with_layout(
