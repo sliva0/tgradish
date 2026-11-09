@@ -27,7 +27,7 @@ use crate::telegram::{self, Target};
 
 /// Frame rate of still images, sprite sheets and image sequences unless
 /// `fps` says otherwise.
-pub const DEFAULT_FPS: f64 = 10.0;
+pub const DEFAULT_FPS: f64 = 12.0;
 
 /// Whether the art is kept as it is unless asked otherwise: changing it to
 /// fit is the user's to choose.
@@ -114,7 +114,7 @@ pub struct TgsOptions {
     #[schemars(range(min = 1))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sheet_frames: Option<u32>,
-    /// Frame rate of sprite sheets and image sequences. [default: 10]
+    /// Frame rate of sprite sheets and image sequences. [default: 12]
     #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 60))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<f64>,
@@ -897,7 +897,7 @@ mod tests {
         let layout = sheet.sheet_layout().unwrap().unwrap();
         assert_eq!(
             (layout.columns, layout.rows, layout.frame_duration),
-            (4, 2, Duration::from_millis(100))
+            (4, 2, Duration::from_secs_f64(1.0 / DEFAULT_FPS))
         );
         let bad = TgsOptions { sheet: Some("4 by 2".into()), ..Default::default() };
         assert!(bad.sheet_layout().is_err());
