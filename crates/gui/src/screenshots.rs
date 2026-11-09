@@ -279,7 +279,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().select(shown);
     harness.run_steps(3);
     // the narrowest list, its buttons leaving no room for the name
-    harness.set_size(egui::vec2(900.0, 640.0));
+    harness.set_size(egui::vec2(crate::MIN_WIDTH, 640.0));
     harness.ctx.memory_mut(|memory| memory.reset_areas());
     harness.run_steps(3);
     save(&mut harness, "narrow");

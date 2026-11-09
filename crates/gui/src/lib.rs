@@ -53,6 +53,10 @@ use tgradish_core::ffmpeg::FfmpegChoice;
 pub use crate::about::notices;
 use crate::app::App;
 
+/// The narrowest the window goes, which holds the list of files, the preview
+/// and the column beside it.
+pub(crate) const MIN_WIDTH: f32 = 920.0;
+
 /// How the window starts, from the command line.
 #[derive(Debug, Default)]
 pub struct Launch {
@@ -73,7 +77,7 @@ pub fn run(launch: Launch) -> eframe::Result<()> {
             .with_app_id("tgradish")
             .with_icon(std::sync::Arc::new(icon::window()))
             .with_inner_size([1280.0, 820.0])
-            .with_min_inner_size([900.0, 560.0])
+            .with_min_inner_size([MIN_WIDTH, 560.0])
             .with_drag_and_drop(true),
         ..Default::default()
     };

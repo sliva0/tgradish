@@ -31,7 +31,7 @@ const NARROWEST_PREVIEW: f32 = 366.0;
 /// The least the part of the window beside the list of files narrows to,
 /// before the list has to give way: the preview and the column beside it,
 /// which also makes room for the settings' widest rows.
-pub(crate) const NARROWEST_MAIN: f32 = 640.0;
+pub(crate) const NARROWEST_MAIN: f32 = 656.0;
 /// Side of a `.tgs` result's small picture at its largest: shapes have no
 /// pixels, so this is as sharp as it needs.
 const TGS_INSET: usize = 256;
@@ -595,4 +595,39 @@ fn message_in(ui: &egui::Ui, rect: egui::Rect, text: &str, colour: Color32) {
     let galley = painter.layout_job(job);
     let at = rect.center() - galley.rect.center().to_vec2();
     painter.galley(at, galley, colour);
+}
+
+#[cfg(test)]
+mod tests {
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::{NodeT, Queryable};
+    use tgradish_core::config::Config;
+    use tgradish_core::presets::Presets;
+
+    use super::*;
+    use crate::app::App;
+    use crate::testing::{finish, square};
+
+    #[test]
+    fn the_narrowest_window_holds_the_preview_and_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let frames = dir.path().join("walk");
+        std::fs::create_dir(&frames).unwrap();
+        square(&frames.join("1.png"), [255, 0, 0, 255]);
+        square(&frames.join("2.png"), [0, 0, 255, 255]);
+        let mut harness = Harness::builder()
+            .with_size([crate::MIN_WIDTH, 640.0])
+            .build_eframe(|_| App::with(Config::default(), None, Presets::builtin(), None));
+        harness.state_mut().add(vec![frames]);
+        finish(&mut harness);
+        let column = harness.get_by_label(&fl!("make")).accesskit_node().bounding_box().unwrap();
+        let row = harness.get_by_label(&fl!("in-frames")).accesskit_node().bounding_box().unwrap();
+        // the column's whole width, up to where the panel's margin clips it
+        assert!(
+            column.x0 + f64::from(NARROWEST_SIDE) <= f64::from(crate::MIN_WIDTH) - 8.0,
+            "{column:?}"
+        );
+        // and the row under the preview stops short of it
+        assert!(row.x1 < column.x0, "{row:?} runs into {column:?}");
+    }
 }
