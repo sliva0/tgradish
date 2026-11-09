@@ -117,7 +117,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 // how fast its frames play, which the result's follows
                 row(ui, &fl!("frame-rate"), &fl!("frame-rate", "sequence"), Ok(()), |ui| {
                     let default = Some(tgs::DEFAULT_FPS);
-                    let automatic = (fl!("default-rate"), fl!("default-rate", "hint"));
+                    let automatic = default_rate();
                     auto_number(
                         ui,
                         &mut options.fps,
@@ -203,7 +203,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         Format::Tgs if sequence => {
             row(ui, &fl!("frame-rate"), &fl!("frame-rate", "sheet"), Ok(()), |ui| {
                 let default = Some(tgs::DEFAULT_FPS);
-                let automatic = (fl!("default-rate"), fl!("default-rate", "hint"));
+                let automatic = default_rate();
                 auto_number(
                     ui,
                     &mut item.choices.tgs.fps,
@@ -305,6 +305,12 @@ pub(super) fn frame(ui: &mut egui::Ui, item: &mut Item) {
         let (number, count) = (index + 1, frames.count());
         note(ui, fl!("part-frame", number = number, count = count));
     });
+}
+
+/// The button for a frame rate the input doesn't have, and its hint.
+fn default_rate() -> (String, String) {
+    let fps = widgets::trimmed(tgs::DEFAULT_FPS);
+    (fl!("default-rate"), fl!("default-rate", "hint", fps = fps))
 }
 
 #[cfg(test)]

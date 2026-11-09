@@ -720,11 +720,12 @@ mod tests {
         harness.state_mut().add(vec![frames]);
         finish(&mut harness);
         assert_eq!(harness.state().items[0].kind, Kind::Frames);
-        // two frames, ten a second unless said
+        // two frames, at the default rate unless said
         harness.state_mut().items[0].format = Format::Webm;
         finish(&mut harness);
         let length = harness.state().items[0].input_length().unwrap_or_default();
-        assert!((length - 0.2).abs() < 1e-3, "{length}");
+        let expected = 2.0 / tgradish_core::tgs::DEFAULT_FPS;
+        assert!((length - expected).abs() < 1e-3, "{length}");
         harness.state_mut().items[0].choices.webm.fps = Some(4.0);
         finish(&mut harness);
         let length = harness.state().items[0].input_length().unwrap_or_default();
