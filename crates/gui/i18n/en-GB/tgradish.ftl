@@ -141,7 +141,6 @@ no-font = { $count ->
 
 stop = Stop
 stopping = Stopping…
-converting-note = Converting: progress is beside the preview
 # The button on a file waiting to be converted, which takes it out of the queue.
 cancel-waiting = Cancel
 next-to-convert = Next to convert
@@ -725,6 +724,8 @@ stage-compressing = Compressing
 # a share of the limit, and whether that fits.
 starting = Starting
 encode = Encode { $number }: { $fps } fps, { $rate }
+# The bar beside Stop: the encode at work, and how many there may be at most.
+encode-of = Encode { $number } of up to { $most }: { $fps } fps, { $rate }
 encode-done = Encode { $number }: { $fps } fps, { $rate } → { $size }, fits
     .too-large = Encode { $number }: { $fps } fps, { $rate } → { $size }, too large
 rate-quality = quality { $crf }

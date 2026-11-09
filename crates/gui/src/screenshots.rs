@@ -283,6 +283,49 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     harness.ctx.memory_mut(|memory| memory.reset_areas());
     harness.run_steps(3);
     save(&mut harness, "narrow");
+    // a WebM on its second encode, there and at the usual size
+    let mut job = Job::waiting(dir.path().join("progress.webm"));
+    job.status = Status::Running;
+    let params = |kbps| tgradish_core::events::Params {
+        fps: 30.0,
+        length: 1.0,
+        rate: tgradish_core::events::Rate::Bitrate(kbps),
+    };
+    job.progress = jobs::Progress {
+        webm: Some(jobs::WebmPlan {
+            width: 512,
+            height: 288,
+            fps: 30.0,
+            length: 1.0,
+            attempts: 8,
+            limit: 256 * 1024,
+        }),
+        attempts: vec![
+            jobs::Attempt {
+                number: 1,
+                params: params(2400.0),
+                bytes: Some(300_000),
+                fits: false,
+                ssim: None,
+            },
+            jobs::Attempt {
+                number: 2,
+                params: params(1900.0),
+                bytes: None,
+                fits: false,
+                ssim: None,
+            },
+        ],
+        fraction: Some(0.4),
+        ..jobs::Progress::default()
+    };
+    let item = harness.state_mut().items.last_mut().unwrap();
+    item.job = Some((job, Format::Webm, item.choices.clone()));
+    harness.run_steps(3);
+    save(&mut harness, "narrow-converting");
+    harness.set_size(egui::vec2(1280.0, 820.0));
+    harness.run_steps(3);
+    save(&mut harness, "converting");
     // a fractional scale, where the icon keeps to whole screen pixels
     let mut harness = Harness::builder()
         .with_size([1280.0, 820.0])

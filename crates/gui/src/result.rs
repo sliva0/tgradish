@@ -92,59 +92,20 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
         return;
     }
     let progress = &job.progress;
-    // the accent, half let through, so the text over it stays readable
-    let running = theme::tint(theme::accent(ui.visuals()), 0.5);
+    let running = running_colour(ui);
     let done = widgets::GOOD.gamma_multiply(0.45);
     if let Some(stage) = progress.tgs {
         use jobs::TgsStage;
-        let fits = progress.lossless_bytes.is_none() && stage > TgsStage::Fitting;
         // too large, and never to be changed: packed quickly, in red
         let hopeless = progress.tgs_lossless && progress.lossless_bytes.is_some();
-        let stages = [
-            (TgsStage::Reading, fl!("stage-reading")),
-            (TgsStage::Drawing, fl!("stage-drawing")),
-            (
-                TgsStage::Fitting,
-                match (progress.lossless_bytes, progress.steps.last()) {
-                    // never changed: nothing is fitted
-                    (Some(bytes), _) if progress.tgs_lossless => {
-                        fl!("stage-kept-too-large", size = widgets::kib(bytes as u64))
-                    }
-                    (None, _) if progress.tgs_lossless => fl!("stage-kept"),
-                    (Some(_), Some(step)) => {
-                        let count = progress.steps.len();
-                        let size = widgets::kib(step.bytes as u64);
-                        fl!("stage-fitting-steps", count = count, size = size)
-                    }
-                    (Some(bytes), None) => {
-                        fl!("stage-fitting-from", size = widgets::kib(bytes as u64))
-                    }
-                    (None, _) if fits => fl!("stage-fits"),
-                    (None, _) => fl!("stage-fitting"),
-                },
-            ),
-            (
-                TgsStage::Compressing,
-                if hopeless {
-                    fl!("stage-compressing", "hopeless")
-                } else {
-                    fl!("stage-compressing")
-                },
-            ),
-        ];
-        for (each, text) in stages {
+        for (each, text) in stages(progress, stage) {
             use widgets::Fill;
-            // the stage at work moves even while its share stays put, as
-            // fitting's does through a round of trying reductions
             let (fill, colour) = match each.cmp(&stage) {
                 std::cmp::Ordering::Less if hopeless && each == TgsStage::Fitting => {
                     (Fill::Share(1.0), widgets::BAD.gamma_multiply(0.45))
                 }
                 std::cmp::Ordering::Less => (Fill::Share(1.0), done),
-                std::cmp::Ordering::Equal if each == TgsStage::Fitting => {
-                    (Fill::working(progress.tgs_fitting()), running)
-                }
-                std::cmp::Ordering::Equal => (Fill::Unknown, running),
+                std::cmp::Ordering::Equal => (stage_fill(progress, stage), running),
                 std::cmp::Ordering::Greater => (Fill::Share(0.0), running),
             };
             widgets::bar(ui, fill, &text, colour);
@@ -156,11 +117,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
         widgets::bar(ui, widgets::Fill::Unknown, &fl!("starting"), running);
     }
     for attempt in &progress.attempts {
-        let rate = match attempt.params.rate {
-            tgradish_core::events::Rate::Bitrate(kbps) => format!("{kbps:.0} kbit/s"),
-            tgradish_core::events::Rate::Crf(crf) => fl!("rate-quality", crf = crf),
-            tgradish_core::events::Rate::Lossless => fl!("rate-lossless"),
-        };
+        let rate = rate_text(attempt);
         let (number, fps) = (attempt.number, format!("{:.0}", attempt.params.fps));
         let text = fl!("encode", number = number, fps = fps.as_str(), rate = rate.as_str());
         match attempt.bytes {
@@ -193,6 +150,98 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     {
         widgets::note(ui, fl!("encodes-up-to", count = plan.attempts));
     }
+}
+
+/// The accent, half let through, so the text over it stays readable.
+fn running_colour(ui: &egui::Ui) -> Color32 {
+    theme::tint(theme::accent(ui.visuals()), 0.5)
+}
+
+/// What each stage of a `.tgs` conversion says, once it is at `stage`.
+fn stages(progress: &jobs::Progress, stage: jobs::TgsStage) -> [(jobs::TgsStage, String); 4] {
+    use jobs::TgsStage;
+    let fits = progress.lossless_bytes.is_none() && stage > TgsStage::Fitting;
+    let hopeless = progress.tgs_lossless && progress.lossless_bytes.is_some();
+    [
+        (TgsStage::Reading, fl!("stage-reading")),
+        (TgsStage::Drawing, fl!("stage-drawing")),
+        (
+            TgsStage::Fitting,
+            match (progress.lossless_bytes, progress.steps.last()) {
+                // never changed: nothing is fitted
+                (Some(bytes), _) if progress.tgs_lossless => {
+                    fl!("stage-kept-too-large", size = widgets::kib(bytes as u64))
+                }
+                (None, _) if progress.tgs_lossless => fl!("stage-kept"),
+                (Some(_), Some(step)) => {
+                    let count = progress.steps.len();
+                    let size = widgets::kib(step.bytes as u64);
+                    fl!("stage-fitting-steps", count = count, size = size)
+                }
+                (Some(bytes), None) => {
+                    fl!("stage-fitting-from", size = widgets::kib(bytes as u64))
+                }
+                (None, _) if fits => fl!("stage-fits"),
+                (None, _) => fl!("stage-fitting"),
+            },
+        ),
+        (
+            TgsStage::Compressing,
+            if hopeless { fl!("stage-compressing", "hopeless") } else { fl!("stage-compressing") },
+        ),
+    ]
+}
+
+/// How far the stage at work has got. It moves even while its share stays
+/// put, as fitting's does through a round of trying reductions.
+fn stage_fill(progress: &jobs::Progress, stage: jobs::TgsStage) -> widgets::Fill {
+    match stage {
+        jobs::TgsStage::Fitting => widgets::Fill::working(progress.tgs_fitting()),
+        _ => widgets::Fill::Unknown,
+    }
+}
+
+/// The rate an encode runs at.
+fn rate_text(attempt: &jobs::Attempt) -> String {
+    match attempt.params.rate {
+        tgradish_core::events::Rate::Bitrate(kbps) => format!("{kbps:.0} kbit/s"),
+        tgradish_core::events::Rate::Crf(crf) => fl!("rate-quality", crf = crf),
+        tgradish_core::events::Rate::Lossless => fl!("rate-lossless"),
+    }
+}
+
+/// The step a conversion is at and how far it has got. Only that step: how
+/// many encodes fitting needs isn't known until it has them, and a `.tgs`
+/// conversion's stages take very different times, so a share of all of it
+/// would stall and jump.
+fn current_step(progress: &jobs::Progress) -> (widgets::Fill, String) {
+    use widgets::Fill;
+    if let Some(stage) = progress.tgs {
+        let text = stages(progress, stage).into_iter().find(|(each, _)| *each == stage);
+        return (stage_fill(progress, stage), text.map(|(_, text)| text).unwrap_or_default());
+    }
+    let Some(attempt) = progress.attempts.last() else {
+        return (Fill::Unknown, fl!("starting"));
+    };
+    let (number, rate) = (attempt.number, rate_text(attempt));
+    let fps = format!("{:.0}", attempt.params.fps);
+    let text = match progress.webm.as_ref().map(|plan| plan.attempts) {
+        Some(most) if most > 1 => {
+            fl!("encode-of", number = number, most = most, fps = fps, rate = rate)
+        }
+        _ => fl!("encode", number = number, fps = fps, rate = rate),
+    };
+    // done, it is being scored or the next is about to start
+    let fill =
+        if attempt.bytes.is_some() { Fill::Unknown } else { Fill::working(progress.fraction) };
+    (fill, text)
+}
+
+/// A bar of `size` showing the step a conversion is at, for the bar beside
+/// Stop, which never scrolls away.
+pub(crate) fn step_bar(ui: &mut egui::Ui, job: &Job, size: egui::Vec2) {
+    let (fill, text) = current_step(&job.progress);
+    widgets::bar_sized(ui, size, fill, &text, running_colour(ui));
 }
 
 /// How the last result was made, under its size beside the preview.
@@ -317,5 +366,55 @@ fn reduction(reduction: &tgradish_tgs::reduce::Reduction) -> String {
         Reduction::Downscale { factor } => {
             fl!("step-resolution", factor = format!("{:.0}", factor * 100.0))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tgradish_core::events::{Params, Rate};
+
+    use super::*;
+    use crate::jobs::{Attempt, Progress, TgsStage, WebmPlan};
+    use crate::widgets::Fill;
+
+    fn encode(number: u32, bytes: Option<u64>) -> Attempt {
+        let params = Params { fps: 30.0, length: 1.0, rate: Rate::Bitrate(81.0) };
+        Attempt { number, params, bytes, fits: false, ssim: None }
+    }
+
+    fn plan(attempts: u32) -> WebmPlan {
+        WebmPlan { width: 512, height: 512, fps: 30.0, length: 1.0, attempts, limit: 262_144 }
+    }
+
+    #[test]
+    fn the_current_step_is_only_the_one_at_work() {
+        let (fill, text) = current_step(&Progress::default());
+        assert!(matches!(fill, Fill::Unknown), "{text}");
+        assert_eq!(text, fl!("starting"));
+
+        // the encode at work, by its own progress, with how many there may be
+        let mut progress = Progress {
+            webm: Some(plan(8)),
+            attempts: vec![encode(1, Some(300_000)), encode(2, None)],
+            fraction: Some(0.4),
+            ..Progress::default()
+        };
+        let (fill, text) = current_step(&progress);
+        assert!(matches!(fill, Fill::Working(share) if share == 0.4), "{text}");
+        assert!(text.contains('2') && text.contains('8'), "{text}");
+        // between encodes it hasn't stopped
+        progress.attempts.pop();
+        assert!(matches!(current_step(&progress).0, Fill::Unknown));
+        // only one is allowed: no ceiling to tell of
+        progress.webm = Some(plan(1));
+        progress.attempts = vec![encode(1, None)];
+        let number = fl!("encode", number = 1, fps = "30", rate = "81 kbit/s");
+        assert_eq!(current_step(&progress).1, number);
+
+        // a .tgs says the stage it is at, not the others
+        let compressing = Progress { tgs: Some(TgsStage::Compressing), ..Progress::default() };
+        let (fill, text) = current_step(&compressing);
+        assert!(matches!(fill, Fill::Unknown));
+        assert_eq!(text, fl!("stage-compressing"));
     }
 }
