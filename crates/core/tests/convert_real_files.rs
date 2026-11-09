@@ -1111,6 +1111,7 @@ fn sequences_keep_every_frame_at_any_rate() {
         for fps in [None, Some(3.0), Some(13.0), Some(15.0), Some(30.0), Some(60.0), Some(29.97)] {
             assert_eq!(frames_at(backend, 4, fps), 4, "{} at {fps:?}", name(backend));
         }
+        assert_eq!(frames_at(backend, 1, None), 1, "{}", name(backend));
         assert_eq!(frames_at(backend, 500, None), 500, "{}", name(backend));
 
         // and what comes out has them
