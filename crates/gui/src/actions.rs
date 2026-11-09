@@ -1,6 +1,6 @@
 //! The bar under the selected item: converting it, stopping or not
-//! converting it after all, what went wrong last time, and where its
-//! result goes.
+//! converting it after all and how far it has got, what went wrong last
+//! time, and where its result goes.
 
 use eframe::egui::{self, RichText, vec2};
 
@@ -23,6 +23,9 @@ impl App {
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
         let mut convert = false;
         let mut replace = None;
+        // the room goes to the progress, and the column beside the preview
+        // already names the file
+        let converting = item.job.as_ref().is_some_and(|(job, ..)| job.is_running());
         ui.horizontal(|ui| {
             match &item.job {
                 Some((job, ..)) if job.is_running() => {
@@ -33,7 +36,8 @@ impl App {
                     if ui.add_enabled(!stopping, stop).clicked() {
                         job.cancel();
                     }
-                    widgets::note(ui, fl!("converting-note"));
+                    let size = vec2(ui.available_width(), 32.0);
+                    crate::result::step_bar(ui, job, size);
                 }
                 Some((job, ..)) => {
                     if ui
@@ -104,7 +108,7 @@ impl App {
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let Some(output) = &output else { return };
+                let Some(output) = output.as_ref().filter(|_| !converting) else { return };
                 let name = output
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
