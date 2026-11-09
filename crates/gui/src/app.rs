@@ -30,6 +30,8 @@ use crate::{dnd, toplevel_icon};
 
 /// How many items keep their big frames: the selected one and the last few.
 const KEPT: usize = 3;
+/// How wide the list of files starts.
+const FILES_WIDTH: f32 = 410.0;
 
 pub(crate) struct App {
     pub(crate) config_path: Option<PathBuf>,
@@ -424,11 +426,15 @@ impl eframe::App for App {
         self.take_input(&ctx);
         self.pump(&ctx);
         self.find_fonts(&ctx);
-        // as wide as half the window
-        let widest = (ctx.content_rect().width() * 0.5).max(260.0);
-        egui::Panel::left("files")
+        // as wide as half the window, leaving the rest the room it needs
+        let window = ctx.content_rect().width();
+        let widest = (window * 0.5).min(window - crate::preview::NARROWEST_MAIN).max(260.0);
+        // apart from the width it has in a small window, or that would stay
+        // once the window grows again
+        let id = if widest < FILES_WIDTH { "files-small" } else { "files" };
+        egui::Panel::left(id)
             .resizable(true)
-            .default_size(410.0)
+            .default_size(FILES_WIDTH)
             .size_range(260.0..=widest)
             .show(ui, |ui| {
                 self.files_panel(ui);

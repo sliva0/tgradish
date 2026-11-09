@@ -242,7 +242,7 @@ pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
                 }
             }
         }
-        let width = (ui.available_width() - 64.0 - 2.0 * 8.0 - UNIT).max(80.0);
+        let width = (ui.available_width() - 64.0 - 2.0 * 8.0 - UNIT).max(48.0);
         let (rect, response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click_and_drag());
         bar(ui, rect, &response, (length, frames, *in_frames), (start, used), time, limit);
         match frames {
