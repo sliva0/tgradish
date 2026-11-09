@@ -187,6 +187,9 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
 /// the bitrate field takes them. Lengths beyond the video's are cut to it.
 struct RangeBounds {
     range: std::ops::RangeInclusive<f64>,
+    /// What planning takes, which a preset or an earlier session may have
+    /// set beyond what the field offers: kept until it is edited.
+    takes: std::ops::RangeInclusive<f64>,
     decimals: usize,
     speed: f64,
     unit: &'static str,
@@ -194,20 +197,30 @@ struct RangeBounds {
 
 impl RangeBounds {
     fn of(fit: Fit) -> Self {
-        let (range, decimals, speed, unit) = match fit {
-            Fit::Auto | Fit::Bitrate | Fit::Off => (1.0..=50_000.0, 0, 5.0, " kbit/s"),
-            Fit::Fps => (1.0..=telegram::MAX_FPS, 0, 0.1, " fps"),
-            Fit::Length => (0.01..=3600.0, 2, 0.01, " s"),
-            Fit::Crf => (f64::from(*CRFS.start())..=f64::from(*CRFS.end()), 0, 0.1, ""),
+        let (range, takes, decimals, speed, unit) = match fit {
+            Fit::Auto | Fit::Bitrate | Fit::Off => {
+                (1.0..=50_000.0, 1.0..=f64::INFINITY, 0, 5.0, " kbit/s")
+            }
+            Fit::Fps => {
+                let fps = 1.0..=telegram::MAX_FPS;
+                (fps.clone(), fps, 0, 0.1, " fps")
+            }
+            Fit::Length => (0.01..=3600.0, f64::MIN_POSITIVE..=f64::INFINITY, 2, 0.01, " s"),
+            Fit::Crf => {
+                let crf = f64::from(*CRFS.start())..=f64::from(*CRFS.end());
+                (crf.clone(), crf, 0, 0.1, "")
+            }
         };
-        Self { range, decimals, speed, unit }
+        Self { range, takes, decimals, speed, unit }
     }
 
     /// A field of one end, shown as "—" unless `set`, as fitting chooses
     /// the range then; whole numbers without a decimal point.
     fn field<'a>(&self, value: &'a mut f64, set: bool) -> egui::DragValue<'a> {
+        let refused = !self.takes.contains(value);
         let field = egui::DragValue::new(value)
             .range(self.range.clone())
+            .clamp_existing_to_range(refused)
             .speed(self.speed)
             .max_decimals(self.decimals);
         if set {
@@ -215,5 +228,32 @@ impl RangeBounds {
         } else {
             field.custom_formatter(|_, _| "—".to_owned())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What showing a range's end leaves of it.
+    fn shown(fit: Fit, mut value: f64) -> f64 {
+        let mut harness = egui_kittest::Harness::new_ui(|ui| {
+            ui.add(RangeBounds::of(fit).field(&mut value, true));
+        });
+        harness.run();
+        drop(harness);
+        value
+    }
+
+    #[test]
+    fn showing_a_range_keeps_what_planning_takes() {
+        // beyond what the fields offer, yet fine to convert with
+        assert_eq!(shown(Fit::Length, 0.005), 0.005);
+        assert_eq!(shown(Fit::Bitrate, 60_000.0), 60_000.0);
+        assert_eq!(shown(Fit::Fps, 24.0), 24.0);
+        // what planning would refuse comes into range
+        assert_eq!(shown(Fit::Fps, -2257.0), 1.0);
+        assert_eq!(shown(Fit::Fps, 507.0), telegram::MAX_FPS);
+        assert_eq!(shown(Fit::Length, -1.0), 0.01);
     }
 }
