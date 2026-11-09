@@ -1089,6 +1089,48 @@ fn makes_tgs_stickers_from_videos() {
 }
 
 #[test]
+fn sequences_keep_every_frame_at_any_rate() {
+    let Some(backends) = backends() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let one = dir.path().join("1.png");
+    let [(_, steps), _] = tgradish_corpus::sequences();
+    std::fs::write(&one, tgradish_corpus::encode::png(&steps[0])).unwrap();
+    let sequence = |frames| vec![one.clone(); frames];
+    let frames_at = |backend: &Backend, frames: usize, fps: Option<f64>| {
+        let options = Options { fps, ..Options::default() };
+        let inputs = sequence(frames);
+        let cancel = CancelToken::new();
+        let drawn = tgradish_core::drawn::readable(&one, Some(&inputs), &options, &cancel).unwrap();
+        let probe = drawn.probe(backend, &cancel).unwrap();
+        let rate = fps.unwrap_or(tgradish_core::tgs::DEFAULT_FPS);
+        assert_eq!(probe.fps, Some(rate));
+        tgradish_core::convert::frame_count(probe.duration.unwrap_or_default(), rate)
+    };
+    for backend in &backends {
+        // rates whose frames' times round down in APNG, up, and don't divide
+        for fps in [None, Some(3.0), Some(13.0), Some(15.0), Some(30.0), Some(60.0), Some(29.97)] {
+            assert_eq!(frames_at(backend, 4, fps), 4, "{} at {fps:?}", name(backend));
+        }
+        assert_eq!(frames_at(backend, 500, None), 500, "{}", name(backend));
+
+        // and what comes out has them
+        let output = dir.path().join(format!("{}.webm", name(backend)));
+        let request = Request {
+            input: one.clone(),
+            sequence: Some(sequence(4)),
+            output: Some(output.clone()),
+            options: Options { fps: Some(29.97), attempts: Some(1), ..Options::default() },
+            overwrite: true,
+            keep_temp: false,
+        };
+        let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
+        let probe = backend.probe(&outcome.output, &CancelToken::new()).unwrap();
+        let starts = backend.frame_starts(&outcome.output, &probe, &CancelToken::new()).unwrap();
+        assert_eq!(starts.len(), 4, "{}", name(backend));
+    }
+}
+
+#[test]
 fn times_animated_pictures_by_their_frames() {
     let Some(backends) = backends() else { return };
     let dir = tempfile::tempdir().unwrap();

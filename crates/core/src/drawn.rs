@@ -12,9 +12,12 @@ use std::path::{Path, PathBuf};
 use tgradish_tgs::frames::{self, Animation, LayerInfo, Layers, Limits, Tag};
 
 use crate::CancelToken;
+use crate::backend::Backend;
 use crate::error::{Error, Result};
+use crate::ffmpeg::Probe;
 use crate::options::Options;
 use crate::source::{self, Aseprite};
+use crate::tgs::DEFAULT_FPS;
 
 /// An input as ffmpeg reads it: the file itself, or pixel art drawn into a
 /// temporary PNG, which lasts as long as this does.
@@ -26,11 +29,25 @@ pub struct Readable {
     aseprite: Aseprite,
     /// What was drawn, until it is taken, and whether it is a still picture.
     drawn: Option<(Animation, bool)>,
+    /// How many frames a sequence has and how many it plays a second.
+    sequence: Option<(usize, f64)>,
 }
 
 impl Readable {
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// What `backend` reads of it, with a sequence's length and frame rate
+    /// as they were asked for, since what ffmpeg makes of the frames' times
+    /// can be enough short of them to leave the last frame out.
+    pub fn probe(&self, backend: &Backend, cancel: &CancelToken) -> Result<Probe> {
+        let mut probe = backend.probe(&self.path, cancel)?;
+        if let Some((frames, fps)) = self.sequence.filter(|_| !probe.still_image) {
+            probe.duration = Some(frames as f64 / fps);
+            (probe.fps, probe.base_fps) = (Some(fps), Some(fps));
+        }
+        Ok(probe)
     }
 
     /// Whether it is pixel art, drawn.
@@ -88,7 +105,8 @@ pub fn layers(show: Option<&[String]>, hide: Option<&[String]>) -> Layers {
 
 /// `input` as ffmpeg can read it: an Aseprite file drawn with the tag and
 /// layers `options` choose; with `sequence`, the frames of one animation,
-/// image files or folders of them, `fps` a second, 10 unless it says; an
+/// image files or folders of them, `fps` a second, [`DEFAULT_FPS`] unless
+/// it says; an
 /// animated WebP drawn as it is; and anything else as it is. Only Aseprite
 /// files have tags and layers.
 pub fn readable(
@@ -120,7 +138,7 @@ pub fn readable(
         None => {
             let path = input.to_path_buf();
             let aseprite = Aseprite::default();
-            return Ok(Readable { path, dir: None, aseprite, drawn: None });
+            return Ok(Readable { path, dir: None, aseprite, drawn: None, sequence: None });
         }
     };
     cancel.check()?;
@@ -132,8 +150,9 @@ pub fn readable(
     let animated = sequence.is_some() || animation.frames().len() > 1;
     write_png(&path, &animation, animated)
         .map_err(|err| Error::Io(std::io::Error::other(err.to_string())))?;
+    let rate = sequence.map(|_| (animation.frames().len(), options.fps.unwrap_or(DEFAULT_FPS)));
     let drawn = Some((animation, !animated));
-    Ok(Readable { path, dir: Some(dir), aseprite, drawn })
+    Ok(Readable { path, dir: Some(dir), aseprite, drawn, sequence: rate })
 }
 
 /// Writes `animation` as a PNG, `animated` with each frame lasting its own

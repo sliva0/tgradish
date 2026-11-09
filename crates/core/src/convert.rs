@@ -760,7 +760,7 @@ pub fn convert(
     let mut readable = crate::drawn::readable(&request.input, sequence, &request.options, cancel)?;
     // ffmpeg reads them from the file: not kept while it does
     drop(readable.take_drawn());
-    let source = backend.probe(readable.path(), cancel)?;
+    let source = readable.probe(backend, cancel)?;
     let (mut plan, warnings) = plan(request, source)?;
     plan.input = readable.path().to_path_buf();
     choose_auto_scaling(backend, &mut plan, &request.options, cancel)?;

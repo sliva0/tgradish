@@ -123,6 +123,17 @@ impl Timing {
         }
         (frames > 0 && end > first).then_some(Timing { frames, length: end - first })
     }
+
+    /// How long the frames play, at `fps` if that is what the packets'
+    /// times round: ffmpeg times APNG in units of 1/100000 s, so a twelfth
+    /// of a second is 0.08333 and 4 frames at 12 fps come to less than 4
+    /// frames' time, which would leave the last one out. The most that can
+    /// lose is half a unit a frame, 0.03% at 60 fps.
+    fn length_at(&self, fps: Option<f64>) -> f64 {
+        fps.map(|fps| self.frames as f64 / fps)
+            .filter(|even| (even - self.length).abs() <= self.length * 5e-4)
+            .unwrap_or(self.length)
+    }
 }
 
 impl Facts {
@@ -168,7 +179,7 @@ impl Facts {
                     let from_start = file_duration.map(|duration| duration - start);
                     from_start.filter(|duration| *duration > 0.0)
                 })
-                .or(timing.map(|timing| timing.length)),
+                .or(timing.map(|timing| timing.length_at(self.avg_fps.or(self.base_fps)))),
         };
         // where the stream gives no average, its packets', rather than its
         // base rate, which can be its time base
@@ -308,6 +319,22 @@ pub fn frame_starts(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn times_frames_by_their_rate_past_rounding() {
+        let packets = |ticks: f64| (0..4).map(move |frame| (f64::from(frame) * ticks, ticks));
+        let timing = Timing::of(packets(0.08333)).unwrap();
+        // short of 4 frames at 12 fps, as ffmpeg reads them from an APNG
+        assert!(timing.length * 12.0 < 4.0 - 1e-6);
+        assert_eq!(timing.length_at(Some(12.0)), 4.0 / 12.0);
+        // long, where the unit rounds up
+        let timing = Timing::of(packets(0.06667)).unwrap();
+        assert_eq!(timing.length_at(Some(15.0)), 4.0 / 15.0);
+        // a rate that isn't how the frames play changes nothing, nor none
+        let timing = Timing::of(packets(0.1)).unwrap();
+        assert_eq!(timing.length_at(Some(25.0)), timing.length);
+        assert_eq!(timing.length_at(None), timing.length);
+    }
 
     #[test]
     fn reads_fields_of_compact_output() {

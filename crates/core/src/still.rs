@@ -123,7 +123,7 @@ pub fn convert(backend: &Backend, request: &Request, cancel: &CancelToken) -> Re
     // ffmpeg reads them from the file: not kept while it does
     drop(readable.take_drawn());
     let input = readable.path();
-    let source = backend.probe(input, cancel)?;
+    let source = readable.probe(backend, cancel)?;
     // where frames start, to find the one that shows at a time; without
     // them, frames count as coming evenly, as before they were read
     let starts = match request.options.start {

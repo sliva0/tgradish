@@ -279,7 +279,7 @@ impl Video {
                 }
             }
             let path = readable.path();
-            let probe = backend.probe(path, cancel).map_err(|err| failure(&err))?;
+            let probe = readable.probe(&backend, cancel).map_err(|err| failure(&err))?;
             let request = FramesRequest {
                 start: 0.0,
                 length: None,
