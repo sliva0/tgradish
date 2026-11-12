@@ -18,7 +18,9 @@ pub use aseprite::{Direction, LayerInfo, Layers, Sprite, Tag};
 pub use sheet::{Sheet, sequence, split_sheet, sprite_sheet};
 
 /// Duration of still images in an animation when nothing else says how long
-/// to show them, and of frames whose files say 0.
+/// to show them, and of every frame that says 0, in whatever format or
+/// however it is put together: viewers show such frames for a while too,
+/// and an [`Animation`] holds none.
 pub const DEFAULT_FRAME_DURATION: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -160,6 +162,7 @@ pub fn decode(bytes: &[u8], options: &DecodeOptions) -> Result<Animation> {
 #[derive(Clone, PartialEq, Eq)]
 pub struct Frame {
     pub rgba: Vec<u8>,
+    /// How long it shows. In an [`Animation`] never zero.
     pub duration: Duration,
 }
 
@@ -172,7 +175,8 @@ impl fmt::Debug for Frame {
     }
 }
 
-/// Frames of one size, each shown for its own duration, looping.
+/// Frames of one size, each shown for its own duration, looping. Every
+/// frame shows for some time: see [`Animation::new`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Animation {
     width: u32,
@@ -181,7 +185,10 @@ pub struct Animation {
 }
 
 impl Animation {
-    pub fn new(width: u32, height: u32, frames: Vec<Frame>) -> Result<Animation> {
+    /// Frames that say they show for no time get
+    /// [`DEFAULT_FRAME_DURATION`], so what works on an animation never has
+    /// to decide what such a frame means.
+    pub fn new(width: u32, height: u32, mut frames: Vec<Frame>) -> Result<Animation> {
         let expected = frame_bytes(width, height)?;
         if frames.is_empty() {
             return Err(Error::Empty);
@@ -190,6 +197,11 @@ impl Animation {
             frames.iter().enumerate().find(|(_, frame)| frame.rgba.len() != expected)
         {
             return Err(Error::FrameSize { index, len: frame.rgba.len(), width, height, expected });
+        }
+        for frame in &mut frames {
+            if frame.duration.is_zero() {
+                frame.duration = DEFAULT_FRAME_DURATION;
+            }
         }
         Ok(Animation { width, height, frames })
     }
@@ -210,9 +222,10 @@ impl Animation {
         self.frames
     }
 
-    /// Length of one loop.
+    /// Length of one loop, or the longest a [`Duration`] holds when its
+    /// frames come to more.
     pub fn duration(&self) -> Duration {
-        self.frames.iter().map(|frame| frame.duration).sum()
+        self.frames.iter().fold(Duration::ZERO, |total, frame| total.saturating_add(frame.duration))
     }
 
     /// RGBA of a pixel, or `None` outside the animation.
@@ -264,6 +277,21 @@ mod tests {
         assert_eq!(animation.pixel(0, 2, 0), None);
         assert_eq!(animation.pixel(2, 0, 0), None);
         assert_eq!(animation.duration(), Duration::from_millis(150));
+    }
+
+    #[test]
+    fn gives_frames_of_no_time_the_default() {
+        let frames = vec![frame(4, 0), frame(4, 30), frame(4, 0)];
+        let animation = Animation::new(1, 1, frames).unwrap();
+        let durations: Vec<Duration> = animation.frames().iter().map(|f| f.duration).collect();
+        let ms = Duration::from_millis;
+        assert_eq!(durations, [DEFAULT_FRAME_DURATION, ms(30), DEFAULT_FRAME_DURATION]);
+        assert_eq!(animation.duration(), ms(30) + DEFAULT_FRAME_DURATION * 2);
+
+        // and frames of more time than there is don't overflow its length
+        let endless = Frame { rgba: vec![0; 4], duration: Duration::MAX };
+        let animation = Animation::new(1, 1, vec![endless.clone(), endless]).unwrap();
+        assert_eq!(animation.duration(), Duration::MAX);
     }
 
     #[test]
