@@ -2,7 +2,8 @@
 //! processes, or through libraries linked into the binary (the `linked`
 //! feature).
 
-use std::path::Path;
+use std::borrow::Cow;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use schemars::JsonSchema;
@@ -10,7 +11,7 @@ use serde::Serialize;
 
 use crate::CancelToken;
 use crate::convert::Plan;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::events::Params;
 use crate::ffmpeg::{self, Capabilities, Ffmpeg, FfmpegChoice, Output, Probe};
 
@@ -20,6 +21,40 @@ pub(crate) enum Pass<'a> {
     Single,
     First(&'a Path),
     Second(&'a Path),
+}
+
+/// `path` from the root, as ffmpeg is given every file it reads. It takes
+/// a name as a URL, so in one relative to the working directory what
+/// comes before a colon, as in `2026-11-12T10:30:00.png`, is read as a
+/// protocol, and its programs take one that starts with a dash for an
+/// option. From the root a name starts with neither, on Windows with a
+/// drive's letter, which ffmpeg knows. Links are left as they are, and so
+/// is a path that can't be made absolute, as an empty one.
+fn absolute(path: &Path) -> Cow<'_, Path> {
+    if path.is_absolute() {
+        return Cow::Borrowed(path);
+    }
+    std::path::absolute(path).map_or(Cow::Borrowed(path), Cow::Owned)
+}
+
+/// `plan` with its input as [`absolute`] makes it.
+fn reading_absolute(plan: &Plan) -> Cow<'_, Plan> {
+    match absolute(&plan.input) {
+        Cow::Borrowed(_) => Cow::Borrowed(plan),
+        Cow::Owned(input) => Cow::Owned(Plan { input, ..plan.clone() }),
+    }
+}
+
+/// `result` with its error naming `given` again, where it names the path
+/// [`absolute`] made of it: errors name files as the user did.
+fn naming<T>(result: Result<T>, given: &Path, read: &Path) -> Result<T> {
+    let named = |path: PathBuf| if path == read { given.to_path_buf() } else { path };
+    result.map_err(|err| match err {
+        Error::Probe { path, message } => Error::Probe { path: named(path), message },
+        Error::NoVideo(path) => Error::NoVideo(named(path)),
+        Error::NoFrame { path, at } => Error::NoFrame { path: named(path), at },
+        err => err,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,9 +87,9 @@ impl Backend {
             #[cfg(feature = "linked")]
             FfmpegChoice::Auto | FfmpegChoice::Builtin => Ok(Backend::Linked),
             #[cfg(not(feature = "linked"))]
-            FfmpegChoice::Builtin => Err(crate::Error::FfmpegNotFound(
-                "this tgradish build has no built-in ffmpeg".into(),
-            )),
+            FfmpegChoice::Builtin => {
+                Err(Error::FfmpegNotFound("this tgradish build has no built-in ffmpeg".into()))
+            }
             choice => Ok(Backend::Process(ffmpeg::locate(choice, None)?)),
         }
     }
@@ -74,11 +109,13 @@ impl Backend {
     }
 
     pub fn probe(&self, input: &Path, cancel: &CancelToken) -> Result<Probe> {
-        match self {
-            Backend::Process(ffmpeg) => ffmpeg::probe(ffmpeg, input, cancel),
+        let read = absolute(input);
+        let probe = match self {
+            Backend::Process(ffmpeg) => ffmpeg::probe(ffmpeg, &read, cancel),
             #[cfg(feature = "linked")]
-            Backend::Linked => crate::linked::probe(input, cancel),
-        }
+            Backend::Linked => crate::linked::probe(&read, cancel),
+        };
+        naming(probe, input, &read)
     }
 
     /// Where the frames of a video, `probe` probed, start, in order, in
@@ -90,11 +127,13 @@ impl Backend {
         probe: &Probe,
         cancel: &CancelToken,
     ) -> Result<Vec<f64>> {
+        let read = absolute(input);
         let in_file = match self {
-            Backend::Process(ffmpeg) => ffmpeg::frame_starts(ffmpeg, input, cancel)?,
+            Backend::Process(ffmpeg) => ffmpeg::frame_starts(ffmpeg, &read, cancel),
             #[cfg(feature = "linked")]
-            Backend::Linked => crate::linked::frame_starts(input, cancel)?,
+            Backend::Linked => crate::linked::frame_starts(&read, cancel),
         };
+        let in_file = naming(in_file, input, &read)?;
         let mut starts: Vec<f64> = in_file.into_iter().map(|start| start - probe.start).collect();
         // packets come in decoding order, and decoders drop those before
         // the start
@@ -122,7 +161,8 @@ impl Backend {
         cancel: &CancelToken,
         on_output: &mut dyn FnMut(Output),
     ) -> Result<()> {
-        match self {
+        let read = reading_absolute(plan);
+        let encoded = match self {
             Backend::Process(ffmpeg) => {
                 let pass = match pass {
                     Pass::Single => None,
@@ -130,12 +170,15 @@ impl Backend {
                     Pass::Second(log) => Some((2, log)),
                 };
                 let mut cmd = Command::new(&ffmpeg.ffmpeg);
-                cmd.args(ffmpeg::encode_args(plan, params, pass, output));
+                cmd.args(ffmpeg::encode_args(&read, params, pass, output));
                 ffmpeg::run(cmd, "ffmpeg", cancel, on_output).map(drop)
             }
             #[cfg(feature = "linked")]
-            Backend::Linked => crate::linked::encode(plan, params, pass, output, cancel, on_output),
-        }
+            Backend::Linked => {
+                crate::linked::encode(&read, params, pass, output, cancel, on_output)
+            }
+        };
+        naming(encoded, &plan.input, &read.input)
     }
 
     /// Frames of a video or image for showing it, see [`FramesRequest`].
@@ -164,15 +207,17 @@ impl Backend {
         let scale = (f64::from(request.max_side) / f64::from(longer)).min(1.0);
         let size = |side: u32| ((f64::from(side) * scale).round() as u32).max(1);
         let (width, height) = (size(probe.width), size(probe.height));
+        let read = absolute(path);
         let frames = match self {
             Backend::Process(ffmpeg) => {
-                ffmpeg::frames(ffmpeg, path, probe, (start, fps), (width, height), count, cancel)?
+                ffmpeg::frames(ffmpeg, &read, probe, (start, fps), (width, height), count, cancel)
             }
             #[cfg(feature = "linked")]
             Backend::Linked => {
-                crate::linked::frames(path, probe, (start, fps), (width, height), count, cancel)?
+                crate::linked::frames(&read, probe, (start, fps), (width, height), count, cancel)
             }
         };
+        let frames = naming(frames, path, &read)?;
         Ok(Frames { width, height, start, fps, frames })
     }
 
@@ -219,11 +264,13 @@ impl Backend {
     /// The planned frame at the plan's start, cropped, scaled and padded as
     /// the plan says: straight RGBA of the plan's size, for image stickers.
     pub fn still(&self, plan: &Plan, cancel: &CancelToken) -> Result<Vec<u8>> {
-        match self {
-            Backend::Process(ffmpeg) => ffmpeg::still(ffmpeg, plan, cancel),
+        let read = reading_absolute(plan);
+        let still = match self {
+            Backend::Process(ffmpeg) => ffmpeg::still(ffmpeg, &read, cancel),
             #[cfg(feature = "linked")]
-            Backend::Linked => crate::linked::still(plan, cancel),
-        }
+            Backend::Linked => crate::linked::still(&read, cancel),
+        };
+        naming(still, &plan.input, &read.input)
     }
 
     /// See [`ffmpeg::ssim`].
@@ -235,11 +282,15 @@ impl Backend {
         cancel: &CancelToken,
         on_line: &mut dyn FnMut(String),
     ) -> Result<f64> {
-        match self {
-            Backend::Process(ffmpeg) => ffmpeg::ssim(ffmpeg, plan, candidate, fps, cancel, on_line),
+        let (read, candidate) = (reading_absolute(plan), absolute(candidate));
+        let ssim = match self {
+            Backend::Process(ffmpeg) => {
+                ffmpeg::ssim(ffmpeg, &read, &candidate, fps, cancel, on_line)
+            }
             #[cfg(feature = "linked")]
-            Backend::Linked => crate::linked::ssim(plan, candidate, fps, cancel),
-        }
+            Backend::Linked => crate::linked::ssim(&read, &candidate, fps, cancel),
+        };
+        naming(ssim, &plan.input, &read.input)
     }
 }
 

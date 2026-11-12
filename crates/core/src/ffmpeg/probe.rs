@@ -207,6 +207,7 @@ pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Prob
     let mut cmd = Command::new(&ffmpeg.ffprobe);
     cmd.args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"])
         .args(["-select_streams", "v:0"])
+        .arg("-i")
         .arg(input);
     let mut stdout = String::new();
     let result = run(cmd, "ffprobe", cancel, &mut |output| {
@@ -266,6 +267,7 @@ fn timing(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Option<
     let mut cmd = Command::new(&ffmpeg.ffprobe);
     cmd.args(["-v", "error", "-select_streams", "v:0", "-of", "compact"])
         .args(["-show_entries", "packet=pts_time,duration_time"])
+        .arg("-i")
         .arg(input);
     let (mut packets, mut untimed) = (Vec::new(), false);
     run(cmd, "ffprobe", cancel, &mut |output| {
@@ -297,6 +299,7 @@ pub fn frame_starts(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Resu
     let mut cmd = Command::new(&ffmpeg.ffprobe);
     cmd.args(["-v", "error", "-select_streams", "v:0", "-of", "compact"])
         .args(["-show_entries", "format=start_time:packet=pts_time"])
+        .arg("-i")
         .arg(input);
     let (mut file_start, mut starts, mut untimed) = (0.0, Vec::new(), false);
     run(cmd, "ffprobe", cancel, &mut |output| {
