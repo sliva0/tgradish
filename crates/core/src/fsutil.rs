@@ -18,8 +18,17 @@ pub(crate) fn beside(input: &Path, suffix: &str) -> PathBuf {
 /// so nobody sees a half-written file and hard links to the old file keep
 /// their content. With `replace` an existing file is replaced; otherwise
 /// this fails with [`std::io::ErrorKind::AlreadyExists`], even if the file
-/// appeared while tgradish was working.
+/// appeared while tgradish was working. Where `path` is a link to a file,
+/// that file is the one written, and the link stays.
 pub fn write_file(path: &Path, bytes: &[u8], replace: bool) -> std::io::Result<()> {
+    // renaming over a link would put a file in its place, and leave what
+    // it points to, as a config file kept in a dotfiles folder, behind; a
+    // link to nothing is replaced, as there is nowhere to write through it
+    let linked = match std::fs::symlink_metadata(path) {
+        Ok(found) if found.is_symlink() => std::fs::canonicalize(path).ok(),
+        _ => None,
+    };
+    let path = linked.as_deref().unwrap_or(path);
     let dir = path.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let mut builder = tempfile::Builder::new();
     builder.prefix(".tgradish-");
@@ -83,6 +92,35 @@ mod tests {
         std::fs::write(&plain, b"x").unwrap();
         let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&path), mode(&plain));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writes_what_a_link_points_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let (kept, used) = (dir.path().join("dotfiles"), dir.path().join("config"));
+        std::fs::create_dir(&kept).unwrap();
+        std::fs::create_dir(&used).unwrap();
+        let (file, link) = (kept.join("config.toml"), used.join("config.toml"));
+        std::fs::write(&file, b"old").unwrap();
+        // a link relative to its folder, as stow makes them
+        std::os::unix::fs::symlink("../dotfiles/config.toml", &link).unwrap();
+        write_file(&link, b"new", true).unwrap();
+        assert!(link.symlink_metadata().unwrap().is_symlink());
+        assert_eq!(std::fs::read(&file).unwrap(), b"new");
+        // nor is it replaced unasked
+        let err = write_file(&link, b"newer", false).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&link).unwrap(), b"new");
+        // nothing left beside either
+        for folder in [&kept, &used] {
+            assert_eq!(std::fs::read_dir(folder).unwrap().count(), 1);
+        }
+        // a link to nothing gives way to the file
+        let dangling = used.join("gone.toml");
+        std::os::unix::fs::symlink("nowhere/gone.toml", &dangling).unwrap();
+        write_file(&dangling, b"here", true).unwrap();
+        assert!(dangling.symlink_metadata().unwrap().is_file());
     }
 
     #[cfg(unix)]
