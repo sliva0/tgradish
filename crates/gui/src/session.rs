@@ -58,58 +58,53 @@ fn plain_name(name: &str) -> bool {
     matches!((parts.next(), parts.next()), (Some(Component::Normal(_)), None))
 }
 
-/// A name for the copy of a pasted image, which no other has had.
-fn new_name(item: &Item, image: &Path) -> String {
+/// Copies the pasted image of item `id` next to the session file at
+/// `path`, so the window can open it again, and gives the copy's name,
+/// which no other has had.
+pub fn keep_pasted(path: &Path, id: u64, image: &Path) -> std::io::Result<String> {
     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
     let extension = image.extension().and_then(|e| e.to_str()).unwrap_or("png");
-    format!("{time:x}-{}.{extension}", item.id)
+    let name = format!("{time:x}-{id}.{extension}");
+    let dir = pasted_dir(path);
+    std::fs::create_dir_all(&dir)?;
+    std::fs::copy(image, dir.join(&name))?;
+    Ok(name)
+}
+
+/// Whether the session can hold `item`: JSON can't name files whose paths
+/// aren't Unicode, and a pasted image is only there again if it was
+/// copied.
+fn keeps(item: &Item) -> bool {
+    item.inputs.iter().all(|input| input.to_str().is_some())
+        && (item.pasted.is_none() || item.kept.is_some())
 }
 
 impl Session {
-    /// What `items` are, `selected` the one selected. Copies pasted images
-    /// next to the session file at `path`, once. Files whose paths aren't
-    /// Unicode are left out, as JSON can't hold them.
-    pub fn of(items: &mut [Item], selected: Option<u64>, path: &Path) -> Session {
-        let pasted = pasted_dir(path);
-        let text = |path: &Path| path.to_str().is_some();
-        let saved = items
-            .iter_mut()
-            .filter(|item| item.inputs.iter().all(|input| text(input)))
+    /// What `items` are, `selected` the one selected, without those the
+    /// session can't hold.
+    pub fn of(items: &[Item], selected: Option<u64>) -> Session {
+        let kept: Vec<&Item> = items.iter().filter(|item| keeps(item)).collect();
+        let saved = kept
+            .iter()
             .map(|item| {
-                if item.pasted.is_some()
-                    && item.kept.is_none()
-                    && let Some(image) = item.inputs.first()
-                {
-                    let name = new_name(item, image);
-                    let copied = std::fs::create_dir_all(&pasted)
-                        .and_then(|()| std::fs::copy(image, pasted.join(&name)));
-                    item.kept = copied.is_ok().then_some(name);
-                }
-                let copy = item.pasted.as_ref().and(item.kept.clone());
-                let result = item.made.as_ref().filter(|made| text(&made.job.output)).map(|made| {
-                    SavedResult {
-                        output: made.job.output.clone(),
-                        format: made.format,
-                        choices: made.choices.clone(),
-                    }
-                });
+                let made = item.made.as_ref().filter(|made| made.job.output.to_str().is_some());
                 Saved {
-                    inputs: if copy.is_some() { Vec::new() } else { item.inputs.clone() },
+                    // a pasted image is opened from its copy
+                    inputs: if item.kept.is_some() { Vec::new() } else { item.inputs.clone() },
                     sequence: item.sequence,
-                    pasted: copy,
+                    pasted: item.kept.clone(),
                     format: item.format,
                     format_guessed: item.format_guessed,
                     choices: item.choices.clone(),
-                    result,
+                    result: made.map(|made| SavedResult {
+                        output: made.job.output.clone(),
+                        format: made.format,
+                        choices: made.choices.clone(),
+                    }),
                 }
             })
             .collect();
-        let kept: Vec<u64> = items
-            .iter()
-            .filter(|item| item.inputs.iter().all(|input| text(input)))
-            .map(|item| item.id)
-            .collect();
-        let selected = selected.and_then(|id| kept.iter().position(|&kept| kept == id));
+        let selected = selected.and_then(|id| kept.iter().position(|item| item.id == id));
         Session { version: VERSION, items: saved, selected }
     }
 
@@ -213,9 +208,13 @@ mod tests {
         items.iter().map(|item| std::fs::read(&item.inputs[0]).unwrap()).collect()
     }
 
-    /// Saves `items` at `path` and opens them again, numbered from 1.
+    /// Saves `items` at `path`, pasted images copied there as the window
+    /// copies them, and opens them again, numbered from 1.
     fn again(items: &mut [Item], path: &Path) -> Vec<Item> {
-        let session = Session::of(items, None, path);
+        for item in items.iter_mut().filter(|item| item.kept.is_none()) {
+            item.kept = Some(keep_pasted(path, item.id, &item.inputs[0]).unwrap());
+        }
+        let session = Session::of(items, None);
         session.save(&session.to_json().unwrap(), path).unwrap();
         Session::load(path).unwrap().restore(path, 1).0
     }
@@ -241,8 +240,9 @@ mod tests {
         let path = dir.path().join("session.json");
         let outside = dir.path().join("precious.txt");
         std::fs::write(&outside, b"keep").unwrap();
-        let mut session = Session::of(&mut [pasted(1, b"one")], None, &path);
-        session.items[0].pasted = Some(outside.to_str().unwrap().to_owned());
+        let mut one = pasted(1, b"one");
+        one.kept = Some(outside.to_str().unwrap().to_owned());
+        let session = Session::of(&[one], None);
         let (items, _, gone) = session.restore(&path, 1);
         assert!(items.is_empty() && gone == 1);
         assert_eq!(std::fs::read(&outside).unwrap(), b"keep");
@@ -257,7 +257,7 @@ mod tests {
         let mut item = Item::new(1, vec![PathBuf::from("/a.png")], false, Target::Sticker);
         item.choices.show_layers = Some(vec!["sketch".into()]);
         item.choices.webm.exact_scale = "2".parse().ok();
-        let json = Session::of(&mut [item], None, Path::new("session.json")).to_json().unwrap();
+        let json = Session::of(&[item], None).to_json().unwrap();
         for name in ["format-guessed", "show-layers", "exact-scale"] {
             assert!(json.contains(&format!("\"{name}\":")), "{name} in {json}");
         }
@@ -266,16 +266,18 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn leaves_out_files_json_cannot_name() {
+    fn leaves_out_what_it_cannot_hold() {
         use std::os::unix::ffi::OsStrExt;
         let dir = tempfile::tempdir().unwrap();
         let odd = dir.path().join(std::ffi::OsStr::from_bytes(b"odd\xff.png"));
         let fine = dir.path().join("fine.png");
-        let mut items = [
+        // nor a pasted image that has no copy to open it from
+        let items = [
             Item::new(1, vec![odd], false, Target::Sticker),
             Item::new(2, vec![fine], false, Target::Sticker),
+            pasted(3, b"three"),
         ];
-        let session = Session::of(&mut items, Some(2), &dir.path().join("session.json"));
+        let session = Session::of(&items, Some(2));
         assert!(session.to_json().is_ok());
         assert_eq!((session.items.len(), session.selected), (1, Some(0)));
     }
