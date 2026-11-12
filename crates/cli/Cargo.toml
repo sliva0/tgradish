@@ -3,9 +3,15 @@ name = "tgradish"
 description = "Telegram video, image and animated stickers and emoji from videos, pictures and pixel art, with the ability to bypass the 3 second limit"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
+# cargo packs it into the crate
+readme = "../../README.md"
+keywords = ["telegram", "sticker", "emoji", "webm", "pixel-art"]
+categories = ["command-line-utilities", "multimedia::video", "multimedia::images"]
 
 [features]
 default = ["gui"]
@@ -26,7 +32,8 @@ console.workspace = true
 ctrlc.workspace = true
 indicatif.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+# the order of fields in what `--json` prints
+serde_json = { workspace = true, features = ["preserve_order"] }
 shlex.workspace = true
 thiserror.workspace = true
 toml.workspace = true

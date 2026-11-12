@@ -1,11 +1,22 @@
 [package]
 name = "tgradish-tgs"
 description = "Telegram animated stickers (.tgs) from pixel art animations"
-version.workspace = true
+# a library with its own version, not the application's
+version = "0.1.0"
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["telegram", "sticker", "tgs", "lottie", "pixel-art"]
+categories = ["multimedia::images", "multimedia::encoding", "wasm"]
+
+# with the schemas and the threads; core's features need ffmpeg, so it has
+# no such line
+[package.metadata.docs.rs]
+all-features = true
 
 [dependencies]
 tgradish-frames.workspace = true
@@ -13,7 +24,8 @@ tgradish-frames.workspace = true
 flate2.workspace = true
 schemars = { workspace = true, optional = true }
 serde.workspace = true
-serde_json.workspace = true
+# reads Lottie nested deeper than serde_json's own limit, see check.rs
+serde_json = { workspace = true, features = ["unbounded_depth"] }
 thiserror.workspace = true
 zopfli.workspace = true
 

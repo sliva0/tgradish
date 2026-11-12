@@ -122,10 +122,13 @@ date. ffmpeg stays LGPL: never enable its GPL parts. Paths and commands say
 
 ## Releasing
 
-1. Set the version in `Cargo.toml`: `[workspace.package]` and the
-   workspace's own crates under `[workspace.dependencies]`; in
-   `crates/cli/tgradish.exe.manifest`, with a fourth number, 0; and
-   `pkgver` in each `packaging/aur/*/PKGBUILD`. Then refresh `Cargo.lock`
+1. Set the version in `Cargo.toml`: `[workspace.package]`, and
+   `tgradish-core` and `tgradish-gui` under `[workspace.dependencies]`,
+   which ask for it exactly; in `crates/cli/tgradish.exe.manifest`, with a
+   fourth number, 0; and `pkgver` in each `packaging/aur/*/PKGBUILD`. The
+   two libraries, `tgradish-frames` and `tgradish-tgs`, have versions of
+   their own: raise one in its manifest and under `[workspace.dependencies]`
+   when it changed since it was last published. Then refresh `Cargo.lock`
    with `cargo update --workspace` and commit it, as release builds use
    `--locked`. A test checks the manifest, and the release workflow the
    PKGBUILDs.
@@ -140,7 +143,12 @@ date. ffmpeg stays LGPL: never enable its GPL parts. Paths and commands say
 4. In each `packaging/aur/*` folder, `updpkgsums`, then
    `makepkg --printsrcinfo > .SRCINFO`, and push to the AUR.
 
-None of the crates is on crates.io yet. If the libraries are published,
-it is in the order they depend on each other: `tgradish-frames`,
-`tgradish-tgs`, `tgradish-core`, `tgradish-gui`, then `tgradish`. The
-corpus, tgs-lab and xtask are `publish = false`, and stay that way.
+5. `cargo publish -p` each crate whose version is new, in the order they
+   depend on each other: `tgradish-frames`, `tgradish-tgs`,
+   `tgradish-core`, `tgradish-gui`, then `tgradish`. They ask for each
+   other's exact versions, since `cargo install` doesn't read
+   `Cargo.lock`.
+
+The corpus, tgs-lab and xtask are `publish = false`, and stay that way.
+`rust-version` in `Cargo.toml` is the oldest Rust that builds every crate,
+which CI checks with; `rust-toolchain.toml` builds with the newest.

@@ -513,7 +513,7 @@ dependencies = [
 
 [[package]]
 name = "tgradish-frames"
-version = "2.0.0"
+version = "0.1.0"
 dependencies = [
  "flate2",
  "image",
@@ -522,7 +522,7 @@ dependencies = [
 
 [[package]]
 name = "tgradish-tgs"
-version = "2.0.0"
+version = "0.1.0"
 dependencies = [
  "flate2",
  "serde",

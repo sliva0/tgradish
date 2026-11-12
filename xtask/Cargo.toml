@@ -3,6 +3,7 @@ name = "xtask"
 # release archives are named after it
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 # where releases are, which the notice of ffmpeg's sources says
 repository.workspace = true
