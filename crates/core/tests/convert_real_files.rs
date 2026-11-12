@@ -743,6 +743,36 @@ fn passes_encoder_options() {
     }
 }
 
+/// Names that aren't Unicode, as files kept from older systems have: here
+/// Latin-1, which ffmpeg reads as the bytes it is.
+#[cfg(unix)]
+#[test]
+fn reads_files_whose_names_arent_unicode() {
+    use std::os::unix::ffi::OsStrExt;
+    let Some(backends) = backends() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join(std::ffi::OsStr::from_bytes(b"caf\xe9.gif"));
+    let files = tgradish_corpus::files();
+    let walker = files.iter().find(|file| file.name == "walker_2x.gif").unwrap();
+    if std::fs::write(&input, &walker.bytes).is_err() {
+        eprintln!("skipped: this filesystem only takes Unicode names");
+        return;
+    }
+    for backend in &backends {
+        let name = name(backend);
+        // the result beside it, named after it
+        let request =
+            Request { options: fast(Fit::Off), overwrite: true, ..Request::new(input.clone()) };
+        let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {})
+            .unwrap_or_else(|err| panic!("{name}: {err}"));
+        assert!(outcome.output.to_str().is_none(), "{name}: {:?}", outcome.output);
+        assert!(outcome.issues.is_empty(), "{name}: {:?}", outcome.issues);
+        let preview = backend.preview(&outcome.output, 64, &CancelToken::new());
+        let preview = preview.unwrap_or_else(|err| panic!("{name}: {err}"));
+        assert!(!preview.frames.is_empty(), "{name}");
+    }
+}
+
 /// A FIFO without a writer would block the built-in ffmpeg in the OS,
 /// where cancelling cannot reach.
 #[cfg(all(unix, feature = "linked"))]
