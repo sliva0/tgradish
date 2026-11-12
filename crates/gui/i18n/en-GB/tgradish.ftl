@@ -354,6 +354,7 @@ integer-scale = Integer scale
     .only = Only with "{ scaling-integer }" scaling
 scale-largest = Largest that fits
     .hint = The largest whole multiple that keeps the crop within the result
+    .preset = The preset fixes a scale
 scale-fixed = Fixed
     .hint = This scale; the crop can be at most what it fits into the result
 smaller = Smaller
@@ -396,10 +397,10 @@ part-frames = Frames { $first } to { $last } of { $count }
 speed = Speed
     .hint = How many times as fast as the input the result plays
 # The choices beside a number the window can pick itself, as the speed: what
-# it picks, and how.
+# it picks, and how. Where the preset sets the number, in any group of
+# settings, the choice is the preset's.
 from-preset = Preset's
-    .speed = The speed the preset sets
-    .duration = The duration the preset sets
+    .hint = The value the preset sets
 from-input = Input's
     .speed = As fast as the input plays
     .rate = The input's rate at the speed, at most 60 fps
@@ -439,9 +440,6 @@ frame-at = Frame at
 ## Settings: size and quality of a WebM
 
 size-and-quality = Size and quality
-# A value a preset sets, beside a number the window picks unless asked for one.
-from-preset-value = Preset's
-    .hint = The value the preset sets
 # How the result is made to fit the size limit; .lossless is the hover of
 # the ways a quality can't go with, while lossless encoding is ticked.
 fitting = Getting under the limit
@@ -541,6 +539,7 @@ reading-art = Reading the pixel art
 sprite-sheet = Sprite sheet
     .hint = Frames laid out in a grid of equal cells, row by row
 read-as-sheet = Read as a sprite sheet
+    .preset = The preset reads it as one
 # The sprite sheet's columns × rows.
 sheet-cells = Cells
 sheet-frames = Frames

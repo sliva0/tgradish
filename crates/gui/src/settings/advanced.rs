@@ -29,14 +29,16 @@ pub(super) fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     egui::CollapsingHeader::new(RichText::new(fl!("encoder-options")).strong())
         .id_salt("advanced")
         .show(ui, |ui| {
+            // what the preset sets, which the item's own go over, whole
+            let base = item.choices.webm_base(context.presets, context.config).unwrap_or_default();
             row(ui, "libvpx-vp9", &fl!("vp9-options"), Ok(()), |ui| {
-                encoder_rows(ui, item.id, &mut item.choices.webm);
+                encoder_rows(ui, item.id, &mut item.choices.webm, &base.encoder_options);
             });
 
             let system = fl!("ffmpeg-arguments", "system");
             let allowed = if context.extra_args { Ok(()) } else { Err(system.as_str()) };
             row(ui, &fl!("ffmpeg-arguments"), &fl!("ffmpeg-arguments", "hint"), allowed, |ui| {
-                arguments(ui, item.id, &mut item.choices.webm);
+                arguments(ui, item.id, &mut item.choices.webm, &base.extra_args);
                 if !context.extra_args {
                     note(ui, system.as_str());
                 }
@@ -50,9 +52,9 @@ pub(super) fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
 #[derive(Clone)]
 struct Rows {
     pairs: Vec<(String, String)>,
-    /// The options the item had when the rows were last in step with them.
-    /// Once it has others, as after another preset was taken up, the rows
-    /// are read from them again.
+    /// The options the item had, its own or its preset's, when the rows
+    /// were last in step with them. Once it has others, as after another
+    /// preset was taken up, the rows are read from them again.
     written: Option<BTreeMap<String, String>>,
 }
 
@@ -76,14 +78,21 @@ impl Rows {
 }
 
 /// The libvpx-vp9 options of the item `id`, a row each, with examples to
-/// add by a click. The rows stay where they are while they are typed, and
+/// add by a click: its own, or else its `preset`'s, which the first change
+/// makes its own. The rows stay where they are while they are typed, and
 /// the item takes those that have a name.
-fn encoder_rows(ui: &mut egui::Ui, id: u64, options: &mut Options) {
+fn encoder_rows(
+    ui: &mut egui::Ui,
+    id: u64,
+    options: &mut Options,
+    preset: &Option<BTreeMap<String, String>>,
+) {
     let rows_id = egui::Id::new(("encoder option rows", id));
+    let used = options.encoder_options.as_ref().or(preset.as_ref()).cloned();
     let mut rows = ui
         .data(|data| data.get_temp::<Rows>(rows_id))
-        .filter(|rows| rows.written == options.encoder_options)
-        .unwrap_or_else(|| Rows::of(&options.encoder_options));
+        .filter(|rows| rows.written == used)
+        .unwrap_or_else(|| Rows::of(&used));
     let mut changed = false;
     let mut remove = None;
     for (index, (name, value)) in rows.pairs.iter_mut().enumerate() {
@@ -112,9 +121,15 @@ fn encoder_rows(ui: &mut egui::Ui, id: u64, options: &mut Options) {
         rows.pairs.remove(index);
         changed = true;
     }
-    if ui.small_button(fl!("add-option")).clicked() {
-        rows.pairs.push((String::new(), String::new()));
-    }
+    ui.horizontal(|ui| {
+        if ui.small_button(fl!("add-option")).clicked() {
+            rows.pairs.push((String::new(), String::new()));
+        }
+        if preset.is_some() && options.encoder_options.is_some() && widgets::reset(ui) {
+            options.encoder_options = None;
+            rows = Rows::of(preset);
+        }
+    });
     ui.horizontal_wrapped(|ui| {
         widgets::note(ui, fl!("examples"));
         for (name, value, hint) in encoder_examples() {
@@ -128,32 +143,55 @@ fn encoder_rows(ui: &mut egui::Ui, id: u64, options: &mut Options) {
         }
     });
     if changed {
-        options.encoder_options = rows.named();
-        rows.written = options.encoder_options.clone();
+        // the item's own are all it uses: none at all, where the preset
+        // has some, is said by an empty map
+        let named = rows.named();
+        options.encoder_options = match preset {
+            Some(preset) if named.as_ref() == Some(preset) => None,
+            Some(_) => Some(named.clone().unwrap_or_default()),
+            None => named.clone(),
+        };
+        rows.written = named.or_else(|| options.encoder_options.clone());
     }
     ui.data_mut(|data| data.insert_temp(rows_id, rows));
 }
 
 /// The raw ffmpeg arguments of the item `id`, typed as a shell would take
-/// them. What is typed is kept as it is while the field has the focus, as
+/// them: its own, or else its `preset`'s, which the first change makes its
+/// own. What is typed is kept as it is while the field has the focus, as
 /// the words alone can't say it: a space after the last word, a quote not
 /// closed yet. The item takes the words whenever the text reads as some,
 /// and once the field is left it shows them as the item has them.
-fn arguments(ui: &mut egui::Ui, id: u64, options: &mut Options) {
+fn arguments(ui: &mut egui::Ui, id: u64, options: &mut Options, preset: &Option<Vec<String>>) {
     let typed_id = egui::Id::new(("ffmpeg arguments typed", id));
-    let words = options.extra_args.as_deref().unwrap_or_default();
+    let words = options.extra_args.as_ref().or(preset.as_ref());
+    let words = words.map(Vec::as_slice).unwrap_or_default();
     let joined = || shlex::try_join(words.iter().map(String::as_str)).unwrap_or_default();
     let mut text = ui.data(|data| data.get_temp::<String>(typed_id)).unwrap_or_else(joined);
-    let edit = ui.add(
-        egui::TextEdit::singleline(&mut text)
-            .hint_text(fl!("ffmpeg-arguments", "placeholder"))
-            .desired_width(300.0),
-    );
+    let (edit, reset) = ui
+        .horizontal(|ui| {
+            let edit = ui.add(
+                egui::TextEdit::singleline(&mut text)
+                    .hint_text(fl!("ffmpeg-arguments", "placeholder"))
+                    .desired_width(300.0),
+            );
+            let own = preset.is_some() && options.extra_args.is_some();
+            (edit, own && widgets::reset(ui))
+        })
+        .inner;
     let read = shlex::split(&text);
-    if edit.changed()
+    if reset {
+        options.extra_args = None;
+    } else if edit.changed()
         && let Some(words) = &read
     {
-        options.extra_args = Some(words.clone()).filter(|words| !words.is_empty());
+        // the item's own are all it uses: none at all, where the preset
+        // has some, is said by an empty list
+        options.extra_args = match preset {
+            Some(preset) if words == preset => None,
+            Some(_) => Some(words.clone()),
+            None => Some(words.clone()).filter(|words| !words.is_empty()),
+        };
     }
     if edit.has_focus() {
         if read.is_none() {
@@ -178,6 +216,15 @@ mod tests {
 
     /// The folded options of a new item, open, with the system's ffmpeg.
     fn opened<'a>(presets: &'a Presets, config: &'a Config) -> Harness<'a, Item> {
+        opened_with(presets, config, None)
+    }
+
+    /// [`opened`], the item made with `preset`.
+    fn opened_with<'a>(
+        presets: &'a Presets,
+        config: &'a Config,
+        preset: Option<&str>,
+    ) -> Harness<'a, Item> {
         let context = Context {
             presets,
             config,
@@ -187,7 +234,8 @@ mod tests {
             presets_dir: None,
             in_frames: false,
         };
-        let item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
+        let mut item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
+        item.choices.preset = preset.map(str::to_owned);
         let mut harness =
             Harness::new_ui_state(move |ui, item: &mut Item| advanced(ui, item, &context), item);
         widgets::test_fonts(&harness);
@@ -249,6 +297,45 @@ mod tests {
         harness.run_steps(2);
         assert_eq!(fields(&harness), ["qmax-alpha", "40", "", "", ""]);
         assert_eq!(options(&harness), [pair("qmax-alpha", "40")]);
+    }
+
+    #[test]
+    fn shows_the_presets_options_and_adds_to_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let preset = "[webm]\nextra-args = ['-qmin', '4']\n\
+                      [webm.encoder-options]\naq-mode = '2'\n";
+        std::fs::write(dir.path().join("tuned.toml"), preset).unwrap();
+        let (presets, config) = (Presets::load(Some(dir.path())).unwrap(), Config::default());
+        let mut harness = opened_with(&presets, &config, Some("tuned"));
+        assert_eq!(fields(&harness), ["aq-mode", "2", "-qmin 4"]);
+        let own = |harness: &Harness<Item>| harness.state().choices.webm.clone();
+        assert_eq!((own(&harness).encoder_options, own(&harness).extra_args), (None, None));
+        // one more is the item's with the preset's, not instead of it
+        harness.get_by_label("qmax=50").click();
+        harness.run_steps(2);
+        let both = [("aq-mode", "2"), ("qmax", "50")];
+        let both = both.map(|(name, value)| (name.to_owned(), value.to_owned()));
+        assert_eq!(own(&harness).encoder_options, Some(both.into_iter().collect()));
+        // all removed, the item uses none, over the preset's
+        for _ in 0..2 {
+            harness.query_all_by_label("✖").next().unwrap().click();
+            harness.run_steps(2);
+        }
+        assert_eq!(own(&harness).encoder_options, Some(BTreeMap::new()));
+        assert_eq!(fields(&harness), ["-qmin 4"]);
+        // and back to the preset's
+        harness.get_by_label("⟲").click();
+        harness.run_steps(2);
+        assert_eq!(own(&harness).encoder_options, None);
+        assert_eq!(fields(&harness), ["aq-mode", "2", "-qmin 4"]);
+        // arguments typed after the preset's are the item's, with them
+        harness.query_all_by_role(Role::TextInput).last().unwrap().click();
+        harness.run_steps(2);
+        harness.key_press(egui::Key::End);
+        harness.run_steps(2);
+        type_keys(&mut harness, " -an");
+        let words = ["-qmin", "4", "-an"].map(String::from);
+        assert_eq!(own(&harness).extra_args, Some(words.to_vec()));
     }
 
     #[test]

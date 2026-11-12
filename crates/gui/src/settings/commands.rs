@@ -105,8 +105,12 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
     // and one it can't be told to set aside: then everything the window
     // uses goes on the command line, over a built-in preset that sets
     // nothing more than it
-    let whole =
+    let unscaled =
         item.format != Format::Tgs && base.exact_scale.is_some() && effective.exact_scale.is_none();
+    // nor can it be told of encoder options all removed, as no flag says
+    // none over the preset's
+    let has = |options: &Options| options.encoder_options.as_ref().is_some_and(|o| !o.is_empty());
+    let whole = unscaled || (item.format == Format::Webm && has(&base) && !has(&effective));
     // image stickers take their picture settings from the preset too;
     // named unless it is the format's own, as the window's settings may
     // choose another than the config file
