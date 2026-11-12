@@ -301,6 +301,21 @@ fn calibrate(
 /// Makes a sticker of `animation`, reporting `progress`. `cancelled` is
 /// asked between steps, and while encoding between colours; when it says
 /// yes, this stops with [`Error::Cancelled`](crate::Error::Cancelled).
+///
+/// With the `threads` feature, fitting tries each round's candidates in
+/// threads of their own, and zopfli packs in one, which has two effects
+/// past this call:
+///
+/// - zopfli can't be stopped, so a stop while it packs returns at once
+///   and leaves its thread to finish alone, at work for as long as packing
+///   the sticker takes;
+/// - at most two such threads run in the whole process, counting those
+///   left behind, so that stopping and starting again doesn't pile them
+///   up. However many stickers are made at once, two are packed at a
+///   time, and after two stops the next waits for one to end, still
+///   answering to `cancelled`.
+///
+/// On wasm, which has no threads to start, the feature does nothing.
 pub fn make(
     animation: &Animation,
     options: &Options,
@@ -430,16 +445,20 @@ pub fn make(
     }
 }
 
+/// Whether work is given to threads: with the `threads` feature, but on
+/// wasm, where starting one panics. Features are the same for every target
+/// of a build, so one that also builds for the web can have it on there.
+const THREADS: bool = cfg!(all(feature = "threads", not(target_family = "wasm")));
+
 /// `json` packed by zopfli, given up on when `cancelled` says so. zopfli
-/// can't be stopped, so with the `threads` feature it packs in a thread of
-/// its own, left to finish alone; at most `PACKING` of them run at once,
-/// so stopping and starting again doesn't pile them up.
+/// can't be stopped, so with [`THREADS`] it packs in a thread of its own,
+/// left to finish alone; at most [`PACKING`] of them run at once in the
+/// whole process, so stopping and starting again doesn't pile them up.
 fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
     let check = || if cancelled() { Err(crate::Error::Cancelled) } else { Ok(()) };
     check()?;
     let iterations = zopfli_iterations(effort);
-    #[cfg(feature = "threads")]
-    let tgs = {
+    let tgs = if THREADS {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::mpsc::{RecvTimeoutError, channel};
         use std::time::Duration;
@@ -480,29 +499,25 @@ fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
                 Err(RecvTimeoutError::Disconnected) => panic!("zopfli panicked"),
             }
         }
+    } else {
+        file::pack(json.as_bytes(), iterations)
     };
-    #[cfg(not(feature = "threads"))]
-    let tgs = file::pack(json.as_bytes(), iterations);
     check()?;
     Ok(tgs)
 }
 
-/// How many threads zopfli packs in at once, at most: one at work, and one
-/// left to finish after a stop.
-#[cfg(feature = "threads")]
+/// How many threads zopfli packs in at once, at most, in the whole process:
+/// one at work, and one left to finish after a stop.
 const PACKING: usize = 2;
 
-/// `f` of each item, in threads of their own with the `threads` feature.
+/// `f` of each item, in threads of their own with [`THREADS`].
 fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
-    #[cfg(feature = "threads")]
-    {
+    if THREADS {
         std::thread::scope(|scope| {
             let handles: Vec<_> = items.iter().map(|item| scope.spawn(|| f(item))).collect();
             handles.into_iter().map(|handle| handle.join().expect("no panics")).collect()
         })
-    }
-    #[cfg(not(feature = "threads"))]
-    {
+    } else {
         items.iter().map(f).collect()
     }
 }
