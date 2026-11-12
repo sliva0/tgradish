@@ -13,6 +13,8 @@ pub struct Sheet {
     /// How many cells hold frames. By default all of them, except fully
     /// transparent cells at the end.
     pub frames: Option<u32>,
+    /// How long each frame shows; zero stands for
+    /// [`DEFAULT_FRAME_DURATION`](crate::DEFAULT_FRAME_DURATION).
     pub frame_duration: Duration,
 }
 
@@ -80,7 +82,9 @@ pub fn split_sheet(image: &Animation, sheet: &Sheet, limits: &Limits) -> Result<
 }
 
 /// Joins images of one size into an animation. Still images are shown for
-/// `frame_duration`; animated ones keep their own frames and timing.
+/// `frame_duration`, zero standing for
+/// [`DEFAULT_FRAME_DURATION`](crate::DEFAULT_FRAME_DURATION); animated ones
+/// keep their own frames and timing.
 pub fn sequence<'a>(
     images: impl IntoIterator<Item = &'a [u8]>,
     frame_duration: Duration,
@@ -109,4 +113,32 @@ pub fn sequence<'a>(
     }
     let (width, height) = size.ok_or(Error::Empty)?;
     Animation::new(width, height, frames)
+}
+
+#[cfg(test)]
+mod tests {
+    use tgradish_corpus::{Canvas, encode};
+
+    use super::*;
+    use crate::DEFAULT_FRAME_DURATION;
+
+    #[test]
+    fn shows_frames_of_no_time_for_the_default() {
+        let mut canvas = Canvas::new(2, 1);
+        canvas.rect(0, 0, 2, 1, [200, 40, 40, 255]);
+        let png = encode::png(&canvas);
+        let limits = Limits::default();
+        let durations = |animation: Animation| -> Vec<Duration> {
+            animation.frames().iter().map(|frame| frame.duration).collect()
+        };
+
+        let sheet = |frame_duration| Sheet { columns: 2, rows: 1, frames: None, frame_duration };
+        let split = sprite_sheet(&png, &sheet(Duration::ZERO), &limits).unwrap();
+        assert_eq!(durations(split), [DEFAULT_FRAME_DURATION; 2]);
+        let split = sprite_sheet(&png, &sheet(Duration::from_millis(1)), &limits).unwrap();
+        assert_eq!(durations(split), [Duration::from_millis(1); 2]);
+
+        let joined = sequence([&png[..], &png[..]], Duration::ZERO, &limits).unwrap();
+        assert_eq!(durations(joined), [DEFAULT_FRAME_DURATION; 2]);
+    }
 }

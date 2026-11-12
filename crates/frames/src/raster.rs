@@ -98,10 +98,8 @@ fn collect(
     if out.len() == 1 {
         out[0].duration = DEFAULT_FRAME_DURATION;
     }
-    // Files whose frames all say 0 rely on the viewer's default speed.
-    if out.iter().all(|frame| frame.duration.is_zero()) {
-        out.iter_mut().for_each(|frame| frame.duration = DEFAULT_FRAME_DURATION);
-    }
+    // A frame that says 0 relies on the viewer's default speed, which
+    // `Animation::new` gives it, whether all of them do or only some.
     Animation::new(width, height, out).map(Some)
 }
 
@@ -125,4 +123,71 @@ fn still(mut decoder: impl ImageDecoder, format: Format, limits: &Limits) -> Res
         height,
         vec![Frame { rgba: image.into_raw(), duration: DEFAULT_FRAME_DURATION }],
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use tgradish_corpus::{Canvas, Sprite, encode};
+
+    use super::*;
+    use crate::DecodeOptions;
+
+    /// A sprite of 2x2 frames, each of another colour, shown for `delays`
+    /// milliseconds.
+    fn sprite(delays: &[u32]) -> Sprite {
+        let frames = (0..delays.len() as u8).map(|index| {
+            let mut canvas = Canvas::new(2, 2);
+            canvas.rect(0, 0, 2, 2, [index * 60, 200, 40, 255]);
+            canvas
+        });
+        Sprite {
+            name: "test",
+            about: "",
+            frames: frames.collect(),
+            delays: delays.to_vec(),
+            scale: 1,
+            likely_scale: None,
+        }
+    }
+
+    /// How long each frame of a decoded file shows, in milliseconds.
+    fn delays(bytes: &[u8]) -> Vec<u128> {
+        let animation = crate::decode(bytes, &DecodeOptions::default()).unwrap();
+        animation.frames().iter().map(|frame| frame.duration.as_millis()).collect()
+    }
+
+    #[test]
+    fn shows_gif_frames_as_browsers_do() {
+        let ms = Duration::from_millis;
+        assert_eq!(gif_delay(ms(0)), DEFAULT_FRAME_DURATION);
+        assert_eq!(gif_delay(ms(10)), DEFAULT_FRAME_DURATION);
+        assert_eq!(gif_delay(ms(20)), ms(20));
+        // in a file, where delays are in centiseconds
+        assert_eq!(delays(&encode::gif(&sprite(&[0, 10, 20, 0, 70]))), [100, 100, 20, 100, 70]);
+        assert_eq!(delays(&encode::gif(&sprite(&[0, 0, 0]))), [100, 100, 100]);
+    }
+
+    #[test]
+    fn gives_frames_that_say_0_the_default_duration() {
+        // APNG and WebP keep 10 ms as it is, and 0 is the default whether
+        // every frame says it or only some
+        type Encode = fn(&Sprite) -> Vec<u8>;
+        for (format, encode) in [("APNG", encode::apng as Encode), ("WebP", encode::webp)] {
+            assert_eq!(delays(&encode(&sprite(&[0, 0, 0]))), [100, 100, 100], "{format}");
+            assert_eq!(delays(&encode(&sprite(&[0, 10, 40, 0]))), [100, 10, 40, 100], "{format}");
+            assert_eq!(delays(&encode(&sprite(&[30, 0]))), [30, 100], "{format}");
+        }
+    }
+
+    #[test]
+    fn shows_a_single_frame_as_a_still_image() {
+        // whatever delay its one frame has
+        for delay in [0, 20, 5000] {
+            let one = sprite(&[delay]);
+            assert_eq!(delays(&encode::gif(&one)), [100], "GIF of {delay} ms");
+            assert_eq!(delays(&encode::apng(&one)), [100], "APNG of {delay} ms");
+            assert_eq!(delays(&encode::webp(&one)), [100], "WebP of {delay} ms");
+            assert_eq!(delays(&encode::png(&one.frames[0])), [100]);
+        }
+    }
 }

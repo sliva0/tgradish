@@ -408,6 +408,8 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
     let mut timed: Vec<(Vec<u32>, u32)> = Vec::new();
     let mut merged_frames = 0;
     for (frame, (shown, ticks)) in animation.frames().iter().zip(shown.into_iter().zip(ticks)) {
+        // outside the part that is used: an `Animation` has no frames that
+        // show for no time
         if shown == 0 {
             continue;
         }
@@ -974,6 +976,20 @@ mod tests {
             let wrong = Options { tempo: Some(tempo), ..Options::default() };
             assert!(matches!(normalise(&input, &wrong), Err(Error::Tempo(_))), "{tempo}");
         }
+    }
+
+    #[test]
+    fn shows_frames_that_say_no_time() {
+        // an animation shows them for the default 100 ms, so none goes
+        // missing without being counted as dropped
+        let input = flat(&[(RED, ms(0)), (GREEN, ms(50)), (BLUE, ms(0))]);
+        let (anim, report) = normalise(&input, &Options::default()).unwrap();
+        let ticks: Vec<u32> = anim.frames().iter().map(|frame| frame.ticks).collect();
+        assert_eq!((ticks, report.dropped_frames, report.input_length), (vec![6, 3, 6], 0, 0.25));
+        // nor is one where every frame does past its end at its start
+        let input = flat(&[(RED, ms(0)), (BLUE, ms(0))]);
+        let (anim, report) = normalise(&input, &Options::default()).unwrap();
+        assert_eq!((anim.frames().len(), report.ticks), (2, 12));
     }
 
     #[test]
