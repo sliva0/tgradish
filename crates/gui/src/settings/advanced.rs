@@ -27,8 +27,8 @@ pub(super) fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     egui::CollapsingHeader::new(RichText::new(fl!("encoder-options")).strong())
         .id_salt("advanced")
         .show(ui, |ui| {
-            let options: &mut Options = &mut item.choices.webm;
             {
+                let options: &mut Options = &mut item.choices.webm;
                 let hint = fl!("vp9-options");
                 row(ui, "libvpx-vp9", &hint, Ok(()), |ui| {
                     let mut pairs: Vec<(String, String)> =
@@ -91,24 +91,118 @@ pub(super) fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             let system = fl!("ffmpeg-arguments", "system");
             let allowed = if context.extra_args { Ok(()) } else { Err(system.as_str()) };
             row(ui, &fl!("ffmpeg-arguments"), &fl!("ffmpeg-arguments", "hint"), allowed, |ui| {
-                let mut text = options
-                    .extra_args
-                    .as_ref()
-                    .map(|words| {
-                        shlex::try_join(words.iter().map(String::as_str)).unwrap_or_default()
-                    })
-                    .unwrap_or_default();
-                let edit = ui.add(
-                    egui::TextEdit::singleline(&mut text)
-                        .hint_text(fl!("ffmpeg-arguments", "placeholder"))
-                        .desired_width(300.0),
-                );
-                if edit.changed() {
-                    options.extra_args = shlex::split(&text).filter(|words| !words.is_empty());
-                }
+                arguments(ui, item.id, &mut item.choices.webm);
                 if !context.extra_args {
                     note(ui, system.as_str());
                 }
             });
         });
+}
+
+/// The raw ffmpeg arguments of the item `id`, typed as a shell would take
+/// them. What is typed is kept as it is while the field has the focus, as
+/// the words alone can't say it: a space after the last word, a quote not
+/// closed yet. The item takes the words whenever the text reads as some,
+/// and once the field is left it shows them as the item has them.
+fn arguments(ui: &mut egui::Ui, id: u64, options: &mut Options) {
+    let typed_id = egui::Id::new(("ffmpeg arguments typed", id));
+    let words = options.extra_args.as_deref().unwrap_or_default();
+    let joined = || shlex::try_join(words.iter().map(String::as_str)).unwrap_or_default();
+    let mut text = ui.data(|data| data.get_temp::<String>(typed_id)).unwrap_or_else(joined);
+    let edit = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .hint_text(fl!("ffmpeg-arguments", "placeholder"))
+            .desired_width(300.0),
+    );
+    let read = shlex::split(&text);
+    if edit.changed()
+        && let Some(words) = &read
+    {
+        options.extra_args = Some(words.clone()).filter(|words| !words.is_empty());
+    }
+    if edit.has_focus() {
+        if read.is_none() {
+            note(ui, fl!("ffmpeg-arguments", "unfinished"));
+        }
+        ui.data_mut(|data| data.insert_temp(typed_id, text));
+    } else {
+        ui.data_mut(|data| data.remove::<String>(typed_id));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+    use tgradish_core::config::Config;
+    use tgradish_core::presets::Presets;
+    use tgradish_core::telegram::Target;
+
+    use super::*;
+
+    /// The folded options of a new item, open, with the system's ffmpeg.
+    fn opened<'a>(presets: &'a Presets, config: &'a Config) -> Harness<'a, Item> {
+        let context = Context {
+            presets,
+            config,
+            extra_args: true,
+            output: None,
+            config_path: None,
+            presets_dir: None,
+            in_frames: false,
+        };
+        let item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
+        let mut harness =
+            Harness::new_ui_state(move |ui, item: &mut Item| advanced(ui, item, &context), item);
+        widgets::test_fonts(&harness);
+        harness.run_steps(2);
+        harness.get_by_label(&fl!("encoder-options")).click();
+        harness.run_steps(8);
+        harness
+    }
+
+    /// Types `text` a key at a time, the window drawn after each.
+    fn type_keys(harness: &mut Harness<Item>, text: &str) {
+        for key in text.chars() {
+            harness.event(egui::Event::Text(key.to_string()));
+            harness.step();
+        }
+    }
+
+    /// What the text fields show, in order.
+    fn fields(harness: &Harness<Item>) -> Vec<String> {
+        harness
+            .query_all_by_role(Role::TextInput)
+            .map(|field| field.value().unwrap_or_default())
+            .collect()
+    }
+
+    #[test]
+    fn takes_ffmpeg_arguments_as_they_are_typed() {
+        let (presets, config) = (Presets::builtin(), Config::default());
+        let mut harness = opened(&presets, &config);
+        harness.query_all_by_role(Role::TextInput).last().unwrap().click();
+        harness.run_steps(2);
+        let words = |harness: &Harness<Item>| harness.state().choices.webm.extra_args.clone();
+        // the space between two words stays while the second is typed
+        type_keys(&mut harness, "-qmin 4");
+        assert_eq!(words(&harness), Some(vec!["-qmin".into(), "4".into()]));
+        assert_eq!(fields(&harness), ["-qmin 4"]);
+        // a quote left open: what is typed stays, and the words as they
+        // last read
+        type_keys(&mut harness, " -metadata title=\"my");
+        assert_eq!(fields(&harness), ["-qmin 4 -metadata title=\"my"]);
+        assert_eq!(words(&harness).map(|words| words.len()), Some(4));
+        harness.get_by_label(&fl!("ffmpeg-arguments", "unfinished"));
+        type_keys(&mut harness, " sticker\"");
+        let read = ["-qmin", "4", "-metadata", "title=my sticker"].map(String::from);
+        assert_eq!(words(&harness), Some(read.to_vec()));
+        assert!(harness.query_by_label(&fl!("ffmpeg-arguments", "unfinished")).is_none());
+        // left, the field shows the words as the item has them
+        harness.key_press(egui::Key::Tab);
+        harness.run_steps(3);
+        assert_eq!(fields(&harness), ["-qmin 4 -metadata 'title=my sticker'"]);
+        assert_eq!(words(&harness), Some(read.to_vec()));
+    }
 }
