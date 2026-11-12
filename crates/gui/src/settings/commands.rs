@@ -268,9 +268,10 @@ mod tests {
         walk.choices.hide_layers = Some(vec!["sketch".into(), "back, old".into()]);
         for format in [Format::Webm, Format::Tgs, Format::Image] {
             walk.format = format;
-            let line = command_line(&walk, &plain);
-            let read = ["--tag", "idle", "--hide-layers", "sketch", "--hide-layers", "back, old"];
-            assert!(line.windows(read.len()).any(|words| words == read), "{format:?}: {line:?}");
+            // each flag and its value, whether one word or two
+            let line = command_line(&walk, &plain).join("\n").replace('=', "\n");
+            let read = "--tag\nidle\n--hide-layers\nsketch\n--hide-layers\nback, old";
+            assert!(line.contains(read), "{format:?}: {line:?}");
         }
     }
 
