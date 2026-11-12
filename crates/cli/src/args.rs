@@ -679,9 +679,10 @@ mod tests {
         let webm = Options {
             target: Some(Target::Emoji),
             tag: Some("idle".into()),
-            // names with commas and spaces, one flag each
+            // names with commas and spaces, one flag each, and ones that
+            // start as flags do
             show_layers: Some(vec!["Shadow, soft".into(), "Hat".into()]),
-            hide_layers: Some(vec!["Back ground".into()]),
+            hide_layers: Some(vec!["Back ground".into(), "--old".into()]),
             crop: Some(Crop { x: 1, y: 2, width: 30, height: 40 }),
             resize: Some(options::Resize::Pad),
             scaling: Some(options::Scaling::PixelPerfect),
@@ -699,7 +700,7 @@ mod tests {
             lossless: Some(false),
             spoof: Some(options::Spoof::Never),
             fake_duration: Some(0.5),
-            title: Some("a pig's \"sticker\"".into()),
+            title: Some("-_- a pig's \"sticker\"".into()),
             watermark: Some(false),
             encoder_options: Some([("tune-content".into(), "screen".into())].into()),
             extra_args: Some(vec!["-x".into(), "a b".into()]),
@@ -718,13 +719,13 @@ mod tests {
             resize: Some(options::Resize::Stretch),
             keep_canvas: Some(true),
             pixel_scale: Some(2),
-            tag: Some("run".into()),
+            tag: Some("-run".into()),
             show_layers: Some(vec!["Outline".into()]),
             hide_layers: Some(vec!["Sketch".into(), "Guides, old".into()]),
             sheet: Some("4x2".into()),
             sheet_frames: Some(7),
             fps: Some(12.5),
-            title: Some("walk".into()),
+            title: Some("-_-".into()),
             watermark: Some(true),
         };
         assert_eq!(parsed(options::flags(&tgs)).to_tgs_options(), tgs);

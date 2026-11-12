@@ -451,7 +451,10 @@ impl Options {
 }
 
 /// Command line flags that set the values `options` sets: the flag of each
-/// field has its name, as `tgradish convert` has them.
+/// field has its name, as `tgradish convert` has them. A flag and its
+/// value are one word, `--name=value`: in a word of its own, a value that
+/// starts with a dash, as a title or a layer's name can, would be taken
+/// for another flag.
 pub fn flags(options: &impl Serialize) -> Vec<String> {
     let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(options) else {
         return Vec::new();
@@ -470,34 +473,33 @@ pub fn flags(options: &impl Serialize) -> Vec<String> {
     let mut flags = Vec::new();
     for (name, value) in fields {
         let flag = format!("--{name}");
+        let set = |value: &dyn std::fmt::Display| format!("{flag}={value}");
         use serde_json::Value;
         match (name.as_str(), value) {
             ("crop", value) => {
                 if let Ok(crop) = serde_json::from_value::<Crop>(value) {
-                    flags.extend([flag, crop.to_string()]);
+                    flags.push(set(&crop));
                 }
             }
             ("fit-range", value) => {
                 if let Ok(range) = serde_json::from_value::<Range>(value) {
-                    flags.extend([flag, range.to_string()]);
+                    flags.push(set(&range));
                 }
             }
             ("encoder-options", Value::Object(pairs)) => {
                 for (key, value) in pairs {
                     let value = value.as_str().map_or_else(|| value.to_string(), str::to_owned);
-                    flags.extend([flag.clone(), format!("{key}={value}")]);
+                    flags.push(set(&format_args!("{key}={value}")));
                 }
             }
             // one each, as names can have commas
             ("show-layers" | "hide-layers", Value::Array(names)) => {
-                for name in names.iter().filter_map(Value::as_str) {
-                    flags.extend([flag.clone(), name.to_owned()]);
-                }
+                flags.extend(names.iter().filter_map(Value::as_str).map(|name| set(&name)));
             }
             ("extra-args", Value::Array(words)) => {
                 let words: Vec<&str> = words.iter().filter_map(Value::as_str).collect();
                 if let Ok(joined) = shlex::try_join(words) {
-                    flags.push(format!("{flag}={joined}"));
+                    flags.push(set(&joined));
                 }
             }
             (_, Value::Array(items)) => {
@@ -505,12 +507,12 @@ pub fn flags(options: &impl Serialize) -> Vec<String> {
                     .iter()
                     .map(|item| item.as_str().map_or_else(|| item.to_string(), str::to_owned))
                     .collect();
-                flags.extend([flag, items.join(",")]);
+                flags.push(set(&items.join(",")));
             }
             (_, Value::Bool(true)) => flags.push(flag),
-            (_, Value::Bool(false)) => flags.push(format!("{flag}=false")),
-            (_, Value::String(text)) => flags.extend([flag, text]),
-            (_, value @ Value::Number(_)) => flags.extend([flag, number(&value)]),
+            (_, Value::Bool(false)) => flags.push(set(&false)),
+            (_, Value::String(text)) => flags.push(set(&text)),
+            (_, value @ Value::Number(_)) => flags.push(set(&number(&value))),
             _ => {}
         }
     }
@@ -547,13 +549,32 @@ mod tests {
             ..Default::default()
         };
         let flags = flags(&options);
-        let value = |flag: &str| {
-            let at = flags.iter().position(|f| f == flag).unwrap();
-            flags[at + 1].clone()
+        for flag in ["--length=0.08", "--start=0.100001", "--crf=30"] {
+            assert!(flags.iter().any(|written| written == flag), "{flag}: {flags:?}");
+        }
+    }
+
+    #[test]
+    fn flags_carry_their_values() {
+        // a value in a word of its own could be taken for a flag
+        let options = Options {
+            title: Some("-_-".into()),
+            show_layers: Some(vec!["--help".into(), "a, b".into()]),
+            lossless: Some(true),
+            watermark: Some(false),
+            encoder_options: Some([("aq-mode".to_owned(), "2".to_owned())].into()),
+            ..Default::default()
         };
         assert_eq!(
-            (value("--length"), value("--start"), value("--crf")),
-            ("0.08".to_owned(), "0.100001".to_owned(), "30".to_owned())
+            flags(&options),
+            [
+                "--show-layers=--help",
+                "--show-layers=a, b",
+                "--lossless",
+                "--title=-_-",
+                "--watermark=false",
+                "--encoder-options=aq-mode=2",
+            ]
         );
     }
 
