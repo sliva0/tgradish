@@ -367,9 +367,10 @@ jobs:
           # Windows paths and an output that already exists
           "$bin" convert still.webm -o out.webm --preset fast && exit 1 || true
 
+  # drafts the release, on a tag. Every other run does all of it but that
+  # last step, so a tag isn't the first time the steps before it run
   publish:
     needs: [build, test-linux, test-musl, test-packages, test-windows]
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -388,7 +389,12 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      # fails without the archive of ffmpeg's sources
+      - name: List what the release holds
+        run: ls -l artifacts target/ffmpeg/ffmpeg-*-sources.tar
+
       - name: Draft the release
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
