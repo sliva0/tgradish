@@ -7,10 +7,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tgradish_core::options::{Crop, Options};
 use tgradish_core::presets::Format;
-use tgradish_core::telegram::Target;
-use tgradish_core::tgs::TgsOptions;
 
 use crate::item::{Choices, Item, Made};
 use crate::jobs::{Done, Job, Status};
@@ -19,6 +16,7 @@ use crate::jobs::{Done, Job, Status};
 const VERSION: u32 = 1;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct Session {
     version: u32,
     items: Vec<Saved>,
@@ -26,61 +24,8 @@ pub struct Session {
     selected: Option<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct SavedChoices {
-    preset: Option<String>,
-    target: Target,
-    #[serde(default)]
-    tag: Option<String>,
-    #[serde(default)]
-    show_layers: Option<Vec<String>>,
-    #[serde(default)]
-    hide_layers: Option<Vec<String>>,
-    crop: Option<Crop>,
-    start: Option<f64>,
-    length: Option<f64>,
-    #[serde(default)]
-    frame: Option<f64>,
-    webm: Options,
-    tgs: TgsOptions,
-}
-
-impl SavedChoices {
-    fn of(choices: &Choices) -> SavedChoices {
-        SavedChoices {
-            preset: choices.preset.clone(),
-            target: choices.target,
-            tag: choices.tag.clone(),
-            show_layers: choices.show_layers.clone(),
-            hide_layers: choices.hide_layers.clone(),
-            crop: choices.crop,
-            start: choices.start,
-            length: choices.length,
-            frame: choices.frame,
-            webm: choices.webm.clone(),
-            tgs: choices.tgs.clone(),
-        }
-    }
-
-    fn choices(mut self) -> Choices {
-        Choices {
-            preset: self.preset,
-            target: self.target,
-            // kept with the .tgs options before every format read tags
-            tag: self.tag.or_else(|| self.tgs.tag.take()),
-            show_layers: self.show_layers,
-            hide_layers: self.hide_layers,
-            crop: self.crop,
-            start: self.start,
-            length: self.length,
-            frame: self.frame,
-            webm: self.webm,
-            tgs: self.tgs,
-        }
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 struct Saved {
     inputs: Vec<PathBuf>,
     sequence: bool,
@@ -88,16 +33,17 @@ struct Saved {
     pasted: Option<String>,
     format: Format,
     format_guessed: bool,
-    choices: SavedChoices,
+    choices: Choices,
     /// The last result, and what it was made with.
     result: Option<SavedResult>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 struct SavedResult {
     output: PathBuf,
     format: Format,
-    choices: SavedChoices,
+    choices: Choices,
 }
 
 /// Where pasted images are kept, next to the session file.
@@ -144,7 +90,7 @@ impl Session {
                     SavedResult {
                         output: made.job.output.clone(),
                         format: made.format,
-                        choices: SavedChoices::of(&made.choices),
+                        choices: made.choices.clone(),
                     }
                 });
                 Saved {
@@ -153,7 +99,7 @@ impl Session {
                     pasted: copy,
                     format: item.format,
                     format_guessed: item.format_guessed,
-                    choices: SavedChoices::of(&item.choices),
+                    choices: item.choices.clone(),
                     result,
                 }
             })
@@ -238,18 +184,20 @@ fn restore_item(saved: Saved, path: &Path, id: u64) -> Option<Item> {
     item.kept = saved.pasted;
     item.format = saved.format;
     item.format_guessed = saved.format_guessed;
-    item.choices = saved.choices.choices();
+    item.choices = saved.choices;
     item.made = saved.result.and_then(|result| {
         let done = Done::of_file(&result.output, result.format, result.choices.target)?;
         let mut job = Job::waiting(result.output);
         job.status = Status::Done(Box::new(done));
-        Some(Made { job, format: result.format, choices: result.choices.choices() })
+        Some(Made { job, format: result.format, choices: result.choices })
     });
     Some(item)
 }
 
 #[cfg(test)]
 mod tests {
+    use tgradish_core::telegram::Target;
+
     use super::*;
 
     fn pasted(id: u64, bytes: &[u8]) -> Item {
@@ -302,6 +250,18 @@ mod tests {
             assert!(!plain_name(name), "{name}");
         }
         assert!(plain_name("19a0-3.png"));
+    }
+
+    #[test]
+    fn names_everything_as_the_options_within_are_named() {
+        let mut item = Item::new(1, vec![PathBuf::from("/a.png")], false, Target::Sticker);
+        item.choices.show_layers = Some(vec!["sketch".into()]);
+        item.choices.webm.exact_scale = "2".parse().ok();
+        let json = Session::of(&mut [item], None, Path::new("session.json")).to_json().unwrap();
+        for name in ["format-guessed", "show-layers", "exact-scale"] {
+            assert!(json.contains(&format!("\"{name}\":")), "{name} in {json}");
+        }
+        assert!(!json.contains('_'), "{json}");
     }
 
     #[cfg(unix)]
