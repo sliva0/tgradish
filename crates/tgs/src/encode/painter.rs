@@ -103,6 +103,13 @@ const fn min(a: usize, b: usize) -> usize {
 
 /// Per layer: the stricter of tlottie's and Telegram's limits.
 const MAX_SHAPES: usize = min(TLOTTIE.max_shapes_per_layer, telegram::MAX_SHAPES_PER_LAYER);
+// A layer of no more shapes is within tlottie's limits on fills and on the
+// rectangles they paint as well, each of which is a shape, so `stack`
+// counts shapes alone.
+const _: () = assert!(
+    MAX_SHAPES <= TLOTTIE.max_paints_per_layer
+        && MAX_SHAPES <= TLOTTIE.max_paint_source_items_per_layer
+);
 /// Rectangles of one colour in one frame: a layer holding only them adds
 /// their group, its fill and its transform.
 const MAX_GROUP_RECTS: usize = min(TLOTTIE.max_paint_source_items_per_layer, MAX_SHAPES - 3);
@@ -930,12 +937,8 @@ fn stack(
     reuse: bool,
 ) -> Result<Vec<Layer>, EncodeError> {
     // tlottie counts every group, rectangle, fill and group transform as a
-    // shape, and every rectangle a fill paints as a paint source
-    let fits = |groups: usize, rects: usize| {
-        rects <= TLOTTIE.max_paint_source_items_per_layer
-            && groups <= TLOTTIE.max_paints_per_layer
-            && rects + 3 * groups <= MAX_SHAPES
-    };
+    // shape; its limits on fills and what they paint are past `MAX_SHAPES`
+    let fits = |groups: usize, rects: usize| rects + 3 * groups <= MAX_SHAPES;
     // pieces with every span of frames they are shown for, in drawing order
     let mut shown: Vec<(u16, Vec<Rect>, Spans)> = Vec::new();
     let mut same: std::collections::HashMap<(usize, u32, u16, Vec<Rect>), usize> =
@@ -1180,6 +1183,38 @@ mod tests {
             };
             assert_eq!(shown, [(from, to)]);
         }
+    }
+
+    #[test]
+    fn fills_a_layer_to_the_most_shapes_and_no_further() {
+        // three pieces shown together: a group, its fill and its transform
+        // count as shapes beside its rectangles, so the first two come to
+        // exactly as many as a layer takes
+        let piece = |rects: usize| Piece {
+            from: 0,
+            to: 1,
+            rects: (0..rects as u32).map(|x| (x, 0, 1, 1)).collect(),
+            tile: 0,
+        };
+        let pieces = vec![(0, 1, piece(MAX_SHAPES - 7)), (1, 2, piece(1)), (2, 3, piece(1))];
+        let shapes = |layers: Vec<Layer>| -> Vec<usize> {
+            let count = |layer: &Layer| {
+                layer.groups.iter().map(|group| group.shapes.len() + 3).sum::<usize>()
+            };
+            layers.iter().map(count).collect()
+        };
+        assert_eq!(MAX_SHAPES, telegram::MAX_SHAPES_PER_LAYER);
+        assert_eq!(shapes(stack(pieces, &[0, 10], false).unwrap()), [MAX_SHAPES, 4]);
+        // and so do layers filled in drawing order, when lifetimes need too
+        // many: each piece shown with the one before but for another span
+        let spans = (0..MAX_LAYERS + 2 + MAX_SHAPES / 4).map(|i| {
+            let piece =
+                Piece { from: i % 2, to: i % 2 + 2, rects: vec![(i as u32, 0, 1, 1)], tile: 0 };
+            (i, 1, piece)
+        });
+        let filled = shapes(stack(spans.collect(), &[0, 10, 20, 30], false).unwrap());
+        assert_eq!(filled[0], MAX_SHAPES / 4 * 4);
+        assert!(filled.len() > 1 && filled.iter().all(|&shapes| shapes <= MAX_SHAPES));
     }
 
     #[test]

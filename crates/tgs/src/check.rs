@@ -659,6 +659,12 @@ mod tests {
             ["24018 shapes in 6 layers count 24072, a layer as 9; Telegram takes at most 24000"]
         );
         assert_eq!(errors(&animation(6, 3980)), Vec::<String>::new());
+        // a layer of as many shapes as were accepted, and of one more
+        assert_eq!(errors(&animation(1, telegram::MAX_SHAPES_PER_LAYER - 3)), Vec::<String>::new());
+        assert_eq!(
+            errors(&animation(1, telegram::MAX_SHAPES_PER_LAYER - 2)),
+            ["4094 shapes in a layer; Telegram takes at most 4093"]
+        );
         let named = Animation { name: Some("x".repeat(MAX_RAW_JSON)), ..animation(1, 1) };
         assert!(errors(&named)[0].contains("Telegram Desktop plays at most"));
 
