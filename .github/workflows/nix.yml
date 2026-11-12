@@ -37,6 +37,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# nothing here writes to the repository
+permissions:
+  contents: read
+
 jobs:
   flake:
     strategy:
@@ -47,7 +51,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
       # fails when flake.lock is missing an input
       - run: nix flake check -L --no-update-lock-file
       - name: Run the package

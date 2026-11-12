@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # The workflows' actions. Other people's are pinned by commit, which a tag
+  # can't be moved away from, with the version beside it for this to raise.
+  # One pull request a week for all of them.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
