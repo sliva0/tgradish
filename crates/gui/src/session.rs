@@ -2,7 +2,12 @@
 //! saved as the window runs and when it closes, read when it opens. Kept
 //! in the state directory (`~/.local/state/tgradish` on Linux), with
 //! copies of pasted images, whose own folders go when the window closes.
+//!
+//! A session this version can't read, as one a newer tgradish kept, is
+//! set aside rather than written over, and the copies it may name are left
+//! alone.
 
+use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -14,6 +19,15 @@ use crate::jobs::{Done, Job, Status};
 
 /// What the file says it is, so a session of another layout is left alone.
 const VERSION: u32 = 1;
+
+/// A session file as it is read: its items one by one, so that one this
+/// version can't read, as with an option it doesn't know, is left out alone.
+#[derive(Deserialize)]
+struct Read {
+    version: u32,
+    items: Vec<serde_json::Value>,
+    selected: Option<usize>,
+}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -58,17 +72,140 @@ fn plain_name(name: &str) -> bool {
     matches!((parts.next(), parts.next()), (Some(Component::Normal(_)), None))
 }
 
-/// Copies the pasted image of item `id` next to the session file at
-/// `path`, so the window can open it again, and gives the copy's name,
-/// which no other has had.
-pub fn keep_pasted(path: &Path, id: u64, image: &Path) -> std::io::Result<String> {
-    let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
-    let extension = image.extension().and_then(|e| e.to_str()).unwrap_or("png");
-    let name = format!("{time:x}-{id}.{extension}");
-    let dir = pasted_dir(path);
-    std::fs::create_dir_all(&dir)?;
-    std::fs::copy(image, dir.join(&name))?;
-    Ok(name)
+/// What a session file held.
+#[derive(Default)]
+pub struct Loaded {
+    pub session: Session,
+    /// Set when some or all of it couldn't be read.
+    pub unreadable: Option<Unreadable>,
+}
+
+/// A session file this version of tgradish couldn't read all of.
+pub struct Unreadable {
+    /// How many of its files were left out; `None` when none of it could
+    /// be read.
+    pub files: Option<usize>,
+    /// Where the file is kept as it was.
+    pub kept: PathBuf,
+}
+
+/// A window's session file: where it is, what the window last wrote there,
+/// and which copies of pasted images are the window's to remove.
+pub struct Store {
+    path: PathBuf,
+    /// The session as last written or read, so it is only written again
+    /// when it changes.
+    written: String,
+    /// The copies of pasted images this window read of or made. Others in
+    /// the folder may belong to a session that was set aside.
+    copies: HashSet<String>,
+}
+
+impl Store {
+    pub fn at(path: PathBuf) -> Store {
+        Store { path, written: String::new(), copies: HashSet::new() }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Where a session that couldn't be read is kept.
+    fn aside(&self) -> PathBuf {
+        self.path.with_extension("json.unreadable")
+    }
+
+    /// Reads the session, if there is one. A file that can't be read is
+    /// moved aside, and one that can only be read in part is copied there
+    /// first, so that nothing is lost when the session is next written;
+    /// an error where that can't be done.
+    pub fn read(&mut self) -> std::io::Result<Loaded> {
+        let text = match std::fs::read(&self.path) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Loaded::default()),
+            Err(err) => return Err(err),
+        };
+        let Some((session, unread)) = parse(&text) else {
+            std::fs::rename(&self.path, self.aside())?;
+            let unreadable = Unreadable { files: None, kept: self.aside() };
+            return Ok(Loaded { session: Session::default(), unreadable: Some(unreadable) });
+        };
+        let unreadable = if unread > 0 {
+            std::fs::copy(&self.path, self.aside())?;
+            Some(Unreadable { files: Some(unread), kept: self.aside() })
+        } else {
+            None
+        };
+        self.written = session.to_json().unwrap_or_default();
+        self.copies = session.items.iter().filter_map(|item| item.pasted.clone()).collect();
+        Ok(Loaded { session, unreadable })
+    }
+
+    /// Copies the pasted image of item `id` next to the session file, so
+    /// the window can open it again, and gives the copy's name, which no
+    /// other has had.
+    pub fn keep_pasted(&mut self, id: u64, image: &Path) -> std::io::Result<String> {
+        let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+        let extension = image.extension().and_then(|e| e.to_str()).unwrap_or("png");
+        let name = format!("{time:x}-{id}.{extension}");
+        let dir = pasted_dir(&self.path);
+        std::fs::create_dir_all(&dir)?;
+        std::fs::copy(image, dir.join(&name))?;
+        self.copies.insert(name.clone());
+        Ok(name)
+    }
+
+    /// Writes `session` if it changed, whole or not at all, and removes
+    /// the copies of pasted images it no longer has.
+    pub fn save(&mut self, session: &Session) -> std::io::Result<()> {
+        let json = session.to_json().map_err(std::io::Error::other)?;
+        if json == self.written {
+            return Ok(());
+        }
+        if let Some(dir) = self.path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let partial = self.path.with_extension("json.partial");
+        std::fs::write(&partial, &json)?;
+        std::fs::rename(&partial, &self.path)?;
+        self.written = json;
+        let named: HashSet<String> =
+            session.items.iter().filter_map(|item| item.pasted.clone()).collect();
+        // copies nobody names are left over, unless a session set aside
+        // may name them: then only this window's own go
+        let all = !self.aside().exists();
+        if let Ok(entries) = std::fs::read_dir(pasted_dir(&self.path)) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if !named.contains(&name) && (all || self.copies.contains(&name)) {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+        self.copies = named;
+        Ok(())
+    }
+}
+
+/// The session `text` holds and how many of its items couldn't be read, or
+/// `None` where it isn't a session of this layout at all.
+fn parse(text: &str) -> Option<(Session, usize)> {
+    let read: Read =
+        serde_json::from_str(text).ok().filter(|read: &Read| read.version == VERSION)?;
+    let mut session = Session { version: VERSION, items: Vec::new(), selected: None };
+    let mut unread = 0;
+    for (index, item) in read.items.into_iter().enumerate() {
+        match serde_json::from_value(item) {
+            Ok(item) => {
+                if read.selected == Some(index) {
+                    session.selected = Some(session.items.len());
+                }
+                session.items.push(item);
+            }
+            Err(_) => unread += 1,
+        }
+    }
+    Some((session, unread))
 }
 
 /// Whether the session can hold `item`: JSON can't name files whose paths
@@ -110,32 +247,6 @@ impl Session {
 
     pub fn to_json(&self) -> serde_json::Result<String> {
         serde_json::to_string(self)
-    }
-
-    /// Writes the session to `path`, whole or not at all, and drops copies
-    /// of pasted images it no longer has.
-    pub fn save(&self, json: &str, path: &Path) -> std::io::Result<()> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let partial = path.with_extension("json.partial");
-        std::fs::write(&partial, json)?;
-        std::fs::rename(&partial, path)?;
-        let kept: Vec<&str> = self.items.iter().filter_map(|item| item.pasted.as_deref()).collect();
-        if let Ok(entries) = std::fs::read_dir(pasted_dir(path)) {
-            for entry in entries.flatten() {
-                if !kept.iter().any(|name| entry.file_name() == **name) {
-                    let _ = std::fs::remove_file(entry.path());
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// The session saved at `path`, if there is one of this layout.
-    pub fn load(path: &Path) -> Option<Session> {
-        let text = std::fs::read_to_string(path).ok()?;
-        serde_json::from_str::<Session>(&text).ok().filter(|session| session.version == VERSION)
     }
 
     /// The items again, numbered from `next_id`, and which is selected;
@@ -211,12 +322,17 @@ mod tests {
     /// Saves `items` at `path`, pasted images copied there as the window
     /// copies them, and opens them again, numbered from 1.
     fn again(items: &mut [Item], path: &Path) -> Vec<Item> {
+        let mut store = Store::at(path.to_path_buf());
+        store.read().unwrap();
         for item in items.iter_mut().filter(|item| item.kept.is_none()) {
-            item.kept = Some(keep_pasted(path, item.id, &item.inputs[0]).unwrap());
+            item.kept = Some(store.keep_pasted(item.id, &item.inputs[0]).unwrap());
         }
-        let session = Session::of(items, None);
-        session.save(&session.to_json().unwrap(), path).unwrap();
-        Session::load(path).unwrap().restore(path, 1).0
+        store.save(&Session::of(items, None)).unwrap();
+        Store::at(path.to_path_buf()).read().unwrap().session.restore(path, 1).0
+    }
+
+    fn copies(path: &Path) -> usize {
+        std::fs::read_dir(pasted_dir(path)).map_or(0, Iterator::count)
     }
 
     #[test]
@@ -231,7 +347,65 @@ mod tests {
         let items = again(&mut items, &path);
         assert_eq!(contents(&items), [b"two".to_vec(), b"three".to_vec()]);
         // and only their copies are kept
-        assert_eq!(std::fs::read_dir(pasted_dir(&path)).unwrap().count(), 2);
+        assert_eq!(copies(&path), 2);
+    }
+
+    #[test]
+    fn sets_aside_a_session_it_cannot_read() {
+        // of another version, and not a session at all
+        for text in [r#"{"version":2,"items":[],"selected":null}"#, "not a session"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("session.json");
+            std::fs::write(&path, text).unwrap();
+            // a copy it may name
+            std::fs::create_dir(pasted_dir(&path)).unwrap();
+            std::fs::write(pasted_dir(&path).join("19a0-3.png"), b"pasted").unwrap();
+            let mut store = Store::at(path.clone());
+            let loaded = store.read().unwrap();
+            let unreadable = loaded.unreadable.expect("unreadable");
+            assert!(loaded.session.items.is_empty() && unreadable.files.is_none());
+            assert_eq!(std::fs::read_to_string(&unreadable.kept).unwrap(), text);
+            // the window goes on with a session of its own, whose copies
+            // come and go, and leaves the other's alone
+            let mut items = [pasted(1, b"one")];
+            items[0].kept = Some(store.keep_pasted(1, &items[0].inputs[0]).unwrap());
+            store.save(&Session::of(&items, None)).unwrap();
+            assert_eq!(copies(&path), 2);
+            store.save(&Session::of(&[], None)).unwrap();
+            assert_eq!(copies(&path), 1);
+            assert_eq!(std::fs::read(pasted_dir(&path).join("19a0-3.png")).unwrap(), b"pasted");
+            assert_eq!(std::fs::read_to_string(&unreadable.kept).unwrap(), text);
+        }
+    }
+
+    #[test]
+    fn leaves_out_only_the_files_it_cannot_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let mut store = Store::at(path.clone());
+        let mut items = [pasted(1, b"one"), pasted(2, b"two")];
+        for item in &mut items {
+            item.kept = Some(store.keep_pasted(item.id, &item.inputs[0]).unwrap());
+            item.choices.webm.crf = Some(20);
+        }
+        store.save(&Session::of(&items, Some(2))).unwrap();
+        // as a newer tgradish would keep the first, with an option of its own
+        let text = std::fs::read_to_string(&path).unwrap();
+        let newer = text.replacen(r#""webm":{"#, r#""webm":{"made-up":1,"#, 1);
+        assert_ne!(newer, text);
+        std::fs::write(&path, &newer).unwrap();
+
+        let mut store = Store::at(path.clone());
+        let loaded = store.read().unwrap();
+        let unreadable = loaded.unreadable.expect("unreadable");
+        assert_eq!(unreadable.files, Some(1));
+        assert_eq!(std::fs::read_to_string(&unreadable.kept).unwrap(), newer);
+        // the other is there, and still the one selected
+        let (items, selected, gone) = loaded.session.restore(&path, 7);
+        assert_eq!((contents(&items), selected, gone), (vec![b"two".to_vec()], Some(7), 0));
+        // and writing the session leaves the copy of the one left out
+        store.save(&Session::of(&items, selected)).unwrap();
+        assert_eq!(copies(&path), 2);
     }
 
     #[test]

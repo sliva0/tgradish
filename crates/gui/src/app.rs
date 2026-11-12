@@ -70,9 +70,9 @@ pub(crate) struct App {
     pub(crate) inspection: Option<inspect::Inspection>,
     /// The theme Settings showed last, to apply a change made there.
     pub(crate) prefs_theme: Option<tgradish_core::config::Theme>,
-    /// Where the open files are kept between runs, and what was written
-    /// there last.
-    pub(crate) session: Option<(PathBuf, String)>,
+    /// Where the open files are kept between runs; `None` where they
+    /// aren't.
+    pub(crate) session: Option<session::Store>,
     /// When to see whether the session changed.
     pub(crate) next_save: f64,
     /// The system's fonts for what the window's own lack.
@@ -129,33 +129,53 @@ impl App {
     /// Opens the files of last time from the session at `path`, unless the
     /// settings say not to, and keeps the session there from now on.
     fn reopen(&mut self, path: PathBuf) {
-        let session = session::Session::load(&path).filter(|_| !self.config.gui.forget_files);
-        let saved = session.as_ref().and_then(|session| session.to_json().ok()).unwrap_or_default();
-        if let Some(session) = session {
-            let (items, selected, gone) = session.restore(&path, self.next_id);
+        let mut store = session::Store::at(path);
+        // with the setting off, the first save empties what is there
+        if !self.config.gui.forget_files {
+            let loaded = match store.read() {
+                Ok(loaded) => loaded,
+                // not to be written over, then
+                Err(err) => return self.say(fl!("session-unsaved", error = err.to_string())),
+            };
+            if let Some(unreadable) = loaded.unreadable {
+                let kept = unreadable.kept.display().to_string();
+                self.say(match unreadable.files {
+                    Some(count) => fl!("files-unreadable", count = count, path = kept),
+                    None => fl!("session-unreadable", path = kept),
+                });
+            }
+            let (items, selected, gone) = loaded.session.restore(store.path(), self.next_id);
             self.next_id += items.len() as u64;
             self.items = items;
             if let Some(id) = selected.or(self.items.last().map(|item| item.id)) {
                 self.select(id);
             }
             if gone > 0 {
-                self.message = Some(fl!("files-gone", count = gone));
+                self.say(fl!("files-gone", count = gone));
             }
         }
-        self.session = Some((path, saved));
+        self.session = Some(store);
+    }
+
+    /// Shows `message` over the window, under what it already says there.
+    fn say(&mut self, message: String) {
+        self.message = Some(match self.message.take() {
+            Some(said) => format!("{said}\n{message}"),
+            None => message,
+        });
     }
 
     /// Copies pasted images that have no copy yet next to the session, so
     /// they can be opened again. Where one can't be copied the session
     /// can't be kept: that is said once, as when writing it fails.
     fn keep_pasted(&mut self) {
-        let Some((path, _)) = &self.session else { return };
+        let Some(store) = &mut self.session else { return };
         if self.config.gui.forget_files {
             return;
         }
         for item in self.items.iter_mut().filter(|item| item.kept.is_none()) {
             let Some(image) = item.pasted.as_ref().and(item.inputs.first()) else { continue };
-            match session::keep_pasted(path, item.id, image) {
+            match store.keep_pasted(item.id, image) {
                 Ok(name) => item.kept = Some(name),
                 Err(err) => {
                     self.message = Some(fl!("session-unsaved", error = err.to_string()));
@@ -170,23 +190,13 @@ impl App {
     fn save_session(&mut self) {
         // those pasted while the setting was on have none yet
         self.keep_pasted();
-        let Some((path, saved)) = &self.session else { return };
+        let Some(store) = &mut self.session else { return };
         // with the setting off, nothing is kept: an empty session
         let items: &[Item] = if self.config.gui.forget_files { &[] } else { &self.items };
-        let session = session::Session::of(items, self.selected);
-        let saved_now = session.to_json().map_err(std::io::Error::other).and_then(|json| {
-            if json != *saved {
-                session.save(&json, path)?;
-            }
-            Ok(json)
-        });
-        match saved_now {
-            Ok(json) => self.session = Some((path.clone(), json)),
-            Err(err) => {
-                self.message = Some(fl!("session-unsaved", error = err.to_string()));
-                // once is enough
-                self.session = None;
-            }
+        if let Err(err) = store.save(&session::Session::of(items, self.selected)) {
+            self.message = Some(fl!("session-unsaved", error = err.to_string()));
+            // once is enough
+            self.session = None;
         }
     }
 
@@ -545,6 +555,7 @@ impl eframe::App for App {
 
 #[cfg(test)]
 mod tests {
+    use egui_kittest::kittest::Queryable;
     use tgradish_core::presets::Format;
     use tgradish_core::telegram;
 
@@ -585,6 +596,33 @@ mod tests {
         }
         harness.state_mut().save_session();
         assert_eq!(std::fs::read(&copies).unwrap(), b"in the way");
+    }
+
+    #[test]
+    fn keeps_a_session_it_cannot_read_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("session.json");
+        let aside = dir.path().join("session.json.unreadable");
+        std::fs::write(&state, r#"{"version":99,"items":[{"of":"a later tgradish"}]}"#).unwrap();
+        let mut harness = harness(Config::default());
+        harness.state_mut().reopen(state.clone());
+        harness.run_steps(2);
+        harness.get_by_label_contains("The files of last time couldn't be read");
+        // written anew by this window, the other kept beside it
+        harness.state_mut().save_session();
+        assert!(std::fs::read_to_string(&aside).unwrap().contains("a later tgradish"));
+        assert!(std::fs::read_to_string(&state).unwrap().contains(r#""version":1"#));
+
+        // told to forget the files, it reads none and keeps none
+        std::fs::write(&state, "anything").unwrap();
+        let mut config = Config::default();
+        config.gui.forget_files = true;
+        let mut harness = self::harness(config);
+        harness.state_mut().reopen(state.clone());
+        harness.state_mut().save_session();
+        assert!(harness.state().message.is_none());
+        assert!(std::fs::read_to_string(&state).unwrap().contains(r#""items":[]"#));
+        assert!(std::fs::read_to_string(&aside).unwrap().contains("a later tgradish"));
     }
 
     #[test]
