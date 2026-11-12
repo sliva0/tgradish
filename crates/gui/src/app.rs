@@ -127,9 +127,11 @@ impl App {
     }
 
     /// Opens the files of last time from the session at `path`, unless the
-    /// settings say not to, and keeps the session there from now on.
+    /// settings say not to, and keeps the session there from now on. A
+    /// window opened while another has the session starts empty and keeps
+    /// none.
     fn reopen(&mut self, path: PathBuf) {
-        let mut store = session::Store::at(path);
+        let Some(mut store) = session::Store::open(path) else { return };
         // with the setting off, the first save empties what is there
         if !self.config.gui.forget_files {
             let loaded = match store.read() {
@@ -599,6 +601,36 @@ mod tests {
     }
 
     #[test]
+    fn leaves_the_session_to_the_window_that_has_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state").join("session.json");
+        let mut first = harness(Config::default());
+        first.state_mut().reopen(state.clone());
+        let (files, folder) = pasted_image();
+        first.state_mut().add_pasted(files, folder);
+        first.state_mut().save_session();
+        let written = std::fs::read_to_string(&state).unwrap();
+
+        // a second window meanwhile, whose own files are kept nowhere
+        let mut second = harness(Config::default());
+        second.state_mut().reopen(state.clone());
+        assert!(second.state().session.is_none() && second.state().items.is_empty());
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        second.state_mut().add(vec![art]);
+        second.state_mut().save_session();
+        assert!(second.state().message.is_none());
+        assert_eq!(std::fs::read_to_string(&state).unwrap(), written);
+        assert_eq!(std::fs::read_dir(state.with_file_name("pasted")).unwrap().count(), 1);
+
+        // the next one, once the first has closed, has its files
+        drop(first);
+        let mut third = harness(Config::default());
+        third.state_mut().reopen(state);
+        assert_eq!(third.state().items.len(), 1);
+    }
+
+    #[test]
     fn keeps_a_session_it_cannot_read_and_says_so() {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("session.json");
@@ -613,7 +645,8 @@ mod tests {
         assert!(std::fs::read_to_string(&aside).unwrap().contains("a later tgradish"));
         assert!(std::fs::read_to_string(&state).unwrap().contains(r#""version":1"#));
 
-        // told to forget the files, it reads none and keeps none
+        // told to forget the files, the next window reads none and keeps none
+        drop(harness);
         std::fs::write(&state, "anything").unwrap();
         let mut config = Config::default();
         config.gui.forget_files = true;
