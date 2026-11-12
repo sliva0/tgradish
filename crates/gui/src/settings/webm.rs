@@ -13,7 +13,7 @@ use super::{Context, commands};
 use crate::item::Item;
 use crate::l10n::fl;
 use crate::widgets::{
-    self, Choice, Pick, auto_number, chosen_hint, flag, greyed, preset_picking, preset_segments,
+    self, Choice, Pick, chosen_hint, flag, greyed, preset_number, preset_picking, preset_segments,
     row, section, segments,
 };
 
@@ -38,9 +38,6 @@ fn webm_speeds() -> [Choice<Speed>; 3] {
 
 pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     section(ui, &fl!("size-and-quality"));
-    // the label of a value the preset sets
-    let presets = (fl!("from-preset-value"), fl!("from-preset-value", "hint"));
-    let presets = (presets.0.as_str(), presets.1.as_str());
     let base = item.choices.webm_base(context.presets, context.config).unwrap_or_default();
     let base_fit = base.fit.unwrap_or(Fit::Auto);
     let options = &mut item.choices.webm;
@@ -74,17 +71,15 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
     let fitting = if fit == Fit::Off { Err(off.as_str()) } else { Ok(()) };
     row(ui, &fl!("attempts"), &fl!("attempts", "hint"), fitting, |ui| {
         let defaults = (fl!("attempts-default"), fl!("attempts-default", "hint"));
-        let (automatic, default) = match base.attempts {
-            Some(attempts) => (presets, attempts),
-            None => ((defaults.0.as_str(), defaults.1.as_str()), DEFAULT_ATTEMPTS),
-        };
+        let defaults = (defaults.0.as_str(), defaults.1.as_str());
         // the number alone in its field, which takes it typed, and the
         // word for it beside
         ui.horizontal(|ui| {
-            auto_number(ui, &mut options.attempts, automatic, Some(default), default, |value| {
+            let (value, default) = (&mut options.attempts, DEFAULT_ATTEMPTS);
+            preset_number(ui, value, base.attempts, defaults, Some(default), default, |value| {
                 value.range(1..=MAX_ATTEMPTS)
             });
-            let count = options.attempts.unwrap_or(default);
+            let count = options.attempts.or(base.attempts).unwrap_or(default);
             ui.label(fl!("attempts-times", count = count));
         });
     });
@@ -93,10 +88,11 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
     row(ui, &fl!("search-within"), &fl!("search-within", "hint"), fitting, |ui| {
         ui.horizontal(|ui| {
             let mut custom = options.fit_range.is_some();
-            let choices = [
-                (false, fl!("search-auto"), fl!("search-auto", "hint")),
-                (true, fl!("custom"), String::new()),
-            ];
+            let automatic = match base.fit_range {
+                Some(_) => widgets::from_preset(),
+                None => (fl!("search-auto"), fl!("search-auto", "hint")),
+            };
+            let choices = [(false, automatic.0, automatic.1), (true, fl!("custom"), String::new())];
             if segments(ui, &mut custom, &choices, |_| Ok(())) {
                 if custom {
                     asked_custom = true;
@@ -104,16 +100,19 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
                     options.fit_range = None;
                 }
             }
-            // automatic, the range isn't shown: it is fitting's to choose
+            // automatic, the range isn't shown: it is fitting's to choose,
+            // unless the preset sets one
             let set = options.fit_range;
-            let mut shown = set.unwrap_or(Range { min: 0.0, max: 0.0 });
+            let known = set.or(base.fit_range);
+            let mut shown = known.unwrap_or(Range { min: 0.0, max: 0.0 });
             let pick = fl!("custom", "hint");
+            let (min, max) = (&mut shown.min, &mut shown.max);
             let low = ui
-                .add_enabled(set.is_some(), bounds.field(&mut shown.min, set.is_some()))
+                .add_enabled(set.is_some(), bounds.field(min, known.is_some(), set.is_some()))
                 .on_disabled_hover_text(pick.as_str());
             ui.label(fl!("range-to"));
             let high = ui
-                .add_enabled(set.is_some(), bounds.field(&mut shown.max, set.is_some()))
+                .add_enabled(set.is_some(), bounds.field(max, known.is_some(), set.is_some()))
                 .on_disabled_hover_text(pick.as_str());
             if set.is_some() && (low.changed() || high.changed()) {
                 shown.max = shown.max.max(shown.min);
@@ -121,11 +120,15 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
             }
         });
     });
-    // a custom range starts as the one fitting would search
+    // a custom range starts as the preset's, or the one fitting would
+    // search
     if asked_custom {
-        let (fps, length) = commands::planned(item, context)
-            .map_or((30.0, telegram::MAX_SECONDS), |(_, plan)| (plan.fps, plan.length));
-        item.choices.webm.fit_range = Some(convert::default_fit_range(fit, fps, length));
+        let searched = || {
+            let (fps, length) = commands::planned(item, context)
+                .map_or((30.0, telegram::MAX_SECONDS), |(_, plan)| (plan.fps, plan.length));
+            convert::default_fit_range(fit, fps, length)
+        };
+        item.choices.webm.fit_range = Some(base.fit_range.unwrap_or_else(searched));
     }
     let options = &mut item.choices.webm;
     let quality = match fit {
@@ -141,11 +144,9 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
         quality.as_ref().map_err(String::as_str).copied(),
         |ui| {
             let defaults = (fl!("crf-default"), fl!("crf-default", "hint"));
-            let (automatic, default) = match base.crf {
-                Some(crf) => (presets, crf),
-                None => ((defaults.0.as_str(), defaults.1.as_str()), DEFAULT_CRF),
-            };
-            auto_number(ui, &mut options.crf, automatic, Some(default), default, |value| {
+            let defaults = (defaults.0.as_str(), defaults.1.as_str());
+            let (value, default) = (&mut options.crf, DEFAULT_CRF);
+            preset_number(ui, value, base.crf, defaults, Some(default), default, |value| {
                 value.range(CRFS)
             });
         },
@@ -176,7 +177,7 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
     row(ui, &fl!("bitrate"), &fl!("bitrate", "hint"), allowed, |ui| {
         let automatic = (fl!("bitrate-auto"), fl!("bitrate-auto", "hint"));
         let automatic = (automatic.0.as_str(), automatic.1.as_str());
-        auto_number(ui, &mut options.bitrate, automatic, None, 600.0, |value| {
+        preset_number(ui, &mut options.bitrate, base.bitrate, automatic, None, 600.0, |value| {
             value.range(1.0..=50_000.0).speed(5.0).max_decimals(0).suffix(" kbit/s")
         });
     });
@@ -214,16 +215,18 @@ impl RangeBounds {
         Self { range, takes, decimals, speed, unit }
     }
 
-    /// A field of one end, shown as "—" unless `set`, as fitting chooses
-    /// the range then; whole numbers without a decimal point.
-    fn field<'a>(&self, value: &'a mut f64, set: bool) -> egui::DragValue<'a> {
-        let refused = !self.takes.contains(value);
+    /// A field of one end, shown as "—" unless it is `known`, as fitting
+    /// chooses the range then; whole numbers without a decimal point. Only
+    /// a `live` one, the user's own, is brought into what planning takes:
+    /// a preset's shows as it is.
+    fn field<'a>(&self, value: &'a mut f64, known: bool, live: bool) -> egui::DragValue<'a> {
+        let refused = live && !self.takes.contains(value);
         let field = egui::DragValue::new(value)
             .range(self.range.clone())
             .clamp_existing_to_range(refused)
             .speed(self.speed)
             .max_decimals(self.decimals);
-        if set {
+        if known {
             field.suffix(self.unit).custom_formatter(|value, _| widgets::trimmed(value))
         } else {
             field.custom_formatter(|_, _| "—".to_owned())
@@ -238,7 +241,7 @@ mod tests {
     /// What showing a range's end leaves of it.
     fn shown(fit: Fit, mut value: f64) -> f64 {
         let mut harness = egui_kittest::Harness::new_ui(|ui| {
-            ui.add(RangeBounds::of(fit).field(&mut value, true));
+            ui.add(RangeBounds::of(fit).field(&mut value, true, true));
         });
         harness.run();
         drop(harness);

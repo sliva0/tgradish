@@ -340,7 +340,7 @@ impl Part {
             (Part::Time, _) => time(ui, item, context),
             (Part::Quality, Format::Webm) => webm_quality(ui, item, context),
             (Part::Quality, Format::Tgs) => tgs_quality(ui, item, context),
-            (Part::Reading, _) => reading(ui, item),
+            (Part::Reading, _) => reading(ui, item, context),
             (Part::Advanced, _) => advanced(ui, item, context),
             (Part::Quality, Format::Image) => {}
         }
@@ -356,5 +356,45 @@ mod tests {
         let names: Vec<String> =
             preset_names(&Presets::builtin()).into_iter().map(|(name, _)| name).collect();
         assert_eq!(names, ["fast", "balanced", "best"]);
+    }
+
+    #[test]
+    fn rows_show_what_the_preset_sets() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        use tgradish_core::ffmpeg::FfmpegChoice;
+
+        use crate::testing::{finish, harness, video};
+
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video(dir.path(), "64x48") else { return };
+        let preset = "[webm]\nfit = 'off'\nbitrate = 300.0\nfps = 24.0\n\
+                      scaling = 'pixel-perfect'\nexact-scale = '2'\n";
+        std::fs::write(dir.path().join("mine.toml"), preset).unwrap();
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        let mut harness = harness(config);
+        harness.state_mut().presets = Presets::load(Some(dir.path())).unwrap();
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        harness.state_mut().items[0].choices.preset = Some("mine".into());
+        harness.run_steps(3);
+        // the frame rate and the bitrate are the preset's, and say so
+        let by = egui_kittest::kittest::by;
+        assert_eq!(harness.query_all_by_label(&fl!("from-preset")).count(), 2);
+        harness.get(by().value("24 fps"));
+        harness.get(by().value("300 kbit/s"));
+        // and so is the scale, which "Largest that fits" can't take away
+        harness.get(by().value("×2"));
+        let largest = fl!("scale-largest");
+        assert!(harness.get_by_label(&largest).accesskit_node().is_disabled());
+        // one of the item's own goes over it, with a way back
+        let scale = tgradish_core::options::ExactScale { up: 3, down: 1 };
+        harness.state_mut().items[0].choices.webm.exact_scale = Some(scale);
+        harness.run_steps(3);
+        harness.get(by().value("×3"));
+        harness.get_by_label("⟲").click();
+        harness.run_steps(3);
+        assert_eq!(harness.state().items[0].choices.webm.exact_scale, None);
+        harness.get(by().value("×2"));
     }
 }

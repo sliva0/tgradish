@@ -12,7 +12,9 @@ use super::Context;
 use crate::item::{Item, Kind};
 use crate::l10n::fl;
 use crate::timeline;
-use crate::widgets::{self, Choice, auto_number, chosen_hint, note, preset_segments, row, section};
+use crate::widgets::{
+    self, Choice, chosen_hint, note, preset_number, preset_segments, row, section,
+};
 
 fn spoofs() -> [Choice<Spoof>; 3] {
     [
@@ -24,8 +26,11 @@ fn spoofs() -> [Choice<Spoof>; 3] {
 
 pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let animated = item.input_length().is_some();
-    let sequence =
-        item.format == Format::Tgs && (item.sequence || item.choices.tgs.sheet.is_some());
+    // what the preset sets, which the item's own values go over
+    let webm_base = item.choices.webm_base(context.presets, context.config).unwrap_or_default();
+    let tgs_base = item.choices.tgs_base(context.presets, context.config).unwrap_or_default();
+    let sheet = item.choices.tgs.sheet.is_some() || tgs_base.sheet.is_some();
+    let sequence = item.format == Format::Tgs && (item.sequence || sheet);
     if !animated && !sequence {
         return;
     }
@@ -41,15 +46,11 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         }
         Format::Tgs => None,
     };
-    // what the preset sets, which the item's own values go over
-    let webm_base = item.choices.webm_base(context.presets, context.config).unwrap_or_default();
     let spoof = item.choices.webm.spoof.or(webm_base.spoof).unwrap_or(Spoof::Auto);
     // a preset's tempo is what the automatic choice stands for
     let preset_tempo = match item.format {
         Format::Webm | Format::Image => webm_base.tempo,
-        Format::Tgs => {
-            item.choices.tgs_base(context.presets, context.config).ok().and_then(|base| base.tempo)
-        }
+        Format::Tgs => tgs_base.tempo,
     };
     if let Some(length) = item.input_length() {
         row(ui, &fl!("used-part"), &fl!("used-part", "hint"), Ok(()), |ui| {
@@ -61,20 +62,15 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             ui.horizontal(|ui| {
                 // a .tgs plays a longer part fast enough to fit 3 s
                 let fitted = used.is_some_and(telegram::too_long);
-                let preset = (fl!("from-preset"), fl!("from-preset", "speed"));
                 let input = (fl!("from-input"), fl!("from-input", "speed"));
                 let fits = (fl!("fits-3-s"), fl!("fits-3-s", "hint"));
-                let (value, automatic) = match (item.format, preset_tempo) {
-                    (Format::Tgs, Some(_)) => (&mut item.choices.tgs.tempo, preset),
-                    (Format::Webm | Format::Image, Some(_)) => {
-                        (&mut item.choices.webm.tempo, preset)
-                    }
-                    (Format::Webm | Format::Image, None) => (&mut item.choices.webm.tempo, input),
-                    (Format::Tgs, None) if fitted => (&mut item.choices.tgs.tempo, fits),
-                    (Format::Tgs, None) => (&mut item.choices.tgs.tempo, input),
+                let (value, automatic) = match item.format {
+                    Format::Webm | Format::Image => (&mut item.choices.webm.tempo, input),
+                    Format::Tgs if fitted => (&mut item.choices.tgs.tempo, fits),
+                    Format::Tgs => (&mut item.choices.tgs.tempo, input),
                 };
                 let automatic = (automatic.0.as_str(), automatic.1.as_str());
-                auto_number(ui, value, automatic, Some(tempo), 1.0, |value| {
+                preset_number(ui, value, preset_tempo, automatic, Some(tempo), 1.0, |value| {
                     value.range(TEMPOS).speed(0.01).max_decimals(2).prefix("×")
                 });
                 if item.format == Format::Webm
@@ -116,23 +112,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             if item.kind == Kind::Frames {
                 // how fast its frames play, which the result's follows
                 row(ui, &fl!("frame-rate"), &fl!("frame-rate", "sequence"), Ok(()), |ui| {
-                    let default = Some(tgs::DEFAULT_FPS);
-                    let automatic = default_rate();
-                    auto_number(
-                        ui,
-                        &mut options.fps,
-                        (&automatic.0, &automatic.1),
-                        default,
-                        tgs::DEFAULT_FPS,
-                        |value| {
-                            value
-                                .range(0.1..=60.0)
-                                .speed(0.1)
-                                .max_decimals(2)
-                                .suffix(" fps")
-                                .custom_formatter(|v, _| widgets::trimmed(v))
-                        },
-                    );
+                    sequence_rate(ui, &mut options.fps, webm_base.fps);
                 });
             } else {
                 let highest = most.unwrap_or(telegram::MAX_FPS);
@@ -140,7 +120,8 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                     let most = highest.min(30.0);
                     let automatic = (fl!("from-input"), fl!("from-input", "rate"));
                     let automatic = (automatic.0.as_str(), automatic.1.as_str());
-                    auto_number(ui, &mut options.fps, automatic, chosen, most, |value| {
+                    let (value, preset) = (&mut options.fps, webm_base.fps);
+                    preset_number(ui, value, preset, automatic, chosen, most, |value| {
                         value
                             .range(1.0..=highest)
                             .speed(0.1)
@@ -169,21 +150,14 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             let allowed = if honest { Err(why.as_str()) } else { Ok(()) };
             row(ui, &fl!("spoof-to"), &fl!("spoof-to", "hint"), allowed, |ui| {
                 let custom = options.fake_duration.is_some();
-                let (automatic, shown) = match webm_base.fake_duration {
-                    Some(duration) => {
-                        ((fl!("from-preset"), fl!("from-preset", "duration")), duration)
-                    }
-                    None => (
-                        (fl!("default-duration"), fl!("default-duration", "hint")),
-                        DEFAULT_FAKE_DURATION,
-                    ),
-                };
+                let automatic = (fl!("default-duration"), fl!("default-duration", "hint"));
                 let automatic = (automatic.0.as_str(), automatic.1.as_str());
-                let changed = auto_number(
+                let changed = preset_number(
                     ui,
                     &mut options.fake_duration,
+                    webm_base.fake_duration,
                     automatic,
-                    Some(shown),
+                    Some(DEFAULT_FAKE_DURATION),
                     telegram::MAX_SECONDS,
                     |value| {
                         value
@@ -202,23 +176,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         }
         Format::Tgs if sequence => {
             row(ui, &fl!("frame-rate"), &fl!("frame-rate", "sheet"), Ok(()), |ui| {
-                let default = Some(tgs::DEFAULT_FPS);
-                let automatic = default_rate();
-                auto_number(
-                    ui,
-                    &mut item.choices.tgs.fps,
-                    (&automatic.0, &automatic.1),
-                    default,
-                    tgs::DEFAULT_FPS,
-                    |value| {
-                        value
-                            .range(0.1..=60.0)
-                            .speed(0.1)
-                            .max_decimals(2)
-                            .suffix(" fps")
-                            .custom_formatter(|v, _| widgets::trimmed(v))
-                    },
-                );
+                sequence_rate(ui, &mut item.choices.tgs.fps, tgs_base.fps);
             });
         }
         Format::Tgs => {}
@@ -307,10 +265,21 @@ pub(super) fn frame(ui: &mut egui::Ui, item: &mut Item) {
     });
 }
 
-/// The button for a frame rate the input doesn't have, and its hint.
-fn default_rate() -> (String, String) {
-    let fps = widgets::trimmed(tgs::DEFAULT_FPS);
-    (fl!("default-rate"), fl!("default-rate", "hint", fps = fps))
+/// How fast frames that don't say it play: the `preset`'s rate, or else
+/// the default one, unless set.
+fn sequence_rate(ui: &mut egui::Ui, fps: &mut Option<f64>, preset: Option<f64>) {
+    let default = tgs::DEFAULT_FPS;
+    let hint = fl!("default-rate", "hint", fps = widgets::trimmed(default));
+    let automatic = (fl!("default-rate"), hint);
+    let automatic = (automatic.0.as_str(), automatic.1.as_str());
+    preset_number(ui, fps, preset, automatic, Some(default), default, |value| {
+        value
+            .range(0.1..=60.0)
+            .speed(0.1)
+            .max_decimals(2)
+            .suffix(" fps")
+            .custom_formatter(|v, _| widgets::trimmed(v))
+    });
 }
 
 #[cfg(test)]

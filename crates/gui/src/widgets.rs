@@ -392,6 +392,33 @@ pub fn auto_number<T: egui::emath::Numeric>(
     changed
 }
 
+/// An [`auto_number`] for a value a preset may set. While the preset sets
+/// one, that is what the automatic choice stands for: it is named the
+/// preset's and shows the preset's value, which a number of the user's own
+/// starts from. Without one, the choice is `automatic`, showing `shown`.
+pub fn preset_number<T: egui::emath::Numeric>(
+    ui: &mut egui::Ui,
+    value: &mut Option<T>,
+    preset: Option<T>,
+    automatic: (&str, &str),
+    shown: Option<T>,
+    start: T,
+    edit: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
+) -> bool {
+    match preset {
+        Some(preset) => {
+            let presets = from_preset();
+            auto_number(ui, value, (&presets.0, &presets.1), Some(preset), preset, edit)
+        }
+        None => auto_number(ui, value, automatic, shown, start, edit),
+    }
+}
+
+/// The label of a choice that stands for the preset's value, and its hint.
+pub fn from_preset() -> (String, String) {
+    (fl!("from-preset"), fl!("from-preset", "hint"))
+}
+
 /// How much of a limit something uses: a bar, red when over.
 pub fn gauge(ui: &mut egui::Ui, used: u64, limit: u64, text: String) {
     let share = used as f32 / limit.max(1) as f32;

@@ -13,7 +13,7 @@ use crate::canvas::{Exact, Keep};
 use crate::item::{Aspect, Item};
 use crate::l10n::fl;
 use crate::widgets::{
-    self, Choice, auto_number, chosen_hint, flag, note, preset_segments, row, segments,
+    self, Choice, chosen_hint, flag, note, preset_number, preset_segments, row, segments,
 };
 
 /// The shapes the crop can keep.
@@ -241,7 +241,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 });
                 chosen_hint(ui, resize, &squares);
             });
-            let base = preset.and_then(|base| base.keep_canvas).unwrap_or(false);
+            let base = preset.as_ref().and_then(|base| base.keep_canvas).unwrap_or(false);
             row(ui, &fl!("margins"), &fl!("margins", "hint"), Ok(()), |ui| {
                 let mut auto = item.choices.tgs.keep_canvas.map(|keep| !keep);
                 let (text, hint) = (fl!("auto-crop"), fl!("auto-crop", "hint"));
@@ -250,19 +250,28 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 }
                 note(ui, fl!("auto-crop", "after"));
             });
-            // what the last conversion found, if it looked for it
+            // what the last conversion found, if it looked for it: neither
+            // the item nor its preset said
+            let looked = |made: &&crate::item::Made| {
+                let preset = made.choices.tgs_base(presets, config);
+                made.format == Format::Tgs
+                    && made.choices.tgs.pixel_scale.is_none()
+                    && preset.is_ok_and(|preset| preset.pixel_scale.is_none())
+            };
             let detected = item
                 .made
                 .as_ref()
-                .filter(|made| made.format == Format::Tgs && made.choices.tgs.pixel_scale.is_none())
+                .filter(looked)
                 .and_then(|made| made.job.progress.report.as_ref())
                 .map(|report| report.scale);
+            let preset = preset.and_then(|base| base.pixel_scale);
             row(ui, &fl!("art-pixel"), &fl!("art-pixel", "hint"), Ok(()), |ui| {
                 let detected_text = (fl!("art-pixel-detected"), fl!("art-pixel-detected", "hint"));
                 widgets::steady_numbers(ui, 2, " px", |ui| {
-                    auto_number(
+                    preset_number(
                         ui,
                         &mut item.choices.tgs.pixel_scale,
+                        preset,
                         (&detected_text.0, &detected_text.1),
                         detected,
                         2,
@@ -618,7 +627,12 @@ fn integer_scale(
             (false, fl!("scale-largest"), fl!("scale-largest", "hint")),
             (true, fl!("scale-fixed"), fl!("scale-fixed", "hint")),
         ];
-        if segments(ui, &mut fixed, &choices, |_| Ok(())) {
+        // a preset's scale can be changed here, not left out
+        let pick = |fixed: bool| match preset {
+            Some(_) if !fixed => Err(fl!("scale-largest", "preset")),
+            _ => Ok(()),
+        };
+        if segments(ui, &mut fixed, &choices, pick) {
             chosen = fixed.then_some(guess);
         }
         ui.add_enabled_ui(scale.is_some(), |ui| {
@@ -647,6 +661,9 @@ fn integer_scale(
                 chosen = Some(step_scale(step));
             }
         });
+        if preset.is_some() && item.choices.webm.exact_scale.is_some() && widgets::reset(ui) {
+            chosen = preset;
+        }
     });
     // greyed out, the scale is only shown, and kept for integer scaling
     if integer && chosen != scale {
