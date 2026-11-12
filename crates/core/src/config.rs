@@ -187,6 +187,20 @@ mod tests {
         assert_eq!(Config::load(&path).unwrap(), config);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn saves_through_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let (managed, path) = (dir.path().join("managed.toml"), dir.path().join("config.toml"));
+        std::fs::write(&managed, "preset = 'fast'\n").unwrap();
+        std::os::unix::fs::symlink(&managed, &path).unwrap();
+        let config = Config { preset: Some("best".into()), ..Config::load(&path).unwrap() };
+        config.save(&path).unwrap();
+        // still a link, to what was saved
+        assert!(path.symlink_metadata().unwrap().is_symlink());
+        assert_eq!(Config::load(&managed).unwrap(), config);
+    }
+
     #[test]
     fn missing_file_is_default() {
         let dir = tempfile::tempdir().unwrap();
