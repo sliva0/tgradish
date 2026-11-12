@@ -283,6 +283,9 @@ pub struct Sprite {
     tags: Vec<Tag>,
     tilesets: Vec<Tileset>,
     limits: Limits,
+    /// Bytes of pixels, tiles and palettes it holds. The frames drawn from
+    /// it are held beside them, so the limit is for both together.
+    spent: usize,
 }
 
 impl Sprite {
@@ -335,6 +338,7 @@ impl Sprite {
             tags: Vec::new(),
             tilesets: Vec::new(),
             limits: *limits,
+            spent: 0,
         };
         let mut old_palette: Option<Vec<Colour>> = None;
         let mut new_palette = false;
@@ -423,6 +427,7 @@ impl Sprite {
         if sprite.frames.is_empty() {
             return Err(Error::Empty);
         }
+        sprite.spent = spent;
         sprite.link_layers()?;
         sprite.check_cels()?;
         let frames = sprite.frames.len() as u32;
@@ -463,8 +468,12 @@ impl Sprite {
                     8 | 16 | 32 => usize::from(bits / 8),
                     _ => return Err(error(format!("tiles of {bits} bits"))),
                 };
+                // kept as 32-bit tiles whatever the file's are, beside
+                // the file's own while they are read
+                spend(spent, budget([width, height, 4], &self.limits)?, &self.limits)?;
                 let size = budget([width, height, tile_bytes], &self.limits)?;
-                let data = inflate(chunk.rest(), spend(spent, size, &self.limits)?)?;
+                spend(&mut spent.clone(), size, &self.limits)?;
+                let data = inflate(chunk.rest(), size)?;
                 let tiles = data
                     .chunks_exact(tile_bytes)
                     .map(|tile| tile.iter().rev().fold(0u32, |id, &byte| id << 8 | u32::from(byte)))
@@ -643,10 +652,12 @@ impl Sprite {
                 })?
                 .frames(),
         };
-        // the frames, and while drawing one, a canvas for each group level
+        // the frames, and while drawing one, a canvas for each group level,
+        // all beside what the sprite holds
         let frame_size = budget([self.width as usize, self.height as usize, 4], &self.limits)?;
         let canvases = order.len().saturating_add(self.depth_of_groups + 1);
-        budget([frame_size, canvases, 1], &self.limits)?;
+        let drawn = budget([frame_size, canvases, 1], &self.limits)?;
+        spend(&mut self.spent.clone(), drawn, &self.limits)?;
         let frames = order
             .into_iter()
             .map(|index| {
@@ -1350,40 +1361,66 @@ mod tests {
         assert!(decode(&file(1, 1, 32, 1, &[deep])).is_err());
     }
 
+    /// The tileset layers made by [`layer`] use: two 1x1 tiles (red,
+    /// green), new format, where tile 0 is empty, so ids 1 and 2.
+    fn tileset() -> Vec<u8> {
+        let mut data = 7u32.to_le_bytes().to_vec();
+        data.extend((2u32 | 4).to_le_bytes());
+        data.extend(3u32.to_le_bytes());
+        data.extend([1, 0, 1, 0, 1, 0]);
+        data.extend([0; 14]);
+        data.extend(string("tiles"));
+        let pixels = zlib(&[[0; 4], RED, GREEN].concat());
+        data.extend((pixels.len() as u32).to_le_bytes());
+        data.extend(pixels);
+        chunk(0x2023, &data)
+    }
+
+    /// A tilemap cel on layer 0, of one row of `tiles` kept in `bits` bits
+    /// each, the top three of 32 for flips.
+    fn tilemap(bits: u16, tiles: &[u32]) -> Vec<u8> {
+        let mut data = cel_header(0, 0, 0, 255, 3);
+        data.extend((tiles.len() as u16).to_le_bytes());
+        data.extend(1u16.to_le_bytes());
+        data.extend(bits.to_le_bytes());
+        let ids = if bits == 32 { 0x1fff_ffff } else { (1u32 << bits) - 1 };
+        for mask in [ids, 0x2000_0000, 0x4000_0000, 0x8000_0000] {
+            data.extend(mask.to_le_bytes());
+        }
+        data.extend([0; 10]);
+        let bytes = usize::from(bits / 8);
+        data.extend(zlib(
+            &tiles.iter().flat_map(|t| t.to_le_bytes()[..bytes].to_vec()).collect::<Vec<_>>(),
+        ));
+        chunk(0x2005, &data)
+    }
+
     #[test]
     fn draws_tiles_and_refuses_flips() {
-        // a tileset of two 1x1 tiles (red, green), new format: tile 0 is
-        // empty, so ids 1 and 2
-        let tileset = {
-            let mut data = 7u32.to_le_bytes().to_vec();
-            data.extend((2u32 | 4).to_le_bytes());
-            data.extend(3u32.to_le_bytes());
-            data.extend([1, 0, 1, 0, 1, 0]);
-            data.extend([0; 14]);
-            data.extend(string("tiles"));
-            let pixels = zlib(&[[0; 4], RED, GREEN].concat());
-            data.extend((pixels.len() as u32).to_le_bytes());
-            data.extend(pixels);
-            chunk(0x2023, &data)
-        };
-        let tilemap = |tiles: &[u32]| {
-            let mut data = cel_header(0, 0, 0, 255, 3);
-            data.extend((tiles.len() as u16).to_le_bytes());
-            data.extend(1u16.to_le_bytes());
-            data.extend(32u16.to_le_bytes());
-            for mask in [0x1fff_ffffu32, 0x2000_0000, 0x4000_0000, 0x8000_0000] {
-                data.extend(mask.to_le_bytes());
-            }
-            data.extend([0; 10]);
-            data.extend(zlib(&tiles.iter().flat_map(|t| t.to_le_bytes()).collect::<Vec<_>>()));
-            chunk(0x2005, &data)
-        };
         let sprite = |tiles: &[u32]| {
-            file(3, 1, 32, 1, &[vec![layer(1, 2, 0, 0, 255), tileset.clone(), tilemap(tiles)]])
+            file(3, 1, 32, 1, &[vec![layer(1, 2, 0, 0, 255), tileset(), tilemap(32, tiles)]])
         };
         assert_eq!(pixels(&decode(&sprite(&[2, 0, 1])).unwrap(), 0), [GREEN, [0; 4], RED]);
         assert!(matches!(decode(&sprite(&[2 | 0x2000_0000, 0, 1])), Err(Error::Decode { .. })));
         assert!(matches!(decode(&sprite(&[9, 0, 1])), Err(Error::Decode { .. })));
+    }
+
+    #[test]
+    fn reads_tiles_of_8_and_16_bits() {
+        for bits in [8, 16, 32] {
+            let sprite = |tiles: &[u32]| {
+                file(3, 1, 32, 1, &[vec![layer(1, 2, 0, 0, 255), tileset(), tilemap(bits, tiles)]])
+            };
+            let drawn = decode(&sprite(&[2, 0, 1])).unwrap();
+            assert_eq!(pixels(&drawn, 0), [GREEN, [0; 4], RED], "{bits} bits");
+            // a tile the set lacks, of an id that still fits a byte
+            let lacking = decode(&sprite(&[2, 0, 200]));
+            assert!(matches!(lacking, Err(Error::Decode { .. })), "{bits} bits");
+        }
+        let odd = file(3, 1, 32, 1, &[vec![layer(1, 2, 0, 0, 255), tileset(), tilemap(24, &[1])]]);
+        assert!(
+            matches!(decode(&odd), Err(Error::Decode { message, .. }) if message.contains("24"))
+        );
     }
 
     #[test]
@@ -1404,6 +1441,30 @@ mod tests {
             &[vec![layer(1, 0, 0, 0, 255), image_cel(0, (0, 0), (60000, 60000), &RED, false)]],
         );
         assert!(matches!(Sprite::read_with(&cel, &roomy), Err(Error::TooLarge(_))));
+    }
+
+    #[test]
+    fn counts_the_sprite_beside_its_frames() {
+        // a 4x4 cel of 64 bytes on a 4x4 canvas: drawing takes the frame
+        // and a canvas, 128 bytes, while the sprite still holds the cel
+        let cel = image_cel(0, (0, 0), (4, 4), &[RED; 16].concat(), false);
+        let bytes = file(4, 4, 32, 1, &[vec![layer(1, 0, 0, 0, 255), cel]]);
+        let limits = |max_bytes| Limits { max_dimension: 8192, max_bytes };
+        let draw = |max_bytes| {
+            Sprite::read_with(&bytes, &limits(max_bytes))?.animation(None, &Layers::default())
+        };
+        assert!(matches!(Sprite::read_with(&bytes, &limits(63)), Err(Error::TooLarge(_))));
+        assert!(matches!(draw(191), Err(Error::TooLarge(_))));
+        assert_eq!(draw(192).unwrap().frames().len(), 1);
+
+        // 100 tiles of a byte each in the file are 400 bytes as they are
+        // kept, with the file's 100 beside them while they are read, and
+        // the tileset's 12 bytes of pixels
+        let tiles =
+            file(1, 1, 32, 1, &[vec![layer(1, 2, 0, 0, 255), tileset(), tilemap(8, &[1; 100])]]);
+        assert!(matches!(Sprite::read_with(&tiles, &limits(511)), Err(Error::TooLarge(_))));
+        let sprite = Sprite::read_with(&tiles, &limits(512)).unwrap();
+        assert_eq!(sprite.spent, 412);
     }
 
     #[test]
