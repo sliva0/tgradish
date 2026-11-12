@@ -2,6 +2,8 @@
 //! folded away: libvpx-vp9 options by name, and raw ffmpeg arguments
 //! where the system's ffmpeg runs.
 
+use std::collections::BTreeMap;
+
 use eframe::egui::{self, RichText};
 use tgradish_core::options::Options;
 
@@ -27,66 +29,9 @@ pub(super) fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     egui::CollapsingHeader::new(RichText::new(fl!("encoder-options")).strong())
         .id_salt("advanced")
         .show(ui, |ui| {
-            {
-                let options: &mut Options = &mut item.choices.webm;
-                let hint = fl!("vp9-options");
-                row(ui, "libvpx-vp9", &hint, Ok(()), |ui| {
-                    let mut pairs: Vec<(String, String)> =
-                        options.encoder_options.clone().unwrap_or_default().into_iter().collect();
-                    let mut changed = false;
-                    let mut remove = None;
-                    for (index, (name, value)) in pairs.iter_mut().enumerate() {
-                        ui.horizontal(|ui| {
-                            changed |= ui
-                                .add(
-                                    egui::TextEdit::singleline(name)
-                                        .hint_text(fl!("vp9-options", "name"))
-                                        .desired_width(190.0),
-                                )
-                                .changed();
-                            ui.label("=");
-                            changed |= ui
-                                .add(
-                                    egui::TextEdit::singleline(value)
-                                        .hint_text(fl!("vp9-options", "value"))
-                                        .desired_width(150.0),
-                                )
-                                .changed();
-                            if ui.small_button("✖").on_hover_text(fl!("remove")).clicked() {
-                                remove = Some(index);
-                            }
-                        });
-                    }
-                    if let Some(index) = remove {
-                        pairs.remove(index);
-                        changed = true;
-                    }
-                    if ui.small_button(fl!("add-option")).clicked() {
-                        pairs.push((String::new(), String::new()));
-                        changed = true;
-                    }
-                    ui.horizontal_wrapped(|ui| {
-                        widgets::note(ui, fl!("examples"));
-                        for (name, value, hint) in encoder_examples() {
-                            if ui
-                                .small_button(format!("{name}={value}"))
-                                .on_hover_text(hint)
-                                .clicked()
-                            {
-                                match pairs.iter_mut().find(|(other, _)| other == name) {
-                                    Some(pair) => pair.1 = value.to_owned(),
-                                    None => pairs.push((name.to_owned(), value.to_owned())),
-                                }
-                                changed = true;
-                            }
-                        }
-                    });
-                    if changed {
-                        options.encoder_options =
-                            (!pairs.is_empty()).then(|| pairs.into_iter().collect());
-                    }
-                });
-            }
+            row(ui, "libvpx-vp9", &fl!("vp9-options"), Ok(()), |ui| {
+                encoder_rows(ui, item.id, &mut item.choices.webm);
+            });
 
             let system = fl!("ffmpeg-arguments", "system");
             let allowed = if context.extra_args { Ok(()) } else { Err(system.as_str()) };
@@ -97,6 +42,96 @@ pub(super) fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 }
             });
         });
+}
+
+/// The rows of an item's encoder options as they are edited, which its map
+/// of them can't hold: a map sorts them by name, and has no place for a row
+/// not named yet, nor for two of one name while one of them is typed.
+#[derive(Clone)]
+struct Rows {
+    pairs: Vec<(String, String)>,
+    /// The options the item had when the rows were last in step with them.
+    /// Once it has others, as after another preset was taken up, the rows
+    /// are read from them again.
+    written: Option<BTreeMap<String, String>>,
+}
+
+impl Rows {
+    fn of(options: &Option<BTreeMap<String, String>>) -> Rows {
+        let pairs = options.clone().unwrap_or_default().into_iter().collect();
+        Rows { pairs, written: options.clone() }
+    }
+
+    /// The rows that have a name, as the item keeps them: the later of two
+    /// of one name.
+    fn named(&self) -> Option<BTreeMap<String, String>> {
+        let named: BTreeMap<String, String> = self
+            .pairs
+            .iter()
+            .map(|(name, value)| (name.trim().to_owned(), value.clone()))
+            .filter(|(name, _)| !name.is_empty())
+            .collect();
+        (!named.is_empty()).then_some(named)
+    }
+}
+
+/// The libvpx-vp9 options of the item `id`, a row each, with examples to
+/// add by a click. The rows stay where they are while they are typed, and
+/// the item takes those that have a name.
+fn encoder_rows(ui: &mut egui::Ui, id: u64, options: &mut Options) {
+    let rows_id = egui::Id::new(("encoder option rows", id));
+    let mut rows = ui
+        .data(|data| data.get_temp::<Rows>(rows_id))
+        .filter(|rows| rows.written == options.encoder_options)
+        .unwrap_or_else(|| Rows::of(&options.encoder_options));
+    let mut changed = false;
+    let mut remove = None;
+    for (index, (name, value)) in rows.pairs.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            changed |= ui
+                .add(
+                    egui::TextEdit::singleline(name)
+                        .hint_text(fl!("vp9-options", "name"))
+                        .desired_width(190.0),
+                )
+                .changed();
+            ui.label("=");
+            changed |= ui
+                .add(
+                    egui::TextEdit::singleline(value)
+                        .hint_text(fl!("vp9-options", "value"))
+                        .desired_width(150.0),
+                )
+                .changed();
+            if ui.small_button("✖").on_hover_text(fl!("remove")).clicked() {
+                remove = Some(index);
+            }
+        });
+    }
+    if let Some(index) = remove {
+        rows.pairs.remove(index);
+        changed = true;
+    }
+    if ui.small_button(fl!("add-option")).clicked() {
+        rows.pairs.push((String::new(), String::new()));
+    }
+    ui.horizontal_wrapped(|ui| {
+        widgets::note(ui, fl!("examples"));
+        for (name, value, hint) in encoder_examples() {
+            if ui.small_button(format!("{name}={value}")).on_hover_text(hint).clicked() {
+                match rows.pairs.iter_mut().find(|(other, _)| other.trim() == name) {
+                    Some(pair) => pair.1 = value.to_owned(),
+                    None => rows.pairs.push((name.to_owned(), value.to_owned())),
+                }
+                changed = true;
+            }
+        }
+    });
+    if changed {
+        options.encoder_options = rows.named();
+        rows.written = options.encoder_options.clone();
+    }
+    ui.data_mut(|data| data.insert_temp(rows_id, rows));
 }
 
 /// The raw ffmpeg arguments of the item `id`, typed as a shell would take
@@ -176,6 +211,44 @@ mod tests {
             .query_all_by_role(Role::TextInput)
             .map(|field| field.value().unwrap_or_default())
             .collect()
+    }
+
+    #[test]
+    fn keeps_encoder_option_rows_in_place_while_they_are_typed() {
+        let (presets, config) = (Presets::builtin(), Config::default());
+        let mut harness = opened(&presets, &config);
+        let options = |harness: &Harness<Item>| {
+            let options = harness.state().choices.webm.encoder_options.clone();
+            options.unwrap_or_default().into_iter().collect::<Vec<_>>()
+        };
+        let pair = |name: &str, value: &str| (name.to_owned(), value.to_owned());
+        harness.get_by_label("qmax=50").click();
+        harness.run_steps(2);
+        // two new rows, both there, under the one before, and neither the
+        // item's until it has a name
+        for _ in 0..2 {
+            harness.get_by_label(&fl!("add-option")).click();
+            harness.run_steps(2);
+        }
+        assert_eq!(fields(&harness), ["qmax", "50", "", "", "", "", ""]);
+        assert_eq!(options(&harness), [pair("qmax", "50")]);
+        // a name that sorts before the others, typed through one there is:
+        // its row stays where it is, and so does the other of that name
+        harness.query_all_by_role(Role::TextInput).nth(2).unwrap().click();
+        harness.run_steps(2);
+        type_keys(&mut harness, "qmax");
+        assert_eq!(fields(&harness), ["qmax", "50", "qmax", "", "", "", ""]);
+        type_keys(&mut harness, "-alpha");
+        harness.key_press(egui::Key::Tab);
+        harness.run_steps(2);
+        type_keys(&mut harness, "40");
+        assert_eq!(fields(&harness), ["qmax", "50", "qmax-alpha", "40", "", "", ""]);
+        assert_eq!(options(&harness), [pair("qmax", "50"), pair("qmax-alpha", "40")]);
+        // removed, the rows under it stay
+        harness.query_all_by_label("✖").next().unwrap().click();
+        harness.run_steps(2);
+        assert_eq!(fields(&harness), ["qmax-alpha", "40", "", "", ""]);
+        assert_eq!(options(&harness), [pair("qmax-alpha", "40")]);
     }
 
     #[test]
