@@ -40,9 +40,6 @@ rustPlatform.buildRustPackage {
       # tgs-lab is a workspace of its own, which the package doesn't build
       (lib.fileset.difference ../../crates ../../crates/tgs-lab)
       ../../xtask
-      # licence notices the binary carries, see crates/core/build.rs
-      ../../LICENSE.txt
-      ../../licenses
     ];
   };
 

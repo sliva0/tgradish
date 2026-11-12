@@ -1,7 +1,7 @@
 //! The licence notices of what tgradish is built from: its own licence,
-//! the Rust crates', and in builds with ffmpeg linked in, ffmpeg's and its
-//! libraries'. Packed into the binary (see `build.rs`), so it carries them
-//! wherever it is copied.
+//! the Rust crates', and in builds with ffmpeg linked in statically,
+//! ffmpeg's and its libraries'. Packed into the binary (see `build.rs`), so
+//! it carries them wherever it is copied.
 
 use std::io::Read;
 
@@ -36,7 +36,9 @@ mod tests {
         assert!(notices[0].text.contains("MIT License"));
         let crates = notices.iter().find(|notice| notice.title == "Rust crates").unwrap();
         assert!(crates.text.contains("used by:"));
+        // of the static build alone: linked to a distribution's ffmpeg, the
+        // binary holds none of it
         let ffmpeg = notices.iter().any(|notice| notice.title.starts_with("ffmpeg"));
-        assert_eq!(ffmpeg, cfg!(feature = "linked"));
+        assert_eq!(ffmpeg, cfg!(feature = "linked-static"));
     }
 }

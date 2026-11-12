@@ -64,6 +64,7 @@ package() {
   install -Dm644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   # libwebp's licence and patent grant
   for file in COPYING PATENTS; do
-    install -Dm644 "licenses/libwebp/$file" "$pkgdir/usr/share/licenses/$pkgname/libwebp-$file"
+    install -Dm644 "crates/core/licenses/libwebp/$file" \
+      "$pkgdir/usr/share/licenses/$pkgname/libwebp-$file"
   done
 }

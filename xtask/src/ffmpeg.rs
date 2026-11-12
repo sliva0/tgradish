@@ -9,7 +9,7 @@ use std::process::Command;
 
 use anyhow::{Result, bail, ensure};
 
-use crate::{MUSL_GCC, Target, output, run, workspace_root};
+use crate::{MUSL_GCC, NOTICES, Target, output, run, workspace_root};
 
 /// An archive pinned by its hash: a library of the ffmpeg build, or a tool
 /// a task downloads.
@@ -415,21 +415,41 @@ impl Build {
             std::fs::remove_dir_all(&stage)?;
         }
         std::fs::create_dir_all(&stage)?;
-        let mut sources = format!(
-            "tgradish links a minimal ffmpeg {} build, made by `cargo xtask ffmpeg`.\n\
-             ffmpeg is licensed under the LGPL 2.1 or later. Sources:\n\n",
-            FFMPEG.version
-        );
         for source in LIBRARIES {
-            sources.push_str(&format!("{} {}: {}\n", source.name, source.version, source.url));
             let dir = self.source_dir(source);
             for license in source.licenses {
                 std::fs::copy(dir.join(license), stage.join(format!("{}-{license}", source.name)))?;
             }
         }
-        std::fs::write(stage.join("SOURCES.txt"), sources)?;
+        std::fs::write(stage.join("SOURCES.txt"), sources_notice())?;
         Ok(stage)
     }
+}
+
+/// The name of the archive of the build's exact sources, which goes out
+/// with each release: [`package_sources`] writes it with `.tar` added.
+pub fn sources_archive() -> String {
+    format!("ffmpeg-{}-sources", FFMPEG.version)
+}
+
+/// `SOURCES.txt`: what is built in and where its sources are. A binary
+/// copied on its own carries no other word of them, so it names the archive
+/// a release publishes them in, not only where they were downloaded from.
+fn sources_notice() -> String {
+    let mut notice = format!(
+        "tgradish links a minimal ffmpeg {} build, made by `cargo xtask ffmpeg`.\n\
+         ffmpeg is licensed under the LGPL 2.1 or later. The exact sources of the\n\
+         build, with how to build tgradish against a modified ffmpeg, are in\n\
+         {}.tar, published with each tgradish release at\n\
+         {}/releases. They come from:\n\n",
+        FFMPEG.version,
+        sources_archive(),
+        env!("CARGO_PKG_REPOSITORY"),
+    );
+    for source in LIBRARIES {
+        notice.push_str(&format!("{} {}: {}\n", source.name, source.version, source.url));
+    }
+    notice
 }
 
 /// The `ffmpeg` task: [`ensure_ffmpeg`], or with `--force` [`ffmpeg_for`].
@@ -508,7 +528,7 @@ pub fn ensure_ffmpeg(target: Target, asm: bool) -> Result<()> {
 }
 
 /// Builds the static ffmpeg libraries of `target` into its prefix, and
-/// keeps `licenses/ffmpeg` up to date with what is in them.
+/// keeps the notices binaries carry up to date with what is in them.
 pub fn ffmpeg_for(target: Target, asm: bool) -> Result<()> {
     let build = Build {
         target,
@@ -537,10 +557,10 @@ pub fn ffmpeg_for(target: Target, asm: bool) -> Result<()> {
     Ok(())
 }
 
-/// Copies the gathered licences into `licenses/ffmpeg`, which binaries
-/// carry (see crates/core/build.rs).
+/// Copies the gathered licences into `ffmpeg` in [`NOTICES`], which
+/// binaries carry (see crates/core/build.rs).
 fn carry_licenses(licenses: &Path) -> Result<()> {
-    let carried = workspace_root().join("licenses/ffmpeg");
+    let carried = workspace_root().join(NOTICES).join("ffmpeg");
     std::fs::create_dir_all(&carried)?;
     for entry in std::fs::read_dir(licenses)? {
         let entry = entry?;
@@ -580,7 +600,7 @@ pub fn package_sources() -> Result<()> {
     let out = workspace_root().join("target/ffmpeg");
     let downloads = out.join("sources");
 
-    let name = format!("ffmpeg-{}-sources", FFMPEG.version);
+    let name = sources_archive();
     let stage = out.join(&name);
     if stage.exists() {
         std::fs::remove_dir_all(&stage)?;
@@ -611,4 +631,22 @@ pub fn package_sources() -> Result<()> {
     run(Command::new("tar").arg("-cf").arg(&archive).arg("-C").arg(&out).arg(&name))?;
     println!("{}", archive.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `cargo xtask ffmpeg` writes the committed notice when it builds, so a
+    /// change of version or wording that was never built shows here.
+    #[test]
+    fn the_carried_sources_notice_is_todays() {
+        let carried = workspace_root().join(NOTICES).join("ffmpeg/SOURCES.txt");
+        assert_eq!(
+            std::fs::read_to_string(&carried).unwrap(),
+            sources_notice(),
+            "{} is out of date: run cargo xtask ffmpeg",
+            carried.display()
+        );
+    }
 }

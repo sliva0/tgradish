@@ -112,10 +112,13 @@ translation in place.
 
 tgradish is MIT. Every binary carries every notice it needs
 (`crates/core/build.rs`), which `tgradish licences` prints and About in the
-window shows. After changing dependencies, run `cargo xtask licenses` with
-cargo-about 0.9.2, which CI uses too. `cargo xtask ffmpeg` keeps
-`licenses/ffmpeg` up to date. ffmpeg stays LGPL: never enable its GPL
-parts. Paths and commands say "licenses", prose says "licences".
+window shows. The notices are in `crates/core/licenses`, and every published
+crate has its own copy of `LICENSE.txt`, since a crate is packaged without
+the repository around it. After changing dependencies, run `cargo xtask
+licenses` with cargo-about 0.9.2, which CI uses too; it renews those copies
+as well. `cargo xtask ffmpeg` keeps `crates/core/licenses/ffmpeg` up to
+date. ffmpeg stays LGPL: never enable its GPL parts. Paths and commands say
+"licenses", prose says "licences".
 
 ## Releasing
 
