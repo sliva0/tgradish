@@ -74,6 +74,15 @@ files-gone = { $count ->
     [one] { $count } file is gone since last time
    *[other] { $count } files are gone since last time
 }
+# The list of them couldn't be read, as when a newer tgradish kept it. It
+# is renamed rather than written over, to the path given.
+session-unreadable = The files of last time couldn't be read, so none are open. Their list is kept as { $path }
+# Some of the list couldn't: those are left out, and a copy of the list as
+# it was is kept at the path given.
+files-unreadable = { $count ->
+    [one] { $count } file of last time couldn't be read and is left out. The list as it was is kept as { $path }
+   *[other] { $count } files of last time couldn't be read and are left out. The list as it was is kept as { $path }
+}
 # The files open now couldn't be saved to be opened again next time.
 session-unsaved = The open files couldn't be kept for next time: { $error }
 # A setting changed outside the Settings dialog, such as the theme, which is
