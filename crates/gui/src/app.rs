@@ -356,7 +356,7 @@ impl App {
     /// Adds a pasted image, the one file in `dir`, which is kept as long
     /// as the item is, and copied next to the session at once: `dir` goes
     /// when the window closes.
-    fn add_pasted(&mut self, files: Vec<PathBuf>, dir: tempfile::TempDir) {
+    pub(crate) fn add_pasted(&mut self, files: Vec<PathBuf>, dir: tempfile::TempDir) {
         let mut item =
             Item::new(self.next_id, files, false, self.config.gui.target.unwrap_or_default());
         item.pasted = Some(dir);
@@ -562,15 +562,7 @@ mod tests {
     use tgradish_core::telegram;
 
     use super::*;
-    use crate::testing::{convert, finish, harness, square};
-
-    /// A pasted image as the clipboard gives one: the file and its folder.
-    fn pasted_image() -> (Vec<PathBuf>, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let image = dir.path().join(tgradish_core::clipboard::PASTED_IMAGE_NAME);
-        square(&image, [255, 0, 0, 255]);
-        (vec![image], dir)
-    }
+    use crate::testing::{convert, finish, harness, pasted_image, square};
 
     #[test]
     fn copies_pasted_images_as_they_are_pasted() {
