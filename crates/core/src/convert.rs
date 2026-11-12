@@ -772,12 +772,14 @@ pub fn convert(
                 .into(),
         ));
     }
-    for message in warnings {
-        on_event(Event::Warning { message });
-    }
     // the input as given, not as drawn for ffmpeg
     let started = Plan { input: request.input.clone(), ..plan.clone() };
     on_event(Event::Started { plan: Box::new(started) });
+    // after it: of several inputs' events, a warning is about the one that
+    // started last
+    for message in warnings {
+        on_event(Event::Warning { message });
+    }
 
     let temp = tempfile::Builder::new().prefix("tgradish-").tempdir()?;
     let mut encoder = BackendEncoder {
