@@ -18,7 +18,7 @@ pub struct Source {
     pub version: &'static str,
     pub url: &'static str,
     pub sha256: &'static str,
-    /// License files to ship, relative to the source directory.
+    /// Licence files to ship, relative to the source directory.
     pub licenses: &'static [&'static str],
 }
 
@@ -407,7 +407,7 @@ impl Build {
         Ok(())
     }
 
-    /// Collects the licenses of everything in the build, and where its
+    /// Collects the licences of everything in the build, and where its
     /// sources come from, for release archives.
     fn stage_licenses(&self) -> Result<PathBuf> {
         let stage = ffmpeg_licenses(self.target);

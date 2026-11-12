@@ -62,7 +62,7 @@
 mod build;
 mod ffmpeg;
 mod icons;
-mod licences;
+mod licenses;
 mod package;
 mod release;
 mod strings;
@@ -79,7 +79,7 @@ fn main() -> Result<()> {
         Some("ffmpeg-sources") => ffmpeg::package_sources(),
         Some("build") => build::build_release(&args[1..]),
         Some("package") => package::package_release(&args[1..]),
-        Some("licenses") => licences::crate_licenses(&args[1..]),
+        Some("licenses") => licenses::crate_licenses(&args[1..]),
         Some("icons") => icons::icons(&args[1..]),
         Some("local-release") => release::local_release(&args[1..]),
         Some("strings") => strings::strings(&args[1..]),

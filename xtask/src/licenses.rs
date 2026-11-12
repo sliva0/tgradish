@@ -38,12 +38,12 @@ pub fn crate_licenses(args: &[String]) -> Result<()> {
         .arg("-o")
         .arg(&fresh))?;
     let text = sorted_sections(&std::fs::read_to_string(&fresh)?);
-    // crates' own license files say who holds the copyright; without them
+    // crates' own licence files say who holds the copyright; without them
     // (see the crate's notes on CARGO_HOME) every crate gets the bare
-    // license text
+    // licence text
     ensure!(
         text.matches("\n----").count() > MOST_SECTIONS_WITHOUT_FILES,
-        "cargo-about found almost no license files: is a .gitignore hiding CARGO_HOME?"
+        "cargo-about found almost no licence files: is a .gitignore hiding CARGO_HOME?"
     );
     if check {
         let committed = std::fs::read_to_string(&file).unwrap_or_default();
