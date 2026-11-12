@@ -29,6 +29,53 @@ fn libav(doing: &'static str) -> impl Fn(ff::Error) -> Error {
     move |err| Error::Libav(format!("{doing}: {err}"))
 }
 
+/// `path` as libavformat takes a file's name: on Unix its bytes as they
+/// are, which is what the ffmpeg command line is given, so names that
+/// aren't Unicode read too; elsewhere as UTF-8, which ffmpeg turns into
+/// the system's own. ffmpeg-next's functions that take a path panic on
+/// what isn't Unicode.
+fn c_path(path: &Path) -> std::result::Result<CString, &'static str> {
+    #[cfg(unix)]
+    let bytes = std::os::unix::ffi::OsStrExt::as_bytes(path.as_os_str());
+    #[cfg(not(unix))]
+    let bytes = path
+        .to_str()
+        .ok_or("its name isn't valid Unicode, which the built-in ffmpeg needs")?
+        .as_bytes();
+    CString::new(bytes).map_err(|_| "its name has a NUL character in it")
+}
+
+/// A WebM file to write at `path`, as ffmpeg-next's `output_as` makes one,
+/// but for any name [`c_path`] takes.
+fn create_webm(path: &Path) -> Result<format::context::Output> {
+    let failed = libav("creating the output");
+    let name =
+        c_path(path).map_err(|why| Error::Libav(format!("creating {}: {why}", path.display())))?;
+    // SAFETY: the calls ffmpeg-next's `output_as` makes, with
+    // NUL-terminated strings that outlive them. The context is freed here
+    // when its file can't be opened, and otherwise by the wrapper, which
+    // closes the file too
+    unsafe {
+        let mut context = std::ptr::null_mut();
+        let made = ff::ffi::avformat_alloc_output_context2(
+            &mut context,
+            std::ptr::null_mut(),
+            c"webm".as_ptr(),
+            name.as_ptr(),
+        );
+        if made < 0 {
+            return Err(failed(ff::Error::from(made)));
+        }
+        let opened =
+            ff::ffi::avio_open(&mut (*context).pb, name.as_ptr(), ff::ffi::AVIO_FLAG_WRITE);
+        if opened < 0 {
+            ff::ffi::avformat_free_context(context);
+            return Err(failed(ff::Error::from(opened)));
+        }
+        Ok(format::context::Output::wrap(context))
+    }
+}
+
 fn init() -> Result<()> {
     static INIT: OnceLock<std::result::Result<(), String>> = OnceLock::new();
     INIT.get_or_init(|| {
@@ -285,10 +332,7 @@ impl Encoder {
     ) -> Result<Encoder> {
         let codec = ff::encoder::find_by_name("libvpx-vp9")
             .ok_or_else(|| Error::Libav("this ffmpeg has no libvpx-vp9 encoder".into()))?;
-        let mut output = output
-            .map(|path| format::output_as(path, "webm"))
-            .transpose()
-            .map_err(libav("creating the output"))?;
+        let mut output = output.map(create_webm).transpose()?;
 
         let mut encoder = codec::context::Context::new_with_codec(codec)
             .encoder()

@@ -2,12 +2,13 @@
 //! stream, timestamps counted from the file's start, seek to the start and
 //! drop frames before it, stop after the read window, repeat still images.
 
+use std::ffi::CStr;
 use std::path::Path;
 
 use ff::{Packet, Rational, Rescale, codec, format, frame};
 use ffmpeg_next as ff;
 
-use super::libav;
+use super::{c_path, libav};
 use crate::CancelToken;
 use crate::convert::Plan;
 use crate::error::{Error, Result};
@@ -75,6 +76,42 @@ pub(super) struct Source {
     done: bool,
 }
 
+/// Opens the file `name` and reads what streams it has, with `interrupt`
+/// asked whether to give up on reads that take long. ffmpeg-next's
+/// `input_with_interrupt` does the same, but takes the name as text and
+/// panics on one that isn't Unicode.
+fn open_input(
+    name: &CStr,
+    interrupt: impl FnMut() -> bool + Send + 'static,
+) -> std::result::Result<format::context::Input, ff::Error> {
+    // SAFETY: the calls ffmpeg-next's `input_with_interrupt` makes. `name`
+    // is NUL-terminated and outlives them. libavformat frees the context
+    // itself when opening fails, and it is closed here when its streams
+    // can't be read; the guard keeps the callback's closure for as long as
+    // the context the wrapper owns, or frees it on the way out
+    unsafe {
+        let mut context = ff::ffi::avformat_alloc_context();
+        if context.is_null() {
+            return Err(ff::Error::Other { errno: ff::util::error::ENOMEM });
+        }
+        let interrupt = ff::util::interrupt::new(Box::new(interrupt));
+        (*context).interrupt_callback = interrupt.interrupt;
+        use std::ptr::null_mut;
+        match ff::ffi::avformat_open_input(&mut context, name.as_ptr(), null_mut(), null_mut()) {
+            0 => match ff::ffi::avformat_find_stream_info(context, null_mut()) {
+                found if found >= 0 => {
+                    Ok(format::context::Input::wrap_with_interrupt(context, interrupt.guard))
+                }
+                err => {
+                    ff::ffi::avformat_close_input(&mut context);
+                    Err(ff::Error::from(err))
+                }
+            },
+            err => Err(ff::Error::from(err)),
+        }
+    }
+}
+
 /// Seconds to `time_base` units.
 fn to_units(seconds: f64, time_base: Rational) -> i64 {
     (seconds * f64::from(time_base.denominator()) / f64::from(time_base.numerator())).round() as i64
@@ -101,12 +138,10 @@ impl Source {
             let cancel = cancel.clone();
             move || cancel.is_cancelled()
         };
-        let input = format::input_with_interrupt(path, interrupt).map_err(|err| {
-            if cancel.is_cancelled() {
-                Error::Cancelled
-            } else {
-                Error::Probe { path: path.to_path_buf(), message: err.to_string() }
-            }
+        let unreadable = |message: String| Error::Probe { path: path.to_path_buf(), message };
+        let name = c_path(path).map_err(|why| unreadable(why.into()))?;
+        let input = open_input(&name, interrupt).map_err(|err| {
+            if cancel.is_cancelled() { Error::Cancelled } else { unreadable(err.to_string()) }
         })?;
         let stream = input
             .streams()
