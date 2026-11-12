@@ -2,37 +2,21 @@
 //! system ffmpeg and, with the `linked` feature, the built-in one. Skipped
 //! when ffmpeg is not on PATH, since it also makes test input.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use common::{backends, clip, name};
 use tgradish_core::CancelToken;
 use tgradish_core::backend::{Backend, FramesRequest};
 use tgradish_core::convert::{Request, convert};
 use tgradish_core::events::Event;
-use tgradish_core::ffmpeg::{self, FfmpegChoice};
+use tgradish_core::ffmpeg;
 use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Speed};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::{Error, webm};
 use tgradish_corpus::Clip;
-
-/// Backends to test, or `None` without a system ffmpeg.
-fn backends() -> Option<Vec<Backend>> {
-    let Ok(system) = ffmpeg::locate(FfmpegChoice::System, None) else {
-        eprintln!("skipped: needs ffmpeg and ffprobe on PATH");
-        return None;
-    };
-    #[allow(unused_mut)]
-    let mut backends = vec![Backend::Process(system)];
-    #[cfg(feature = "linked")]
-    backends.push(Backend::Linked);
-    Some(backends)
-}
-
-/// A clip like phone footage, made once with ffmpeg and kept for later
-/// runs.
-fn clip(kind: Clip) -> Option<PathBuf> {
-    tgradish_corpus::clip(kind, Path::new(env!("CARGO_TARGET_TMPDIR")))
-}
 
 fn fast(fit: Fit) -> Options {
     Options { fit: Some(fit), speed: Some(Speed::Fast), ..Default::default() }
@@ -48,15 +32,6 @@ fn first_frame_rgba(path: &Path) -> Vec<u8> {
         .unwrap();
     assert!(out.status.success());
     out.stdout
-}
-
-/// Name for assertion messages.
-fn name(backend: &Backend) -> &'static str {
-    match backend {
-        Backend::Process(_) => "process",
-        #[allow(unreachable_patterns)]
-        _ => "linked",
-    }
 }
 
 #[test]

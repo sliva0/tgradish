@@ -1,0 +1,38 @@
+//! What the end-to-end tests share: the backends they run through, and
+//! the clips they convert.
+// each test binary uses its own part of this
+#![allow(dead_code)]
+
+use std::path::{Path, PathBuf};
+
+use tgradish_core::backend::Backend;
+use tgradish_core::ffmpeg::{self, FfmpegChoice};
+use tgradish_corpus::Clip;
+
+/// Backends to test, or `None` without a system ffmpeg.
+pub fn backends() -> Option<Vec<Backend>> {
+    let Ok(system) = ffmpeg::locate(FfmpegChoice::System, None) else {
+        eprintln!("skipped: needs ffmpeg and ffprobe on PATH");
+        return None;
+    };
+    #[allow(unused_mut)]
+    let mut backends = vec![Backend::Process(system)];
+    #[cfg(feature = "linked")]
+    backends.push(Backend::Linked);
+    Some(backends)
+}
+
+/// A clip like phone footage, made once with ffmpeg and kept for later
+/// runs.
+pub fn clip(kind: Clip) -> Option<PathBuf> {
+    tgradish_corpus::clip(kind, Path::new(env!("CARGO_TARGET_TMPDIR")))
+}
+
+/// Name for assertion messages.
+pub fn name(backend: &Backend) -> &'static str {
+    match backend {
+        Backend::Process(_) => "process",
+        #[allow(unreachable_patterns)]
+        _ => "linked",
+    }
+}
