@@ -590,6 +590,7 @@ example-qmax = Never worse than quality 50 anywhere
 ffmpeg-arguments = ffmpeg arguments
     .hint = Raw arguments added before the output, split like a shell would
     .placeholder = For example: -qmin 4
+    .unfinished = A quote or a backslash is left open: the arguments stay as they last read until it is closed
     .system = Only with the system's ffmpeg, which "{ settings }" can pick
 
 

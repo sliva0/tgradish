@@ -537,6 +537,14 @@ pub(crate) fn toast(ctx: &egui::Context, message: &str) -> bool {
     open
 }
 
+/// Gives a test's bare `harness` the window's fonts. egui's own are left
+/// out of the build, and text without glyphs has no place for a cursor but
+/// its start, so what is typed would go in backwards.
+#[cfg(test)]
+pub(crate) fn test_fonts<State>(harness: &egui_kittest::Harness<'_, State>) {
+    harness.ctx.set_fonts(crate::fonts::fonts());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
