@@ -68,9 +68,14 @@ impl App {
             .collect();
         let suffix = format!(".{}.{}", item.choices.target.name(), item.format.extension());
         let own = item.made.as_ref().map(|made| made.job.output.as_path());
-        // pasted images all have one name: theirs never replace a file
+        // pasted images all have one name, so tgradish having made a file
+        // doesn't make it theirs to replace: only the item's own result is
         let blocked = |path: &Path| {
-            path.exists() && (item.pasted.is_some() || !self.may_replace(item.id, path))
+            let may_replace = match item.pasted {
+                Some(_) => self.wrote(item.id, path),
+                None => self.may_replace(item.id, path),
+            };
+            path.exists() && !may_replace
         };
         free_name(&first, &suffix, &claimed, own, &blocked)
     }
@@ -138,12 +143,13 @@ fn free_name(
 
 #[cfg(test)]
 mod tests {
+    use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
     use tgradish_core::config::Config;
 
     use super::*;
     use crate::jobs::Status;
-    use crate::testing::{convert, finish, harness, made_job, square};
+    use crate::testing::{convert, finish, harness, made_job, pasted_image, square};
 
     #[test]
     fn numbers_results_of_files_with_the_same_name() {
@@ -213,6 +219,53 @@ mod tests {
             assert_eq!(made.output, output);
             assert_eq!(made.replaces, !earlier);
         }
+    }
+
+    #[test]
+    fn replaces_a_pasted_images_own_result_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        let mut config = Config::default();
+        config.gui.output_dir = Some(out.clone());
+        let mut harness = harness(config);
+        let results = |harness: &Harness<App>| -> Vec<PathBuf> {
+            harness.state().items.iter().map(|item| made_job(item).output.clone()).collect()
+        };
+        let (first, second) =
+            (out.join("clipboard.sticker.tgs"), out.join("clipboard 2.sticker.tgs"));
+        // made again with another setting, the result goes where it went
+        for keep_canvas in [false, true] {
+            if harness.state().items.is_empty() {
+                let (files, folder) = pasted_image();
+                harness.state_mut().add_pasted(files, folder);
+            }
+            finish(&mut harness);
+            harness.state_mut().items[0].choices.tgs.keep_canvas = Some(keep_canvas);
+            harness.run_steps(2);
+            convert(&harness);
+            harness.run_steps(2);
+            finish(&mut harness);
+            assert_eq!(results(&harness), std::slice::from_ref(&first));
+            assert!(!second.exists());
+        }
+        // another pasted image's doesn't go over it
+        let (files, folder) = pasted_image();
+        harness.state_mut().add_pasted(files, folder);
+        finish(&mut harness);
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        assert_eq!(results(&harness), [first.clone(), second]);
+        // nor does the first's go over a file put where its result was
+        std::fs::write(&first, b"mine").unwrap();
+        let id = harness.state().items[0].id;
+        harness.state_mut().select(id);
+        harness.run_steps(2);
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        assert_eq!(results(&harness)[0], out.join("clipboard 3.sticker.tgs"));
+        assert_eq!(std::fs::read(&first).unwrap(), b"mine");
     }
 
     #[test]

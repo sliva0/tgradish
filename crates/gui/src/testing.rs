@@ -25,6 +25,15 @@ pub(crate) fn square(path: &Path, colour: [u8; 4]) {
     encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
 }
 
+/// A pasted image as the clipboard gives one, for `App::add_pasted`: the
+/// file and its folder.
+pub(crate) fn pasted_image() -> (Vec<PathBuf>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let image = dir.path().join(tgradish_core::clipboard::PASTED_IMAGE_NAME);
+    square(&image, [255, 0, 0, 255]);
+    (vec![image], dir)
+}
+
 pub(crate) fn harness(config: Config) -> Harness<'static, App> {
     Harness::builder()
         .with_size([1280.0, 820.0])
