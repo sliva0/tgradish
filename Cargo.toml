@@ -4,20 +4,29 @@ members = ["crates/*", "xtask"]
 # a workspace of its own, see its manifest
 exclude = ["crates/tgs-lab"]
 
+# the application's version, which core, the window and the command line
+# share; the two libraries, tgradish-frames and tgradish-tgs, have their own
 [workspace.package]
 version = "2.0.0"
 edition = "2024"
+# the oldest Rust that builds every crate: `if let` guards in matches need
+# it, as does the window's egui
+rust-version = "1.95"
 license = "MIT"
 authors = ["sliva0 <sliva0mk@gmail.com>"]
 repository = "https://github.com/sliva0/tgradish"
+homepage = "https://github.com/sliva0/tgradish"
 
+# The workspace's own crates ask for each other's exact versions: they are
+# released together, and `cargo install` resolves afresh rather than read
+# Cargo.lock, so a looser requirement could pair crates never built as one.
 [workspace.dependencies]
-tgradish-core = { path = "crates/core", version = "2.0.0" }
+tgradish-core = { path = "crates/core", version = "=2.0.0" }
 # synthetic test art, unpublished
 tgradish-corpus = { path = "crates/corpus" }
-tgradish-frames = { path = "crates/frames", version = "2.0.0" }
-tgradish-gui = { path = "crates/gui", version = "2.0.0" }
-tgradish-tgs = { path = "crates/tgs", version = "2.0.0" }
+tgradish-frames = { path = "crates/frames", version = "=0.1.0" }
+tgradish-gui = { path = "crates/gui", version = "=2.0.0" }
+tgradish-tgs = { path = "crates/tgs", version = "=0.1.0" }
 
 anyhow = "1.0.104"
 arboard = { version = "3.6.1", features = ["wayland-data-control"] }
@@ -58,7 +67,9 @@ rfd = "0.17.2"
 rust-embed = { version = "8.13.0", features = ["debug-embed"] }
 schemars = "1.2.2"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = { version = "1.0.151", features = ["preserve_order", "unbounded_depth"] }
+# each crate names the features it needs, so publishing one doesn't turn
+# another's on for whoever depends on it
+serde_json = "1.0.151"
 shlex = "2.0.1"
 tempfile = "3.27.0"
 thiserror = "2.0.21"

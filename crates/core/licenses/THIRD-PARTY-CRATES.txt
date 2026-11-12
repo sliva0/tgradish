@@ -4423,9 +4423,9 @@ SOFTWARE.
 MIT License, used by:
   tgradish 2.0.0
   tgradish-core 2.0.0
-  tgradish-frames 2.0.0
+  tgradish-frames 0.1.0
   tgradish-gui 2.0.0
-  tgradish-tgs 2.0.0
+  tgradish-tgs 0.1.0
 
 MIT License
 

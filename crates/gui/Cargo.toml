@@ -3,9 +3,14 @@ name = "tgradish-gui"
 description = "The tgradish window: converts with tgradish-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["telegram", "sticker", "emoji", "egui", "pixel-art"]
+categories = ["multimedia::video", "multimedia::images"]
 
 [dependencies]
 tgradish-core = { workspace = true, features = ["clipboard"] }

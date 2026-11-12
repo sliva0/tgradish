@@ -3,9 +3,14 @@ name = "tgradish-core"
 description = "Library behind tgradish: Telegram video, image and pixel art sticker conversion, and WebM duration spoofing"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["telegram", "sticker", "emoji", "webm", "ffmpeg"]
+categories = ["multimedia::video", "multimedia::images", "multimedia::encoding"]
 
 [features]
 # ffmpeg libraries linked into the binary, from the system or FFMPEG_DIR
@@ -27,7 +32,8 @@ ffmpeg-next = { workspace = true, optional = true }
 png.workspace = true
 schemars.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+# options become flags in the order of their fields
+serde_json = { workspace = true, features = ["preserve_order"] }
 shlex.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true

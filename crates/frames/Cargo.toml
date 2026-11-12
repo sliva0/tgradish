@@ -1,11 +1,17 @@
 [package]
 name = "tgradish-frames"
 description = "RGBA animations with frame durations, and pure-Rust decoders for them"
-version.workspace = true
+# a library with its own version, not the application's
+version = "0.1.0"
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["animation", "gif", "apng", "aseprite", "sprite-sheet"]
+categories = ["multimedia::images", "wasm"]
 
 [dependencies]
 flate2.workspace = true
