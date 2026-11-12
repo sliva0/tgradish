@@ -268,6 +268,11 @@ const WINDOW_LIBRARIES: [(&str, &str); 13] = [
     ("libdbus-1-3", "libdbus-1.so.3"),
 ];
 
+/// What tgradish is, as short as a package's summary has to be: the .deb's
+/// and .rpm's, and the AUR packages' `pkgdesc`. Where length is free, as in
+/// `crates/cli/Cargo.toml`, the sentence names the kinds of sticker too.
+const SUMMARY: &str = "Telegram stickers and emoji from videos, pictures and pixel art";
+
 /// Packs the release staged in `stage` as a .deb and an .rpm, with nfpm.
 /// Returns their paths.
 fn linux_packages(
@@ -358,7 +363,7 @@ fn linux_packages(
          priority: optional\n\
          maintainer: \"sliva0 <sliva0mk@gmail.com>\"\n\
          description: |-\n  \
-           Telegram stickers and emoji from videos, pictures and pixel art\n  \
+           {SUMMARY}\n  \
            Makes video (WebM) and image (WebP) stickers and custom emoji from any\n  \
            video or picture, and animated (TGS) stickers from pixel art, fitted to\n  \
            Telegram's limits. It has ffmpeg built in.\n\
@@ -452,4 +457,47 @@ fn needed_glibc(exe: &Path) -> Result<(u32, u32)> {
         .filter_map(|version| glibc_version(version).ok())
         .max()
         .context("the executable uses no versioned glibc symbols")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What tgradish is said to be is written out wherever a format wants
+    /// it, and had drifted into five wordings.
+    #[test]
+    fn everything_describes_tgradish_alike() {
+        let root = workspace_root();
+        let read = |path: &str| std::fs::read_to_string(root.join(path)).unwrap();
+        let manifest = read("crates/cli/Cargo.toml");
+        let sentence = manifest
+            .lines()
+            .find_map(|line| line.strip_prefix("description = \"")?.strip_suffix('"'))
+            .unwrap();
+        // the summary is the sentence without the kinds of sticker
+        assert_eq!(sentence.replacen(" video, image and animated", "", 1), SUMMARY);
+        for (path, line) in [
+            ("flake.nix", format!("  description = \"{sentence}\";")),
+            ("packaging/nix/package.nix", format!("    description = \"{sentence}\";")),
+            ("crates/cli/assets/tgradish.desktop", format!("Comment={sentence}")),
+        ] {
+            assert!(read(path).lines().any(|found| found == line), "{path} lacks {line:?}");
+        }
+        // the AUR asks for about 80 characters at most
+        for (package, note) in [
+            ("tgradish", ""),
+            ("tgradish-bin", " (release build)"),
+            ("tgradish-static-bin", " (static ffmpeg)"),
+        ] {
+            let described = format!("{SUMMARY}{note}");
+            assert!(described.len() <= 80, "{described:?} is too long for a pkgdesc");
+            for (file, line) in [
+                ("PKGBUILD", format!("pkgdesc='{described}'")),
+                (".SRCINFO", format!("\tpkgdesc = {described}")),
+            ] {
+                let path = format!("packaging/aur/{package}/{file}");
+                assert!(read(&path).lines().any(|found| found == line), "{path} lacks {line:?}");
+            }
+        }
+    }
 }

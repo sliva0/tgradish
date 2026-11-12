@@ -4,7 +4,7 @@ pkgname=tgradish-static-bin
 _pkgname=tgradish
 pkgver=2.0.0
 pkgrel=1
-pkgdesc='Telegram video and image stickers and emoji from any video or picture, and animated stickers from pixel art (release build with ffmpeg built in)'
+pkgdesc='Telegram stickers and emoji from videos, pictures and pixel art (static ffmpeg)'
 arch=(x86_64 aarch64)
 url='https://github.com/sliva0/tgradish'
 # tgradish is MIT; the ffmpeg built in is LGPL, with libvpx, dav1d and zlib
