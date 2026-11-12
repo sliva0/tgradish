@@ -5,7 +5,7 @@
 //!
 //! A session this version can't read, as one a newer tgradish kept, is
 //! set aside rather than written over, and the copies it may name are left
-//! alone.
+//! alone. Only one window at a time keeps a session, the first to open.
 
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
@@ -99,11 +99,17 @@ pub struct Store {
     /// The copies of pasted images this window read of or made. Others in
     /// the folder may belong to a session that was set aside.
     copies: HashSet<String>,
+    /// Held while the window runs, so no other keeps a session here.
+    _lock: Option<std::fs::File>,
 }
 
 impl Store {
-    pub fn at(path: PathBuf) -> Store {
-        Store { path, written: String::new(), copies: HashSet::new() }
+    /// The session at `path`, for this window alone: `None` while another
+    /// window has it, as two would write over each other's files and
+    /// remove each other's pasted images.
+    pub fn open(path: PathBuf) -> Option<Store> {
+        let lock = lock(&path).ok()?;
+        Some(Store { path, written: String::new(), copies: HashSet::new(), _lock: lock })
     }
 
     pub fn path(&self) -> &Path {
@@ -184,6 +190,27 @@ impl Store {
         }
         self.copies = named;
         Ok(())
+    }
+}
+
+/// Another window holds the session.
+struct Held;
+
+/// Takes the lock beside the session at `path`, which lasts until the file
+/// is closed, as when the window ends in any way. No file where there is
+/// no telling whether another window is open, as the folder can't be
+/// written to or its file system has no locks: the session is kept as if
+/// there were none, and where it can't be, writing it says so.
+fn lock(path: &Path) -> Result<Option<std::fs::File>, Held> {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let options = std::fs::File::options().create(true).truncate(false).write(true).clone();
+    let Ok(file) = options.open(path.with_extension("lock")) else { return Ok(None) };
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Err(Held),
+        Err(std::fs::TryLockError::Error(_)) => Ok(None),
     }
 }
 
@@ -322,13 +349,14 @@ mod tests {
     /// Saves `items` at `path`, pasted images copied there as the window
     /// copies them, and opens them again, numbered from 1.
     fn again(items: &mut [Item], path: &Path) -> Vec<Item> {
-        let mut store = Store::at(path.to_path_buf());
+        let mut store = Store::open(path.to_path_buf()).unwrap();
         store.read().unwrap();
         for item in items.iter_mut().filter(|item| item.kept.is_none()) {
             item.kept = Some(store.keep_pasted(item.id, &item.inputs[0]).unwrap());
         }
         store.save(&Session::of(items, None)).unwrap();
-        Store::at(path.to_path_buf()).read().unwrap().session.restore(path, 1).0
+        drop(store);
+        Store::open(path.to_path_buf()).unwrap().read().unwrap().session.restore(path, 1).0
     }
 
     fn copies(path: &Path) -> usize {
@@ -351,6 +379,17 @@ mod tests {
     }
 
     #[test]
+    fn lets_one_window_at_a_time_keep_the_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state").join("session.json");
+        let first = Store::open(path.clone()).expect("nobody has it");
+        assert!(Store::open(path.clone()).is_none());
+        // until the first window is gone
+        drop(first);
+        assert!(Store::open(path).is_some());
+    }
+
+    #[test]
     fn sets_aside_a_session_it_cannot_read() {
         // of another version, and not a session at all
         for text in [r#"{"version":2,"items":[],"selected":null}"#, "not a session"] {
@@ -360,7 +399,7 @@ mod tests {
             // a copy it may name
             std::fs::create_dir(pasted_dir(&path)).unwrap();
             std::fs::write(pasted_dir(&path).join("19a0-3.png"), b"pasted").unwrap();
-            let mut store = Store::at(path.clone());
+            let mut store = Store::open(path.clone()).unwrap();
             let loaded = store.read().unwrap();
             let unreadable = loaded.unreadable.expect("unreadable");
             assert!(loaded.session.items.is_empty() && unreadable.files.is_none());
@@ -382,7 +421,7 @@ mod tests {
     fn leaves_out_only_the_files_it_cannot_read() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("session.json");
-        let mut store = Store::at(path.clone());
+        let mut store = Store::open(path.clone()).unwrap();
         let mut items = [pasted(1, b"one"), pasted(2, b"two")];
         for item in &mut items {
             item.kept = Some(store.keep_pasted(item.id, &item.inputs[0]).unwrap());
@@ -394,8 +433,9 @@ mod tests {
         let newer = text.replacen(r#""webm":{"#, r#""webm":{"made-up":1,"#, 1);
         assert_ne!(newer, text);
         std::fs::write(&path, &newer).unwrap();
+        drop(store);
 
-        let mut store = Store::at(path.clone());
+        let mut store = Store::open(path.clone()).unwrap();
         let loaded = store.read().unwrap();
         let unreadable = loaded.unreadable.expect("unreadable");
         assert_eq!(unreadable.files, Some(1));
