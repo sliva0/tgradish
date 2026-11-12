@@ -45,7 +45,7 @@ package() {
   done
   install -Dm644 README.md THIRD-PARTY.txt THIRD-PARTY-CRATES.txt -t "$pkgdir/usr/share/doc/$_pkgname/"
   install -Dm644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-  # ffmpeg's, its libraries' and libwebp's licenses, and where ffmpeg's
+  # ffmpeg's, its libraries' and libwebp's licences, and where ffmpeg's
   # sources are
   install -Dm644 licenses/* -t "$pkgdir/usr/share/licenses/$pkgname/"
 }

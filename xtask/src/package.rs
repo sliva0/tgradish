@@ -130,7 +130,7 @@ pub fn package_release(args: &[String]) -> Result<()> {
 }
 
 /// Packs a release archive: the tgradish binary built with
-/// `--features linked-static --target <triple>`, and the licenses of the
+/// `--features linked-static --target <triple>`, and the licences of the
 /// ffmpeg build linked into it. With `system_ffmpeg`, the binary is one
 /// built without ffmpeg instead. With `max_glibc`, fails if a Linux binary
 /// needs a newer glibc.
