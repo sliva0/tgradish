@@ -41,13 +41,15 @@
 //! archives and binaries end up in `target/release-artifacts`.
 //!
 //! `cargo xtask licenses [--check]` writes the licences of the Rust crates
-//! in tgradish to `licenses/THIRD-PARTY-CRATES.txt`, which binaries carry;
-//! `--check` fails if it is out of date, as after dependencies change. Needs
-//! cargo-about 0.9.2, which CI uses too: other versions word the list
+//! in tgradish to `crates/core/licenses/THIRD-PARTY-CRATES.txt`, which
+//! binaries carry, and copies `LICENSE.txt` into every crate that is
+//! published, as a crate is packaged without the repository around it;
+//! `--check` fails if either is out of date, as after dependencies change.
+//! Needs cargo-about 0.9.2, which CI uses too: other versions word the list
 //! differently. cargo-about skips files a `.gitignore` above the crates'
 //! sources ignores, such as one of a home directory kept in git: then set
 //! `CARGO_HOME` to a directory outside it. `cargo xtask ffmpeg` keeps
-//! `licenses/ffmpeg` up to date the same way.
+//! `crates/core/licenses/ffmpeg` up to date the same way.
 //!
 //! `cargo xtask icons [--check]` makes the icons for menus and the Windows
 //! executable from the window's own, `crates/gui/assets/icon.png`;
@@ -97,6 +99,11 @@ fn main() -> Result<()> {
         ),
     }
 }
+
+/// Where the notices binaries carry are kept, from the repository's top:
+/// inside core, whose build script packs them, since a published crate
+/// can't read files outside itself.
+const NOTICES: &str = "crates/core/licenses";
 
 /// The C compiler of musl targets: musl's own wrapper of the system's gcc,
 /// from musl-tools on Debian and Ubuntu, or musl on Arch.

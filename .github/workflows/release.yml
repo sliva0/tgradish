@@ -19,11 +19,11 @@ on:
       - crates/core/src/linked/**
       - crates/core/src/ffmpeg/args.rs
       - crates/core/build.rs
+      - crates/core/licenses/**
       - crates/cli/build.rs
       - crates/cli/tgradish.rc
       - crates/cli/tgradish.exe.manifest
       - crates/cli/assets/**
-      - licenses/**
       # features, dependencies and profiles
       - Cargo.toml
       - crates/core/Cargo.toml

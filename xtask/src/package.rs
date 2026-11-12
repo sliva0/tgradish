@@ -12,9 +12,9 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail, ensure};
 
-use crate::ffmpeg::{FFMPEG, Source, download};
+use crate::ffmpeg::{FFMPEG, Source, download, sources_archive};
 use crate::icons::ICON_SIZES;
-use crate::{Target, output, run, workspace_root};
+use crate::{NOTICES, Target, output, run, workspace_root};
 
 /// nfpm, which writes the .deb and .rpm packages, for the machine that runs
 /// it; hashes from the release's checksums.txt.
@@ -177,7 +177,7 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
     std::fs::create_dir_all(stage.join("licenses"))?;
     for file in ["COPYING", "PATENTS"] {
         let to = stage.join("licenses").join(format!("libwebp-{file}"));
-        std::fs::copy(root.join("licenses/libwebp").join(file), to)?;
+        std::fs::copy(root.join(NOTICES).join("libwebp").join(file), to)?;
     }
     let third_party = if system_ffmpeg {
         "tgradish is MIT licensed, see LICENSE.txt.\n\n\
@@ -193,9 +193,10 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
             "tgradish is MIT licensed, see LICENSE.txt.\n\n\
              It includes ffmpeg {ffmpeg} (LGPL 2.1 or later) built with zlib, libvpx and\n\
              dav1d, linked statically. Their licences are in licenses/. The exact\n\
-             sources are in ffmpeg-{ffmpeg}-sources.tar, published with this release,\n\
+             sources are in {sources}.tar, published with this release,\n\
              with how to rebuild tgradish against a modified ffmpeg.\n",
             ffmpeg = FFMPEG.version,
+            sources = sources_archive(),
         )
     };
     let libwebp = "\nIt includes libwebp (BSD 3-Clause), for image stickers: its licence and\n\
@@ -208,7 +209,7 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
     )?;
     // the crates of every build, as the binary carries them
     std::fs::copy(
-        root.join("licenses/THIRD-PARTY-CRATES.txt"),
+        root.join(NOTICES).join("THIRD-PARTY-CRATES.txt"),
         stage.join("THIRD-PARTY-CRATES.txt"),
     )?;
 

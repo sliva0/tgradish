@@ -3,10 +3,16 @@
 //! committed, so builds need no network or cargo-about, and CI checks it
 //! after dependencies change. Its sections are sorted here so a reader can
 //! find a licence and its crates.
+//!
+//! tgradish's own licence is `LICENSE.txt` at the top of the repository,
+//! and every published crate has a copy, kept the same here: crates.io
+//! packs a crate's own folder and nothing above it.
 
-use anyhow::{Result, bail, ensure};
+use std::path::{Path, PathBuf};
 
-use crate::{cargo, run, workspace_root};
+use anyhow::{Context, Result, bail, ensure};
+
+use crate::{NOTICES, cargo, run, workspace_root};
 
 /// Width of the rule above each licence's section, which `xtask/about.hbs`
 /// draws: the two must match for the sections to be found.
@@ -19,8 +25,45 @@ const RULE_WIDTH: usize = 80;
 /// `xtask/about.toml` accepts.
 const MOST_SECTIONS_WITHOUT_FILES: usize = 40;
 
-/// Writes or checks `licenses/THIRD-PARTY-CRATES.txt`: the crates of
-/// every target and build, ffmpeg linked in or not.
+/// The folders of the crates that are published, which is every one of
+/// `crates/` that doesn't say otherwise.
+fn published_crates(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut crates = Vec::new();
+    for entry in std::fs::read_dir(root.join("crates"))? {
+        let dir = entry?.path();
+        let Ok(manifest) = std::fs::read_to_string(dir.join("Cargo.toml")) else { continue };
+        if !manifest.lines().any(|line| line.trim() == "publish = false") {
+            crates.push(dir);
+        }
+    }
+    crates.sort();
+    Ok(crates)
+}
+
+/// Writes or checks the copy of `LICENSE.txt` in each published crate.
+fn own_licence(root: &Path, check: bool) -> Result<()> {
+    let name = "LICENSE.txt";
+    let text = std::fs::read(root.join(name)).with_context(|| format!("could not read {name}"))?;
+    let crates = published_crates(root)?;
+    ensure!(!crates.is_empty(), "found no published crates in crates/");
+    for dir in crates {
+        let copy = dir.join(name);
+        if check {
+            ensure!(
+                std::fs::read(&copy).ok().as_ref() == Some(&text),
+                "{} isn't a copy of {name}: run cargo xtask licenses and commit it",
+                copy.display()
+            );
+        } else {
+            std::fs::write(&copy, &text)?;
+        }
+    }
+    Ok(())
+}
+
+/// Writes or checks `THIRD-PARTY-CRATES.txt` in [`NOTICES`]: the crates of
+/// every target and build, ffmpeg linked in or not; and the published
+/// crates' copies of tgradish's own licence.
 pub fn crate_licenses(args: &[String]) -> Result<()> {
     let check = match args {
         [] => false,
@@ -28,7 +71,8 @@ pub fn crate_licenses(args: &[String]) -> Result<()> {
         _ => bail!("usage: cargo xtask licenses [--check]"),
     };
     let root = workspace_root();
-    let file = root.join("licenses/THIRD-PARTY-CRATES.txt");
+    own_licence(root, check)?;
+    let file = root.join(NOTICES).join("THIRD-PARTY-CRATES.txt");
     let fresh = root.join("target/THIRD-PARTY-CRATES.txt");
     run(cargo()
         .current_dir(root)
@@ -85,4 +129,19 @@ fn sorted_sections(text: &str) -> String {
         head.lines().map(|line| line.trim().to_lowercase()).collect::<Vec<_>>()
     });
     std::iter::once(intro).chain(sections).collect::<Vec<_>>().join(&rule)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_the_published_crates() {
+        let names: Vec<String> = published_crates(workspace_root())
+            .unwrap()
+            .iter()
+            .map(|dir| dir.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["cli", "core", "frames", "gui", "tgs"]);
+    }
 }

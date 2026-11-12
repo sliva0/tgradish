@@ -14,8 +14,6 @@ on:
       - Cargo.lock
       - crates/**
       - xtask/**
-      - licenses/**
-      - LICENSE.txt
       - .github/workflows/nix.yml
       - "!crates/tgs-lab/**"
       - "!**.md"
@@ -29,8 +27,6 @@ on:
       - Cargo.lock
       - crates/**
       - xtask/**
-      - licenses/**
-      - LICENSE.txt
       - .github/workflows/nix.yml
       - "!crates/tgs-lab/**"
       - "!**.md"

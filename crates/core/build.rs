@@ -1,23 +1,26 @@
 //! Packs the licence notices of what tgradish is built from, compressed,
 //! so a binary on its own carries them; `licenses` reads them back for
-//! `tgradish licences`. The
-//! texts are in `licenses/` at the top of the repository: the Rust crates'
-//! from `cargo xtask licenses`, ffmpeg's from `cargo xtask ffmpeg`, and
-//! libwebp's from the libwebp-sys crate's copy of it.
+//! `tgradish licences`. The texts are in this crate, since a published
+//! crate is built without the repository around it: tgradish's own beside
+//! this file, and in `licenses/` the Rust crates' from `cargo xtask
+//! licenses`, ffmpeg's from `cargo xtask ffmpeg`, and libwebp's from the
+//! libwebp-sys crate's copy of it.
 
 use std::io::Write;
 use std::path::Path;
 
 fn main() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let read = |path: &str| {
         let path = root.join(path);
         println!("cargo:rerun-if-changed={}", path.display());
         std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("{}: {err}", path.display()))
     };
     let mut notices = vec![("tgradish".to_owned(), read("LICENSE.txt"))];
-    // only builds with ffmpeg linked in carry it
-    if std::env::var_os("CARGO_FEATURE_LINKED").is_some() {
+    // only builds with the release's ffmpeg in them carry its notices:
+    // one linked to a distribution's libraries holds no copy of ffmpeg, and
+    // those aren't the build these files describe
+    if std::env::var_os("CARGO_FEATURE_LINKED_STATIC").is_some() {
         for (file, title) in [
             ("SOURCES.txt", "ffmpeg: what is built in, and its sources"),
             ("ffmpeg-COPYING.LGPLv2.1", "ffmpeg: GNU Lesser General Public License 2.1"),
