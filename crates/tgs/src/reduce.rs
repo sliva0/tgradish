@@ -11,25 +11,31 @@ use serde::Serialize;
 use crate::normalise::{Edges, Grid, PixelAnim, PixelFrame, assemble, grid_starts, snap_to};
 use crate::{Error, Result};
 
-/// One reduction at one strength.
+/// One reduction at one strength. [`Reduction::apply`] refuses strengths
+/// outside the range each kind gives.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(tag = "reduction", rename_all = "snake_case")]
 pub enum Reduction {
-    /// Snaps the art onto a pixel grid most of it follows.
+    /// Snaps the art onto a pixel grid most of it follows, of art pixels
+    /// `scale` input pixels wide: 1 or more, and past the art's size it
+    /// makes no difference.
     SnapToGrid { scale: u32 },
-    /// Joins colours closer than `distance` in OKLab into the more common.
+    /// Joins colours closer than `distance` in OKLab into the more common:
+    /// 0 or more, where 0 joins none.
     MergeColours { distance: f64 },
     /// Joins neighbouring frames that differ in at most this share of the
-    /// area.
+    /// area, from 0 to 1.
     MergeFrames { changed: f64 },
-    /// Drops this share of frames, the least different first, giving
-    /// their time to the frame before.
+    /// Drops this share of frames, from 0 to 1, the least different first,
+    /// giving their time to the frame before. However small the share, one
+    /// frame goes, so that a weak step still does something, and however
+    /// large, the first stays.
     DropFrames { share: f64 },
     /// Replaces cells that match none of their 8 neighbours with the most
     /// common neighbouring colour.
     Despeckle,
-    /// Scales the art down by `factor`.
+    /// Scales the art down by `factor`, between 0 and 1 and neither.
     Downscale { factor: f64 },
 }
 
@@ -177,7 +183,34 @@ impl Reduction {
         })
     }
 
+    /// Refuses a strength outside its kind's range: one that isn't a
+    /// number, that would divide by zero, or that would be taken for
+    /// another without saying so.
+    fn check(&self) -> Result<()> {
+        let share = |value: f64| (0.0..=1.0).contains(&value);
+        match *self {
+            Reduction::SnapToGrid { scale: 0 } => Err(Error::ZeroScale),
+            Reduction::MergeColours { distance } if !(distance >= 0.0 && distance.is_finite()) => {
+                Err(Error::ColourDistance(distance))
+            }
+            Reduction::MergeFrames { changed } if !share(changed) => {
+                Err(Error::ChangedShare(changed))
+            }
+            Reduction::DropFrames { share: dropped } if !share(dropped) => {
+                Err(Error::DroppedShare(dropped))
+            }
+            // any other factor would make no edges or endless ones
+            Reduction::Downscale { factor } if !(factor > 0.0 && factor < 1.0) => {
+                Err(Error::DownscaleFactor(factor))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// `anim` reduced, or an error when the strength is outside the range
+    /// its kind gives.
     pub fn apply(&self, anim: &PixelAnim) -> Result<PixelAnim> {
+        self.check()?;
         match *self {
             Reduction::SnapToGrid { scale } => snap_to_grid(anim, scale),
             Reduction::MergeColours { distance } => Ok(merge_colours(anim, distance)),
@@ -498,9 +531,13 @@ fn snapped(
     Ok(compact(assemble(&pixels, &ticks, width, &edges)?))
 }
 
+/// `scale` must be at least 1.
 fn snap_to_grid(anim: &PixelAnim, scale: u32) -> Result<PixelAnim> {
     let width = *anim.grid.columns.last().unwrap();
     let height = *anim.grid.rows.last().unwrap();
+    // as when normalising forces a scale: anything larger than the art
+    // makes it one cell either way, and needn't be counted through
+    let scale = scale.min(width.max(height));
     let pixels = expand(anim);
     let edges = Edges::count(&pixels, width, height);
     // a square cut from the middle cuts through art pixels at its sides
@@ -510,11 +547,8 @@ fn snap_to_grid(anim: &PixelAnim, scale: u32) -> Result<PixelAnim> {
     snapped(anim, pixels, &columns, &rows)
 }
 
+/// `factor` must be between 0 and 1.
 fn downscale(anim: &PixelAnim, factor: f64) -> Result<PixelAnim> {
-    // any other factor would make no edges or endless ones
-    if !(factor > 0.0 && factor < 1.0) {
-        return Err(Error::DownscaleFactor(factor));
-    }
     let width = *anim.grid.columns.last().unwrap();
     let height = *anim.grid.rows.last().unwrap();
     // the art's own pixels, grown by 1 / factor, from where its grid
@@ -638,6 +672,78 @@ mod tests {
             let wrong = Reduction::Downscale { factor }.apply(&board);
             assert!(matches!(wrong, Err(Error::DownscaleFactor(_))), "{factor}");
         }
+    }
+
+    #[test]
+    fn refuses_strengths_that_mean_nothing() {
+        let a = anim(3, 1, &[(&[RED, NEAR_RED, BLUE], 100), (&[RED, NEAR_RED, CLEAR], 100)]);
+        let not_numbers = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY];
+        assert_eq!(Reduction::SnapToGrid { scale: 0 }.apply(&a), Err(Error::ZeroScale));
+        for distance in [-0.01, -1e300].into_iter().chain(not_numbers) {
+            let wrong = Reduction::MergeColours { distance }.apply(&a);
+            assert!(matches!(wrong, Err(Error::ColourDistance(_))), "{distance}");
+        }
+        for share in [-0.01, 1.01, 1e300].into_iter().chain(not_numbers) {
+            let wrong = Reduction::MergeFrames { changed: share }.apply(&a);
+            assert!(matches!(wrong, Err(Error::ChangedShare(_))), "{share}");
+            let wrong = Reduction::DropFrames { share }.apply(&a);
+            assert!(matches!(wrong, Err(Error::DroppedShare(_))), "{share}");
+        }
+        for factor in [-1e300, 1.01, 1e300].into_iter().chain(not_numbers) {
+            let wrong = Reduction::Downscale { factor }.apply(&a);
+            assert!(matches!(wrong, Err(Error::DownscaleFactor(_))), "{factor}");
+        }
+        // every strength fitting tries is one it takes, and so is any
+        // between two of them, as near either as its five halvings come
+        for kind in Kind::ALL {
+            let ladder = kind.ladder(Some(2));
+            for (index, reduction) in ladder.iter().enumerate() {
+                assert_eq!(reduction.check(), Ok(()), "{reduction:?}");
+                let weaker = index.checked_sub(1).map(|index| &ladder[index]);
+                for share in [1.0 / 32.0, 0.5, 31.0 / 32.0] {
+                    if let Some(between) = reduction.between(weaker, share) {
+                        assert_eq!(between.check(), Ok(()), "{between:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn reduces_at_the_ends_of_each_range() {
+        let a = anim(3, 1, &[(&[RED, NEAR_RED, BLUE], 100), (&[RED, NEAR_RED, CLEAR], 100)]);
+        let apply = |reduction: Reduction| reduction.apply(&a).unwrap();
+        // a grid of 1 is the pixels themselves, and one past the art is as
+        // coarse as one its size, without counting through every offset
+        assert_eq!(apply(Reduction::SnapToGrid { scale: 1 }), a);
+        let coarse = apply(Reduction::SnapToGrid { scale: u32::MAX });
+        assert_eq!(coarse, apply(Reduction::SnapToGrid { scale: 3 }));
+        assert!(coarse.width() < a.width());
+
+        // no distance joins no colours, and one past any two colours all
+        assert_eq!(apply(Reduction::MergeColours { distance: 0.0 }), a);
+        let one = apply(Reduction::MergeColours { distance: f64::MAX });
+        assert_eq!(one.palette(), [CLEAR, RED]);
+
+        // frames that differ at all stay apart at 0, and all join at 1
+        assert_eq!(apply(Reduction::MergeFrames { changed: 0.0 }), a);
+        let joined = apply(Reduction::MergeFrames { changed: 1.0 });
+        assert_eq!((joined.frames().len(), joined.ticks()), (1, a.ticks()));
+
+        // one frame goes at least, and the first stays at most
+        for share in [0.0, 1.0] {
+            let dropped = apply(Reduction::DropFrames { share });
+            assert_eq!((dropped.frames().len(), dropped.ticks()), (1, a.ticks()), "{share}");
+            assert_eq!(dropped.rgba(0), a.rgba(0));
+        }
+        let three = anim(1, 1, &[(&[RED], 100), (&[BLUE], 100), (&[NEAR_RED], 100)]);
+        let dropped = |share: f64| Reduction::DropFrames { share }.apply(&three).unwrap();
+        assert_eq!((dropped(0.0).frames().len(), dropped(1.0).frames().len()), (2, 1));
+
+        // factors a hair from either end: one cell, or the art as it is
+        let small = apply(Reduction::Downscale { factor: f64::MIN_POSITIVE });
+        assert_eq!((small.width(), small.height()), (1, 1));
+        assert_eq!(apply(Reduction::Downscale { factor: 1.0 - f64::EPSILON }), a);
     }
 
     #[test]

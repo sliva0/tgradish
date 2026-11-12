@@ -43,6 +43,12 @@ pub enum Error {
     ZeroScale,
     #[error("the downscale factor {0} is not between 0 and 1")]
     DownscaleFactor(f64),
+    #[error("the colour distance {0} is not a number from 0 up")]
+    ColourDistance(f64),
+    #[error("the share of the picture that may change, {0}, is not from 0 to 1")]
+    ChangedShare(f64),
+    #[error("the share of frames to drop, {0}, is not from 0 to 1")]
+    DroppedShare(f64),
     #[error("more than 65535 colours: this is not pixel art")]
     TooManyColours,
     #[error(transparent)]

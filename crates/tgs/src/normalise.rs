@@ -649,8 +649,8 @@ impl Edges {
         Grid { columns: edges(&self.columns), rows: edges(&self.rows) }
     }
 
-    /// How well colour edges line up with a grid of `scale`, at its best
-    /// offset. The `borders` of the crop count as edges where they lie on
+    /// How well colour edges line up with a grid of `scale`, which is at
+    /// least 1, at its best offset. The `borders` of the crop count as edges where they lie on
     /// the art's grid, as those of the visible pixels do; where a crop cut
     /// through art pixels they would mislead, and only edges inside count.
     pub(crate) fn fit(&self, scale: u32, borders: bool) -> GridFit {
@@ -684,8 +684,9 @@ fn snap(pixels: &mut [u32], width: u32, height: u32, scale: u32, offset: (u32, u
     snap_to(pixels, width, &columns, &rows)
 }
 
-/// Edges of a grid of `scale` along a side of `size` pixels, starting at
-/// `offset`: from 0 to the size, cells at the ends cut short.
+/// Edges of a grid of `scale`, which is at least 1, along a side of `size`
+/// pixels, starting at `offset`: from 0 to the size, cells at the ends cut
+/// short.
 pub(crate) fn grid_starts(offset: u32, size: u32, scale: u32) -> Vec<u32> {
     let mut starts = vec![0];
     starts.extend((offset % scale..size).step_by(scale as usize).filter(|&start| start > 0));
