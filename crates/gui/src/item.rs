@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use eframe::egui;
+use serde::{Deserialize, Serialize};
 use tgradish_core::config::Config;
 use tgradish_core::inputs;
 use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Spoof};
@@ -61,8 +62,9 @@ impl Kind {
 
 /// What the user chose for an item: a preset, then their own values over
 /// it. Target, crop, times and what of an Aseprite file is read apply to
-/// every format.
-#[derive(Debug, Clone, PartialEq)]
+/// every format. Kept with the session as they are.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct Choices {
     /// `None` for the default preset of the format.
     pub preset: Option<String>,
