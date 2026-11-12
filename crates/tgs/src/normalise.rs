@@ -439,10 +439,13 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
         }
     }
 
+    // nothing to see is no sticker, on a kept canvas as on a cropped one,
+    // where it would otherwise come out blank and pass every check
+    let visible = visible_area(&frames, area.width).ok_or(Error::Invisible)?;
     let crop = if options.keep_canvas {
         Rect { x: 0, y: 0, width: area.width, height: area.height }
     } else {
-        visible_area(&frames, area.width).ok_or(Error::Invisible)?
+        visible
     };
     let mut crop = crop;
     let ticks: Vec<u32> = frames.iter().map(|&(_, ticks)| ticks).collect();
@@ -1126,6 +1129,17 @@ mod tests {
 
         let invisible = animation(2, 2, &[ms(100)], |_, x, _| [x as u8, 0, 0, 0]);
         assert_eq!(normalise(&invisible, &Options::default()), Err(Error::Invisible));
+        // whether or not its canvas is kept
+        let canvas = Options { keep_canvas: true, ..Options::default() };
+        assert_eq!(normalise(&invisible, &canvas), Err(Error::Invisible));
+        // and so is a part of the input with nothing in it
+        let corner = animation(4, 4, &[ms(100)], |_, x, y| if x + y == 0 { RED } else { CLEAR });
+        let crop = Some(Rect { x: 2, y: 2, width: 2, height: 2 });
+        for keep_canvas in [false, true] {
+            let empty = Options { crop, keep_canvas, ..Options::default() };
+            assert_eq!(normalise(&corner, &empty), Err(Error::Invisible), "{keep_canvas}");
+        }
+        assert_eq!(normalise(&corner, &canvas).unwrap().1.crop.width, 4);
     }
 
     #[test]
