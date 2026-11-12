@@ -35,8 +35,9 @@ pub mod telegram {
     pub const MAX_LAYERS: usize = 1_500;
     /// Shapes in one layer, counted like tlottie counts them (groups, their
     /// fills and transforms, and what they draw): 4093 were accepted, 4103
-    /// refused.
-    pub const MAX_SHAPES_PER_LAYER: usize = 4_096;
+    /// refused. No probe tried a count between them, so this is the most
+    /// known to pass, rounding towards refusing as the limits above do.
+    pub const MAX_SHAPES_PER_LAYER: usize = 4_093;
     /// Path vertices one fill paints (the paths before it in its group):
     /// 8000 were accepted, 12 000 refused, while 12 000 under three fills
     /// passed, in one layer or three, and so did 40 000 under ten. Points
