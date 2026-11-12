@@ -65,6 +65,26 @@ fn converts_short_clip_without_spoofing() {
 }
 
 #[test]
+fn warns_once_started() {
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
+    for backend in &backends {
+        let dir = tempfile::tempdir().unwrap();
+        // a quality, which fitting a bitrate has no use for
+        let request = Request {
+            output: Some(dir.path().join("out.webm")),
+            options: Options { length: Some(0.5), crf: Some(30), ..fast(Fit::Bitrate) },
+            ..Request::new(input.clone())
+        };
+        let mut events = Vec::new();
+        convert(backend, &request, &CancelToken::new(), &mut |e| events.push(e)).unwrap();
+        let name = name(backend);
+        assert!(matches!(events.first(), Some(Event::Started { .. })), "{name}: {:?}", events[0]);
+        let warned = events.iter().position(|event| matches!(event, Event::Warning { .. }));
+        assert_eq!(warned, Some(1), "{name}");
+    }
+}
+
+#[test]
 fn fits_emoji_into_their_smaller_limit() {
     let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     for backend in &backends {

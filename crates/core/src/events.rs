@@ -33,7 +33,8 @@ pub struct Params {
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
-    /// The conversion is planned and about to start encoding.
+    /// The conversion is planned and about to start encoding: the first
+    /// event of every conversion.
     Started {
         plan: Box<Plan>,
     },
