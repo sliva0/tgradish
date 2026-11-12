@@ -353,16 +353,27 @@ pub fn is_pixel_art(frames: &[Vec<u8>], width: u32, crop: Option<Crop>) -> bool 
 }
 
 /// Whether `frames` of a `width` wide picture have at most `most` colours
-/// within `crop`, not counting transparent pixels.
+/// within `crop`, not counting transparent pixels. What of the crop lies
+/// outside a frame holds no colours: front-ends ask this of frames made
+/// smaller than the input the crop was drawn on.
 pub fn has_few_colours(frames: &[Vec<u8>], width: u32, crop: Option<Crop>, most: usize) -> bool {
     let mut colours = std::collections::HashSet::new();
+    let width = width as usize;
     for rgba in frames {
-        let height = (rgba.len() / 4) as u32 / width.max(1);
-        let Crop { x, y, width: w, height: h } = crop.unwrap_or(Crop::whole((width, height)));
-        for row in y..(y + h).min(height) {
-            let start = (row * width + x) as usize * 4;
-            let end = (row * width + (x + w).min(width)) as usize * 4;
-            for pixel in rgba[start..end].as_chunks::<4>().0 {
+        let height = rgba.len() / 4 / width.max(1);
+        let (columns, rows) = match crop {
+            Some(crop) => {
+                let within = |start: u32, length: u32, side: usize| {
+                    let start = (start as usize).min(side);
+                    start..start.saturating_add(length as usize).min(side)
+                };
+                (within(crop.x, crop.width, width), within(crop.y, crop.height, height))
+            }
+            None => (0..width, 0..height),
+        };
+        for row in rows {
+            let row = &rgba[row * width * 4..][..width * 4];
+            for pixel in row[columns.start * 4..columns.end * 4].as_chunks::<4>().0 {
                 if pixel[3] > 0 && colours.insert(*pixel) && colours.len() > most {
                     return false;
                 }
@@ -1091,7 +1102,27 @@ mod tests {
         assert!(!is_pixel_art(std::slice::from_ref(&photo), 1000, None));
         // only the crop counts
         let crop = Some(Crop { x: 0, y: 0, width: 100, height: 1 });
-        assert!(is_pixel_art(&[photo], 1000, crop));
+        assert!(is_pixel_art(std::slice::from_ref(&photo), 1000, crop));
+    }
+
+    #[test]
+    fn counts_colours_of_a_crop_only_where_it_meets_the_frame() {
+        // 4x2: a row of four colours over a row of one
+        let row = |colours: [u8; 4]| colours.into_iter().flat_map(|c| [c, 0, 0, 255]);
+        let frames = [row([1, 2, 3, 4]).chain(row([9, 9, 9, 9])).collect::<Vec<u8>>()];
+        let few = |x, y, width, height, most| {
+            has_few_colours(&frames, 4, Some(Crop { x, y, width, height }), most)
+        };
+        assert!(!few(0, 0, 4, 2, 4) && few(0, 0, 4, 2, 5));
+        // partly outside: the last two columns, and the last row
+        assert!(!few(2, 0, 100, 100, 2) && few(2, 0, 100, 100, 3));
+        assert!(!few(0, 1, 4, u32::MAX, 0) && few(0, 1, 4, u32::MAX, 1));
+        // wholly outside, to the right, below, and as far as numbers go
+        assert!(few(5, 0, 2, 2, 0) && few(0, 2, 4, 1, 0));
+        assert!(few(u32::MAX, u32::MAX, u32::MAX, u32::MAX, 0));
+        // nor a picture with no width, or frames cut short
+        assert!(has_few_colours(&frames, 0, Some(Crop::whole((4, 2))), 0));
+        assert!(has_few_colours(&[vec![1, 0, 0, 255, 2, 0]], 4, None, 0));
     }
 
     #[test]
