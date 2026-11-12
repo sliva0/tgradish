@@ -145,13 +145,35 @@ impl App {
         self.session = Some((path, saved));
     }
 
+    /// Copies pasted images that have no copy yet next to the session, so
+    /// they can be opened again. Where one can't be copied the session
+    /// can't be kept: that is said once, as when writing it fails.
+    fn keep_pasted(&mut self) {
+        let Some((path, _)) = &self.session else { return };
+        if self.config.gui.forget_files {
+            return;
+        }
+        for item in self.items.iter_mut().filter(|item| item.kept.is_none()) {
+            let Some(image) = item.pasted.as_ref().and(item.inputs.first()) else { continue };
+            match session::keep_pasted(path, item.id, image) {
+                Ok(name) => item.kept = Some(name),
+                Err(err) => {
+                    self.message = Some(fl!("session-unsaved", error = err.to_string()));
+                    self.session = None;
+                    return;
+                }
+            }
+        }
+    }
+
     /// Keeps the open files and their settings, if they changed.
     fn save_session(&mut self) {
+        // those pasted while the setting was on have none yet
+        self.keep_pasted();
         let Some((path, saved)) = &self.session else { return };
         // with the setting off, nothing is kept: an empty session
-        let items: &mut [Item] =
-            if self.config.gui.forget_files { &mut [] } else { &mut self.items };
-        let session = session::Session::of(items, self.selected, path);
+        let items: &[Item] = if self.config.gui.forget_files { &[] } else { &self.items };
+        let session = session::Session::of(items, self.selected);
         let saved_now = session.to_json().map_err(std::io::Error::other).and_then(|json| {
             if json != *saved {
                 session.save(&json, path)?;
@@ -314,19 +336,21 @@ impl App {
     pub(crate) fn paste(&mut self) {
         match tgradish_core::clipboard::paste() {
             Ok(Pasted { files, image_dir: None }) => self.add(files),
-            Ok(Pasted { files, image_dir: Some(dir) }) => {
-                let mut item = Item::new(
-                    self.next_id,
-                    files,
-                    false,
-                    self.config.gui.target.unwrap_or_default(),
-                );
-                item.pasted = Some(dir);
-                let id = self.push(item);
-                self.select(id);
-            }
+            Ok(Pasted { files, image_dir: Some(dir) }) => self.add_pasted(files, dir),
             Err(err) => self.message = Some(crate::jobs::failure(&err)),
         }
+    }
+
+    /// Adds a pasted image, the one file in `dir`, which is kept as long
+    /// as the item is, and copied next to the session at once: `dir` goes
+    /// when the window closes.
+    fn add_pasted(&mut self, files: Vec<PathBuf>, dir: tempfile::TempDir) {
+        let mut item =
+            Item::new(self.next_id, files, false, self.config.gui.target.unwrap_or_default());
+        item.pasted = Some(dir);
+        let id = self.push(item);
+        self.select(id);
+        self.keep_pasted();
     }
 
     pub(crate) fn remove(&mut self, id: u64) {
@@ -526,6 +550,42 @@ mod tests {
 
     use super::*;
     use crate::testing::{convert, finish, harness, square};
+
+    /// A pasted image as the clipboard gives one: the file and its folder.
+    fn pasted_image() -> (Vec<PathBuf>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let image = dir.path().join(tgradish_core::clipboard::PASTED_IMAGE_NAME);
+        square(&image, [255, 0, 0, 255]);
+        (vec![image], dir)
+    }
+
+    #[test]
+    fn copies_pasted_images_as_they_are_pasted() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state").join("session.json");
+        let copies = dir.path().join("state").join("pasted");
+        let mut harness = harness(Config::default());
+        harness.state_mut().reopen(state.clone());
+        let (files, folder) = pasted_image();
+        harness.state_mut().add_pasted(files, folder);
+        // there before the session is next written
+        assert_eq!(std::fs::read_dir(&copies).unwrap().count(), 1);
+        assert!(harness.state().items[0].kept.is_some() && !state.exists());
+
+        // where copies can't be made, that is said once and not tried again
+        std::fs::remove_dir_all(&copies).unwrap();
+        std::fs::write(&copies, b"in the way").unwrap();
+        for _ in 0..2 {
+            let (files, folder) = pasted_image();
+            harness.state_mut().add_pasted(files, folder);
+            let app = harness.state_mut();
+            let said = app.message.take().is_some_and(|said| said.contains("kept for next time"));
+            assert_eq!(said, app.items.len() == 2);
+            assert!(app.session.is_none() && app.items.last().unwrap().kept.is_none());
+        }
+        harness.state_mut().save_session();
+        assert_eq!(std::fs::read(&copies).unwrap(), b"in the way");
+    }
 
     #[test]
     fn reopens_the_files_of_last_time() {
