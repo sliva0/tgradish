@@ -12,6 +12,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# nothing here writes to the repository
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -29,7 +33,7 @@ jobs:
       # rust-toolchain.toml selects stable with clippy and rustfmt
       - run: rustup show active-toolchain
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Install ffmpeg (Linux)
         if: runner.os == 'Linux'
@@ -51,7 +55,7 @@ jobs:
       - run: cargo xtask icons --check
 
       # binaries carry the licences of their crates; they must list today's
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         if: runner.os == 'Linux'
         with:
           # other versions word the list differently
@@ -71,7 +75,7 @@ jobs:
           rustup toolchain install "$version" --profile minimal
           # over rust-toolchain.toml's stable
           echo "RUSTUP_TOOLCHAIN=$version" >> "$GITHUB_ENV"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo check --workspace --all-targets --locked
 
   # the built-in ffmpeg backend, against the distribution's ffmpeg libraries
@@ -80,7 +84,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install ffmpeg and its development files
         run: |
           sudo apt-get update
@@ -102,7 +106,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: rustup target add x86_64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: sudo apt-get update && sudo apt-get install -y musl-tools
       - run: >
           cargo clippy -p tgradish --target x86_64-unknown-linux-musl --all-targets
@@ -117,7 +121,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: crates/tgs-lab -> target
       - name: Install what Telegram's rlottie builds with
@@ -135,5 +139,5 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: rustup target add wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo check -p tgradish-frames -p tgradish-tgs --target wasm32-unknown-unknown
