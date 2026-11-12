@@ -21,10 +21,6 @@ const NANOS: u64 = 1_000_000_000;
 pub const TEMPOS: std::ops::RangeInclusive<f64> = 0.1..=10.0;
 /// Longest stretch Telegram allows, in nanoseconds.
 const MAX_NANOS: u64 = MAX_FRAMES as u64 * NANOS / FPS as u64;
-/// Half a 60 fps frame, in nanoseconds: what is longer than 3 s by less
-/// still rounds to 3 s of frames, like 180 frames of 1/60 s each rounded up
-/// to whole nanoseconds.
-const HALF_TICK: u64 = NANOS / FPS as u64 / 2;
 /// Largest pixel scale looked for when the art isn't exactly on a grid.
 const MAX_LIKELY_SCALE: u32 = 16;
 /// Share of colour edges that must lie on a scale's grid to suggest it.
@@ -315,13 +311,85 @@ fn pack(rgba: &[u8], width: u32, area: Rect) -> Vec<u32> {
     out
 }
 
+/// When the input's frames show on Telegram's 60 fps grid.
+#[derive(Debug, Clone, PartialEq)]
+struct Timing {
+    /// How long each input frame shows, in nanoseconds of input: 0 for
+    /// those outside the part that is used.
+    shown: Vec<u64>,
+    /// How many 60 fps frames each of them gets: at least one and at most
+    /// [`MAX_FRAMES`] together.
+    ticks: Vec<u32>,
+    /// How many times as fast as the input it plays.
+    tempo: f64,
+    /// Whether the end was cut off to keep it to 3 seconds.
+    trimmed: bool,
+}
+
+/// Times frames that last `durations`, of which `start..end` is used, all
+/// in nanoseconds, at `tempo`; with none, as fast as fits a long part into
+/// 3 seconds.
+///
+/// Whether the part is too long is decided in 60 fps frames, as Telegram
+/// counts them, and not in the input's time, where half a frame of leeway
+/// is five frames at tempo 0.1 and a twentieth of one at 10. So what rounds
+/// to 180 frames is taken whole, like 180 frames of 1/60 s each rounded up
+/// to whole nanoseconds, and anything more is cut at the end of the 180th.
+fn timing(durations: &[u64], start: u64, end: u64, tempo: Option<f64>) -> Result<Timing> {
+    let length = end.saturating_sub(start);
+    // 60 fps frames a nanosecond of input, as whole numbers over each other
+    let rate = |tempo: f64| {
+        let millionths = (tempo * 1e6).round() as u128;
+        (u128::from(FPS) * 1_000_000, u128::from(NANOS) * millionths)
+    };
+    // the 60 fps frame nearest to a time, so each frame's rounding doesn't
+    // add up over those before it
+    let tick = |at: u64, (numer, denom): (u128, u128)| (u128::from(at) * numer + denom / 2) / denom;
+    let most = u128::from(MAX_FRAMES);
+    let (tempo, rate, trimmed) = match tempo {
+        Some(tempo) if !TEMPOS.contains(&tempo) => return Err(Error::Tempo(tempo)),
+        Some(tempo) => (tempo, rate(tempo), tick(length, rate(tempo)) > most),
+        None if tick(length, rate(1.0)) > most => {
+            (length as f64 / MAX_NANOS as f64, (most, u128::from(length)), false)
+        }
+        None => (1.0, rate(1.0), false),
+    };
+    // what still plays longer than 3 seconds is cut
+    let end = if trimmed { start + (most * rate.1 / rate.0) as u64 } else { end };
+
+    let (mut at, mut elapsed) = (0u64, 0u64);
+    let mut shown = Vec::with_capacity(durations.len());
+    let mut ticks = Vec::with_capacity(durations.len());
+    for &duration in durations {
+        let (from, to) = (at, at.saturating_add(duration));
+        at = to;
+        let within = to.min(end).saturating_sub(from.max(start));
+        let before = tick(elapsed, rate);
+        elapsed += within;
+        shown.push(within);
+        // no more than `most` in all, by how `rate` and `end` were chosen
+        ticks.push((tick(elapsed, rate) - before) as u32);
+    }
+    // a part too short for 60 fps still shows, as its longest frame
+    if ticks.iter().all(|&ticks| ticks == 0)
+        && let Some(longest) = (0..shown.len()).max_by_key(|&index| shown[index])
+    {
+        ticks[longest] = 1;
+    }
+    Ok(Timing { shown, ticks, tempo, trimmed })
+}
+
 pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim, Report)> {
-    let input_length = nanos(animation.duration());
+    let durations: Vec<u64> =
+        animation.frames().iter().map(|frame| nanos(frame.duration)).collect();
+    let input_length =
+        durations.iter().fold(0u64, |total, &duration| total.saturating_add(duration));
     let start = nanos(options.start);
     if start >= input_length {
-        return Err(Error::StartPastEnd { start: options.start, length: animation.duration() });
+        let length = Duration::from_nanos(input_length);
+        return Err(Error::StartPastEnd { start: options.start, length });
     }
-    let mut end = match options.length {
+    let end = match options.length {
         Some(length) if length.is_zero() => return Err(Error::ZeroLength),
         Some(length) => start.saturating_add(nanos(length)).min(input_length),
         None => input_length,
@@ -334,68 +402,28 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
     if area.width == 0 || area.height == 0 || outside {
         return Err(Error::CropOutside { crop: area, width: input_width, height: input_height });
     }
-    let (tempo, fitted) = match options.tempo {
-        Some(tempo) if !TEMPOS.contains(&tempo) => return Err(Error::Tempo(tempo)),
-        Some(tempo) => (tempo, false),
-        None if end - start > MAX_NANOS + HALF_TICK => {
-            ((end - start) as f64 / MAX_NANOS as f64, true)
-        }
-        None => (1.0, false),
-    };
-    // what still plays longer than 3 seconds is cut
-    let most = (MAX_NANOS as f64 * tempo).round() as u64;
-    let trimmed = !fitted && end - start > most + HALF_TICK;
-    if trimmed {
-        end = start + most;
-    }
+    let Timing { shown, ticks, tempo, trimmed } = timing(&durations, start, end, options.tempo)?;
 
-    // frames within the window, joined while identical
-    let mut timed: Vec<(Vec<u32>, u64)> = Vec::new();
+    // frames within what is used, joined while identical
+    let mut timed: Vec<(Vec<u32>, u32)> = Vec::new();
     let mut merged_frames = 0;
-    let mut at = 0;
-    for frame in animation.frames() {
-        let (from, to) = (at, at + nanos(frame.duration));
-        at = to;
-        let shown = to.min(end).saturating_sub(from.max(start));
+    for (frame, (shown, ticks)) in animation.frames().iter().zip(shown.into_iter().zip(ticks)) {
         if shown == 0 {
             continue;
         }
         let pixels = pack(&frame.rgba, input_width, area);
         match timed.last_mut() {
-            Some((last, duration)) if *last == pixels => {
-                *duration += shown;
+            Some((last, total)) if *last == pixels => {
+                *total += ticks;
                 merged_frames += 1;
             }
-            _ => timed.push((pixels, shown)),
+            _ => timed.push((pixels, ticks)),
         }
     }
 
-    // whole 60 fps frames, rounding where each frame starts so the total
-    // stays right
-    let (numer, denom) = if fitted {
-        (u128::from(MAX_FRAMES), u128::from(end - start))
-    } else {
-        // the tempo in millionths, to stay in whole numbers
-        let millionths = (tempo * 1e6).round() as u128;
-        (u128::from(FPS) * 1_000_000, u128::from(NANOS) * millionths)
-    };
-    let tick = |at: u64| ((u128::from(at) * numer + denom / 2) / denom) as u32;
-    let mut elapsed = 0;
-    let mut ticks: Vec<u32> = timed
-        .iter()
-        .map(|(_, duration)| {
-            let from = tick(elapsed);
-            elapsed += duration;
-            tick(elapsed) - from
-        })
-        .collect();
-    if ticks.iter().all(|&ticks| ticks == 0) {
-        let longest = (0..timed.len()).max_by_key(|&index| timed[index].1).unwrap();
-        ticks[longest] = 1;
-    }
     let mut frames: Vec<(Vec<u32>, u32)> = Vec::new();
     let mut dropped_frames = 0;
-    for ((pixels, _), ticks) in timed.into_iter().zip(ticks) {
+    for (pixels, ticks) in timed {
         if ticks == 0 {
             dropped_frames += 1;
             continue;
@@ -946,6 +974,97 @@ mod tests {
             let wrong = Options { tempo: Some(tempo), ..Options::default() };
             assert!(matches!(normalise(&input, &wrong), Err(Error::Tempo(_))), "{tempo}");
         }
+    }
+
+    #[test]
+    fn keeps_any_tempo_to_180_frames() {
+        const TICK: f64 = NANOS as f64 / FPS as f64;
+        let most = f64::from(MAX_FRAMES);
+        // lengths this many 60 fps frames from 3 seconds of them, never
+        // halfway between two
+        let around = [-90.0, -1.0, -0.6, -0.4, -0.1, 0.0, 0.1, 0.3, 0.4, 0.6, 1.0, 4.8, 500.0];
+        for tempo in [0.1, 0.25, 0.5, 1.0, 2.0, 10.0] {
+            for off in around {
+                let length = ((most + off) * TICK * tempo).round() as u64;
+                // as 60 fps frames, were they not whole
+                let ideal = length as f64 / (TICK * tempo);
+                // as one frame, as seven uneven ones, and from a start
+                let sevenths: Vec<u64> = (1..=7).map(|part| length * part / 28).collect();
+                let uneven: u64 = sevenths.iter().sum();
+                let split = [sevenths, vec![length - uneven]].concat();
+                let late = [vec![12_345_678], split.clone()].concat();
+                for (durations, start) in [(vec![length], 0), (split, 0), (late, 12_345_678)] {
+                    let what = format!("tempo {tempo}, {off} from 3 s, {} frames", durations.len());
+                    let timing = timing(&durations, start, start + length, Some(tempo)).unwrap();
+                    let total: u32 = timing.ticks.iter().sum();
+                    assert!((1..=MAX_FRAMES).contains(&total), "{what}: {total} ticks");
+                    assert_eq!(timing.tempo, tempo);
+                    // cut only when it rounds to more than 180 frames, and
+                    // then at 180; otherwise every frame it rounds to
+                    assert_eq!(timing.trimmed, ideal > most + 0.5, "{what}");
+                    let expected = if timing.trimmed { most } else { ideal.round() };
+                    assert_eq!(f64::from(total), expected, "{what}");
+                    let used: u64 = timing.shown.iter().sum();
+                    assert_eq!(used < length, timing.trimmed, "{what}");
+                    assert_eq!(timing.shown[0] == 0, start > 0, "{what}");
+                }
+            }
+        }
+        // what the half frame of leeway let through, counted in input time
+        let ticks = |ms: u64, tempo: f64| {
+            let timing = timing(&[ms * 1_000_000], 0, ms * 1_000_000, Some(tempo)).unwrap();
+            (timing.ticks[0], timing.trimmed)
+        };
+        assert_eq!(ticks(1505, 0.5), (180, true));
+        assert_eq!(ticks(308, 0.1), (180, true));
+        // and the 0.3 of a frame it called a cut
+        assert_eq!(ticks(30_050, 10.0), (180, false));
+        let slow = Options { tempo: Some(0.5), ..Options::default() };
+        let (anim, report) = normalise(&flat(&[(RED, ms(1505))]), &slow).unwrap();
+        assert_eq!((anim.ticks(), report.ticks, report.trimmed), (180, 180, true));
+    }
+
+    #[test]
+    fn fits_long_inputs_into_180_frames_when_no_tempo_is_asked() {
+        let most = f64::from(MAX_FRAMES);
+        for off in [-90.0, -0.6, -0.4, 0.0, 0.4, 0.6, 1.0, 180.0, 1e6] {
+            let length = ((most + off) * NANOS as f64 / f64::from(FPS)).round() as u64;
+            let thirds = [length / 2, length / 3, length - length / 2 - length / 3];
+            let timing = timing(&thirds, 0, length, None).unwrap();
+            let total: u32 = timing.ticks.iter().sum();
+            // what rounds to 180 frames plays as it is, anything longer
+            // as fast as makes it 180, and nothing is cut
+            let fitted = off > 0.5;
+            let expected = if fitted { most } else { (most + off).round() };
+            assert_eq!((f64::from(total), timing.trimmed), (expected, false), "{off}");
+            let tempo = if fitted { length as f64 / MAX_NANOS as f64 } else { 1.0 };
+            assert_eq!(timing.tempo, tempo, "{off}");
+            assert_eq!(timing.shown, thirds);
+        }
+    }
+
+    #[test]
+    fn times_frames_of_any_length() {
+        // too short for a 60 fps frame together: the longest shows
+        let short = timing(&[1_000_000, 3_000_000, 2_000_000], 0, 6_000_000, None).unwrap();
+        assert_eq!(short.ticks, [0, 1, 0]);
+        // no time at all gets no frames, wherever it is
+        let none = timing(&[0, 50_000_000, 0, 50_000_000, 0], 0, 100_000_000, None).unwrap();
+        assert_eq!(
+            (none.shown, none.ticks),
+            (vec![0, 50_000_000, 0, 50_000_000, 0], vec![0, 3, 0, 3, 0])
+        );
+        // and frames longer than the numbers hold neither overflow nor
+        // count for more than 180 frames
+        for tempo in [None, Some(0.1), Some(10.0)] {
+            let long = timing(&[u64::MAX, u64::MAX], 0, u64::MAX, tempo).unwrap();
+            assert_eq!((long.ticks, long.trimmed), (vec![180, 0], tempo.is_some()), "{tempo:?}");
+        }
+        let endless = flat(&[(RED, Duration::MAX), (BLUE, Duration::MAX)]);
+        let (anim, report) = normalise(&endless, &Options::default()).unwrap();
+        assert_eq!((anim.ticks(), report.frames, report.trimmed), (180, 1, false));
+        let late = Options { start: Duration::MAX, ..Options::default() };
+        assert!(matches!(normalise(&endless, &late), Err(Error::StartPastEnd { .. })));
     }
 
     #[test]
