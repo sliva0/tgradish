@@ -48,7 +48,9 @@ pub struct Request {
     pub options: Options,
     /// Replace the output if it exists.
     pub overwrite: bool,
-    /// Keep intermediate files and report where they are.
+    /// Keep intermediate files, whatever comes of the conversion, and
+    /// report where they are: in the outcome, or in a warning when it
+    /// fails.
     pub keep_temp: bool,
 }
 
@@ -781,11 +783,37 @@ pub fn convert(
         on_event(Event::Warning { message });
     }
 
-    let temp = tempfile::Builder::new().prefix("tgradish-").tempdir()?;
+    // kept from the start when asked, whatever comes of the encodes
+    let temp = tempfile::Builder::new()
+        .prefix("tgradish-")
+        .disable_cleanup(request.keep_temp)
+        .tempdir()?;
+    let made = encode_in(temp.path(), backend, request, plan, cancel, on_event);
+    if made.is_err() && request.keep_temp {
+        // the outcome says where they are, and there is none
+        let message = format!("{KEPT_IN}{}", temp.path().display());
+        on_event(Event::Warning { message });
+    }
+    made
+}
+
+/// What a warning that a failed conversion's intermediate files are kept
+/// starts with; their directory follows.
+const KEPT_IN: &str = "intermediate files are kept in ";
+
+/// Fits `plan` by encodes into `dir`, and writes the result.
+fn encode_in(
+    dir: &Path,
+    backend: &Backend,
+    request: &Request,
+    plan: Plan,
+    cancel: &CancelToken,
+    on_event: &mut dyn FnMut(Event),
+) -> Result<Outcome> {
     let mut encoder = BackendEncoder {
         backend,
         plan: &plan,
-        dir: temp.path(),
+        dir,
         cancel,
         on_event: &mut *on_event,
         attempts: 0,
@@ -812,7 +840,6 @@ pub fn convert(
 
     let info = webm::inspect(&bytes)?;
     let issues = telegram::check(&info, plan.target);
-    let temp_dir = request.keep_temp.then(|| temp.keep());
     on_event(Event::Finished {
         output: plan.output.clone(),
         bytes: info.file_size,
@@ -828,7 +855,7 @@ pub fn convert(
         params: best.params,
         spoofed,
         issues,
-        temp_dir,
+        temp_dir: request.keep_temp.then(|| dir.to_path_buf()),
     })
 }
 

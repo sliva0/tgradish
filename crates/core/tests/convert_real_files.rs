@@ -85,6 +85,48 @@ fn warns_once_started() {
 }
 
 #[test]
+fn keeps_intermediate_files_whatever_comes_of_them() {
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
+    for backend in &backends {
+        let name = name(backend);
+        let dir = tempfile::tempdir().unwrap();
+        let request = |options| Request {
+            output: Some(dir.path().join("out.webm")),
+            options,
+            overwrite: true,
+            keep_temp: true,
+            ..Request::new(input.clone())
+        };
+        let made = Options { length: Some(0.5), ..fast(Fit::Off) };
+        let outcome = convert(backend, &request(made), &CancelToken::new(), &mut |_| {}).unwrap();
+        let kept = outcome.temp_dir.expect("kept");
+        assert!(kept.join("attempt-01.webm").exists(), "{name}");
+        std::fs::remove_dir_all(kept).unwrap();
+
+        // an emoji that can't fit, at bitrates far past its limit
+        let too_large = Options {
+            target: Some(Target::Emoji),
+            length: Some(1.0),
+            attempts: Some(1),
+            fit_range: Some(tgradish_core::options::Range { min: 5000.0, max: 50_000.0 }),
+            ..fast(Fit::Bitrate)
+        };
+        let mut warnings = Vec::new();
+        let failed = convert(backend, &request(too_large), &CancelToken::new(), &mut |event| {
+            if let Event::Warning { message } = event {
+                warnings.push(message);
+            }
+        });
+        assert!(matches!(failed, Err(Error::NothingFits { .. })), "{name}: {failed:?}");
+        // a warning says where the attempt is
+        let kept = warnings.iter().find_map(|message| message.rsplit_once(" kept in "));
+        let kept = PathBuf::from(kept.unwrap_or_else(|| panic!("{name}: {warnings:?}")).1);
+        assert!(kept.join("attempt-01.webm").exists(), "{name}: {kept:?}");
+        std::fs::remove_dir_all(kept).unwrap();
+    }
+}
+
+#[test]
 fn fits_emoji_into_their_smaller_limit() {
     let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     for backend in &backends {
