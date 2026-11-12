@@ -3,7 +3,8 @@
 //!
 //! Pure Rust that builds for `wasm32-unknown-unknown`: no ffmpeg,
 //! processes, filesystem or `tgradish-core`. The `threads` feature tries
-//! fitting's candidates, and packs, in threads of their own.
+//! fitting's candidates, and packs, in threads of their own, except on
+//! wasm; [`sticker::make`] says what that means for callers.
 
 use std::time::Duration;
 

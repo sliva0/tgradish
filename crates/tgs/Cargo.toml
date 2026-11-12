@@ -20,7 +20,11 @@ zopfli.workspace = true
 [features]
 # JSON Schemas of reports and options, for front-ends
 schema = ["dep:schemars"]
-# Fitting tries its candidates in threads of their own
+# Fitting tries its candidates in threads of their own, and zopfli packs in
+# one. zopfli can't be stopped, so a thread packing when a sticker is
+# cancelled is left to finish alone, and at most two pack at once in the
+# whole process, however many stickers are being made. Does nothing on
+# wasm, which has no threads to start.
 threads = []
 
 [dev-dependencies]
