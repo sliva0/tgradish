@@ -241,7 +241,11 @@ mod tests {
         )
         .unwrap();
         let report = tgradish_tgs::normalise(&animation, &Default::default()).unwrap().1;
-        let step = tgradish_tgs::sticker::Step::new(crate::tgs::Reduction::Despeckle, 60_000, 0.01);
+        let step = tgradish_tgs::sticker::Step::new(
+            tgradish_tgs::reduce::Reduction::Despeckle,
+            60_000,
+            0.01,
+        );
         let tgs = [
             tgs::Event::Started { input: "art.gif".into(), report: Box::new(report) },
             tgs::Event::TooLarge { bytes: 70_000 },

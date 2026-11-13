@@ -4,8 +4,7 @@
 
 use eframe::egui;
 use tgradish_core::options::{Sheet, Speed};
-use tgradish_core::tgs;
-use tgradish_tgs::reduce::Kind as Reduction;
+use tgradish_core::tgradish_tgs::reduce::{self, Kind as Reduction};
 
 use super::Context;
 use crate::item::{Item, Kind};
@@ -33,11 +32,11 @@ fn reductions() -> [Choice<Reduction>; 6] {
     ]
 }
 
-fn compromises() -> [Choice<tgs::Compromise>; 3] {
+fn compromises() -> [Choice<reduce::Compromise>; 3] {
     [
-        (tgs::Compromise::Auto, fl!("give-up-either"), fl!("give-up-either", "hint")),
-        (tgs::Compromise::Motion, fl!("give-up-motion"), fl!("give-up-motion", "hint")),
-        (tgs::Compromise::Detail, fl!("give-up-detail"), fl!("give-up-detail", "hint")),
+        (reduce::Compromise::Auto, fl!("give-up-either"), fl!("give-up-either", "hint")),
+        (reduce::Compromise::Motion, fl!("give-up-motion"), fl!("give-up-motion", "hint")),
+        (reduce::Compromise::Detail, fl!("give-up-detail"), fl!("give-up-detail", "hint")),
     ]
 }
 

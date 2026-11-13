@@ -351,8 +351,8 @@ fn share(bytes: u64, limit: u64) -> String {
     format!("{:.1}%", bytes as f64 / limit.max(1) as f64 * 100.0)
 }
 
-fn reduction(reduction: &tgradish_tgs::reduce::Reduction) -> String {
-    use tgradish_tgs::reduce::Reduction;
+fn reduction(reduction: &tgradish_core::tgradish_tgs::reduce::Reduction) -> String {
+    use tgradish_core::tgradish_tgs::reduce::Reduction;
     match *reduction {
         Reduction::SnapToGrid { scale } => fl!("step-snapped", scale = scale),
         Reduction::MergeColours { distance } => {

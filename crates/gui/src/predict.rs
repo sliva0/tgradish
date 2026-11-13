@@ -227,7 +227,8 @@ pub fn tgs_bounds(frames: &[Vec<u8>], width: u32, part: Part, keep_canvas: bool)
 
 /// The middle square of `bounds`, as converting cuts a `.tgs` square.
 pub fn middle_square([x0, y0, x1, y1]: [usize; 4]) -> [usize; 4] {
-    let square = tgradish_tgs::normalise::middle_square((x1 - x0) as u32, (y1 - y0) as u32);
+    let square =
+        tgradish_core::tgradish_tgs::normalise::middle_square((x1 - x0) as u32, (y1 - y0) as u32);
     let (x, y) = (x0 + square.x as usize, y0 + square.y as usize);
     [x, y, x + square.width as usize, y + square.height as usize]
 }

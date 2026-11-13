@@ -6,6 +6,8 @@ use std::path::Path;
 
 use serde::Serialize;
 
+use tgradish_tgs::check;
+
 use crate::error::Result;
 use crate::input::{FileKind, sniff};
 use crate::telegram::{self, Target};
@@ -21,7 +23,7 @@ pub enum Inspected {
     /// A WebP picture, judged as `target`.
     Image { target: Target, info: webp::Info, issues: Vec<telegram::Issue> },
     /// A `.tgs`, whose limits are the same for stickers and emoji.
-    Tgs { info: Box<tgs::Stats>, issues: Vec<tgs::Issue> },
+    Tgs { info: Box<check::Stats>, issues: Vec<check::Issue> },
     /// A WebM video, judged as `target`.
     Webm { target: Target, info: Box<WebmInfo>, issues: Vec<telegram::Issue> },
 }

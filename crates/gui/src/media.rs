@@ -13,9 +13,9 @@ use tgradish_core::drawn::{self, Readable};
 use tgradish_core::ffmpeg::Probe;
 use tgradish_core::input::Input;
 use tgradish_core::preview::Preview;
+use tgradish_core::tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 use tgradish_core::tgs;
 use tgradish_core::webm::Options;
-use tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 
 use crate::jobs::failure;
 use crate::l10n::fl;
@@ -317,7 +317,7 @@ impl Video {
     /// as core's `probe` of them says: a still picture, or each frame
     /// lasting its own time.
     fn of_drawn(
-        animation: tgradish_tgs::frames::Animation,
+        animation: tgradish_core::tgradish_tgs::frames::Animation,
         probe: Probe,
         readable: Readable,
     ) -> Video {

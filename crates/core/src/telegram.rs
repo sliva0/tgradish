@@ -6,8 +6,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::tgs::Severity;
 use crate::webm::container::WebmInfo;
+use tgradish_tgs::check::Severity;
 
 /// Largest video sticker @Stickers accepts, in bytes; one more is "too big".
 pub const MAX_STICKER_BYTES: u64 = 256 * 1024;

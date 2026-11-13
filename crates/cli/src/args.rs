@@ -5,6 +5,7 @@ use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{self, Crop, ExactScale, Range};
 use tgradish_core::presets::Format;
 use tgradish_core::telegram::Target;
+use tgradish_core::tgradish_tgs::reduce;
 use tgradish_core::tgs;
 use tgradish_core::webm::{self, Options};
 
@@ -482,7 +483,7 @@ impl From<FormatArg> for Format {
         }
     }
 }
-value_enum!(KindArg => tgs::Kind {
+value_enum!(KindArg => reduce::Kind {
     SnapToGrid,
     MergeColours,
     MergeFrames,
@@ -490,7 +491,7 @@ value_enum!(KindArg => tgs::Kind {
     Despeckle,
     Downscale,
 });
-value_enum!(CompromiseArg => tgs::Compromise { Auto, Motion, Detail });
+value_enum!(CompromiseArg => reduce::Compromise { Auto, Motion, Detail });
 
 #[derive(Debug, Args)]
 pub struct SpoofArgs {
@@ -644,8 +645,8 @@ mod tests {
             ["\"crf\" in --options-json", "\"spoof\" in --options-json"]
         );
         let tgs = options.to_tgs_options();
-        assert_eq!(tgs.reductions.unwrap(), [tgs::Kind::MergeColours, tgs::Kind::DropFrames]);
-        assert_eq!(tgs.compromise, Some(tgs::Compromise::Motion));
+        assert_eq!(tgs.reductions.unwrap(), [reduce::Kind::MergeColours, reduce::Kind::DropFrames]);
+        assert_eq!(tgs.compromise, Some(reduce::Compromise::Motion));
         assert_eq!((tgs.keep_canvas, tgs.fps), (Some(true), Some(12.0)));
     }
 
@@ -748,8 +749,8 @@ mod tests {
             tempo: Some(0.5),
             speed: Some(options::Speed::Fast),
             exact: Some(true),
-            reductions: Some(vec![tgs::Kind::MergeColours, tgs::Kind::DropFrames]),
-            compromise: Some(tgs::Compromise::Detail),
+            reductions: Some(vec![reduce::Kind::MergeColours, reduce::Kind::DropFrames]),
+            compromise: Some(reduce::Compromise::Detail),
             crop: Some(Crop { x: 0, y: 0, width: 8, height: 8 }),
             resize: Some(options::Resize::Stretch),
             keep_canvas: Some(true),
