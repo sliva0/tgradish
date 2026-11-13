@@ -12,7 +12,7 @@ use crate::config::Config;
 use tgradish_core::presets::Presets;
 use tgradish_core::{telegram, webm};
 
-use super::{Context, commands};
+use super::Context;
 use crate::item::{Choices, Item};
 use crate::l10n::fl;
 use crate::widgets::{
@@ -151,7 +151,7 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
     // search
     if asked_custom {
         let searched = || {
-            let (fps, length) = commands::planned(item, context)
+            let (fps, length) = planned(item, context)
                 .map_or((30.0, telegram::MAX_SECONDS), |(_, plan)| (plan.fps, plan.length));
             webm::default_fit_range(fit, fps, length)
         };
@@ -253,6 +253,24 @@ impl RangeBounds {
             field.custom_formatter(|_, _| "—".to_owned())
         }
     }
+}
+
+/// What converting the item to WebM would ask for, and plans to make.
+pub(super) fn planned(
+    item: &Item,
+    context: &Context,
+) -> Result<(webm::Request, webm::Plan), String> {
+    let video = item.video.ready().ok_or_else(|| fl!("no-ffmpeg-commands", "unread"))?;
+    let options = item.choices.webm_options(context.presets, context.config)?;
+    let request = webm::Request {
+        input: item.input(),
+        output: context.output.clone(),
+        options,
+        overwrite: true,
+        keep_temp: false,
+    };
+    let (plan, _) = webm::plan(&request, video.probe.clone()).map_err(|err| err.to_string())?;
+    Ok((request, plan))
 }
 
 #[cfg(test)]
