@@ -38,12 +38,14 @@
         };
 
         # cargo, clippy and rustfmt from nixpkgs, ffmpeg's libraries for
-        # `--features linked`, and what `cargo xtask ffmpeg` builds with
+        # `--features linked`, what `cargo xtask ffmpeg` builds with, and
+        # cmake for tgs-lab's rlottie. Not cargo-about: `cargo xtask
+        # licenses` takes 0.9.2 alone, and nixpkgs has another
         devShells.default = pkgs.mkShell {
           inputsFrom = [ pkgs.tgradish ];
           packages = with pkgs; [
-            cargo-about
             clippy
+            cmake
             curl
             rustfmt
             meson

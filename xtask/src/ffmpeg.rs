@@ -616,9 +616,9 @@ pub fn package_sources() -> Result<()> {
         "Sources of the ffmpeg build that tgradish releases include or link\n\
          statically. Build it with `cargo xtask ffmpeg` from the tgradish\n\
          repository at the same version; xtask/src/ffmpeg.rs has every configure\n\
-         flag. To relink tgradish against a modified ffmpeg, build that\n\
-         with `cargo xtask ffmpeg`, then tgradish with `cargo build --release\n\
-         --features linked-static`, PKG_CONFIG_PATH pointing at its lib/pkgconfig.\n\n",
+         flag. To relink tgradish against a modified ffmpeg, build that with\n\
+         `cargo xtask ffmpeg --target TARGET`, then tgradish with\n\
+         `cargo xtask build --target TARGET`, which links it in.\n\n",
     );
     for source in LIBRARIES {
         let archive = download(source, &downloads)?;
