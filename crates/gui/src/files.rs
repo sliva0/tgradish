@@ -264,9 +264,17 @@ fn row(
     let result =
         egui::Rect::from_min_size(egui::pos2(inner.max.x - THUMB, inner.min.y), vec2(THUMB, THUMB));
     let mut action = None;
-    if item.result_thumb.is_some() {
+    if let Some(made) = &item.made {
         let stale = !item.result_is_current();
         thumb(ui, result, item.result_thumb.as_ref(), false, stale);
+        // a result with no picture yet, or none to show, as a .tgs made in
+        // an earlier run: its format where the picture would be
+        if item.result_thumb.is_none() {
+            let name = made.format.extension().to_uppercase();
+            let colour = ui.visuals().weak_text_color();
+            let font = FontId::proportional(12.0);
+            ui.painter().text(result.center(), egui::Align2::CENTER_CENTER, name, font, colour);
+        }
         if stale && !item.is_busy() {
             let badge =
                 egui::Rect::from_min_size(result.right_top() - vec2(20.0, 0.0), vec2(20.0, 20.0));
@@ -281,7 +289,7 @@ fn row(
     }
     // where the result will show, a way to make it, as large, so the row
     // looks the same before and after
-    if item.result_thumb.is_none() && !item.is_busy() && item.job.is_none() {
+    if offers_convert(item) {
         // placed, so the rows below don't move
         let button = ui.place(result, egui::Button::new("").min_size(result.size()));
         let colour = ui.style().interact(&button).text_color();
@@ -348,6 +356,12 @@ fn row(
         }
     });
     (response, action)
+}
+
+/// Whether a row has a button to convert where its result would be: until
+/// there is a result, or while one is being made.
+fn offers_convert(item: &Item) -> bool {
+    item.made.is_none() && !item.is_busy()
 }
 
 /// A thumbnail in `rect`, marked when it is out of date.
@@ -436,5 +450,54 @@ pub(crate) fn kind(format: Format, target: telegram::Target) -> String {
         (Format::Tgs, telegram::Target::Emoji) => fl!("tgs-emoji"),
         (Format::Image, telegram::Target::Sticker) => fl!("image-sticker"),
         (Format::Image, telegram::Target::Emoji) => fl!("image-emoji"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tgradish_core::config::Config;
+    use tgradish_core::ffmpeg::FfmpegChoice;
+    use tgradish_core::options::Fit;
+
+    use super::*;
+    use crate::testing::{convert, finish, harness, square, video};
+
+    #[test]
+    fn shows_results_of_last_time_in_the_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video(dir.path(), "64x48") else { return };
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        let state = dir.path().join("state").join("session.json");
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut first = harness(config.clone());
+        first.state_mut().reopen(state.clone());
+        first.state_mut().add(vec![video, art]);
+        finish(&mut first);
+        for index in [0, 1] {
+            let id = first.state().items[index].id;
+            first.state_mut().select(id);
+            let choices = &mut first.state_mut().items[index].choices;
+            (choices.preset, choices.webm.fit) = (Some("fast".into()), Some(Fit::Off));
+            finish(&mut first);
+            convert(&first);
+            first.run_steps(2);
+            finish(&mut first);
+        }
+        first.state_mut().save_session();
+        drop(first);
+
+        let mut second = harness(config);
+        second.state_mut().reopen(state);
+        finish(&mut second);
+        let items = &second.state().items;
+        assert_eq!(second.state().selected, Some(items[1].id));
+        // the video's, not selected, read for its thumbnail alone
+        assert!(items[0].result_thumb.is_some() && items[0].result_clip.is_idle());
+        // the .tgs, which has none to show, is made all the same
+        assert_eq!(items[1].made.as_ref().map(|made| made.format), Some(Format::Tgs));
+        assert!(items.iter().all(|item| !offers_convert(item)));
     }
 }
