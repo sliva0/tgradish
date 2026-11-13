@@ -315,6 +315,9 @@ pub fn exact_sizes(
     scale: ExactScale,
 ) -> std::result::Result<Sizes, String> {
     let (box_w, box_h) = target.box_size();
+    if !scale.is_valid() {
+        return Err(format!("scale {scale} has a side of 0: use N or 1/N"));
+    }
     let (Some(width), Some(height)) = (scale.apply(used.0), scale.apply(used.1)) else {
         return Err(format!(
             "at scale {scale} the crop's sides must be multiples of {} pixels",
@@ -1061,6 +1064,11 @@ mod tests {
         let huge = ExactScale { up: u32::MAX, down: 1 };
         let exact = |target, used, scale| exact_sizes(target, Resize::Contain, used, scale);
         assert!(exact(Target::Sticker, (2, 2), huge).is_err());
+        // made in code, with nothing to scale by
+        for zero in [ExactScale { up: 0, down: 1 }, ExactScale { up: 1, down: 0 }] {
+            let wrong = exact(Target::Sticker, (4, 4), zero).unwrap_err();
+            assert!(wrong.contains("side of 0"), "{wrong}");
+        }
         assert_eq!((half.to_string(), twice.to_string()), ("1/2".into(), "2".into()));
 
         // 1024 x 576 halved makes a 512 x 288 sticker, pixels in 2x2 blocks

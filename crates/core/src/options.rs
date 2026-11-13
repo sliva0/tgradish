@@ -186,13 +186,14 @@ impl std::fmt::Display for Crop {
 
 /// A scale that lines input pixels up with the result's: a whole number of
 /// result pixels for each input pixel (`2`), or the other way round
-/// (`1/2`). Written as `N`, `1/N` or a decimal like `0.5`.
+/// (`1/2`). Written as `N`, `1/N` or a decimal like `0.5`; reading it, as
+/// from a preset, refuses anything else, zero included.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct ExactScale {
-    /// Result pixels along an input pixel; 1 when shrinking.
+    /// Result pixels along an input pixel; 1 when shrinking. Never 0.
     pub up: u32,
-    /// Input pixels along a result pixel; 1 when growing.
+    /// Input pixels along a result pixel; 1 when growing. Never 0.
     pub down: u32,
 }
 
@@ -200,17 +201,24 @@ impl ExactScale {
     /// The largest scale either way: a pixel to a whole sticker side.
     pub const MAX: u32 = 512;
 
+    /// Whether it scales by anything: a scale made in code with a side of
+    /// 0 makes no pixels, and planning refuses it.
+    pub fn is_valid(self) -> bool {
+        self.up > 0 && self.down > 0
+    }
+
     /// `size` input pixels at this scale, if they make whole result pixels.
     pub fn apply(self, size: u32) -> Option<u32> {
-        if !size.is_multiple_of(self.down) {
+        if !self.is_valid() || !size.is_multiple_of(self.down) {
             return None;
         }
         (size / self.down).checked_mul(self.up)
     }
 
-    /// The most input pixels that make at most `size` result pixels.
+    /// The most input pixels that make at most `size` result pixels: none
+    /// at a scale that isn't valid.
     pub fn most_input(self, size: u32) -> u32 {
-        (size / self.up).saturating_mul(self.down)
+        size.checked_div(self.up).map_or(0, |whole| whole.saturating_mul(self.down))
     }
 }
 
@@ -606,6 +614,22 @@ mod tests {
         assert!("0x32".parse::<Crop>().is_err());
         assert!("64x32+1".parse::<Crop>().is_err());
         assert!(crop.fits(740, 410) && !crop.fits(739, 410));
+    }
+
+    #[test]
+    fn reads_no_scale_of_zero() {
+        for text in ["0", "1/0", "0/1", "0/0", "0.0", "0x", "-1", "1/-2", "513", "1/513"] {
+            assert!(text.parse::<ExactScale>().is_err(), "{text}");
+            let preset = format!("exact-scale = '{text}'");
+            assert!(toml::from_str::<Options>(&preset).is_err(), "{text}");
+        }
+        // as code can still make one
+        for zero in [ExactScale { up: 0, down: 1 }, ExactScale { up: 1, down: 0 }] {
+            assert!(!zero.is_valid());
+            assert_eq!((zero.apply(4), zero.most_input(512)), (None, 0), "{zero:?}");
+        }
+        let half: ExactScale = "1/2".parse().unwrap();
+        assert!(half.is_valid() && half.apply(4) == Some(2) && half.most_input(512) == 1024);
     }
 
     #[test]
