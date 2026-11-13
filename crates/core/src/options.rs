@@ -581,6 +581,11 @@ impl Options {
         self.spoof.unwrap_or(Spoof::Auto)
     }
 
+    /// How many times as fast as the input it plays: as fast.
+    pub fn tempo_or_default(&self) -> f64 {
+        self.tempo.unwrap_or(1.0)
+    }
+
     /// Whether to encode losslessly: no.
     pub fn lossless_or_default(&self) -> bool {
         self.lossless.unwrap_or(false)

@@ -164,6 +164,14 @@ impl TgsOptions {
         self.keep_canvas.unwrap_or(false)
     }
 
+    /// How many times as fast as the input the sticker plays, for a part
+    /// of it `used` seconds long where that is known: as fast as fits a
+    /// longer part into Telegram's 3 seconds, as normalising plays it.
+    pub fn tempo_or_default(&self, used: Option<f64>) -> f64 {
+        let fitting = |used: f64| (used / telegram::MAX_SECONDS).max(1.0);
+        self.tempo.unwrap_or_else(|| used.map_or(1.0, fitting))
+    }
+
     /// Whether the art is kept exactly as it is: yes, as changing it to
     /// fit is the user's to choose.
     pub fn exact_or_default(&self) -> bool {
@@ -547,10 +555,7 @@ fn read_video(
         (Some(length), Some(available)) => Some(length.min(available)),
         (length, available) => length.or(available),
     };
-    // as fast as normalising plays it, which fits a long part into 3 s
-    let tempo = options
-        .tempo
-        .unwrap_or_else(|| used.map_or(1.0, |used| (used / telegram::MAX_SECONDS).max(1.0)));
+    let tempo = options.tempo_or_default(used);
     let fps = probe.fps_or_default().min(STICKER_FPS / tempo);
     let read = match (options.tempo, used) {
         (None, Some(used)) => used,
@@ -914,7 +919,14 @@ mod tests {
         assert!(unset.exact_or_default() && !unset.keep_canvas_or_default());
         let settings = unset.sticker_options().unwrap();
         assert_eq!((settings.effort, settings.fit), (Effort::Best, Fit::Exact));
+        // a long part plays as fast as fits it into 3 s, a short one as it is
+        assert_eq!(
+            (unset.tempo_or_default(Some(6.0)), unset.tempo_or_default(Some(2.0))),
+            (2.0, 1.0)
+        );
+        assert_eq!(unset.tempo_or_default(None), 1.0);
         let set = TgsOptions { resize: Some(Resize::Crop), exact: Some(false), ..unset };
+        assert_eq!(TgsOptions { tempo: Some(0.5), ..set.clone() }.tempo_or_default(Some(6.0)), 0.5);
         assert_eq!((set.resize_or_default(), set.exact_or_default()), (Resize::Crop, false));
     }
 

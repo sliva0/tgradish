@@ -68,7 +68,7 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
                 steps.extend(picture(&options, (crop.width, crop.height)));
             }
             if item.format == Format::Webm {
-                let tempo = options.tempo.unwrap_or(1.0);
+                let tempo = options.tempo_or_default();
                 time(item, &used, tempo, options.spoof_or_default(), &mut steps);
             }
         }

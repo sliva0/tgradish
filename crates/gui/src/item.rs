@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tgradish_core::inputs;
 use tgradish_core::options::{Crop, Options, Resize, Scaling};
 use tgradish_core::presets::{Format, Presets};
-use tgradish_core::telegram::{self, Target};
+use tgradish_core::telegram::Target;
 use tgradish_core::tgs::TgsOptions;
 use tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 
@@ -593,18 +593,17 @@ impl Item {
     /// set, the item's or its preset's, or for `.tgs` as fast as fits the
     /// used part into 3 seconds.
     pub fn tempo(&self, presets: &Presets, config: &Config) -> f64 {
-        let set = match self.format {
-            Format::Webm => self.choices.webm_options(presets, config).ok().and_then(|o| o.tempo),
-            Format::Tgs => self.choices.tgs_options(presets, config).ok().and_then(|o| o.tempo),
-            Format::Webp => None,
-        };
-        set.unwrap_or_else(|| match self.format {
-            Format::Webm | Format::Webp => 1.0,
-            Format::Tgs => {
-                let used = self.range().map_or(0.0, |(start, end)| end - start);
-                (used / telegram::MAX_SECONDS).max(1.0)
+        // a broken preset still leaves the defaults
+        match self.format {
+            Format::Webm => {
+                self.choices.webm_options(presets, config).unwrap_or_default().tempo_or_default()
             }
-        })
+            Format::Tgs => {
+                let used = self.range().map(|(start, end)| end - start);
+                self.choices.tgs_options(presets, config).unwrap_or_default().tempo_or_default(used)
+            }
+            Format::Webp => 1.0,
+        }
     }
 
     /// Whether the last sticker is what converting would make now.
