@@ -78,11 +78,12 @@ impl App {
             .filter(|other| other.id != item.id)
             .flat_map(|other| {
                 let waiting = other.job.as_ref().map(|conversion| conversion.job.output.as_path());
-                waiting.into_iter().chain(other.made.as_ref().map(|made| made.job.output.as_path()))
+                let made = other.last_result().map(|made| made.job.output.as_path());
+                waiting.into_iter().chain(made)
             })
             .collect();
         let suffix = format!(".{}.{}", item.choices.target.name(), item.format.extension());
-        let own = item.made.as_ref().map(|made| made.job.output.as_path());
+        let own = item.last_result().map(|made| made.job.output.as_path());
         // pasted images all have one name, so tgradish having made a file
         // doesn't make it theirs to replace: only the item's own result is
         let blocked = |path: &Path| {
