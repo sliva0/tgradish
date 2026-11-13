@@ -178,7 +178,7 @@ impl Choices {
         Ok(match format {
             Format::Webm => Recipe::Webm(self.webm_options(presets, config)?),
             Format::Tgs => Recipe::Tgs(self.tgs_options(presets, config)?),
-            Format::Image => Recipe::Image(self.image_options(presets, config)?),
+            Format::Webp => Recipe::Image(self.image_options(presets, config)?),
         })
     }
 
@@ -523,7 +523,7 @@ impl Item {
             return None;
         }
         match self.format {
-            Format::Webm | Format::Image => {
+            Format::Webm | Format::Webp => {
                 let readable = &self.video.ready()?.readable;
                 Some((readable.tags(), readable.layers(), readable.durations()))
             }
@@ -537,7 +537,7 @@ impl Item {
     /// Whether the input is being read for the current format.
     pub fn input_reading(&self) -> bool {
         match self.format {
-            Format::Webm | Format::Image => self.video.is_loading(),
+            Format::Webm | Format::Webp => self.video.is_loading(),
             Format::Tgs => self.art.is_loading(),
         }
     }
@@ -545,7 +545,7 @@ impl Item {
     /// The input as it is shown for the current format.
     pub fn input_clip(&self) -> Option<&Clip> {
         match self.format {
-            Format::Webm | Format::Image => self.video.ready().map(|video| &video.overview),
+            Format::Webm | Format::Webp => self.video.ready().map(|video| &video.overview),
             Format::Tgs => self.art.ready().map(|art| &art.clip),
         }
     }
@@ -553,7 +553,7 @@ impl Item {
     /// Size of the input picture.
     pub fn input_size(&self) -> Option<(u32, u32)> {
         match self.format {
-            Format::Webm | Format::Image => {
+            Format::Webm | Format::Webp => {
                 self.video.ready().map(|v| (v.probe.width, v.probe.height))
             }
             Format::Tgs => self.art.ready().map(|art| (art.clip.width, art.clip.height)),
@@ -563,7 +563,7 @@ impl Item {
     /// Length of the input in seconds, `None` for still images.
     pub fn input_length(&self) -> Option<f64> {
         match self.format {
-            Format::Webm | Format::Image => self.video.ready().and_then(|video| {
+            Format::Webm | Format::Webp => self.video.ready().and_then(|video| {
                 (!video.probe.still_image).then_some(video.probe.duration).flatten()
             }),
             Format::Tgs => {
@@ -577,7 +577,7 @@ impl Item {
     /// it times them.
     pub fn input_frames(&self) -> Option<std::sync::Arc<Frames>> {
         match self.format {
-            Format::Webm | Format::Image => self.video.ready()?.frames.clone(),
+            Format::Webm | Format::Webp => self.video.ready()?.frames.clone(),
             Format::Tgs => self.art.ready()?.frames.clone(),
         }
     }
@@ -585,7 +585,7 @@ impl Item {
     /// Why the input can't be shown, if reading it failed.
     pub fn input_error(&self) -> Option<&str> {
         let load = match self.format {
-            Format::Webm | Format::Image => match &self.video {
+            Format::Webm | Format::Webp => match &self.video {
                 Load::Failed(message) => Some(message),
                 _ => None,
             },
@@ -612,10 +612,10 @@ impl Item {
         let set = match self.format {
             Format::Webm => self.choices.webm_options(presets, config).ok().and_then(|o| o.tempo),
             Format::Tgs => self.choices.tgs_options(presets, config).ok().and_then(|o| o.tempo),
-            Format::Image => None,
+            Format::Webp => None,
         };
         set.unwrap_or_else(|| match self.format {
-            Format::Webm | Format::Image => 1.0,
+            Format::Webm | Format::Webp => 1.0,
             Format::Tgs => {
                 let used = self.range().map_or(0.0, |(start, end)| end - start);
                 (used / telegram::MAX_SECONDS).max(1.0)

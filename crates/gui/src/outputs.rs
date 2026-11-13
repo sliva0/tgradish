@@ -63,7 +63,7 @@ impl App {
         let next_to_input = match item.format {
             Format::Webm => convert::default_output(input, item.choices.target),
             Format::Tgs => tgs::default_output(input, item.choices.target),
-            Format::Image => still::default_output(input, item.choices.target),
+            Format::Webp => still::default_output(input, item.choices.target),
         };
         let name = next_to_input.file_name().unwrap_or_default();
         let first = match (&item.pasted, dir) {

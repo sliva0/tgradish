@@ -35,7 +35,7 @@ impl Preset {
             Format::Tgs => choices
                 .tgs_base(presets, config)
                 .map(|options| (options.tag, options.show_layers, options.hide_layers)),
-            Format::Webm | Format::Image => choices
+            Format::Webm | Format::Webp => choices
                 .webm_base(presets, config)
                 .map(|options| (options.tag, options.show_layers, options.hide_layers)),
         };
@@ -138,7 +138,7 @@ fn tag_row(
         (from, (tag.to as usize + 1).clamp(from + 1, count))
     };
     let read = choices.tag.clone().or(preset.tag.clone());
-    let picture = format == Format::Image;
+    let picture = format == Format::Webp;
     // the part used, which a tag played forward sets
     let used = frames.part(total, choices.start, choices.length);
     let shown = frames.at(choices.frame.unwrap_or(0.0));
@@ -399,10 +399,10 @@ mod tests {
         );
         assert!(picked(&harness, "walk") && !picked(&harness, "idle"));
         // a picture's frame starts where the picker puts it
-        let mut harness = run(Choices::new(Target::Sticker), Preset::default(), Format::Image);
+        let mut harness = run(Choices::new(Target::Sticker), Preset::default(), Format::Webp);
         harness.get_by_label("walk").click();
         harness.run_steps(2);
-        let frames = frames_of(&durations, Format::Image).unwrap();
+        let frames = frames_of(&durations, Format::Webp).unwrap();
         assert_eq!(harness.state().frame, Some(frames.times[2]));
         assert!(picked(&harness, "walk"));
     }

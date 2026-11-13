@@ -50,9 +50,9 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
     let (presets, config) = (context.presets, context.config);
     let mut steps = Vec::new();
     match item.format {
-        Format::Webm | Format::Image => {
+        Format::Webm | Format::Webp => {
             let options = match item.format {
-                Format::Image => item.choices.image_options(presets, config),
+                Format::Webp => item.choices.image_options(presets, config),
                 _ => item.choices.webm_options(presets, config),
             };
             let Ok(options) = options else { return steps };
@@ -109,7 +109,7 @@ fn read(item: &Item, used: &Used, steps: &mut Vec<String>) {
     if let Some(crop) = used.crop {
         steps.push(fl!("plan-cropped", width = crop.width, height = crop.height));
     }
-    if item.format == Format::Image
+    if item.format == Format::Webp
         && let Some(frame) = used.start.filter(|_| item.input_length().is_some())
     {
         steps.push(fl!("plan-frame", time = widgets::seconds(frame)));

@@ -296,7 +296,7 @@ fn sections(
         let picked = chosen.to_owned();
         if picked != current {
             match format {
-                Format::Webm | Format::Image => config.preset = Some(picked),
+                Format::Webm | Format::Webp => config.preset = Some(picked),
                 Format::Tgs => config.tgs_preset = Some(picked),
             }
         }

@@ -99,7 +99,7 @@ impl App {
                     backend.as_ref().ok().cloned(),
                 ));
                 reading += 1;
-            } else if matches!(item.format, Format::Webm | Format::Image)
+            } else if matches!(item.format, Format::Webm | Format::Webp)
                 && !(item.format_guessed && item.art.is_loading())
             {
                 // pixel art drawn again with another tag, layers or rate
@@ -190,7 +190,7 @@ impl App {
             item.result_thumb = None;
             // a picture is read from its file again; a .tgs can't be
             let preview = match format {
-                Format::Image => done.preview.take(),
+                Format::Webp => done.preview.take(),
                 Format::Webm | Format::Tgs => done.preview.clone(),
             };
             item.result_clip = match preview {
@@ -288,7 +288,7 @@ fn settle(ctx: &egui::Context, item: &mut Item) {
             item.format = Format::Tgs;
         } else if !art.clip.is_animated() {
             // a photo or a drawing stays a picture
-            item.format = Format::Image;
+            item.format = Format::Webp;
         }
     }
     // kept from when the file was another, larger one: it can't be made
@@ -366,7 +366,7 @@ fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backe
             Load::Loading(media::load_result(ctx, backend.clone(), &done.output))
         }
         // small enough to read at once
-        (Format::Image, _) => match still::preview(&done.output) {
+        (Format::Webp, _) => match still::preview(&done.output) {
             Ok(preview) => Load::Ready(Clip::from_preview(preview, true)),
             Err(err) => Load::Failed(crate::jobs::failure(&err)),
         },
@@ -483,7 +483,7 @@ mod tests {
         harness.state_mut().items[0].choices.frame = Some(1.0);
         harness.run_steps(2);
         let item = &harness.state().items[0];
-        assert_eq!((item.format, item.view.time, item.view.playing), (Format::Image, 1.0, false));
+        assert_eq!((item.format, item.view.time, item.view.playing), (Format::Webp, 1.0, false));
         convert(&harness);
         harness.run_steps(2);
         finish(&mut harness);
@@ -753,7 +753,7 @@ mod tests {
         harness.state_mut().add(vec![photo]);
         finish(&mut harness);
         let item = &harness.state().items[1];
-        assert_eq!((item.kind, item.format), (Kind::Image, Format::Image));
+        assert_eq!((item.kind, item.format), (Kind::Image, Format::Webp));
     }
 
     #[test]
@@ -805,7 +805,7 @@ mod tests {
         if !has_ffmpeg() {
             return;
         }
-        for format in [Format::Webm, Format::Image] {
+        for format in [Format::Webm, Format::Webp] {
             harness.state_mut().items[0].format = format;
             finish(&mut harness);
             let item = &harness.state().items[0];
@@ -869,7 +869,7 @@ mod tests {
         finish(&mut harness);
         let length = harness.state().items[0].input_length().unwrap_or_default();
         assert!((length - 0.5).abs() < 1e-3, "{length}");
-        for format in [Format::Webm, Format::Image] {
+        for format in [Format::Webm, Format::Webp] {
             harness.state_mut().items[0].format = format;
             finish(&mut harness);
             convert(&harness);

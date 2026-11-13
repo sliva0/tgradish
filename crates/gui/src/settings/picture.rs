@@ -181,7 +181,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     });
 
     match item.format {
-        Format::Webm | Format::Image => {
+        Format::Webm | Format::Webp => {
             let target = item.choices.target;
             row(ui, &fl!("square"), &fl!("square", "hint"), Ok(()), |ui| {
                 let squares = squares();

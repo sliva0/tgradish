@@ -328,7 +328,7 @@ fn preview(
     });
     // fields rather than methods, so the view and crop can change
     let (overview, part, still) = match item.format {
-        Format::Webm | Format::Image => (
+        Format::Webm | Format::Webp => (
             item.video.ready().map(|video| &video.overview),
             item.part.as_ref().and_then(|(_, part)| part.ready()),
             item.still.as_ref().and_then(|(at, still)| Some((*at, still.ready()?))),
@@ -348,7 +348,7 @@ fn preview(
                 message_in(ui, rect, &fl!("unreadable", error = message), widgets::BAD);
             } else if let (Some(clip), Some(size)) = (overview, input_size) {
                 // a picture is one frame: shown still, where it is picked
-                let picking = item.format == Format::Image;
+                let picking = item.format == Format::Webp;
                 if picking {
                     item.view.playing = false;
                     let frame = item.choices.frame.unwrap_or(0.0);
@@ -378,7 +378,7 @@ fn preview(
                 // with room for its longest label, eased into place when it
                 // is turned on or off, resized or moved
                 let widest = match item.format {
-                    Format::Webm | Format::Image => {
+                    Format::Webm | Format::Webp => {
                         format!("{}\n{}", fl!("inset-label", scale = 100), "512 × 512 px")
                     }
                     Format::Tgs => fl!("inset-label", "plain"),
@@ -434,7 +434,7 @@ fn preview(
                     let crop = item.choices.crop;
                     let where_ = predict::Part::of(crop, size, (clip.width, clip.height));
                     match item.format {
-                        Format::Webm | Format::Image => {
+                        Format::Webm | Format::Webp => {
                             let used = crop.map_or(size, |crop| (crop.width, crop.height));
                             let full = Crop::whole(size);
                             // a crop that doesn't suit the exact scale yet is made to
@@ -515,7 +515,7 @@ fn preview(
     }
     ui.add_space(6.0);
     match (item.view.show, length, result_length) {
-        (Show::Input, Some(_), _) if item.format == Format::Image => {
+        (Show::Input, Some(_), _) if item.format == Format::Webp => {
             if let Some(frames) = item.input_frames() {
                 timeline::frame_picker(ui, &frames, &mut item.choices.frame, in_frames);
             }
@@ -566,7 +566,7 @@ fn tgs_bounds(inset: &mut Inset, clip: &Clip, part: predict::Part, tgs: &TgsOpti
 /// pixels. `None` while its size isn't known.
 fn inset_label(item: &Item, size: (u32, u32), webm: &Options) -> Option<Option<String>> {
     match item.format {
-        Format::Webm | Format::Image => {
+        Format::Webm | Format::Webp => {
             let full = Crop::whole(size);
             let sizes = settings::webm_sizes(webm, item.choices.crop.unwrap_or(full))?;
             Some(Some(format!("{} × {} px", sizes.width, sizes.height)))

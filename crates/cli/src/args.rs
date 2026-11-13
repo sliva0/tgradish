@@ -156,8 +156,8 @@ pub struct WatchArgs {
 pub struct ConversionArgs {
     /// What to make: webm (video sticker or emoji: VP9 in WebM, from any
     /// video or picture), tgs (animated sticker or emoji: TGS, meant for
-    /// pixel art, or a video of it) or image (static sticker or emoji: WebP,
-    /// from any picture or the frame at --start).
+    /// pixel art, or a video of it) or webp (image sticker or emoji, from
+    /// any picture or the frame at --start; image works too).
     /// [default: by the output's extension, then webm]
     #[arg(long, value_enum)]
     pub format: Option<FormatArg>,
@@ -169,7 +169,7 @@ pub struct ConversionArgs {
     #[arg(short = 'y', long)]
     pub overwrite: bool,
     /// Preset to start from: fast, balanced, best or one of your own, see
-    /// `tgradish preset list`. [default: balanced for webm and image, best
+    /// `tgradish preset list`. [default: balanced for webm and webp, best
     /// for tgs, unless the config's preset or tgs-preset names another]
     #[arg(short, long)]
     pub preset: Option<String>,
@@ -348,7 +348,7 @@ impl OptionArgs {
                 given(self.sheet.is_some(), "--sheet"),
                 given(self.sheet_frames.is_some(), "--sheet-frames"),
             ],
-            Format::Image => vec![
+            Format::Webp => vec![
                 given(self.fit.is_some(), "--fit"),
                 given(self.attempts.is_some(), "--attempts"),
                 given(self.fit_range.is_some(), "--fit-range"),
@@ -489,7 +489,26 @@ value_enum!(ScalingArg => options::Scaling { Auto, Smooth, Sharp, PixelPerfect }
 value_enum!(FitArg => options::Fit { Auto, Bitrate, Crf, Fps, Length, Off });
 value_enum!(SpeedArg => options::Speed { Fast, Balanced, Best });
 value_enum!(SpoofArg => options::Spoof { Auto, Always, Never });
-value_enum!(FormatArg => Format { Webm, Tgs, Image });
+
+/// [`Format`] for clap, which also takes `image` for WebP: the kind of
+/// sticker it makes.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum FormatArg {
+    Webm,
+    Tgs,
+    #[value(alias = "image")]
+    Webp,
+}
+
+impl From<FormatArg> for Format {
+    fn from(value: FormatArg) -> Self {
+        match value {
+            FormatArg::Webm => Format::Webm,
+            FormatArg::Tgs => Format::Tgs,
+            FormatArg::Webp => Format::Webp,
+        }
+    }
+}
 value_enum!(KindArg => tgs::Kind {
     SnapToGrid,
     MergeColours,
@@ -641,8 +660,8 @@ mod tests {
             options.foreign(Format::Webm),
             ["--reductions", "--compromise", "--keep-canvas"]
         );
-        assert!(!options.foreign(Format::Image).iter().any(|flag| flag.contains("layer")));
-        assert!(!options.foreign(Format::Image).contains(&"--tag"));
+        assert!(!options.foreign(Format::Webp).iter().any(|flag| flag.contains("layer")));
+        assert!(!options.foreign(Format::Webp).contains(&"--tag"));
         let tgs = options.to_tgs_options();
         assert_eq!(tgs.reductions.unwrap(), [tgs::Kind::MergeColours, tgs::Kind::DropFrames]);
         assert_eq!(tgs.compromise, Some(tgs::Compromise::Motion));
@@ -659,7 +678,7 @@ mod tests {
         // lossless VP9 is WebM's, keeping the art exact is .tgs's
         assert_eq!(options("--lossless").foreign(Format::Tgs), ["--lossless"]);
         assert!(options("--lossless").foreign(Format::Webm).is_empty());
-        for format in [Format::Webm, Format::Image] {
+        for format in [Format::Webm, Format::Webp] {
             assert_eq!(options("--exact").foreign(format), ["--exact"]);
         }
         assert_eq!(options("--exact=false").to_tgs_options().exact, Some(false));

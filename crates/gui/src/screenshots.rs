@@ -113,7 +113,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         let item = &mut harness.state_mut().items[0];
         (item.view.aspect, item.choices.webm) = (item::Aspect::Free, Default::default());
         // a frame of it as an image sticker, picked on the bar
-        (item.format, item.choices.frame) = (Format::Image, Some(0.5));
+        (item.format, item.choices.frame) = (Format::Webp, Some(0.5));
         harness.run_steps(3);
         for _ in 0..100 {
             harness.step();

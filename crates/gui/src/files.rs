@@ -512,8 +512,8 @@ pub(crate) fn kind(format: Format, target: telegram::Target) -> String {
         (Format::Webm, telegram::Target::Emoji) => fl!("webm-emoji"),
         (Format::Tgs, telegram::Target::Sticker) => fl!("tgs-sticker"),
         (Format::Tgs, telegram::Target::Emoji) => fl!("tgs-emoji"),
-        (Format::Image, telegram::Target::Sticker) => fl!("image-sticker"),
-        (Format::Image, telegram::Target::Emoji) => fl!("image-emoji"),
+        (Format::Webp, telegram::Target::Sticker) => fl!("image-sticker"),
+        (Format::Webp, telegram::Target::Emoji) => fl!("image-emoji"),
     }
 }
 
