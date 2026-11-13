@@ -1258,7 +1258,7 @@ fn makes_sequences_into_videos_and_pictures() {
         let info = webm::inspect_file(&made.output).unwrap();
         assert_eq!(info.video_frames, 2, "{name}");
         assert!((info.header_duration.unwrap() - 0.5).abs() < 1e-3, "{name}");
-        // a picture's frames come ten a second, whatever else says
+        // a picture's frames come twelve a second, whatever else says
         let picture = |fps| {
             let options = Options { start: Some(0.15), fps, ..Options::default() };
             let request = Request { options, ..request.clone() };
