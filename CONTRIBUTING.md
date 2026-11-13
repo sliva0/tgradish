@@ -161,7 +161,10 @@ date. ffmpeg stays LGPL: never enable its GPL parts. Paths and commands say
    depend on each other: `tgradish-frames`, `tgradish-tgs`,
    `tgradish-core`, `tgradish-gui`, then `tgradish`. They ask for each
    other's exact versions, since `cargo install` doesn't read
-   `Cargo.lock`.
+   `Cargo.lock`. Packaging checks them against each other from copies
+   it unpacks under cargo's `registry/src`, and keeps using those while
+   the version is the same, so before packaging again at a version
+   already packaged, delete the `tgradish-*` folders there.
 
 The corpus, tgs-lab and xtask are `publish = false`, and stay that way.
 `rust-version` in `Cargo.toml` is the oldest Rust that builds every crate,
