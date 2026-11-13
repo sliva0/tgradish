@@ -6,7 +6,7 @@ use crate::config::Config;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use tgradish_core::inputs;
-use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Spoof};
+use tgradish_core::options::{Crop, Options, Resize, Scaling};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::tgs::TgsOptions;
@@ -235,26 +235,10 @@ pub enum Recipe {
 
 /// `options` without the values of settings that are hidden or greyed
 /// out, as `effective`, everything a conversion gets, shows them: they are
-/// kept for when they show again, but have no say until then.
-pub fn shown(mut options: Options, effective: &Options) -> Options {
-    let fit = effective.fit_or_default();
-    let constant_quality = matches!(fit, Fit::Fps | Fit::Length | Fit::Off);
-    let lossless = constant_quality && effective.lossless == Some(true);
-    if fit == Fit::Off {
-        (options.attempts, options.fit_range) = (None, None);
-    }
-    if !constant_quality {
-        (options.crf, options.lossless) = (None, None);
-    }
-    if fit != Fit::Off || lossless {
-        options.bitrate = None;
-    }
-    if lossless {
-        options.crf = None;
-    }
-    if effective.spoof == Some(Spoof::Never) {
-        options.fake_duration = None;
-    }
+/// kept for when they show again, but have no say until then. What has no
+/// say by how fitting uses it core says; the window adds its own rows'.
+pub fn shown(options: Options, effective: &Options) -> Options {
+    let mut options = tgradish_core::options::in_effect(options, effective);
     // a scale of whole multiples, which keeps the whole picture
     if effective.scaling != Some(Scaling::PixelPerfect) {
         options.exact_scale = None;
@@ -640,6 +624,8 @@ impl Item {
 
 #[cfg(test)]
 mod tests {
+    use tgradish_core::options::Fit;
+
     use super::*;
 
     #[test]
