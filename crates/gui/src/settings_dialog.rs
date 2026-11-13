@@ -11,6 +11,7 @@ use tgradish_core::backend::Backend;
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::presets::{Format, Presets};
 
+use crate::app::App;
 use crate::file_settings;
 use crate::l10n::{self, fl};
 use crate::media::Task;
@@ -36,6 +37,9 @@ pub(crate) struct SettingsDialog {
     /// Results are to go in a folder not chosen yet: kept here, as the
     /// settings never hold a folder without a name.
     folder_unchosen: bool,
+    /// A default preset picked for a format, which the window takes up, as
+    /// the items that follow it may then fit another way.
+    pub(crate) default_preset: Option<(Format, String)>,
 }
 
 impl SettingsDialog {
@@ -299,10 +303,27 @@ fn sections(
         });
         let picked = chosen.to_owned();
         if picked != current {
-            match format {
-                Format::Webm | Format::Webp => config.preset = Some(picked),
-                Format::Tgs => config.tgs_preset = Some(picked),
-            }
+            dialog.default_preset = Some((format, picked));
+        }
+    }
+}
+
+impl App {
+    /// Makes `name` the default preset for `format`. The items without a
+    /// preset of their own follow it, and may then fit another way, as
+    /// when they pick another preset: their own range to search goes
+    /// where it counts in another unit.
+    pub(crate) fn set_default_preset(&mut self, format: Format, name: String) {
+        let fit = |choices: &_, config: &_| file_settings::fit_of(choices, &self.presets, config);
+        let before: Vec<_> =
+            self.items.iter().map(|item| fit(&item.choices, &self.config)).collect();
+        match format {
+            Format::Webm | Format::Webp => self.config.preset = Some(name),
+            Format::Tgs => self.config.tgs_preset = Some(name),
+        }
+        for (item, before) in self.items.iter_mut().zip(before) {
+            let after = fit(&item.choices, &self.config);
+            file_settings::follow_fit(&mut item.choices.webm, before, after);
         }
     }
 }
@@ -339,7 +360,6 @@ mod tests {
     use egui_kittest::kittest::Queryable;
 
     use super::*;
-    use crate::app::App;
 
     #[test]
     fn saves_settings_when_asked() {
@@ -365,6 +385,46 @@ mod tests {
             !harness.state().settings_dialog.is_open() && !harness.state().config.gui.reopen_files
         );
         assert!(Config::load(&path).unwrap().gui.reopen_files);
+    }
+
+    #[test]
+    fn drops_a_range_a_new_default_preset_fits_by_another_unit() {
+        use tgradish_core::options::{Fit, Range};
+        use tgradish_core::tgs;
+        use tgradish_core::webm::Options;
+
+        let dir = tempfile::tempdir().unwrap();
+        let webm = Options { fit: Some(Fit::Crf), ..Options::default() };
+        let (tgs, presets_dir) = (tgs::Options::default(), dir.path());
+        tgradish_core::presets::save(presets_dir, "by quality", "", (&webm, &tgs), false).unwrap();
+        let mut harness = crate::testing::harness(Config::default());
+        let bitrates = Some(Range { min: 100.0, max: 400.0 });
+        {
+            let app = harness.state_mut();
+            app.presets = Presets::load(Some(presets_dir)).unwrap();
+            for (id, preset) in [(1, None), (2, Some("balanced"))] {
+                let mut item = crate::item::Item::new(
+                    id,
+                    vec!["pig.mp4".into()],
+                    false,
+                    tgradish_core::telegram::Target::Sticker,
+                );
+                item.choices.preset = preset.map(str::to_owned);
+                item.choices.webm.fit_range = bitrates;
+                app.items.push(item);
+            }
+            app.settings_dialog.open();
+        }
+        harness.run_steps(2);
+        // the WebM row's, the first
+        harness.get_all_by_label("by quality").next().unwrap().click_accesskit();
+        harness.run_steps(2);
+        let app = harness.state();
+        assert_eq!(app.config.preset.as_deref(), Some("by quality"));
+        // the first follows the default, by quality now; the second has a
+        // preset of its own, by bitrate still
+        let ranges: Vec<_> = app.items.iter().map(|item| item.choices.webm.fit_range).collect();
+        assert_eq!(ranges, [None, bitrates]);
     }
 
     #[test]

@@ -558,6 +558,9 @@ impl eframe::App for App {
         if let Some(pick) = self.settings_dialog.pick.take() {
             self.pick(&ctx, pick);
         }
+        if let Some((format, name)) = self.settings_dialog.default_preset.take() {
+            self.set_default_preset(format, name);
+        }
         // as Settings or the theme button changes it
         if self.theme_shown != Some(self.config.gui.theme) {
             set_theme(&ctx, self.config.gui.theme);
