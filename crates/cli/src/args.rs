@@ -50,7 +50,8 @@ pub struct Global {
     /// Show more output, including ffmpeg logs with -vv.
     #[arg(short, long, global = true, action = clap::ArgAction::Count, conflicts_with = "quiet")]
     pub verbose: u8,
-    /// Only print errors and results.
+    /// Only print errors, warnings and results: a line on stdout for each
+    /// file made.
     #[arg(short, long, global = true)]
     pub quiet: bool,
     /// ffmpeg executable or directory with ffmpeg and ffprobe.
