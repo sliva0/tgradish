@@ -30,7 +30,7 @@ pub use events::{Event, Params, Rate};
 pub use fit::first_params;
 pub use options::{
     CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, DEFAULT_FAKE_DURATION, HIGHEST_BITRATE, MAX_ATTEMPTS,
-    Options, in_effect,
+    Options, in_effect, set_aside,
 };
 pub use plan::{Plan, default_fit_range, frame_count, plan, played_fps, read_from};
 pub(crate) use plan::{encoded_length, estimate_bitrate};

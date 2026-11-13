@@ -305,15 +305,9 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     if lossless && !matches!(fit, Fit::Fps | Fit::Length | Fit::Off) {
         return Err(Error::invalid("lossless", "only works with fit fps, length or off"));
     }
-    let in_effect = super::in_effect(o.clone(), o);
-    let fitting = serde_json::to_value(fit).ok().and_then(|v| v.as_str().map(str::to_owned));
-    let fitting = fitting.unwrap_or_default();
-    for (key, asked, kept) in [
-        ("crf", o.crf.is_some(), in_effect.crf.is_some()),
-        ("bitrate", o.bitrate.is_some(), in_effect.bitrate.is_some()),
-    ] {
-        if asked && !kept {
-            warnings.push(format!("{key} is ignored with fit {fitting}"));
+    for (key, why) in super::set_aside(o, o) {
+        if matches!(key, "crf" | "bitrate") {
+            warnings.push(format!("{key} is ignored as {why}"));
         }
     }
 
@@ -440,6 +434,18 @@ mod tests {
         }
         let encoder_options = Some([("tune-content".to_string(), "screen".into())].into());
         assert!(plan_with(Options { encoder_options, ..Default::default() }).is_ok());
+    }
+
+    #[test]
+    fn warns_of_what_sets_a_quality_or_bitrate_aside() {
+        let crf = Options { crf: Some(20), ..Default::default() };
+        let warned = |options: Options| plan_with(crf.clone().merged(&options)).unwrap().1;
+        let lossless = Options { fit: Some(Fit::Fps), lossless: Some(true), ..Default::default() };
+        assert_eq!(warned(lossless), ["crf is ignored as lossless is on"]);
+        let bitrate = Options { fit: Some(Fit::Off), bitrate: Some(300.0), ..Default::default() };
+        assert_eq!(warned(bitrate), ["crf is ignored as bitrate is set"]);
+        let fitted = Options { fit: Some(Fit::Crf), ..Default::default() };
+        assert_eq!(warned(fitted), ["crf is ignored as fit is crf"]);
     }
 
     #[test]
