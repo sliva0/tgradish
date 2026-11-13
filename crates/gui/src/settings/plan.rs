@@ -69,7 +69,7 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
             }
             if item.format == Format::Webm {
                 let tempo = options.tempo.unwrap_or(1.0);
-                time(item, &used, tempo, options.spoof == Some(Spoof::Never), &mut steps);
+                time(item, &used, tempo, options.spoof.unwrap_or(Spoof::Auto), &mut steps);
             }
         }
         Format::Tgs => {
@@ -82,8 +82,9 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
             };
             read(item, &used, &mut steps);
             art(&options, &mut steps);
+            // cut at 3 seconds, as a .tgs can't say it is shorter
             let tempo = item.tempo(presets, config);
-            time(item, &used, tempo, true, &mut steps);
+            time(item, &used, tempo, Spoof::Never, &mut steps);
         }
     }
     if let Some(name) = context.output.as_ref().and_then(|output| output.file_name()) {
@@ -160,8 +161,8 @@ fn art(options: &TgsOptions, steps: &mut Vec<String>) {
 }
 
 /// How the result plays at `tempo`: faster or slower, and how its length
-/// is kept to Telegram's, `cut` at 3 seconds or told to be shorter.
-fn time(item: &Item, used: &Used, tempo: f64, cut: bool, steps: &mut Vec<String>) {
+/// is kept to Telegram's as `spoof` says.
+fn time(item: &Item, used: &Used, tempo: f64, spoof: Spoof, steps: &mut Vec<String>) {
     let Some(length) = item.input_length() else { return };
     let start = used.start.unwrap_or(0.0).clamp(0.0, length);
     let end = used.length.map_or(length, |used| (start + used).min(length));
@@ -176,15 +177,20 @@ fn time(item: &Item, used: &Used, tempo: f64, cut: bool, steps: &mut Vec<String>
     } else if tempo < 1.0 - 1e-9 {
         steps.push(fl!("plan-slower", factor = widgets::trimmed(1.0 / tempo)));
     }
-    let played = (end - start) / tempo;
-    if !telegram::too_long(played) {
-        return;
-    }
+    steps.extend(length_step((end - start) / tempo, spoof));
+}
+
+/// What is done to a result that plays for `played` to keep to Telegram's
+/// length: cut, or its duration spoofed, which "Always spoof" does to
+/// short ones too.
+fn length_step(played: f64, spoof: Spoof) -> Option<String> {
+    let long = telegram::too_long(played);
     let played = widgets::seconds(played);
-    if cut {
-        steps.push(fl!("plan-cut-3-s", played = played));
-    } else {
-        steps.push(fl!("plan-spoofed", played = played));
+    match spoof {
+        Spoof::Never if long => Some(fl!("plan-cut-3-s", played = played)),
+        Spoof::Auto | Spoof::Always if long => Some(fl!("plan-spoofed", played = played)),
+        Spoof::Always => Some(fl!("plan-spoofed-anyway", played = played)),
+        Spoof::Auto | Spoof::Never => None,
     }
 }
 
@@ -216,5 +222,17 @@ mod tests {
             ..Options::default()
         };
         assert_eq!(picture(&cut, (64, 40)), ["Scaled to 160 × 100", "Middle cut to 100 × 100"]);
+    }
+
+    #[test]
+    fn says_when_the_duration_is_spoofed() {
+        let spoofed = |played| fl!("plan-spoofed", played = widgets::seconds(played));
+        assert_eq!(length_step(2.0, Spoof::Auto), None);
+        assert_eq!(length_step(5.0, Spoof::Auto), Some(spoofed(5.0)));
+        // always, even a short one
+        let anyway = fl!("plan-spoofed-anyway", played = widgets::seconds(2.0));
+        assert_eq!(length_step(2.0, Spoof::Always), Some(anyway));
+        assert_eq!(length_step(2.0, Spoof::Never), None);
+        assert_eq!(length_step(5.0, Spoof::Never), Some(fl!("plan-cut-3-s", played = "5.00 s")));
     }
 }

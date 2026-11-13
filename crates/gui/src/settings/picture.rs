@@ -699,11 +699,23 @@ fn integer_scale(
         match scale {
             Some(scale) => makes(scale_text(scale)),
             None if sizes.scaling == Scaling::PixelPerfect => {
-                makes(format!("×{}", sizes.scaled.0 / crop.width.max(1)))
+                makes(multiples(&sizes, (crop.width, crop.height)))
             }
             None => fl!("scale-shrinks"),
         },
     );
+}
+
+/// The whole multiples a `used` picture is scaled by, as ×3, or each way
+/// where stretching makes them differ.
+fn multiples(sizes: &convert::Sizes, used: (u32, u32)) -> String {
+    let across = sizes.scaled.0 / used.0.max(1);
+    let down = sizes.scaled.1 / used.1.max(1);
+    if across == down {
+        format!("×{across}")
+    } else {
+        fl!("scale-each-way", across = across, down = down)
+    }
 }
 
 #[cfg(test)]
@@ -763,6 +775,12 @@ mod tests {
         assert_eq!(largest_scale(Target::Sticker, (64, 40)), ExactScale { up: 8, down: 1 });
         assert_eq!(largest_scale(Target::Emoji, (64, 40)), ExactScale { up: 1, down: 1 });
         assert_eq!(largest_scale(Target::Sticker, (1920, 1080)), ExactScale { up: 1, down: 4 });
+        // stretched, each way by its own multiple
+        let padded = convert::sizes(Target::Sticker, Resize::Pad, Scaling::PixelPerfect, (64, 40));
+        assert_eq!(multiples(&padded, (64, 40)), "×8");
+        let stretched =
+            convert::sizes(Target::Sticker, Resize::Stretch, Scaling::PixelPerfect, (64, 40));
+        assert_eq!(multiples(&stretched, (64, 40)), fl!("scale-each-way", across = 8, down = 12));
     }
 
     #[test]
