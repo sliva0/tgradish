@@ -2,7 +2,8 @@
 //! keeps for the window read here. They are read leniently, unlike the
 //! rest of the file: a key a newer window wrote, or one renamed since, is
 //! left as it is, and a value that can't be read gives that setting its
-//! default rather than failing the file, which the command line reads too.
+//! default rather than failing the file, which the command line reads too,
+//! and is left as it is until that setting is changed.
 
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
@@ -16,7 +17,8 @@ use tgradish_core::telegram::Target;
 /// it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Config {
-    /// Core's, its `[gui]` holding only what the window doesn't know of.
+    /// Core's, its `[gui]` holding only what the window doesn't know of:
+    /// keys, and values of its own keys it can't read.
     core: tgradish_core::config::Config,
     pub(crate) gui: GuiConfig,
 }
@@ -38,7 +40,8 @@ impl DerefMut for Config {
 impl From<tgradish_core::config::Config> for Config {
     fn from(mut core: tgradish_core::config::Config) -> Config {
         let gui = GuiConfig::read(&core.gui);
-        core.gui.retain(|key, _| !KEYS.contains(&key));
+        let read = toml::Table::try_from(&gui).expect("the window's settings are a table");
+        core.gui.retain(|key, value| !KEYS.contains(&key) || read.get(key) != Some(value));
         Config { core, gui }
     }
 }
@@ -145,13 +148,22 @@ impl GuiConfig {
         }
     }
 
-    /// Writes the settings into `table`, keeping what else it holds.
+    /// Writes the settings into `table`, keeping what else it holds: a
+    /// value of a setting this version couldn't read stays while the
+    /// setting is still what that value read as.
     fn write(&self, table: &mut toml::Table) {
-        for key in KEYS {
-            table.remove(key);
-        }
         let written = toml::Table::try_from(self).expect("the window's settings are a table");
-        table.extend(written);
+        let unread = GuiConfig::read(table);
+        let unread = toml::Table::try_from(&unread).expect("the window's settings are a table");
+        for key in KEYS {
+            if table.contains_key(key) && written.get(key) == unread.get(key) {
+                continue;
+            }
+            table.remove(key);
+            if let Some(value) = written.get(key) {
+                table.insert(key.to_owned(), value.clone());
+            }
+        }
     }
 }
 
@@ -268,6 +280,39 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("newer-setting = \"kept\"") && !text.contains("old"), "{text}");
         assert_eq!(Config::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn keeps_values_it_cannot_read_until_their_setting_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let text = "[gui]\ntheme = 'high-contrast'\nlanguage = 7\n\
+                    [gui.result-preview]\nsize = 9\ncorner = 'top-left'\n";
+        std::fs::write(&path, text).unwrap();
+        let mut app = crate::app::App::with(
+            Config::load(&path).unwrap(),
+            Some(path.clone()),
+            tgradish_core::presets::Presets::builtin(),
+            None,
+        );
+        assert_eq!(app.config.gui.theme, Theme::System);
+        // another setting changed, and the whole of them saved
+        app.save_setting(|gui| gui.timeline_frames = true);
+        app.config.save(&path).unwrap();
+        let saved = || std::fs::read_to_string(&path).unwrap();
+        for kept in ["theme = \"high-contrast\"", "language = 7", "size = 9"] {
+            assert!(saved().contains(kept), "{kept} in {}", saved());
+        }
+        assert!(saved().contains("timeline-frames = true"), "{}", saved());
+        // the setting itself changed
+        app.save_setting(|gui| gui.theme = Theme::Dark);
+        app.save_setting(|gui| gui.result_preview.corner = Corner::TopRight);
+        assert!(
+            saved().contains("theme = \"dark\"") && saved().contains("size = 3"),
+            "{}",
+            saved()
+        );
+        assert!(saved().contains("language = 7"), "{}", saved());
     }
 
     #[test]
