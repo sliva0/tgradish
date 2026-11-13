@@ -148,13 +148,13 @@ impl Crop {
             && u64::from(self.y) + u64::from(self.height) <= u64::from(height)
     }
 
-    /// An error message unless the crop lies within a `width` by `height`
-    /// input.
-    pub fn check(&self, width: u32, height: u32) -> Result<(), String> {
+    /// Fails unless the crop lies within a `width` by `height` input.
+    pub fn check(&self, width: u32, height: u32) -> crate::Result<()> {
         if self.fits(width, height) {
             Ok(())
         } else {
-            Err(format!("crop {self} is not within the {width}x{height} input"))
+            let reason = format!("{self} is not within the {width}x{height} input");
+            Err(crate::Error::invalid("crop", reason))
         }
     }
 }

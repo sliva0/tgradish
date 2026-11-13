@@ -54,7 +54,7 @@ pub(crate) fn unreadable(path: &Path, err: impl std::fmt::Display) -> Error {
 pub(crate) fn frame_duration(fps: Option<f64>) -> Result<Duration> {
     let fps = fps.unwrap_or(DEFAULT_FPS);
     let most = f64::from(tgradish_tgs::limits::telegram::FPS);
-    let invalid = || Error::InvalidOptions(format!("fps {fps} is not between 0 and {most}"));
+    let invalid = || Error::invalid("fps", format!("{fps} is not between 0 and {most}"));
     if !(fps > 0.0 && fps <= most) {
         return Err(invalid());
     }
@@ -80,7 +80,7 @@ pub(crate) fn sequence_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>> {
     // the order the user gave is usually a shell's, which puts 10 before 2
     files.sort_by(|a, b| natural_order(a, b));
     if files.is_empty() {
-        return Err(Error::InvalidOptions("the sequence has no images".into()));
+        return Err(Error::NothingToConvert);
     }
     Ok(files)
 }

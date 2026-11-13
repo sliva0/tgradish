@@ -165,7 +165,7 @@ impl TgsOptions {
 
     fn sheet_layout(&self) -> Result<Option<Sheet>> {
         let Some(text) = &self.sheet else { return Ok(None) };
-        let invalid = || Error::InvalidOptions(format!("sheet {text:?} is not COLUMNSxROWS"));
+        let invalid = || Error::invalid("sheet", format!("{text:?} is not COLUMNSxROWS"));
         let (columns, rows) = text.split_once(['x', 'X']).ok_or_else(invalid)?;
         let number = |n: &str| n.trim().parse::<u32>().ok().filter(|&n| n > 0).ok_or_else(invalid);
         Ok(Some(Sheet {
@@ -179,11 +179,11 @@ impl TgsOptions {
         crate::source::frame_duration(self.fps)
     }
 
-    fn seconds(value: Option<f64>, name: &str) -> Result<Option<Duration>> {
+    fn seconds(value: Option<f64>, name: &'static str) -> Result<Option<Duration>> {
         value
             .map(|seconds| {
                 Duration::try_from_secs_f64(seconds)
-                    .map_err(|_| Error::InvalidOptions(format!("{name} {seconds} is not valid")))
+                    .map_err(|_| Error::invalid(name, format!("{seconds} is not valid")))
             })
             .transpose()
     }
@@ -210,9 +210,8 @@ impl TgsOptions {
                 tempo: match self.tempo {
                     Some(tempo) if !TEMPOS.contains(&tempo) => {
                         let (low, high) = (TEMPOS.start(), TEMPOS.end());
-                        return Err(Error::InvalidOptions(format!(
-                            "tempo {tempo} is not from {low} to {high}"
-                        )));
+                        let reason = format!("{tempo} is not from {low} to {high}");
+                        return Err(Error::invalid("tempo", reason));
                     }
                     tempo => tempo,
                 },
@@ -221,9 +220,9 @@ impl TgsOptions {
                     Resize::Crop => normalise::Square::Crop,
                     Resize::Stretch => normalise::Square::Stretch,
                     Resize::Contain => {
-                        return Err(Error::InvalidOptions(
-                            "TGS stickers are square: resize pad, crop or stretch".into(),
-                        ));
+                        let reason = "contain can't make TGS stickers, which are square: use pad, \
+                                      crop or stretch";
+                        return Err(Error::invalid("resize", reason));
                     }
                 },
             },
@@ -420,7 +419,7 @@ fn load(
         return Ok(Loaded::art(source::read_sequence(inputs, options.fps, cancel)?));
     }
     let [input] = inputs else {
-        return Err(Error::InvalidOptions("nothing to convert".into()));
+        return Err(Error::NothingToConvert);
     };
     cancel.check()?;
     if !reads_as_art(input)? {
@@ -494,18 +493,18 @@ fn read_video(
 ) -> Result<Loaded> {
     let chosen =
         crate::drawn::layers(options.show_layers.as_deref(), options.hide_layers.as_deref());
-    if options.tag.is_some() || !chosen.is_empty() {
-        return Err(Error::InvalidOptions("tags and layers are only in Aseprite files".into()));
+    if let Some(err) = crate::drawn::not_aseprite(options.tag.as_deref(), &chosen) {
+        return Err(err);
     }
     if options.sheet.is_some() {
-        return Err(Error::InvalidOptions("a sprite sheet is a picture, not a video".into()));
+        return Err(Error::invalid("sheet", "reads a picture, not a video"));
     }
     let start = options.start.unwrap_or(0.0);
     if start.is_nan() || start < 0.0 {
-        return Err(Error::InvalidOptions(format!("start {start} is not valid")));
+        return Err(Error::invalid("start", format!("{start} is not valid")));
     }
     if let Some(length) = options.length.filter(|length| length.is_nan() || *length <= 0.0) {
-        return Err(Error::InvalidOptions(format!("length {length} is not more than 0")));
+        return Err(Error::invalid("length", format!("{length} is not more than 0")));
     }
     let probe = backend.probe(input, cancel)?;
     let unreadable = |message: String| Error::Probe { path: input.to_path_buf(), message };
@@ -523,10 +522,9 @@ fn read_video(
     }
     let available = probe.duration.filter(|_| !probe.still_image).map(|whole| whole - start);
     if let Some(available) = available.filter(|&available| available <= 0.0) {
-        return Err(Error::InvalidOptions(format!(
-            "start {start} is past the end of the video, {:.3} s long",
-            start + available
-        )));
+        let reason =
+            format!("{start} is past the end of the video, {:.3} s long", start + available);
+        return Err(Error::invalid("start", reason));
     }
     // what is used: as long as asked, as far as the video goes
     let used = match (options.length, available) {
@@ -674,10 +672,7 @@ fn refuse_overwriting_inputs(request: &TgsRequest) -> Result<()> {
     };
     for input in inputs {
         if input.canonicalize().is_ok_and(|input| input == output) {
-            return Err(Error::InvalidOptions(format!(
-                "the output {} is an input",
-                request.output.display()
-            )));
+            return Err(Error::OutputIsInput(request.output.clone()));
         }
     }
     Ok(())
@@ -817,7 +812,7 @@ mod tests {
             backend: None,
         };
         let err = convert(&request(input.clone()), &CancelToken::new(), &mut |_| {}).unwrap_err();
-        assert!(err.to_string().contains("is an input"), "{err}");
+        assert!(matches!(err, Error::OutputIsInput(_)), "{err}");
         assert_eq!(std::fs::read(&input).unwrap(), b"not even a png");
         // the same file by another path
         let other = dir.path().join(".").join("art.png");
@@ -878,7 +873,10 @@ mod tests {
             assert!(made.issues.is_empty(), "{resize:?}: {:?}", made.issues);
             assert_eq!(made.preview.width, made.preview.height, "{resize:?}");
         }
-        assert!(matches!(make(Resize::Contain), Err(Error::InvalidOptions(_))));
+        assert!(matches!(
+            make(Resize::Contain),
+            Err(Error::InvalidOption { option: "resize", .. })
+        ));
     }
 
     #[test]
@@ -891,7 +889,7 @@ mod tests {
     #[test]
     fn refuses_tiny_frame_rates() {
         let slow = TgsOptions { fps: Some(1e-100), ..Default::default() };
-        assert!(matches!(slow.frame_duration(), Err(Error::InvalidOptions(_))));
+        assert!(matches!(slow.frame_duration(), Err(Error::InvalidOption { option: "fps", .. })));
     }
 
     #[test]

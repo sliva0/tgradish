@@ -11,7 +11,7 @@ use anyhow::{Context as _, Result, bail};
 
 use crate::Context;
 use crate::args::WatchArgs;
-use crate::convert::Converter;
+use crate::convert::{Converter, Failed};
 use tgradish_core::inputs;
 
 use crate::ui;
@@ -139,9 +139,18 @@ struct Failures {
 
 /// Whether trying again could help: the file may have been locked, not
 /// readable yet, or still being written.
-fn worth_retrying(err: &tgradish_core::Error) -> bool {
+fn worth_retrying(err: &Failed) -> bool {
     use tgradish_core::Error;
-    matches!(err, Error::Io(_) | Error::Probe { .. } | Error::Ffmpeg { .. } | Error::Libav(_))
+    match err {
+        Failed::Core(err) => {
+            matches!(
+                err,
+                Error::Io(_) | Error::Probe { .. } | Error::Ffmpeg { .. } | Error::Libav(_)
+            )
+        }
+        Failed::Folder { .. } => true,
+        Failed::SameOutput { .. } => false,
+    }
 }
 
 /// Sleeps for `seconds`, waking up early when cancelled.
@@ -233,7 +242,7 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
                     ours.insert(path.clone());
                     failures.remove(&path);
                 }
-                Err(tgradish_core::Error::Cancelled) => {
+                Err(Failed::Core(tgradish_core::Error::Cancelled)) => {
                     return Err(tgradish_core::Error::Cancelled.into());
                 }
                 Err(err) if worth_retrying(&err) && !changed_meanwhile => {
