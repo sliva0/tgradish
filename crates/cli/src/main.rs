@@ -208,7 +208,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Config(command) => commands::config(&ctx, command, config_path),
         Command::Ffmpeg(command) => commands::ffmpeg(&ctx, command),
         Command::Licenses => {
-            commands::licenses();
+            commands::licenses(&ctx);
             Ok(())
         }
         #[cfg(feature = "gui")]
@@ -281,6 +281,15 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let cli = Cli::parse();
+    if cli.command.is_window() && cli.global.json {
+        use clap::CommandFactory;
+        Cli::command()
+            .error(
+                clap::error::ErrorKind::ArgumentConflict,
+                "--json can't be used with gui: the window prints nothing to read",
+            )
+            .exit();
+    }
     term::init(cli.global.colour, cli.global.json);
     if !cli.command.is_window() {
         tgradish_core::mark::set_client(tgradish_core::mark::Client::Cli);

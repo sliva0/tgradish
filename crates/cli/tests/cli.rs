@@ -77,6 +77,14 @@ fn carries_licences() {
     }
     // each crate's own license file, with who holds its copyright
     assert!(text.matches("used by:").count() > 40);
+    // as JSON, a notice a line
+    let json = json_lines(&tgradish(&["--json", "licenses"]));
+    assert_eq!(json[0]["title"], "tgradish");
+    assert!(json.iter().all(|notice| notice["text"].is_string()));
+    for notice in &json {
+        let title = notice["title"].as_str().unwrap();
+        assert!(text.lines().any(|line| line == title), "{title}");
+    }
 }
 
 /// A reader that stops early, as `tgradish licenses | head -2`, ends the
@@ -117,6 +125,12 @@ fn reports_errors_as_json() {
 fn rejects_bad_flags() {
     let output = tgradish(&["convert", "a.mp4", "--crf", "64"]);
     assert_eq!(output.status.code(), Some(2));
+    // the window prints nothing to read
+    if cfg!(feature = "gui") {
+        let output = tgradish(&["--json", "gui"]);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--json can't be used with gui"));
+    }
 }
 
 #[test]
