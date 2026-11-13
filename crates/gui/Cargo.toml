@@ -41,6 +41,11 @@ winit = { workspace = true, features = ["wayland"] }
 # libdbus, for the accent colour from the desktop portal
 libloading.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# the accent colour, from AppKit
+objc2.workspace = true
+objc2-app-kit = { workspace = true, features = ["std", "NSColor", "NSColorSpace", "objc2-core-foundation"] }
+
 [target.'cfg(windows)'.dependencies]
 # the accent colour, from the registry
 windows-sys = { workspace = true, features = ["Win32_System_Registry"] }
