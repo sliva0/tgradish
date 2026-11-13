@@ -151,8 +151,10 @@ impl FileKind {
         })
     }
 
-    /// The kind a file named `path` is by its extension.
-    fn of_name(path: &Path) -> FileKind {
+    /// The kind a file named `path` is by its extension, as [`sniff`]
+    /// takes it where the content tells nothing: what a file is taken
+    /// for until it can be read, as the window does.
+    pub fn of_name(path: &Path) -> FileKind {
         match extension(path).as_str() {
             "webm" | "mkv" => FileKind::Webm,
             "webp" => FileKind::Webp { animated: false },
