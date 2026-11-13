@@ -216,11 +216,7 @@ mod tests {
                 width: 512,
                 height: 384,
                 encoding: Encoding::Lossy { quality: 80 },
-                issues: vec![Issue::WrongSize {
-                    width: 512,
-                    height: 384,
-                    expected: "100x100".into(),
-                }],
+                issues: vec![Issue::WrongSize { width: 512, height: 384, side: 100, exact: true }],
                 warnings: vec!["a warning".into()],
             }),
             StillEvent::Error { message: "it failed".into(), input: None },
@@ -346,7 +342,12 @@ mod tests {
                 names.extend(value.as_str().map(str::to_owned));
             }
             for issue in sample["issues"].as_array().into_iter().flatten() {
-                names.extend(issue["issue"].as_str().map(str::to_owned));
+                names.extend(
+                    ["kind", "severity"]
+                        .map(|key| issue[key].as_str().map(str::to_owned))
+                        .into_iter()
+                        .flatten(),
+                );
             }
         }
         assert!(names.len() > 100, "{names:?}");

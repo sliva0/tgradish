@@ -206,7 +206,7 @@ fn makes_animated_stickers() {
     let inspected = tgradish(&["--json", "inspect", out.to_str().unwrap()]);
     let lines = json_lines(&inspected);
     assert_eq!(lines[0]["format"], "tgs");
-    assert_eq!(lines[0]["stats"]["frames"], 30.0);
+    assert_eq!(lines[0]["info"]["frames"], 30.0);
     assert_eq!(lines[0]["issues"], serde_json::json!([]));
 
     // WebM flags don't mix with .tgs output, nor the reverse

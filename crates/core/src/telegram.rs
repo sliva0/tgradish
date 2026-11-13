@@ -6,6 +6,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::tgs::Severity;
 use crate::webm::WebmInfo;
 
 /// Largest video sticker @Stickers accepts, in bytes; one more is "too big".
@@ -69,8 +70,13 @@ impl Target {
 }
 
 /// Something about a file that Telegram will reject.
+///
+/// Serialised as every issue tgradish reports is, `.tgs` ones too: by its
+/// `kind`, with its `severity` and `message`, beside what it found, as
+/// `{"kind":"too-big","severity":"error","message":"file is 300000 bytes,
+/// limit is 262144","bytes":300000,"max":262144}`.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
-#[serde(tag = "issue", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
+#[serde(into = "Reported")]
 pub enum Issue {
     NotWebm {
         doc_type: String,
@@ -80,10 +86,13 @@ pub enum Issue {
         codec_id: String,
     },
     HasAudio,
+    /// Not a size Telegram takes: one side `side` pixels long and the
+    /// other at most that, or with `exact`, both that long.
     WrongSize {
         width: u64,
         height: u64,
-        expected: String,
+        side: u64,
+        exact: bool,
     },
     TooBig {
         bytes: u64,
@@ -101,6 +110,68 @@ pub enum Issue {
     Animated,
 }
 
+impl Issue {
+    /// How bad it is: Telegram refuses a file with any of these.
+    pub fn severity(&self) -> Severity {
+        Severity::Error
+    }
+}
+
+/// An [`Issue`] as it is serialised.
+#[derive(Serialize, JsonSchema)]
+struct Reported {
+    #[serde(flatten)]
+    found: Found,
+    severity: Severity,
+    message: String,
+}
+
+/// What an [`Issue`] found, tagged by its kind: a copy of it, as serde
+/// can't put fields that are worked out beside an enum's own.
+#[derive(Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
+enum Found {
+    /// The container isn't WebM.
+    NotWebm { doc_type: String },
+    /// There is no video track.
+    NoVideo,
+    /// The video isn't VP9.
+    NotVp9 { codec_id: String },
+    /// There is an audio track.
+    HasAudio,
+    /// Not a size Telegram takes: one side `side` pixels long and the
+    /// other at most that, or with `exact`, both that long.
+    WrongSize { width: u64, height: u64, side: u64, exact: bool },
+    /// Larger than `max` bytes.
+    TooBig { bytes: u64, max: u64 },
+    /// Its header says it lasts longer than `max` seconds.
+    TooLong { seconds: f64, max: f64 },
+    /// More than `max` frames a second.
+    TooManyFps { fps: f64, max: f64 },
+    /// An animated image, where image stickers are one picture.
+    Animated,
+}
+
+impl From<Issue> for Reported {
+    fn from(issue: Issue) -> Reported {
+        let (severity, message) = (issue.severity(), issue.to_string());
+        let found = match issue {
+            Issue::NotWebm { doc_type } => Found::NotWebm { doc_type },
+            Issue::NoVideo => Found::NoVideo,
+            Issue::NotVp9 { codec_id } => Found::NotVp9 { codec_id },
+            Issue::HasAudio => Found::HasAudio,
+            Issue::WrongSize { width, height, side, exact } => {
+                Found::WrongSize { width, height, side, exact }
+            }
+            Issue::TooBig { bytes, max } => Found::TooBig { bytes, max },
+            Issue::TooLong { seconds, max } => Found::TooLong { seconds, max },
+            Issue::TooManyFps { fps, max } => Found::TooManyFps { fps, max },
+            Issue::Animated => Found::Animated,
+        };
+        Reported { found, severity, message }
+    }
+}
+
 impl std::fmt::Display for Issue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -108,9 +179,13 @@ impl std::fmt::Display for Issue {
             Issue::NoVideo => write!(f, "no video track"),
             Issue::NotVp9 { codec_id } => write!(f, "codec is {codec_id}, not VP9"),
             Issue::HasAudio => write!(f, "has an audio track"),
-            Issue::WrongSize { width, height, expected } => {
-                write!(f, "size is {width}x{height}, expected {expected}")
+            Issue::WrongSize { width, height, side, exact: true } => {
+                write!(f, "size is {width}x{height}, expected {side}x{side}")
             }
+            Issue::WrongSize { width, height, side, exact: false } => write!(
+                f,
+                "size is {width}x{height}, expected one side {side} px, the other at most {side} px"
+            ),
             Issue::TooBig { bytes, max } => write!(f, "file is {bytes} bytes, limit is {max}"),
             Issue::TooLong { seconds, max } => {
                 write!(f, "metadata duration is {seconds:.3} s, limit is {max} s")
@@ -133,12 +208,8 @@ fn size_issue(width: u64, height: u64, target: Target) -> Option<Issue> {
     } else {
         width <= box_w && height <= box_h && (width == box_w || height == box_h)
     };
-    let expected = if target.requires_exact_size() {
-        format!("{box_w}x{box_h}")
-    } else {
-        format!("one side {box_w} px, the other at most {box_w} px")
-    };
-    (!size_ok).then_some(Issue::WrongSize { width, height, expected })
+    let exact = target.requires_exact_size();
+    (!size_ok).then_some(Issue::WrongSize { width, height, side: box_w, exact })
 }
 
 /// Lists everything that would make Telegram reject an image sticker or
@@ -244,5 +315,33 @@ mod tests {
             check(&info(512, 1000, 75.0), Target::Sticker)[..],
             [Issue::TooManyFps { .. }]
         ));
+    }
+
+    #[test]
+    fn reports_issues_as_tgs_ones_are() {
+        let issue = serde_json::to_value(Issue::TooBig { bytes: 300_000, max: 262_144 }).unwrap();
+        let message = "file is 300000 bytes, limit is 262144";
+        let expected = serde_json::json!({
+            "kind": "too-big", "severity": "error", "message": message,
+            "bytes": 300_000, "max": 262_144,
+        });
+        assert_eq!(issue, expected);
+        let size = Issue::WrongSize { width: 512, height: 384, side: 100, exact: true };
+        let size = serde_json::to_value(size).unwrap();
+        assert_eq!(
+            (&size["side"], &size["exact"]),
+            (&serde_json::json!(100), &serde_json::json!(true))
+        );
+        // a .tgs's have the same envelope, with no data of their own
+        let lottie = br#"{"v":"5.5.2","w":100,"h":100,"fr":60,"ip":0,"op":60,"layers":[]}"#;
+        let (_, found) = tgradish_tgs::check::check(lottie, None).unwrap();
+        let tgs = serde_json::to_value(&found[0]).unwrap();
+        let keys = |value: &serde_json::Value| -> Vec<String> {
+            let mut keys: Vec<_> = value.as_object().unwrap().keys().cloned().collect();
+            keys.sort();
+            keys
+        };
+        assert_eq!(keys(&tgs), ["kind", "message", "severity"]);
+        assert!(keys(&tgs).iter().all(|key| issue.get(key).is_some()));
     }
 }
