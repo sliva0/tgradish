@@ -2,12 +2,12 @@
 //! and the input, and the frame counts and times they come to.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use super::{Request, default_output};
+use super::Request;
 use crate::error::{Error, Result};
 use crate::ffmpeg::Probe;
 use crate::options::{self, Crop, Fit, FitUnit, Range, Resize, Scaling, Speed, Spoof};
@@ -147,14 +147,6 @@ fn is_option_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// Whether `output` is the same file as `input`, following `..` and links.
-fn same_file(input: &Path, output: &Path) -> bool {
-    match (std::fs::canonicalize(input), std::fs::canonicalize(output)) {
-        (Ok(input), Ok(output)) => input == output,
-        _ => input == output,
-    }
-}
-
 /// Checks a fit range given against what `fit` tunes, the one place that
 /// does: finite and in order, within [`Fit::range_limits`], and holding a
 /// whole number where only those are tried. A range of lengths past the
@@ -229,18 +221,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         return Err(Error::invalid("resize", reason));
     }
 
-    let output = request.output.clone().unwrap_or_else(|| default_output(&request.input, target));
-    // any of a sequence's frames too
-    let frames = match &request.sequence {
-        Some(frames) => crate::art::sequence_files(frames)?,
-        None => Vec::new(),
-    };
-    if std::iter::once(&request.input).chain(&frames).any(|input| same_file(input, &output)) {
-        return Err(Error::OutputIsInput(output));
-    }
-    if !request.overwrite && output.exists() {
-        return Err(Error::OutputExists(output));
-    }
+    let output = request.output();
 
     let spoof = o.spoof_or_default();
     let fake_duration = o.fake_duration.unwrap_or(super::DEFAULT_FAKE_DURATION);
@@ -355,7 +336,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     let sizes = picture_sizes(o, used)?;
 
     let plan = Plan {
-        input: request.input.clone(),
+        input: request.input.first().to_path_buf(),
         output,
         target,
         crop: o.crop,
@@ -393,6 +374,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input::Input;
     use crate::options::ExactScale;
     use crate::picture::{exact_sizes, sizes};
     use crate::webm::Options;
@@ -415,31 +397,8 @@ mod tests {
     }
 
     fn plan_with(options: Options) -> Result<(Plan, Vec<String>)> {
-        let request = Request { options, ..Request::new("in.mp4".into()) };
+        let request = Request { options, ..Request::new(Input::File("in.mp4".into())) };
         plan(&request, source(4.84))
-    }
-
-    #[test]
-    fn refuses_to_overwrite_input_through_dot_dot() {
-        let dir = tempfile::tempdir().unwrap();
-        let input = dir.path().join("input.mp4");
-        std::fs::write(&input, b"").unwrap();
-        let name = dir.path().file_name().unwrap();
-        let sneaky = dir.path().join("..").join(name).join("input.mp4");
-        let request =
-            Request { output: Some(sneaky), overwrite: true, ..Request::new(input.clone()) };
-        assert!(matches!(plan(&request, source(4.84)), Err(Error::OutputIsInput(_))));
-        // nor any frame of a sequence
-        let (first, second) = (dir.path().join("1.png"), dir.path().join("2.webp"));
-        std::fs::write(&first, b"").unwrap();
-        std::fs::write(&second, b"").unwrap();
-        let request = Request {
-            sequence: Some(vec![first.clone(), second.clone()]),
-            output: Some(second),
-            overwrite: true,
-            ..Request::new(first)
-        };
-        assert!(matches!(plan(&request, source(4.84)), Err(Error::OutputIsInput(_))));
     }
 
     #[test]
@@ -654,7 +613,7 @@ mod tests {
         assert_eq!((plan.length, plan.fps), (9.68, 15.0));
         // at least a frame a second, and what is asked for
         let slowest = Options { tempo: Some(0.1), spoof: Some(Spoof::Never), ..Options::default() };
-        let request = Request { options: slowest, ..Request::new("in.mp4".into()) };
+        let request = Request { options: slowest, ..Request::new(Input::File("in.mp4".into())) };
         let (plan, _) = super::plan(&request, Probe { fps: Some(1.0), ..source(4.84) }).unwrap();
         assert_eq!((plan.fps, plan.length), (1.0, 3.0));
         let asked = Options { tempo: Some(0.1), fps: Some(30.0), ..Options::default() };

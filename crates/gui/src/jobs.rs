@@ -7,12 +7,11 @@ use std::sync::mpsc::{Receiver, channel};
 use eframe::egui;
 use tgradish_core::CancelToken;
 use tgradish_core::backend::Backend;
+use tgradish_core::input::Input;
 use tgradish_core::presets::Format;
 use tgradish_core::preview::Preview;
 use tgradish_core::tgs;
-use tgradish_core::webm::Options;
-use tgradish_core::webm::{Event, Params};
-use tgradish_core::webm::{Request, convert};
+use tgradish_core::webm::{self, Event, Options, Params};
 use tgradish_core::webp;
 use tgradish_core::{Error, FfmpegMissing, telegram};
 use tgradish_tgs::check::{Issue, Severity};
@@ -372,14 +371,7 @@ impl Job {
     }
 
     /// Starts converting on a worker thread, which repaints `ctx` as it goes.
-    pub fn start(
-        &mut self,
-        plan: Plan,
-        inputs: Vec<PathBuf>,
-        sequence: bool,
-        overwrite: bool,
-        ctx: &egui::Context,
-    ) {
+    pub fn start(&mut self, plan: Plan, input: Input, overwrite: bool, ctx: &egui::Context) {
         let (sender, receiver) = channel();
         self.messages = Some(receiver);
         self.status = Status::Running;
@@ -395,7 +387,7 @@ impl Job {
             let update =
                 |change: Box<dyn FnOnce(&mut Progress) + Send>| send(Message::Progress(change));
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                run(plan, inputs, sequence, output, overwrite, &cancel, &update)
+                run(plan, input, output, overwrite, &cancel, &update)
             }));
             send(match result {
                 Ok(result) => Message::Finished(result),
@@ -466,8 +458,7 @@ type Update<'a> = &'a dyn Fn(Box<dyn FnOnce(&mut Progress) + Send>);
 
 fn run(
     plan: Plan,
-    inputs: Vec<PathBuf>,
-    sequence: bool,
+    input: Input,
     output: PathBuf,
     overwrite: bool,
     cancel: &CancelToken,
@@ -480,33 +471,20 @@ fn run(
             error,
         })?;
     }
-    // the frames of one animation, which pixel art drawing joins
-    let frames = (sequence || inputs.len() > 1).then(|| inputs.clone());
+    let output = Some(output);
     match plan {
         Plan::Webm { options, backend } => {
-            let request = Request {
-                input: inputs[0].clone(),
-                sequence: frames,
-                output: Some(output),
-                options,
-                overwrite,
-                keep_temp: false,
-            };
-            webm(&request, backend, cancel, update)
+            let request = webm::Request { input, output, options, overwrite, keep_temp: false };
+            convert_webm(&request, backend, cancel, update)
         }
         Plan::Image { options, backend } => {
-            let request = Request {
-                input: inputs[0].clone(),
-                sequence: frames,
-                output: Some(output),
-                options,
-                overwrite,
-                keep_temp: false,
-            };
-            let target = request.options.target.unwrap_or_default();
-            let outcome = webp::convert(&backend, &request, cancel)?;
-            let warnings = outcome.warnings.clone();
-            update(Box::new(move |progress| progress.warnings.extend(warnings)));
+            let target = options.target.unwrap_or_default();
+            let request = webp::Request { input, output, options, overwrite };
+            let outcome = webp::convert(&backend, &request, cancel, &mut |event| {
+                if let webp::Event::Warning { message } = event {
+                    update(Box::new(move |progress| progress.warnings.push(message)));
+                }
+            })?;
             let preview = webp::preview(&outcome.output).ok();
             Ok(Done {
                 output: outcome.output,
@@ -523,32 +501,33 @@ fn run(
         }
         Plan::Tgs { options, backend } => {
             let exact = options.exact_or_default();
-            let request = tgs::Request { inputs, sequence, output, options, overwrite, backend };
+            let request = tgs::Request { input, output, options, overwrite };
             update(Box::new(move |progress| {
                 progress.tgs = Some(TgsStage::Reading);
                 progress.tgs_exact = exact;
             }));
-            let outcome = tgs::convert(&request, cancel, &mut |event| match event {
-                tgs::Event::Started { report, .. } => update(Box::new(move |progress| {
-                    progress.report = Some(report);
-                    progress.tgs = Some(TgsStage::Drawing);
-                })),
-                tgs::Event::TooLarge { bytes } => update(Box::new(move |progress| {
-                    progress.unchanged_bytes = Some(bytes as usize);
-                    progress.tgs = Some(TgsStage::Fitting);
-                })),
-                tgs::Event::Reduced { step } => update(Box::new(move |progress| {
-                    progress.steps.push(step);
-                    progress.tgs = Some(TgsStage::Fitting);
-                })),
-                tgs::Event::Packing => update(Box::new(|progress| {
-                    progress.tgs = Some(TgsStage::Compressing);
-                })),
-                tgs::Event::Warning { message } => update(Box::new(move |progress| {
-                    progress.warnings.push(message);
-                })),
-                _ => {}
-            })?;
+            let outcome =
+                tgs::convert(backend.as_ref(), &request, cancel, &mut |event| match event {
+                    tgs::Event::Started { report, .. } => update(Box::new(move |progress| {
+                        progress.report = Some(report);
+                        progress.tgs = Some(TgsStage::Drawing);
+                    })),
+                    tgs::Event::TooLarge { bytes } => update(Box::new(move |progress| {
+                        progress.unchanged_bytes = Some(bytes as usize);
+                        progress.tgs = Some(TgsStage::Fitting);
+                    })),
+                    tgs::Event::Reduced { step } => update(Box::new(move |progress| {
+                        progress.steps.push(step);
+                        progress.tgs = Some(TgsStage::Fitting);
+                    })),
+                    tgs::Event::Packing => update(Box::new(|progress| {
+                        progress.tgs = Some(TgsStage::Compressing);
+                    })),
+                    tgs::Event::Warning { message } => update(Box::new(move |progress| {
+                        progress.warnings.push(message);
+                    })),
+                    _ => {}
+                })?;
             Ok(Done {
                 output: outcome.output,
                 bytes: outcome.bytes,
@@ -565,14 +544,14 @@ fn run(
     }
 }
 
-fn webm(
-    request: &Request,
+fn convert_webm(
+    request: &webm::Request,
     backend: Backend,
     cancel: &CancelToken,
     update: Update,
 ) -> Result<Done, Error> {
     let limit = request.options.target.unwrap_or_default().max_bytes();
-    let outcome = convert(&backend, request, cancel, &mut |event| match event {
+    let outcome = webm::convert(&backend, request, cancel, &mut |event| match event {
         Event::Started { plan } => {
             let planned = WebmPlan {
                 width: plan.width,

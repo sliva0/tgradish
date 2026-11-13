@@ -46,6 +46,10 @@ pub enum Error {
     /// link, and writing it would destroy that input.
     #[error("the output {} is an input", .0.display())]
     OutputIsInput(PathBuf),
+    /// A folder was given as one file to convert; the pictures in it are
+    /// converted as a sequence.
+    #[error("{} is a folder, whose pictures are converted as a sequence", .0.display())]
+    IsFolder(PathBuf),
     /// No inputs were given, or a sequence's folders hold no images.
     #[error("there are no images to convert")]
     NothingToConvert,

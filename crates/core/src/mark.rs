@@ -354,14 +354,11 @@ mod tests {
         let input = dir.path().join("walker.gif");
         std::fs::write(&input, &walker.bytes).unwrap();
         let request = crate::tgs::Request {
-            inputs: vec![input],
-            sequence: false,
-            output: dir.path().join("walker.tgs"),
-            options: Default::default(),
-            overwrite: false,
-            backend: None,
+            output: Some(dir.path().join("walker.tgs")),
+            ..crate::tgs::Request::new(crate::input::Input::File(input))
         };
-        let made = crate::tgs::convert(&request, &crate::CancelToken::new(), &mut |_| {}).unwrap();
+        let cancel = crate::CancelToken::new();
+        let made = crate::tgs::convert(None, &request, &cancel, &mut |_| {}).unwrap();
         assert_eq!(read_file(&made.output), Some(Mark::current()));
     }
 

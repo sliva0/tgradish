@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, FileAction, Result};
 use crate::options::{Fit, Speed};
+use crate::telegram::Target;
 use crate::tgs;
 use crate::webm::Options;
 
@@ -144,6 +145,15 @@ impl FormatOptions {
             FormatOptions::Tgs(_) => Format::Tgs,
             FormatOptions::Webp(_) => Format::Webp,
         }
+    }
+
+    /// What they make, a sticker unless they say.
+    pub fn target(&self) -> Target {
+        match self {
+            FormatOptions::Webm(options) | FormatOptions::Webp(options) => options.target,
+            FormatOptions::Tgs(options) => options.target,
+        }
+        .unwrap_or_default()
     }
 }
 

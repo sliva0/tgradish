@@ -87,6 +87,7 @@ pub fn explain(err: tgradish_core::Error) -> anyhow::Error {
         Error::OutputExists(path) => {
             anyhow!("{} already exists, use --overwrite to replace it", path.display())
         }
+        Error::IsFolder(_) => anyhow!("{err}: use --sequence"),
         Error::FfmpegNotFound(FfmpegMissing::NotOnPath) => {
             anyhow!("{err}: install them or pass --ffmpeg PATH")
         }

@@ -2,7 +2,7 @@
 //! frames with the time each starts.
 
 use std::panic::AssertUnwindSafe;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
@@ -11,6 +11,7 @@ use tgradish_core::CancelToken;
 use tgradish_core::backend::{Backend, Frames, FramesRequest};
 use tgradish_core::drawn::{self, Readable};
 use tgradish_core::ffmpeg::Probe;
+use tgradish_core::input::Input;
 use tgradish_core::preview::Preview;
 use tgradish_core::tgs;
 use tgradish_core::webm::Options;
@@ -265,19 +266,17 @@ pub struct Video {
 const DRAWN_BYTES: usize = 256 << 20;
 
 impl Video {
-    /// One file, or with `sequence` the frames of one animation; `drawing`
-    /// says how pixel art ffmpeg can't read is drawn for it.
+    /// `input` as ffmpeg reads it; `drawing` says how pixel art ffmpeg
+    /// can't read is drawn for it.
     pub fn load(
         ctx: &egui::Context,
         backend: Backend,
-        inputs: Vec<PathBuf>,
-        sequence: bool,
+        input: Input,
         drawing: Options,
     ) -> Task<Video> {
         Task::spawn(ctx, move |cancel| {
-            let frames = (sequence || inputs.len() > 1).then_some(&inputs[..]);
-            let mut readable = drawn::readable(&inputs[0], frames, &drawing, cancel)
-                .map_err(|err| failure(&err))?;
+            let mut readable =
+                drawn::readable(&input, &drawing, cancel).map_err(|err| failure(&err))?;
             // pixel art drawn here, shown as it was drawn, without ffmpeg
             if let Some((animation, still)) = readable.take_drawn() {
                 let bytes = animation.frames().iter().map(|frame| frame.rgba.len()).sum::<usize>();
@@ -430,26 +429,25 @@ impl Art {
     /// are read through `backend`.
     pub fn load(
         ctx: &egui::Context,
-        inputs: Vec<PathBuf>,
-        sequence: bool,
+        input: Input,
         options: tgs::Options,
         backend: Option<Backend>,
     ) -> Task<Art> {
         Task::spawn(ctx, move |cancel| {
-            let source = tgs::read_art(&inputs, sequence, &options, backend.as_ref(), cancel)
+            let art = tgs::read_art(backend.as_ref(), &input, &options, cancel)
                 .map_err(|err| failure(&err))?;
-            if source.frames.is_empty() {
+            if art.frames.is_empty() {
                 return Err(fl!("art-no-frames"));
             }
             let mut times = vec![0.0];
-            let mut frames = Vec::with_capacity(source.frames.len());
-            for (rgba, seconds) in source.frames {
+            let mut frames = Vec::with_capacity(art.frames.len());
+            for (rgba, seconds) in art.frames {
                 times.push(times.last().unwrap() + seconds);
                 frames.push(rgba);
             }
-            let (width, height) = (source.width, source.height);
+            let (width, height) = (art.width, art.height);
             let clip = Clip { id: next_id(), width, height, frames, times, pixelated: true };
-            let (tags, layers, durations) = (source.tags, source.layers, source.durations);
+            let (tags, layers, durations) = (art.tags, art.layers, art.durations);
             let frames = clip
                 .is_animated()
                 .then(|| Arc::new(timeline::Frames { times: clip.times.clone(), cut: Cut::Art }));

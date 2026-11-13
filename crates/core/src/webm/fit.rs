@@ -416,7 +416,8 @@ mod tests {
             orientation: Default::default(),
             decoder: None,
         };
-        let request = Request { options, ..Request::new("in.mp4".into()) };
+        let request =
+            Request { options, ..Request::new(crate::input::Input::File("in.mp4".into())) };
         plan(&request, source).unwrap().0
     }
 

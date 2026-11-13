@@ -14,7 +14,7 @@ pub use encode::{Encoding, encode};
 use encode::{fit, with_xmp, xmp};
 pub use inspect::{Info, creator_tool, dimensions, inspect_file, is_image, preview};
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -22,26 +22,50 @@ use serde::Serialize;
 use crate::CancelToken;
 use crate::backend::Backend;
 use crate::error::{Error, Result};
+use crate::input::Input;
 use crate::picture;
-use crate::telegram::{self, Issue, Target};
-use crate::webm::Options;
-use crate::webm::{self, Plan, Request};
+use crate::presets::Format;
+use crate::telegram::{self, Issue};
+use crate::webm::{self, Options, Plan};
 
-/// The input with a `.sticker.webp` or `.emoji.webp` extension.
-pub fn default_output(input: &Path, target: Target) -> PathBuf {
-    crate::fsutil::beside(input, &format!("{}.webp", target.name()))
+/// A picture to make.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Request {
+    pub input: Input,
+    /// Where the result goes: by default [`Input::default_output`], as
+    /// [`Request::output`] gives it.
+    pub output: Option<PathBuf>,
+    /// WebM's options, of which a picture takes [`PICTURE_OPTIONS`].
+    pub options: Options,
+    /// Replace the output if it exists.
+    pub overwrite: bool,
 }
 
-/// What `convert --json` and `watch --json` print for images: one once it
-/// is made, or why it couldn't be.
+impl Request {
+    pub fn new(input: Input) -> Self {
+        Self { input, output: None, options: Options::default(), overwrite: false }
+    }
+
+    /// Where the result goes, as asked or by default.
+    pub fn output(&self) -> PathBuf {
+        let target = self.options.target.unwrap_or_default();
+        self.output.clone().unwrap_or_else(|| self.input.default_output(Format::Webp, target))
+    }
+}
+
+/// What an image conversion reports, which `convert --json` and `watch
+/// --json` print: what is worth knowing about it, then the picture once
+/// it is made, or why it couldn't be.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "event", rename_all = "kebab-case")]
+// `describe` titles the schema as it always has
+#[schemars(rename = "StillEvent")]
 #[non_exhaustive]
 pub enum Event {
     Finished(Outcome),
-    /// Something worth knowing about more than one picture, as `watch`
-    /// says of folders it can't read; what is about one is in its
-    /// outcome's warnings.
+    /// Something worth knowing: about the picture, as options that were
+    /// adjusted or ignored, or about more than one, as `watch` says of
+    /// folders it can't read.
     Warning {
         message: String,
     },
@@ -50,7 +74,8 @@ pub enum Event {
     Error(crate::protocol::Failure),
 }
 
-/// A finished image sticker or emoji.
+/// What converting made: all that [`Event::Finished`] says, whether or not
+/// events were followed.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct Outcome {
@@ -61,7 +86,6 @@ pub struct Outcome {
     pub height: u32,
     pub encoding: Encoding,
     pub issues: Vec<Issue>,
-    pub warnings: Vec<String>,
 }
 
 /// The options a still picture has, of WebM's: what to make, what is read
@@ -121,9 +145,13 @@ pub fn plan(
     {
         options.start = Some(frame_start(start, starts, fps));
     }
-    let target = options.target.unwrap_or_default();
-    let output = request.output.clone().unwrap_or_else(|| default_output(&request.input, target));
-    let request = Request { output: Some(output), options, ..request.clone() };
+    let request = webm::Request {
+        input: request.input.clone(),
+        output: Some(request.output()),
+        options,
+        overwrite: request.overwrite,
+        keep_temp: false,
+    };
     let (mut plan, warnings) = webm::plan(&request, source)?;
     // one frame
     plan.length = 1.0 / plan.fps;
@@ -131,11 +159,17 @@ pub fn plan(
 }
 
 /// Makes an image sticker or emoji from the frame at `start`.
-pub fn convert(backend: &Backend, request: &Request, cancel: &CancelToken) -> Result<Outcome> {
+pub fn convert(
+    backend: &Backend,
+    request: &Request,
+    cancel: &CancelToken,
+    on_event: &mut dyn FnMut(Event),
+) -> Result<Outcome> {
+    request.input.check_output(&request.output(), request.overwrite)?;
     // pixel art, drawn for ffmpeg with what a picture has: a sequence's
     // frames timed as by default, as frames are picked by time
-    let (sequence, drawing) = (request.sequence.as_deref(), picture_options(&request.options));
-    let mut readable = crate::drawn::readable(&request.input, sequence, &drawing, cancel)?;
+    let drawing = picture_options(&request.options);
+    let mut readable = crate::drawn::readable(&request.input, &drawing, cancel)?;
     // ffmpeg reads them from the file: not kept while it does
     drop(readable.take_drawn());
     let input = readable.path();
@@ -150,6 +184,9 @@ pub fn convert(backend: &Backend, request: &Request, cancel: &CancelToken) -> Re
         _ => Vec::new(),
     };
     let (mut plan, warnings) = plan(request, source, &starts)?;
+    for message in warnings {
+        on_event(Event::Warning { message });
+    }
     plan.input = input.to_path_buf();
     picture::choose_auto_scaling(backend, &mut plan, &request.options, cancel)?;
     let rgba = backend.still(&plan, cancel)?;
@@ -166,15 +203,16 @@ pub fn convert(backend: &Backend, request: &Request, cancel: &CancelToken) -> Re
     cancel.check()?;
     crate::fsutil::write_output(&plan.output, &webp, request.overwrite)?;
     let bytes = webp.len() as u64;
-    Ok(Outcome {
+    let outcome = Outcome {
         output: plan.output.clone(),
         bytes,
         width: plan.width,
         height: plan.height,
         encoding,
         issues: telegram::check_still(plan.width, plan.height, bytes, plan.target),
-        warnings,
-    })
+    };
+    on_event(Event::Finished(outcome.clone()));
+    Ok(outcome)
 }
 
 #[cfg(test)]

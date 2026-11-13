@@ -18,7 +18,7 @@ pub use options::Options;
 use read::load;
 pub use read::{Art, needs_ffmpeg, read_art};
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 pub use tgradish_tgs::check::{Issue, Severity, Stats};
@@ -28,11 +28,11 @@ pub use tgradish_tgs::reduce::{Compromise, Kind, Reduction};
 use tgradish_tgs::sticker::{self, Progress, Step};
 
 use crate::CancelToken;
-use crate::art;
 use crate::backend::Backend;
 use crate::error::{Error, Result};
+use crate::input::Input;
+use crate::presets::Format;
 use crate::preview::Preview;
-use crate::telegram::Target;
 
 /// Frame rate of still images, sprite sheets and image sequences unless
 /// `fps` says otherwise.
@@ -41,21 +41,28 @@ pub const DEFAULT_FPS: f64 = 12.0;
 /// Largest `.tgs` Telegram accepts, in bytes.
 pub const MAX_BYTES: u64 = tgradish_tgs::limits::telegram::MAX_BYTES as u64;
 
-/// `NAME.sticker.tgs` or `NAME.emoji.tgs` next to the input.
-pub fn default_output(input: &Path, target: Target) -> PathBuf {
-    crate::fsutil::beside(input, &format!("{}.tgs", target.name()))
+/// A sticker to make.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Request {
+    pub input: Input,
+    /// Where the result goes: by default [`Input::default_output`], as
+    /// [`Request::output`] gives it.
+    pub output: Option<PathBuf>,
+    pub options: Options,
+    /// Replace the output if it exists.
+    pub overwrite: bool,
 }
 
-pub struct Request {
-    /// One animation, image or video, or with `sequence` the frames of one
-    /// animation (image files, or directories of them).
-    pub inputs: Vec<PathBuf>,
-    pub sequence: bool,
-    pub output: PathBuf,
-    pub options: Options,
-    pub overwrite: bool,
-    /// ffmpeg, which reads videos; pixel art doesn't need it.
-    pub backend: Option<Backend>,
+impl Request {
+    pub fn new(input: Input) -> Self {
+        Self { input, output: None, options: Options::default(), overwrite: false }
+    }
+
+    /// Where the result goes, as asked or by default.
+    pub fn output(&self) -> PathBuf {
+        let target = self.options.target.unwrap_or_default();
+        self.output.clone().unwrap_or_else(|| self.input.default_output(Format::Tgs, target))
+    }
 }
 
 /// What converting made: all that [`Event::Finished`] says, whether or
@@ -79,47 +86,25 @@ pub struct Outcome {
     pub preview: Preview,
 }
 
-/// Fails when the output is one of the inputs, even through another path
-/// or a link.
-fn refuse_overwriting_inputs(request: &Request) -> Result<()> {
-    let Ok(output) = request.output.canonicalize() else { return Ok(()) };
-    let inputs = if request.sequence || request.inputs.len() > 1 {
-        art::sequence_files(&request.inputs)?
-    } else {
-        request.inputs.clone()
-    };
-    for input in inputs {
-        if input.canonicalize().is_ok_and(|input| input == output) {
-            return Err(Error::OutputIsInput(request.output.clone()));
-        }
-    }
-    Ok(())
-}
-
-/// Converts pixel art into a `.tgs` sticker.
+/// Converts pixel art into a `.tgs` sticker. `backend` is ffmpeg, which
+/// only a video needs, as [`needs_ffmpeg`] tells: pixel art is read
+/// without it.
 pub fn convert(
+    backend: Option<&Backend>,
     request: &Request,
     cancel: &CancelToken,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Outcome> {
-    if request.output.exists() && !request.overwrite {
-        return Err(Error::OutputExists(request.output.clone()));
-    }
-    refuse_overwriting_inputs(request)?;
+    let output = request.output();
+    request.input.check_output(&output, request.overwrite)?;
     let mut settings = request.options.sticker_options()?;
-    let loaded = load(
-        &request.inputs,
-        request.sequence,
-        &request.options,
-        request.backend.as_ref(),
-        cancel,
-    )?;
+    let loaded = load(backend, &request.input, &request.options, cancel)?;
     if let Some(part) = &loaded.video {
         // read from the start: as long as the part used
         settings.normalise.start = Duration::ZERO;
         settings.normalise.length = part.length;
     }
-    let input = request.inputs.first().cloned().unwrap_or_default();
+    let input = request.input.first().to_path_buf();
     let sticker = sticker::make(
         &loaded.animation,
         &settings,
@@ -150,9 +135,9 @@ pub fn convert(
     if cancel.is_cancelled() {
         return Err(Error::Cancelled);
     }
-    crate::fsutil::write_output(&request.output, &sticker.tgs, request.overwrite)?;
+    crate::fsutil::write_output(&output, &sticker.tgs, request.overwrite)?;
     let outcome = Outcome {
-        output: request.output.clone(),
+        output,
         bytes: sticker.bytes as u64,
         json_bytes: sticker.json_bytes as u64,
         changed,
@@ -189,19 +174,17 @@ mod tests {
         let input = dir.path().join("art.png");
         std::fs::write(&input, b"not even a png").unwrap();
         let request = |output: PathBuf| Request {
-            inputs: vec![dir.path().to_path_buf()],
-            sequence: true,
-            output,
-            options: Options::default(),
+            output: Some(output),
             overwrite: true,
-            backend: None,
+            ..Request::new(Input::Sequence(vec![dir.path().to_path_buf()]))
         };
-        let err = convert(&request(input.clone()), &CancelToken::new(), &mut |_| {}).unwrap_err();
+        let convert = |request: &Request| convert(None, request, &CancelToken::new(), &mut |_| {});
+        let err = convert(&request(input.clone())).unwrap_err();
         assert!(matches!(err, Error::OutputIsInput(_)), "{err}");
         assert_eq!(std::fs::read(&input).unwrap(), b"not even a png");
         // the same file by another path
         let other = dir.path().join(".").join("art.png");
-        assert!(convert(&request(other), &CancelToken::new(), &mut |_| {}).is_err());
+        assert!(convert(&request(other)).is_err());
     }
 
     #[test]
@@ -214,14 +197,12 @@ mod tests {
         let make = |resize| {
             let options = Options { resize: Some(resize), ..Options::default() };
             let request = Request {
-                inputs: vec![input.clone()],
-                sequence: false,
-                output: dir.path().join(format!("{resize:?}.tgs")),
+                output: Some(dir.path().join(format!("{resize:?}.tgs"))),
                 options,
                 overwrite: true,
-                backend: None,
+                ..Request::new(Input::File(input.clone()))
             };
-            convert(&request, &CancelToken::new(), &mut |_| {})
+            convert(None, &request, &CancelToken::new(), &mut |_| {})
         };
         // taller than wide: padded keeps its shape, the others are square
         let padded = make(Resize::Pad).unwrap();

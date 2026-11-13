@@ -12,7 +12,7 @@ use anyhow::{Context as _, Result, bail};
 use crate::Context;
 use crate::args::WatchArgs;
 use crate::convert::{Converter, Failed};
-use tgradish_core::input;
+use tgradish_core::input::{self, Input};
 
 use crate::ui;
 
@@ -184,7 +184,8 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
     std::fs::read_dir(&args.dir)
         .with_context(|| format!("couldn't read {}", args.dir.display()))?;
     let converter = Converter::new(ctx, &args.conversion, None)?;
-    let output_for = |path: &Path| converter.output_under(path, Some(&args.dir));
+    let output_for =
+        |path: &Path| converter.output_for(&Input::File(path.to_path_buf()), Some(&args.dir));
 
     let mut tracker = Tracker::default();
     for (path, stamp) in Scan::run(&args.dir, args.recursive).files {
@@ -238,7 +239,8 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
             }
 
             let overwrite = converter.overwrite() || ours.contains(&path);
-            let result = converter.run(&path, Some(output_for(&path)), overwrite);
+            let input = Input::File(path.clone());
+            let result = converter.run(&input, Some(output_for(&path)), overwrite);
             let changed_meanwhile = current_stamp(&path) != Some(stamp);
             match result {
                 Ok(_) => {
