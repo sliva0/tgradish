@@ -269,9 +269,9 @@ pub enum TgsEvent {
         bytes: u64,
         /// Size of the Lottie JSON inside.
         json_bytes: u64,
-        /// Whether anything visible was given up: reductions, a forced pixel
-        /// scale, the end of a long input.
-        lossy: bool,
+        /// Whether anything visible was given up to fit: reductions, a
+        /// forced pixel scale, the end of a long input.
+        changed: bool,
         /// Reductions fitting applied, in order.
         steps: Vec<Step>,
         layers: usize,
@@ -309,8 +309,9 @@ pub struct TgsOutcome {
     pub bytes: u64,
     /// Size of the Lottie JSON inside.
     pub json_bytes: u64,
-    /// See [`TgsEvent::Finished`].
-    pub lossy: bool,
+    /// Whether anything visible was given up to fit, see
+    /// [`TgsEvent::Finished`].
+    pub changed: bool,
     /// Reductions fitting applied, in order.
     pub steps: Vec<Step>,
     pub layers: usize,
@@ -732,7 +733,7 @@ pub fn convert(
         tgradish_tgs::Error::Cancelled => Error::Cancelled,
         err => err.into(),
     })?;
-    let lossy = sticker.lossy();
+    let changed = sticker.lossy();
     // stopped as the last of it was packed: nothing is written
     if cancel.is_cancelled() {
         return Err(Error::Cancelled);
@@ -742,7 +743,7 @@ pub fn convert(
         output: request.output.clone(),
         bytes: sticker.bytes as u64,
         json_bytes: sticker.json_bytes as u64,
-        lossy,
+        changed,
         steps: sticker.steps,
         layers: sticker.layers,
         rectangles: sticker.rectangles,
@@ -756,7 +757,7 @@ pub fn convert(
         output: outcome.output.clone(),
         bytes: outcome.bytes,
         json_bytes: outcome.json_bytes,
-        lossy,
+        changed,
         steps: outcome.steps.clone(),
         layers: outcome.layers,
         rectangles: outcome.rectangles,

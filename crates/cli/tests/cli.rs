@@ -198,7 +198,7 @@ fn makes_animated_stickers() {
     assert_eq!(lines[0]["report"]["ticks"], 30);
     let finished = lines.last().unwrap();
     assert_eq!(
-        (finished["event"].as_str(), finished["lossy"].as_bool()),
+        (finished["event"].as_str(), finished["changed"].as_bool()),
         (Some("finished"), Some(false))
     );
     assert_eq!(finished["issues"], serde_json::json!([]));

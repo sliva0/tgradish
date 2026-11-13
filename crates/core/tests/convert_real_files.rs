@@ -1208,7 +1208,7 @@ fn makes_tgs_stickers_from_videos() {
             sticker(request(input, output, options, Some(backend.clone())))
         };
         let made = video(&once, TgsOptions::default()).unwrap();
-        assert!(made.issues.is_empty() && !made.lossy, "{name}: {:?}", made.issues);
+        assert!(made.issues.is_empty() && !made.changed, "{name}: {:?}", made.issues);
         assert!(made_by_tgradish(&made.output), "{name}");
         assert!(made.preview == direct.preview, "{name}: not the same as the GIF");
         // the third walk, read from where it starts
@@ -1217,10 +1217,10 @@ fn makes_tgs_stickers_from_videos() {
         assert!(made.preview == direct.preview, "{name}: not the same as the GIF");
         // at its own pace, what plays past 3 seconds is cut, and said
         let own_pace = TgsOptions { tempo: Some(1.0), ..TgsOptions::default() };
-        assert!(video(&long, own_pace).unwrap().lossy, "{name}");
+        assert!(video(&long, own_pace).unwrap().changed, "{name}");
         // all of it, played faster
         let made = video(&long, TgsOptions::default()).unwrap();
-        assert!(made.issues.is_empty() && !made.lossy, "{name}: {:?}", made.issues);
+        assert!(made.issues.is_empty() && !made.changed, "{name}: {:?}", made.issues);
         // a cut between frames, as long as asked: 9 sixtieths
         let cut = TgsOptions { length: Some(0.15), ..TgsOptions::default() };
         let made = video(&once, cut).unwrap();

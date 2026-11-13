@@ -615,11 +615,11 @@ impl TgsPrinter {
             TgsEvent::Warning { message } => {
                 self.bar.line(format!("{} {message}", ui::warning_label()));
             }
-            TgsEvent::Finished { output, bytes, lossy, steps, issues, .. } => {
+            TgsEvent::Finished { output, bytes, changed, steps, issues, .. } => {
                 self.bar.finish();
-                let lossy = if lossy && !steps.is_empty() {
+                let lossy = if changed && !steps.is_empty() {
                     format!(", {}", style("changed to fit").yellow())
-                } else if lossy {
+                } else if changed {
                     ", lossy".to_string()
                 } else {
                     ", lossless".to_string()
