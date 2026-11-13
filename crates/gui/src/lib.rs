@@ -8,6 +8,7 @@ mod actions;
 mod app;
 mod canvas;
 mod config;
+mod cuts;
 #[cfg(all(unix, not(target_os = "macos")))]
 #[allow(unsafe_code)]
 mod dbus;

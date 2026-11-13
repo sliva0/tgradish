@@ -8,9 +8,9 @@ use tgradish_core::presets::Format;
 use tgradish_core::tgradish_tgs::frames::aseprite::{Direction, LayerInfo, Tag};
 
 use super::Context;
+use crate::cuts::{Cut, Frames};
 use crate::item::{Choices, Item};
 use crate::l10n::fl;
-use crate::timeline::{Cut, Frames};
 use crate::widgets::{self, row, section, section_with};
 
 /// Indent of each level of groups in the list of layers.

@@ -12,10 +12,10 @@ use tgradish_core::webm::DEFAULT_FAKE_DURATION;
 use super::Context;
 use crate::item::{Item, Kind};
 use crate::l10n::fl;
-use crate::timeline;
 use crate::widgets::{
     self, Choice, chosen_hint, note, preset_number, preset_segments, row, section,
 };
+use crate::{cuts, timeline};
 
 fn spoofs() -> [Choice<Spoof>; 3] {
     [
@@ -221,7 +221,7 @@ fn used_part(ui: &mut egui::Ui, item: &mut Item, length: f64, in_frames: bool) {
                 });
             }
             None => {
-                let (mut from, mut to) = timeline::part(length, choices.start, choices.length);
+                let (mut from, mut to) = cuts::part(length, choices.start, choices.length);
                 ui.label(fl!("part-from"));
                 let start = ui.add_sized(size, timeline::seconds(&mut from, length)).changed();
                 ui.label(fl!("part-to"));
@@ -229,7 +229,7 @@ fn used_part(ui: &mut egui::Ui, item: &mut Item, length: f64, in_frames: bool) {
                 if start || end {
                     let from = from.min(to - 0.01).max(0.0);
                     let to = to.max(from + 0.01).min(length);
-                    timeline::set_part(length, (from, to), &mut choices.start, &mut choices.length);
+                    cuts::set_part(length, (from, to), &mut choices.start, &mut choices.length);
                 }
             }
         }
