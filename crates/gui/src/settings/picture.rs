@@ -13,7 +13,8 @@ use crate::canvas::{Exact, Keep};
 use crate::item::{Aspect, Item};
 use crate::l10n::fl;
 use crate::widgets::{
-    self, Choice, chosen_hint, flag, note, preset_number, preset_segments, row, segments,
+    self, Choice, Pick, chosen_hint, flag, note, preset_number, preset_picking, preset_segments,
+    row, segments,
 };
 
 /// The shapes the crop can keep.
@@ -184,26 +185,28 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             let target = item.choices.target;
             row(ui, &fl!("square"), &fl!("square", "hint"), Ok(()), |ui| {
                 let squares = squares();
-                let base = base.resize.unwrap_or(convert::default_resize(target));
-                let mut resize = resize_of(&effective);
-                ui.horizontal(|ui| {
-                    let allowed = |option| match option {
-                        Resize::Contain if target.requires_exact_size() => {
-                            Err(fl!("square-off", "emoji"))
-                        }
-                        Resize::Crop | Resize::Stretch if exact.is_some() => {
-                            Err(fl!("square-exact"))
-                        }
-                        _ => Ok(()),
-                    };
-                    if segments(ui, &mut resize, &squares, allowed) {
-                        item.choices.webm.resize = (resize != base).then_some(resize);
+                // cropping or stretching, which an exact scale sets aside:
+                // shown as what is made instead, and kept until changed
+                let default = convert::default_resize(target);
+                let made = |resize: Resize| match resize {
+                    Resize::Crop | Resize::Stretch if exact.is_some() => default,
+                    resize => resize,
+                };
+                let base = made(base.resize.unwrap_or(default));
+                let mut resize = item.choices.webm.resize.map(made);
+                let pick = |option| match option {
+                    Resize::Contain if target.requires_exact_size() => {
+                        Pick::No(fl!("square-off", "emoji"))
                     }
-                    if item.choices.webm.resize.is_some() && widgets::reset(ui) {
-                        item.choices.webm.resize = None;
+                    Resize::Crop | Resize::Stretch if exact.is_some() => {
+                        Pick::No(fl!("square-exact"))
                     }
-                });
-                chosen_hint(ui, resize, &squares);
+                    _ => Pick::Yes,
+                };
+                if preset_picking(ui, &mut resize, base, &squares, pick) {
+                    item.choices.webm.resize = resize;
+                }
+                chosen_hint(ui, resize.unwrap_or(base), &squares);
             });
 
             row(ui, &fl!("scaling"), &fl!("scaling", "hint"), Ok(()), |ui| {
@@ -226,20 +229,12 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             row(ui, &fl!("square"), &fl!("square", "tgs"), Ok(()), |ui| {
                 let squares = tgs_squares();
                 let base = preset.as_ref().and_then(|base| base.resize).unwrap_or(Resize::Pad);
-                let mut resize = item.choices.tgs.resize.unwrap_or(base);
-                ui.horizontal(|ui| {
-                    let allowed = |option| match option {
-                        Resize::Contain => Err(fl!("square-off", "tgs")),
-                        _ => Ok(()),
-                    };
-                    if segments(ui, &mut resize, &squares, allowed) {
-                        item.choices.tgs.resize = (resize != base).then_some(resize);
-                    }
-                    if item.choices.tgs.resize.is_some() && widgets::reset(ui) {
-                        item.choices.tgs.resize = None;
-                    }
-                });
-                chosen_hint(ui, resize, &squares);
+                let pick = |option| match option {
+                    Resize::Contain => Pick::No(fl!("square-off", "tgs")),
+                    _ => Pick::Yes,
+                };
+                preset_picking(ui, &mut item.choices.tgs.resize, base, &squares, pick);
+                chosen_hint(ui, item.choices.tgs.resize.unwrap_or(base), &squares);
             });
             let base = preset.as_ref().and_then(|base| base.keep_canvas).unwrap_or(false);
             row(ui, &fl!("margins"), &fl!("margins", "hint"), Ok(()), |ui| {
@@ -541,10 +536,7 @@ fn aspect_ratio(
                     .range(0.01..=10_000.0)
                     .speed(0.05)
                     .max_decimals(3)
-                    .custom_formatter(|n, _| {
-                        let text = format!("{n:.3}");
-                        text.trim_end_matches('0').trim_end_matches('.').to_owned()
-                    })
+                    .custom_formatter(|n, _| widgets::trimmed_to(n, 3))
             }
             let across = ui.add(side(&mut width)).on_hover_text(fl!("width"));
             typed |= across.on_disabled_hover_text(pick.as_str()).changed();
@@ -800,5 +792,33 @@ mod tests {
         item.choices.target = telegram::Target::Emoji;
         harness.run_steps(3);
         assert_eq!(harness.state().items[0].choices.webm.exact_scale, scale);
+    }
+
+    #[test]
+    fn shows_a_square_an_exact_scale_sets_aside_as_what_is_made() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video(dir.path(), "64x48") else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        let item = &mut harness.state_mut().items[0];
+        item.choices.webm.resize = Some(Resize::Crop);
+        item.choices.webm.scaling = Some(Scaling::PixelPerfect);
+        item.choices.webm.exact_scale = Some(ExactScale { up: 2, down: 1 });
+        harness.run_steps(3);
+        // the sticker keeps the crop's shape, as cropping is set aside
+        let lit = |harness: &egui_kittest::Harness<crate::app::App>, text: &str| {
+            // the first of its name: fitting has an Off too, further down
+            let button = harness.query_all_by_label(text).next().unwrap();
+            let toggled = button.accesskit_node().toggled();
+            toggled == Some(eframe::egui::accesskit::Toggled::True)
+        };
+        assert!(lit(&harness, &fl!("square-off")) && !lit(&harness, &fl!("square-crop")));
+        // and kept for when the scale goes
+        assert_eq!(harness.state().items[0].choices.webm.resize, Some(Resize::Crop));
     }
 }

@@ -74,8 +74,17 @@ pub fn section_with(ui: &mut egui::Ui, title: &str, beside: impl FnOnce(&mut egu
 
 /// A number with as few decimals as it needs, at most two: 60, 29.97.
 pub fn trimmed(value: f64) -> String {
-    let text = format!("{value:.2}");
-    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+    trimmed_to(value, 2)
+}
+
+/// A number with as few decimals as it needs, at most `decimals`.
+pub fn trimmed_to(value: f64, decimals: usize) -> String {
+    let text = format!("{value:.decimals$}");
+    if text.contains('.') {
+        text.trim_end_matches('0').trim_end_matches('.').to_owned()
+    } else {
+        text
+    }
 }
 
 /// How wide `text` is in buttons' font, plus `padding`.
