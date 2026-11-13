@@ -371,8 +371,7 @@ fn accents(ui: &mut egui::Ui, accent: &mut Accent, typed: &mut String) {
         picker.show(|ui| {
             // from the accent shown, until one is picked
             let mut colour = own.unwrap_or_else(|| theme::accent(ui.visuals()));
-            let names = [fl!("accent-shade"), fl!("accent-hue")];
-            if widgets::colour_picker(ui, &mut colour, [&names[0], &names[1]]) {
+            if widgets::colour_picker(ui, &mut colour) {
                 *accent = Accent::Own(colour);
             }
             ui.horizontal(|ui| {
@@ -456,8 +455,9 @@ fn check_ffmpeg(choice: FfmpegChoice, path: Option<&Path>, cancel: &CancelToken)
 #[cfg(test)]
 mod tests {
     use eframe::egui::Color32;
+    use eframe::egui::ecolor::HsvaGamma;
     use egui_kittest::Harness;
-    use egui_kittest::kittest::Queryable;
+    use egui_kittest::kittest::{NodeT, Queryable};
 
     use super::*;
 
@@ -574,6 +574,39 @@ mod tests {
         assert_eq!(harness.state().config.gui.accent, Accent::Own(own));
         assert_eq!(shown(&harness), own);
         harness.get_by_label(&fl!("accent-own", "chosen", colour = "#ff8800"));
+        // the square and the strip, with the keyboard: Shift leaps
+        let (shade, hue_name) = (fl!("accent-shade"), fl!("accent-hue"));
+        let square = || egui_kittest::kittest::by().label(&shade);
+        harness.get(square()).focus();
+        harness.run_steps(1);
+        harness.run_steps(1);
+        harness.key_press(egui::Key::ArrowLeft);
+        harness.key_press(egui::Key::ArrowDown);
+        harness.run_steps(2);
+        let less = shown(&harness);
+        let (before, after) = (HsvaGamma::from(own), HsvaGamma::from(less));
+        assert!(after.s < before.s && after.v < before.v, "{before:?} to {after:?}");
+        assert_eq!(harness.state().config.gui.accent, Accent::Own(less));
+        assert!(harness.get(square()).value().is_some_and(|value| value.contains("% bright")));
+        harness.get(egui_kittest::kittest::by().label(&hue_name)).focus();
+        harness.run_steps(2);
+        harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::ArrowRight);
+        harness.run_steps(2);
+        let hue = |colour| HsvaGamma::from(colour).h;
+        assert!((hue(shown(&harness)) - hue(less) - 0.1).abs() < 0.02, "{:?}", shown(&harness));
+        // the focus kept, and a screen reader's step taken too
+        let strip = harness.get(egui_kittest::kittest::by().label(&hue_name));
+        assert!(strip.is_focused());
+        let (target_node, target_tree) = strip.accesskit_node().locate();
+        let stepped = shown(&harness);
+        let action = egui::accesskit::Action::Decrement;
+        let request =
+            egui::accesskit::ActionRequest { action, target_node, target_tree, data: None };
+        harness.event(egui::Event::AccessKitActionRequest(request));
+        harness.run_steps(2);
+        assert!(hue(shown(&harness)) < hue(stepped));
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
         // and back to the system's
         // the theme's is the first
         let system = fl!("accent-system");
