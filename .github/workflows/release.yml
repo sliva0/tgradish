@@ -24,6 +24,8 @@ on:
       - crates/cli/tgradish.rc
       - crates/cli/tgradish.exe.manifest
       - crates/cli/assets/**
+      # the AUR packages, which test-aur builds
+      - packaging/aur/**
       # features, dependencies and profiles
       - Cargo.toml
       - crates/core/Cargo.toml
