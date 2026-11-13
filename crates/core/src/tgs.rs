@@ -640,7 +640,9 @@ fn read_lottie(path: &Path) -> Result<(Vec<u8>, Option<usize>)> {
     }
 }
 
-/// The Lottie JSON of a `.tgs` (or plain Lottie JSON) file.
+/// The Lottie JSON of a `.tgs` (or plain Lottie JSON) file, which the
+/// tests read marks from.
+#[cfg(test)]
 pub(crate) fn read_json(path: &Path) -> Result<Vec<u8>> {
     read_lottie(path).map(|(json, _)| json)
 }

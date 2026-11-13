@@ -43,6 +43,19 @@ pub fn write_file(path: &Path, bytes: &[u8], replace: bool) -> std::io::Result<(
     result.map(drop).map_err(|err| err.error)
 }
 
+/// The bytes of the file at `path` if it has at most `most` of them, or
+/// `None`, read without reading more than that, however large it is.
+pub(crate) fn read_at_most(path: &Path, most: u64) -> std::io::Result<Option<Vec<u8>>> {
+    let file = std::fs::File::open(path)?;
+    if file.metadata()?.len() > most {
+        return Ok(None);
+    }
+    let mut bytes = Vec::new();
+    // it may have grown since
+    std::io::Read::read_to_end(&mut std::io::Read::take(file, most + 1), &mut bytes)?;
+    Ok((bytes.len() as u64 <= most).then_some(bytes))
+}
+
 /// [`write_file`] for a result, where an output already there is
 /// [`Error::OutputExists`](crate::Error::OutputExists).
 pub(crate) fn write_output(path: &Path, bytes: &[u8], replace: bool) -> crate::Result<()> {
