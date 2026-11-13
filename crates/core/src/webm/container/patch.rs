@@ -21,9 +21,11 @@ pub struct Patch {
     pub title: Option<String>,
     pub muxing_app: Option<String>,
     pub writing_app: Option<String>,
-    /// Text hidden in the padding next to Info, ignored by players and not
-    /// shown by ffprobe. Must start with [`SIGNATURE_PREFIX`](super::SIGNATURE_PREFIX) to be found by
-    /// [`inspect`](super::inspect). Written only if there is enough padding left.
+    /// Text written into the padding next to Info, which players ignore and
+    /// ffprobe doesn't show. Must start with
+    /// [`SIGNATURE_PREFIX`](super::SIGNATURE_PREFIX) to be found by
+    /// [`inspect`](super::inspect). Written only if there is enough padding
+    /// left.
     pub signature: Option<String>,
     /// A new UID for the video track, written over the old one when that
     /// takes 8 bytes, as ffmpeg's do.

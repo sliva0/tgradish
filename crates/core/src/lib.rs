@@ -75,8 +75,8 @@ pub use tgradish_tgs;
 /// Name and version, used in watermarks.
 pub const TOOL_ID: &str = concat!("tgradish ", env!("CARGO_PKG_VERSION"));
 
-/// Where tgradish lives. Files made carry it in their signature, which
-/// [`mark`] looks for: changing it stops older files being recognised.
+/// Where tgradish lives, which the signature of WebM files it makes
+/// names: older files are known by it, so it stays as it is.
 pub const REPOSITORY: &str = "https://github.com/sliva0/tgradish";
 
 /// What a `.tgs` sticker made without a title is named, before
@@ -85,7 +85,8 @@ pub const REPOSITORY: &str = "https://github.com/sliva0/tgradish";
 pub(crate) const UNTITLED: &str = "made with ";
 pub(crate) const TITLED: &str = " (made with tgradish)";
 
-/// Text hidden in WebM padding to mark files made or modified by tgradish.
+/// What WebM files made or modified by tgradish carry in their padding,
+/// unless their watermark is turned off, to say so.
 pub fn signature() -> String {
     format!("{TOOL_ID} {REPOSITORY}")
 }

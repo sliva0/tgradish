@@ -49,6 +49,8 @@ pub mod check;
 pub mod encode;
 pub mod file;
 pub mod limits;
+// tgradish-core's own, and none of the API it promises
+#[doc(hidden)]
 pub mod mark;
 pub mod normalise;
 pub mod reduce;

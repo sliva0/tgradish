@@ -52,7 +52,7 @@ pub struct Options {
     pub max_bytes: usize,
     /// Written into the sticker as its name.
     pub name: Option<String>,
-    /// Hidden in the order of its rectangles (see [`crate::mark`]).
+    /// For tgradish-core's own use: `None` elsewhere.
     pub mark: Option<Vec<u8>>,
 }
 
