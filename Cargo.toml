@@ -53,6 +53,9 @@ libloading = "0.8.9"
 # the allocator of musl builds, see crates/cli/src/main.rs
 libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
 mimalloc = { version = "0.1.52", features = ["override"] }
+# the accent colour on macOS, already in the window's dependencies there
+objc2 = "0.6.5"
+objc2-app-kit = { version = "0.3.2", default-features = false }
 libwebp-sys = { version = "0.14.4", default-features = false, features = ["std", "parallel"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec", "filter", "format", "software-scaling"] }

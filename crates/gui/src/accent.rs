@@ -1,7 +1,9 @@
-//! The system's accent colour, where it has one: from the desktop portal on
-//! Linux, which Plasma 6 and GNOME 47 and later answer, and from the
-//! registry on Windows. Read on a thread, as the portal may take a while to
-//! start, and followed as it changes.
+//! The system's accent colour, where it has one: on Linux from the desktop
+//! portal, which Plasma 6, GNOME 47 and later and others answer, and in a
+//! Plasma session without one there, as Plasma 5's, from KDE's
+//! `kdeglobals`; on Windows from the registry; on macOS from AppKit. Read
+//! on a thread, as the portal may take a while to start, and followed as it
+//! changes.
 
 use std::sync::{Arc, Mutex};
 
@@ -55,10 +57,11 @@ mod portal {
     const NAMESPACE: &CStr = c"org.freedesktop.appearance";
     const KEY: &CStr = c"accent-color";
 
-    /// Reads the accent, then follows the portal's changes to it, on a
-    /// connection of its own, until the session bus goes away.
+    /// Reads the accent, then follows the portal's changes to it, and
+    /// KDE's to its settings, on a connection of its own, until the session
+    /// bus goes away. Without the bus, KDE's settings are read once.
     pub(super) fn follow(set: impl Fn(Option<Color32>)) {
-        let Some(dbus) = Dbus::load() else { return };
+        let Some(dbus) = Dbus::load() else { return set(super::kde::accent()) };
         // SAFETY: the connection, and each message until it is unreferenced,
         // stay valid, and only this thread uses them
         unsafe {
@@ -67,15 +70,24 @@ mod portal {
             let connection = (dbus.dbus_bus_get_private)(SESSION, &mut error);
             (dbus.dbus_error_free)(&mut error);
             if connection.is_null() {
-                return;
+                return set(super::kde::accent());
             }
             // libdbus ends the process when the bus goes away, unless told
             (dbus.dbus_connection_set_exit_on_disconnect)(connection, 0);
-            // listening first, so a change while reading isn't missed
-            let rule = c"type='signal',interface='org.freedesktop.portal.Settings',member='SettingChanged'";
-            (dbus.dbus_bus_add_match)(connection, rule.as_ptr(), &mut error);
-            (dbus.dbus_error_free)(&mut error);
-            set(read(&dbus, connection));
+            // listening first, so a change while reading isn't missed: to
+            // the portal, and to KDE saying its settings changed, as
+            // Frameworks 5 and 6 do, and Plasma 5's colour settings
+            for rule in [
+                c"type='signal',interface='org.freedesktop.portal.Settings',member='SettingChanged'",
+                c"type='signal',interface='org.kde.kconfig.notify',member='ConfigChanged'",
+                c"type='signal',interface='org.kde.KGlobalSettings',member='notifyChange'",
+            ] {
+                (dbus.dbus_bus_add_match)(connection, rule.as_ptr(), &mut error);
+                (dbus.dbus_error_free)(&mut error);
+            }
+            // the portal's, or else KDE's
+            let mut portal = read(&dbus, connection);
+            set(portal.or_else(super::kde::accent));
             loop {
                 // what came while reading, then while waiting
                 loop {
@@ -83,11 +95,20 @@ mod portal {
                     if message.is_null() {
                         break;
                     }
-                    let signal = c"SettingChanged".as_ptr();
-                    if (dbus.dbus_message_is_signal)(message, INTERFACE.as_ptr(), signal) != 0
+                    let is = |interface: &CStr, member: &CStr| {
+                        (dbus.dbus_message_is_signal)(message, interface.as_ptr(), member.as_ptr())
+                            != 0
+                    };
+                    if is(INTERFACE, c"SettingChanged")
                         && let Some(accent) = changed(&dbus, message)
                     {
-                        set(accent);
+                        portal = accent;
+                        set(portal.or_else(super::kde::accent));
+                    } else if portal.is_none()
+                        && (is(c"org.kde.kconfig.notify", c"ConfigChanged")
+                            || is(c"org.kde.KGlobalSettings", c"notifyChange"))
+                    {
+                        set(super::kde::accent());
                     }
                     (dbus.dbus_message_unref)(message);
                 }
@@ -288,6 +309,119 @@ mod portal {
     }
 }
 
+/// KDE's accent, from `kdeglobals`, which the portal answers with in Plasma
+/// 6, but not in Plasma 5.
+#[cfg(all(unix, not(target_os = "macos")))]
+mod kde {
+    use std::path::PathBuf;
+
+    use eframe::egui::Color32;
+
+    /// The accent of a Plasma session: the one chosen, or where it follows
+    /// the colour scheme, the scheme's selection colour. Other desktops may
+    /// have left a `kdeglobals` behind, which isn't theirs to follow.
+    pub(super) fn accent() -> Option<Color32> {
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        let plasma = desktop.split(':').any(|name| name.eq_ignore_ascii_case("KDE"))
+            || std::env::var_os("KDE_FULL_SESSION").is_some_and(|value| value == "true");
+        if !plasma {
+            return None;
+        }
+        let files: Vec<String> =
+            paths().iter().filter_map(|path| std::fs::read_to_string(path).ok()).collect();
+        of(&files)
+    }
+
+    /// The accent `files` say, the user's first, as KDE reads them: each
+    /// key from the first of them that has it.
+    pub(super) fn of(files: &[String]) -> Option<Color32> {
+        let first = |section: &str, key: &str| {
+            files.iter().find_map(|text| value(text, section, key)).and_then(colour)
+        };
+        first("General", "AccentColor").or_else(|| first("Colors:Selection", "BackgroundNormal"))
+    }
+
+    /// `kdeglobals` in the user's settings, then in the system's.
+    fn paths() -> Vec<PathBuf> {
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let user = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .filter(|dir| dir.is_absolute())
+            .or_else(|| home.map(|home| home.join(".config")));
+        let system = std::env::var("XDG_CONFIG_DIRS")
+            .ok()
+            .filter(|dirs| !dirs.is_empty())
+            .unwrap_or_else(|| "/etc/xdg".to_owned());
+        let system = system.split(':').filter(|dir| dir.starts_with('/')).map(PathBuf::from);
+        user.into_iter().chain(system).map(|dir| dir.join("kdeglobals")).collect()
+    }
+
+    /// The value of `key` in `[section]` of an INI file, as KConfig writes
+    /// them.
+    fn value<'a>(text: &'a str, section: &str, key: &str) -> Option<&'a str> {
+        let mut inside = false;
+        for line in text.lines().map(str::trim) {
+            if let Some(name) = line.strip_prefix('[') {
+                inside = name.strip_suffix(']') == Some(section);
+            } else if inside
+                && let Some((name, value)) = line.split_once('=')
+                && name.trim() == key
+            {
+                return Some(value.trim());
+            }
+        }
+        None
+    }
+
+    /// A colour as KConfig writes one: `r,g,b`, maybe with alpha, or
+    /// `#rrggbb`.
+    fn colour(value: &str) -> Option<Color32> {
+        if let Some(digits) = value.strip_prefix('#') {
+            if digits.len() != 6 || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return None;
+            }
+            let rgb = u32::from_str_radix(digits, 16).ok()?;
+            let [_, red, green, blue] = rgb.to_be_bytes();
+            return Some(Color32::from_rgb(red, green, blue));
+        }
+        let channels: Vec<u8> =
+            value.split(',').map(|part| part.trim().parse().ok()).collect::<Option<_>>()?;
+        match channels[..] {
+            [red, green, blue] | [red, green, blue, _] => Some(Color32::from_rgb(red, green, blue)),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn reads_kdes_accent() {
+            let scheme = "[Colors:Selection]\nBackgroundAlternate=30,87,116\n\
+                          BackgroundNormal=61,174,233\n[General]\nColorScheme=BreezeDark\n";
+            let chosen = "[General]\nAccentColor=233,100,58\n";
+            let read =
+                |files: &[&str]| of(&files.iter().map(|text| text.to_string()).collect::<Vec<_>>());
+            // following the scheme: its selection colour
+            assert_eq!(read(&[scheme]), Some(Color32::from_rgb(61, 174, 233)));
+            // chosen, in the user's file or the system's
+            assert_eq!(read(&[scheme, chosen]), Some(Color32::from_rgb(233, 100, 58)));
+            assert_eq!(
+                read(&["[General]\nAccentColor = #00d3b8\n"]),
+                Some(Color32::from_rgb(0, 211, 184))
+            );
+            // the user's first
+            let other = "[General]\nAccentColor=1,2,3,255\n";
+            assert_eq!(read(&[other, chosen]), Some(Color32::from_rgb(1, 2, 3)));
+            // none, or none that reads
+            assert_eq!(read(&[]), None);
+            assert_eq!(read(&["[Other]\nAccentColor=1,2,3\n"]), None);
+            assert_eq!(read(&["[General]\nAccentColor=1,2,300\n"]), None);
+        }
+    }
+}
+
 /// Reads the accent every few seconds: Windows says when it changes only
 /// in window messages, which winit doesn't pass on.
 #[cfg(windows)]
@@ -324,5 +458,29 @@ fn registry_accent() -> Option<Color32> {
     (status == 0).then(|| Color32::from_rgb(red, green, blue))
 }
 
-#[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
+/// Reads the accent every few seconds: AppKit says when it changes only
+/// on the main thread's run loop, which winit keeps to itself.
+#[cfg(target_os = "macos")]
+fn follow(set: impl Fn(Option<Color32>)) {
+    loop {
+        set(objc2::rc::autoreleasepool(|_| control_accent()));
+        std::thread::sleep(std::time::Duration::from_secs(3));
+    }
+}
+
+/// AppKit's `controlAccentColor`, in sRGB.
+#[cfg(target_os = "macos")]
+fn control_accent() -> Option<Color32> {
+    use objc2_app_kit::{NSColor, NSColorSpace};
+    let accent =
+        NSColor::controlAccentColor().colorUsingColorSpace(&NSColorSpace::sRGBColorSpace())?;
+    let channel = |value: f64| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Some(Color32::from_rgb(
+        channel(accent.redComponent()),
+        channel(accent.greenComponent()),
+        channel(accent.blueComponent()),
+    ))
+}
+
+#[cfg(not(any(windows, unix)))]
 fn follow(_set: impl Fn(Option<Color32>)) {}
