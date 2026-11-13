@@ -146,8 +146,8 @@ pub(crate) fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         // where the user's own are renamed or deleted, once there are any
         if users && context.presets_dir.is_some() {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let manage =
-                    egui::Button::new(RichText::new(fl!("manage-presets")).small()).frame(false);
+                let text = RichText::new(fl!("manage-presets")).size(12.5);
+                let manage = egui::Button::new(text).small().min_size(vec2(0.0, 22.0));
                 if ui.add(manage).on_hover_text(fl!("manage-presets", "hint")).clicked() {
                     preset_dialogs::ask(ui.ctx(), Ask::Manage);
                 }

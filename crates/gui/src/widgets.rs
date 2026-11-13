@@ -149,6 +149,21 @@ pub(crate) fn label(ui: &mut egui::Ui, text: &str, hint: &str) {
     }
 }
 
+/// `button` as the primary one, the one way on in its place: filled with
+/// the accent and outlined in it. Its words go in the headings' weight, as
+/// [`medium`] makes them. Greyed out unless `enabled`.
+pub(crate) fn primary(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    button: egui::Button<'_>,
+) -> egui::Response {
+    ui.scope(|ui| {
+        theme::primary(ui.visuals_mut());
+        ui.add_enabled(enabled, button)
+    })
+    .inner
+}
+
 /// Width of the labels before settings.
 pub(crate) const LABELS: f32 = 150.0;
 

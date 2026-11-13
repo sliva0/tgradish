@@ -145,42 +145,49 @@ impl App {
 
         let changed =
             self.items.iter().filter(|item| !item.is_busy() && !item.result_is_current()).count();
-        egui::Panel::bottom("files-footer").show(ui, |ui| {
-            ui.add_space(6.0);
-            // onto a second line where longer words leave no room
-            ui.horizontal_wrapped(|ui| {
-                if ui
-                    .add_enabled(
-                        changed > 0,
-                        egui::Button::new(fl!("convert-all", count = changed)),
-                    )
-                    .on_hover_text(fl!("convert-all", "hint"))
-                    .clicked()
-                {
-                    let ids: Vec<u64> = self
-                        .items
-                        .iter()
-                        .filter(|item| !item.is_busy() && !item.result_is_current())
-                        .map(|item| item.id)
-                        .collect();
-                    for id in ids {
-                        self.enqueue(id);
+        // without files there is nothing to convert or remove, and the way
+        // to add them, beside the list, is the one thing to do
+        if !self.items.is_empty() {
+            egui::Panel::bottom("files-footer").show(ui, |ui| {
+                ui.add_space(6.0);
+                // onto a second line where longer words leave no room
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add_enabled(
+                            changed > 0,
+                            egui::Button::new(fl!("convert-all", count = changed)),
+                        )
+                        .on_hover_text(fl!("convert-all", "hint"))
+                        .clicked()
+                    {
+                        let ids: Vec<u64> = self
+                            .items
+                            .iter()
+                            .filter(|item| !item.is_busy() && !item.result_is_current())
+                            .map(|item| item.id)
+                            .collect();
+                        for id in ids {
+                            self.enqueue(id);
+                        }
                     }
-                }
-                if !self.items.is_empty() && ui.button(fl!("remove-all")).clicked() {
-                    let ids: Vec<u64> = self.items.iter().map(|item| item.id).collect();
-                    for id in ids {
-                        self.remove(id);
+                    if !self.items.is_empty() && ui.button(fl!("remove-all")).clicked() {
+                        let ids: Vec<u64> = self.items.iter().map(|item| item.id).collect();
+                        for id in ids {
+                            self.remove(id);
+                        }
                     }
-                }
+                });
+                ui.add_space(4.0);
             });
-            ui.add_space(4.0);
-        });
+        }
 
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             if self.items.is_empty() {
-                ui.add_space(20.0);
-                widgets::note(ui, fl!("no-files"));
+                ui.vertical_centered(|ui| {
+                    let line = ui.text_style_height(&egui::TextStyle::Body);
+                    ui.add_space(((ui.available_height() - line) / 2.0).max(20.0));
+                    widgets::note(ui, fl!("no-files"));
+                });
             }
             let mut clicked = None;
             let mut removed = None;
@@ -243,9 +250,9 @@ impl App {
             ui.horizontal(|ui| {
                 let width = 400.0;
                 ui.add_space((ui.available_width() - width).max(0.0) / 2.0);
-                let add = egui::Button::new(RichText::new(fl!("add-files")).strong())
+                let add = egui::Button::new(widgets::medium(ui, fl!("add-files"), 14.0))
                     .min_size(vec2(130.0, 34.0));
-                if ui.add(add).clicked() {
+                if widgets::primary(ui, true, add).clicked() {
                     self.pick(ui.ctx(), Pick::Files);
                 }
                 if ui
@@ -352,27 +359,16 @@ fn row(
         }
     }
     // where the result will show, a way to make it, as large, so the row
-    // looks the same before and after
+    // looks the same before and after: a bare mark, framed as a button while
+    // the row is hovered, so the bar's Convert stays the one that stands out
     if offers_convert(item) {
+        let framed = response.contains_pointer();
         // placed, so the rows below don't move
-        let button = ui.place(result, egui::Button::new("").min_size(result.size()));
+        let button = egui::Button::new("").min_size(result.size()).frame(framed);
+        let button = ui.place(result, button);
         let colour = ui.style().interact(&button).text_color();
-        let painter = ui.painter();
-        let at = |y: f32| result.center() + vec2(0.0, y);
-        painter.text(
-            at(-7.0),
-            egui::Align2::CENTER_CENTER,
-            "▶",
-            FontId::proportional(18.0),
-            colour,
-        );
-        painter.text(
-            at(13.0),
-            egui::Align2::CENTER_CENTER,
-            fl!("convert"),
-            FontId::proportional(11.0),
-            colour,
-        );
+        let font = FontId::proportional(18.0);
+        ui.painter().text(result.center(), egui::Align2::CENTER_CENTER, "▶", font, colour);
         if button.on_hover_text(fl!("convert", "hint")).clicked() {
             action = Some(RowAction::Convert);
         }
@@ -485,14 +481,18 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
             );
         }
         (None, Some(made)) => match &made.job.status {
+            // out of date, it says nothing of how it went: the badge on
+            // its picture says to make it again
+            Status::Done(done) if !item.result_is_current() => {
+                let stale = small(fl!("row-stale", size = widgets::kib(done.bytes))).weak();
+                ui.add(egui::Label::new(stale).truncate());
+            }
             Status::Done(done) => {
                 let refused = done.problems.iter().any(|p| p.refused);
                 let colour =
                     if refused { theme::bad(ui.visuals()) } else { theme::good(ui.visuals()) };
                 let mark = if refused { "✖" } else { "✔" };
                 let size = widgets::kib(done.bytes);
-                let size =
-                    if item.result_is_current() { size } else { fl!("row-stale", size = size) };
                 ui.colored_label(colour, small(format!("{mark} {size}")));
             }
             Status::Failed(_) => {
