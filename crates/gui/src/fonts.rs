@@ -45,7 +45,7 @@ impl App {
         if let Some(item) = self.selected.and_then(|id| self.item(id)) {
             texts.push(self.output_for(item).display().to_string());
         }
-        texts.extend(self.message.clone());
+        texts.extend(self.banner.rows.iter().flat_map(|said| said.message.texts()));
         texts.extend(
             self.inspection.as_ref().map(|inspection| inspection.path.display().to_string()),
         );

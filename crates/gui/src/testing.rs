@@ -38,7 +38,14 @@ pub(crate) fn pasted_image() -> (Vec<PathBuf>, tempfile::TempDir) {
 pub(crate) fn harness(config: Config) -> Harness<'static, App> {
     Harness::builder()
         .with_size([1280.0, 820.0])
-        .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin(), None))
+        .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin()))
+}
+
+/// Everything the window's messages say, each part on a line of its own,
+/// to look in.
+pub(crate) fn said(app: &App) -> String {
+    let rows = app.banner.rows.iter();
+    rows.flat_map(|said| said.message.texts()).collect::<Vec<_>>().join("\n")
 }
 
 /// Clicks the selected item's Convert button, which shows its shortcut,

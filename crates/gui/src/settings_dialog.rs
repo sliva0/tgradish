@@ -40,6 +40,9 @@ pub(crate) struct SettingsDialog {
     /// A default preset picked for a format, which the window takes up, as
     /// the items that follow it may then fit another way.
     pub(crate) default_preset: Option<(Format, String)>,
+    /// Save wrote the settings file, which the window takes up, as what
+    /// it said of the file is past.
+    pub(crate) wrote: bool,
 }
 
 impl SettingsDialog {
@@ -71,18 +74,27 @@ impl SettingsDialog {
 /// as the window opened.
 fn save(config: &mut Config, path: &Path) -> Result<String, String> {
     let shown = path.display().to_string();
+    match write(config, path) {
+        Ok(None) => Ok(fl!("saved-to", path = shown)),
+        Ok(Some(kept)) => {
+            Ok(fl!("saved-to", "kept", path = shown, kept = kept.display().to_string()))
+        }
+        Err(error) => Err(fl!("not-saved", error = error)),
+    }
+}
+
+/// Writes `config` to `path`, a file there that can't be read kept beside
+/// it first, and nothing written where it can't be. Gives where that file
+/// went, or why nothing was written.
+pub(crate) fn write(config: &mut Config, path: &Path) -> Result<Option<PathBuf>, String> {
     let kept = match Config::load(path) {
-        Err(tgradish_core::Error::Config { .. }) => match crate::app::keep_aside(path) {
-            Ok(kept) => Some(kept.display().to_string()),
-            Err(err) => return Err(fl!("not-saved", error = err.to_string())),
-        },
+        Err(tgradish_core::Error::Config { .. }) => {
+            Some(crate::app::keep_aside(path).map_err(|err| err.to_string())?)
+        }
         _ => None,
     };
-    match (config.save(path), kept) {
-        (Ok(()), None) => Ok(fl!("saved-to", path = shown)),
-        (Ok(()), Some(kept)) => Ok(fl!("saved-to", "kept", path = shown, kept = kept)),
-        (Err(err), _) => Err(fl!("not-saved", error = err.to_string())),
-    }
+    config.save(path).map_err(|err| err.to_string())?;
+    Ok(kept)
 }
 
 /// Shows the dialog if it is open. `ffmpeg_given` says an ffmpeg was given
@@ -126,6 +138,7 @@ pub(crate) fn show(
                     Some(path) => save(config, path),
                     None => Err(fl!("no-home")),
                 });
+                dialog.wrote = matches!(dialog.saved, Some(Ok(_)));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button(fl!("about-and-licences")).clicked() {
@@ -384,7 +397,7 @@ mod tests {
         let path = dir.path().join("config.toml");
         let at = path.clone();
         let mut harness = Harness::builder().with_size([1280.0, 820.0]).build_eframe(move |_| {
-            App::with(Config::default(), Some(at.clone()), Presets::builtin(), None)
+            App::with(Config::default(), Some(at.clone()), Presets::builtin())
         });
         harness.state_mut().settings_dialog.open();
         harness.run_steps(2);
@@ -468,7 +481,7 @@ mod tests {
         let path = dir.path().join("config.toml");
         let at = path.clone();
         let mut harness = Harness::builder().with_size([1280.0, 820.0]).build_eframe(move |_| {
-            App::with(Config::default(), Some(at.clone()), Presets::builtin(), None)
+            App::with(Config::default(), Some(at.clone()), Presets::builtin())
         });
         harness.state_mut().settings_dialog.open();
         harness.run_steps(2);

@@ -625,7 +625,7 @@ mod tests {
         square(&frames.join("2.png"), [0, 0, 255, 255]);
         let mut harness = Harness::builder()
             .with_size([crate::MIN_WIDTH, 640.0])
-            .build_eframe(|_| App::with(Config::default(), None, Presets::builtin(), None));
+            .build_eframe(|_| App::with(Config::default(), None, Presets::builtin()));
         harness.state_mut().add(vec![frames]);
         finish(&mut harness);
         let column = harness.get_by_label(&fl!("make")).accesskit_node().bounding_box().unwrap();

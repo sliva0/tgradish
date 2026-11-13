@@ -307,7 +307,6 @@ mod tests {
             Config::load(&path).unwrap(),
             Some(path.clone()),
             tgradish_core::presets::Presets::builtin(),
-            None,
         );
         assert_eq!(app.config.gui.theme, Theme::System);
         // another setting changed, and the whole of them saved
