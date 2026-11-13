@@ -255,8 +255,8 @@ pub struct WatchArgs {
     /// Also convert files that are already there and have no result yet.
     #[arg(long)]
     pub existing: bool,
-    /// Seconds between looks at the directory.
-    #[arg(long, value_name = "SECONDS", default_value_t = 1.0)]
+    /// Seconds between looks at the directory, from 0.05 to a day.
+    #[arg(long, value_name = "SECONDS", default_value_t = 1.0, value_parser = parse_interval)]
     pub interval: f64,
     /// What to make: webm (video sticker or emoji: VP9 in WebM, from any
     /// video or picture), tgs (animated sticker or emoji: TGS, meant for
@@ -568,6 +568,17 @@ impl std::str::FromStr for ShellWords {
     }
 }
 
+/// Seconds for `watch --interval`: no shorter than watching wakes to see
+/// if it was stopped, and no longer than a day, beyond which it may as
+/// well not watch, and far below where seconds stop being a duration.
+fn parse_interval(text: &str) -> Result<f64, String> {
+    let seconds: f64 = text.parse().map_err(|_| format!("{text} isn't a number"))?;
+    if !(0.05..=86_400.0).contains(&seconds) {
+        return Err("must be from 0.05 to 86400 seconds".into());
+    }
+    Ok(seconds)
+}
+
 /// `NAME=VALUE`, or nothing, which says there are none.
 fn parse_option_pair(text: &str) -> Result<Option<(String, String)>, String> {
     if text.is_empty() {
@@ -831,6 +842,24 @@ mod tests {
             assert_eq!(args.fake_duration, 1.5, "{flag}");
         }
         assert!(Cli::try_parse_from(["tgradish", "spoof", "a.webm", "--duration=1"]).is_err());
+    }
+
+    #[test]
+    fn takes_intervals_watching_can_wait() {
+        let interval = |text: &str| {
+            let flag = format!("--interval={text}");
+            let parsed = Cli::try_parse_from(["tgradish", "watch", "in", &flag]);
+            parsed.map(|cli| match cli.command {
+                Command::Watch(args) => args.interval,
+                _ => panic!(),
+            })
+        };
+        assert_eq!(interval("0.05").unwrap(), 0.05);
+        assert_eq!(interval("86400").unwrap(), 86_400.0);
+        for wrong in ["1e100", "inf", "NaN", "0", "-1", "0.01", "86401", "soon"] {
+            let err = interval(wrong).unwrap_err();
+            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation, "{wrong}");
+        }
     }
 
     #[test]
