@@ -139,7 +139,7 @@ pub enum Error {
         frames: u32,
     },
     /// An animation given as a sprite sheet, which is one picture.
-    #[error("a sprite sheet is one picture, this has {frames} frames")]
+    #[error("a sprite sheet must be a single picture, this has {frames} frames")]
     SheetAnimated {
         /// How many frames it has.
         frames: usize,

@@ -89,12 +89,9 @@ pub(super) fn load(
         }
     };
     let (animation, aseprite) = match sheet {
-        // a sheet is one picture: an animation's first frame
+        // which refuses an animation, rather than lose all but a frame
         Some(sheet) => decoded.and_then(|(image, aseprite)| {
-            let (width, height) = (image.width(), image.height());
-            let first = image.into_frames().swap_remove(0);
-            let picture = frames::Animation::new(width, height, vec![first])?;
-            Ok((frames::split_sheet(&picture, &sheet, &limits)?, aseprite))
+            Ok((frames::split_sheet(&image, &sheet, &limits)?, aseprite))
         }),
         None => decoded,
     }
@@ -272,13 +269,23 @@ mod tests {
         assert_eq!((names, frames), (vec!["idle"], ase.sprite.frames.len()));
         let idle = Options { tag: Some("idle".into()), ..Options::default() };
         assert_eq!(read(idle).1, 2);
-        // a sheet is the first frame, whatever the tag
+        // a sheet is one picture, which an animation isn't, whatever the
+        // tag
         let sheet = Options {
             tag: Some("idle".into()),
             sheet: Some(crate::options::Sheet { columns: 2, rows: 1 }),
             ..Options::default()
         };
-        assert_eq!(read(sheet).0, width / 2);
+        let input = Input::File(path.clone());
+        let refused = load(None, &input, &sheet, &CancelToken::new()).err().unwrap();
+        assert!(refused.to_string().contains("must be a single picture"), "{refused}");
+        let gif = dir.path().join("walker.gif");
+        std::fs::write(&gif, tgradish_corpus::encode::gif(&ase.sprite)).unwrap();
+        assert!(load(None, &Input::File(gif), &sheet, &CancelToken::new()).is_err());
+        let png = dir.path().join("walker.png");
+        std::fs::write(&png, tgradish_corpus::encode::sheet(&ase.sprite, 2)).unwrap();
+        let loaded = load(None, &Input::File(png), &sheet, &CancelToken::new()).unwrap();
+        assert_eq!(loaded.animation.width(), width);
 
         // stopped between the files of a sequence
         let cancel = CancelToken::new();
