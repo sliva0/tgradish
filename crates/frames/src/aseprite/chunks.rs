@@ -32,6 +32,11 @@ impl Sprite {
                 let (width, height) = (chunk.u16()? as usize, chunk.u16()? as usize);
                 let bits = chunk.u16()?;
                 let id_mask = chunk.u32()?;
+                // one run of bits, which an id is shifted down from
+                let ids = id_mask.checked_shr(id_mask.trailing_zeros()).unwrap_or(0);
+                if ids == 0 || ids & ids.wrapping_add(1) != 0 {
+                    return Err(error(format!("tile ids in the bits {id_mask:#010x}")));
+                }
                 let flip_mask = chunk.u32()? | chunk.u32()? | chunk.u32()?;
                 chunk.skip(10)?;
                 let tile_bytes = match bits {
