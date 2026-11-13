@@ -260,6 +260,55 @@ pub(crate) fn text_field(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> 
         .vertical_align(egui::Align::Center)
 }
 
+/// Room inside a dialog's frame.
+const DIALOG_MARGIN: i8 = 16;
+
+/// A dialog over the window, `id` telling it from others, framed as every
+/// dialog is: its [`dialog_title`] first, its [`dialog_buttons`] last.
+pub(crate) fn dialog(ctx: &egui::Context, id: &str) -> egui::Modal {
+    let frame = egui::Frame::popup(&ctx.global_style()).inner_margin(DIALOG_MARGIN);
+    egui::Modal::new(egui::Id::new(id)).frame(frame)
+}
+
+/// A dialog's title, cut short where it is long, with a cross in the
+/// corner, level with it, that closes the dialog: true once clicked.
+pub(crate) fn dialog_title(ui: &mut egui::Ui, title: impl Into<egui::WidgetText>) -> bool {
+    let title = title.into();
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let side = ui.spacing().interact_size.y;
+            let cross = egui::Button::new("✖").frame(false).min_size(vec2(side, side));
+            let closed = ui.add(cross).on_hover_text(fl!("close")).clicked();
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(egui::Label::new(title).truncate());
+            });
+            closed
+        })
+        .inner
+    })
+    .inner
+}
+
+/// A dialog's title in words, in the headings' weight.
+pub(crate) fn title_text(ui: &egui::Ui, text: impl Into<String>) -> RichText {
+    medium(ui, text, TITLE)
+}
+
+/// A dialog's row of buttons, under a line: `add` adds them from the right,
+/// the one that closes it first, then the primary one, then the others;
+/// what it adds left to right after them goes at the row's left.
+pub(crate) fn dialog_buttons<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.add_space(4.0);
+    ui.separator();
+    ui.add_space(4.0);
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add).inner
+}
+
+/// A button of a dialog's row, as wide as the others at the least.
+pub(crate) fn dialog_button<'a>(text: impl Into<egui::WidgetText>) -> egui::Button<'a> {
+    egui::Button::new(text).min_size(vec2(90.0, theme::CONTROL))
+}
+
 /// Width of the labels before settings.
 pub(crate) const LABELS: f32 = 150.0;
 

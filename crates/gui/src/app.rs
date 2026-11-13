@@ -656,14 +656,15 @@ impl eframe::App for App {
         self.inspection_dialog(&ctx);
         self.preset_dialogs(&ctx);
         if self.settings_dialog.about {
-            let modal = egui::Modal::new(egui::Id::new("about")).show(&ctx, |ui| {
+            let modal = widgets::dialog(&ctx, "about").show(&ctx, |ui| {
                 ui.set_width(600.0);
+                let crossed =
+                    widgets::dialog_title(ui, widgets::title_text(ui, fl!("about-title")));
                 about(ui);
-                ui.separator();
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.button(fl!("close")).clicked()
-                })
-                .inner
+                let closed = widgets::dialog_buttons(ui, |ui| {
+                    ui.add(widgets::dialog_button(fl!("close"))).clicked()
+                });
+                crossed || closed
             });
             if modal.inner || modal.should_close() {
                 self.settings_dialog.about = false;
