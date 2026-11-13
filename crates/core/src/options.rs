@@ -62,6 +62,46 @@ pub enum Fit {
     Off,
 }
 
+/// What a fit range counts, which depends on the way of fitting it is
+/// for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FitUnit {
+    /// Bitrates, in kbit/s.
+    Kbps,
+    /// libvpx's constant qualities.
+    Crf,
+    /// Frame rates.
+    Fps,
+    /// Lengths, in seconds.
+    Seconds,
+}
+
+impl Fit {
+    /// What a range searched while fitting this way counts. Fitting
+    /// nothing counts bitrates, as the way it encodes is by one.
+    pub fn unit(self) -> FitUnit {
+        match self {
+            Fit::Auto | Fit::Bitrate | Fit::Off => FitUnit::Kbps,
+            Fit::Crf => FitUnit::Crf,
+            Fit::Fps => FitUnit::Fps,
+            Fit::Length => FitUnit::Seconds,
+        }
+    }
+
+    /// What the ends of a range searched while fitting this way can be:
+    /// bitrates of at least 1 kbit/s, libvpx's CRFs, frame rates up to
+    /// Telegram's, and lengths above 0, which planning also keeps within
+    /// the result's.
+    pub fn range_limits(self) -> std::ops::RangeInclusive<f64> {
+        match self.unit() {
+            FitUnit::Kbps => 1.0..=f64::INFINITY,
+            FitUnit::Crf => f64::from(*CRFS.start())..=f64::from(*CRFS.end()),
+            FitUnit::Fps => 1.0..=crate::telegram::MAX_FPS,
+            FitUnit::Seconds => f64::MIN_POSITIVE..=f64::INFINITY,
+        }
+    }
+}
+
 /// Encoder speed. Faster settings produce worse looking stickers at the same
 /// size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -94,7 +134,8 @@ pub enum Spoof {
     Never,
 }
 
-/// A `[min, max]` range for the value tuned by [`Fit`].
+/// A `[min, max]` range for the value tuned by [`Fit`], in its
+/// [`FitUnit`].
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Range {
     pub min: f64,
@@ -336,7 +377,10 @@ pub struct Options {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attempts: Option<u32>,
     /// Range searched while fitting, in the unit of the fitted value
-    /// (kbit/s, CRF, fps or seconds). Default depends on `fit`.
+    /// (kbit/s, CRF, fps or seconds), so it belongs to the `fit` it is
+    /// written for: layered over options that fit in another unit without
+    /// a range of its own, the range below is dropped. Default depends on
+    /// `fit`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fit_range: Option<Range>,
     /// Seconds to skip at the start of the input. Default: 0.
@@ -466,8 +510,17 @@ impl Options {
     }
 
     /// Returns `self` with every value set in `overlay` replacing its own.
+    /// A range to fit within belongs to the way of fitting it was written
+    /// for: when `overlay` fits in another unit, as a bitrate where `self`
+    /// fits a quality, and sets no range of its own, `self`'s is dropped
+    /// rather than read in the wrong unit.
     pub fn merged(self, overlay: &Options) -> Options {
-        self.overlaid(overlay)
+        let unit = self.fit.unwrap_or(Fit::Auto).unit();
+        let mut merged = self.overlaid(overlay);
+        if overlay.fit.is_some_and(|fit| fit.unit() != unit) && overlay.fit_range.is_none() {
+            merged.fit_range = None;
+        }
+        merged
     }
 }
 
@@ -607,6 +660,26 @@ mod tests {
         assert_eq!(merged.fit, Some(Fit::Auto));
         assert_eq!(merged.crf, Some(40));
         assert_eq!(merged.title.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn drops_a_range_of_another_unit() {
+        let qualities = Some(Range { min: 20.0, max: 40.0 });
+        let base = Options { fit: Some(Fit::Crf), fit_range: qualities, ..Default::default() };
+        let fit = |fit| Options { fit: Some(fit), ..Default::default() };
+        // fitting a bitrate: a range of qualities is none of bitrates
+        assert_eq!(base.clone().merged(&fit(Fit::Bitrate)).fit_range, None);
+        // the same unit, or a range of its own, or no other fit: kept
+        assert_eq!(base.clone().merged(&fit(Fit::Crf)).fit_range, qualities);
+        let own = Some(Range { min: 100.0, max: 400.0 });
+        let bitrates = Options { fit_range: own, ..fit(Fit::Bitrate) };
+        assert_eq!(base.clone().merged(&bitrates).fit_range, own);
+        let crf = Options { crf: Some(30), ..Default::default() };
+        assert_eq!(base.merged(&crf).fit_range, qualities);
+        // a range with no fit is one of bitrates, as fitting is by default
+        let auto = Options { fit_range: own, ..Default::default() };
+        assert_eq!(auto.clone().merged(&fit(Fit::Off)).fit_range, own);
+        assert_eq!(auto.merged(&fit(Fit::Fps)).fit_range, None);
     }
 
     #[test]
