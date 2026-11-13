@@ -54,11 +54,14 @@ pub struct Global {
     /// file made.
     #[arg(short, long, global = true)]
     pub quiet: bool,
-    /// ffmpeg executable or directory with ffmpeg and ffprobe.
-    #[arg(long, global = true, env = "TGRADISH_FFMPEG", value_name = "PATH")]
+    /// The ffmpeg executable to use, or a directory with ffmpeg and
+    /// ffprobe. Without this or --ffmpeg-from, TGRADISH_FFMPEG can name
+    /// one, over the config file's.
+    #[arg(long, global = true, value_name = "PATH", conflicts_with = "ffmpeg_from")]
     pub ffmpeg: Option<PathBuf>,
-    /// Which ffmpeg to use when no path is given. Default: from config, or
-    /// auto (built in if this build has it, otherwise system).
+    /// Which ffmpeg to use: auto, built in if this build has it, otherwise
+    /// the system's on PATH; builtin; or system. Over TGRADISH_FFMPEG and
+    /// the config file. [default: the config's, or auto]
     #[arg(long, global = true, value_name = "WHERE", value_enum)]
     pub ffmpeg_from: Option<FfmpegFrom>,
     /// Config file to use instead of the default one.
@@ -118,9 +121,12 @@ pub enum Command {
     /// Show the config file.
     #[command(subcommand)]
     Config(ConfigCommand),
-    /// Check which ffmpeg is used.
-    #[command(subcommand)]
-    Ffmpeg(FfmpegCommand),
+    /// Check which ffmpeg is used: `status`, which `tgradish ffmpeg` alone
+    /// runs.
+    Ffmpeg {
+        #[command(subcommand)]
+        command: Option<FfmpegCommand>,
+    },
     /// Print the licences of tgradish and of what it is built from, which
     /// every copy carries.
     #[command(alias = "licences")]
