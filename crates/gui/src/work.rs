@@ -241,6 +241,8 @@ impl App {
                 }
                 Err(message) => {
                     job.status = Status::Failed(message);
+                    // taken in next frame, which nothing else may ask for
+                    ctx.request_repaint();
                 }
             }
         }
