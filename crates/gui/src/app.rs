@@ -3,12 +3,13 @@
 //! to `App`; this holds what they share, and draws them in turn.
 
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32};
 use tgradish_core::backend::Backend;
 use tgradish_core::clipboard::Pasted;
 use tgradish_core::config::Config;
+use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::paths;
 use tgradish_core::presets::Presets;
 
@@ -62,6 +63,9 @@ pub(crate) struct App {
     /// seconds, to notice one installed meanwhile, or when the settings
     /// change.
     pub(crate) found_backend: std::cell::RefCell<Option<FoundBackend>>,
+    /// The ffmpeg the command line chose, over the config's for this run
+    /// alone, so Settings doesn't save it.
+    pub(crate) ffmpeg_override: (Option<FfmpegChoice>, Option<PathBuf>),
     /// The ffmpeg inputs were last read with, or why there was none: when
     /// it changes, reads that failed are tried again.
     pub(crate) read_with: Option<Result<Backend, String>>,
@@ -101,27 +105,25 @@ pub(crate) struct App {
 impl App {
     pub(crate) fn new(launch: Launch) -> App {
         let config_path = launch.config_path.or_else(Config::default_path);
-        let (mut config, unreadable) = match config_path.as_deref().map(Config::load) {
-            Some(Ok(config)) => (config, None),
-            Some(Err(err)) => (Config::default(), Some(err)),
+        let (config, unreadable) = match config_path.as_deref() {
+            Some(path) => load_config(path),
             None => (Config::default(), None),
         };
         // before anything is said
         crate::l10n::choose(config.gui.language.as_deref());
-        let mut message = unreadable.map(|err| fl!("settings-unreadable", error = err.to_string()));
-        // as on the command line: a path beats a choice
-        if let Some(choice) = launch.ffmpeg_choice {
-            config.ffmpeg.choice = choice;
-            config.ffmpeg.path = None;
-        }
-        if let Some(path) = launch.ffmpeg_path {
-            config.ffmpeg.path = Some(path);
-        }
+        let mut message = unreadable.map(|(err, kept)| match kept {
+            Some(kept) => {
+                let kept = fl!("settings-kept", path = kept.display().to_string());
+                format!("{}\n{kept}", fl!("settings-unreadable", error = err.to_string()))
+            }
+            None => fl!("settings-unreadable", error = err.to_string()),
+        });
         let presets = Presets::load_user().unwrap_or_else(|err| {
             message = Some(fl!("presets-unreadable", error = err.to_string()));
             Presets::builtin()
         });
         let mut app = App::with(config, config_path, presets, message);
+        app.ffmpeg_override = (launch.ffmpeg_choice, launch.ffmpeg_path);
         app.presets_dir = tgradish_core::presets::user_dir();
         if let Some(dir) = paths::state_dir() {
             app.reopen(dir.join("session.json"));
@@ -227,6 +229,7 @@ impl App {
             made_by_tgradish: Default::default(),
             outputs: Default::default(),
             found_backend: Default::default(),
+            ffmpeg_override: (None, None),
             read_with: None,
             screen: Screen::default(),
             inset: Inset::default(),
@@ -276,16 +279,26 @@ impl App {
         }
     }
 
-    pub(crate) fn backend(&self) -> Result<Backend, String> {
+    /// Which ffmpeg to use and where, as the settings and the command line
+    /// say: as on the command line, a path beats a choice.
+    fn ffmpeg_settings(&self) -> (FfmpegChoice, Option<PathBuf>) {
         let ffmpeg = &self.config.ffmpeg;
-        let settings = (ffmpeg.choice, ffmpeg.path.clone());
+        match &self.ffmpeg_override {
+            (choice, Some(path)) => (choice.unwrap_or(ffmpeg.choice), Some(path.clone())),
+            (Some(choice), None) => (*choice, None),
+            (None, None) => (ffmpeg.choice, ffmpeg.path.clone()),
+        }
+    }
+
+    pub(crate) fn backend(&self) -> Result<Backend, String> {
+        let settings = self.ffmpeg_settings();
         let mut found = self.found_backend.borrow_mut();
         match &*found {
             Some(seen) if seen.settings == settings && seen.when.elapsed() < LOOK_AGAIN => {
                 seen.backend.clone()
             }
             _ => {
-                let backend = Backend::select(ffmpeg.choice, ffmpeg.path.as_deref())
+                let backend = Backend::select(settings.0, settings.1.as_deref())
                     .map_err(|err| crate::jobs::failure(&err));
                 let when = std::time::Instant::now();
                 *found = Some(FoundBackend { settings, when, backend: backend.clone() });
@@ -428,6 +441,20 @@ impl App {
     }
 }
 
+/// The settings at `path`, or the defaults where they can't be read, with
+/// why and where the file is kept as it was: copied aside first, as saving
+/// Settings writes over it.
+fn load_config(path: &Path) -> (Config, Option<(tgradish_core::Error, Option<PathBuf>)>) {
+    match Config::load(path) {
+        Ok(config) => (config, None),
+        Err(err) => {
+            let aside = path.with_extension("toml.unreadable");
+            let kept = std::fs::copy(path, &aside).is_ok().then_some(aside);
+            (Config::default(), Some((err, kept)))
+        }
+    }
+}
+
 /// How long a closing window waits for conversions to stop, so they take
 /// their temporary files and ffmpeg's processes with them.
 const STOPPING: std::time::Duration = std::time::Duration::from_secs(3);
@@ -461,7 +488,7 @@ const LOOK_AGAIN: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// The ffmpeg found for the settings `settings`, at `when`.
 pub(crate) struct FoundBackend {
-    settings: (tgradish_core::ffmpeg::FfmpegChoice, Option<PathBuf>),
+    settings: (FfmpegChoice, Option<PathBuf>),
     when: std::time::Instant,
     backend: Result<Backend, String>,
 }
@@ -687,7 +714,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let Some(video) = crate::testing::video_of(dir.path(), "1280x720", 8) else { return };
         let mut config = Config::default();
-        config.ffmpeg.choice = tgradish_core::ffmpeg::FfmpegChoice::System;
+        config.ffmpeg.choice = FfmpegChoice::System;
         config.gui.output_dir = Some(dir.path().join("out"));
         let mut harness = harness(config);
         harness.state_mut().add(vec![video]);
@@ -703,6 +730,35 @@ mod tests {
         assert!(job.wait_until(std::time::Instant::now()));
         job.poll();
         assert!(matches!(job.status, crate::jobs::Status::Cancelled), "{:?}", job.status);
+    }
+
+    #[test]
+    fn saves_no_ffmpeg_the_command_line_chose() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut app = App::with(Config::default(), Some(path.clone()), Presets::builtin(), None);
+        app.ffmpeg_override = (None, Some(dir.path().join("no-ffmpeg-here")));
+        // used, though nothing is found there
+        assert!(app.backend().is_err());
+        app.keep(|gui| gui.overwrite = true);
+        app.config.save(&path).unwrap();
+        let saved = Config::load(&path).unwrap();
+        assert!(saved.gui.overwrite && saved.ffmpeg == Config::default().ffmpeg);
+    }
+
+    #[test]
+    fn keeps_settings_it_cannot_read_before_they_are_saved_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "made-up = 1\n").unwrap();
+        let (config, unreadable) = load_config(&path);
+        let (_, kept) = unreadable.expect("unreadable");
+        assert_eq!(config, Config::default());
+        assert_eq!(kept, Some(dir.path().join("config.toml.unreadable")));
+        assert_eq!(std::fs::read_to_string(kept.unwrap()).unwrap(), "made-up = 1\n");
+        // a file that is fine is left alone
+        std::fs::write(&path, "").unwrap();
+        assert!(load_config(&path).1.is_none());
     }
 
     #[test]
