@@ -15,7 +15,8 @@ use crate::item::{Item, Show};
 impl App {
     /// Files dropped on the window, pasted, and keys.
     pub(crate) fn take_input(&mut self, ctx: &egui::Context) {
-        let (dropped, hovered, text_pasted, v_released, space, delete) = ctx.input(|input| {
+        let paste = ctx.input(|input| self.paste_key.read(&input.events));
+        let (dropped, hovered, space, delete) = ctx.input(|input| {
             let dropped: Vec<PathBuf> = input
                 .raw
                 .dropped_files
@@ -23,19 +24,9 @@ impl App {
                 .map(|file| file.path().to_path_buf())
                 .filter(|path| !path.as_os_str().is_empty())
                 .collect();
-            let text_pasted =
-                input.events.iter().any(|event| matches!(event, egui::Event::Paste(_)));
-            let v_released = input.events.iter().find_map(|event| match event {
-                egui::Event::Key { key: egui::Key::V, pressed: false, modifiers, .. } => {
-                    Some(modifiers.command)
-                }
-                _ => None,
-            });
             (
                 dropped,
                 !input.raw.hovered_files.is_empty(),
-                text_pasted,
-                v_released,
                 input.key_pressed(egui::Key::Space),
                 input.key_pressed(egui::Key::Delete),
             )
@@ -56,7 +47,6 @@ impl App {
         // typing into a text field is just typing, and keys pressed in a
         // dialog are for it, not the window behind
         if ctx.memory(|memory| memory.focused().is_some()) || self.dialog_open() {
-            self.clipboard_read = false;
             return;
         }
         if space
@@ -97,18 +87,50 @@ impl App {
         if delete && let Some(id) = self.selected {
             self.remove(id);
         }
-        // egui only says when text is pasted, so files and images are
-        // pasted when Ctrl+V is let go
-        if text_pasted {
+        if paste {
             self.paste();
-            self.clipboard_read = true;
         }
-        if let Some(command) = v_released {
-            if command && !self.clipboard_read {
-                self.paste();
+    }
+}
+
+/// Ctrl+V, as egui-winit passes it on: it swallows V going down with Ctrl,
+/// and says so only where the clipboard holds text, which it pastes as
+/// text. Files and images, which it doesn't, are pasted as V comes up
+/// instead, once for each time it went down.
+#[derive(Debug, Default)]
+pub(crate) struct PasteKey {
+    /// The clipboard was read for the V held, as it held text.
+    read: bool,
+    /// V went down without Ctrl, which egui-winit passes on as a key.
+    plain: bool,
+}
+
+impl PasteKey {
+    /// Takes in a frame's `events`, and gives whether they ask for the
+    /// clipboard to be pasted. Kept up with while keys go to a text field
+    /// or a dialog too, which take a paste themselves, so V going down
+    /// there isn't taken for Ctrl+V once it comes up outside.
+    fn read(&mut self, events: &[egui::Event]) -> bool {
+        let mut paste = false;
+        for event in events {
+            match event {
+                egui::Event::Paste(_) => {
+                    paste = true;
+                    self.read = true;
+                }
+                egui::Event::Key { key: egui::Key::V, pressed: true, modifiers, .. } => {
+                    self.plain = !modifiers.command;
+                }
+                // went down as Ctrl+V where egui-winit passed nothing on,
+                // whether Ctrl is still held or let go first
+                egui::Event::Key { key: egui::Key::V, pressed: false, .. } => {
+                    paste |= !self.plain && !self.read;
+                    *self = PasteKey::default();
+                }
+                _ => {}
             }
-            self.clipboard_read = false;
         }
+        paste
     }
 }
 
@@ -235,6 +257,42 @@ mod tests {
     use super::*;
     use crate::jobs::Status;
     use crate::testing::{convert, finish, harness, made_job, square, video_of};
+
+    #[test]
+    fn pastes_once_for_each_ctrl_v_whichever_key_comes_up_first() {
+        use egui::{Event, Key, Modifiers};
+        let v = |pressed, modifiers| Event::Key {
+            key: Key::V,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers,
+        };
+        let (ctrl, none) = (Modifiers::COMMAND, Modifiers::NONE);
+        let text = || Event::Paste("/a.png".into());
+        // each frame's events, as egui-winit gives them, and what is pasted
+        let pastes = |frames: &[Vec<Event>]| -> Vec<bool> {
+            let mut key = PasteKey::default();
+            frames.iter().map(|events| key.read(events)).collect()
+        };
+        // files or an image: nothing as V goes down, pasted as it comes up,
+        // with Ctrl held or let go first
+        assert_eq!(pastes(&[vec![], vec![v(false, ctrl)]]), [false, true]);
+        assert_eq!(pastes(&[vec![], vec![v(false, none)]]), [false, true]);
+        // text: pasted as V goes down, not again as it comes up
+        assert_eq!(pastes(&[vec![text()], vec![v(false, ctrl)]]), [true, false]);
+        assert_eq!(pastes(&[vec![text()], vec![v(false, none)]]), [true, false]);
+        // and again for the next Ctrl+V
+        assert_eq!(
+            pastes(&[vec![text()], vec![v(false, ctrl)], vec![v(false, ctrl)]]),
+            [true, false, true]
+        );
+        // V alone pastes nothing, nor V held down before Ctrl
+        assert_eq!(pastes(&[vec![v(true, none)], vec![v(false, none)]]), [false, false]);
+        assert_eq!(pastes(&[vec![v(true, none)], vec![v(false, ctrl)]]), [false, false]);
+        // where a backend passes Ctrl+V on as a key, it is pasted all the same
+        assert_eq!(pastes(&[vec![v(true, ctrl)], vec![v(false, none)]]), [false, true]);
+    }
 
     #[test]
     fn leaves_keys_pressed_in_dialogs_to_them() {

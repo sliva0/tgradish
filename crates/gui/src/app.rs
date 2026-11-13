@@ -89,8 +89,8 @@ pub(crate) struct App {
     /// The system's fonts for what the window's own lack.
     pub(crate) fallbacks: fallback::Fallbacks,
     pub(crate) message: Option<String>,
-    /// The clipboard was read for the Ctrl+V being held.
-    pub(crate) clipboard_read: bool,
+    /// What Ctrl+V has done so far.
+    pub(crate) paste_key: crate::keys::PasteKey,
     #[cfg(all(unix, not(target_os = "macos")))]
     pub(crate) drops: Option<dnd::Drops>,
     /// The window's icon on Wayland, kept while the window shows it.
@@ -248,7 +248,7 @@ impl App {
             next_save: 0.0,
             fallbacks: fallback::Fallbacks::new(fonts()),
             message,
-            clipboard_read: false,
+            paste_key: crate::keys::PasteKey::default(),
             #[cfg(all(unix, not(target_os = "macos")))]
             drops: None,
             #[cfg(all(unix, not(target_os = "macos")))]
