@@ -1,6 +1,7 @@
 //! Machine-readable description of tgradish for front-ends that run the
 //! CLI, printed by `tgradish describe`.
 
+use schemars::generate::SchemaSettings;
 use schemars::{JsonSchema, Schema, schema_for};
 use serde::Serialize;
 
@@ -58,6 +59,12 @@ pub struct PresetDescription {
     pub error: Option<String>,
 }
 
+/// The JSON Schema of `T` as it is written, rather than read: of what
+/// tgradish prints.
+fn printed<T: JsonSchema>() -> Schema {
+    SchemaSettings::default().for_serialize().into_generator().into_root_schema_for::<T>()
+}
+
 /// `default_presets` are the presets used when none is given, for WebM and
 /// `.tgs`.
 pub fn describe(presets: &Presets, default_presets: [&str; 2]) -> Description {
@@ -92,7 +99,7 @@ pub fn describe(presets: &Presets, default_presets: [&str; 2]) -> Description {
                 output_extension: Format::Webm.extension(),
                 default_preset: webm.to_string(),
                 options: schema_for!(Options),
-                events: schema_for!(Event),
+                events: printed::<Event>(),
             },
             FormatDescription {
                 format: Format::Tgs,
@@ -100,7 +107,7 @@ pub fn describe(presets: &Presets, default_presets: [&str; 2]) -> Description {
                 output_extension: Format::Tgs.extension(),
                 default_preset: tgs.to_string(),
                 options: schema_for!(TgsOptions),
-                events: schema_for!(TgsEvent),
+                events: printed::<TgsEvent>(),
             },
             FormatDescription {
                 format: Format::Image,
@@ -110,7 +117,7 @@ pub fn describe(presets: &Presets, default_presets: [&str; 2]) -> Description {
                 output_extension: Format::Image.extension(),
                 default_preset: webm.to_string(),
                 options: schema_for!(Options),
-                events: schema_for!(crate::still::StillEvent),
+                events: printed::<crate::still::StillEvent>(),
             },
         ],
         presets,
