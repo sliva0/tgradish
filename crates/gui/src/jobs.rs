@@ -14,7 +14,7 @@ use tgradish_core::presets::Format;
 use tgradish_core::preview::Preview;
 use tgradish_core::still;
 use tgradish_core::tgs::{self, TgsEvent, TgsOptions, TgsRequest};
-use tgradish_core::{Error, telegram};
+use tgradish_core::{Error, FfmpegMissing, telegram};
 use tgradish_tgs::check::{Issue, Severity};
 use tgradish_tgs::normalise::Report;
 use tgradish_tgs::sticker::Step;
@@ -195,7 +195,9 @@ pub(crate) fn failure(err: &Error) -> String {
         name.unwrap_or_else(|| path.display().to_string())
     };
     match err {
-        Error::FfmpegNotFound(details) => fl!("ffmpeg-not-found", details = details.as_str()),
+        Error::FfmpegNotFound(FfmpegMissing::NotOnPath) => fl!("ffmpeg-not-on-path"),
+        Error::FfmpegNotFound(missing) => fl!("ffmpeg-not-found", details = missing.to_string()),
+        Error::ExtraArgsNeedProgram => fl!("extra-args-need-program"),
         Error::Ffmpeg { program, status, stderr } => {
             let program = program.to_string();
             let failed = fl!("program-failed", program = program, status = status.as_str());
@@ -685,8 +687,15 @@ mod tests {
     fn words_failures_as_the_window_does() {
         let invalid = Error::InvalidOption { option: "crf", reason: "must be at most 63".into() };
         assert_eq!(failure(&invalid), "Crf must be at most 63");
-        let missing = failure(&Error::FfmpegNotFound("not on PATH".into()));
-        assert_eq!(missing, fl!("ffmpeg-not-found", details = "not on PATH"));
+        let missing = failure(&Error::FfmpegNotFound(FfmpegMissing::NotBuiltIn));
+        let details = FfmpegMissing::NotBuiltIn.to_string();
+        assert_eq!(missing, fl!("ffmpeg-not-found", details = details));
+        // the window's own words for what core names flags or keys in
+        assert_eq!(
+            failure(&Error::FfmpegNotFound(FfmpegMissing::NotOnPath)),
+            fl!("ffmpeg-not-on-path")
+        );
+        assert!(!failure(&Error::ExtraArgsNeedProgram).contains("extra-args"));
         let unreadable =
             Error::Probe { path: PathBuf::from("/some/where/clip.mp4"), message: "broken".into() };
         assert_eq!(

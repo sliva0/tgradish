@@ -46,7 +46,7 @@ pub mod tgs;
 pub mod webm;
 
 pub use cancel::CancelToken;
-pub use error::{Error, Result};
+pub use error::{Error, FfmpegMissing, Result};
 
 /// Name and version, used in watermarks.
 pub const TOOL_ID: &str = concat!("tgradish ", env!("CARGO_PKG_VERSION"));

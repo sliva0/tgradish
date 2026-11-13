@@ -88,7 +88,7 @@ impl Backend {
             FfmpegChoice::Auto | FfmpegChoice::Builtin => Ok(Backend::Linked),
             #[cfg(not(feature = "linked"))]
             FfmpegChoice::Builtin => {
-                Err(Error::FfmpegNotFound("this tgradish build has no built-in ffmpeg".into()))
+                Err(Error::FfmpegNotFound(crate::error::FfmpegMissing::NotBuiltIn))
             }
             choice => Ok(Backend::Process(ffmpeg::locate(choice, None)?)),
         }

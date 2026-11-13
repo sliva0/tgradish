@@ -424,7 +424,7 @@ fn load(
     cancel.check()?;
     if !reads_as_art(input)? {
         let backend = backend.ok_or_else(|| {
-            Error::FfmpegNotFound(format!("{} is a video, which ffmpeg reads", input.display()))
+            Error::FfmpegNotFound(crate::error::FfmpegMissing::ForVideo(input.clone()))
         })?;
         return read_video(backend, input, options, cancel);
     }

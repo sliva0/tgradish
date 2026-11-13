@@ -1,4 +1,7 @@
-//! The errors of the library, which front-ends print or show.
+//! The errors of the library, which front-ends print or show. Each says
+//! what is wrong in neutral words, naming an option by its key, as
+//! `fit-range`, where it has to: how to put it right, as by which flag or
+//! setting, is the front-end's to say.
 
 use std::path::PathBuf;
 
@@ -10,7 +13,7 @@ use crate::webm::WebmError;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("ffmpeg not found: {0}")]
-    FfmpegNotFound(String),
+    FfmpegNotFound(FfmpegMissing),
     #[error("{program} failed ({status}):\n{stderr}")]
     Ffmpeg { program: &'static str, status: String, stderr: String },
     #[error("couldn't read {}: {message}", path.display())]
@@ -27,9 +30,8 @@ pub enum Error {
     /// `extra-args` were given with the built-in ffmpeg, which has no
     /// command line to add them to.
     #[error(
-        "extra-args are ffmpeg command line arguments, so they need ffmpeg as a \
-         separate program: use --ffmpeg-from system or --ffmpeg PATH, or \
-         --encoder-options for encoder settings, which work with the built-in ffmpeg"
+        "extra-args are arguments for ffmpeg's command line, which the built-in ffmpeg \
+         doesn't have; encoder-options work with either"
     )]
     ExtraArgsNeedProgram,
     /// The config file couldn't be read as one, or written.
@@ -48,7 +50,7 @@ pub enum Error {
     OutputExists(PathBuf),
     #[error(
         "nothing fits the {limit} byte limit, the smallest attempt was {smallest} bytes; \
-         try a shorter length, a lower frame rate or a wider --fit-range"
+         a shorter length, a lower frame rate or a wider fit-range can help"
     )]
     NothingFits { smallest: u64, limit: u64 },
     #[error("cancelled")]
@@ -72,6 +74,30 @@ impl Error {
     pub(crate) fn invalid(option: &'static str, reason: impl Into<String>) -> Error {
         Error::InvalidOption { option, reason: reason.into() }
     }
+}
+
+/// Why no ffmpeg could be used.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
+pub enum FfmpegMissing {
+    /// There is no ffmpeg, or ffprobe, where a path said.
+    #[error("{} does not exist", .0.display())]
+    NoProgram(PathBuf),
+    /// There is no ffprobe beside the ffmpeg a path gave.
+    #[error("ffprobe is missing, expected it at {}", .0.display())]
+    NoFfprobe(PathBuf),
+    /// Neither ffmpeg and ffprobe is on PATH.
+    #[error("ffmpeg and ffprobe are not on PATH")]
+    NotOnPath,
+    /// The built-in ffmpeg was asked for, which this build doesn't have.
+    #[error("this tgradish build has no built-in ffmpeg")]
+    NotBuiltIn,
+    /// The built-in ffmpeg was asked for as programs, which it isn't.
+    #[error("the built-in ffmpeg is not an executable")]
+    BuiltInIsNoProgram,
+    /// A video was to be read, but no ffmpeg was given to read it.
+    #[error("{} is a video, which ffmpeg reads", .0.display())]
+    ForVideo(PathBuf),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

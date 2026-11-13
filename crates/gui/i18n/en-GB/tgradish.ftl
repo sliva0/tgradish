@@ -867,6 +867,9 @@ inspect-features = Features
 # A conversion that stopped on a fault of tgradish's own.
 crashed = tgradish crashed: { $details }
 ffmpeg-not-found = ffmpeg wasn't found: { $details }
+ffmpeg-not-on-path = ffmpeg and ffprobe aren't on PATH: install them, or pick another ffmpeg in "{ settings }"
+# Raw ffmpeg arguments were set, with the built-in ffmpeg chosen.
+extra-args-need-program = ffmpeg arguments need the system's ffmpeg, which "{ settings }" can pick; encoder options work with either
 # ffmpeg or ffprobe ended with an error; its own output follows, as it is.
 program-failed = { $program } failed ({ $status }):
 unreadable-file = Couldn't read { $name }: { $details }

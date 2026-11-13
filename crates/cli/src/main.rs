@@ -78,6 +78,34 @@ pub fn print_json_error(err: &anyhow::Error, input: Option<&std::path::Path>) {
     }));
 }
 
+/// `err` with what to do about it on the command line, where that is
+/// known: core says what is wrong, and the flags are the command line's.
+pub fn explain(err: tgradish_core::Error) -> anyhow::Error {
+    use anyhow::anyhow;
+    use tgradish_core::{Error, FfmpegMissing};
+    match err {
+        Error::OutputExists(path) => {
+            anyhow!("{} already exists, use --overwrite to replace it", path.display())
+        }
+        Error::FfmpegNotFound(FfmpegMissing::NotOnPath) => {
+            anyhow!("{err}: install them or pass --ffmpeg PATH")
+        }
+        Error::FfmpegNotFound(FfmpegMissing::NotBuiltIn | FfmpegMissing::BuiltInIsNoProgram) => {
+            anyhow!("{err}: use --ffmpeg-from system or --ffmpeg PATH")
+        }
+        Error::ExtraArgsNeedProgram => anyhow!(
+            "--extra-args are arguments for ffmpeg's command line, which the built-in ffmpeg \
+             doesn't have: use --ffmpeg-from system or --ffmpeg PATH, or --encoder-options for \
+             encoder settings, which work with either"
+        ),
+        Error::NothingFits { smallest, limit } => anyhow!(
+            "nothing fits the {limit} byte limit, the smallest attempt was {smallest} bytes; try \
+             a shorter --length, a lower --fps or a wider --fit-range"
+        ),
+        err => err.into(),
+    }
+}
+
 /// Settings shared by all commands.
 pub struct Context {
     pub global: Global,

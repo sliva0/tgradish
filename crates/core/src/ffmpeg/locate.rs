@@ -5,7 +5,7 @@ use std::env::consts::EXE_SUFFIX;
 use std::path::{Path, PathBuf};
 
 use super::{Ffmpeg, FfmpegChoice, FfmpegSource};
-use crate::error::{Error, Result};
+use crate::error::{Error, FfmpegMissing, Result};
 
 fn exe(dir: &Path, name: &str) -> PathBuf {
     dir.join(format!("{name}{EXE_SUFFIX}"))
@@ -30,13 +30,10 @@ pub fn locate(choice: FfmpegChoice, path: Option<&Path>) -> Result<Ffmpeg> {
         let ffmpeg = if path.is_dir() { exe(dir, "ffmpeg") } else { path.to_path_buf() };
         let ffprobe = exe(dir, "ffprobe");
         if !ffmpeg.is_file() {
-            return Err(Error::FfmpegNotFound(format!("{} does not exist", ffmpeg.display())));
+            return Err(Error::FfmpegNotFound(FfmpegMissing::NoProgram(ffmpeg)));
         }
         if !ffprobe.is_file() {
-            return Err(Error::FfmpegNotFound(format!(
-                "ffprobe is missing, expected it at {}",
-                ffprobe.display()
-            )));
+            return Err(Error::FfmpegNotFound(FfmpegMissing::NoFfprobe(ffprobe)));
         }
         return Ok(Ffmpeg { ffmpeg, ffprobe, source: FfmpegSource::Path });
     }
@@ -45,13 +42,8 @@ pub fn locate(choice: FfmpegChoice, path: Option<&Path>) -> Result<Ffmpeg> {
         FfmpegChoice::Auto | FfmpegChoice::System => system(),
         FfmpegChoice::Builtin => None,
     };
-    found.ok_or_else(|| {
-        let hint = match choice {
-            FfmpegChoice::Auto | FfmpegChoice::System => {
-                "ffmpeg and ffprobe are not on PATH: install them or pass --ffmpeg PATH"
-            }
-            FfmpegChoice::Builtin => "the built-in ffmpeg is not an executable",
-        };
-        Error::FfmpegNotFound(hint.into())
-    })
+    found.ok_or(Error::FfmpegNotFound(match choice {
+        FfmpegChoice::Auto | FfmpegChoice::System => FfmpegMissing::NotOnPath,
+        FfmpegChoice::Builtin => FfmpegMissing::BuiltInIsNoProgram,
+    }))
 }
