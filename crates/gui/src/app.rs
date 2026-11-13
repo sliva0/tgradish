@@ -445,6 +445,7 @@ impl App {
     /// [`App::save_setting`] for any of the settings.
     pub(crate) fn save_config_setting(&mut self, change: impl Fn(&mut Config)) {
         change(&mut self.config);
+        self.config.forget_overridden();
         if let Some(path) = &self.config_path {
             let saved = Config::load(path).and_then(|mut saved| {
                 change(&mut saved);
@@ -571,6 +572,8 @@ impl eframe::App for App {
         if let Some((format, name)) = self.settings_dialog.default_preset.take() {
             self.set_default_preset(format, name);
         }
+        // as Settings changes them, without saving
+        self.config.forget_overridden();
         // as Settings or the theme button changes it
         if self.theme_shown != Some(self.config.gui.theme) {
             set_theme(&ctx, self.config.gui.theme);
