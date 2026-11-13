@@ -32,7 +32,7 @@ pub(crate) struct Inspection {
 impl Inspection {
     pub(crate) fn of(path: &Path) -> Inspection {
         let (found, problems) = match inspect::inspect(path, None) {
-            Ok(Inspected::Image { target, info, issues }) => {
+            Ok(Inspected::Webp { target, info, issues }) => {
                 let problems = issues.iter().map(|issue| Problem::refused(issue, target));
                 (Found::Image { info, target }, problems.collect())
             }
