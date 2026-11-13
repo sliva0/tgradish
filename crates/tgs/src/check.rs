@@ -13,6 +13,7 @@ use crate::limits::{MAX_RAW_JSON, TLOTTIE, telegram};
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Stats {
     /// The animation's name (`nm`).
@@ -54,7 +55,7 @@ pub struct Stats {
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Severity {
     /// Telegram refuses the sticker, or some client can't play it.
@@ -66,6 +67,7 @@ pub enum Severity {
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Issue {
     pub severity: Severity,
@@ -77,7 +79,7 @@ pub struct Issue {
 /// What an [`Issue`] is about: one of each thing [`check`] checks.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum IssueKind {
     /// The canvas isn't 512x512.

@@ -19,7 +19,7 @@ use crate::{Result, file, mark};
 /// What to do when the lossless result is too large.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "kebab-case")]
 pub enum Fit {
     /// Lossless when it fits, otherwise the least visible reductions that
     /// make it fit.
@@ -66,6 +66,7 @@ impl Default for Options {
 /// A reduction fitting applied.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Step {
     #[serde(flatten)]
@@ -88,7 +89,7 @@ impl Step {
 /// Progress, for front-ends to show.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "stage", rename_all = "snake_case")]
+#[serde(tag = "stage", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum Progress {
     Normalised {
@@ -104,7 +105,9 @@ pub enum Progress {
     Packing,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Sticker {
     #[serde(skip)]
