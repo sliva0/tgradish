@@ -21,23 +21,38 @@ pub enum Reduction {
     /// Snaps the art onto a pixel grid most of it follows, of art pixels
     /// `scale` input pixels wide: 1 or more, and past the art's size it
     /// makes no difference.
-    SnapToGrid { scale: u32 },
+    SnapToGrid {
+        /// Input pixels per art pixel.
+        scale: u32,
+    },
     /// Joins colours closer than `distance` in OKLab into the more common:
     /// 0 or more, where 0 joins none.
-    MergeColours { distance: f64 },
+    MergeColours {
+        /// How far apart colours may be to be joined.
+        distance: f64,
+    },
     /// Joins neighbouring frames that differ in at most this share of the
     /// area, from 0 to 1.
-    MergeFrames { changed: f64 },
+    MergeFrames {
+        /// The share of the area that may differ.
+        changed: f64,
+    },
     /// Drops this share of frames, from 0 to 1, the least different first,
     /// giving their time to the frame before. However small the share, one
     /// frame goes, so that a weak step still does something, and however
     /// large, the first stays.
-    DropFrames { share: f64 },
+    DropFrames {
+        /// The share of frames to drop.
+        share: f64,
+    },
     /// Replaces cells that match none of their 8 neighbours with the most
     /// common neighbouring colour.
     Despeckle,
     /// Scales the art down by `factor`, between 0 and 1 and neither.
-    Downscale { factor: f64 },
+    Downscale {
+        /// The size kept, as a share of the art's.
+        factor: f64,
+    },
 }
 
 /// The kinds of reductions, roughly from least to most visible.
@@ -46,11 +61,17 @@ pub enum Reduction {
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Kind {
+    /// [`Reduction::SnapToGrid`].
     SnapToGrid,
+    /// [`Reduction::MergeColours`].
     MergeColours,
+    /// [`Reduction::MergeFrames`].
     MergeFrames,
+    /// [`Reduction::DropFrames`].
     DropFrames,
+    /// [`Reduction::Despeckle`].
     Despeckle,
+    /// [`Reduction::Downscale`].
     Downscale,
 }
 
@@ -130,6 +151,7 @@ impl Compromise {
 }
 
 impl Reduction {
+    /// Which kind of reduction this is.
     pub fn kind(&self) -> Kind {
         match self {
             Reduction::SnapToGrid { .. } => Kind::SnapToGrid,

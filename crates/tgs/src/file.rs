@@ -9,11 +9,14 @@ use thiserror::Error;
 /// unpacker allows 5 MiB, so nothing larger works anywhere.
 pub const MAX_UNPACKED: usize = 5 * 1024 * 1024;
 
+/// Why a `.tgs` couldn't be unpacked.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum ReadError {
+    /// It isn't gzip, as flate2 says.
     #[error("not gzip data: {0}")]
     Gzip(String),
+    /// It unpacks to more than [`MAX_UNPACKED`].
     #[error("unpacks to more than {} MiB", MAX_UNPACKED >> 20)]
     TooLarge,
 }

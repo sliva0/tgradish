@@ -71,7 +71,9 @@ pub struct Options {
 /// it is shown for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PixelFrame {
+    /// An index into [`PixelAnim::palette`] for each cell, row by row.
     pub pixels: Vec<u16>,
+    /// How many 60 fps frames it shows for, at least 1.
     pub ticks: u32,
 }
 
@@ -163,6 +165,7 @@ impl PixelAnim {
         self.height
     }
 
+    /// Where its cells lie in the input.
     pub fn grid(&self) -> &Grid {
         &self.grid
     }
@@ -172,6 +175,7 @@ impl PixelAnim {
         &self.palette
     }
 
+    /// The frames in playing order, no two in a row the same.
     pub fn frames(&self) -> &[PixelFrame] {
         &self.frames
     }
@@ -236,13 +240,18 @@ impl PixelAnim {
     }
 }
 
+/// A rectangle of pixels.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Rect {
+    /// Its left edge, from the left of what it is in.
     pub x: u32,
+    /// Its top edge, from the top.
     pub y: u32,
+    /// Its width.
     pub width: u32,
+    /// Its height.
     pub height: u32,
 }
 
@@ -252,15 +261,19 @@ pub struct Rect {
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Report {
+    /// The input's width in pixels.
     pub input_width: u32,
+    /// The input's height in pixels.
     pub input_height: u32,
+    /// How many frames the input has.
     pub input_frames: usize,
     /// Length of the input, in seconds.
     pub input_length: f64,
     /// The part of the input that is used, in input pixels.
     pub crop: Rect,
-    /// Size in cells (see [`PixelAnim`]).
+    /// Width in cells (see [`PixelAnim`]).
     pub width: u32,
+    /// Height in cells.
     pub height: u32,
     /// The art's pixel scale: every cell is a multiple of it, but those a
     /// crop cuts at the sides.
@@ -273,6 +286,7 @@ pub struct Report {
     /// Visible colours, translucent ones too, counting each (colour,
     /// alpha) once: all but the fully transparent.
     pub colours: usize,
+    /// Frames kept, once those alike in a row are joined.
     pub frames: usize,
     /// Consecutive identical frames joined into one.
     pub merged_frames: usize,
@@ -284,18 +298,23 @@ pub struct Report {
     pub tempo: f64,
     /// Whether a long input was cut at 3 seconds.
     pub trimmed: bool,
+    /// What is worth knowing about the art.
     pub warnings: Vec<Warning>,
 }
 
+/// A pixel scale most of the art follows, though not all of it.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct LikelyScale {
+    /// The scale, in input pixels per art pixel.
     pub scale: u32,
+    /// The share of colour edges on its grid, from 0 to 1.
     pub fit: f64,
 }
 
+/// Something about the art worth knowing, which doesn't stop a sticker.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "warning", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
@@ -303,7 +322,10 @@ pub struct LikelyScale {
 pub enum Warning {
     /// Hundreds of colours: probably not pixel art, so the sticker will be
     /// large.
-    ManyColours { colours: usize },
+    ManyColours {
+        /// How many it has.
+        colours: usize,
+    },
 }
 
 impl std::fmt::Display for Warning {
@@ -405,6 +427,9 @@ fn timing(durations: &[u64], start: u64, end: u64, tempo: Option<f64>) -> Result
     Ok(Timing { shown, ticks, tempo, trimmed })
 }
 
+/// Reads `animation` as pixel art, as `options` say: cells of the largest
+/// blocks of input pixels that are one colour in every frame, a palette,
+/// and frames on Telegram's 60 fps grid; and what was done on the way.
 pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim, Report)> {
     let durations: Vec<u64> =
         animation.frames().iter().map(|frame| nanos(frame.duration)).collect();

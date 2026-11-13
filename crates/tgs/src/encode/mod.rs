@@ -1,4 +1,6 @@
-//! Encoders: [`PixelAnim`] in, [`Scene`] out.
+//! Encoders: a [normalised animation](crate::PixelAnim) in, a scene of paint
+//! groups out. Only how hard they work and how they fail are public
+//! without the `internals` feature.
 
 mod cover;
 mod mask;

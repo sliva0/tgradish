@@ -74,6 +74,7 @@ pub enum Effort {
     Best,
 }
 
+/// What the painter may do, to compare encodings by.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// Keep shapes alive over frames where they don't change. Without it,
@@ -85,6 +86,7 @@ pub struct Settings {
     /// Draw a shape that comes back later once, in a layer hidden in
     /// between.
     pub reuse: bool,
+    /// How hard to look for a small encoding.
     pub effort: Effort,
 }
 
@@ -116,13 +118,23 @@ const _: () = assert!(
 const MAX_GROUP_RECTS: usize = min(TLOTTIE.max_paint_source_items_per_layer, MAX_SHAPES - 3);
 const MAX_LAYERS: usize = min(TLOTTIE.max_painted_shape_layers, telegram::MAX_LAYERS);
 
+/// Why the encoder couldn't draw an animation.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum EncodeError {
+    /// One colour in one frame takes more rectangles than one group holds.
     #[error("a colour needs {rects} rectangles in one frame, Telegram allows {MAX_GROUP_RECTS}")]
-    TooManyRects { rects: usize },
+    TooManyRects {
+        /// How many it takes.
+        rects: usize,
+    },
+    /// More layers than Telegram takes, even with every frame drawn whole.
     #[error("the animation needs {layers} layers, Telegram allows {MAX_LAYERS}")]
-    TooManyLayers { layers: usize },
+    TooManyLayers {
+        /// How many it takes.
+        layers: usize,
+    },
+    /// Asked to stop.
     #[error("cancelled")]
     Cancelled,
 }

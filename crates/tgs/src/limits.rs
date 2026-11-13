@@ -12,6 +12,7 @@
 pub mod telegram {
     /// The canvas is exactly this many pixels wide and high.
     pub const CANVAS: u32 = 512;
+    /// Frames a second; 30 is accepted too, against the rules.
     pub const FPS: u32 = 60;
     /// At most 3 seconds at 60 fps: `op - ip <= 180`.
     pub const MAX_FRAMES: u32 = 180;
@@ -62,26 +63,36 @@ pub const MAX_RAW_JSON: usize = 2 * 1024 * 1024;
 /// near.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RendererLimits {
+    /// Bytes of JSON.
     pub max_input_bytes: usize,
     /// Arrays and objects inside each other in the JSON.
     pub max_nesting_depth: usize,
+    /// Layers, those of precomps too.
     pub max_layers: usize,
     /// Shape layers that paint something.
     pub max_painted_shape_layers: usize,
+    /// Shape items in one layer: groups, their fills and transforms, and
+    /// what they draw.
     pub max_shapes_per_layer: usize,
     /// Fills and strokes per layer.
     pub max_paints_per_layer: usize,
     /// Geometry items (rectangles, paths) that paints in one layer draw.
     pub max_paint_source_items_per_layer: usize,
+    /// Vertices of one path, and of each of its tangents.
     pub max_path_points: usize,
+    /// How far from 0 a path's points may be.
     pub max_path_coordinate_abs: f32,
+    /// Keyframes of one property.
     pub max_keyframes: usize,
+    /// Assets, such as precomps.
     pub max_assets: usize,
+    /// Layers once precomps are expanded where they are used.
     pub max_precomp_expansion: usize,
     /// Groups inside groups; a constant in tlottie (`MAX_GROUP_DEPTH`).
     pub max_group_depth: usize,
 }
 
+/// tlottie's limits, at the version tgs-lab checks renders with.
 pub const TLOTTIE: RendererLimits = RendererLimits {
     max_input_bytes: 16 << 20,
     max_nesting_depth: 175,

@@ -14,6 +14,7 @@ use crate::scene::FillRule;
 const FPS: u32 = crate::limits::telegram::FPS;
 const CANVAS: u32 = crate::limits::telegram::CANVAS;
 
+/// A whole sticker as Lottie: what [`crate::layout`] makes of a scene.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Animation {
     /// The top-level `nm`, where tgradish signs its output.
@@ -36,6 +37,7 @@ pub struct Style {
     pub rect_roundness: bool,
 }
 
+/// A shape layer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
     /// `ln`, a name renderers don't use; carries tgradish's mark in
@@ -43,10 +45,12 @@ pub struct Layer {
     pub id: Option<String>,
     /// Shown for frames `from..to`: `ip` and `op`.
     pub from: u32,
+    /// See `from`.
     pub to: u32,
     /// Spans of frames within those where the layer is hidden after all,
     /// in order: hold keyframes on its opacity.
     pub hidden: Vec<(u32, u32)>,
+    /// Where its coordinates land on the canvas.
     pub transform: Transform,
     /// Top first.
     pub items: Vec<Item>,
@@ -55,31 +59,39 @@ pub struct Layer {
 /// Maps layer coordinates onto the canvas: `position + scale * point`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Transform {
+    /// Canvas pixels of the layer's 0, across and down.
     pub position: [f64; 2],
     /// Canvas pixels per layer unit, across and down.
     pub scale: [f64; 2],
 }
 
+/// A shape item.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     /// Drawn top first; ends with its fill and an [`Item::GroupTransform`],
     /// which has opacity keyframes only when the group is hidden while its
     /// layer shows, as a shape drawn once for several spans of frames is.
     Group(Vec<Item>),
+    /// A rectangle, in layer coordinates.
     Rect {
+        /// Its middle.
         centre: [f64; 2],
+        /// Its width and height.
         size: [f64; 2],
     },
     /// A closed outline with straight edges.
     Path(Vec<[f64; 2]>),
     /// Straight RGBA; translucent colours become fill opacity.
     Fill {
+        /// The colour.
         colour: [u8; 4],
+        /// How the shapes before it fill.
         rule: FillRule,
     },
     /// The transform every group needs, empty but for hold keyframes on
     /// its opacity, `(frame, percent)`, when the group is hidden at times.
     GroupTransform {
+        /// Hold keyframes, `(frame, percent)`.
         opacity: Vec<(u32, u8)>,
     },
 }
