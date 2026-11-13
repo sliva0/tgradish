@@ -665,7 +665,8 @@ impl<'a> Painter<'a> {
     }
 
     /// [`Painter::greedy_order`], working out only the costs a step can
-    /// change when `cached`.
+    /// change when `cached`. Encoding always caches; working out every
+    /// cost again is for the test that checks caching changes nothing.
     fn greedy(&self, colours: &[u16], cached: bool) -> Vec<u16> {
         let mut everything = vec![self.empty(); self.frames()];
         for &colour in colours.iter().filter(|&&c| self.opaque(c)) {
