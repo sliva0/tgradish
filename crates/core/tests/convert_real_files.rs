@@ -102,8 +102,15 @@ fn keeps_intermediate_files_whatever_comes_of_them() {
             ..Request::new(input.clone())
         };
         let made = Options { length: Some(0.5), ..fast(Fit::Off) };
-        let outcome = convert(backend, &request(made), &CancelToken::new(), &mut |_| {}).unwrap();
-        let kept = outcome.temp_dir.expect("kept");
+        let mut said = None;
+        let outcome = convert(backend, &request(made), &CancelToken::new(), &mut |event| {
+            if let Event::Finished { temp_dir, .. } = event {
+                said = temp_dir;
+            }
+        });
+        let kept = outcome.unwrap().temp_dir.expect("kept");
+        // the event says where, as the outcome does
+        assert_eq!(said.as_ref(), Some(&kept), "{name}");
         assert!(kept.join("attempt-01.webm").exists(), "{name}");
         std::fs::remove_dir_all(kept).unwrap();
 

@@ -887,6 +887,7 @@ fn encode_in(
 
     let info = webm::inspect(&bytes)?;
     let issues = telegram::check(&info, plan.target);
+    let temp_dir = request.keep_temp.then(|| dir.to_path_buf());
     on_event(Event::Finished {
         output: plan.output.clone(),
         bytes: info.file_size,
@@ -894,6 +895,7 @@ fn encode_in(
         params: best.params,
         spoofed,
         issues: issues.clone(),
+        temp_dir: temp_dir.clone(),
     });
     Ok(Outcome {
         output: plan.output,
@@ -902,7 +904,7 @@ fn encode_in(
         params: best.params,
         spoofed,
         issues,
-        temp_dir: request.keep_temp.then(|| dir.to_path_buf()),
+        temp_dir,
     })
 }
 
