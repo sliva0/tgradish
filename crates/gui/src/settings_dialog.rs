@@ -65,8 +65,8 @@ impl SettingsDialog {
     }
 }
 
-/// Shows the dialog if it is open. `ffmpeg_given` says the command line
-/// that started the window chose its ffmpeg, over the settings'.
+/// Shows the dialog if it is open. `ffmpeg_given` says an ffmpeg was given
+/// as the window was started, which it uses over the settings'.
 pub(crate) fn show(
     ctx: &egui::Context,
     dialog: &mut SettingsDialog,
@@ -178,9 +178,9 @@ fn sections(
                 .on_hover_text(fl!("check", "hint"))
                 .clicked();
             if clicked {
-                // the settings being edited, even where the command line
-                // chose another ffmpeg for this run: Check sits beside
-                // them, and Save keeps them
+                // the settings being edited, even where another ffmpeg
+                // was given for this run: Check sits beside them, and
+                // Save keeps them
                 let ffmpeg = config.ffmpeg.clone();
                 dialog.checking = Some(Task::spawn(ui.ctx(), move |cancel| {
                     Ok(check_ffmpeg(ffmpeg.choice, ffmpeg.path.as_deref(), cancel))
@@ -458,7 +458,7 @@ mod tests {
         harness.state_mut().ffmpeg_override = (Some(FfmpegChoice::System), None);
         harness.state_mut().settings_dialog.open();
         harness.run_steps(2);
-        harness.get_by_label_contains("ffmpeg its command line gave");
+        harness.get_by_label_contains("ffmpeg given as tgradish was started");
         harness.get_by_label("Check").click_accesskit();
         harness.run_steps(2);
         // what it finds is taken in as the window draws

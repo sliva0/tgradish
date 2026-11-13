@@ -63,8 +63,9 @@ pub(crate) struct App {
     /// seconds, to notice one installed meanwhile, or when the settings
     /// change.
     pub(crate) found_backend: std::cell::RefCell<Option<FoundBackend>>,
-    /// The ffmpeg the command line chose, over the config's for this run
-    /// alone, so Settings doesn't save it.
+    /// The ffmpeg given as the window was started, by the command line or
+    /// `TGRADISH_FFMPEG`, over the config's for this run alone, so
+    /// Settings doesn't save it.
     pub(crate) ffmpeg_override: (Option<FfmpegChoice>, Option<PathBuf>),
     /// The ffmpeg inputs were last read with, or why there was none: when
     /// it changes, reads that failed are tried again.

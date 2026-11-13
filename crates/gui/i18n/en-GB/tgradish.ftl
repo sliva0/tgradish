@@ -671,8 +671,9 @@ no-home = There is no home folder to keep settings in
 about-and-licences = About and licences…
 settings-note = Changes apply now; "{ save }" keeps them between restarts
 # Under the ffmpeg heading, when tgradish was started with --ffmpeg or
-# --ffmpeg-from, which this run uses over the settings below.
-ffmpeg-given = This run uses the ffmpeg its command line gave; these settings apply when started without one
+# --ffmpeg-from, or with the TGRADISH_FFMPEG environment variable set,
+# which this run uses over the settings below.
+ffmpeg-given = This run uses the ffmpeg given as tgradish was started; these settings apply when it is started without one
 ffmpeg-use = Use
     .hint = Videos are read, and WebM stickers made, with ffmpeg
 ffmpeg-auto = Automatic
