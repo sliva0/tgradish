@@ -11,6 +11,7 @@
 
 mod blend;
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::time::Duration;
 
@@ -258,6 +259,86 @@ struct Tileset {
     /// Tile 0 is the empty tile; in older files it is `0xffffffff`.
     zero_is_empty: bool,
     pixels: Vec<u8>,
+}
+
+/// A rectangle of the canvas, from its left and top edges up to its right
+/// and bottom ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Bounds {
+    left: usize,
+    top: usize,
+    right: usize,
+    bottom: usize,
+}
+
+impl Bounds {
+    /// The part of a `width` by `height` rectangle at `x, y` that is on
+    /// this one, if any is.
+    fn clip(&self, (x, y): (i64, i64), (width, height): (usize, usize)) -> Option<Bounds> {
+        let side = |from: usize, to: usize, at: i64, size: usize| {
+            let start = at.max(from as i64);
+            let end = at.saturating_add(size as i64).min(to as i64);
+            (start < end).then_some((start as usize, end as usize))
+        };
+        let (left, right) = side(self.left, self.right, x, width)?;
+        let (top, bottom) = side(self.top, self.bottom, y, height)?;
+        Some(Bounds { left, top, right, bottom })
+    }
+
+    /// The smallest rectangle holding both.
+    fn union(self, other: Bounds) -> Bounds {
+        Bounds {
+            left: self.left.min(other.left),
+            top: self.top.min(other.top),
+            right: self.right.max(other.right),
+            bottom: self.bottom.max(other.bottom),
+        }
+    }
+
+    fn width(&self) -> usize {
+        self.right - self.left
+    }
+}
+
+/// A part of the canvas that is drawn on: all of it for a frame, and for a
+/// group composited on its own, only what its layers cover.
+struct Surface {
+    bounds: Bounds,
+    pixels: Vec<Colour>,
+}
+
+impl Surface {
+    fn new(bounds: Bounds) -> Surface {
+        let pixels = vec![[0; 4]; bounds.width() * (bounds.bottom - bounds.top)];
+        Surface { bounds, pixels }
+    }
+
+    /// One row of it, from `left` to `right` on the canvas.
+    fn row(&mut self, y: usize, left: usize, right: usize) -> &mut [Colour] {
+        let start = (y - self.bounds.top) * self.bounds.width();
+        &mut self.pixels[start + left - self.bounds.left..start + right - self.bounds.left]
+    }
+
+    /// Draws `over`, which lies within this one, onto it.
+    fn blend(&mut self, over: &Surface, mode: fn(Colour, Colour, u8) -> Colour, opacity: u8) {
+        let Bounds { left, top, right, .. } = over.bounds;
+        for (row, line) in over.pixels.chunks_exact(over.bounds.width()).enumerate() {
+            for (back, &src) in self.row(top + row, left, right).iter_mut().zip(line) {
+                *back = mode(*back, src, opacity);
+            }
+        }
+    }
+}
+
+/// What a frame draws: for the top level and each group something is
+/// drawn in, the layers in it that draw something, and for each such group
+/// the part of the canvas its layers cover. Built from the frame's cels, so
+/// layers and groups with nothing in the frame cost nothing.
+#[derive(Debug, Default)]
+struct Plan {
+    /// By parent, the top level as the number of layers.
+    children: HashMap<usize, Vec<usize>>,
+    bounds: HashMap<usize, Bounds>,
 }
 
 /// A parsed Aseprite file.
@@ -639,7 +720,13 @@ impl Sprite {
     /// The frames of `tag`, or all frames, with the layers the file shows
     /// and `layers` changes.
     pub fn animation(&self, tag: Option<&str>, layers: &Layers) -> Result<Animation> {
-        let shown = self.shown(layers)?;
+        // a hidden group hides what is in it; groups come before their layers
+        let mut shown = self.shown(layers)?;
+        for index in 0..shown.len() {
+            if let Some(parent) = self.layers[index].parent {
+                shown[index] &= shown[parent];
+            }
+        }
         let order: Vec<u32> = match tag {
             None => (0..self.frames.len() as u32).collect(),
             Some(name) => self
@@ -687,57 +774,114 @@ impl Sprite {
         }
     }
 
-    /// A frame, with the layers `shown` says.
-    fn render(&self, frame: usize, shown: &[bool]) -> Result<Vec<Colour>> {
-        let mut canvas = vec![[0; 4]; self.width as usize * self.height as usize];
-        self.draw_children(self.layers.len(), frame, shown, &mut canvas)?;
-        Ok(canvas)
+    /// The whole canvas.
+    fn canvas(&self) -> Bounds {
+        Bounds { left: 0, top: 0, right: self.width as usize, bottom: self.height as usize }
     }
 
-    /// Draws the children of a group (or of the top level) in order.
+    /// A frame, with the layers `shown` says, which are hidden with their
+    /// groups.
+    fn render(&self, frame: usize, shown: &[bool]) -> Result<Vec<Colour>> {
+        let mut canvas = Surface::new(self.canvas());
+        let plan = self.plan(frame, shown);
+        self.draw_children(self.layers.len(), frame, &plan, &mut canvas)?;
+        Ok(canvas.pixels)
+    }
+
+    /// The part of the canvas a layer's cel in a frame covers, if it has
+    /// one and any of it is on the canvas.
+    fn cel_bounds(&self, frame: usize, index: usize) -> Option<Bounds> {
+        let (cel, content) = self.cel(frame, index)?;
+        let size = match content {
+            Content::Image { width, height, .. } => (*width, *height),
+            Content::Tilemap { width, tiles, .. } => {
+                let LayerKind::Tilemap { tileset } = self.layers[index].kind else { return None };
+                // checked when reading: the tileset exists
+                let set = self.tilesets.iter().find(|t| t.id == tileset).unwrap();
+                let rows = tiles.len().checked_div(*width).unwrap_or(0);
+                (width.saturating_mul(set.width), rows.saturating_mul(set.height))
+            }
+            Content::Linked(_) => return None,
+        };
+        self.canvas().clip((cel.x, cel.y), size)
+    }
+
+    /// What a frame draws of the layers `shown` says.
+    fn plan(&self, frame: usize, shown: &[bool]) -> Plan {
+        let mut plan = Plan::default();
+        for stored in &self.frames[frame].1 {
+            let index = stored.layer;
+            if !shown[index] || self.layers[index].kind == LayerKind::Group {
+                continue;
+            }
+            let Some(bounds) = self.cel_bounds(frame, index) else { continue };
+            // the layer, then each group it is in, joins its parent's list
+            // the first time it is met
+            let (mut child, mut new) = (index, true);
+            loop {
+                let parent = self.layers[child].parent;
+                if new {
+                    plan.children
+                        .entry(parent.unwrap_or(self.layers.len()))
+                        .or_default()
+                        .push(child);
+                }
+                let Some(group) = parent else { break };
+                new = !plan.bounds.contains_key(&group);
+                plan.bounds.entry(group).and_modify(|b| *b = b.union(bounds)).or_insert(bounds);
+                child = group;
+            }
+        }
+        plan
+    }
+
+    /// Draws the layers of a group (or of the top level) that `plan` says
+    /// draw something, in order.
     fn draw_children(
         &self,
         parent: usize,
         frame: usize,
-        shown: &[bool],
-        canvas: &mut [Colour],
+        plan: &Plan,
+        canvas: &mut Surface,
     ) -> Result<()> {
+        let Some(children) = plan.children.get(&parent) else { return Ok(()) };
         // a cel's z-index moves it among the layers, as Aseprite orders them
-        let mut order: Vec<(i64, i64, usize)> = self.children[parent]
+        let mut order: Vec<(i64, i64, usize)> = children
             .iter()
             .map(|&index| {
-                let z = self.stored_cel(frame, index).map_or(0, |cel| cel.z);
+                let z = match self.layers[index].kind {
+                    LayerKind::Group => 0,
+                    _ => self.stored_cel(frame, index).map_or(0, |cel| cel.z),
+                };
                 (index as i64 + z, z, index)
             })
             .collect();
         order.sort_unstable();
         for (_, _, index) in order {
             let layer = &self.layers[index];
-            if !shown[index] {
-                continue;
-            }
             let opacity = if self.layer_opacity { layer.opacity } else { 255 };
             let mode = blend::by_number(layer.blend)
                 .ok_or_else(|| error(format!("unknown blend mode {}", layer.blend)))?;
             match layer.kind {
+                // only over what its layers cover: a canvas of the frame's
+                // size for every group let a small file of many groups on a
+                // large canvas take hours
                 LayerKind::Group if self.composite_groups => {
-                    let mut group = vec![[0; 4]; canvas.len()];
-                    self.draw_children(index, frame, shown, &mut group)?;
-                    for (back, src) in canvas.iter_mut().zip(group) {
-                        *back = mode(*back, src, opacity);
-                    }
+                    let mut group = Surface::new(plan.bounds[&index]);
+                    self.draw_children(index, frame, plan, &mut group)?;
+                    canvas.blend(&group, mode, opacity);
                 }
-                LayerKind::Group => self.draw_children(index, frame, shown, canvas)?,
+                LayerKind::Group => self.draw_children(index, frame, plan, canvas)?,
                 LayerKind::Image | LayerKind::Tilemap { .. } => {
-                    if let Some((cel, content)) = self.cel(frame, index) {
-                        let paint = Paint {
-                            background: layer.background,
-                            opacity: blend::mul_un8(cel.opacity.into(), opacity.into()) as u8,
-                            mode,
-                            palette: &self.palettes[self.frame_palettes[frame]],
-                        };
-                        self.draw_cel(cel, content, layer, &paint, canvas)?;
-                    }
+                    // the plan holds only layers with cels
+                    let (cel, content) = self.cel(frame, index).unwrap();
+                    let paint = Paint {
+                        background: layer.background,
+                        opacity: blend::mul_un8(cel.opacity.into(), opacity.into()) as u8,
+                        mode,
+                        palette: &self.palettes[self.frame_palettes[frame]],
+                    };
+                    self.draw_cel(cel, content, layer, &paint, canvas)?;
                 }
             }
         }
@@ -760,24 +904,22 @@ impl Sprite {
         (width, height): (usize, usize),
         (x, y): (i64, i64),
         paint: &Paint,
-        canvas: &mut [Colour],
+        canvas: &mut Surface,
     ) {
+        let Some(Bounds { left, top, right, bottom }) = canvas.bounds.clip((x, y), (width, height))
+        else {
+            return;
+        };
         let bytes = self.depth.bytes();
-        let (canvas_width, canvas_height) = (i64::from(self.width), i64::from(self.height));
-        for row in 0..height {
-            let cy = y + row as i64;
-            if !(0..canvas_height).contains(&cy) {
-                continue;
-            }
-            for column in 0..width {
-                let cx = x + column as i64;
-                if !(0..canvas_width).contains(&cx) {
-                    continue;
-                }
-                let start = (row * width + column) * bytes;
-                let src = self.colour(&pixels[start..start + bytes], paint);
-                let back = &mut canvas[(cy * canvas_width + cx) as usize];
-                *back = (paint.mode)(*back, src, paint.opacity);
+        for cy in top..bottom {
+            // where the row starts in the image, and its first pixel drawn
+            let row = (cy as i64 - y) as usize * width;
+            let column = (left as i64 - x) as usize;
+            let line = &pixels[(row + column) * bytes..(row + column + right - left) * bytes];
+            for (back, pixel) in
+                canvas.row(cy, left, right).iter_mut().zip(line.chunks_exact(bytes))
+            {
+                *back = (paint.mode)(*back, self.colour(pixel, paint), paint.opacity);
             }
         }
     }
@@ -788,7 +930,7 @@ impl Sprite {
         content: &Content,
         layer: &Layer,
         paint: &Paint,
-        canvas: &mut [Colour],
+        canvas: &mut Surface,
     ) -> Result<()> {
         match content {
             Content::Image { width, height, pixels } => {
@@ -1214,6 +1356,72 @@ mod tests {
         assert_eq!(pixels(&decode(&group(1 | 2)).unwrap(), 0), [[127, 0, 128, 255]]);
         // otherwise the group's opacity is ignored
         assert_eq!(pixels(&decode(&group(1)).unwrap(), 0), [BLUE]);
+    }
+
+    #[test]
+    fn composites_groups_over_what_they_cover() {
+        // a red background; over it a group at half opacity of a green
+        // pixel and a group, inside it, of a blue pair at its right
+        let bytes = |flags| {
+            file(
+                4,
+                2,
+                32,
+                flags,
+                &[vec![
+                    layer(1 | 8, 0, 0, 0, 255),
+                    layer(1, 1, 0, 0, 128),
+                    layer(1, 0, 1, 0, 255),
+                    layer(1, 1, 1, 0, 255),
+                    layer(1, 0, 2, 0, 255),
+                    // an empty group, and one with only hidden layers
+                    layer(1, 1, 0, 0, 255),
+                    layer(1, 1, 0, 0, 255),
+                    layer(0, 0, 1, 0, 255),
+                    image_cel(0, (0, 0), (4, 2), &[RED; 8].concat(), false),
+                    image_cel(2, (0, 0), (1, 1), &GREEN, false),
+                    image_cel(4, (2, 1), (2, 1), &[BLUE; 2].concat(), false),
+                    image_cel(7, (0, 0), (4, 2), &[GREEN; 8].concat(), false),
+                ]],
+            )
+        };
+        let half_green = [127, 128, 0, 255];
+        let half_blue = [127, 0, 128, 255];
+        assert_eq!(
+            pixels(&decode(&bytes(1 | 2)).unwrap(), 0),
+            [half_green, RED, RED, RED, RED, RED, half_blue, half_blue]
+        );
+        // not composited, the group's opacity is ignored
+        assert_eq!(
+            pixels(&decode(&bytes(1)).unwrap(), 0),
+            [GREEN, RED, RED, RED, RED, RED, BLUE, BLUE]
+        );
+    }
+
+    #[test]
+    fn draws_many_groups_on_a_large_canvas_quickly() {
+        // 30 000 groups on a 1024x1024 canvas, most empty and some of a
+        // pixel each: a canvas each would be 120 billion blends a frame
+        let mut chunks = vec![layer(1, 0, 0, 0, 255)];
+        let mut cels = Vec::new();
+        for group in 0..30_000u16 {
+            chunks.push(layer(1, 1, 0, 0, 200));
+            if group % 100 == 0 {
+                chunks.push(layer(1, 0, 1, 0, 255));
+                let at = (group / 100) as i16;
+                cels.push(image_cel(chunks.len() as u16 - 1, (at, at), (1, 1), &BLUE, true));
+            }
+        }
+        chunks.push(image_cel(0, (0, 0), (1, 1), &RED, true));
+        chunks.extend(cels);
+        let bytes = file(1024, 1024, 32, 1 | 2, &[chunks]);
+        let started = std::time::Instant::now();
+        let animation = decode(&bytes).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+        // the first group's blue at 200 over red
+        assert_eq!(animation.pixel(0, 0, 0), Some([55, 0, 200, 255]));
+        assert_eq!(animation.pixel(0, 299, 299), Some([0, 0, 255, 200]));
+        assert_eq!(animation.pixel(0, 300, 300), Some([0; 4]));
     }
 
     #[test]
