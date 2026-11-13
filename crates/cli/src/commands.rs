@@ -300,7 +300,7 @@ pub fn config(ctx: &Context, command: ConfigCommand, path: Option<PathBuf>) -> R
 pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
     match command {
         FfmpegCommand::Status => {
-            let backend = ctx.backend()?;
+            let backend = ctx.backend().map_err(crate::explain)?;
             let caps = backend.capabilities(&ctx.cancel)?;
             if ctx.global.json {
                 crate::json_line(&json!({ "ffmpeg": backend.info(), "capabilities": caps }));

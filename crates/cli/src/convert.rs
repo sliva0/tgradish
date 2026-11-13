@@ -94,10 +94,12 @@ impl<'a> Converter<'a> {
         };
         let resolved = match presets.resolve(name, format)? {
             FormatOptions::Webm(options) => {
-                Resolved::Webm { options: webm(options)?, backend: ctx.backend()? }
+                let backend = ctx.backend().map_err(crate::explain)?;
+                Resolved::Webm { options: webm(options)?, backend }
             }
             FormatOptions::Image(options) => {
-                Resolved::Image { options: webm(options)?, backend: ctx.backend()? }
+                let backend = ctx.backend().map_err(crate::explain)?;
+                Resolved::Image { options: webm(options)?, backend }
             }
             FormatOptions::Tgs(mut options) => {
                 if let Some(json) = &args.options_json {
@@ -311,10 +313,7 @@ impl<'a> Converter<'a> {
 /// Adds hints to errors where the CLI knows what to do about them.
 fn explain(err: Failed) -> anyhow::Error {
     match err {
-        Failed::Core(tgradish_core::Error::OutputExists(path)) => {
-            anyhow::anyhow!("{} already exists, use --overwrite to replace it", path.display())
-        }
-        Failed::Core(err) => err.into(),
+        Failed::Core(err) => crate::explain(err),
         err => err.into(),
     }
 }

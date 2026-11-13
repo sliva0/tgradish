@@ -38,7 +38,8 @@ fn spawn(
 
     let mut child = cmd.spawn().map_err(|err| match err.kind() {
         std::io::ErrorKind::NotFound => {
-            Error::FfmpegNotFound(format!("{} does not exist", cmd.get_program().display()))
+            let program = std::path::PathBuf::from(cmd.get_program());
+            Error::FfmpegNotFound(crate::error::FfmpegMissing::NoProgram(program))
         }
         _ => Error::Io(err),
     })?;
