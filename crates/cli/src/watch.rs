@@ -28,8 +28,7 @@ fn is_input(path: &Path) -> bool {
     if name.starts_with('.') || name.starts_with('~') {
         return false;
     }
-    let results = [".sticker.webm", ".emoji.webm", ".spoofed.webm", ".sticker.webp", ".emoji.webp"];
-    if results.iter().any(|s| name.ends_with(s)) {
+    if input::is_result_name(path) || name.ends_with(crate::commands::SPOOFED) {
         return false;
     }
     let extension = input::extension(path);

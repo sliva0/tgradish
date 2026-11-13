@@ -20,11 +20,14 @@ use crate::Context;
 use crate::args::{ConfigCommand, FfmpegCommand, InspectArgs, PresetCommand, SpoofArgs};
 use crate::ui;
 
+/// What `spoof` puts after the name of a WebM it writes beside the input.
+pub const SPOOFED: &str = ".spoofed.webm";
+
 pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
     let output = match (&args.output, args.in_place) {
         (_, true) => args.input.clone(),
         (Some(output), false) => output.clone(),
-        (None, false) => args.input.with_extension("spoofed.webm"),
+        (None, false) => args.input.with_extension(&SPOOFED[1..]),
     };
     if !args.in_place && !args.overwrite && output != args.input && output.exists() {
         bail!("{} already exists, use --overwrite to replace it", output.display());

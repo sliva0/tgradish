@@ -92,6 +92,20 @@ fn result_suffix(format: Format, target: Target) -> String {
     format!("{}.{}", target.name(), format.extension())
 }
 
+/// Whether `path` is named as a result is by default, as
+/// `pig.sticker.webm` or `walk.emoji.tgs`, of any format and target: what
+/// a watched folder fills with, which isn't converted again.
+pub fn is_result_name(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else { return false };
+    let name = name.to_lowercase();
+    let formats = [Format::Webm, Format::Webp, Format::Tgs];
+    formats.into_iter().any(|format| {
+        [Target::Sticker, Target::Emoji]
+            .into_iter()
+            .any(|target| name.ends_with(&format!(".{}", result_suffix(format, target))))
+    })
+}
+
 /// Videos, and TIFF pictures, which only ffmpeg reads: for any sticker,
 /// animated ones from the frames ffmpeg reads.
 pub const VIDEOS: &[&str] =
@@ -134,6 +148,12 @@ mod tests {
             Path::new("walk/2.emoji.tgs")
         );
         assert_eq!(Input::Sequence(Vec::new()).first(), Path::new(""));
+        for name in ["pig.sticker.webm", "PIG.EMOJI.WEBP", "walk.sticker.tgs"] {
+            assert!(is_result_name(Path::new(name)), "{name}");
+        }
+        for name in ["pig.webm", "sticker.webm", "walk.tgs", "pig.sticker.mp4"] {
+            assert!(!is_result_name(Path::new(name)), "{name}");
+        }
     }
 
     #[test]
