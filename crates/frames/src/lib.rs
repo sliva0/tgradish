@@ -10,11 +10,11 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-mod aseprite;
+pub mod aseprite;
 mod raster;
 mod sheet;
 
-pub use aseprite::{Direction, LayerInfo, Layers, Sprite, Tag};
+use aseprite::{Layers, Sprite};
 pub use sheet::{Sheet, sequence, split_sheet, sprite_sheet};
 
 /// Duration of still images in an animation when nothing else says how long

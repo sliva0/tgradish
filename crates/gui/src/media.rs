@@ -14,7 +14,7 @@ use tgradish_core::ffmpeg::Probe;
 use tgradish_core::options::Options;
 use tgradish_core::preview::Preview;
 use tgradish_core::tgs::{self, TgsOptions};
-use tgradish_tgs::frames::{LayerInfo, Tag};
+use tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 
 use crate::jobs::failure;
 use crate::l10n::fl;

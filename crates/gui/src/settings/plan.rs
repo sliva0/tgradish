@@ -10,7 +10,7 @@ use tgradish_core::presets::Format;
 use tgradish_core::telegram;
 use tgradish_core::tgs::TgsOptions;
 
-use tgradish_tgs::frames::Direction;
+use tgradish_tgs::frames::aseprite::Direction;
 
 use super::Context;
 use crate::item::{Item, Kind};

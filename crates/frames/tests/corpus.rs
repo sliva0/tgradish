@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use tgradish_corpus::{File, Sprite, encode};
 use tgradish_frames::{
-    Animation, DecodeOptions, Error, Layers, Limits, Sheet, decode, sequence, sprite_sheet,
+    Animation, DecodeOptions, Error, Limits, Sheet, aseprite::Layers, decode, sequence,
+    sprite_sheet,
 };
 
 fn file(name: &str) -> File {
@@ -59,7 +60,7 @@ fn plays_aseprite_tags() {
     let idle = decode(&ase.bytes, &tagged).unwrap();
     assert_eq!(idle.frames().len(), 2);
     assert_frames(&idle, &ase.sprite, 0, "idle");
-    let sprite = tgradish_frames::Sprite::read(&ase.bytes).unwrap();
+    let sprite = tgradish_frames::aseprite::Sprite::read(&ase.bytes).unwrap();
     assert_eq!(sprite.tags()[0].colour, tgradish_corpus::encode::TAG_COLOURS[0]);
     let missing = DecodeOptions { tag: Some("run".into()), ..DecodeOptions::default() };
     assert!(matches!(decode(&ase.bytes, &missing), Err(Error::NoSuchTag { .. })));

@@ -7,7 +7,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use tgradish_tgs::frames::{self, Animation, LayerInfo, Layers, Limits, Tag};
+use tgradish_tgs::frames::aseprite::{LayerInfo, Layers, Sprite, Tag};
+use tgradish_tgs::frames::{self, Animation, Limits};
 
 use crate::CancelToken;
 use crate::error::{Error, Result};
@@ -32,7 +33,7 @@ pub(crate) fn aseprite(
     layers: &Layers,
     limits: &Limits,
 ) -> frames::Result<(Animation, Aseprite)> {
-    let sprite = frames::Sprite::read_with(bytes, limits)?;
+    let sprite = Sprite::read_with(bytes, limits)?;
     let animation = sprite.animation(tag, layers)?;
     let durations = sprite.durations().iter().map(Duration::as_secs_f64).collect();
     Ok((animation, Aseprite { tags: sprite.tags().to_vec(), layers: sprite.layers(), durations }))

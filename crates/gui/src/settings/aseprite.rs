@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use eframe::egui::{self, RichText};
 use tgradish_core::presets::Format;
-use tgradish_tgs::frames::{Direction, LayerInfo, Tag};
+use tgradish_tgs::frames::aseprite::{Direction, LayerInfo, Tag};
 
 use super::Context;
 use crate::item::{Choices, Item};

@@ -10,7 +10,7 @@ use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Spoof};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::tgs::TgsOptions;
-use tgradish_tgs::frames::{LayerInfo, Tag};
+use tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 
 use crate::jobs::{Done, Job};
 use crate::l10n::fl;
