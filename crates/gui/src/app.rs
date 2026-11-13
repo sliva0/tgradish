@@ -758,6 +758,47 @@ mod tests {
     }
 
     #[test]
+    fn shows_a_result_of_last_time_as_it_was_made() {
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        let state = dir.path().join("state").join("session.json");
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut first = harness(config.clone());
+        first.state_mut().reopen(state.clone());
+        first.state_mut().add(vec![art]);
+        finish(&mut first);
+        {
+            let item = &mut first.state_mut().items[0];
+            (item.format, item.format_guessed) = (Format::Webp, false);
+            item.choices.target = telegram::Target::Emoji;
+        }
+        first.run_steps(2);
+        convert(&first);
+        first.run_steps(2);
+        finish(&mut first);
+        first.state_mut().save_session();
+        drop(first);
+
+        let mut second = harness(config);
+        second.state_mut().reopen(state);
+        finish(&mut second);
+        let item = &second.state().items[0];
+        assert!(item.result_is_current());
+        assert_eq!(item.made.as_ref().map(|made| made.format), Some(Format::Webp));
+        // checked as an emoji, which a sticker's size isn't
+        let Some(crate::jobs::Status::Done(done)) = item.made.as_ref().map(|made| &made.job.status)
+        else {
+            panic!("not made");
+        };
+        assert!(done.problems.is_empty(), "{:?}", done.problems);
+        second.get_by_label_contains("Telegram should accept it");
+        // and shown
+        assert!(item.result_clip.ready().is_some() && item.result_thumb.is_some());
+    }
+
+    #[test]
     fn stops_converting_when_the_window_closes() {
         let dir = tempfile::tempdir().unwrap();
         let Some(video) = crate::testing::video_of(dir.path(), "1280x720", 8) else { return };

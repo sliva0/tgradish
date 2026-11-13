@@ -11,7 +11,7 @@ use tgradish_core::webm::Options;
 
 use super::Context;
 use crate::canvas::{Exact, Keep};
-use crate::item::{Aspect, Item};
+use crate::item::{Aspect, Item, Recipe};
 use crate::l10n::fl;
 use crate::widgets::{
     self, Choice, Pick, chosen_hint, flag, note, preset_number, preset_picking, preset_segments,
@@ -248,11 +248,9 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             });
             // what the last conversion found, if it looked for it: neither
             // the item nor its preset said
-            let looked = |made: &&crate::item::Conversion| {
-                let preset = made.choices.tgs_base(presets, config);
-                made.format == Format::Tgs
-                    && made.choices.tgs.pixel_scale.is_none()
-                    && preset.is_ok_and(|preset| preset.pixel_scale.is_none())
+            let looked = |made: &&crate::item::Conversion| match &made.recipe {
+                Some(Recipe::Tgs(options)) => options.pixel_scale.is_none(),
+                _ => false,
             };
             let detected = item
                 .made

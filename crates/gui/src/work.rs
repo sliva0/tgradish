@@ -230,7 +230,9 @@ impl App {
         }
         while let Some(id) = self.queue.pop_front() {
             let Some(item) = self.item(id) else { continue };
-            let Some(Conversion { job, format, choices, .. }) = &item.job else { continue };
+            let Some(Conversion { job, format, choices: Some(choices), .. }) = &item.job else {
+                continue;
+            };
             let recipe = choices.recipe(*format, &self.presets, &self.config);
             let setup = recipe.clone().and_then(|recipe| match recipe {
                 Recipe::Webm(options) => {
@@ -325,7 +327,7 @@ fn check_earlier(ctx: &egui::Context, item: &mut Item) {
     let Some((earlier, load)) = &mut item.earlier else { return };
     if load.is_idle() {
         let (output, format) = (earlier.job.output.clone(), earlier.format);
-        let target = earlier.choices.target;
+        let target = earlier.recipe.as_ref().map(Recipe::target).unwrap_or_default();
         load.reload(media::Task::spawn(ctx, move |_| {
             Done::of_file(&output, format, target).ok_or_else(String::new)
         }));
