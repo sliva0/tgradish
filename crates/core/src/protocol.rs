@@ -6,7 +6,7 @@
 //! - Every `--json` output is JSON Lines: one compact object per line.
 //!   `convert` and `watch` print an event a line, as the description's
 //!   schemas give them, `inspect` a file a line, `preset list` a preset a
-//!   line, and other commands one line.
+//!   line, `licenses` a notice a line, and other commands one line.
 //! - A tagged union names its tag by what it distinguishes: `event` for
 //!   events, `format` for what `inspect` found, `kind` for issues,
 //!   encodings and ffmpeg backends, `mode` for an encode's rate control.

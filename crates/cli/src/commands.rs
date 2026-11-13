@@ -217,12 +217,19 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
     Ok(())
 }
 
-/// Prints every licence notice this build carries.
-pub fn licenses() {
+/// Prints every licence notice this build carries; as JSON, a notice a
+/// line.
+pub fn licenses(ctx: &Context) {
     #[cfg(feature = "gui")]
     let notices = tgradish_gui::notices();
     #[cfg(not(feature = "gui"))]
     let notices = tgradish_core::licenses::notices();
+    if ctx.global.json {
+        for notice in &notices {
+            crate::json_line(&json!({ "title": notice.title, "text": notice.text }));
+        }
+        return;
+    }
     for (index, notice) in notices.iter().enumerate() {
         if index > 0 {
             outln!();
