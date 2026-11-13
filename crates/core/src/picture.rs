@@ -91,7 +91,9 @@ pub fn exact_sizes(
     let (box_w, box_h) = target.box_size();
     let invalid = |reason: String| Error::invalid("exact-scale", reason);
     if !scale.is_valid() {
-        return Err(invalid(format!("{scale} has a side of 0: use N or 1/N")));
+        // written out, as none is written as nothing
+        let ExactScale { up, down } = scale;
+        return Err(invalid(format!("{up}/{down} has a side of 0: use N or 1/N")));
     }
     let (Some(width), Some(height)) = (scale.apply(used.0), scale.apply(used.1)) else {
         let down = scale.down;

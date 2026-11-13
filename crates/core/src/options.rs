@@ -299,17 +299,22 @@ pub struct ExactScale {
 }
 
 impl ExactScale {
-    /// No exact scale, over options below that have one, as a preset's:
-    /// written as nothing, as `--exact-scale=` gives it. Layering options
-    /// by `merged` leaves none in its place, so what converts never sees
-    /// it; with no options below, it is the same as none.
+    /// Not a scale, but what clears one: options layered over a preset or
+    /// the config file can't otherwise say that the scale below has no
+    /// say, as leaving it out keeps it. Written as nothing: `--exact-scale=`,
+    /// `exact-scale = ''` or `"exact-scale": ""`. `merged` leaves no scale
+    /// in its place, so presets, the command line and the window never hand
+    /// it on; and where options holding it aren't merged, the options'
+    /// `exact_scale()` leaves it out, so it scales as no scale does.
     pub const NONE: ExactScale = ExactScale { up: 0, down: 0 };
 
     /// The largest scale either way: a pixel to a whole sticker side.
     pub const MAX: u32 = 512;
 
     /// Whether it scales by anything: a scale made in code with a side of
-    /// 0 makes no pixels, and planning refuses it.
+    /// 0 makes no pixels, and planning refuses it. [`ExactScale::NONE`]
+    /// isn't valid either, as it is no scale, which planning never sees as
+    /// one.
     pub fn is_valid(self) -> bool {
         self.up > 0 && self.down > 0
     }
@@ -401,8 +406,8 @@ impl JsonSchema for ExactScale {
         schemars::json_schema!({
             "type": "string",
             "pattern": r"^([1-9][0-9]*|1/[1-9][0-9]*|)$",
-            "description": "N result pixels for each input pixel, or 1/N; nothing for none, over \
-                            a preset's"
+            "description": "N result pixels for each input pixel, or 1/N, with N up to 512; \
+                            nothing for none, which clears a preset's"
         })
     }
 }
@@ -584,8 +589,9 @@ mod tests {
             let preset = format!("exact-scale = '{text}'");
             assert!(toml::from_str::<Options>(&preset).is_err(), "{text}");
         }
-        // as code can still make one
-        for zero in [ExactScale { up: 0, down: 1 }, ExactScale { up: 1, down: 0 }] {
+        // as code can still make one, and none is no scale either
+        let zeros = [ExactScale { up: 0, down: 1 }, ExactScale { up: 1, down: 0 }];
+        for zero in zeros.into_iter().chain([ExactScale::NONE]) {
             assert!(!zero.is_valid());
             assert_eq!((zero.apply(4), zero.most_input(512)), (None, 0), "{zero:?}");
         }
@@ -607,7 +613,15 @@ mod tests {
         assert_eq!(flags(&none), ["--exact-scale="]);
         let read: Options = toml::from_str("exact-scale = ''").unwrap();
         assert_eq!(read, none);
-        assert!(crate::picture::picture_sizes(&none, (8, 8)).is_ok());
+        // and in JSON, as --options-json takes it and describe prints it
+        let json = serde_json::json!({ "exact-scale": "" });
+        assert_eq!(serde_json::from_value::<Options>(json.clone()).unwrap(), none);
+        assert_eq!(serde_json::to_value(&none).unwrap(), json);
+        // what isn't merged scales as none does, not as a scale
+        assert_eq!(none.exact_scale(), None);
+        assert!(none.auto_scaling());
+        let sizes = |options: &Options| crate::picture::picture_sizes(options, (8, 8)).unwrap();
+        assert_eq!(sizes(&none), sizes(&Options::default()));
     }
 
     #[test]
