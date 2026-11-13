@@ -28,7 +28,7 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
         bail!("{} already exists, use --overwrite to replace it", output.display());
     }
     let changes = Patch {
-        duration: Some(args.duration),
+        duration: Some(args.fake_duration),
         title: args.title.clone(),
         muxing_app: args.watermark.then(|| TOOL_ID.to_string()),
         signature: args.watermark.then(tgradish_core::signature),
@@ -42,11 +42,11 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
         crate::json_line(&json!({ "output": output.to_string_lossy(), "report": report }));
         return Ok(());
     }
-    if args.duration > telegram::MAX_SECONDS {
+    if args.fake_duration > telegram::MAX_SECONDS {
         eprintln!(
             "{} {} is longer than {} s, Telegram will still refuse it",
             ui::warning_label(),
-            ui::seconds(args.duration),
+            ui::seconds(args.fake_duration),
             telegram::MAX_SECONDS
         );
     }
@@ -61,7 +61,7 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
             format!(
                 "{}: metadata duration {old} → {}",
                 term::link_out(style(output.display()).bold(), &output),
-                ui::seconds(args.duration)
+                ui::seconds(args.fake_duration)
             )
         )
     );
