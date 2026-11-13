@@ -80,6 +80,9 @@ const BLEND: f32 = 0.3;
 pub(crate) const ROW_SELECTED: f32 = 0.15;
 pub(crate) const ROW_HOVERED: f32 = 0.07;
 
+/// How much of the accent a primary button mixes into its fill.
+const PRIMARY: f32 = 0.45;
+
 /// How far a pressed button's fill moves towards the text colour: a
 /// change of shade, not of colour, so that a button with the keyboard's
 /// focus, which egui draws as pressed, doesn't look chosen.
@@ -180,6 +183,24 @@ pub(crate) fn track(visuals: &egui::Visuals) -> (Color32, Stroke) {
         (mix(scheme.window, scheme.text, 0.05), visuals.widgets.noninteractive.bg_stroke)
     } else {
         (scheme.view, Stroke::NONE)
+    }
+}
+
+/// `visuals` for a primary button, the one way on in its place: its fill
+/// the button colour mixed with the accent, more when hovered or pressed,
+/// and outlined in the accent.
+pub(crate) fn primary(visuals: &mut egui::Visuals) {
+    let accent = accent(visuals);
+    let button = scheme(visuals).button;
+    let outline = Stroke::new(1.0, accent);
+    let widgets = &mut visuals.widgets;
+    for (state, amount) in [
+        (&mut widgets.inactive, PRIMARY),
+        (&mut widgets.hovered, PRIMARY + 0.1),
+        (&mut widgets.active, PRIMARY + 0.2),
+    ] {
+        state.weak_bg_fill = mix(button, accent, amount);
+        state.bg_stroke = outline;
     }
 }
 

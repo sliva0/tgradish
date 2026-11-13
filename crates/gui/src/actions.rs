@@ -97,7 +97,7 @@ impl App {
                     let current = item.result_is_current();
                     let text =
                         if item.made.is_some() { fl!("convert-again") } else { fl!("convert") };
-                    let button = egui::Button::new(RichText::new(text).strong().size(15.0))
+                    let button = egui::Button::new(widgets::medium(ui, text, 15.0))
                         .min_size(vec2(140.0, 32.0))
                         .shortcut_text(fl!("convert-keys"));
                     let hint = if current {
@@ -105,7 +105,7 @@ impl App {
                     } else {
                         fl!("convert-again", "changed")
                     };
-                    if ui.add(button).on_hover_text(hint).clicked() {
+                    if widgets::primary(ui, true, button).on_hover_text(hint).clicked() {
                         convert = true;
                     }
                     if presets_kept {
