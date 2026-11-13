@@ -54,6 +54,8 @@ pub mod normalise;
 pub mod reduce;
 pub mod sticker;
 
+mod grid;
+
 // the interior, with the `internals` feature
 #[cfg(feature = "internals")]
 pub mod layout;
