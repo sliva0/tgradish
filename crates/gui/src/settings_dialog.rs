@@ -130,6 +130,7 @@ pub(crate) fn show(
         // the dialog fits the window, its settings scrolling within
         let room = (ctx.content_rect().height() - 150.0).max(200.0);
         egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
+            widgets::settings_spacing(ui);
             sections(ui, dialog, config, ffmpeg_given, presets);
         });
         ui.separator();
@@ -194,7 +195,7 @@ fn sections(
         ui.horizontal(|ui| {
             let mut text =
                 ffmpeg.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
-            let edit = egui::TextEdit::singleline(&mut text)
+            let edit = widgets::text_field(&mut text)
                 .hint_text(dialog.placeholders.0.as_str())
                 .desired_width(280.0);
             if ui.add(edit).changed() {
@@ -247,7 +248,7 @@ fn sections(
             ui.horizontal(|ui| {
                 let mut text =
                     gui.output_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
-                let edit = egui::TextEdit::singleline(&mut text)
+                let edit = widgets::text_field(&mut text)
                     .hint_text(placeholder.as_str())
                     .desired_width(280.0);
                 if ui.add(edit).changed() {
@@ -261,7 +262,7 @@ fn sections(
             });
         });
         if elsewhere && gui.output_dir.is_none() {
-            note(ui, fl!("in-a-folder", "unchosen"));
+            widgets::hint(ui, fl!("in-a-folder", "unchosen"));
         }
     });
     row(ui, &fl!("existing-files"), &fl!("existing-files", "hint"), Ok(()), |ui| {

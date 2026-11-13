@@ -4,13 +4,13 @@
 
 use std::collections::BTreeMap;
 
-use eframe::egui::{self, RichText};
+use eframe::egui;
 use tgradish_core::webm::Options;
 
 use super::Context;
 use crate::item::Item;
 use crate::l10n::fl;
-use crate::widgets::{self, note, row};
+use crate::widgets::{self, row};
 
 /// libvpx-vp9 options worth knowing, offered to add with a click.
 fn encoder_examples() -> [(&'static str, &'static str, String); 6] {
@@ -25,25 +25,22 @@ fn encoder_examples() -> [(&'static str, &'static str, String); 6] {
 }
 
 pub(super) fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
-    ui.add_space(10.0);
-    egui::CollapsingHeader::new(RichText::new(fl!("encoder-options")).strong())
-        .id_salt("advanced")
-        .show(ui, |ui| {
-            // what the preset sets, which the item's own go over, whole
-            let base = item.choices.webm_base(context.presets, context.config).unwrap_or_default();
-            row(ui, "libvpx-vp9", &fl!("vp9-options"), Ok(()), |ui| {
-                encoder_rows(ui, item.id, &mut item.choices.webm, &base.encoder_options);
-            });
-
-            let system = fl!("ffmpeg-arguments", "system");
-            let allowed = if context.ffmpeg_args { Ok(()) } else { Err(system.as_str()) };
-            row(ui, &fl!("ffmpeg-arguments"), &fl!("ffmpeg-arguments", "hint"), allowed, |ui| {
-                arguments(ui, item.id, &mut item.choices.webm, &base.ffmpeg_args);
-                if !context.ffmpeg_args {
-                    note(ui, system.as_str());
-                }
-            });
+    widgets::folding_section(ui, &fl!("encoder-options"), "advanced", |ui| {
+        // what the preset sets, which the item's own go over, whole
+        let base = item.choices.webm_base(context.presets, context.config).unwrap_or_default();
+        row(ui, "libvpx-vp9", &fl!("vp9-options"), Ok(()), |ui| {
+            encoder_rows(ui, item.id, &mut item.choices.webm, &base.encoder_options);
         });
+
+        let system = fl!("ffmpeg-arguments", "system");
+        let allowed = if context.ffmpeg_args { Ok(()) } else { Err(system.as_str()) };
+        row(ui, &fl!("ffmpeg-arguments"), &fl!("ffmpeg-arguments", "hint"), allowed, |ui| {
+            arguments(ui, item.id, &mut item.choices.webm, &base.ffmpeg_args);
+            if !context.ffmpeg_args {
+                widgets::hint(ui, system.as_str());
+            }
+        });
+    });
 }
 
 /// The rows of an item's encoder options as they are edited, which its map
@@ -99,7 +96,7 @@ fn encoder_rows(
         ui.horizontal(|ui| {
             changed |= ui
                 .add(
-                    egui::TextEdit::singleline(name)
+                    widgets::text_field(name)
                         .hint_text(fl!("vp9-options", "name"))
                         .desired_width(190.0),
                 )
@@ -107,7 +104,7 @@ fn encoder_rows(
             ui.label("=");
             changed |= ui
                 .add(
-                    egui::TextEdit::singleline(value)
+                    widgets::text_field(value)
                         .hint_text(fl!("vp9-options", "value"))
                         .desired_width(150.0),
                 )
@@ -171,7 +168,7 @@ fn arguments(ui: &mut egui::Ui, id: u64, options: &mut Options, preset: &Option<
     let (edit, reset) = ui
         .horizontal(|ui| {
             let edit = ui.add(
-                egui::TextEdit::singleline(&mut text)
+                widgets::text_field(&mut text)
                     .hint_text(fl!("ffmpeg-arguments", "placeholder"))
                     .desired_width(300.0),
             );
@@ -195,7 +192,7 @@ fn arguments(ui: &mut egui::Ui, id: u64, options: &mut Options, preset: &Option<
     }
     if edit.has_focus() {
         if read.is_none() {
-            note(ui, fl!("ffmpeg-arguments", "unfinished"));
+            widgets::hint(ui, fl!("ffmpeg-arguments", "unfinished"));
         }
         ui.data_mut(|data| data.insert_temp(typed_id, text));
     } else {

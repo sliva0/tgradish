@@ -67,6 +67,9 @@ pub(crate) const POSITIVE: Color32 = Color32::from_rgb(39, 174, 96);
 pub(crate) const NEUTRAL: Color32 = Color32::from_rgb(246, 116, 0);
 pub(crate) const NEGATIVE: Color32 = Color32::from_rgb(218, 68, 83);
 
+/// How high buttons and fields are, as Breeze's.
+pub(crate) const CONTROL: f32 = 28.0;
+
 /// Breeze's frame radius, for buttons, fields and dialogs.
 const RADIUS: u8 = 5;
 
@@ -265,7 +268,7 @@ pub(crate) fn apply(ctx: &egui::Context, accent: Option<Color32>) {
             // Breeze's layout spacing and margins, and its buttons' padding
             spacing.item_spacing = vec2(6.0, 6.0);
             spacing.button_padding = vec2(8.0, 4.0);
-            spacing.interact_size.y = 28.0;
+            spacing.interact_size.y = CONTROL;
             spacing.window_margin = egui::Margin::same(10);
             spacing.menu_margin = egui::Margin::same(4);
             // checkboxes and radio buttons, and slider grooves

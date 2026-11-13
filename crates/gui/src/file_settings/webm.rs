@@ -134,12 +134,12 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
             let mut shown = known.unwrap_or(Range { min: 0.0, max: 0.0 });
             let pick = fl!("custom", "hint");
             let (min, max) = (&mut shown.min, &mut shown.max);
-            let low = ui
-                .add_enabled(set.is_some(), bounds.field(min, known.is_some(), set.is_some()))
+            let field = bounds.field(min, known.is_some(), set.is_some());
+            let low = widgets::number_field(ui, set.is_some(), field)
                 .on_disabled_hover_text(pick.as_str());
             ui.label(fl!("range-to"));
-            let high = ui
-                .add_enabled(set.is_some(), bounds.field(max, known.is_some(), set.is_some()))
+            let field = bounds.field(max, known.is_some(), set.is_some());
+            let high = widgets::number_field(ui, set.is_some(), field)
                 .on_disabled_hover_text(pick.as_str());
             if set.is_some() && (low.changed() || high.changed()) {
                 shown.max = shown.max.max(shown.min);
