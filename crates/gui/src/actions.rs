@@ -168,3 +168,133 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+    use tgradish_core::config::Config;
+    use tgradish_core::ffmpeg::FfmpegChoice;
+
+    use super::*;
+    use crate::app::App;
+    use crate::testing::{convert, finish, harness, made_job, square, video_of};
+
+    /// A window with `count` pixel art files, results going to `out`.
+    fn with_art(dir: &std::path::Path, count: usize) -> Harness<'static, App> {
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.join("out"));
+        let mut harness = harness(config);
+        let arts = (0..count)
+            .map(|n| {
+                let art = dir.join(format!("{n}.png"));
+                square(&art, [255, 0, 0, 255]);
+                art
+            })
+            .collect();
+        harness.state_mut().add(arts);
+        finish(&mut harness);
+        harness
+    }
+
+    fn select(harness: &mut Harness<App>, index: usize) {
+        let id = harness.state().items[index].id;
+        harness.state_mut().select(id);
+        harness.run_steps(2);
+    }
+
+    #[test]
+    fn goes_on_past_a_conversion_that_cannot_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = with_art(dir.path(), 3);
+        harness.state_mut().items[1].choices.preset = Some("no such preset".into());
+        harness.run_steps(2);
+        harness.get_by_label_contains("Convert all").click();
+        harness.run_steps(2);
+        finish(&mut harness);
+        let items = &harness.state().items;
+        assert!(items[0].made.is_some() && items[2].made.is_some());
+        let failed = items[1].failed.as_ref().map(|failed| &failed.job.status);
+        assert!(matches!(failed, Some(Status::Failed(_))), "{failed:?}");
+        select(&mut harness, 1);
+        harness.get_by_label_contains("Failed:");
+    }
+
+    #[test]
+    fn takes_a_file_out_of_the_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = with_art(dir.path(), 2);
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        ids.iter().for_each(|&id| harness.state_mut().enqueue(id));
+        // the first as if converting, for as long as it takes, so the
+        // second waits
+        harness.state_mut().queue.pop_front();
+        harness.state_mut().items[0].job.as_mut().unwrap().job.status = Status::Running;
+        select(&mut harness, 1);
+        assert!(harness.query_all_by_label("Next to convert").count() > 0);
+        harness.get_by_label("Cancel").click();
+        harness.run_steps(2);
+        let app = harness.state();
+        assert!(app.queue.is_empty() && app.items[1].job.is_none());
+        assert!(app.items[1].made.is_none() && app.items[1].failed.is_none());
+        assert_eq!(harness.query_all_by_label("Next to convert").count(), 0);
+    }
+
+    #[test]
+    fn goes_on_once_a_file_converting_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = with_art(dir.path(), 2);
+        harness.get_by_label_contains("Convert all").click();
+        harness.run_steps(2);
+        let first = harness.state().items[0].id;
+        assert!(harness.state().items[0].job.as_ref().is_some_and(|c| c.job.is_running()));
+        harness.state_mut().remove(first);
+        finish(&mut harness);
+        let items = &harness.state().items;
+        assert_eq!(items.len(), 1);
+        assert!(made_job(&items[0]).output.ends_with("1.sticker.tgs"));
+    }
+
+    #[test]
+    fn stops_a_conversion() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video_of(dir.path(), "1280x720", 8) else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        convert(&harness);
+        harness.run_steps(2);
+        harness.get_by_label("Stop").click();
+        finish(&mut harness);
+        let item = &harness.state().items[0];
+        let failed = item.failed.as_ref().map(|failed| &failed.job.status);
+        assert!(matches!(failed, Some(Status::Cancelled)), "{failed:?}");
+        assert!(item.made.is_none());
+        harness.get_by_label("Stopped");
+    }
+
+    #[test]
+    fn replaces_a_file_in_the_way_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = with_art(dir.path(), 1);
+        let id = harness.state().items[0].id;
+        harness.state_mut().enqueue(id);
+        // put there after the result's place was worked out
+        let output = harness.state().items[0].job.as_ref().unwrap().job.output.clone();
+        std::fs::create_dir_all(output.parent().unwrap()).unwrap();
+        std::fs::write(&output, b"mine").unwrap();
+        finish(&mut harness);
+        let failed = harness.state().items[0].failed.as_ref().map(|failed| &failed.job.status);
+        assert!(matches!(failed, Some(Status::Exists(path)) if *path == output), "{failed:?}");
+        assert_eq!(std::fs::read(&output).unwrap(), b"mine");
+        harness.get_by_label("Replace it").click();
+        harness.run_steps(2);
+        finish(&mut harness);
+        let item = &harness.state().items[0];
+        assert_eq!(made_job(item).output, output);
+        assert!(item.failed.is_none() && std::fs::read(&output).unwrap() != b"mine");
+    }
+}
