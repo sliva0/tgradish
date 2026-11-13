@@ -52,7 +52,7 @@ fn reads_names_that_look_like_urls_and_options() {
     let missing = Path::new("-missing.gif");
     for backend in &backends {
         let err = backend.probe(missing, &cancel).unwrap_err();
-        assert!(matches!(&err, Error::Probe { path, .. } if path == missing), "{err}");
+        assert!(matches!(&err, Error::Unreadable { path, .. } if path == missing), "{err}");
     }
     // out of the directory before it is removed
     std::env::set_current_dir(env!("CARGO_MANIFEST_DIR")).unwrap();

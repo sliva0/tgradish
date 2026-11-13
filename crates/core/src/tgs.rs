@@ -474,7 +474,7 @@ fn reads_as_art(path: &Path) -> Result<bool> {
     let mut start = Vec::with_capacity(32);
     std::fs::File::open(path)
         .and_then(|file| std::io::Read::read_to_end(&mut std::io::Read::take(file, 32), &mut start))
-        .map_err(|err| Error::Probe { path: path.to_path_buf(), message: err.to_string() })?;
+        .map_err(|err| Error::Unreadable { path: path.to_path_buf(), message: err.to_string() })?;
     Ok(frames::Format::detect(&start).is_some())
 }
 
@@ -507,7 +507,7 @@ fn read_video(
         return Err(Error::invalid("length", format!("{length} is not more than 0")));
     }
     let probe = backend.probe(input, cancel)?;
-    let unreadable = |message: String| Error::Probe { path: input.to_path_buf(), message };
+    let unreadable = |message: String| Error::Unreadable { path: input.to_path_buf(), message };
     let limits = Limits::default();
     let frame_bytes = (probe.width as usize)
         .checked_mul(probe.height as usize)
@@ -638,8 +638,10 @@ pub fn is_sticker(path: &Path) -> bool {
 fn read_lottie(path: &Path) -> Result<(Vec<u8>, Option<usize>)> {
     let bytes = source::read(path)?;
     if bytes.starts_with(&[0x1f, 0x8b]) {
-        let json = tgradish_tgs::file::unpack(&bytes)
-            .map_err(|err| Error::Probe { path: path.to_path_buf(), message: err.to_string() })?;
+        let json = tgradish_tgs::file::unpack(&bytes).map_err(|err| Error::Unreadable {
+            path: path.to_path_buf(),
+            message: err.to_string(),
+        })?;
         Ok((json, Some(bytes.len())))
     } else {
         Ok((bytes, None))
@@ -658,7 +660,7 @@ pub(crate) fn read_json(path: &Path) -> Result<Vec<u8>> {
 pub fn inspect_file(path: &Path) -> Result<(Stats, Vec<Issue>)> {
     let (json, packed) = read_lottie(path)?;
     tgradish_tgs::check::check(&json, packed)
-        .map_err(|err| Error::Probe { path: path.to_path_buf(), message: err.to_string() })
+        .map_err(|err| Error::Unreadable { path: path.to_path_buf(), message: err.to_string() })
 }
 
 /// Fails when the output is one of the inputs, even through another path

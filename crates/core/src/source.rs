@@ -46,7 +46,7 @@ pub(crate) fn read(path: &Path) -> Result<Vec<u8>> {
 
 /// `path` couldn't be read for `err`.
 pub(crate) fn unreadable(path: &Path, err: impl std::fmt::Display) -> Error {
-    Error::Probe { path: path.to_path_buf(), message: err.to_string() }
+    Error::Unreadable { path: path.to_path_buf(), message: err.to_string() }
 }
 
 /// How long each frame of a sequence or sprite sheet shows, at `fps`
@@ -170,6 +170,6 @@ mod tests {
         std::fs::write(&files[0], tgradish_corpus::encode::png(&walker.frames[0])).unwrap();
         std::fs::write(&files[1], b"not a png").unwrap();
         let err = read_sequence(&files, None, &CancelToken::new()).unwrap_err();
-        assert!(matches!(err, Error::Probe { path, .. } if path == files[1]));
+        assert!(matches!(err, Error::Unreadable { path, .. } if path == files[1]));
     }
 }

@@ -145,7 +145,7 @@ fn worth_retrying(err: &Failed) -> bool {
         Failed::Core(err) => {
             matches!(
                 err,
-                Error::Io(_) | Error::Probe { .. } | Error::Ffmpeg { .. } | Error::Libav(_)
+                Error::Io(_) | Error::Unreadable { .. } | Error::Ffmpeg { .. } | Error::Libav(_)
             )
         }
         Failed::Folder { .. } => true,

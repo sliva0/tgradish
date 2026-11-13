@@ -203,7 +203,7 @@ pub(crate) fn failure(err: &Error) -> String {
             let failed = fl!("program-failed", program = program, status = status.as_str());
             format!("{failed}\n{stderr}")
         }
-        Error::Probe { path, message } => {
+        Error::Unreadable { path, message } => {
             fl!("unreadable-file", name = name(path), details = message.as_str())
         }
         Error::NoVideo(path) => fl!("no-video", name = name(path)),
@@ -696,8 +696,10 @@ mod tests {
             fl!("ffmpeg-not-on-path")
         );
         assert!(!failure(&Error::ExtraArgsNeedProgram).contains("extra-args"));
-        let unreadable =
-            Error::Probe { path: PathBuf::from("/some/where/clip.mp4"), message: "broken".into() };
+        let unreadable = Error::Unreadable {
+            path: PathBuf::from("/some/where/clip.mp4"),
+            message: "broken".into(),
+        };
         assert_eq!(
             failure(&unreadable),
             fl!("unreadable-file", name = "clip.mp4", details = "broken")

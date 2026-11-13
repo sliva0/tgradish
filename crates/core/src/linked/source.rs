@@ -128,7 +128,7 @@ impl Source {
         // the interrupt callback below cannot stop an open() or read() that
         // blocks in the OS, as on a FIFO without a writer
         if !std::fs::metadata(path).is_ok_and(|m| m.is_file()) {
-            return Err(Error::Probe {
+            return Err(Error::Unreadable {
                 path: path.to_path_buf(),
                 message: "not a regular file; the built-in ffmpeg only reads files".into(),
             });
@@ -138,7 +138,7 @@ impl Source {
             let cancel = cancel.clone();
             move || cancel.is_cancelled()
         };
-        let unreadable = |message: String| Error::Probe { path: path.to_path_buf(), message };
+        let unreadable = |message: String| Error::Unreadable { path: path.to_path_buf(), message };
         let name = c_path(path).map_err(|why| unreadable(why.into()))?;
         let input = open_input(&name, interrupt).map_err(|err| {
             if cancel.is_cancelled() { Error::Cancelled } else { unreadable(err.to_string()) }

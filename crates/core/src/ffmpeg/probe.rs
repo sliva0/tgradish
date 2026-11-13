@@ -157,7 +157,7 @@ impl Facts {
         let still_image = self.still_image();
         let Facts { format, codec, pix_fmt, width, height, orientation, start, timing, .. } = self;
         if width == 0.0 || height == 0.0 {
-            return Err(Error::Probe {
+            return Err(Error::Unreadable {
                 path: input.to_path_buf(),
                 message: "video stream has no size".into(),
             });
@@ -204,7 +204,7 @@ impl Facts {
 }
 
 pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Probe> {
-    let probe_error = |message: String| Error::Probe { path: input.to_path_buf(), message };
+    let probe_error = |message: String| Error::Unreadable { path: input.to_path_buf(), message };
 
     let mut cmd = Command::new(&ffmpeg.ffprobe);
     cmd.args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"])

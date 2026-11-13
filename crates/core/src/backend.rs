@@ -50,7 +50,7 @@ fn reading_absolute(plan: &Plan) -> Cow<'_, Plan> {
 fn naming<T>(result: Result<T>, given: &Path, read: &Path) -> Result<T> {
     let named = |path: PathBuf| if path == read { given.to_path_buf() } else { path };
     result.map_err(|err| match err {
-        Error::Probe { path, message } => Error::Probe { path: named(path), message },
+        Error::Unreadable { path, message } => Error::Unreadable { path: named(path), message },
         Error::NoVideo(path) => Error::NoVideo(named(path)),
         Error::NoFrame { path, at } => Error::NoFrame { path: named(path), at },
         err => err,
