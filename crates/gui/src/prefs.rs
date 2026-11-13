@@ -294,7 +294,7 @@ fn sections(ui: &mut egui::Ui, prefs: &mut Prefs, config: &mut Config, presets: 
 fn check_ffmpeg(choice: FfmpegChoice, path: Option<&Path>, cancel: &CancelToken) -> (bool, String) {
     let backend = match Backend::select(choice, path) {
         Ok(backend) => backend,
-        Err(err) => return (false, err.to_string()),
+        Err(err) => return (false, crate::jobs::failure(&err)),
     };
     match backend.capabilities(cancel) {
         Ok(caps) => {
@@ -311,7 +311,7 @@ fn check_ffmpeg(choice: FfmpegChoice, path: Option<&Path>, cancel: &CancelToken)
                 false => (false, fl!("ffmpeg-no-vp9", version = version)),
             }
         }
-        Err(err) => (false, err.to_string()),
+        Err(err) => (false, crate::jobs::failure(&err)),
     }
 }
 
@@ -365,7 +365,11 @@ mod tests {
             harness.step();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+        // in the window's words, as reading a file without it would say
         let status = harness.state().prefs.ffmpeg_status.clone();
-        assert!(matches!(status, Some((false, _))), "{status:?}");
+        assert!(
+            matches!(&status, Some((false, said)) if said.starts_with("ffmpeg wasn't found")),
+            "{status:?}"
+        );
     }
 }

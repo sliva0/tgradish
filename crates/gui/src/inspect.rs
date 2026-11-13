@@ -43,7 +43,7 @@ impl Inspection {
                 let problems = issues.iter().map(|issue| Problem::refused(issue, target));
                 (Found::Webm { info, target }, problems.collect())
             }
-            Err(err) => (Found::Failed(err.to_string()), Vec::new()),
+            Err(err) => (Found::Failed(crate::jobs::failure(&err)), Vec::new()),
         };
         Inspection { path: path.to_path_buf(), found, problems }
     }
@@ -225,7 +225,8 @@ fn animation(ui: &mut egui::Ui, stats: &Stats) {
         let text =
             fl!("inspect-length", "value", seconds = widgets::seconds(seconds), frames = frames);
         let (name, hint) = (fl!("inspect-length"), fl!("inspect-length", "hint"));
-        budget(ui, &name, &hint, (seconds * 1000.0) as u64, 3000, text);
+        let most = (telegram::MAX_SECONDS * 1000.0) as u64;
+        budget(ui, &name, &hint, (seconds * 1000.0) as u64, most, text);
         let refused = fl!("inspect-refuses-more");
         let cost = server::cost(stats.shapes, stats.layers);
         let (name, hint) = (fl!("inspect-cost"), fl!("inspect-cost", "hint"));
