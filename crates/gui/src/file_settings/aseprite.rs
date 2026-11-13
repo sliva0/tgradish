@@ -89,7 +89,13 @@ fn frames_of(durations: &[f64], format: Format) -> Option<Frames> {
     (times.len() >= 2).then_some(Frames { times, cut })
 }
 
-/// The tags to pick, as buttons of their colours. One played forward
+/// How high a layer's row is, less the space between them.
+const LAYER: f32 = 22.0;
+
+/// Side of the dot of a tag's colour on its button.
+const DOT: f32 = 10.0;
+
+/// The tags to pick, as buttons with dots of their colours. One played forward
 /// sets where the input starts and ends, or for a picture, the frame it
 /// is, as the timeline writes them; one that plays backwards, or there and
 /// back, is read in its own order, which a cut can't do.
@@ -122,7 +128,8 @@ fn tag_row(
     };
     let picks: Vec<bool> = tags.iter().map(picked).collect();
     ui.horizontal_wrapped(|ui| {
-        let all = egui::Button::new(fl!("all-frames")).selected(whole && !picks.contains(&true));
+        let all = egui::Button::new(fl!("all-frames"));
+        let all = widgets::as_choice(ui, all, whole && !picks.contains(&true));
         let all = ui.add(all).on_hover_text(fl!("all-frames", "hint"));
         if all.clicked() {
             choices.tag = None;
@@ -156,34 +163,22 @@ fn tag_row(
     });
 }
 
-/// A button of a tag's colour, outlined when `picked`, its frames on
-/// hover.
+/// A tag's button, a choice like All frames beside it, lit when `picked`,
+/// with a dot of the tag's colour before its name, and its frames on hover.
 fn tag_button(ui: &mut egui::Ui, tag: &Tag, picked: bool) -> egui::Response {
     // opaque, as Aseprite shows them
     let [red, green, blue, _] = tag.colour;
     let colour = egui::Color32::from_rgb(red, green, blue);
-    // dark text on light colours, light on dark
-    let light = 0.299 * f32::from(red) + 0.587 * f32::from(green) + 0.114 * f32::from(blue);
-    let text = if light > 140.0 { egui::Color32::BLACK } else { egui::Color32::WHITE };
-    let galley = ui.painter().layout_no_wrap(
-        tag.name.clone(),
-        egui::TextStyle::Button.resolve(ui.style()),
-        text,
-    );
-    let size = galley.size() + egui::vec2(16.0, 6.0);
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Button, true, picked, &tag.name)
-    });
-    let edge = match (picked, response.hovered()) {
-        (true, _) => egui::Stroke::new(2.0, ui.visuals().strong_text_color()),
-        (false, true) => egui::Stroke::new(1.0, ui.visuals().strong_text_color()),
-        (false, false) => egui::Stroke::NONE,
-    };
-    // inside, so nothing around it cuts the outline off
-    ui.painter().rect(rect, 4.0, colour, edge, egui::StrokeKind::Inside);
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, text);
+    let dot = egui::Id::new(("tag colour", &tag.name));
+    let atoms = (egui::Atom::custom(dot, egui::vec2(DOT, DOT)), tag.name.as_str());
+    let button = widgets::as_choice(ui, egui::Button::new(atoms), picked);
+    let drawn = button.atom_ui(ui);
+    if let Some(rect) = drawn.rect(dot) {
+        // outlined, so a colour near the button's still shows
+        let edge = ui.visuals().widgets.inactive.bg_stroke;
+        ui.painter().circle(rect.center(), DOT / 2.0, colour, edge);
+    }
+    let response = drawn.response;
     // as Aseprite counts them, from 1
     let (from, to) = (tag.from + 1, tag.to + 1);
     let frames = if from == to {
@@ -216,8 +211,10 @@ fn last_of_group(layers: &[LayerInfo]) -> Vec<bool> {
 /// A box for each layer, under its group, ticked where it shows, with
 /// lines joining each to its group, as `tree` draws them.
 fn layer_list(ui: &mut egui::Ui, choices: &mut Choices, layers: &[LayerInfo]) {
-    // a list, closer than rows of settings
+    // a list, closer than rows of settings, its names as Aseprite writes
+    // them
     ui.spacing_mut().item_spacing.y = 2.0;
+    ui.spacing_mut().interact_size.y = LAYER;
     let last = last_of_group(layers);
     // for each level above the layer's, whether its line goes on below
     let mut going_on: Vec<bool> = Vec::new();

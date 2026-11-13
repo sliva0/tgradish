@@ -128,8 +128,8 @@ fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target) {
             let text = fl!(
                 "inspect-frame-rate",
                 "value",
-                fps = format!("{fps:.2}"),
-                most = format!("{most:.0}"),
+                fps = widgets::trimmed(fps),
+                most = widgets::trimmed(most),
                 frames = fl!("count-frames", count = info.video_frames)
             );
             let name = fl!("inspect-frame-rate");

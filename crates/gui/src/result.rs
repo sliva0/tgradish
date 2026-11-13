@@ -51,7 +51,7 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
         let kept = progress.attempts.iter().find(|attempt| Some(attempt.number) == done.attempt);
         let (fps, length) =
             kept.map_or((plan.fps, plan.length), |kept| (kept.params.fps, kept.params.length));
-        let (width, height, fps) = (plan.width, plan.height, format!("{fps:.2}"));
+        let (width, height, fps) = (plan.width, plan.height, widgets::trimmed(fps));
         let length = widgets::seconds(length);
         widgets::note(
             ui,
@@ -118,7 +118,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     }
     for attempt in &progress.attempts {
         let rate = rate_text(attempt);
-        let (number, fps) = (attempt.number, format!("{:.0}", attempt.params.fps));
+        let (number, fps) = (attempt.number, widgets::trimmed(attempt.params.fps));
         let text = fl!("encode", number = number, fps = fps.as_str(), rate = rate.as_str());
         match attempt.bytes {
             Some(bytes) => {
@@ -225,7 +225,7 @@ fn current_step(progress: &jobs::Progress) -> (widgets::Fill, String) {
         return (Fill::Unknown, fl!("starting"));
     };
     let (number, rate) = (attempt.number, rate_text(attempt));
-    let fps = format!("{:.0}", attempt.params.fps);
+    let fps = widgets::trimmed(attempt.params.fps);
     let text = match progress.webm.as_ref().map(|plan| plan.attempts) {
         Some(most) if most > 1 => {
             fl!("encode-of", number = number, most = most, fps = fps, rate = rate)
@@ -262,7 +262,7 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
         let frames = fl!("count-frames", count = report.frames);
         ui.label(fl!("art-summary", size = size, colours = colours, frames = frames));
         if report.tempo != 1.0 {
-            ui.label(fl!("art-tempo", tempo = format!("{:.2}", report.tempo)));
+            ui.label(fl!("art-tempo", tempo = widgets::trimmed(report.tempo)));
         }
         if let Some(likely) = report.likely_scale {
             ui.label(fl!("art-off-grid", scale = likely.scale));

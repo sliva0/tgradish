@@ -537,6 +537,18 @@ fn picking_in<T: PartialEq + Copy>(
     changed
 }
 
+/// `button` as a choice of [`segments`] is, on its own: lit, and outlined,
+/// where `selected`.
+pub(crate) fn as_choice<'a>(
+    ui: &egui::Ui,
+    button: egui::Button<'a>,
+    selected: bool,
+) -> egui::Button<'a> {
+    let height = ui.spacing().interact_size.y;
+    let button = button.selected(selected).frame_when_inactive(true).min_size(vec2(0.0, height));
+    if selected { button.stroke(theme::on_outline(ui.visuals())) } else { button }
+}
+
 /// One of several choices, on a button of its own styled as a
 /// [`segments`] option. They wrap as words do, in a `horizontal_wrapped`
 /// row; one too long for a line of its own is cut short, and said in full
