@@ -174,11 +174,19 @@ pub fn read_from(start: f64, previous: f64) -> f64 {
 /// that still moves.
 pub fn default_fit_range(fit: Fit, fps: f64, length: f64) -> Range {
     match fit {
-        Fit::Auto | Fit::Bitrate | Fit::Off => Range { min: 8.0, max: 50_000.0 },
+        Fit::Auto | Fit::Bitrate | Fit::Off => Range { min: 8.0, max: options::HIGHEST_BITRATE },
         Fit::Crf => Range { min: 4.0, max: f64::from(*options::CRFS.end()) },
         Fit::Fps => Range { min: 1.0, max: fps.floor().max(1.0) },
         Fit::Length => Range { min: length.min(0.1), max: length },
     }
+}
+
+/// The frame rate a result has unless `fps` says otherwise, from an input
+/// of `input_fps` played at `tempo`: the input's at the tempo, from 1,
+/// so a slow tempo doesn't make a single frame outlast the result, to
+/// Telegram's most.
+pub fn played_fps(input_fps: f64, tempo: f64) -> f64 {
+    (input_fps * tempo).clamp(1.0, telegram::MAX_FPS)
 }
 
 /// Duration of [`frame_count`] frames, as written into the file header.
@@ -431,7 +439,7 @@ pub fn picture_sizes(options: &Options, used: (u32, u32)) -> Result<Sizes> {
     let resize = options.resize.unwrap_or(default_resize(target));
     match options.exact_scale {
         Some(scale) => exact_sizes(target, resize, used, scale),
-        None => Ok(sizes(target, resize, options.scaling.unwrap_or(Scaling::Auto), used)),
+        None => Ok(sizes(target, resize, options.scaling_or_default(), used)),
     }
 }
 
@@ -465,7 +473,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         return Err(Error::OutputExists(output));
     }
 
-    let spoof = o.spoof.unwrap_or(Spoof::Auto);
+    let spoof = o.spoof_or_default();
     let fake_duration = o.fake_duration.unwrap_or(options::DEFAULT_FAKE_DURATION);
     if !(fake_duration > 0.0 && fake_duration <= telegram::MAX_SECONDS) {
         let reason = format!("must be more than 0 and at most {} seconds", telegram::MAX_SECONDS);
@@ -520,11 +528,8 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
             return Err(Error::invalid("fps", reason));
         }
         Some(fps) => fps,
-        None => {
-            let source_fps = source.fps_or_default();
-            let played = if source.still_image { source_fps } else { source_fps * tempo };
-            played.clamp(1.0, telegram::MAX_FPS)
-        }
+        None if source.still_image => played_fps(source.fps_or_default(), 1.0),
+        None => played_fps(source.fps_or_default(), tempo),
     };
 
     let crf = o.crf.unwrap_or(options::DEFAULT_CRF);
@@ -540,13 +545,13 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         None => estimate_bitrate(length, target.max_bytes()),
     };
 
-    let fit = o.fit.unwrap_or(Fit::Auto);
+    let fit = o.fit_or_default();
     let attempts = o.attempts.unwrap_or(options::DEFAULT_ATTEMPTS);
     if !(1..=options::MAX_ATTEMPTS).contains(&attempts) {
         let reason = format!("must be between 1 and {}", options::MAX_ATTEMPTS);
         return Err(Error::invalid("attempts", reason));
     }
-    let lossless = o.lossless.unwrap_or(false);
+    let lossless = o.lossless_or_default();
     if lossless && !matches!(fit, Fit::Fps | Fit::Length | Fit::Off) {
         return Err(Error::invalid("lossless", "only works with fit fps, length or off"));
     }
@@ -601,7 +606,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         crf,
         constant_quality: o.crf.is_some() && o.bitrate.is_none(),
         lossless,
-        speed: o.speed.unwrap_or(Speed::Balanced),
+        speed: o.speed_or_default(),
         alpha: source.alpha || sizes.pads(),
         spoof,
         fake_duration,

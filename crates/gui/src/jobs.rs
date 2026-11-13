@@ -522,7 +522,7 @@ fn run(
             })
         }
         Plan::Tgs { options, backend } => {
-            let exact = options.exact.unwrap_or(tgs::EXACT);
+            let exact = options.exact_or_default();
             let request = TgsRequest { inputs, sequence, output, options, overwrite, backend };
             update(Box::new(move |progress| {
                 progress.tgs = Some(TgsStage::Reading);

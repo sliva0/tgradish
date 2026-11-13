@@ -4,7 +4,8 @@
 
 use eframe::egui;
 use tgradish_core::options::{
-    CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, Fit, FitUnit, MAX_ATTEMPTS, Options, Range, Speed,
+    CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, Fit, FitUnit, HIGHEST_BITRATE, MAX_ATTEMPTS, Options,
+    Range, Speed,
 };
 
 use crate::config::Config;
@@ -41,7 +42,7 @@ fn webm_speeds() -> [Choice<Speed>; 3] {
 /// The way of fitting the item's choices use, its own or its preset's.
 pub(crate) fn fit_of(choices: &Choices, presets: &Presets, config: &Config) -> Fit {
     let base = choices.webm_base(presets, config).unwrap_or_default();
-    choices.webm.fit.or(base.fit).unwrap_or(Fit::Auto)
+    base.merged(&choices.webm).fit_or_default()
 }
 
 /// Drops the item's own range to search once fitting goes from `before`
@@ -59,13 +60,13 @@ pub(crate) fn follow_fit(options: &mut Options, before: Fit, after: Fit) {
 pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     section(ui, &fl!("size-and-quality"));
     let base = item.choices.webm_base(context.presets, context.config).unwrap_or_default();
-    let base_fit = base.fit.unwrap_or(Fit::Auto);
+    let base_fit = base.fit_or_default();
     let options = &mut item.choices.webm;
     let fit = options.fit.unwrap_or(base_fit);
     // lossless keeps no bitrate or quality to fit, so only ways of fitting
     // that keep a quality go with it
     let keeps_quality = |fit: Fit| matches!(fit, Fit::Fps | Fit::Length | Fit::Off);
-    let lossless = keeps_quality(fit) && options.lossless.or(base.lossless).unwrap_or(false);
+    let lossless = keeps_quality(fit) && base.clone().merged(options).lossless_or_default();
     row(ui, &fl!("fitting"), &fl!("fitting", "hint"), Ok(()), |ui| {
         let fits = fits();
         let pick = |fit: Fit| match lossless && !keeps_quality(fit) {
@@ -83,7 +84,7 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
         chosen_hint(ui, chosen, &fits);
     });
     row(ui, &fl!("encoder"), &fl!("encoder", "hint"), Ok(()), |ui| {
-        let base = base.speed.unwrap_or(Speed::Balanced);
+        let base = base.speed_or_default();
         preset_segments(ui, &mut options.speed, base, &webm_speeds());
     });
 
@@ -185,7 +186,7 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
         } else {
             fl!("lossless-encoding", "switches")
         };
-        let preset = base.lossless.unwrap_or(false);
+        let preset = base.lossless_or_default();
         let text = fl!("lossless-encoding");
         let changed = greyed(ui, !keeps_quality(fit), |ui| {
             flag(ui, &mut options.lossless, preset, &text, &hint)
@@ -205,7 +206,7 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
         let automatic = (fl!("bitrate-auto"), fl!("bitrate-auto", "hint"));
         let automatic = (automatic.0.as_str(), automatic.1.as_str());
         preset_number(ui, &mut options.bitrate, base.bitrate, automatic, None, 600.0, |value| {
-            value.range(1.0..=50_000.0).speed(5.0).max_decimals(0).suffix(" kbit/s")
+            value.range(1.0..=HIGHEST_BITRATE).speed(5.0).max_decimals(0).suffix(" kbit/s")
         });
     });
 }
@@ -227,7 +228,7 @@ impl RangeBounds {
     fn of(fit: Fit) -> Self {
         let takes = fit.range_limits();
         let (range, decimals, speed, unit) = match fit.unit() {
-            FitUnit::Kbps => (1.0..=50_000.0, 0, 5.0, " kbit/s"),
+            FitUnit::Kbps => (1.0..=HIGHEST_BITRATE, 0, 5.0, " kbit/s"),
             FitUnit::Fps => (takes.clone(), 0, 0.1, " fps"),
             FitUnit::Seconds => (0.01..=3600.0, 2, 0.01, " s"),
             FitUnit::Crf => (takes.clone(), 0, 0.1, ""),

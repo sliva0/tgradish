@@ -69,7 +69,7 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
             }
             if item.format == Format::Webm {
                 let tempo = options.tempo.unwrap_or(1.0);
-                time(item, &used, tempo, options.spoof.unwrap_or(Spoof::Auto), &mut steps);
+                time(item, &used, tempo, options.spoof_or_default(), &mut steps);
             }
         }
         Format::Tgs => {
@@ -147,13 +147,13 @@ fn picture(options: &Options, used: (u32, u32)) -> Vec<String> {
 
 /// How a `.tgs` result's art is cut and squared.
 fn art(options: &TgsOptions, steps: &mut Vec<String>) {
-    if !options.keep_canvas.unwrap_or(false) {
+    if !options.keep_canvas_or_default() {
         steps.push(fl!("plan-trimmed"));
     }
     if let Some(scale) = options.pixel_scale {
         steps.push(fl!("plan-grid", scale = scale));
     }
-    steps.push(match options.resize.unwrap_or(Resize::Pad) {
+    steps.push(match options.resize_or_default() {
         Resize::Crop => fl!("plan-square-crop"),
         Resize::Stretch => fl!("plan-square-stretch"),
         Resize::Pad | Resize::Contain => fl!("plan-square-pad"),

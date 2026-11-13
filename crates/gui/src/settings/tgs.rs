@@ -47,15 +47,15 @@ pub(super) fn tgs_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context)
     let options = &mut item.choices.tgs;
     row(ui, &fl!("tgs-encoder"), &fl!("tgs-encoder", "hint"), Ok(()), |ui| {
         let speeds = tgs_speeds();
-        preset_segments(ui, &mut options.speed, base.speed.unwrap_or(Speed::Best), &speeds);
-        chosen_hint(ui, options.speed.or(base.speed).unwrap_or(Speed::Best), &speeds);
+        preset_segments(ui, &mut options.speed, base.speed_or_default(), &speeds);
+        chosen_hint(ui, base.clone().merged(options).speed_or_default(), &speeds);
     });
     row(ui, &fl!("too-large"), &fl!("too-large", "hint"), Ok(()), |ui| {
         let text = fl!("never-change");
-        flag(ui, &mut options.exact, base.exact.unwrap_or(tgs::EXACT), &text, "");
+        flag(ui, &mut options.exact, base.exact_or_default(), &text, "");
     });
 
-    let exact = options.exact.or(base.exact).unwrap_or(tgs::EXACT);
+    let exact = base.clone().merged(options).exact_or_default();
     let never = fl!("never-change", "set");
     let changes = if exact { Err(never.as_str()) } else { Ok(()) };
     row(ui, &fl!("give-up"), &fl!("give-up", "hint"), changes, |ui| {

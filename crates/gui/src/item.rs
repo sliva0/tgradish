@@ -237,7 +237,7 @@ pub enum Recipe {
 /// out, as `effective`, everything a conversion gets, shows them: they are
 /// kept for when they show again, but have no say until then.
 pub fn shown(mut options: Options, effective: &Options) -> Options {
-    let fit = effective.fit.unwrap_or(Fit::Auto);
+    let fit = effective.fit_or_default();
     let constant_quality = matches!(fit, Fit::Fps | Fit::Length | Fit::Off);
     let lossless = constant_quality && effective.lossless == Some(true);
     if fit == Fit::Off {

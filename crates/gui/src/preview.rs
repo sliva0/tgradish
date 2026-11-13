@@ -468,7 +468,7 @@ fn preview(
                             }
                         }
                         Format::Tgs => {
-                            let resize = tgs.resize.unwrap_or(Resize::Pad);
+                            let resize = tgs.resize_or_default();
                             let bounds = tgs_bounds(inset, clip, where_, tgs);
                             let key = inset_key((clip.id, frame, bounds, resize));
                             let label = label.as_deref();
@@ -548,7 +548,7 @@ fn preview(
 /// What of `clip` a `.tgs` result shows, before it is made square: the
 /// `part` used, cut to what is visible unless it keeps the canvas.
 fn tgs_bounds(inset: &mut Inset, clip: &Clip, part: predict::Part, tgs: &TgsOptions) -> [usize; 4] {
-    let keep = tgs.keep_canvas.unwrap_or(false);
+    let keep = tgs.keep_canvas_or_default();
     // only the frames the cut keeps, every one it overlaps, as normalising
     // reads them
     let start = tgs.start.unwrap_or(0.0);

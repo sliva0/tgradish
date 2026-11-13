@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use eframe::egui::{self, RichText, vec2};
 use tgradish_core::config::FfmpegConfig;
-use tgradish_core::presets::{Format, Presets};
+use tgradish_core::presets::{BUILTIN, Format, Presets};
 use tgradish_core::telegram::Target;
 
 use crate::config::Config;
@@ -53,9 +53,6 @@ pub struct Context<'a> {
     /// settings of the part used.
     pub in_frames: bool,
 }
-
-/// The built-in presets, in the order of their speed.
-const BUILTIN: [&str; 3] = ["fast", "balanced", "best"];
 
 /// The built-in presets in the order of their speed, then the user's own.
 pub fn preset_names(presets: &Presets) -> Vec<(String, Result<String, String>)> {

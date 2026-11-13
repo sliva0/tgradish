@@ -45,7 +45,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     // the average rate, and the most a video of variable rate reaches
     let input_fps =
         item.video.ready().filter(|_| !tgs).map(|video| (video.probe.fps, video.probe.base_fps));
-    let spoof = item.choices.webm.spoof.or(webm_base.spoof).unwrap_or(Spoof::Auto);
+    let spoof = webm_base.clone().merged(&item.choices.webm).spoof_or_default();
     // a preset's tempo is what the automatic choice stands for
     let preset_tempo = if tgs { tgs_base.tempo } else { webm_base.tempo };
     if let Some(length) = item.input_length() {
@@ -99,12 +99,12 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             // as converting chooses it, and more would repeat the input's
             // frames
             let (average, base) = input_fps.unwrap_or_default();
-            let chosen = average.map(|fps| (fps * tempo).clamp(1.0, telegram::MAX_FPS));
+            let chosen = average.map(|fps| tgradish_core::convert::played_fps(fps, tempo));
             let peak = match (average, base) {
                 (Some(average), Some(base)) => Some(average.max(base)),
                 (average, base) => average.or(base),
             };
-            let most = peak.map(|fps| (fps * tempo).clamp(1.0, telegram::MAX_FPS));
+            let most = peak.map(|fps| tgradish_core::convert::played_fps(fps, tempo));
             if item.kind == Kind::Frames {
                 // how fast its frames play, which the result's follows
                 row(ui, &fl!("frame-rate"), &fl!("frame-rate", "sequence"), Ok(()), |ui| {
@@ -129,7 +129,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             }
             row(ui, &fl!("over-3-s"), &fl!("over-3-s", "hint"), Ok(()), |ui| {
                 let spoofs = spoofs();
-                let preset = webm_base.spoof.unwrap_or(Spoof::Auto);
+                let preset = webm_base.spoof_or_default();
                 preset_segments(ui, &mut options.spoof, preset, &spoofs);
                 let spoof = options.spoof.unwrap_or(preset);
                 chosen_hint(ui, spoof, &spoofs);
@@ -284,7 +284,7 @@ fn sequence_rate(ui: &mut egui::Ui, fps: &mut Option<f64>, preset: Option<f64>) 
     let automatic = (automatic.0.as_str(), automatic.1.as_str());
     preset_number(ui, fps, preset, automatic, Some(default), default, |value| {
         value
-            .range(0.1..=60.0)
+            .range(0.1..=telegram::MAX_FPS)
             .speed(0.1)
             .max_decimals(2)
             .suffix(" fps")

@@ -557,11 +557,39 @@ layered!(Options {
     ffmpeg_args,
 });
 
+/// The values of options left unset, which converting takes: each says
+/// its default once, for core and front-ends alike.
 impl Options {
+    /// The way of fitting: auto.
+    pub fn fit_or_default(&self) -> Fit {
+        self.fit.unwrap_or(Fit::Auto)
+    }
+
+    /// The encoder's speed: balanced.
+    pub fn speed_or_default(&self) -> Speed {
+        self.speed.unwrap_or(Speed::Balanced)
+    }
+
+    /// How pixels are scaled: auto, by the input.
+    pub fn scaling_or_default(&self) -> Scaling {
+        self.scaling.unwrap_or(Scaling::Auto)
+    }
+
+    /// When the duration is spoofed: auto, when the result is longer than
+    /// Telegram plays.
+    pub fn spoof_or_default(&self) -> Spoof {
+        self.spoof.unwrap_or(Spoof::Auto)
+    }
+
+    /// Whether to encode losslessly: no.
+    pub fn lossless_or_default(&self) -> bool {
+        self.lossless.unwrap_or(false)
+    }
+
     /// Whether how pixels are scaled is left to the input: auto, with no
     /// exact scale, which places pixels itself.
     pub fn auto_scaling(&self) -> bool {
-        self.scaling.unwrap_or(Scaling::Auto) == Scaling::Auto && self.exact_scale.is_none()
+        self.scaling_or_default() == Scaling::Auto && self.exact_scale.is_none()
     }
 
     /// Returns `self` with every value set in `overlay` replacing its own.
@@ -570,7 +598,7 @@ impl Options {
     /// fits a quality, and sets no range of its own, `self`'s is dropped
     /// rather than read in the wrong unit.
     pub fn merged(self, overlay: &Options) -> Options {
-        let unit = self.fit.unwrap_or(Fit::Auto).unit();
+        let unit = self.fit_or_default().unit();
         let mut merged = self.overlaid(overlay);
         if overlay.fit.is_some_and(|fit| fit.unit() != unit) && overlay.fit_range.is_none() {
             merged.fit_range = None;
@@ -659,6 +687,10 @@ pub fn flags(options: &impl Serialize) -> Vec<String> {
     flags
 }
 
+/// The highest bitrate worth asking for, in kbit/s, far past what any
+/// sticker fits: the top of the range fitting searches by default.
+pub const HIGHEST_BITRATE: f64 = 50_000.0;
+
 /// Encodes fitting may make: enough to land within a few percent of the
 /// limit for most inputs, at seconds an encode.
 pub const DEFAULT_ATTEMPTS: u32 = 8;
@@ -726,6 +758,18 @@ mod tests {
         assert_eq!(merged.fit, Some(Fit::Auto));
         assert_eq!(merged.crf, Some(40));
         assert_eq!(merged.title.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn says_its_defaults_once() {
+        let unset = Options::default();
+        assert_eq!(
+            (unset.fit_or_default(), unset.speed_or_default(), unset.scaling_or_default()),
+            (Fit::Auto, Speed::Balanced, Scaling::Auto)
+        );
+        assert_eq!((unset.spoof_or_default(), unset.lossless_or_default()), (Spoof::Auto, false));
+        let set = Options { fit: Some(Fit::Crf), lossless: Some(true), ..unset };
+        assert_eq!((set.fit_or_default(), set.lossless_or_default()), (Fit::Crf, true));
     }
 
     #[test]
