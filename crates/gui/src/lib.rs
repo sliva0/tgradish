@@ -101,7 +101,10 @@ pub fn run(launch: Launch) -> eframe::Result<()> {
 }
 
 /// Shows an error in a dialog, for when there is no terminal to print to.
+/// Printed as well: on Linux the dialog is zenity's, which may be missing,
+/// and a log may still be kept of what is printed.
 pub fn show_error(message: &str) {
+    eprintln!("{message}");
     rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
         .set_title("tgradish")
