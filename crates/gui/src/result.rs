@@ -288,57 +288,80 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
         let scored = progress.attempts.iter().any(|attempt| attempt.ssim.is_some());
         egui::ScrollArea::horizontal().id_salt(("attempts", item.id)).show(ui, |ui| {
             let columns = if scored { 5 } else { 4 };
-            // the kept attempt's tick in a column of its own, so the
-            // numbers stay in line
-            let grid = egui::Grid::new(("attempts", item.id))
-                .num_columns(columns + 1)
-                .spacing([10.0, 4.0]);
-            grid.striped(true).show(ui, |ui| {
-                // as wide as the tick from the start, so nothing moves when
-                // one is kept
-                let font = egui::TextStyle::Body.resolve(ui.style());
-                let tick = ui.painter().layout_no_wrap("✔".into(), font, Color32::PLACEHOLDER);
-                ui.allocate_exact_size(vec2(tick.size().x, 0.0), egui::Sense::hover());
-                let headers = [
-                    ("#".to_owned(), fl!("column-number")),
-                    ("fps".to_owned(), fl!("column-fps")),
-                    ("kbit/s".to_owned(), fl!("column-rate")),
-                    (fl!("column-size"), fl!("column-size", "hint")),
-                    (fl!("column-alike"), fl!("column-alike", "hint")),
+            let headers = [
+                ("#".to_owned(), fl!("column-number")),
+                ("fps".to_owned(), fl!("column-fps")),
+                ("kbit/s".to_owned(), fl!("column-rate")),
+                (fl!("column-size"), fl!("column-size", "hint")),
+                (fl!("column-alike"), fl!("column-alike", "hint")),
+            ];
+            // each cell's text, and what it says on hover
+            let mut rows: Vec<Vec<(RichText, String)>> = vec![
+                headers[..columns]
+                    .iter()
+                    .map(|(header, hint)| (RichText::new(header).weak(), hint.clone()))
+                    .collect(),
+            ];
+            for attempt in &progress.attempts {
+                // the kept one ticked before its number, which stays in
+                // line with the others
+                let number = match done.attempt == Some(attempt.number) {
+                    true => RichText::new(format!("✔ {}", attempt.number)).strong(),
+                    false => RichText::new(attempt.number.to_string()),
+                };
+                let rate = match attempt.params.rate {
+                    tgradish_core::webm::Rate::Bitrate(kbps) => format!("{kbps:.0}"),
+                    tgradish_core::webm::Rate::Crf(crf) => fl!("rate-quality-short", crf = crf),
+                    tgradish_core::webm::Rate::Lossless => fl!("rate-lossless"),
+                    rate => format!("{rate:?}"),
+                };
+                let size = match attempt.bytes {
+                    Some(bytes) => {
+                        let colour = match attempt.fits {
+                            true => theme::good(ui.visuals()),
+                            false => theme::bad(ui.visuals()),
+                        };
+                        (RichText::new(share(bytes, done.limit)).color(colour), widgets::kib(bytes))
+                    }
+                    None => (RichText::new("—"), String::new()),
+                };
+                let mut row = vec![
+                    (number, String::new()),
+                    (RichText::new(widgets::trimmed(attempt.params.fps)), String::new()),
+                    (RichText::new(rate), String::new()),
+                    size,
                 ];
-                for (header, hint) in &headers[..columns] {
-                    ui.label(RichText::new(header).weak()).on_hover_text(hint);
+                if scored {
+                    let alike = attempt.ssim.map(|ssim| format!("{:.1}%", ssim * 100.0));
+                    row.push((RichText::new(alike.unwrap_or_default()), String::new()));
                 }
-                ui.end_row();
-                for attempt in &progress.attempts {
-                    let kept = done.attempt == Some(attempt.number);
-                    ui.label(if kept { "✔" } else { "" });
-                    let number = RichText::new(attempt.number.to_string());
-                    ui.label(if kept { number.strong() } else { number });
-                    ui.label(widgets::trimmed(attempt.params.fps));
-                    ui.label(match attempt.params.rate {
-                        tgradish_core::webm::Rate::Bitrate(kbps) => format!("{kbps:.0}"),
-                        tgradish_core::webm::Rate::Crf(crf) => {
-                            fl!("rate-quality-short", crf = crf)
+                rows.push(row);
+            }
+            // numbers lined up by their last digit, in columns as wide as
+            // their widest
+            let width = |text: &RichText| {
+                let text = egui::WidgetText::from(text.clone());
+                let wrap = Some(egui::TextWrapMode::Extend);
+                text.into_galley(ui, wrap, f32::INFINITY, egui::TextStyle::Body).size().x
+            };
+            let mut widths = vec![0.0_f32; columns];
+            for row in &rows {
+                for (column, (text, _)) in row.iter().enumerate() {
+                    widths[column] = widths[column].max(width(text));
+                }
+            }
+            let height = ui.text_style_height(&egui::TextStyle::Body);
+            let grid =
+                egui::Grid::new(("attempts", item.id)).num_columns(columns).spacing([6.0, 4.0]);
+            grid.striped(true).show(ui, |ui| {
+                let layout = egui::Layout::right_to_left(egui::Align::Center);
+                for row in rows {
+                    for (column, (text, hint)) in row.into_iter().enumerate() {
+                        let size = vec2(widths[column], height);
+                        let cell = ui.allocate_ui_with_layout(size, layout, |ui| ui.label(text));
+                        if !hint.is_empty() {
+                            cell.inner.on_hover_text(hint);
                         }
-                        tgradish_core::webm::Rate::Lossless => fl!("rate-lossless"),
-                        rate => format!("{rate:?}"),
-                    });
-                    match attempt.bytes {
-                        Some(bytes) => {
-                            let colour = if attempt.fits {
-                                theme::good(ui.visuals())
-                            } else {
-                                theme::bad(ui.visuals())
-                            };
-                            ui.colored_label(colour, share(bytes, done.limit))
-                                .on_hover_text(widgets::kib(bytes))
-                        }
-                        None => ui.label("—"),
-                    };
-                    if scored {
-                        let alike = attempt.ssim.map(|ssim| format!("{:.1}%", ssim * 100.0));
-                        ui.label(alike.unwrap_or_default());
                     }
                     ui.end_row();
                 }

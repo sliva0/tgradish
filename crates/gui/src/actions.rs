@@ -11,9 +11,25 @@ use crate::l10n::fl;
 use crate::outputs::Written;
 use crate::{system, theme, widgets};
 
-/// Room the right of the bar takes, at least: the result's name and the
-/// button that shows its folder.
-const SAVES_TO: f32 = 300.0;
+/// The share of the bar its right, where the result goes, keeps beside
+/// what went wrong, at the least where it needs that much.
+const RIGHT: f32 = 0.45;
+/// The share of the right the result's name takes at most, so the folder
+/// it goes in keeps some room.
+const NAME: f32 = 0.6;
+
+/// The least room the folder keeps beside a name drawn whole.
+const SAVES_LEAST: f32 = 80.0;
+
+/// What `add` adds, within `width` of the row, so text in it is cut short
+/// there.
+fn within<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.scope(|ui| {
+        ui.set_max_width(width.max(1.0));
+        add(ui)
+    })
+    .inner
+}
 
 impl App {
     pub(crate) fn actions(&mut self, ui: &mut egui::Ui, id: u64) {
@@ -33,6 +49,17 @@ impl App {
         // the room goes to the progress, and the column beside the preview
         // already names the file
         let converting = item.job.as_ref().is_some_and(|conversion| conversion.job.is_running());
+        // the bar's two halves each keep their own room: its right as much
+        // as it needs, but where something is said on its left, no more
+        // than its share
+        let fallbacks = &self.fallbacks;
+        let right = output
+            .as_ref()
+            .filter(|_| !converting)
+            .map(|output| Right::of(ui, fallbacks, output, replaces.as_deref()));
+        let gap = ui.spacing().item_spacing.x;
+        let bar = ui.available_width();
+        let keep = right.as_ref().map_or(0.0, |right| right.width.min(bar * RIGHT) + gap);
         ui.horizontal(|ui| {
             match item.job.as_ref().map(|conversion| &conversion.job) {
                 Some(job) if job.is_running() => {
@@ -84,7 +111,7 @@ impl App {
                     if presets_kept {
                         // an icon alone where the file's name and folder need the room
                         let text = fl!("save-preset");
-                        let room = ui.available_width() - SAVES_TO;
+                        let room = ui.available_width() - keep;
                         let save = if room >= widgets::text_width(ui, &text, 16.0) {
                             egui::Button::new(text)
                         } else {
@@ -102,8 +129,13 @@ impl App {
                     if let Some(failed) = &item.failed {
                         match &failed.job.status {
                             Status::Failed(message) => {
+                                // cut short, said in full on hover and
+                                // beside the preview
                                 let failed = fl!("failed", error = message.as_str());
-                                ui.colored_label(theme::bad(ui.visuals()), failed);
+                                let text = RichText::new(&failed).color(theme::bad(ui.visuals()));
+                                let room = ui.available_width() - keep;
+                                within(ui, room, |ui| ui.add(egui::Label::new(text).truncate()))
+                                    .on_hover_text(failed);
                             }
                             Status::Exists(path) => {
                                 ui.colored_label(theme::warn(ui.visuals()), fl!("in-the-way"));
@@ -117,42 +149,11 @@ impl App {
                     }
                 }
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let Some(output) = output.as_ref().filter(|_| !converting) else { return };
-                let name = output
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                let folder = output.parent().map(|p| p.display().to_string()).unwrap_or_default();
-                let fallbacks = &self.fallbacks;
-                let strong = text_format(ui, ui.visuals().strong_text_color());
-                let (name, missing) = drawable(ui, fallbacks, &name, strong);
-                // the button's short name where the long one leaves the
-                // name no room, as in narrow windows or long words
-                let named = ui.painter().layout_job(name.clone()).size().x;
-                let full = fl!("show-in-folder");
-                let padding = 2.0 * ui.spacing().button_padding.x + ui.spacing().item_spacing.x;
-                let fits = widgets::text_width(ui, &full, padding) + named <= ui.available_width();
-                let text = if fits { full } else { fl!("show-folder", "short") };
-                if output.exists() && ui.button(text).clicked() {
-                    system::reveal(output);
-                }
-                if let Some(replaces) = &replaces {
-                    ui.colored_label(theme::warn(ui.visuals()), format!("⚠ {replaces}"));
-                }
-                ui.label(name).on_hover_ui(|ui| {
-                    let plain = text_format(ui, ui.visuals().text_color());
-                    ui.label(drawable(ui, fallbacks, &output.display().to_string(), plain).0);
-                    if let Some(note) = missing_note(&missing) {
-                        widgets::note(ui, note);
-                    }
+            if let Some(right) = right {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    right.show(ui, fallbacks);
                 });
-                let weak = text_format(ui, ui.visuals().weak_text_color());
-                let folder = format!("{folder}{}", std::path::MAIN_SEPARATOR);
-                let saves = fl!("saves-to", folder = folder);
-                ui.add(egui::Label::new(drawable(ui, fallbacks, &saves, weak).0).truncate())
-                    .on_hover_text(fl!("saves-to", "hint"));
-            });
+            }
         });
         let shortcut = !self.dialog_open()
             && ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::Enter));
@@ -166,6 +167,81 @@ impl App {
         if convert || (shortcut && self.item(id).is_some_and(|item| item.job.is_none())) {
             self.enqueue(id);
         }
+    }
+}
+
+/// The right of the bar: where the result goes, its name, and the button
+/// that shows its folder, laid out as they would be drawn whole.
+struct Right<'a> {
+    output: &'a std::path::Path,
+    name: egui::text::LayoutJob,
+    /// Characters of the name no font has.
+    missing: Vec<char>,
+    saves: egui::text::LayoutJob,
+    replaces: Option<String>,
+    /// How wide it all is, drawn whole.
+    width: f32,
+}
+
+impl<'a> Right<'a> {
+    fn of(
+        ui: &egui::Ui,
+        fallbacks: &crate::fallback::Fallbacks,
+        output: &'a std::path::Path,
+        replaces: Option<&str>,
+    ) -> Right<'a> {
+        let name = output.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let folder = output.parent().map(|p| p.display().to_string()).unwrap_or_default();
+        let strong = text_format(ui, ui.visuals().strong_text_color());
+        let (name, missing) = drawable(ui, fallbacks, &name, strong);
+        let weak = text_format(ui, ui.visuals().weak_text_color());
+        let folder = format!("{folder}{}", std::path::MAIN_SEPARATOR);
+        let saves = drawable(ui, fallbacks, &fl!("saves-to", folder = folder), weak).0;
+        let replaces = replaces.map(|replaces| format!("⚠ {replaces}"));
+        let gap = ui.spacing().item_spacing.x;
+        let measure = |job: &egui::text::LayoutJob| ui.painter().layout_job(job.clone()).size().x;
+        let padding = 2.0 * ui.spacing().button_padding.x;
+        let mut width = measure(&name) + gap + measure(&saves);
+        if output.exists() {
+            width += gap + widgets::text_width(ui, &fl!("show-in-folder"), padding);
+        }
+        if let Some(replaces) = &replaces {
+            width += gap + widgets::text_width(ui, replaces, 0.0);
+        }
+        Right { output, name, missing, saves, replaces, width }
+    }
+
+    /// Draws it, from the right, its words cut short where it has less
+    /// room than it would take.
+    fn show(self, ui: &mut egui::Ui, fallbacks: &crate::fallback::Fallbacks) {
+        let Right { output, name, missing, saves, replaces, .. } = self;
+        // the button's short name where the long one leaves the name no
+        // room, as in narrow windows or long words
+        let named = ui.painter().layout_job(name.clone()).size().x;
+        let full = fl!("show-in-folder");
+        let padding = 2.0 * ui.spacing().button_padding.x + ui.spacing().item_spacing.x;
+        let fits = widgets::text_width(ui, &full, padding) + named <= ui.available_width();
+        let text = if fits { full } else { fl!("show-folder", "short") };
+        if output.exists() && ui.button(text).clicked() {
+            system::reveal(output);
+        }
+        if let Some(replaces) = replaces {
+            let room = ui.available_width() / 2.0;
+            let warning = RichText::new(&replaces).color(theme::warn(ui.visuals()));
+            within(ui, room, |ui| ui.add(egui::Label::new(warning).truncate()))
+                .on_hover_text(replaces);
+        }
+        // whole where the folder keeps a little room, else its share
+        let room = ui.available_width();
+        let room = named.min((room * NAME).max(room - SAVES_LEAST));
+        within(ui, room, |ui| ui.add(egui::Label::new(name).truncate())).on_hover_ui(|ui| {
+            let plain = text_format(ui, ui.visuals().text_color());
+            ui.label(drawable(ui, fallbacks, &output.display().to_string(), plain).0);
+            if let Some(note) = missing_note(&missing) {
+                widgets::note(ui, note);
+            }
+        });
+        ui.add(egui::Label::new(saves).truncate()).on_hover_text(fl!("saves-to", "hint"));
     }
 }
 

@@ -226,52 +226,162 @@ pub(crate) fn picking<T: PartialEq + Copy>(
     choices: &[Choice<T>],
     pick: impl Fn(T) -> Pick,
 ) -> bool {
+    let room = ui.available_width();
+    picking_in(ui, value, choices, pick, room, true)
+}
+
+/// [`segments`] on one line `room` wide, for a row that has no room for
+/// another: their labels cut short where they don't fit, said in full on
+/// hover.
+pub(crate) fn segments_on_line<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    value: &mut T,
+    choices: &[Choice<T>],
+    enabled: impl Fn(T) -> Result<(), String>,
+    room: f32,
+) -> bool {
+    let pick = |option| match enabled(option) {
+        Ok(()) => Pick::Yes,
+        Err(why) => Pick::No(why),
+    };
+    picking_in(ui, value, choices, pick, room, false)
+}
+
+/// The padding of segments that are short of room, rather than wrapped.
+const TIGHT_PADDING: f32 = 4.0;
+
+/// How a row of segments `widths` wide, apart by `gap`, fits `room`: the
+/// segments of each line, and the most a segment of it may take, where it
+/// takes less than they would, which cuts its label short.
+fn flow(widths: &[f32], gap: f32, room: f32, wrap: bool) -> Vec<(std::ops::Range<usize>, f32)> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let mut width = 0.0;
+    for (index, each) in widths.iter().enumerate() {
+        let wider = width + if index > start { gap } else { 0.0 } + each;
+        if wrap && index > start && wider > room {
+            lines.push(start..index);
+            (start, width) = (index, *each);
+        } else {
+            width = wider;
+        }
+    }
+    lines.push(start..widths.len());
+    lines
+        .into_iter()
+        .map(|line| {
+            // the widest cut down first, as little as it takes
+            let gaps = gap * line.len().saturating_sub(1) as f32;
+            let mut sorted: Vec<f32> = widths[line.clone()].to_vec();
+            sorted.sort_by(f32::total_cmp);
+            let mut most = f32::INFINITY;
+            let mut left = room - gaps;
+            for (index, each) in sorted.iter().enumerate() {
+                let share = left / (sorted.len() - index) as f32;
+                if *each > share {
+                    most = share.floor().max(1.0);
+                    break;
+                }
+                left -= each;
+            }
+            (line, most)
+        })
+        .collect()
+}
+
+/// [`picking`] within `room`: tighter, then onto more lines where it may
+/// `wrap`, and only then its labels cut short.
+fn picking_in<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    value: &mut T,
+    choices: &[Choice<T>],
+    pick: impl Fn(T) -> Pick,
+    room: f32,
+    wrap: bool,
+) -> bool {
     let mut changed = false;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 1.0;
-        let last = choices.len().saturating_sub(1);
+    ui.vertical(|ui| {
+        let gap = 1.0;
+        ui.spacing_mut().item_spacing = vec2(gap, 4.0);
+        let widths = |ui: &egui::Ui, padding: f32| -> Vec<f32> {
+            choices.iter().map(|(_, text, _)| text_width(ui, text, 2.0 * padding)).collect()
+        };
+        let total = |widths: &[f32]| widths.iter().sum::<f32>() + gap * (widths.len() - 1) as f32;
+        let mut natural = widths(ui, ui.spacing().button_padding.x);
+        if total(&natural) > room {
+            let tight = widths(ui, TIGHT_PADDING);
+            if total(&tight) <= room || !wrap {
+                ui.spacing_mut().button_padding.x = TIGHT_PADDING;
+                natural = tight;
+            }
+        }
         let radius = ui.visuals().widgets.inactive.corner_radius.nw;
         let height = ui.spacing().interact_size.y;
-        for (index, (option, text, hint)) in choices.iter().enumerate() {
-            let option = *option;
-            let round = |at_end: bool| if at_end { radius } else { 0 };
-            let corners = egui::CornerRadius {
-                nw: round(index == 0),
-                sw: round(index == 0),
-                ne: round(index == last),
-                se: round(index == last),
-            };
-            let selected = *value == option;
-            let mut button = egui::Button::selectable(selected, text.as_str())
-                .corner_radius(corners)
-                .min_size(vec2(0.0, height));
-            button = if selected {
-                button.stroke(theme::on_outline(ui.visuals()))
-            } else {
-                button.frame_when_inactive(true)
-            };
-            let response = match pick(option) {
-                Pick::No(why) => ui.add_enabled(false, button).on_disabled_hover_text(why),
-                Pick::Changes(what) => greyed(ui, true, |ui| ui.add(button)).on_hover_text(what),
-                Pick::Yes if !hint.is_empty() => ui.add(button).on_hover_text(hint.as_str()),
-                Pick::Yes => ui.add(button),
-            };
-            if response.clicked() && !selected {
-                *value = option;
-                changed = true;
-            }
+        for (line, most) in flow(&natural, gap, room, wrap) {
+            ui.horizontal(|ui| {
+                for index in line.clone() {
+                    let (option, text, hint) = &choices[index];
+                    let option = *option;
+                    let round = |at_end: bool| if at_end { radius } else { 0 };
+                    let (first, last) = (index == line.start, index + 1 == line.end);
+                    let corners = egui::CornerRadius {
+                        nw: round(first),
+                        sw: round(first),
+                        ne: round(last),
+                        se: round(last),
+                    };
+                    let selected = *value == option;
+                    let mut button = egui::Button::selectable(selected, text.as_str())
+                        .truncate()
+                        .corner_radius(corners)
+                        .min_size(vec2(0.0, height));
+                    button = if selected {
+                        button.stroke(theme::on_outline(ui.visuals()))
+                    } else {
+                        button.frame_when_inactive(true)
+                    };
+                    let cut = natural[index] > most;
+                    let response = ui
+                        .scope(|ui| {
+                            if most.is_finite() {
+                                ui.set_max_width(most);
+                            }
+                            match pick(option) {
+                                Pick::No(why) => {
+                                    ui.add_enabled(false, button).on_disabled_hover_text(why)
+                                }
+                                Pick::Changes(what) => {
+                                    greyed(ui, true, |ui| ui.add(button)).on_hover_text(what)
+                                }
+                                Pick::Yes if !hint.is_empty() => {
+                                    ui.add(button).on_hover_text(hint.as_str())
+                                }
+                                Pick::Yes => ui.add(button),
+                            }
+                        })
+                        .inner;
+                    // cut short: said in full
+                    let response =
+                        if cut { response.on_hover_text(text.as_str()) } else { response };
+                    if response.clicked() && !selected {
+                        *value = option;
+                        changed = true;
+                    }
+                }
+            });
         }
     });
     changed
 }
 
 /// One of several choices, on a button of its own styled as a
-/// [`segments`] option, its text cut short past `max_width`.
+/// [`segments`] option. They wrap as words do, in a `horizontal_wrapped`
+/// row; one too long for a line of its own is cut short, and said in full
+/// on hover.
 pub(crate) fn choice(
     ui: &mut egui::Ui,
     selected: bool,
     text: &str,
-    max_width: f32,
     enabled: bool,
 ) -> egui::Response {
     let height = ui.spacing().interact_size.y;
@@ -281,11 +391,17 @@ pub(crate) fn choice(
     } else {
         button.frame_when_inactive(true)
     };
-    ui.scope(|ui| {
-        ui.set_max_width(max_width);
-        ui.add_enabled(enabled, button)
-    })
-    .inner
+    let line = ui.max_rect().width();
+    if text_width(ui, text, 2.0 * ui.spacing().button_padding.x) <= line {
+        return ui.add_enabled(enabled, button);
+    }
+    let response = ui
+        .scope(|ui| {
+            ui.set_max_width(line);
+            ui.add_enabled(enabled, button)
+        })
+        .inner;
+    response.on_hover_text(text)
 }
 
 /// [`segments`] for a value a preset may set.
@@ -309,7 +425,8 @@ pub(crate) fn preset_picking<T: PartialEq + Copy>(
     let mut current = value.unwrap_or(base);
     let mut changed = false;
     ui.horizontal(|ui| {
-        if picking(ui, &mut current, choices, pick) {
+        let room = ui.available_width() - RESET - ui.spacing().item_spacing.x;
+        if picking_in(ui, &mut current, choices, pick, room, true) {
             *value = (current != base).then_some(current);
             changed = true;
         }
