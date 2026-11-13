@@ -75,7 +75,7 @@ impl From<FileKind> for Kind {
 /// it. Target, crop, times and what of an Aseprite file is read apply to
 /// every format. Kept with the session as they are.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct Choices {
     /// `None` for the default preset of the format.
     pub(crate) preset: Option<String>,

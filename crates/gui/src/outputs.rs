@@ -15,6 +15,7 @@ use crate::item::Item;
 
 /// A file's size and modification time, which change when it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct FileVersion {
     bytes: u64,
     /// Since 1970, as files are dated.
