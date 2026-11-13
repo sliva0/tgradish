@@ -113,7 +113,7 @@ impl App {
 
     /// Whether tgradish made the file at `path`, by the marks it shows:
     /// read once for each version of the file.
-    fn made_by_tgradish(&self, path: &Path) -> bool {
+    pub(crate) fn made_by_tgradish(&self, path: &Path) -> bool {
         let Some(version) = FileVersion::of(path) else { return false };
         let mut known = self.made_by_tgradish.borrow_mut();
         match known.get(path) {
@@ -225,12 +225,17 @@ mod tests {
             let mut harness = harness(Config::default());
             harness.state_mut().add(vec![art.clone()]);
             finish(&mut harness);
+            // said before converting
+            let said = harness.query_by_label_contains("Replaces an earlier result").is_some();
+            assert_eq!(said, !earlier);
             convert(&harness);
             harness.run_steps(2);
             finish(&mut harness);
             let made = made_job(&harness.state().items[0]);
             assert_eq!(made.output, output);
             assert_eq!(made.replaces, !earlier);
+            // and no longer once this window has made it
+            assert!(harness.query_by_label_contains("Replaces an earlier result").is_none());
         }
     }
 

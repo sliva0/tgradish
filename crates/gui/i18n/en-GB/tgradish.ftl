@@ -175,6 +175,11 @@ show-in-folder = Show in folder
 # Before the folder a file's result goes to.
 saves-to = Saves to { $folder }
     .hint = Where results go is set in "{ settings }"
+# Beside the name of the result to be made, where a file is there that
+# converting will replace: one tgradish made at another time, or with the
+# setting to replace any, another file.
+replaces-earlier = Replaces an earlier result
+    .any = Replaces the file there
 
 
 ## Reading a file to show it
