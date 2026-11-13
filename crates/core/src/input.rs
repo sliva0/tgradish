@@ -106,6 +106,87 @@ pub fn is_result_name(path: &Path) -> bool {
     })
 }
 
+/// What a file is, as tgradish tells kinds of file apart: what results
+/// are for inspecting, and what reads an input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum FileKind {
+    /// WebM, or other Matroska: a video sticker, or a video.
+    Webm,
+    /// A WebP picture, still or animated.
+    Webp { animated: bool },
+    /// A `.tgs` sticker: gzip, or Lottie JSON named `.tgs`.
+    Tgs,
+    /// An Aseprite file.
+    Aseprite,
+    /// A picture or animation both ffmpeg and the pixel art reader read:
+    /// PNG and APNG, GIF, JPEG or BMP.
+    Picture,
+    /// Anything else, which only ffmpeg might read: other videos, TIFF.
+    Other,
+}
+
+impl FileKind {
+    /// Whether tgradish's own pixel art reader reads it, as `.tgs`
+    /// stickers are made of it; the rest are read through ffmpeg.
+    pub fn reads_as_art(self) -> bool {
+        matches!(self, FileKind::Webp { .. } | FileKind::Aseprite | FileKind::Picture)
+    }
+
+    /// The kind of a file starting with `start`, if they tell.
+    fn of_start(start: &[u8]) -> Option<FileKind> {
+        use tgradish_tgs::frames::Format;
+        Some(match Format::detect(start) {
+            Some(Format::WebP) => {
+                // the extended header's animation flag
+                let animated = start.get(12..16) == Some(b"VP8X")
+                    && start.get(20).is_some_and(|flags| flags & 0x02 != 0);
+                FileKind::Webp { animated }
+            }
+            Some(Format::Aseprite) => FileKind::Aseprite,
+            Some(Format::Gif | Format::Png | Format::Jpeg | Format::Bmp) => FileKind::Picture,
+            None if start.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) => FileKind::Webm,
+            None if start.starts_with(&[0x1f, 0x8b]) => FileKind::Tgs,
+            _ => return None,
+        })
+    }
+
+    /// The kind a file named `path` is by its extension.
+    fn of_name(path: &Path) -> FileKind {
+        match extension(path).as_str() {
+            "webm" | "mkv" => FileKind::Webm,
+            "webp" => FileKind::Webp { animated: false },
+            "tgs" => FileKind::Tgs,
+            extension if ASEPRITE.contains(&extension) => FileKind::Aseprite,
+            extension if IMAGES.contains(&extension) => FileKind::Picture,
+            _ => FileKind::Other,
+        }
+    }
+}
+
+/// What the file at `path` is: by its first bytes, or where they tell
+/// nothing, as of plain Lottie JSON, or the file can't be read, by its
+/// extension.
+pub fn sniff(path: &Path) -> FileKind {
+    sniff_readable(path).unwrap_or_else(|_| FileKind::of_name(path))
+}
+
+/// [`sniff`] of a file that must be readable: one that can't be opened is
+/// [`Error::Unreadable`].
+pub(crate) fn sniff_readable(path: &Path) -> Result<FileKind> {
+    let mut start = Vec::with_capacity(START_BYTES as usize);
+    std::fs::File::open(path)
+        .and_then(|file| {
+            std::io::Read::read_to_end(&mut std::io::Read::take(file, START_BYTES), &mut start)
+        })
+        .map_err(|err| crate::art::unreadable(path, err))?;
+    Ok(FileKind::of_start(&start).unwrap_or_else(|| FileKind::of_name(path)))
+}
+
+/// How much of a file [`sniff`] reads: enough for a WebP's extended
+/// header.
+const START_BYTES: u64 = 32;
+
 /// Videos, and TIFF pictures, which only ffmpeg reads: for any sticker,
 /// animated ones from the frames ffmpeg reads.
 pub const VIDEOS: &[&str] =
@@ -184,6 +265,31 @@ mod tests {
         // a folder given as a file is a sequence's
         let folder = Input::File(dir.path().to_path_buf());
         assert!(matches!(folder.check_output(&output, true), Err(Error::IsFolder(_))));
+    }
+
+    #[test]
+    fn sniffs_by_content_then_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = |name: &str, bytes: &[u8]| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, bytes).unwrap();
+            path
+        };
+        let mut animated = b"RIFF\0\0\0\0WEBPVP8X\0\0\0\0\x02".to_vec();
+        animated.extend([0; 11]);
+        // a WebP named otherwise, as a WebM and a .tgs are
+        assert_eq!(sniff(&file("a.webm", &animated)), FileKind::Webp { animated: true });
+        assert_eq!(sniff(&file("b", b"RIFF\0\0\0\0WEBPVP8 ")), FileKind::Webp { animated: false });
+        assert_eq!(sniff(&file("c.webp", &[0x1a, 0x45, 0xdf, 0xa3, 0x9f])), FileKind::Webm);
+        assert_eq!(sniff(&file("d.png", &[0x1f, 0x8b, 8])), FileKind::Tgs);
+        assert_eq!(sniff(&file("e", b"\x89PNG\r\n\x1a\n")), FileKind::Picture);
+        // what the start doesn't tell, by name: Lottie JSON, and videos
+        assert_eq!(sniff(&file("f.tgs", b"{\"v\":\"5.5.2\"}")), FileKind::Tgs);
+        assert_eq!(sniff(&file("g.mp4", b"\0\0\0\x18ftypmp42")), FileKind::Other);
+        // and what can't be read
+        assert_eq!(sniff(&dir.path().join("missing.ase")), FileKind::Aseprite);
+        assert!(sniff_readable(&dir.path().join("missing.ase")).is_err());
+        assert!(FileKind::Picture.reads_as_art() && !FileKind::Webm.reads_as_art());
     }
 
     #[test]
