@@ -12,7 +12,7 @@ use anyhow::{Context as _, Result, bail};
 use crate::Context;
 use crate::args::WatchArgs;
 use crate::convert::{Converter, Failed};
-use tgradish_core::inputs;
+use tgradish_core::input;
 
 use crate::ui;
 
@@ -32,11 +32,11 @@ fn is_input(path: &Path) -> bool {
     if results.iter().any(|s| name.ends_with(s)) {
         return false;
     }
-    let extension = inputs::extension(path);
+    let extension = input::extension(path);
     let extension = extension.as_str();
-    inputs::VIDEOS.contains(&extension)
-        || inputs::IMAGES.contains(&extension)
-        || inputs::ASEPRITE.contains(&extension)
+    input::VIDEOS.contains(&extension)
+        || input::IMAGES.contains(&extension)
+        || input::ASEPRITE.contains(&extension)
 }
 
 /// What a file looked like at one scan.
@@ -280,7 +280,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recognizes_inputs() {
+    fn recognises_inputs() {
         let input = |path: &str| is_input(Path::new(path));
         assert!(input("dir/Pig.MP4"));
         assert!(input("cat.gif"));

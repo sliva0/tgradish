@@ -8,7 +8,7 @@ use tgradish_core::options::{Crop, Resize, Spoof};
 use tgradish_core::picture;
 use tgradish_core::presets::Format;
 use tgradish_core::telegram;
-use tgradish_core::tgs::TgsOptions;
+use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 
 use tgradish_tgs::frames::aseprite::Direction;
@@ -147,7 +147,7 @@ fn picture(options: &Options, used: (u32, u32)) -> Vec<String> {
 }
 
 /// How a `.tgs` result's art is cut and squared.
-fn art(options: &TgsOptions, steps: &mut Vec<String>) {
+fn art(options: &tgs::Options, steps: &mut Vec<String>) {
     if !options.keep_canvas_or_default() {
         steps.push(fl!("plan-trimmed"));
     }

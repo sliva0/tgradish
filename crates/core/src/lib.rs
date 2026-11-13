@@ -14,6 +14,7 @@
 //! WebM inspection and duration spoofing ([`webm::container`]), presets, the user's
 //! config and the events front-ends follow are here too.
 
+mod art;
 pub mod backend;
 mod cancel;
 #[cfg(feature = "clipboard")]
@@ -23,7 +24,7 @@ pub mod drawn;
 mod error;
 pub mod ffmpeg;
 mod fsutil;
-pub mod inputs;
+pub mod input;
 pub mod inspect;
 pub mod licenses;
 #[cfg(feature = "linked")]
@@ -36,7 +37,6 @@ pub mod picture;
 pub mod presets;
 pub mod preview;
 pub mod protocol;
-mod source;
 pub mod telegram;
 pub mod tgs;
 pub mod webm;

@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, FileAction, Result};
 use crate::options::{Fit, Speed};
-use crate::tgs::TgsOptions;
+use crate::tgs;
 use crate::webm::Options;
 
 /// The built-in presets' names, fastest first.
@@ -87,7 +87,7 @@ impl Format {
     }
 
     /// Whether this format uses the option `key`, as files, JSON and flags
-    /// name it: WebM all of [`Options`], `.tgs` all of [`TgsOptions`], and
+    /// name it: WebM all of [`Options`], `.tgs` all of [`tgs::Options`], and
     /// images those of WebM's a still picture has,
     /// [`crate::webp::PICTURE_OPTIONS`].
     pub fn uses(self, key: &str) -> bool {
@@ -102,7 +102,7 @@ impl Format {
         };
         match self {
             Format::Webm => known(&WEBM, || schemars::schema_for!(Options)),
-            Format::Tgs => known(&TGS, || schemars::schema_for!(TgsOptions)),
+            Format::Tgs => known(&TGS, || schemars::schema_for!(tgs::Options)),
             Format::Webp => crate::webp::PICTURE_OPTIONS.contains(&key),
         }
     }
@@ -132,7 +132,7 @@ impl Format {
 #[serde(untagged)]
 pub enum FormatOptions {
     Webm(Options),
-    Tgs(TgsOptions),
+    Tgs(tgs::Options),
     /// WebM's options, for an image.
     Webp(Options),
 }
@@ -184,7 +184,7 @@ pub struct Preset {
     /// without the presets it extends: those its file sets.
     pub webm: Options,
     /// The same for `.tgs` results.
-    pub tgs: TgsOptions,
+    pub tgs: tgs::Options,
     /// File the preset was loaded from, `None` for built-in presets.
     pub path: Option<PathBuf>,
 }
@@ -218,7 +218,7 @@ fn table(options: &impl Serialize) -> toml::Table {
 }
 
 fn builtin() -> Vec<Preset> {
-    let preset = |name: &str, description: &str, webm: Options, tgs: TgsOptions| Preset {
+    let preset = |name: &str, description: &str, webm: Options, tgs: tgs::Options| Preset {
         name: name.into(),
         description: description.into(),
         extends: None,
@@ -226,7 +226,7 @@ fn builtin() -> Vec<Preset> {
         tgs,
         path: None,
     };
-    let speed = |speed| TgsOptions { speed: Some(speed), ..Default::default() };
+    let speed = |speed| tgs::Options { speed: Some(speed), ..Default::default() };
     vec![
         preset(
             "fast",
@@ -300,7 +300,7 @@ pub struct Presets {
 #[derive(Debug, Clone)]
 struct Resolved {
     webm: std::result::Result<Options, PresetError>,
-    tgs: std::result::Result<TgsOptions, PresetError>,
+    tgs: std::result::Result<tgs::Options, PresetError>,
 }
 
 impl Presets {
@@ -321,7 +321,7 @@ impl Presets {
             .keys()
             .map(|name| {
                 let webm = self.fold(name, |preset| &preset.webm, Options::merged);
-                let tgs = self.fold(name, |preset| &preset.tgs, TgsOptions::merged);
+                let tgs = self.fold(name, |preset| &preset.tgs, tgs::Options::merged);
                 let resolved = Resolved { webm: webm.map_err(message), tgs: tgs.map_err(message) };
                 (name.clone(), resolved)
             })
@@ -401,7 +401,7 @@ impl Presets {
     }
 
     /// Options of `name` for `.tgs` results.
-    pub fn tgs(&self, name: &str) -> Result<TgsOptions> {
+    pub fn tgs(&self, name: &str) -> Result<tgs::Options> {
         match self.resolved.get(name) {
             Some(resolved) => resolved.tgs.clone().map_err(Error::Preset),
             None => Err(self.get(name).expect_err("every preset is resolved")),
@@ -465,7 +465,7 @@ pub fn save(
     dir: &Path,
     name: &str,
     description: &str,
-    (webm, tgs): (&Options, &TgsOptions),
+    (webm, tgs): (&Options, &tgs::Options),
     replace: bool,
 ) -> Result<PathBuf> {
     check_name(name)?;
@@ -536,7 +536,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 
 /// Says the preset at `path` is `description`, keeping its options. The
 /// file is written anew, without any comments it had.
-pub fn describe(path: &Path, description: &str) -> Result<()> {
+pub fn set_description(path: &Path, description: &str) -> Result<()> {
     let text = std::fs::read_to_string(path).map_err(Error::io(FileAction::Read, path))?;
     let mut file: toml::Table = toml::from_str(&text)
         .map_err(|err| PresetError::Broken(format!("{}: {err}", path.display())))?;
@@ -575,7 +575,7 @@ mod tests {
     fn renames_describes_and_removes_presets() {
         let dir = tempfile::tempdir().unwrap();
         let webm = Options { crf: Some(28), ..Options::default() };
-        let tgs = TgsOptions::default();
+        let tgs = tgs::Options::default();
         save(dir.path(), "small", "Small ones", (&webm, &tgs), false).unwrap();
         save(dir.path(), "other", "", (&webm, &tgs), false).unwrap();
         let load = || Presets::load(Some(dir.path())).unwrap();
@@ -589,9 +589,9 @@ mod tests {
 
         // described anew, its options as they were
         let path = dir.path().join("tiny.toml");
-        describe(&path, "Tiny ones").unwrap();
+        set_description(&path, "Tiny ones").unwrap();
         assert_eq!(load().get("tiny").unwrap().description, "Tiny ones");
-        describe(&path, "").unwrap();
+        set_description(&path, "").unwrap();
         assert_eq!(load().get("tiny").unwrap().description, "");
         assert_eq!(load().webm("tiny").unwrap().crf, Some(28));
 
@@ -646,13 +646,13 @@ mod tests {
             title: Some("pig".into()),
             ..Options::default()
         };
-        let tgs = TgsOptions {
+        let tgs = tgs::Options {
             speed: Some(Speed::Fast),
             exact: Some(false),
             pixel_scale: Some(2),
             // one file's: left out
             sheet: "4x2".parse().ok(),
-            ..TgsOptions::default()
+            ..tgs::Options::default()
         };
         let path = save(dir.path(), "my small", "Small ones", (&webm, &tgs), false).unwrap();
         assert_eq!(path, dir.path().join("my small.toml"));

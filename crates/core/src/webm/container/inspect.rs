@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use super::ebml::{self, Element, ids};
 use super::{DEFAULT_TIMESTAMP_SCALE, EbmlError, Result, SIGNATURE_PREFIX, WebmError};
-use crate::source::unreadable;
+use crate::art::unreadable;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]

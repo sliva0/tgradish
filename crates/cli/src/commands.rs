@@ -8,11 +8,11 @@ use tgradish_core::config::Config;
 use tgradish_core::inspect::{self, Inspected};
 use tgradish_core::presets::{self, Format, Presets};
 use tgradish_core::telegram::{self, Target};
-use tgradish_core::tgs::TgsOptions;
+use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 use tgradish_core::webm::container::{self, Patch, WebmInfo};
+use tgradish_core::webp;
 use tgradish_core::{TOOL_ID, protocol};
-use tgradish_core::{tgs, webp};
 
 use crate::term;
 
@@ -243,7 +243,11 @@ fn default_for(ctx: &Context, name: &str) -> String {
 
 /// `preset`, its options with everything it extends applied, as a preset
 /// file could hold it.
-fn preset_file(preset: &presets::Preset, webm: &Options, tgs: &TgsOptions) -> Result<toml::Table> {
+fn preset_file(
+    preset: &presets::Preset,
+    webm: &Options,
+    tgs: &tgs::Options,
+) -> Result<toml::Table> {
     let mut file = toml::Table::new();
     if !preset.description.is_empty() {
         file.insert("description".into(), preset.description.clone().into());

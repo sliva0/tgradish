@@ -326,7 +326,7 @@ mod tests {
         // as stickers are named
         let named = |title: Option<&str>| {
             let options =
-                crate::tgs::TgsOptions { title: title.map(Into::into), ..Default::default() };
+                crate::tgs::Options { title: title.map(Into::into), ..Default::default() };
             options.sticker_options().unwrap().name.unwrap()
         };
         assert!(tgradish_name(&named(None)) && tgradish_name(&named(Some("dance"))));
@@ -353,7 +353,7 @@ mod tests {
         let walker = files.iter().find(|file| file.name == "walker_2x.gif").unwrap();
         let input = dir.path().join("walker.gif");
         std::fs::write(&input, &walker.bytes).unwrap();
-        let request = crate::tgs::TgsRequest {
+        let request = crate::tgs::Request {
             inputs: vec![input],
             sequence: false,
             output: dir.path().join("walker.tgs"),

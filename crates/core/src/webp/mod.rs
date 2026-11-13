@@ -37,7 +37,7 @@ pub fn default_output(input: &Path, target: Target) -> PathBuf {
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "event", rename_all = "kebab-case")]
 #[non_exhaustive]
-pub enum StillEvent {
+pub enum Event {
     Finished(Outcome),
     /// Something worth knowing about more than one picture, as `watch`
     /// says of folders it can't read; what is about one is in its

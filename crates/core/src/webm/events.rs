@@ -1,6 +1,6 @@
 //! What a WebM conversion reports as it goes, for front-ends to follow.
-//! `.tgs` and WebP conversions report their own, [`crate::tgs::TgsEvent`]
-//! and [`crate::webp::StillEvent`].
+//! `.tgs` and WebP conversions report their own, [`crate::tgs::Event`]
+//! and [`crate::webp::Event`].
 
 use std::path::PathBuf;
 

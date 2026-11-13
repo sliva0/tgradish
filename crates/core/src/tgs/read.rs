@@ -6,11 +6,11 @@ use std::time::Duration;
 
 use tgradish_tgs::frames::{self, DecodeOptions, Limits};
 
-use super::TgsOptions;
+use super::Options;
 use crate::CancelToken;
+use crate::art::{self, Aseprite};
 use crate::backend::{Backend, FramesRequest};
 use crate::error::{Error, Result};
-use crate::source::{self, Aseprite};
 use crate::telegram;
 
 /// What the inputs hold, as [`convert`](super::convert) reads them.
@@ -54,13 +54,13 @@ impl Loaded {
 pub(super) fn load(
     inputs: &[PathBuf],
     sequence: bool,
-    options: &TgsOptions,
+    options: &Options,
     backend: Option<&Backend>,
     cancel: &CancelToken,
 ) -> Result<Loaded> {
     let limits = Limits::default();
     if sequence || inputs.len() > 1 {
-        return Ok(Loaded::art(source::read_sequence(inputs, options.fps, cancel)?));
+        return Ok(Loaded::art(art::read_sequence(inputs, options.fps, cancel)?));
     }
     let [input] = inputs else {
         return Err(Error::NothingToConvert);
@@ -72,7 +72,7 @@ pub(super) fn load(
         })?;
         return read_video(backend, input, options, cancel);
     }
-    let bytes = source::read(input)?;
+    let bytes = art::read(input)?;
     cancel.check()?;
     let sheet = options.sheet_layout()?;
     // a sheet is one picture, whatever tag is asked for
@@ -80,9 +80,7 @@ pub(super) fn load(
     let chosen =
         crate::drawn::layers(options.show_layers.as_deref(), options.hide_layers.as_deref());
     let decoded = match frames::Format::detect(&bytes) {
-        Some(frames::Format::Aseprite) => {
-            source::aseprite(&bytes, tag.as_deref(), &chosen, &limits)
-        }
+        Some(frames::Format::Aseprite) => art::aseprite(&bytes, tag.as_deref(), &chosen, &limits),
         _ => {
             let options = DecodeOptions { tag, layers: chosen };
             frames::decode(&bytes, &options, &limits)
@@ -99,7 +97,7 @@ pub(super) fn load(
         }),
         None => decoded,
     }
-    .map_err(|err| source::unreadable(input, err))?;
+    .map_err(|err| art::unreadable(input, err))?;
     let Aseprite { tags, layers, durations } = aseprite;
     Ok(Loaded { tags, layers, durations, ..Loaded::art(animation) })
 }
@@ -132,7 +130,7 @@ const STICKER_FPS: f64 = tgradish_tgs::limits::telegram::FPS as f64;
 fn read_video(
     backend: &Backend,
     input: &Path,
-    options: &TgsOptions,
+    options: &Options,
     cancel: &CancelToken,
 ) -> Result<Loaded> {
     let chosen =
@@ -224,7 +222,7 @@ fn read_video(
 
 /// Pixel art as it is read, before anything is cropped or reduced.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Source {
+pub struct Art {
     pub width: u32,
     pub height: u32,
     /// Straight RGBA, each frame with how long it shows, in seconds.
@@ -243,13 +241,13 @@ pub struct Source {
 /// what is read: `tag`, the layers, `sheet`, `sheet_frames` and `fps`; or a
 /// video through `backend`, as much as a sticker can show. `cancel` is
 /// asked between files.
-pub fn read_source(
+pub fn read_art(
     inputs: &[PathBuf],
     sequence: bool,
-    options: &TgsOptions,
+    options: &Options,
     backend: Option<&Backend>,
     cancel: &CancelToken,
-) -> Result<Source> {
+) -> Result<Art> {
     let loaded = load(inputs, sequence, options, backend, cancel)?;
     let (width, height) = (loaded.animation.width(), loaded.animation.height());
     let frames = loaded
@@ -259,7 +257,7 @@ pub fn read_source(
         .map(|frame| (frame.rgba, frame.duration.as_secs_f64()))
         .collect();
     let (tags, layers, durations) = (loaded.tags, loaded.layers, loaded.durations);
-    Ok(Source { width, height, frames, tags, layers, durations })
+    Ok(Art { width, height, frames, tags, layers, durations })
 }
 
 #[cfg(test)]
@@ -273,22 +271,22 @@ mod tests {
         let ase = ase.unwrap();
         let path = dir.path().join(&ase.name);
         std::fs::write(&path, &ase.bytes).unwrap();
-        let read = |options: TgsOptions| {
+        let read = |options: Options| {
             let loaded =
                 load(std::slice::from_ref(&path), false, &options, None, &CancelToken::new());
             let loaded = loaded.unwrap();
             (loaded.animation.width(), loaded.animation.frames().len(), loaded.tags)
         };
-        let (width, frames, tags) = read(TgsOptions::default());
+        let (width, frames, tags) = read(Options::default());
         let names: Vec<_> = tags.iter().map(|tag| tag.name.as_str()).collect();
         assert_eq!((names, frames), (vec!["idle"], ase.sprite.frames.len()));
-        let idle = TgsOptions { tag: Some("idle".into()), ..TgsOptions::default() };
+        let idle = Options { tag: Some("idle".into()), ..Options::default() };
         assert_eq!(read(idle).1, 2);
         // a sheet is the first frame, whatever the tag
-        let sheet = TgsOptions {
+        let sheet = Options {
             tag: Some("idle".into()),
             sheet: Some(crate::options::Sheet { columns: 2, rows: 1 }),
-            ..TgsOptions::default()
+            ..Options::default()
         };
         assert_eq!(read(sheet).0, width / 2);
 
@@ -296,7 +294,7 @@ mod tests {
         let cancel = CancelToken::new();
         cancel.cancel();
         let both = [path.clone(), path.clone()];
-        let stopped = load(&both, true, &TgsOptions::default(), None, &cancel);
+        let stopped = load(&both, true, &Options::default(), None, &cancel);
         assert!(matches!(stopped, Err(Error::Cancelled)));
     }
 }

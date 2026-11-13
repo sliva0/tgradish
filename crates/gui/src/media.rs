@@ -12,7 +12,7 @@ use tgradish_core::backend::{Backend, Frames, FramesRequest};
 use tgradish_core::drawn::{self, Readable};
 use tgradish_core::ffmpeg::Probe;
 use tgradish_core::preview::Preview;
-use tgradish_core::tgs::{self, TgsOptions};
+use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 use tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 
@@ -432,11 +432,11 @@ impl Art {
         ctx: &egui::Context,
         inputs: Vec<PathBuf>,
         sequence: bool,
-        options: TgsOptions,
+        options: tgs::Options,
         backend: Option<Backend>,
     ) -> Task<Art> {
         Task::spawn(ctx, move |cancel| {
-            let source = tgs::read_source(&inputs, sequence, &options, backend.as_ref(), cancel)
+            let source = tgs::read_art(&inputs, sequence, &options, backend.as_ref(), cancel)
                 .map_err(|err| failure(&err))?;
             if source.frames.is_empty() {
                 return Err(fl!("art-no-frames"));

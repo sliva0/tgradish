@@ -19,7 +19,7 @@ use crate::telegram::{self, Target};
 /// every field is optional so presets and flags can be layered.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
-pub struct TgsOptions {
+pub struct Options {
     /// What to make. Both are square animations. Default: sticker.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<Target>,
@@ -105,7 +105,7 @@ pub struct TgsOptions {
     pub watermark: Option<bool>,
 }
 
-crate::options::layered!(TgsOptions {
+crate::options::layered!(Options {
     target,
     start,
     length,
@@ -130,7 +130,7 @@ crate::options::layered!(TgsOptions {
 
 /// The values of options left unset, which converting takes: each says
 /// its default once, for core and front-ends alike.
-impl TgsOptions {
+impl Options {
     /// How art that isn't square fills the sticker: padded.
     pub fn resize_or_default(&self) -> Resize {
         self.resize.unwrap_or(Resize::Pad)
@@ -163,10 +163,10 @@ impl TgsOptions {
     }
 }
 
-impl TgsOptions {
+impl Options {
     /// These options with every value `overlay` sets in place of their
     /// own.
-    pub fn merged(self, overlay: &TgsOptions) -> TgsOptions {
+    pub fn merged(self, overlay: &Options) -> Options {
         self.overlaid(overlay)
     }
 
@@ -183,7 +183,7 @@ impl TgsOptions {
     }
 
     pub(super) fn frame_duration(&self) -> Result<Duration> {
-        crate::source::frame_duration(self.fps)
+        crate::art::frame_duration(self.fps)
     }
 
     fn seconds(value: Option<f64>, name: &'static str) -> Result<Option<Duration>> {
@@ -256,14 +256,14 @@ mod tests {
 
     #[test]
     fn keeps_the_art_unless_asked() {
-        let fit = |exact| TgsOptions { exact, ..TgsOptions::default() }.sticker_options();
+        let fit = |exact| Options { exact, ..Options::default() }.sticker_options();
         assert_eq!(fit(None).unwrap().fit, Fit::Exact);
         assert_eq!(fit(Some(false)).unwrap().fit, Fit::Auto);
     }
 
     #[test]
     fn says_its_defaults_once() {
-        let unset = TgsOptions::default();
+        let unset = Options::default();
         assert_eq!(
             (unset.resize_or_default(), unset.speed_or_default()),
             (Resize::Pad, Speed::Best)
@@ -277,21 +277,21 @@ mod tests {
             (2.0, 1.0)
         );
         assert_eq!(unset.tempo_or_default(None), 1.0);
-        let set = TgsOptions { resize: Some(Resize::Crop), exact: Some(false), ..unset };
-        assert_eq!(TgsOptions { tempo: Some(0.5), ..set.clone() }.tempo_or_default(Some(6.0)), 0.5);
+        let set = Options { resize: Some(Resize::Crop), exact: Some(false), ..unset };
+        assert_eq!(Options { tempo: Some(0.5), ..set.clone() }.tempo_or_default(Some(6.0)), 0.5);
         assert_eq!((set.resize_or_default(), set.exact_or_default()), (Resize::Crop, false));
     }
 
     #[test]
     fn refuses_tiny_frame_rates() {
-        let slow = TgsOptions { fps: Some(1e-100), ..Default::default() };
+        let slow = Options { fps: Some(1e-100), ..Default::default() };
         assert!(matches!(slow.frame_duration(), Err(Error::InvalidOption { option: "fps", .. })));
     }
 
     #[test]
     fn layers_options() {
-        let preset = TgsOptions { speed: Some(Speed::Fast), fps: Some(5.0), ..Default::default() };
-        let flags = TgsOptions { fps: Some(12.0), exact: Some(true), ..Default::default() };
+        let preset = Options { speed: Some(Speed::Fast), fps: Some(5.0), ..Default::default() };
+        let flags = Options { fps: Some(12.0), exact: Some(true), ..Default::default() };
         let merged = preset.merged(&flags);
         assert_eq!(
             (merged.speed, merged.fps, merged.exact),
@@ -299,7 +299,7 @@ mod tests {
         );
         let settings = merged.sticker_options().unwrap();
         assert_eq!((settings.effort, settings.fit), (Effort::Fast, Fit::Exact));
-        let sheet = TgsOptions { sheet: "4x2".parse().ok(), ..Default::default() };
+        let sheet = Options { sheet: "4x2".parse().ok(), ..Default::default() };
         let layout = sheet.sheet_layout().unwrap().unwrap();
         assert_eq!(
             (layout.columns, layout.rows, layout.frame_duration),
@@ -307,7 +307,7 @@ mod tests {
         );
         // made in code, which reading refuses
         let none = crate::options::Sheet { columns: 0, rows: 2 };
-        let bad = TgsOptions { sheet: Some(none), ..Default::default() };
+        let bad = Options { sheet: Some(none), ..Default::default() };
         assert!(bad.sheet_layout().is_err());
         assert_eq!(default_output(Path::new("a/b.gif"), Target::Emoji), Path::new("a/b.emoji.tgs"));
     }

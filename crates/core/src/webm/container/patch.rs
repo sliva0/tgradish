@@ -75,7 +75,7 @@ fn video_track_uid(buf: &[u8], tracks: &Element) -> Result<Option<(Element, Elem
 
 /// Turns a CRC-32 child of `parent` into a Void of the same size. Used after
 /// changing bytes the checksum covers.
-fn neutralize_crc(buf: &mut [u8], parent: &Element) -> Result<()> {
+fn neutralise_crc(buf: &mut [u8], parent: &Element) -> Result<()> {
     // a CRC-32 element must be the first child
     let crc = parent.children(buf).next().transpose()?.filter(|el| el.id == ids::CRC32);
     if let Some(crc) = crc
@@ -229,11 +229,11 @@ fn update_seek_head(buf: &mut [u8], segment: &Segment, info_start: usize) -> Res
                 return Err(WebmError::SeekPositionTooNarrow);
             }
             buf[pos_el.data_start..pos_el.end].copy_from_slice(&bytes[8 - width..]);
-            neutralize_crc(buf, &seek)?;
+            neutralise_crc(buf, &seek)?;
             patched = true;
         }
         if patched {
-            neutralize_crc(buf, seek_head)?;
+            neutralise_crc(buf, seek_head)?;
         }
     }
     Ok(())
@@ -309,7 +309,7 @@ fn patch_in_place(buf: &mut [u8], patch: &Patch) -> Result<PatchReport> {
             buf[range.clone()].fill(0);
             buf[range.start..range.start + text.len()].copy_from_slice(text.as_bytes());
             for parent in &parents {
-                neutralize_crc(buf, parent)?;
+                neutralise_crc(buf, parent)?;
             }
             tags_patched += 1;
         }
@@ -321,8 +321,8 @@ fn patch_in_place(buf: &mut [u8], patch: &Patch) -> Result<PatchReport> {
             {
                 let old = ebml::read_uint(buf, &field)?;
                 buf[field.data_start..field.end].copy_from_slice(&uid.to_be_bytes());
-                neutralize_crc(buf, &entry)?;
-                neutralize_crc(buf, tracks)?;
+                neutralise_crc(buf, &entry)?;
+                neutralise_crc(buf, tracks)?;
                 // tags name their track by its UID
                 for tags in segment.children.iter().filter(|el| el.id == ids::TAGS) {
                     for (target, parents) in tag_track_uids(buf, tags)? {
@@ -331,7 +331,7 @@ fn patch_in_place(buf: &mut [u8], patch: &Patch) -> Result<PatchReport> {
                         {
                             buf[target.data_start..target.end].copy_from_slice(&uid.to_be_bytes());
                             for parent in &parents {
-                                neutralize_crc(buf, parent)?;
+                                neutralise_crc(buf, parent)?;
                             }
                         }
                     }
@@ -340,7 +340,7 @@ fn patch_in_place(buf: &mut [u8], patch: &Patch) -> Result<PatchReport> {
         }
     }
     // a Segment checksum covers everything changed above
-    neutralize_crc(buf, &segment.el)?;
+    neutralise_crc(buf, &segment.el)?;
 
     Ok(PatchReport {
         old_duration: fields.duration.map(|units| units * scale / 1e9),
@@ -362,7 +362,7 @@ pub fn patch_file(
     changes: &Patch,
     replace: bool,
 ) -> crate::Result<PatchReport> {
-    let mut buf = crate::source::read(input)?;
+    let mut buf = crate::art::read(input)?;
     let report = patch(&mut buf, changes)?;
     crate::fsutil::write_output(output, &buf, replace)?;
     Ok(report)

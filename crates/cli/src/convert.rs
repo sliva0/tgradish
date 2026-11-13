@@ -8,7 +8,7 @@ use console::style;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use tgradish_core::backend::Backend;
 use tgradish_core::presets::{Format, FormatOptions, Presets};
-use tgradish_core::tgs::{self, TgsEvent, TgsOptions, TgsRequest};
+use tgradish_core::tgs;
 use tgradish_core::webm::Event;
 use tgradish_core::webm::Options;
 use tgradish_core::webm::{Request, convert, default_output};
@@ -39,7 +39,7 @@ pub enum Failed {
 /// Options of the format a command converts to.
 enum Resolved {
     Webm { options: Options, backend: Backend },
-    Tgs { options: TgsOptions },
+    Tgs { options: tgs::Options },
     Webp { options: Options, backend: Backend },
 }
 
@@ -242,7 +242,7 @@ impl<'a> Converter<'a> {
                     true => Some(self.ctx.backend()?),
                     false => None,
                 };
-                let request = TgsRequest {
+                let request = tgs::Request {
                     inputs: inputs.to_vec(),
                     sequence,
                     output,
@@ -275,7 +275,7 @@ impl<'a> Converter<'a> {
                 };
                 let outcome = webp::convert(backend, &request, cancel)?;
                 if json {
-                    let event = webp::StillEvent::Finished(outcome);
+                    let event = webp::Event::Finished(outcome);
                     crate::json_line(&event);
                 } else {
                     self.print_still(&outcome);
@@ -573,9 +573,9 @@ impl TgsPrinter {
         self.bar.show(bar);
     }
 
-    fn event(&mut self, event: TgsEvent) {
+    fn event(&mut self, event: tgs::Event) {
         match event {
-            TgsEvent::Started { input, report } if !self.quiet => {
+            tgs::Event::Started { input, report } if !self.quiet => {
                 self.bar.line(ui::status("Converting", term::link(input.display(), &input)));
                 let scale = match report.scale {
                     1 => String::new(),
@@ -609,14 +609,14 @@ impl TgsPrinter {
                 term::progress(Some(0.1));
                 self.spinner("Converting", "to vector".into());
             }
-            TgsEvent::TooLarge { bytes } if !self.quiet && self.exact => {
+            tgs::Event::TooLarge { bytes } if !self.quiet && self.exact => {
                 self.bar.line(format!(
                     "{} about {} as it is, too large; --exact=false lets fitting change the art",
                     ui::warning_label(),
                     ui::size_within(bytes, tgs::MAX_BYTES)
                 ));
             }
-            TgsEvent::TooLarge { bytes } if !self.quiet => {
+            tgs::Event::TooLarge { bytes } if !self.quiet => {
                 self.unchanged = Some(bytes);
                 self.bar.line(ui::status(
                     "Fitting",
@@ -625,7 +625,7 @@ impl TgsPrinter {
                 term::progress(Some(0.3));
                 self.spinner("Fitting", "into 64 KiB".into());
             }
-            TgsEvent::Reduced { step } if !self.quiet => {
+            tgs::Event::Reduced { step } if !self.quiet => {
                 self.bar.line(ui::status(
                     "Reduced",
                     format!(
@@ -642,14 +642,14 @@ impl TgsPrinter {
                     term::progress(Some(0.3 + 0.5 * gone));
                 }
             }
-            TgsEvent::Packing => {
+            tgs::Event::Packing => {
                 term::progress(Some(0.85));
                 self.spinner("Compressing", "with zopfli".into());
             }
-            TgsEvent::Warning { message } => {
+            tgs::Event::Warning { message } => {
                 self.bar.line(format!("{} {message}", ui::warning_label()));
             }
-            TgsEvent::Finished { output, bytes, changed, steps, issues, .. } => {
+            tgs::Event::Finished { output, bytes, changed, steps, issues, .. } => {
                 self.bar.finish();
                 let changed = if changed && !steps.is_empty() {
                     format!(", {}", style("changed to fit").yellow())

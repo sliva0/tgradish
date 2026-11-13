@@ -61,14 +61,14 @@ impl Search {
 /// attempt that fits well under the limit is scored, and one that looks
 /// [`ALIKE_ENOUGH`] like the input ends the search.
 #[allow(clippy::too_many_arguments)]
-fn maximize(
+fn maximise(
     encoder: &mut dyn Encoder,
     budget: u32,
     (min, max): (f64, f64),
     initial: f64,
     limit: u64,
     alike: bool,
-    quantize: impl Fn(f64) -> f64,
+    quantise: impl Fn(f64) -> f64,
     params: impl Fn(f64) -> Params,
 ) -> Result<Search> {
     let limit_f = limit as f64;
@@ -80,7 +80,7 @@ fn maximize(
     // rounding must not leave the range, use the exact value if it would
     let snap = |x: f64| {
         let x = x.clamp(min, max);
-        let rounded = quantize(x);
+        let rounded = quantise(x);
         if (min..=max).contains(&rounded) { rounded } else { x }
     };
     let mut x = snap(initial);
@@ -200,7 +200,7 @@ fn fit_bitrate(
 ) -> Result<Search> {
     let range = (plan.fit_range.min, plan.fit_range.max);
     let length = plan.length;
-    maximize(
+    maximise(
         encoder,
         budget,
         range,
@@ -325,7 +325,7 @@ pub fn run(plan: &Plan, encoder: &mut dyn Encoder) -> Result<Attempt> {
             limit,
             |fps| Params { fps: fps as f64, length, rate: quality },
         )?,
-        Fit::Length => maximize(
+        Fit::Length => maximise(
             encoder,
             budget,
             (range.min, range.max),

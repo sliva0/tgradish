@@ -13,10 +13,10 @@ use tgradish_tgs::frames::aseprite::{LayerInfo, Layers, Tag};
 use tgradish_tgs::frames::{self, Animation, Limits};
 
 use crate::CancelToken;
+use crate::art::{self, Aseprite};
 use crate::backend::Backend;
 use crate::error::{Error, FileAction, Result};
 use crate::ffmpeg::Probe;
-use crate::source::{self, Aseprite};
 use crate::tgs::DEFAULT_FPS;
 use crate::webm::Options;
 
@@ -164,19 +164,19 @@ pub fn readable(
         return Err(err);
     }
     let (animation, aseprite) = match sequence {
-        Some(frames) => (source::read_sequence(frames, options.fps, cancel)?, Aseprite::default()),
+        Some(frames) => (art::read_sequence(frames, options.fps, cancel)?, Aseprite::default()),
         None if aseprite => {
             cancel.check()?;
-            let bytes = source::read(input)?;
-            source::aseprite(&bytes, options.tag.as_deref(), &layers, &Limits::default())
-                .map_err(|err| source::unreadable(input, err))?
+            let bytes = art::read(input)?;
+            art::aseprite(&bytes, options.tag.as_deref(), &layers, &Limits::default())
+                .map_err(|err| art::unreadable(input, err))?
         }
         None if is_animated_webp(input) => {
             cancel.check()?;
-            let bytes = source::read(input)?;
+            let bytes = art::read(input)?;
             let animation =
                 frames::decode(&bytes, &frames::DecodeOptions::default(), &Limits::default())
-                    .map_err(|err| source::unreadable(input, err))?;
+                    .map_err(|err| art::unreadable(input, err))?;
             (animation, Aseprite::default())
         }
         None => {
