@@ -282,7 +282,8 @@ impl Video {
             if let Some((animation, still)) = readable.take_drawn() {
                 let bytes = animation.frames().iter().map(|frame| frame.rgba.len()).sum::<usize>();
                 if bytes <= DRAWN_BYTES {
-                    return Ok(Video::of_drawn(animation, still, readable));
+                    let probe = readable.probe_drawn(&animation, still);
+                    return Ok(Video::of_drawn(animation, probe, readable));
                 }
             }
             let path = readable.path();
@@ -313,43 +314,26 @@ impl Video {
         })
     }
 
-    /// Frames drawn for ffmpeg, as ffmpeg would read them from `readable`:
-    /// a still picture, or each frame lasting its own time.
+    /// Frames drawn for ffmpeg, as ffmpeg would read them from `readable`,
+    /// as core's `probe` of them says: a still picture, or each frame
+    /// lasting its own time.
     fn of_drawn(
         animation: tgradish_tgs::frames::Animation,
-        still: bool,
+        probe: Probe,
         readable: Readable,
     ) -> Video {
         let (width, height) = (animation.width(), animation.height());
+        let still = probe.still_image;
         let mut times = vec![0.0];
-        let mut shortest = f64::INFINITY;
         let frames: Vec<Vec<u8>> = animation
             .into_frames()
             .into_iter()
             .map(|frame| {
-                let seconds = frame.duration.as_secs_f64();
-                shortest = shortest.min(seconds);
-                times.push(times.last().unwrap() + seconds);
+                times.push(times.last().unwrap() + frame.duration.as_secs_f64());
                 frame.rgba
             })
             .collect();
         let frames = if still { frames[..1].to_vec() } else { frames };
-        let length = *times.last().unwrap();
-        let count = frames.len() as f64;
-        let probe = Probe {
-            format: "apng".into(),
-            codec: "apng".into(),
-            width,
-            height,
-            fps: (!still).then(|| count / length),
-            base_fps: (!still).then(|| 1.0 / shortest),
-            duration: (!still).then_some(length),
-            start: 0.0,
-            alpha: true,
-            still_image: still,
-            orientation: Default::default(),
-            decoder: None,
-        };
         let starts = if still { Vec::new() } else { times[..times.len() - 1].to_vec() };
         // a picture as ffmpeg times one, a frame at its default rate
         let times = if still { vec![0.0, 1.0 / probe.fps_or_default()] } else { times };

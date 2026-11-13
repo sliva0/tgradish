@@ -43,12 +43,42 @@ impl Readable {
     /// as they were asked for, since what ffmpeg makes of the frames' times
     /// can be enough short of them to leave the last frame out.
     pub fn probe(&self, backend: &Backend, cancel: &CancelToken) -> Result<Probe> {
-        let mut probe = backend.probe(&self.path, cancel)?;
+        Ok(self.timed(backend.probe(&self.path, cancel)?))
+    }
+
+    /// What [`Readable::probe`] finds of the frames drawn, worked out from
+    /// them without ffmpeg: `animation` and `still` as
+    /// [`Readable::take_drawn`] gave them, read as the PNG they were drawn
+    /// into, a still picture or each frame lasting its own time.
+    pub fn probe_drawn(&self, animation: &Animation, still: bool) -> Probe {
+        let seconds = animation.frames().iter().map(|frame| frame.duration.as_secs_f64());
+        let length: f64 = seconds.clone().sum();
+        let shortest = seconds.fold(f64::INFINITY, f64::min);
+        let count = animation.frames().len() as f64;
+        self.timed(Probe {
+            format: "apng".into(),
+            codec: "apng".into(),
+            width: animation.width(),
+            height: animation.height(),
+            fps: (!still).then(|| count / length),
+            base_fps: (!still).then(|| 1.0 / shortest),
+            duration: (!still).then_some(length),
+            start: 0.0,
+            alpha: true,
+            still_image: still,
+            orientation: Default::default(),
+            decoder: None,
+        })
+    }
+
+    /// `probe` with a sequence's length and frame rate as they were asked
+    /// for.
+    fn timed(&self, mut probe: Probe) -> Probe {
         if let Some((frames, fps)) = self.sequence.filter(|_| !probe.still_image) {
             probe.duration = Some(frames as f64 / fps);
             (probe.fps, probe.base_fps) = (Some(fps), Some(fps));
         }
-        Ok(probe)
+        probe
     }
 
     /// Whether it is pixel art, drawn.
@@ -318,6 +348,14 @@ mod tests {
         for frame in animation.frames() {
             assert!(frame.duration.abs_diff(twelfth).as_micros() < 2, "{:?}", frame.duration);
         }
+        // as ffmpeg would find it, worked out without it, at the rate asked
+        let mut drawn = drawn;
+        let (taken, still) = drawn.take_drawn().unwrap();
+        let probe = drawn.probe_drawn(&taken, still);
+        assert!(!probe.still_image && probe.alpha);
+        assert_eq!((probe.width, probe.height), (animation.width(), animation.height()));
+        assert_eq!((probe.fps, probe.base_fps), (Some(12.0), Some(12.0)));
+        assert_eq!(probe.duration, Some(steps.len() as f64 / 12.0));
         // one frame of a sequence lasts, as a picture wouldn't
         let one = [folder.join("1.png")];
         let drawn = readable(&one[0], Some(&one), &twelve, &CancelToken::new()).unwrap();
