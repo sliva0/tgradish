@@ -1,17 +1,14 @@
 //! Checks WebM inspection and patching on files written by a real ffmpeg.
-//! Skipped when ffmpeg is missing.
+//! Skipped when ffmpeg is missing, unless `TGRADISH_REQUIRE_FFMPEG=1`.
 
-use std::path::{Path, PathBuf};
+mod common;
+
+use std::path::Path;
 use std::process::Command;
 
+use common::clip;
 use tgradish_core::webm::{self, Patch};
 use tgradish_corpus::Clip;
-
-/// A clip like phone footage, made once with ffmpeg and kept for later
-/// runs.
-fn clip(kind: Clip) -> Option<PathBuf> {
-    tgradish_corpus::clip(kind, Path::new(env!("CARGO_TARGET_TMPDIR")))
-}
 
 fn encode(input: &Path, output: &Path, seconds: &str) {
     let status = Command::new("ffmpeg")
@@ -47,6 +44,10 @@ fn decodes_cleanly(path: &Path) -> bool {
 
 #[test]
 fn spoofs_and_watermarks_ffmpeg_output() {
+    // a clip made by an earlier run is there without ffmpeg
+    if common::backends().is_none() {
+        return;
+    }
     for kind in [Clip::Tall, Clip::Square] {
         let name = format!("{kind:?}");
         let Some(input) = clip(kind) else { return };
