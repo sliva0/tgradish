@@ -174,7 +174,7 @@ fn issue_text(issue: &telegram::Issue, target: telegram::Target) -> String {
             limit = widgets::seconds(max)
         ),
         &Issue::TooManyFps { fps, max } => {
-            fl!("issue-too-many-fps", fps = format!("{fps:.2}"), limit = format!("{max:.0}"))
+            fl!("issue-too-many-fps", fps = widgets::trimmed(fps), limit = widgets::trimmed(max))
         }
         Issue::Animated => fl!("issue-animated"),
         // what the window has no words of its own for, as core says it

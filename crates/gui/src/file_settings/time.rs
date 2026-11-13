@@ -66,7 +66,13 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 };
                 let automatic = (automatic.0.as_str(), automatic.1.as_str());
                 preset_number(ui, value, preset_tempo, automatic, Some(tempo), 1.0, |value| {
-                    value.range(TEMPOS).speed(0.01).max_decimals(2).prefix("×")
+                    // ×2, as the plan writes it, not ×2.00
+                    value
+                        .range(TEMPOS)
+                        .speed(0.01)
+                        .max_decimals(2)
+                        .prefix("×")
+                        .custom_formatter(|n, _| widgets::trimmed(n))
                 });
                 if !tgs
                     && let Some(used) = used
