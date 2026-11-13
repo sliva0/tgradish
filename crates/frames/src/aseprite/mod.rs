@@ -418,23 +418,17 @@ impl Sprite {
         Ok(())
     }
 
-    /// Cels must name existing layers, links existing image cels.
+    /// Cels must name existing layers, links lead to image or tilemap
+    /// cels.
     fn check_cels(&self) -> Result<()> {
-        for (_, cels) in &self.frames {
+        for (frame, (_, cels)) in self.frames.iter().enumerate() {
             for cel in cels {
                 let layer =
                     self.layers.get(cel.layer).ok_or_else(|| error("a cel's layer is missing"))?;
                 match (&cel.content, layer.kind) {
-                    (Content::Linked(frame), _) => {
-                        let target = self.stored_cel(*frame, cel.layer);
-                        if !matches!(
-                            target,
-                            Some(Cel {
-                                content: Content::Image { .. } | Content::Tilemap { .. },
-                                ..
-                            })
-                        ) {
-                            return Err(error("a linked cel points at nothing"));
+                    (Content::Linked(_), _) => {
+                        if self.content(frame, cel.layer).is_none() {
+                            return Err(error("a linked cel leads to nothing, or round in a loop"));
                         }
                     }
                     (Content::Tilemap { .. }, LayerKind::Tilemap { tileset }) => {
@@ -568,14 +562,24 @@ impl Sprite {
 
     /// The cel of a layer in a frame, and its pixels: a linked cel keeps
     /// its own position, opacity and z-index, and shows the pixels of the
-    /// cel it links to.
+    /// cel its links lead to.
     fn cel(&self, frame: usize, layer: usize) -> Option<(&Cel, &Content)> {
-        let cel = self.stored_cel(frame, layer)?;
-        match cel.content {
-            // checked when reading: links point at image or tilemap cels
-            Content::Linked(target) => Some((cel, &self.stored_cel(target, layer)?.content)),
-            ref content => Some((cel, content)),
+        // checked when reading: links lead to image or tilemap cels
+        Some((self.stored_cel(frame, layer)?, self.content(frame, layer)?))
+    }
+
+    /// The pixels of a layer's cel in a frame: its own, or those of the cel
+    /// its links lead to, through cels that link on, as Aseprite follows
+    /// them. None where a link points at nothing, or where links go round
+    /// in a loop, as any chain longer than the frames does.
+    fn content(&self, mut frame: usize, layer: usize) -> Option<&Content> {
+        for _ in 0..=self.frames.len() {
+            match &self.stored_cel(frame, layer)?.content {
+                Content::Linked(target) => frame = *target,
+                content => return Some(content),
+            }
         }
+        None
     }
 }
 
@@ -631,6 +635,36 @@ mod tests {
             sprite.animation(Some("nope"), &Layers::default()),
             Err(Error::NoSuchTag { available, .. }) if available == ["back", "on"]
         ));
+    }
+
+    #[test]
+    fn follows_links_to_cels_that_link_on() {
+        // frame 2 links to frame 1, which links to frame 0, from where it is
+        let linked = |x: i16, frame: u16| {
+            let mut data = cel_header(0, x, 0, 128, 1);
+            data.extend(frame.to_le_bytes());
+            chunk(0x2005, &data)
+        };
+        let frames = |last: Vec<u8>| {
+            file(
+                2,
+                1,
+                32,
+                1,
+                &[
+                    vec![layer(1, 0, 0, 0, 255), image_cel(0, (0, 0), (1, 1), &RED, false)],
+                    vec![linked(0, 0)],
+                    vec![last],
+                ],
+            )
+        };
+        let animation = decode(&frames(linked(1, 1))).unwrap();
+        assert_eq!(pixels(&animation, 2), [[0; 4], [255, 0, 0, 128]]);
+        // links that come back round lead nowhere
+        let looped =
+            file(1, 1, 32, 1, &[vec![layer(1, 0, 0, 0, 255), linked(0, 1)], vec![linked(0, 0)]]);
+        assert!(decode(&looped).is_err());
+        assert!(decode(&frames(linked(0, 2))).is_err());
     }
 
     #[test]
