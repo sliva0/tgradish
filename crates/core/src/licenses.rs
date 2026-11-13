@@ -5,6 +5,8 @@
 
 use std::io::Read;
 
+include!("notice_titles.rs");
+
 /// One licence notice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notice {
@@ -34,11 +36,13 @@ mod tests {
         let notices = notices();
         assert_eq!(notices[0].title, "tgradish");
         assert!(notices[0].text.contains("MIT License"));
-        let crates = notices.iter().find(|notice| notice.title == "Rust crates").unwrap();
+        let crates = notices.iter().find(|notice| notice.title == CRATES).unwrap();
         assert!(crates.text.contains("used by:"));
         // of the static build alone: linked to a distribution's ffmpeg, the
         // binary holds none of it
         let ffmpeg = notices.iter().any(|notice| notice.title.starts_with("ffmpeg"));
         assert_eq!(ffmpeg, cfg!(feature = "linked-static"));
+        let sources = notices.iter().any(|notice| notice.title == FFMPEG_SOURCES);
+        assert_eq!(sources, ffmpeg);
     }
 }
