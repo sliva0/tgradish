@@ -897,12 +897,12 @@ preset-exists = A preset of this name is there already: saving replaces it
 replace = Replace
 name-it-first = Name it first
 cancel = Cancel
-# What a preset's name can't be.
+# What a preset's name can't be, and why one can't be renamed or deleted.
 preset-name-length = A preset's name has 1 to { $most } characters, not starting with a space
 preset-name-characters = A preset's name has only letters, digits, spaces, - and _
 preset-name-builtin = "{ $name }" is a built-in preset's name
 preset-name-taken = Another preset is named "{ $name }"
-preset-extended = "{ $other }" extends it: rename it there first
+preset-extended = "{ $other }" extends it: change that preset first
 your-presets = Your presets
 your-presets-note = Changes are kept as you make them. "{ preset-fast }", "{ preset-balanced }" and "{ preset-best }" are built in and stay as they are
 no-presets = None yet: "{ -save-settings }", in the bar under the settings
