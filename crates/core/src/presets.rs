@@ -575,7 +575,7 @@ mod tests {
         };
         let tgs = TgsOptions {
             speed: Some(Speed::Fast),
-            lossless: Some(false),
+            exact: Some(false),
             pixel_scale: Some(2),
             // one file's: left out
             sheet: Some("4x2".into()),

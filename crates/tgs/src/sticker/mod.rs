@@ -29,8 +29,9 @@ pub enum Fit {
     /// make it fit.
     #[default]
     Auto,
-    /// Never reduce; a result that is too large is reported.
-    Lossless,
+    /// Never reduce, keeping the art exactly as it is; a result that is
+    /// too large is reported.
+    Exact,
 }
 
 /// How [`make`] makes a sticker. Built as `Options { fit,
@@ -284,7 +285,7 @@ pub fn make(
     // slow, and reductions don't change it
     let likely = match options.fit {
         Fit::Auto => likely_scale(&original, &report, &options.normalise),
-        Fit::Lossless => None,
+        Fit::Exact => None,
     };
     let mut current = original.clone();
     // the quick encode of `current`, when making the sticker has one for
@@ -512,7 +513,7 @@ mod tests {
         // fitting with no reductions to make comes to keeping it as it is,
         // rather than aiming lower and encoding again some 34 times
         let input = noise();
-        let lossless = Options { fit: Fit::Lossless, effort: Effort::Fast, ..Options::default() };
+        let lossless = Options { fit: Fit::Exact, effort: Effort::Fast, ..Options::default() };
         let started = std::time::Instant::now();
         let kept = make(&input, &lossless, &mut |_| {}, &|| false).unwrap();
         let once = started.elapsed();
@@ -528,7 +529,7 @@ mod tests {
     fn packs_art_that_cant_fit_quickly() {
         // noise in many colours, kept as it is: far over the limit
         let input = noise();
-        let options = Options { fit: Fit::Lossless, effort: Effort::Fast, ..Options::default() };
+        let options = Options { fit: Fit::Exact, effort: Effort::Fast, ..Options::default() };
         let mut too_large = None;
         let made = make(
             &input,
@@ -565,13 +566,13 @@ mod tests {
             })
             .collect();
         let input = Animation::new(48, 48, frames).unwrap();
-        let lossless = Options { fit: Fit::Lossless, effort: Effort::Fast, ..Options::default() };
+        let lossless = Options { fit: Fit::Exact, effort: Effort::Fast, ..Options::default() };
         let made = make(&input, &lossless, &mut |_| {}, &|| false).unwrap();
         let json = file::unpack(&made.tgs).unwrap();
         let gzip = file::pack_quick(&json).len();
         assert!((made.bytes as f64) < gzip as f64 * 0.85, "{} of {gzip}", made.bytes);
         // at a limit only zopfli's size fits, it fits as it is either way
-        for fit in [Fit::Lossless, Fit::Auto] {
+        for fit in [Fit::Exact, Fit::Auto] {
             let options = Options { fit, max_bytes: made.bytes, ..lossless.clone() };
             let mut too_large = false;
             let mut progress = |event| too_large |= matches!(event, Progress::TooLarge { .. });

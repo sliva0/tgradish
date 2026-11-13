@@ -252,10 +252,8 @@ pub struct OptionArgs {
     /// [default: balanced], and comes out larger for TGS [default: best].
     #[arg(long, value_enum, help_heading = "Encoding")]
     pub speed: Option<SpeedArg>,
-    /// WebM: lossless encoding, only small for tiny or still pictures
-    /// [default: false]. TGS: never change the pixel art to make it fit, but
-    /// report a sticker that is too large; --lossless=false lets fitting
-    /// change it [default: true].
+    /// Lossless encoding, only small for tiny or still pictures. [default:
+    /// false]
     #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
           default_missing_value = "true", help_heading = "Encoding")]
     pub lossless: Option<bool>,
@@ -289,6 +287,12 @@ pub struct OptionArgs {
           default_missing_value = "true", help_heading = "Metadata")]
     pub watermark: Option<bool>,
 
+    /// Never change the pixel art to make it fit, but report a sticker
+    /// that is too large; --exact=false lets fitting change it. [default:
+    /// true]
+    #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
+          default_missing_value = "true", help_heading = TGS)]
+    pub exact: Option<bool>,
     /// Reductions that may make a sticker fit, comma-separated. [default:
     /// all]
     #[arg(long, value_enum, value_delimiter = ',', help_heading = TGS)]
@@ -336,6 +340,7 @@ impl OptionArgs {
         let given = |set: bool, name: &'static str| set.then_some(name);
         let flags = match format {
             Format::Webm => vec![
+                given(self.exact.is_some(), "--exact"),
                 given(!self.reductions.is_empty(), "--reductions"),
                 given(self.compromise.is_some(), "--compromise"),
                 given(self.keep_canvas.is_some(), "--keep-canvas"),
@@ -358,6 +363,7 @@ impl OptionArgs {
                 given(self.extra_args.is_some(), "--extra-args"),
                 given(self.spoof.is_some(), "--spoof"),
                 given(self.fake_duration.is_some(), "--fake-duration"),
+                given(self.exact.is_some(), "--exact"),
                 given(!self.reductions.is_empty(), "--reductions"),
                 given(self.compromise.is_some(), "--compromise"),
                 given(self.keep_canvas.is_some(), "--keep-canvas"),
@@ -373,6 +379,7 @@ impl OptionArgs {
                 given(self.fit_range.is_some(), "--fit-range"),
                 given(self.bitrate.is_some(), "--bitrate"),
                 given(self.crf.is_some(), "--crf"),
+                given(self.lossless.is_some(), "--lossless"),
                 given(!self.encoder_options.is_empty(), "--encoder-options"),
                 given(self.extra_args.is_some(), "--extra-args"),
                 given(self.spoof.is_some(), "--spoof"),
@@ -389,7 +396,7 @@ impl OptionArgs {
             length: self.length,
             tempo: self.tempo,
             speed: self.speed.map(Into::into),
-            lossless: self.lossless,
+            exact: self.exact,
             reductions: (!self.reductions.is_empty())
                 .then(|| self.reductions.iter().map(|&kind| kind.into()).collect()),
             compromise: self.compromise.map(Into::into),
@@ -643,6 +650,22 @@ mod tests {
     }
 
     #[test]
+    fn keeps_lossless_and_exact_apart() {
+        let options = |flag: &str| {
+            let cli = Cli::parse_from(["tgradish", "convert", "a.gif", flag]);
+            let Command::Convert(args) = cli.command else { panic!() };
+            args.conversion.options
+        };
+        // lossless VP9 is WebM's, keeping the art exact is .tgs's
+        assert_eq!(options("--lossless").foreign(Format::Tgs), ["--lossless"]);
+        assert!(options("--lossless").foreign(Format::Webm).is_empty());
+        for format in [Format::Webm, Format::Image] {
+            assert_eq!(options("--exact").foreign(format), ["--exact"]);
+        }
+        assert_eq!(options("--exact=false").to_tgs_options().exact, Some(false));
+    }
+
+    #[test]
     fn parses_bool_flags() {
         let cli =
             Cli::parse_from(["tgradish", "convert", "a.mp4", "--lossless", "--watermark=false"]);
@@ -714,7 +737,7 @@ mod tests {
             length: Some(1.5),
             tempo: Some(0.5),
             speed: Some(options::Speed::Fast),
-            lossless: Some(true),
+            exact: Some(true),
             reductions: Some(vec![tgs::Kind::MergeColours, tgs::Kind::DropFrames]),
             compromise: Some(tgs::Compromise::Detail),
             crop: Some(Crop { x: 0, y: 0, width: 8, height: 8 }),

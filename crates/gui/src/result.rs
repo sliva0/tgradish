@@ -97,7 +97,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     if let Some(stage) = progress.tgs {
         use jobs::TgsStage;
         // too large, and never to be changed: packed quickly, in red
-        let hopeless = progress.tgs_lossless && progress.lossless_bytes.is_some();
+        let hopeless = progress.tgs_exact && progress.unchanged_bytes.is_some();
         for (each, text) in stages(progress, stage) {
             use widgets::Fill;
             let (fill, colour) = match each.cmp(&stage) {
@@ -160,19 +160,19 @@ fn running_colour(ui: &egui::Ui) -> Color32 {
 /// What each stage of a `.tgs` conversion says, once it is at `stage`.
 fn stages(progress: &jobs::Progress, stage: jobs::TgsStage) -> [(jobs::TgsStage, String); 4] {
     use jobs::TgsStage;
-    let fits = progress.lossless_bytes.is_none() && stage > TgsStage::Fitting;
-    let hopeless = progress.tgs_lossless && progress.lossless_bytes.is_some();
+    let fits = progress.unchanged_bytes.is_none() && stage > TgsStage::Fitting;
+    let hopeless = progress.tgs_exact && progress.unchanged_bytes.is_some();
     [
         (TgsStage::Reading, fl!("stage-reading")),
         (TgsStage::Drawing, fl!("stage-drawing")),
         (
             TgsStage::Fitting,
-            match (progress.lossless_bytes, progress.steps.last()) {
+            match (progress.unchanged_bytes, progress.steps.last()) {
                 // never changed: nothing is fitted
-                (Some(bytes), _) if progress.tgs_lossless => {
+                (Some(bytes), _) if progress.tgs_exact => {
                     fl!("stage-kept-too-large", size = widgets::kib(bytes as u64))
                 }
-                (None, _) if progress.tgs_lossless => fl!("stage-kept"),
+                (None, _) if progress.tgs_exact => fl!("stage-kept"),
                 (Some(_), Some(step)) => {
                     let count = progress.steps.len();
                     let size = widgets::kib(step.bytes as u64);
@@ -274,7 +274,7 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
         let size = widgets::kib(json);
         ui.label(fl!("art-shapes", layers = layers, rectangles = rectangles, size = size));
     }
-    if let Some(bytes) = progress.lossless_bytes {
+    if let Some(bytes) = progress.unchanged_bytes {
         ui.label(fl!("art-before-fitting", size = widgets::kib(bytes as u64)));
     }
     for step in &progress.steps {
