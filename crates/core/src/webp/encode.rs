@@ -9,7 +9,12 @@ use crate::telegram;
 /// Straight RGBA as a WebP: lossless when `quality` is `None`, otherwise
 /// lossy at that quality, 0 to 100, with exact alpha.
 #[allow(unsafe_code)]
-pub fn encode(rgba: &[u8], width: u32, height: u32, quality: Option<f32>) -> Result<Vec<u8>> {
+pub(crate) fn encode(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    quality: Option<f32>,
+) -> Result<Vec<u8>> {
     use libwebp_sys as webp;
     use std::mem::MaybeUninit;
     assert_eq!(rgba.len(), width as usize * height as usize * 4, "a whole picture");
@@ -183,14 +188,15 @@ pub(super) fn xmp(title: Option<&str>, mark: bool) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::telegram::{Issue, Target};
-    use crate::webp::{creator_tool, dimensions, inspect_file, preview};
+    use crate::webp::{creator_tool, inspect_file, preview};
 
     fn read_back(webp: &[u8]) -> (u32, u32, Vec<u8>) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.webp");
         std::fs::write(&path, webp).unwrap();
         let preview = preview(&path).unwrap();
-        assert_eq!(dimensions(&path).unwrap(), (preview.width, preview.height));
+        let info = inspect_file(&path).unwrap();
+        assert_eq!((info.width, info.height), (preview.width, preview.height));
         (preview.width, preview.height, preview.frames[0].0.clone())
     }
 

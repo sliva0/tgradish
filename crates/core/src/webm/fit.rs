@@ -24,14 +24,14 @@ const AUTO_MIN_FPS: f64 = 8.0;
 const ALIKE_ENOUGH: f64 = 0.995;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Attempt {
-    pub number: u32,
-    pub params: Params,
-    pub bytes: u64,
-    pub path: PathBuf,
+pub(crate) struct Attempt {
+    pub(crate) number: u32,
+    pub(crate) params: Params,
+    pub(crate) bytes: u64,
+    pub(crate) path: PathBuf,
 }
 
-pub trait Encoder {
+pub(crate) trait Encoder {
     fn encode(&mut self, params: Params) -> Result<Attempt>;
     /// Similarity to the source, higher is better.
     fn score(&mut self, attempt: &Attempt) -> Result<f64>;
@@ -269,9 +269,9 @@ fn fit_auto(encoder: &mut dyn Encoder, plan: &Plan, limit: u64) -> Result<Search
     Ok(total)
 }
 
-/// What fitting encodes first: what it then changes
-/// depends on the sizes that come out. Found by running [`run`] with an
-/// encoder that stops at its first attempt, so it always agrees with it.
+/// What fitting encodes first: what it then changes depends on the sizes
+/// that come out. Found by running the search with an encoder that stops
+/// at its first attempt, so it always agrees with it.
 pub fn first_params(plan: &Plan) -> Params {
     /// Notes the first attempt asked for, and stops the search there.
     struct First(Option<Params>);
@@ -292,7 +292,7 @@ pub fn first_params(plan: &Plan) -> Params {
 /// Runs the search configured in `plan` and returns the attempt to keep:
 /// the best under its target's size limit. With `fit = off` that is the
 /// single attempt, even if it is too big.
-pub fn run(plan: &Plan, encoder: &mut dyn Encoder) -> Result<Attempt> {
+pub(crate) fn run(plan: &Plan, encoder: &mut dyn Encoder) -> Result<Attempt> {
     let limit = plan.target.max_bytes();
     let (fps, length, budget) = (plan.fps, plan.length, plan.attempts);
     let quality = if plan.lossless { Rate::Lossless } else { Rate::Crf(plan.crf) };

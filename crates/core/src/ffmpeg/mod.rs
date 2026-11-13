@@ -25,7 +25,6 @@ pub(crate) use args::input_args;
 pub(crate) use args::video_filter;
 #[cfg(feature = "linked")]
 pub(crate) use args::{frames_filter, picture_filter, read_seconds, ssim_graph};
-pub use locate::locate;
 pub use orientation::Orientation;
 pub use probe::Probe;
 #[cfg(feature = "linked")]
@@ -69,7 +68,7 @@ pub struct Capabilities {
 }
 
 /// Runs `ffmpeg -version` and `ffmpeg -encoders`.
-pub fn capabilities(ffmpeg: &Ffmpeg, cancel: &CancelToken) -> crate::Result<Capabilities> {
+pub(crate) fn capabilities(ffmpeg: &Ffmpeg, cancel: &CancelToken) -> crate::Result<Capabilities> {
     let stdout = |arg: &str| -> crate::Result<Vec<String>> {
         let mut cmd = std::process::Command::new(&ffmpeg.ffmpeg);
         cmd.args(["-hide_banner", arg]);

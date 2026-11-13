@@ -1,31 +1,36 @@
-//! Finding ffmpeg and ffprobe: a path the user gave, the ones on PATH, or
-//! the one built in.
+//! Finding ffmpeg and ffprobe: at a path the user gave, or on PATH.
 
 use std::env::consts::EXE_SUFFIX;
 use std::path::{Path, PathBuf};
 
-use super::{Ffmpeg, FfmpegChoice, FfmpegSource};
+use super::{Ffmpeg, FfmpegSource};
 use crate::error::{Error, FfmpegMissing, Result};
 
 fn exe(dir: &Path, name: &str) -> PathBuf {
     dir.join(format!("{name}{EXE_SUFFIX}"))
 }
 
-fn system() -> Option<Ffmpeg> {
-    let ffmpeg = which::which("ffmpeg").ok()?;
-    // prefer the ffprobe from the same installation
-    let ffprobe = ffmpeg
-        .parent()
-        .map(|dir| exe(dir, "ffprobe"))
-        .filter(|path| path.is_file())
-        .or_else(|| which::which("ffprobe").ok())?;
-    Some(Ffmpeg { ffmpeg, ffprobe, source: FfmpegSource::System })
-}
+impl Ffmpeg {
+    /// The ffmpeg and ffprobe on PATH, ffprobe from beside ffmpeg where
+    /// it is there.
+    pub fn on_path() -> Result<Ffmpeg> {
+        let ffmpeg = which::which("ffmpeg").ok();
+        // prefer the ffprobe from the same installation
+        let ffprobe = ffmpeg.as_deref().and_then(|ffmpeg| {
+            let beside = ffmpeg.parent().map(|dir| exe(dir, "ffprobe"));
+            beside.filter(|path| path.is_file()).or_else(|| which::which("ffprobe").ok())
+        });
+        match (ffmpeg, ffprobe) {
+            (Some(ffmpeg), Some(ffprobe)) => {
+                Ok(Ffmpeg { ffmpeg, ffprobe, source: FfmpegSource::System })
+            }
+            _ => Err(Error::FfmpegNotFound(FfmpegMissing::NotOnPath)),
+        }
+    }
 
-/// Finds ffmpeg. `path` overrides `choice` and may point at the ffmpeg
-/// executable or at the directory containing it; ffprobe must be next to it.
-pub fn locate(choice: FfmpegChoice, path: Option<&Path>) -> Result<Ffmpeg> {
-    if let Some(path) = path {
+    /// The ffmpeg at `path`, the executable or the folder holding it, with
+    /// the ffprobe beside it.
+    pub(crate) fn at(path: &Path) -> Result<Ffmpeg> {
         let dir = if path.is_dir() { path } else { path.parent().unwrap_or(Path::new(".")) };
         let ffmpeg = if path.is_dir() { exe(dir, "ffmpeg") } else { path.to_path_buf() };
         let ffprobe = exe(dir, "ffprobe");
@@ -35,15 +40,6 @@ pub fn locate(choice: FfmpegChoice, path: Option<&Path>) -> Result<Ffmpeg> {
         if !ffprobe.is_file() {
             return Err(Error::FfmpegNotFound(FfmpegMissing::NoFfprobe(ffprobe)));
         }
-        return Ok(Ffmpeg { ffmpeg, ffprobe, source: FfmpegSource::Path });
+        Ok(Ffmpeg { ffmpeg, ffprobe, source: FfmpegSource::Path })
     }
-
-    let found = match choice {
-        FfmpegChoice::Auto | FfmpegChoice::System => system(),
-        FfmpegChoice::Builtin => None,
-    };
-    found.ok_or(Error::FfmpegNotFound(match choice {
-        FfmpegChoice::Auto | FfmpegChoice::System => FfmpegMissing::NotOnPath,
-        FfmpegChoice::Builtin => FfmpegMissing::BuiltInIsNoProgram,
-    }))
 }

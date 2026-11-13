@@ -203,7 +203,7 @@ impl Facts {
     }
 }
 
-pub fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Probe> {
+pub(crate) fn probe(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Probe> {
     let probe_error = |message: String| Error::Unreadable { path: input.to_path_buf(), message };
 
     let mut cmd = Command::new(&ffmpeg.ffprobe);
@@ -297,7 +297,11 @@ fn compact_field<'a>(line: &'a str, section: &str, name: &str) -> Option<&'a str
 /// Where the frames of `input`'s first video stream start, in seconds
 /// after the file's start, as its packets come: empty when some carry no
 /// time.
-pub fn frame_starts(ffmpeg: &Ffmpeg, input: &Path, cancel: &CancelToken) -> Result<Vec<f64>> {
+pub(crate) fn frame_starts(
+    ffmpeg: &Ffmpeg,
+    input: &Path,
+    cancel: &CancelToken,
+) -> Result<Vec<f64>> {
     let mut cmd = Command::new(&ffmpeg.ffprobe);
     cmd.args(["-v", "error", "-select_streams", "v:0", "-of", "compact"])
         .args(["-show_entries", "format=start_time:packet=pts_time"])

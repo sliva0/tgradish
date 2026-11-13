@@ -2,7 +2,7 @@
 //! and emoji made from videos, pictures, Aseprite files and sequences of
 //! images, as any of three kinds of result:
 //!
-//! - VP9 WebM ([`webm`]), fitted to the size limit by [`webm::fit`];
+//! - VP9 WebM ([`webm`]), fitted to the size limit;
 //! - WebP pictures ([`webp`]);
 //! - `.tgs` vector animations ([`tgs`]), over the `tgradish-tgs` crate,
 //!   which turns pixel art into shapes.

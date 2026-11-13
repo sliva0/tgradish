@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use tgradish_core::backend::Backend;
-use tgradish_core::ffmpeg::{self, FfmpegChoice};
+use tgradish_core::ffmpeg::Ffmpeg;
 use tgradish_corpus::Clip;
 
 // the rule every crate's tests share, kept with the clips
@@ -16,7 +16,7 @@ pub use tgradish_corpus::skip;
 
 /// Backends to test, or `None` without a system ffmpeg.
 pub fn backends() -> Option<Vec<Backend>> {
-    let Ok(system) = ffmpeg::locate(FfmpegChoice::System, None) else {
+    let Ok(system) = Ffmpeg::on_path() else {
         return skip("needs ffmpeg and ffprobe on PATH");
     };
     #[allow(unused_mut)]

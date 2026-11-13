@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-pub use tgradish_tgs::check::{Issue, Stats};
+use tgradish_tgs::check::{Issue, Stats};
 
 use crate::art;
 use crate::error::{Error, Result};

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use schemars::JsonSchema;
 use serde::Serialize;
-pub use tgradish_tgs::check::Issue;
+use tgradish_tgs::check::Issue;
 use tgradish_tgs::normalise::Report;
 use tgradish_tgs::sticker::Step;
 

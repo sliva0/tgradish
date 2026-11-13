@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tgradish_tgs::encode::Effort;
 use tgradish_tgs::frames::Sheet;
 use tgradish_tgs::normalise;
-pub use tgradish_tgs::reduce::{Compromise, Kind};
+use tgradish_tgs::reduce::{Compromise, Kind};
 use tgradish_tgs::sticker::{self, Fit};
 
 use crate::error::{Error, Result};
