@@ -42,6 +42,8 @@ pub enum Square {
     Stretch,
 }
 
+/// How [`normalise`] reads an animation. Built as `Options { tempo,
+/// ..Options::default() }`, so that what is added later keeps its default.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Options {
     /// Keep the input's canvas instead of cropping to the visible pixels.
@@ -246,6 +248,7 @@ pub struct Rect {
 /// What normalising did, for the user and the protocol.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct Report {
     pub input_width: u32,
     pub input_height: u32,
@@ -284,6 +287,7 @@ pub struct Report {
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct LikelyScale {
     pub scale: u32,
     pub fit: f64,
@@ -292,6 +296,7 @@ pub struct LikelyScale {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "warning", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Warning {
     /// Hundreds of colours: probably not pixel art, so the sticker will be
     /// large.

@@ -13,6 +13,7 @@ use crate::limits::{MAX_RAW_JSON, TLOTTIE, telegram};
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct Stats {
     /// The animation's name (`nm`).
     pub name: Option<String>,
@@ -54,6 +55,7 @@ pub struct Stats {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Severity {
     /// Telegram refuses the sticker, or some client can't play it.
     Error,
@@ -64,6 +66,7 @@ pub enum Severity {
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub struct Issue {
     pub severity: Severity,
     /// What was checked, for front-ends to tell issues apart by.
@@ -75,6 +78,7 @@ pub struct Issue {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum IssueKind {
     /// The canvas isn't 512x512.
     Canvas,
@@ -125,6 +129,7 @@ pub enum IssueKind {
 
 /// Why Lottie JSON couldn't be checked at all.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum CheckError {
     /// It nests deeper than Telegram's renderer reads, so deep that
     /// reading it could exhaust the stack.

@@ -117,6 +117,7 @@ const MAX_GROUP_RECTS: usize = min(TLOTTIE.max_paint_source_items_per_layer, MAX
 const MAX_LAYERS: usize = min(TLOTTIE.max_painted_shape_layers, telegram::MAX_LAYERS);
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum EncodeError {
     #[error("a colour needs {rects} rectangles in one frame, Telegram allows {MAX_GROUP_RECTS}")]
     TooManyRects { rects: usize },

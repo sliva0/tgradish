@@ -10,6 +10,7 @@ use thiserror::Error;
 pub const MAX_UNPACKED: usize = 5 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum ReadError {
     #[error("not gzip data: {0}")]
     Gzip(String),

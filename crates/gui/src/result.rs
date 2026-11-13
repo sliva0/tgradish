@@ -366,6 +366,8 @@ fn reduction(reduction: &tgradish_tgs::reduce::Reduction) -> String {
         Reduction::Downscale { factor } => {
             fl!("step-resolution", factor = format!("{:.0}", factor * 100.0))
         }
+        // one added to tgradish-tgs since, which the window has no words for
+        other => format!("{other:?}"),
     }
 }
 
