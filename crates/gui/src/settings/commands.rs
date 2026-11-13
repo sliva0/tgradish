@@ -105,12 +105,8 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
     // and one it can't be told to set aside: then everything the window
     // uses goes on the command line, over a built-in preset that sets
     // nothing more than it
-    let unscaled =
+    let whole =
         item.format != Format::Tgs && base.exact_scale.is_some() && effective.exact_scale.is_none();
-    // nor can it be told of encoder options all removed, as no flag says
-    // none over the preset's
-    let has = |options: &Options| options.encoder_options.as_ref().is_some_and(|o| !o.is_empty());
-    let whole = unscaled || (item.format == Format::Webm && has(&base) && !has(&effective));
     // image stickers take their picture settings from the preset too;
     // named unless it is the format's own, as the window's settings may
     // choose another than the config file
@@ -326,6 +322,18 @@ mod tests {
         let line = command_line(&item, &context).join(" ");
         assert!(line.contains("--preset balanced") && !line.contains("--exact-scale"), "{line}");
         assert_eq!(presets.webm("still").unwrap().exact_scale, Some(ExactScale { up: 2, down: 1 }));
+
+        // encoder options all removed: none, over the preset's
+        let preset = "[webm]\nencoder-options = { aq-mode = '2' }\n";
+        std::fs::write(dir.path().join("tuned.toml"), preset).unwrap();
+        let presets = Presets::load(Some(dir.path())).unwrap();
+        let context = Context { presets: &presets, ..context };
+        let mut item = Item::new(2, vec!["pig.mp4".into()], false, Target::Sticker);
+        item.choices.preset = Some("tuned".into());
+        item.choices.webm.encoder_options = Some(Default::default());
+        let line = command_line(&item, &context);
+        assert!(line.contains(&"--encoder-options=".to_owned()), "{line:?}");
+        assert!(line.join(" ").contains("--preset tuned"), "{line:?}");
     }
 
     #[test]
