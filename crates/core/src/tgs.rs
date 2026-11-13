@@ -656,7 +656,7 @@ pub(crate) fn read_json(path: &Path) -> Result<Vec<u8>> {
 pub fn inspect_file(path: &Path) -> Result<(Stats, Vec<Issue>)> {
     let (json, packed) = read_lottie(path)?;
     tgradish_tgs::check::check(&json, packed)
-        .map_err(|message| Error::Probe { path: path.to_path_buf(), message })
+        .map_err(|err| Error::Probe { path: path.to_path_buf(), message: err.to_string() })
 }
 
 /// Fails when the output is one of the inputs, even through another path
