@@ -211,7 +211,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
 
             row(ui, &fl!("scaling"), &fl!("scaling", "hint"), Ok(()), |ui| {
                 let scalings = scalings();
-                let preset = base.scaling.unwrap_or(Scaling::Auto);
+                let preset = base.scaling_or_default();
                 preset_segments(ui, &mut item.choices.webm.scaling, preset, &scalings);
                 let scaling = item.choices.webm.scaling.unwrap_or(preset);
                 chosen_hint(ui, scaling, &scalings);
@@ -228,7 +228,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             let preset = item.choices.tgs_base(context.presets, context.config).ok();
             row(ui, &fl!("square"), &fl!("square", "tgs"), Ok(()), |ui| {
                 let squares = tgs_squares();
-                let base = preset.as_ref().and_then(|base| base.resize).unwrap_or(Resize::Pad);
+                let base = preset.clone().unwrap_or_default().resize_or_default();
                 let pick = |option| match option {
                     Resize::Contain => Pick::No(fl!("square-off", "tgs")),
                     _ => Pick::Yes,
@@ -236,7 +236,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 preset_picking(ui, &mut item.choices.tgs.resize, base, &squares, pick);
                 chosen_hint(ui, item.choices.tgs.resize.unwrap_or(base), &squares);
             });
-            let base = preset.as_ref().and_then(|base| base.keep_canvas).unwrap_or(false);
+            let base = preset.clone().unwrap_or_default().keep_canvas_or_default();
             row(ui, &fl!("margins"), &fl!("margins", "hint"), Ok(()), |ui| {
                 let mut auto = item.choices.tgs.keep_canvas.map(|keep| !keep);
                 let (text, hint) = (fl!("auto-crop"), fl!("auto-crop", "hint"));

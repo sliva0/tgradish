@@ -32,6 +32,9 @@ use crate::error::{Error, FileAction, Result};
 use crate::options::{Fit, Options, Speed};
 use crate::tgs::TgsOptions;
 
+/// The built-in presets' names, fastest first.
+pub const BUILTIN: [&str; 3] = ["fast", "balanced", "best"];
+
 /// The preset used for WebM output when none is given.
 pub const DEFAULT_PRESET: &str = "balanced";
 /// The preset used for `.tgs` output when none is given: its best encoding
@@ -719,6 +722,8 @@ mod tests {
         for format in [Format::Webm, Format::Tgs] {
             assert!(presets.get(format.default_preset()).is_ok());
         }
+        let names: Vec<String> = builtin().into_iter().map(|preset| preset.name).collect();
+        assert_eq!(names, BUILTIN);
     }
 
     #[test]

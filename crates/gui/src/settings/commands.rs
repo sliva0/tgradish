@@ -112,7 +112,7 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
     // choose another than the config file
     let preset = choices.preset_name(item.format, config);
     if whole {
-        args.extend(["--preset".into(), "balanced".into()]);
+        args.extend(["--preset".into(), tgradish_core::presets::DEFAULT_PRESET.into()]);
         webm = effective;
     } else if choices.preset.is_some() || preset != item.format.default_preset() {
         args.extend(["--preset".into(), preset.to_owned()]);

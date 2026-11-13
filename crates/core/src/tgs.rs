@@ -29,10 +29,6 @@ use crate::telegram::{self, Target};
 /// `fps` says otherwise.
 pub const DEFAULT_FPS: f64 = 12.0;
 
-/// Whether the art is kept exactly as it is unless asked otherwise:
-/// changing it to fit is the user's to choose.
-pub const EXACT: bool = true;
-
 /// Largest `.tgs` Telegram accepts, in bytes.
 pub const MAX_BYTES: u64 = tgradish_tgs::limits::telegram::MAX_BYTES as u64;
 
@@ -148,6 +144,33 @@ crate::options::layered!(TgsOptions {
     watermark,
 });
 
+/// The values of options left unset, which converting takes: each says
+/// its default once, for core and front-ends alike.
+impl TgsOptions {
+    /// How art that isn't square fills the sticker: padded.
+    pub fn resize_or_default(&self) -> Resize {
+        self.resize.unwrap_or(Resize::Pad)
+    }
+
+    /// How hard to look for a small encoding: the best, which takes
+    /// seconds.
+    pub fn speed_or_default(&self) -> Speed {
+        self.speed.unwrap_or(Speed::Best)
+    }
+
+    /// Whether the input's canvas is kept: no, the art is cropped to what
+    /// shows.
+    pub fn keep_canvas_or_default(&self) -> bool {
+        self.keep_canvas.unwrap_or(false)
+    }
+
+    /// Whether the art is kept exactly as it is: yes, as changing it to
+    /// fit is the user's to choose.
+    pub fn exact_or_default(&self) -> bool {
+        self.exact.unwrap_or(true)
+    }
+}
+
 impl TgsOptions {
     /// These options with every value `overlay` sets in place of their
     /// own.
@@ -189,7 +212,7 @@ impl TgsOptions {
         };
         Ok(sticker::Options {
             normalise: normalise::Options {
-                keep_canvas: self.keep_canvas.unwrap_or(false),
+                keep_canvas: self.keep_canvas_or_default(),
                 crop: self.crop.map(|crop| normalise::Rect {
                     x: crop.x,
                     y: crop.y,
@@ -207,7 +230,7 @@ impl TgsOptions {
                     }
                     tempo => tempo,
                 },
-                square: match self.resize.unwrap_or(Resize::Pad) {
+                square: match self.resize_or_default() {
                     Resize::Pad => normalise::Square::Pad,
                     Resize::Crop => normalise::Square::Crop,
                     Resize::Stretch => normalise::Square::Stretch,
@@ -218,12 +241,12 @@ impl TgsOptions {
                     }
                 },
             },
-            effort: match self.speed.unwrap_or(Speed::Best) {
+            effort: match self.speed_or_default() {
                 Speed::Fast => Effort::Fast,
                 Speed::Balanced => Effort::Balanced,
                 Speed::Best => Effort::Best,
             },
-            fit: if self.exact.unwrap_or(EXACT) { Fit::Exact } else { Fit::Auto },
+            fit: if self.exact_or_default() { Fit::Exact } else { Fit::Auto },
             reductions: self.reductions.clone().unwrap_or_else(|| Kind::ALL.to_vec()),
             compromise: self.compromise.unwrap_or_default(),
             name,
@@ -879,6 +902,20 @@ mod tests {
         let fit = |exact| TgsOptions { exact, ..TgsOptions::default() }.sticker_options();
         assert_eq!(fit(None).unwrap().fit, Fit::Exact);
         assert_eq!(fit(Some(false)).unwrap().fit, Fit::Auto);
+    }
+
+    #[test]
+    fn says_its_defaults_once() {
+        let unset = TgsOptions::default();
+        assert_eq!(
+            (unset.resize_or_default(), unset.speed_or_default()),
+            (Resize::Pad, Speed::Best)
+        );
+        assert!(unset.exact_or_default() && !unset.keep_canvas_or_default());
+        let settings = unset.sticker_options().unwrap();
+        assert_eq!((settings.effort, settings.fit), (Effort::Best, Fit::Exact));
+        let set = TgsOptions { resize: Some(Resize::Crop), exact: Some(false), ..unset };
+        assert_eq!((set.resize_or_default(), set.exact_or_default()), (Resize::Crop, false));
     }
 
     #[test]

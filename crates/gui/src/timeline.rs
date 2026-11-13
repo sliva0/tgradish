@@ -432,7 +432,7 @@ fn bar(
         painter.text(
             pos2(x + 3.0, rect.top()),
             egui::Align2::LEFT_TOP,
-            "3 s",
+            format!("{} s", tgradish_core::telegram::MAX_SECONDS),
             egui::FontId::proportional(10.5),
             widgets::WARN,
         );

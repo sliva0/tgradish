@@ -255,8 +255,7 @@ impl<'a> Converter<'a> {
                         crate::json_line(&event);
                     })?;
                 } else {
-                    let mut printer =
-                        TgsPrinter::new(self.ctx, options.exact.unwrap_or(tgs::EXACT));
+                    let mut printer = TgsPrinter::new(self.ctx, options.exact_or_default());
                     let result = tgs::convert(&request, cancel, &mut |e| printer.event(e));
                     printer.bar.finish();
                     let outcome = result?;
