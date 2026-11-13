@@ -36,8 +36,8 @@ impl Inspection {
                 let problems = issues.iter().map(|issue| Problem::refused(issue, target));
                 (Found::Image { info, target }, problems.collect())
             }
-            Ok(Inspected::Tgs { stats, issues }) => {
-                (Found::Tgs(stats), issues.into_iter().map(Problem::of_tgs).collect())
+            Ok(Inspected::Tgs { info, issues }) => {
+                (Found::Tgs(info), issues.into_iter().map(Problem::of_tgs).collect())
             }
             Ok(Inspected::Webm { target, info, issues }) => {
                 let problems = issues.iter().map(|issue| Problem::refused(issue, target));

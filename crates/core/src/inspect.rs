@@ -35,14 +35,15 @@ impl Kind {
     }
 }
 
-/// What a sticker file holds, and what Telegram would refuse of it.
+/// What a sticker file holds, as `info`, and what Telegram would refuse
+/// of it, as `issues`, tagged by its `format`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "format", rename_all = "kebab-case")]
 pub enum Inspected {
     /// A WebP picture, judged as `target`.
     Image { target: Target, info: still::Info, issues: Vec<telegram::Issue> },
     /// A `.tgs`, whose limits are the same for stickers and emoji.
-    Tgs { stats: Box<tgs::Stats>, issues: Vec<tgs::Issue> },
+    Tgs { info: Box<tgs::Stats>, issues: Vec<tgs::Issue> },
     /// A WebM video, judged as `target`.
     Webm { target: Target, info: Box<WebmInfo>, issues: Vec<telegram::Issue> },
 }
@@ -58,8 +59,8 @@ pub fn inspect(path: &Path, target: Option<Target>) -> Result<Inspected> {
             Inspected::Image { target, info, issues }
         }
         Kind::Tgs => {
-            let (stats, issues) = tgs::inspect_file(path)?;
-            Inspected::Tgs { stats: Box::new(stats), issues }
+            let (info, issues) = tgs::inspect_file(path)?;
+            Inspected::Tgs { info: Box::new(info), issues }
         }
         Kind::Webm => {
             let info = webm::inspect_file(path)?;

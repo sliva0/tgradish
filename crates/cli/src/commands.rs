@@ -188,7 +188,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
         }
         match &inspected {
             Inspected::Image { target, info, issues } => print_image(path, info, *target, issues),
-            Inspected::Tgs { stats, issues } => print_sticker(path, stats, issues),
+            Inspected::Tgs { info, issues } => print_sticker(path, info, issues),
             Inspected::Webm { target, info, .. } => print_info(path, info, *target),
         }
     }
