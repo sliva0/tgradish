@@ -405,7 +405,7 @@ pub struct Options {
     /// since the built-in ffmpeg has no command line; prefer
     /// `encoder-options` for encoder settings, which work with both.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub extra_args: Option<Vec<String>>,
+    pub ffmpeg_args: Option<Vec<String>>,
 }
 
 impl Options {
@@ -451,7 +451,7 @@ impl Options {
             title,
             watermark,
             encoder_options,
-            extra_args,
+            ffmpeg_args,
         );
         self
     }
@@ -503,7 +503,7 @@ pub fn flags(options: &impl Serialize) -> Vec<String> {
             ("show-layers" | "hide-layers", Value::Array(names)) => {
                 flags.extend(names.iter().filter_map(Value::as_str).map(|name| set(&name)));
             }
-            ("extra-args", Value::Array(words)) => {
+            ("ffmpeg-args", Value::Array(words)) => {
                 let words: Vec<&str> = words.iter().filter_map(Value::as_str).collect();
                 if let Ok(joined) = shlex::try_join(words) {
                     flags.push(set(&joined));

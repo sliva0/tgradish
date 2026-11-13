@@ -915,17 +915,17 @@ fn builtin_backend_rejects_fifos() {
 
 #[cfg(feature = "linked")]
 #[test]
-fn builtin_backend_rejects_extra_args() {
+fn builtin_backend_rejects_ffmpeg_args() {
     let Some(input) = clip(Clip::Square) else { return };
     let request = Request {
         options: Options {
-            extra_args: Some(vec!["-tune-content".into(), "screen".into()]),
+            ffmpeg_args: Some(vec!["-tune-content".into(), "screen".into()]),
             ..Default::default()
         },
         ..Request::new(input)
     };
     let result = convert(&Backend::Linked, &request, &CancelToken::new(), &mut |_| {});
-    assert!(matches!(result, Err(Error::ExtraArgsNeedProgram)), "{result:?}");
+    assert!(matches!(result, Err(Error::FfmpegArgsNeedProgram)), "{result:?}");
 }
 
 /// Red, green, blue and white: the frames of [`uneven_gif`].

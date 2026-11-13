@@ -41,7 +41,7 @@ pub struct Context<'a> {
     /// line that started it gave another.
     pub ffmpeg: FfmpegConfig,
     /// ffmpeg is a separate program, so raw arguments can be passed.
-    pub extra_args: bool,
+    pub ffmpeg_args: bool,
     /// Where the result goes.
     pub output: Option<std::path::PathBuf>,
     /// The config file the window reads and saves.
@@ -386,7 +386,7 @@ mod tests {
             presets: &presets,
             config: &config,
             ffmpeg: config.ffmpeg.clone(),
-            extra_args: true,
+            ffmpeg_args: true,
             output: None,
             config_path: None,
             presets_dir: None,
@@ -417,7 +417,7 @@ mod tests {
             presets: &presets,
             config: &config,
             ffmpeg: config.ffmpeg.clone(),
-            extra_args: true,
+            ffmpeg_args: true,
             output: None,
             config_path: None,
             presets_dir: None,

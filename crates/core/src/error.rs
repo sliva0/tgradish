@@ -30,13 +30,13 @@ pub enum Error {
     /// "crf must be at most 63".
     #[error("{option} {reason}")]
     InvalidOption { option: &'static str, reason: String },
-    /// `extra-args` were given with the built-in ffmpeg, which has no
+    /// `ffmpeg-args` were given with the built-in ffmpeg, which has no
     /// command line to add them to.
     #[error(
-        "extra-args are arguments for ffmpeg's command line, which the built-in ffmpeg \
+        "ffmpeg-args are arguments for ffmpeg's command line, which the built-in ffmpeg \
          doesn't have; encoder-options work with either"
     )]
-    ExtraArgsNeedProgram,
+    FfmpegArgsNeedProgram,
     /// The config file couldn't be read as one, or written.
     #[error("config {}: {message}", path.display())]
     Config { path: PathBuf, message: String },

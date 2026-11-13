@@ -200,7 +200,7 @@ pub(crate) fn failure(err: &Error) -> String {
     match err {
         Error::FfmpegNotFound(FfmpegMissing::NotOnPath) => fl!("ffmpeg-not-on-path"),
         Error::FfmpegNotFound(missing) => fl!("ffmpeg-not-found", details = missing.to_string()),
-        Error::ExtraArgsNeedProgram => fl!("extra-args-need-program"),
+        Error::FfmpegArgsNeedProgram => fl!("ffmpeg-args-need-program"),
         Error::Ffmpeg { program, status, stderr } => {
             let program = program.to_string();
             let failed = fl!("program-failed", program = program, status = status.as_str());
@@ -702,7 +702,7 @@ mod tests {
             failure(&Error::FfmpegNotFound(FfmpegMissing::NotOnPath)),
             fl!("ffmpeg-not-on-path")
         );
-        assert!(!failure(&Error::ExtraArgsNeedProgram).contains("extra-args"));
+        assert!(!failure(&Error::FfmpegArgsNeedProgram).contains("ffmpeg-args"));
         let unreadable = Error::Unreadable {
             path: PathBuf::from("/some/where/clip.mp4"),
             message: "broken".into(),

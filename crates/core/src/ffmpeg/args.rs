@@ -251,7 +251,7 @@ pub(crate) fn encode_args(
     for (name, value) in &plan.encoder_options {
         args.extend([format!("-{name}:v").into(), value.into()]);
     }
-    args.extend(plan.extra_args.iter().map(OsString::from));
+    args.extend(plan.ffmpeg_args.iter().map(OsString::from));
     if let Some((pass, log)) = pass {
         args.extend(["-pass".into(), pass.to_string().into(), "-passlogfile".into(), log.into()]);
     }

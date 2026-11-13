@@ -48,7 +48,7 @@ impl App {
             self.empty(ui);
             return;
         };
-        let extra_args = self.backend().as_ref().is_ok_and(Backend::supports_extra_args);
+        let ffmpeg_args = self.backend().as_ref().is_ok_and(Backend::supports_ffmpeg_args);
         let queued = self.queue.iter().position(|&other| other == id);
         egui::Panel::bottom("actions").show(ui, |ui| {
             ui.add_space(8.0);
@@ -61,7 +61,7 @@ impl App {
             presets: &self.presets,
             config: &self.config,
             ffmpeg: tgradish_core::config::FfmpegConfig { choice, path },
-            extra_args,
+            ffmpeg_args,
             output,
             config_path: self.config_path.as_deref(),
             presets_dir: self.presets_dir.as_deref(),

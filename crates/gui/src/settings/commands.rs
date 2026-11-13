@@ -159,7 +159,7 @@ pub(super) fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 Ok(lines) => {
                     note(
                         ui,
-                        if context.extra_args {
+                        if context.ffmpeg_args {
                             fl!("ffmpeg-commands")
                         } else {
                             fl!("ffmpeg-commands", "builtin")
@@ -240,7 +240,7 @@ mod tests {
             presets: &presets,
             config: &config,
             ffmpeg: FfmpegConfig { choice: FfmpegChoice::System, path: None },
-            extra_args: true,
+            ffmpeg_args: true,
             output: None,
             config_path: Some(std::path::Path::new("/elsewhere/config.toml")),
             presets_dir: None,
@@ -305,7 +305,7 @@ mod tests {
             presets: &presets,
             config: &config,
             ffmpeg: config.ffmpeg.clone(),
-            extra_args: false,
+            ffmpeg_args: false,
             output: None,
             config_path: default_config.as_deref(),
             presets_dir: None,

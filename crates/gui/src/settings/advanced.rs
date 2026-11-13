@@ -36,10 +36,10 @@ pub(super) fn advanced(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             });
 
             let system = fl!("ffmpeg-arguments", "system");
-            let allowed = if context.extra_args { Ok(()) } else { Err(system.as_str()) };
+            let allowed = if context.ffmpeg_args { Ok(()) } else { Err(system.as_str()) };
             row(ui, &fl!("ffmpeg-arguments"), &fl!("ffmpeg-arguments", "hint"), allowed, |ui| {
-                arguments(ui, item.id, &mut item.choices.webm, &base.extra_args);
-                if !context.extra_args {
+                arguments(ui, item.id, &mut item.choices.webm, &base.ffmpeg_args);
+                if !context.ffmpeg_args {
                     note(ui, system.as_str());
                 }
             });
@@ -164,7 +164,7 @@ fn encoder_rows(
 /// and once the field is left it shows them as the item has them.
 fn arguments(ui: &mut egui::Ui, id: u64, options: &mut Options, preset: &Option<Vec<String>>) {
     let typed_id = egui::Id::new(("ffmpeg arguments typed", id));
-    let words = options.extra_args.as_ref().or(preset.as_ref());
+    let words = options.ffmpeg_args.as_ref().or(preset.as_ref());
     let words = words.map(Vec::as_slice).unwrap_or_default();
     let joined = || shlex::try_join(words.iter().map(String::as_str)).unwrap_or_default();
     let mut text = ui.data(|data| data.get_temp::<String>(typed_id)).unwrap_or_else(joined);
@@ -175,19 +175,19 @@ fn arguments(ui: &mut egui::Ui, id: u64, options: &mut Options, preset: &Option<
                     .hint_text(fl!("ffmpeg-arguments", "placeholder"))
                     .desired_width(300.0),
             );
-            let own = preset.is_some() && options.extra_args.is_some();
+            let own = preset.is_some() && options.ffmpeg_args.is_some();
             (edit, own && widgets::reset(ui))
         })
         .inner;
     let read = shlex::split(&text);
     if reset {
-        options.extra_args = None;
+        options.ffmpeg_args = None;
     } else if edit.changed()
         && let Some(words) = &read
     {
         // the item's own are all it uses: none at all, where the preset
         // has some, is said by an empty list
-        options.extra_args = match preset {
+        options.ffmpeg_args = match preset {
             Some(preset) if words == preset => None,
             Some(_) => Some(words.clone()),
             None => Some(words.clone()).filter(|words| !words.is_empty()),
@@ -229,7 +229,7 @@ mod tests {
             presets,
             config,
             ffmpeg: config.ffmpeg.clone(),
-            extra_args: true,
+            ffmpeg_args: true,
             output: None,
             config_path: None,
             presets_dir: None,
@@ -303,14 +303,14 @@ mod tests {
     #[test]
     fn shows_the_presets_options_and_adds_to_them() {
         let dir = tempfile::tempdir().unwrap();
-        let preset = "[webm]\nextra-args = ['-qmin', '4']\n\
+        let preset = "[webm]\nffmpeg-args = ['-qmin', '4']\n\
                       [webm.encoder-options]\naq-mode = '2'\n";
         std::fs::write(dir.path().join("tuned.toml"), preset).unwrap();
         let (presets, config) = (Presets::load(Some(dir.path())).unwrap(), Config::default());
         let mut harness = opened_with(&presets, &config, Some("tuned"));
         assert_eq!(fields(&harness), ["aq-mode", "2", "-qmin 4"]);
         let own = |harness: &Harness<Item>| harness.state().choices.webm.clone();
-        assert_eq!((own(&harness).encoder_options, own(&harness).extra_args), (None, None));
+        assert_eq!((own(&harness).encoder_options, own(&harness).ffmpeg_args), (None, None));
         // one more is the item's with the preset's, not instead of it
         harness.get_by_label("qmax=50").click();
         harness.run_steps(2);
@@ -336,7 +336,7 @@ mod tests {
         harness.run_steps(2);
         type_keys(&mut harness, " -an");
         let words = ["-qmin", "4", "-an"].map(String::from);
-        assert_eq!(own(&harness).extra_args, Some(words.to_vec()));
+        assert_eq!(own(&harness).ffmpeg_args, Some(words.to_vec()));
     }
 
     #[test]
@@ -345,7 +345,7 @@ mod tests {
         let mut harness = opened(&presets, &config);
         harness.query_all_by_role(Role::TextInput).last().unwrap().click();
         harness.run_steps(2);
-        let words = |harness: &Harness<Item>| harness.state().choices.webm.extra_args.clone();
+        let words = |harness: &Harness<Item>| harness.state().choices.webm.ffmpeg_args.clone();
         // the space between two words stays while the second is typed
         type_keys(&mut harness, "-qmin 4");
         assert_eq!(words(&harness), Some(vec!["-qmin".into(), "4".into()]));
