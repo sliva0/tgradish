@@ -204,8 +204,15 @@ impl App {
         // those pasted while the setting was on have none yet
         self.copy_pasted();
         let Some(store) = &mut self.session else { return };
-        // with the setting off, nothing is kept: an empty session
-        let items: &[Item] = if self.config.gui.reopen_files { &self.items } else { &[] };
+        // with the setting off, nothing is kept: an empty session, whose
+        // saving removes the copies of pasted images, so they are copied
+        // again once it is back on
+        let items: &[Item] = if self.config.gui.reopen_files {
+            &self.items
+        } else {
+            self.items.iter_mut().for_each(|item| item.pasted_copy = None);
+            &[]
+        };
         let session = session::Session::of(items, self.selected, &self.written);
         if let Err(err) = store.save(&session) {
             self.message = Some(fl!("session-unsaved", error = err.to_string()));
@@ -658,6 +665,28 @@ mod tests {
         }
         harness.state_mut().save_session();
         assert_eq!(std::fs::read(&copies).unwrap(), b"in the way");
+    }
+
+    #[test]
+    fn copies_pasted_images_again_once_the_files_are_kept_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state").join("session.json");
+        let mut first = harness(Config::default());
+        first.state_mut().reopen(state.clone());
+        let (files, folder) = pasted_image();
+        first.state_mut().add_pasted(files, folder);
+        first.state_mut().save_session();
+        // turned off, and on again before the window closes
+        first.state_mut().config.gui.reopen_files = false;
+        first.state_mut().save_session();
+        first.state_mut().config.gui.reopen_files = true;
+        first.state_mut().save_session();
+        drop(first);
+
+        let mut second = harness(Config::default());
+        second.state_mut().reopen(state);
+        assert_eq!(second.state().items.len(), 1);
+        assert!(second.state().message.is_none(), "{:?}", second.state().message);
     }
 
     #[test]
