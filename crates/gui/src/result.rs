@@ -351,8 +351,12 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
                 }
             }
             let height = ui.text_style_height(&egui::TextStyle::Body);
-            let grid =
-                egui::Grid::new(("attempts", item.id)).num_columns(columns).spacing([6.0, 4.0]);
+            // no wider than its columns, as a grid makes them at least
+            // the width of a field otherwise
+            let grid = egui::Grid::new(("attempts", item.id))
+                .num_columns(columns)
+                .min_col_width(0.0)
+                .spacing([6.0, 4.0]);
             grid.striped(true).show(ui, |ui| {
                 let layout = egui::Layout::right_to_left(egui::Align::Center);
                 for row in rows {

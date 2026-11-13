@@ -426,8 +426,10 @@ pub(crate) fn show(
     if cropping.crop.is_some() {
         let text = format!("{} × {}", crop.width, crop.height);
         let galley = painter.layout_no_wrap(text, egui::FontId::proportional(12.5), Color32::WHITE);
+        // over the crop's corner, kept within the stage
+        let x = (on_screen.left() + 6.0).min(rect.right() - galley.size().x - 8.0);
         let at = pos2(
-            on_screen.left() + 6.0,
+            x.max(rect.left() + 4.0),
             (on_screen.top() - galley.size().y - 8.0).max(rect.top() + 4.0),
         );
         let back = Rect::from_min_size(at, galley.size()).expand(4.0);

@@ -87,7 +87,8 @@ pub(crate) fn section(ui: &mut egui::Ui, title: &str) {
 pub(crate) fn section_with(ui: &mut egui::Ui, title: &str, beside: impl FnOnce(&mut egui::Ui)) {
     section_rule(ui);
     ui.horizontal(|ui| {
-        ui.label(medium(ui, title, HEADING));
+        // onto more lines where a narrow column leaves it no room
+        ui.add(egui::Label::new(medium(ui, title, HEADING)).wrap());
         beside(ui);
     });
     ui.add_space(AFTER_HEADING);
@@ -832,7 +833,7 @@ pub(crate) fn bar_sized(
     text: &str,
     colour: Color32,
 ) {
-    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
     let rounding = (size.y / 2.0).min(4.0);
     let painter = ui.painter_at(rect);
     let (track, outline) = theme::track(ui.visuals());
@@ -861,13 +862,18 @@ pub(crate) fn bar_sized(
         ui.ctx().request_repaint();
     }
     painter.rect_stroke(rect, rounding, outline, egui::StrokeKind::Inside);
-    painter.text(
-        rect.left_center() + egui::vec2(8.0, 0.0),
-        egui::Align2::LEFT_CENTER,
-        text,
-        egui::FontId::proportional(12.5),
-        ui.visuals().strong_text_color(),
-    );
+    // cut short where the bar is narrower, said in full on hover
+    let colour = ui.visuals().strong_text_color();
+    let font = egui::FontId::proportional(12.5);
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, colour);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 16.0);
+    let galley = painter.layout_job(job);
+    let at = egui::pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0);
+    let elided = galley.elided;
+    painter.galley(at, galley, colour);
+    if elided {
+        response.on_hover_text(text);
+    }
 }
 
 /// Telegram's problems with a result, or that it has none.

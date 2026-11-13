@@ -83,6 +83,10 @@ pub(crate) fn frame_field<'a>(
 /// marked.
 const MARKED_FRAME: f32 = 6.0;
 
+/// How high the bar is: as high as the buttons and fields beside it, so all
+/// of the row is in line.
+const BAR: f32 = theme::CONTROL;
+
 /// Width of the fields of where the used part starts and ends.
 const FIELD: f32 = 64.0;
 
@@ -167,7 +171,7 @@ pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
             }
         }
         let (width, unit_room) = bar_width(ui, FIELD + ui.spacing().item_spacing.x, NARROWEST_BAR);
-        let (rect, response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click_and_drag());
+        let (rect, response) = ui.allocate_exact_size(vec2(width, BAR), Sense::click_and_drag());
         bar(ui, rect, &response, (length, frames, *in_frames), (start, used), time, limit);
         match frames {
             Some(frames) => {
@@ -225,8 +229,8 @@ fn bar(
 ) {
     let length = length.max(1e-6);
     let track = Rect::from_min_max(
-        pos2(rect.left() + 8.0, rect.top() + 9.0),
-        pos2(rect.right() - 8.0, rect.bottom() - 7.0),
+        pos2(rect.left() + 8.0, rect.top() + 8.0),
+        pos2(rect.right() - 8.0, rect.bottom() - 6.0),
     );
     let x_of = |seconds: f64| track.left() + (seconds / length) as f32 * track.width();
     let seconds_at =
@@ -379,10 +383,10 @@ pub(crate) fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &m
         let text = format!("{} / {}", widgets::seconds(*time), widgets::seconds(length));
         let label_width = 120.0;
         let width = (ui.available_width() - label_width).max(80.0);
-        let (rect, response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click_and_drag());
+        let (rect, response) = ui.allocate_exact_size(vec2(width, BAR), Sense::click_and_drag());
         let track = Rect::from_min_max(
-            pos2(rect.left() + 8.0, rect.top() + 11.0),
-            pos2(rect.right() - 8.0, rect.bottom() - 11.0),
+            pos2(rect.left() + 8.0, rect.top() + 10.0),
+            pos2(rect.right() - 8.0, rect.bottom() - 10.0),
         );
         let seconds_at =
             |x: f32| (f64::from((x - track.left()) / track.width()) * length).clamp(0.0, length);
@@ -442,11 +446,11 @@ pub(crate) fn frame_picker(
             picked = Some(index);
         }
         let (width, unit_room) = bar_width(ui, 0.0, 80.0);
-        let (rect, response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click_and_drag());
+        let (rect, response) = ui.allocate_exact_size(vec2(width, BAR), Sense::click_and_drag());
         // as the bar of the used part in the other modes
         let track = Rect::from_min_max(
-            pos2(rect.left() + 8.0, rect.top() + 9.0),
-            pos2(rect.right() - 8.0, rect.bottom() - 7.0),
+            pos2(rect.left() + 8.0, rect.top() + 8.0),
+            pos2(rect.right() - 8.0, rect.bottom() - 6.0),
         );
         let x_of = |seconds: f64| track.left() + (seconds / length) as f32 * track.width();
         let seconds_at =

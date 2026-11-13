@@ -36,8 +36,8 @@ pub(crate) const NARROWEST_MAIN: f32 = 656.0;
 /// Side of a `.tgs` result's small picture at its largest: shapes have no
 /// pixels, so this is as sharp as it needs.
 const TGS_INSET: usize = 256;
-/// Height kept for the timeline under a preview that plays: its 30 point
-/// track and the space around it.
+/// Height kept for the timeline under a preview that plays: its row, as
+/// high as a button, and the space around it.
 const TIMELINE: f32 = 38.0;
 
 /// Width of the zoom level, as 400%, beside Zoom out.
@@ -146,6 +146,8 @@ impl App {
         ui.painter().hline(line.x_range(), line.center().y, egui::Stroke::new(1.0, colour));
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                // clear of the scroll bar, as the column beside the preview
+                ui.set_max_width(ui.available_width() - 12.0);
                 widgets::settings_spacing(ui);
                 file_settings::show(ui, item, &context);
                 ui.add_space(12.0);
