@@ -158,6 +158,8 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn reads_the_documented_example() {
         let example: Config = toml::from_str(include_str!("config.example.toml")).unwrap();
@@ -165,8 +167,6 @@ mod tests {
         assert!(presets.webm(example.preset.as_deref().unwrap()).is_ok());
         assert!(presets.tgs(example.tgs_preset.as_deref().unwrap()).is_ok());
     }
-
-    use super::*;
 
     #[test]
     fn reads_config() {
