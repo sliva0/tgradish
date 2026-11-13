@@ -89,7 +89,9 @@ pub fn capabilities(ffmpeg: &Ffmpeg, cancel: &CancelToken) -> crate::Result<Capa
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct Ffmpeg {
+    #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub ffmpeg: PathBuf,
+    #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub ffprobe: PathBuf,
     pub source: FfmpegSource,
 }

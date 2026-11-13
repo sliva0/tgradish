@@ -422,3 +422,38 @@ fn makes_image_stickers() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("--crf can't be used"));
 }
+
+/// serde refuses paths that aren't Unicode, which every line names with
+/// what isn't replaced, rather than the command failing.
+#[cfg(unix)]
+#[test]
+fn names_files_whose_names_are_not_unicode() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join(std::ffi::OsStr::from_bytes(b"caf\xe9.png"));
+    square_png(&input, [255, 0, 0, 255]);
+    let output = Command::new(env!("CARGO_BIN_EXE_tgradish"))
+        .args(["--json", "convert", "--format", "tgs"])
+        .arg(&input)
+        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let lines = json_lines(&output);
+    let named = |path: &Value| path.as_str().unwrap().ends_with("caf\u{fffd}.png");
+    assert_eq!(lines[0]["event"], "started");
+    assert!(named(&lines[0]["input"]), "{}", lines[0]);
+    let finished = lines.last().unwrap();
+    assert!(finished["output"].as_str().unwrap().ends_with("caf\u{fffd}.sticker.tgs"));
+    // as is an error about the file
+    let missing = dir.path().join(std::ffi::OsStr::from_bytes(b"gone\xe9.png"));
+    let output = Command::new(env!("CARGO_BIN_EXE_tgradish"))
+        .args(["--json", "inspect"])
+        .arg(&missing)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let lines = json_lines(&output);
+    assert!(lines[0]["input"].as_str().unwrap().ends_with("gone\u{fffd}.png"), "{}", lines[0]);
+}

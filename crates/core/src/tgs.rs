@@ -249,7 +249,11 @@ impl TgsOptions {
 #[serde(tag = "event", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 pub enum TgsEvent {
     /// The input is read: what normalising found and did.
-    Started { input: PathBuf, report: Box<Report> },
+    Started {
+        #[serde(serialize_with = "crate::protocol::serialize_path")]
+        input: PathBuf,
+        report: Box<Report>,
+    },
     /// Losslessly, the sticker would come to about this many bytes, more
     /// than fits; fitting starts.
     TooLarge { bytes: usize },
@@ -260,6 +264,7 @@ pub enum TgsEvent {
     /// Something about the art worth knowing, as normalising found it.
     Warning { message: String },
     Finished {
+        #[serde(serialize_with = "crate::protocol::serialize_path")]
         output: PathBuf,
         bytes: u64,
         /// Size of the Lottie JSON inside.

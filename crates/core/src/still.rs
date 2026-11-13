@@ -40,6 +40,7 @@ pub enum StillEvent {
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct Outcome {
+    #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub output: PathBuf,
     pub bytes: u64,
     pub width: u32,

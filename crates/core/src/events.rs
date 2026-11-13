@@ -98,6 +98,7 @@ pub enum Event {
         line: String,
     },
     Finished {
+        #[serde(serialize_with = "crate::protocol::serialize_path")]
         output: PathBuf,
         bytes: u64,
         /// The attempt that was kept.
@@ -121,5 +122,6 @@ pub enum Event {
 pub struct Failure {
     pub message: String,
     /// The input that failed, `None` when the whole command did.
+    #[serde(serialize_with = "crate::protocol::serialize_optional_path")]
     pub input: Option<PathBuf>,
 }

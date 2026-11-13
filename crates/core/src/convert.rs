@@ -72,7 +72,9 @@ impl Request {
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct Plan {
+    #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub input: PathBuf,
+    #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub output: PathBuf,
     pub source: Probe,
     pub target: Target,
@@ -663,6 +665,7 @@ fn looks_like_pixel_art(backend: &Backend, plan: &Plan, cancel: &CancelToken) ->
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct Outcome {
+    #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub output: PathBuf,
     pub bytes: u64,
     /// The attempt that was kept.
@@ -671,6 +674,7 @@ pub struct Outcome {
     pub spoofed: bool,
     pub issues: Vec<Issue>,
     /// Directory with intermediate files, if they were kept.
+    #[serde(serialize_with = "crate::protocol::serialize_optional_path")]
     pub temp_dir: Option<PathBuf>,
 }
 
