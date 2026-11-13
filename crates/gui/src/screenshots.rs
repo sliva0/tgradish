@@ -39,6 +39,21 @@ fn screenshots() {
     };
     walk(&mut save);
     edges(&mut save);
+    accents(&mut save);
+}
+
+/// Only the pictures of [`accents`], to `$TGRADISH_SCREENSHOTS` as
+/// [`screenshots`] makes them.
+#[test]
+#[ignore]
+fn accent_screenshots() {
+    let out =
+        PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
+    crate::l10n::choose(None);
+    accents(&mut |harness: &mut Harness<App>, name: &str| {
+        let image = harness.render().expect("rendering needs a GPU");
+        image.save(out.join(format!("tgradish-{name}.png"))).unwrap();
+    });
 }
 
 /// Takes the window through each state worth a picture, handing each to
@@ -611,4 +626,79 @@ fn readme_screenshot() {
     let image = harness.render().expect("rendering needs a GPU");
     image.save(out.join("tgradish-readme.png")).unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The window in accents of its own, in both themes: one of Plasma's, a
+/// light one and a dark one, a file chosen, a button with the keyboard's
+/// focus and one hovered; then Settings, where they are chosen, at the
+/// usual width and the narrowest, and the picker of one's own.
+fn accents(save: &mut impl FnMut(&mut Harness<App>, &str)) {
+    use crate::config::{Accent, Theme};
+    use crate::l10n::fl;
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::default();
+    config.gui.output_dir = Some(dir.path().join("out"));
+    let mut harness =
+        Harness::builder().with_size([1280.0, 820.0]).wgpu().build_eframe(move |cc| {
+            let app = App::with(config.clone(), None, Presets::builtin());
+            app.style(&cc.egui_ctx);
+            app
+        });
+    let art = dir.path().join("pixel heart.png");
+    square(&art, [220, 30, 60, 255]);
+    let other = dir.path().join("pixel leaf.png");
+    square(&other, [30, 160, 60, 255]);
+    harness.state_mut().add(vec![art, other]);
+    finish(&mut harness);
+    let first = harness.state().items[0].id;
+    harness.state_mut().select(first);
+    let shot =
+        |harness: &mut Harness<App>, save: &mut dyn FnMut(&mut Harness<App>, &str), name: &str| {
+            harness.run_steps(3);
+            save(harness, name);
+        };
+    let own = |r, g, b| Accent::Own(egui::Color32::from_rgb(r, g, b));
+    for (name, accent) in [
+        ("orange", Accent::Named("orange")),
+        ("light", own(246, 240, 170)),
+        ("dark", own(28, 36, 64)),
+    ] {
+        harness.state_mut().config.gui.accent = accent;
+        for (theme, switch) in [(Theme::Dark, "☀"), (Theme::Light, "🌓")] {
+            set_theme(&harness.ctx, theme);
+            harness.run_steps(2);
+            // the switch of themes with the keyboard's focus, the other
+            // file hovered
+            harness.get_by_label(switch).focus();
+            harness.hover_at(egui::pos2(150.0, 190.0));
+            let theme = if theme == Theme::Dark { "dark" } else { "light" };
+            shot(&mut harness, save, &format!("accent-{name}-{theme}"));
+        }
+        harness.ctx.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+    }
+    harness.event(egui::Event::PointerGone);
+    harness.state_mut().config.gui.accent = Accent::Named("teal");
+    harness.state_mut().settings_dialog.open();
+    for width in [1280.0, crate::MIN_WIDTH] {
+        harness.set_size(egui::vec2(width, 820.0));
+        for theme in [Theme::Dark, Theme::Light] {
+            set_theme(&harness.ctx, theme);
+            let theme = if theme == Theme::Dark { "dark" } else { "light" };
+            shot(&mut harness, save, &format!("accent-settings-{width}-{theme}"));
+        }
+    }
+    // the chosen one with the keyboard's focus, and the picker of one's own
+    harness.set_size(egui::vec2(1280.0, 820.0));
+    set_theme(&harness.ctx, Theme::Dark);
+    harness.state_mut().config.gui.accent = own(200, 90, 160);
+    harness.run_steps(2);
+    harness.get_by_label(&fl!("accent-violet")).focus();
+    shot(&mut harness, save, "accent-settings-focus");
+    let name = fl!("accent-own", "chosen", colour = "#c85aa0");
+    harness.get_by_label(&name).click();
+    shot(&mut harness, save, "accent-picker");
 }

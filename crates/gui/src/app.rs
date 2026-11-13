@@ -107,7 +107,8 @@ pub(crate) struct App {
     pub(crate) preview_share: f32,
     /// The system's accent colour, as it changes.
     pub(crate) accent: Option<accent::Accent>,
-    /// The accent the window's look was made with last.
+    /// The accent the window's look was made with last: the one chosen, or
+    /// else the system's.
     pub(crate) applied_accent: Option<Color32>,
 }
 
@@ -287,9 +288,11 @@ impl App {
         });
     }
 
-    /// Makes the window's look again when the system's accent changed.
+    /// Makes the window's look again when the accent chosen, or the
+    /// system's, changed.
     fn follow_accent(&mut self, ctx: &egui::Context) {
-        let accent = self.accent.as_ref().and_then(accent::Accent::get);
+        let system = || self.accent.as_ref().and_then(accent::Accent::get);
+        let accent = self.config.gui.accent.colour().or_else(system);
         if accent != self.applied_accent {
             self.applied_accent = accent;
             theme::apply(ctx, accent);

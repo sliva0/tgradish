@@ -10,6 +10,21 @@ use eframe::egui::{self, Color32, CornerRadius, Stroke, vec2};
 /// Breeze's accent, for systems without one.
 pub(crate) const BREEZE_ACCENT: Color32 = Color32::from_rgb(61, 174, 233);
 
+/// The accents Plasma's colour settings offer, in their order, by the
+/// names `accent` in `[gui]` takes them by; Breeze's is the blue.
+pub(crate) const ACCENTS: [(&str, Color32); 10] = [
+    ("pink", Color32::from_rgb(233, 58, 154)),
+    ("red", Color32::from_rgb(233, 61, 88)),
+    ("orange", Color32::from_rgb(233, 100, 58)),
+    ("yellow", Color32::from_rgb(232, 203, 45)),
+    ("green", Color32::from_rgb(61, 212, 37)),
+    ("teal", Color32::from_rgb(0, 211, 184)),
+    ("blue", BREEZE_ACCENT),
+    ("purple", Color32::from_rgb(184, 117, 220)),
+    ("violet", Color32::from_rgb(146, 110, 228)),
+    ("grey", Color32::from_rgb(104, 107, 111)),
+];
+
 /// What a colour scheme says, by Breeze's names for it.
 struct Scheme {
     /// Window: panels and dialogs.
@@ -435,19 +450,7 @@ mod tests {
             LIGHT.window,
             DARK.window,
         ];
-        let plasma = [
-            (233, 58, 154),
-            (233, 61, 88),
-            (233, 100, 58),
-            (232, 203, 45),
-            (61, 212, 37),
-            (0, 211, 184),
-            (61, 174, 233),
-            (184, 117, 220),
-            (146, 110, 228),
-            (104, 107, 111),
-        ];
-        let accents = plasma.map(|(r, g, b)| Color32::from_rgb(r, g, b)).into_iter().chain(hostile);
+        let accents = ACCENTS.iter().map(|(_, colour)| *colour).chain(hostile);
         for given in accents {
             for (dark, scheme) in [(false, &LIGHT), (true, &DARK)] {
                 let visuals = visuals(dark, given);
