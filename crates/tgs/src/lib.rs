@@ -52,6 +52,7 @@ pub use sticker::{Options, Progress, Sticker, make};
 pub use tgradish_frames as frames;
 
 #[derive(Debug, Clone, PartialEq, Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("the start ({start:?}) is not before the end of the input ({length:?})")]
     StartPastEnd { start: Duration, length: Duration },

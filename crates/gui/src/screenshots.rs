@@ -193,11 +193,11 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     job.progress = jobs::Progress {
         tgs: Some(jobs::TgsStage::Fitting),
         lossless_bytes: Some(200_000),
-        steps: vec![tgradish_tgs::sticker::Step {
-            reduction: tgradish_tgs::reduce::Reduction::MergeColours { distance: 0.02 },
-            bytes: 110_000,
-            distortion: 0.01,
-        }],
+        steps: vec![tgradish_tgs::sticker::Step::new(
+            tgradish_tgs::reduce::Reduction::MergeColours { distance: 0.02 },
+            110_000,
+            0.01,
+        )],
         ..jobs::Progress::default()
     };
     let item = harness.state_mut().items.last_mut().unwrap();

@@ -16,6 +16,7 @@ use crate::{Error, Result};
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(tag = "reduction", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Reduction {
     /// Snaps the art onto a pixel grid most of it follows, of art pixels
     /// `scale` input pixels wide: 1 or more, and past the art's size it
@@ -43,6 +44,7 @@ pub enum Reduction {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Kind {
     SnapToGrid,
     MergeColours,
@@ -53,7 +55,8 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const ALL: [Kind; 6] = [
+    /// Every kind, in the order fitting tries them.
+    pub const ALL: &'static [Kind] = &[
         Kind::SnapToGrid,
         Kind::MergeColours,
         Kind::MergeFrames,

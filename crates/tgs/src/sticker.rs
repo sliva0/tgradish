@@ -29,6 +29,8 @@ pub enum Fit {
     Lossless,
 }
 
+/// How [`make`] makes a sticker. Built as `Options { fit,
+/// ..Options::default() }`, so that what is added later keeps its default.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Options {
     pub normalise: normalise::Options,
@@ -64,6 +66,7 @@ impl Default for Options {
 /// A reduction fitting applied.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct Step {
     #[serde(flatten)]
     pub reduction: Reduction,
@@ -74,10 +77,19 @@ pub struct Step {
     pub distortion: f64,
 }
 
+impl Step {
+    /// A step of `reduction`, which fitting estimated to come to `bytes`
+    /// and `distortion`: for front-ends to show one made up, as in tests.
+    pub fn new(reduction: Reduction, bytes: usize, distortion: f64) -> Step {
+        Step { reduction, bytes, distortion }
+    }
+}
+
 /// Progress, for front-ends to show.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "stage", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Progress {
     Normalised {
         report: Box<Report>,
@@ -93,6 +105,7 @@ pub enum Progress {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct Sticker {
     #[serde(skip)]
     pub tgs: Vec<u8>,

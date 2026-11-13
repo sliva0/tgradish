@@ -366,7 +366,7 @@ fn print_sticker(path: &std::path::Path, stats: &tgs::Stats, issues: &[tgs::Issu
     for issue in issues {
         let label = match issue.severity {
             tgs::Severity::Error => ui::error_label(),
-            tgs::Severity::Warning => ui::warning_label(),
+            _ => ui::warning_label(),
         };
         println!("  {label} {}", issue.message);
     }

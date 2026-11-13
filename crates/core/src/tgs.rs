@@ -719,6 +719,8 @@ pub fn convert(
             Progress::TooLarge { bytes } => on_event(TgsEvent::TooLarge { bytes }),
             Progress::Reduced { step } => on_event(TgsEvent::Reduced { step }),
             Progress::Packing => on_event(TgsEvent::Packing),
+            // what core has no event for yet isn't said
+            _ => {}
         },
         &|| cancel.is_cancelled(),
     )

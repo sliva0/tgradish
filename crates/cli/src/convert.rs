@@ -633,7 +633,7 @@ impl TgsPrinter {
                 for issue in issues {
                     let label = match issue.severity {
                         tgradish_core::tgs::Severity::Error => ui::error_label(),
-                        tgradish_core::tgs::Severity::Warning => ui::warning_label(),
+                        _ => ui::warning_label(),
                     };
                     eprintln!("{label} {}", issue.message);
                 }
@@ -662,5 +662,6 @@ fn reduction_text(reduction: &tgradish_core::tgs::Reduction) -> String {
         Reduction::Downscale { factor } => {
             format!("lowered the resolution to {:.0}%", factor * 100.0)
         }
+        other => format!("{other:?}"),
     }
 }
