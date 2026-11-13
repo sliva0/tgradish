@@ -9,26 +9,23 @@
 
 use std::sync::OnceLock;
 
-use serde::Serialize;
-
 /// Which front-end made a sticker.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Client {
     /// tgradish as a library, or a front-end that didn't say.
     Library,
     Cli,
     Window,
-    Bot,
 }
 
 impl Client {
+    /// As stickers store it, so a code is never given another meaning: 3
+    /// was a bot's, which there isn't.
     fn code(self) -> u8 {
         match self {
             Client::Library => 0,
             Client::Cli => 1,
             Client::Window => 2,
-            Client::Bot => 3,
         }
     }
 
@@ -37,7 +34,6 @@ impl Client {
             0 => Client::Library,
             1 => Client::Cli,
             2 => Client::Window,
-            3 => Client::Bot,
             _ => return None,
         })
     }
@@ -52,7 +48,7 @@ pub fn set_client(client: Client) {
 }
 
 /// What a mark says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Mark {
     /// tgradish's version: major, minor, patch.
     pub version: [u8; 3],
@@ -70,12 +66,8 @@ const KEY: [u8; 8] = [0x9e, 0x37, 0x79, 0xb9, 0x7f, 0x4a, 0x7c, 0x15];
 impl Mark {
     /// The mark this process puts into stickers.
     pub fn current() -> Mark {
-        let mut version = [0u8; 3];
-        for (part, number) in version.iter_mut().zip(env!("CARGO_PKG_VERSION").split('.')) {
-            *part = number.parse().unwrap_or(u8::MAX);
-        }
         Mark {
-            version,
+            version: version_numbers(env!("CARGO_PKG_VERSION")),
             client: CLIENT.get().copied().unwrap_or(Client::Library),
             user: user_hash(),
         }
@@ -122,11 +114,16 @@ impl Mark {
     pub fn from_u64(value: u64) -> Option<Mark> {
         Mark::from_bytes(value.to_be_bytes())
     }
+}
 
+/// Reading marks back, which only the tests do: tgradish writes them, and
+/// neither the command line nor the window reads them.
+#[cfg(test)]
+impl Mark {
     /// The first mark in `bits`, which hold copies of it one after another
     /// (as `.tgs` files do): bit by bit the majority of the copies, else
     /// any copy that reads.
-    pub fn from_bits(bits: &[bool]) -> Option<Mark> {
+    pub(crate) fn from_bits(bits: &[bool]) -> Option<Mark> {
         let copies: Vec<&[bool]> = bits.as_chunks::<64>().0.iter().map(|copy| &copy[..]).collect();
         let read = |bit: &dyn Fn(usize) -> bool| {
             let mut bytes = [0u8; 8];
@@ -141,19 +138,32 @@ impl Mark {
     }
 
     /// The user hash as text, like `#3fa9c1`.
-    pub fn user_text(&self) -> String {
+    pub(crate) fn user_text(&self) -> String {
         format!("#{:06x}", self.user)
     }
 
-    pub fn version_text(&self) -> String {
+    pub(crate) fn version_text(&self) -> String {
         let [major, minor, patch] = self.version;
         format!("{major}.{minor}.{patch}")
     }
 }
 
 /// The bits of `bytes`, highest first.
-pub fn bits(bytes: &[u8]) -> Vec<bool> {
+#[cfg(test)]
+pub(crate) fn bits(bytes: &[u8]) -> Vec<bool> {
     bytes.iter().flat_map(|&byte| (0..8).rev().map(move |bit| byte >> bit & 1 == 1)).collect()
+}
+
+/// The first three numbers of `version`, as `2.1.0-rc.1` has them before
+/// what a pre-release or a build adds. One that isn't a number, or is more
+/// than a byte holds, is 255.
+fn version_numbers(version: &str) -> [u8; 3] {
+    let release = version.split(['-', '+']).next().unwrap_or_default();
+    let mut numbers = [0u8; 3];
+    for (number, part) in numbers.iter_mut().zip(release.split('.')) {
+        *number = part.parse().unwrap_or(u8::MAX);
+    }
+    numbers
 }
 
 /// CRC-8 of the tool's name and `bytes`, so other programs' random bytes
@@ -185,9 +195,9 @@ fn user_hash() -> u32 {
     folded.max(1)
 }
 
-/// The mark in a sticker file, if it has one. tgradish only writes marks
-/// for now: neither the command line nor the window reads them.
-pub fn read_file(path: &std::path::Path) -> Option<Mark> {
+/// The mark in a sticker file, if it has one.
+#[cfg(test)]
+pub(crate) fn read_file(path: &std::path::Path) -> Option<Mark> {
     if crate::tgs::is_sticker(path) {
         let json = crate::tgs::read_json(path).ok()?;
         Mark::from_bits(&tgradish_tgs::mark::hidden_bits(&json)).or_else(|| {
@@ -232,11 +242,18 @@ pub fn made_by_tgradish(path: &std::path::Path) -> bool {
     }
 }
 
-/// Whether `text` is `tgradish VERSION`, as `crate::TOOL_ID` is.
+/// Whether `text` is `tgradish VERSION`, as `crate::TOOL_ID` is: numbers
+/// between dots, and after them what a pre-release or a build adds, as
+/// `-rc.1` does.
 fn is_tool_id(text: &str) -> bool {
-    text.strip_prefix("tgradish ").is_some_and(|version| {
-        !version.is_empty() && version.split('.').all(|part| part.parse::<u32>().is_ok())
-    })
+    let Some(version) = text.strip_prefix("tgradish ") else { return false };
+    let (release, added) = match version.find(['-', '+']) {
+        Some(at) => (&version[..at], Some(&version[at + 1..])),
+        None => (version, None),
+    };
+    let part_of_one = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+');
+    release.split('.').all(|part| part.parse::<u32>().is_ok())
+        && added.is_none_or(|added| !added.is_empty() && added.chars().all(part_of_one))
 }
 
 /// Whether `name` is one tgradish gives stickers: `made with tgradish
@@ -286,6 +303,14 @@ mod tests {
         assert!(!tgradish_name("tgradish tutorial"));
         assert!(!tgradish_name("made with tgradish 2.x"));
         assert!(is_tool_id(crate::TOOL_ID) && !is_tool_id("tgradish-ish 1.0"));
+        // versions before a release, and builds of one
+        for tool in ["tgradish 2.1.0-rc.1", "tgradish 2.1.0+linux.5", "tgradish 2.1.0-rc.1+5"] {
+            assert!(is_tool_id(tool), "{tool}");
+            assert!(tgradish_name(&format!("made with {tool}")), "{tool}");
+        }
+        for other in ["tgradish ", "tgradish 2.1.0-", "tgradish 2.1.0-rc 1", "tgradish -rc.1"] {
+            assert!(!is_tool_id(other), "{other}");
+        }
         // as stickers are named
         let named = |title: Option<&str>| {
             let options =
@@ -295,6 +320,37 @@ mod tests {
         assert!(tgradish_name(&named(None)) && tgradish_name(&named(Some("dance"))));
         // and how inspecting finds the signature in WebM padding
         assert!(crate::signature().starts_with(crate::webm::SIGNATURE_PREFIX));
+    }
+
+    #[test]
+    fn reads_the_numbers_of_a_version() {
+        assert_eq!(version_numbers("2.0.1"), [2, 0, 1]);
+        // before a release the patch is still a number
+        assert_eq!(version_numbers("2.1.0-rc.1"), [2, 1, 0]);
+        assert_eq!(version_numbers("10.20.30+linux.5"), [10, 20, 30]);
+        // what a byte can't hold, and what isn't there
+        assert_eq!(version_numbers("2.300.x"), [2, 255, 255]);
+        assert_eq!(version_numbers("2"), [2, 0, 0]);
+        assert_eq!(Mark::current().version, version_numbers(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[test]
+    fn reads_the_mark_of_a_sticker_it_made() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = tgradish_corpus::files();
+        let walker = files.iter().find(|file| file.name == "walker_2x.gif").unwrap();
+        let input = dir.path().join("walker.gif");
+        std::fs::write(&input, &walker.bytes).unwrap();
+        let request = crate::tgs::TgsRequest {
+            inputs: vec![input],
+            sequence: false,
+            output: dir.path().join("walker.tgs"),
+            options: Default::default(),
+            overwrite: false,
+            backend: None,
+        };
+        let made = crate::tgs::convert(&request, &crate::CancelToken::new(), &mut |_| {}).unwrap();
+        assert_eq!(read_file(&made.output), Some(Mark::current()));
     }
 
     #[test]
