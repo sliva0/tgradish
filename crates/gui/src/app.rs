@@ -833,7 +833,10 @@ mod tests {
         std::fs::remove_file(&gone).unwrap();
         let mut second = harness(config);
         second.state_mut().reopen(state);
-        second.run_steps(2);
+        // its result is read as the window draws, not before it opens
+        assert!(second.state().items[0].made.is_none());
+        assert!(second.state().items[0].earlier.is_some());
+        finish(&mut second);
         let app = second.state();
         assert_eq!(app.items.len(), 1);
         let item = &app.items[0];

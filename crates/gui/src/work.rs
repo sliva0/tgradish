@@ -13,7 +13,7 @@ use tgradish_core::still;
 use crate::app::App;
 use crate::files::THUMB;
 use crate::item::{Conversion, Item, Kind, Recipe, Show};
-use crate::jobs::{Plan, Status};
+use crate::jobs::{Done, Plan, Status};
 use crate::media::{self, Art, Clip, Load, Video};
 use crate::outputs::Written;
 
@@ -39,6 +39,7 @@ impl App {
             .count();
         for item in &mut self.items {
             item.recipe = item.choices.recipe(item.format, &self.presets, &self.config).ok();
+            check_earlier(ctx, item);
             let is_selected = selected == Some(item.id);
             let kept = is_selected || self.recent.contains(&item.id);
             let finished = item.video.poll() | item.art.poll();
@@ -295,6 +296,31 @@ fn settle(ctx: &egui::Context, item: &mut Item) {
         let image = clip.thumbnail(THUMB as u32 * 2);
         item.input_thumb =
             Some(ctx.load_texture(format!("input-{}", item.id), image, texture_options(clip)));
+    }
+}
+
+/// Reads what an earlier run's result is, on a thread of its own, and
+/// takes it as made once read; it goes if the file has, or if the item was
+/// converted meanwhile.
+fn check_earlier(ctx: &egui::Context, item: &mut Item) {
+    let Some((earlier, load)) = &mut item.earlier else { return };
+    if load.is_idle() {
+        let (output, format) = (earlier.job.output.clone(), earlier.format);
+        let target = earlier.choices.target;
+        load.reload(media::Task::spawn(ctx, move |_| {
+            Done::of_file(&output, format, target).ok_or_else(String::new)
+        }));
+    }
+    load.poll();
+    if load.is_loading() {
+        return;
+    }
+    let (mut earlier, load) = item.earlier.take().expect("there");
+    if let Load::Ready(done) = load
+        && item.made.is_none()
+    {
+        earlier.job.status = Status::Done(Box::new(done));
+        item.made = Some(earlier);
     }
 }
 

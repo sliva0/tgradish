@@ -53,7 +53,10 @@ pub(crate) fn finish(harness: &mut Harness<App>) {
         harness.step();
         let state = harness.state();
         let reading = state.items.iter().any(|item| {
-            item.video.is_loading() || item.art.is_loading() || item.result_clip.is_loading()
+            item.video.is_loading()
+                || item.art.is_loading()
+                || item.result_clip.is_loading()
+                || item.earlier.is_some()
         });
         let idle = state.queue.is_empty() && state.picking.is_none();
         if !reading && idle && state.items.iter().all(|item| item.job.is_none()) {

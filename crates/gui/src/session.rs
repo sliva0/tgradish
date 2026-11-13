@@ -16,7 +16,8 @@ use tgradish_core::clipboard::PASTED_IMAGE_NAME;
 use tgradish_core::presets::Format;
 
 use crate::item::{Choices, Conversion, Item, Recipe};
-use crate::jobs::{Done, Job, Status};
+use crate::jobs::Job;
+use crate::media::Load;
 use crate::outputs::{FileVersion, Written};
 
 /// What the file says it is, so a session of another layout is left alone.
@@ -274,7 +275,7 @@ impl Session {
         let saved = kept
             .iter()
             .map(|item| {
-                let made = item.made.as_ref().filter(|made| made.job.output.to_str().is_some());
+                let made = item.last_result().filter(|made| made.job.output.to_str().is_some());
                 Saved {
                     // a pasted image is opened from its copy
                     inputs: if item.kept.is_some() { Vec::new() } else { item.inputs.clone() },
@@ -350,13 +351,11 @@ fn restore_item(saved: Saved, path: &Path, id: u64) -> Option<Item> {
     item.format = saved.format;
     item.format_guessed = saved.format_guessed;
     item.choices = saved.choices;
-    item.made = saved.result.and_then(|result| {
-        let done = Done::of_file(&result.output, result.format, result.choices.target)?;
-        let mut job = Job::waiting(result.output);
-        job.status = Status::Done(Box::new(done));
-        let mut made = Conversion::of(job, result.format, result.choices);
+    // read again as the window draws, as the file may have gone or changed
+    item.earlier = saved.result.map(|result| {
+        let mut made = Conversion::of(Job::waiting(result.output), result.format, result.choices);
         made.recipe = result.recipe;
-        Some(made)
+        (made, Load::Idle)
     });
     Some(item)
 }

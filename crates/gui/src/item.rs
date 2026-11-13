@@ -12,7 +12,7 @@ use tgradish_core::telegram::{self, Target};
 use tgradish_core::tgs::TgsOptions;
 use tgradish_tgs::frames::{LayerInfo, Tag};
 
-use crate::jobs::Job;
+use crate::jobs::{Done, Job};
 use crate::l10n::fl;
 use crate::media::{Art, Clip, Load, Video};
 use crate::timeline::Frames;
@@ -455,6 +455,9 @@ pub struct Item {
     pub job: Option<Conversion>,
     /// The last conversion that made a sticker.
     pub made: Option<Conversion>,
+    /// The last result of an earlier run, read again before it counts as
+    /// made: what it is, as it may have changed, or whether it is there.
+    pub earlier: Option<(Conversion, Load<Done>)>,
     /// The last conversion, if it failed, was stopped or found a file in
     /// the way: newer than `made`.
     pub failed: Option<Conversion>,
@@ -490,6 +493,7 @@ impl Item {
             input_thumb: None,
             job: None,
             made: None,
+            earlier: None,
             failed: None,
             result_clip: Load::Idle,
             result_thumb: None,
@@ -623,6 +627,11 @@ impl Item {
     /// Whether the last sticker is what converting would make now.
     pub fn result_is_current(&self) -> bool {
         self.made.as_ref().is_some_and(|made| made.recipe.is_some() && made.recipe == self.recipe)
+    }
+
+    /// The last result, or the one of an earlier run while that is read.
+    pub fn last_result(&self) -> Option<&Conversion> {
+        self.made.as_ref().or(self.earlier.as_ref().map(|(earlier, _)| earlier))
     }
 
     pub fn is_busy(&self) -> bool {

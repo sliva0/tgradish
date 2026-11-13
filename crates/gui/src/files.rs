@@ -421,9 +421,10 @@ fn row(
 }
 
 /// Whether a row has a button to convert where its result would be: until
-/// there is a result, or while one is being made.
+/// there is a result, or one of an earlier run, and not while one is
+/// being made.
 fn offers_convert(item: &Item) -> bool {
-    item.made.is_none() && !item.is_busy()
+    item.last_result().is_none() && !item.is_busy()
 }
 
 /// A thumbnail in `rect`, marked when it is out of date.
