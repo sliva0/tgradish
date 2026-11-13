@@ -14,6 +14,7 @@ use tgradish_core::backend::{Backend, FramesRequest};
 use tgradish_core::convert::{Request, convert};
 use tgradish_core::events::Event;
 use tgradish_core::ffmpeg;
+use tgradish_core::mark::made_by_tgradish;
 use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Speed};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::{Error, webm};
@@ -62,6 +63,8 @@ fn converts_short_clip_without_spoofing() {
         assert_eq!(info.title, None, "{name}: source metadata must be dropped");
         assert_eq!(info.writing_app.as_deref(), Some(tgradish_core::TOOL_ID), "{name}");
         assert!(info.signature.is_some());
+        // which the window may replace without asking
+        assert!(made_by_tgradish(&outcome.output), "{name}");
     }
 }
 
@@ -781,6 +784,76 @@ fn passes_encoder_options() {
     }
 }
 
+/// Stickers that look like tgradish's but aren't, which the window must
+/// not replace without asking.
+#[test]
+fn tells_its_own_stickers_from_look_alikes() {
+    use tgradish_core::still;
+    use tgradish_core::tgs::{self, TgsOptions, TgsRequest};
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
+    let backend = &backends[0];
+    let dir = tempfile::tempdir().unwrap();
+    let cancel = CancelToken::new();
+    let path = |name: &str| dir.path().join(name);
+    let unmarked = Options { watermark: Some(false), length: Some(0.2), ..fast(Fit::Off) };
+    let marked = Options { length: Some(0.2), ..fast(Fit::Off) };
+
+    // WebM: unmarked, signed by another, named by tgradish but unsigned,
+    // and a video named as one
+    let webm = |name: &str, options: Options| {
+        let request = Request { output: Some(path(name)), options, ..Request::new(input.clone()) };
+        convert(backend, &request, &cancel, &mut |_| {}).unwrap().output
+    };
+    let ours = webm("ours.webm", marked);
+    assert!(made_by_tgradish(&ours));
+    assert!(!made_by_tgradish(&webm("unmarked.webm", unmarked.clone())));
+    let other =
+        webm::Patch { signature: Some("tgradish someone else's".into()), ..Default::default() };
+    webm::patch_file(&ours, &path("signed.webm"), &other, false).unwrap();
+    assert!(!made_by_tgradish(&path("signed.webm")));
+    let named = webm::Patch {
+        muxing_app: Some(tgradish_core::TOOL_ID.into()),
+        writing_app: Some(tgradish_core::TOOL_ID.into()),
+        ..Default::default()
+    };
+    webm::patch_file(&path("unmarked.webm"), &path("named.webm"), &named, false).unwrap();
+    assert!(!made_by_tgradish(&path("named.webm")));
+    std::fs::copy(&input, path("video.webm")).unwrap();
+    assert!(!made_by_tgradish(&path("video.webm")));
+
+    // WebP: unmarked, and a PNG named as one
+    let picture = Request {
+        output: Some(path("unmarked.webp")),
+        options: unmarked,
+        ..Request::new(input.clone())
+    };
+    assert!(!made_by_tgradish(&still::convert(backend, &picture, &cancel).unwrap().output));
+    let walker = corpus_file(dir.path(), "walker_2x.gif", "walker.gif");
+    std::fs::write(
+        path("png.webp"),
+        tgradish_corpus::encode::png(&tgradish_corpus::sprite("walker_2x").frames[0]),
+    )
+    .unwrap();
+    assert!(!made_by_tgradish(&path("png.webp")));
+
+    // .tgs: unmarked, named by another, and gzip that isn't one
+    let request = TgsRequest {
+        inputs: vec![walker],
+        sequence: false,
+        output: path("unmarked.tgs"),
+        options: TgsOptions { watermark: Some(false), ..TgsOptions::default() },
+        overwrite: false,
+        backend: None,
+    };
+    assert!(!made_by_tgradish(&tgs::convert(&request, &cancel, &mut |_| {}).unwrap().output));
+    for name in ["tgradish tutorial", "made with tgradish 2.x", "made with tgradish"] {
+        std::fs::write(path("named.tgs"), format!(r#"{{"nm":"{name}","layers":[]}}"#)).unwrap();
+        assert!(!made_by_tgradish(&path("named.tgs")), "{name}");
+    }
+    std::fs::write(path("named.tgs"), [0x1f, 0x8b, 8, 0, 0, 0]).unwrap();
+    assert!(!made_by_tgradish(&path("named.tgs")));
+}
+
 /// Names that aren't Unicode, as files kept from older systems have: here
 /// Latin-1, which ffmpeg reads as the bytes it is.
 #[cfg(unix)]
@@ -993,6 +1066,7 @@ fn makes_image_stickers_from_a_frame() {
         let request = Request { output: Some(dir.path().join("out.webp")), ..request };
         let made = tgradish_core::still::convert(backend, &request, &CancelToken::new()).unwrap();
         assert!(made.issues.is_empty(), "{name}: {:?}", made.issues);
+        assert!(made_by_tgradish(&made.output), "{name}");
         assert_eq!((made.width, made.height), (512, 256), "{name}");
         assert_eq!(made.encoding, tgradish_core::still::Encoding::Lossless, "{name}");
         let preview = tgradish_core::still::preview(&made.output).unwrap();
@@ -1119,6 +1193,7 @@ fn makes_tgs_stickers_from_videos() {
         };
         let made = video(&once, TgsOptions::default()).unwrap();
         assert!(made.issues.is_empty() && !made.lossy, "{name}: {:?}", made.issues);
+        assert!(made_by_tgradish(&made.output), "{name}");
         assert!(made.preview == direct.preview, "{name}: not the same as the GIF");
         // the third walk, read from where it starts
         let third = TgsOptions { start: Some(1.6), length: Some(0.8), ..TgsOptions::default() };
