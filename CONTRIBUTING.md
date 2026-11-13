@@ -144,8 +144,9 @@ date. ffmpeg stays LGPL: never enable its GPL parts. Paths and commands say
    others, as `linux-musl-x86_64`, made with musl-gcc (musl-tools on
    Debian and Ubuntu, musl on Arch). Try them.
 3. Push a `vX.Y.Z` tag. The release workflow builds everything, tests the
-   packages on Ubuntu, Debian, Fedora, openSUSE and Windows, and the musl
-   builds on Alpine, and drafts a release with the archives, packages,
+   packages on AlmaLinux, Ubuntu, Debian, Fedora, openSUSE and Windows,
+   the musl builds on Alpine, and the AUR packages, built with makepkg, on
+   Arch Linux, and drafts a release with the archives, packages,
    checksums and ffmpeg's sources. Check the draft, then publish it.
 4. In each `packaging/aur/*` folder, `updpkgsums`, then
    `makepkg --printsrcinfo > .SRCINFO`, and push to the AUR.

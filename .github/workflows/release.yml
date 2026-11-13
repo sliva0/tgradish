@@ -333,6 +333,58 @@ jobs:
           tgradish convert input.png -o out.webp
           tgradish inspect out.webm out.tgs out.webp
 
+  # builds each AUR package as makepkg would, from the archives just built
+  # and, for the source package, a git archive of this commit, then installs
+  # it and converts with it. x86-64 alone, the only Arch Linux image
+  test-aur:
+    needs: build
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    timeout-minutes: 60
+    steps:
+      # git first, so the checkout is a repository to archive
+      - run: pacman -Syu --noconfirm git
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-linux-x86_64
+          path: artifacts
+
+      - name: Build, install and run each package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          version=$(sed -n 's/^pkgver=//p' packaging/aur/tgradish/PKGBUILD)
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git archive --prefix="tgradish-$version/" -o /tmp/source.tar.gz HEAD
+          # makepkg won't run as root
+          useradd -m builder
+          for package in tgradish-bin tgradish-static-bin tgradish; do
+            dir=/tmp/aur/$package
+            mkdir -p "$dir"
+            cp "packaging/aur/$package/PKGBUILD" "$dir"
+            # a file of the name a source downloads to is taken in its place
+            case $package in
+              tgradish) cp /tmp/source.tar.gz "$dir/tgradish-$version.tar.gz" ;;
+              *) cp artifacts/tgradish-"$version"-x86_64-unknown-linux-gnu*.tar.gz "$dir" ;;
+            esac
+            chown -R builder "$dir"
+            # its dependencies, as root, since builder can't install them
+            (cd "$dir" && runuser -u builder -- makepkg --printsrcinfo > .SRCINFO)
+            pacman -S --noconfirm --needed $(sed -n 's/^\t\(make\)\?depends = //p' "$dir/.SRCINFO")
+            (cd "$dir" && runuser -u builder -- makepkg --noconfirm)
+            pacman -U --noconfirm "$dir"/*.pkg.tar.zst
+            tgradish --version
+            tgradish ffmpeg status
+            # a 16 x 16 PNG: a red square in a transparent border
+            echo iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGF7gjobGf2LwqAGjBtDWgKEJAGe22M1pQ+POAAAAAElFTkSuQmCC | base64 -d > /tmp/input.png
+            tgradish convert /tmp/input.png -o /tmp/out.tgs --overwrite
+            tgradish convert /tmp/input.png -o /tmp/out.webm --length 1 --preset fast --overwrite
+            pacman -R --noconfirm "$package"
+          done
+
   # runs the Windows build on Windows
   test-windows:
     needs: build
@@ -378,7 +430,7 @@ jobs:
   # drafts the release, on a tag. Every other run does all of it but that
   # last step, so a tag isn't the first time the steps before it run
   publish:
-    needs: [build, test-linux, test-musl, test-packages, test-windows]
+    needs: [build, test-linux, test-musl, test-packages, test-aur, test-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
