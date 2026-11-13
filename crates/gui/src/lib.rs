@@ -83,7 +83,8 @@ impl Launch {
     }
 
     /// Uses the ffmpeg `choice` says, and the executable or directory at
-    /// `path`, over the config's where either is given.
+    /// `path`, over the config's where either is given, for this run
+    /// alone: as the command line or `TGRADISH_FFMPEG` gives them.
     pub fn ffmpeg(self, choice: Option<FfmpegChoice>, path: Option<PathBuf>) -> Launch {
         Launch { ffmpeg_choice: choice, ffmpeg_path: path, ..self }
     }
