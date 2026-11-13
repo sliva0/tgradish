@@ -27,6 +27,10 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    # it installs ffmpeg, so tests that need it fail rather than skip
+    # without it
+    env:
+      TGRADISH_REQUIRE_FFMPEG: 1
     steps:
       - uses: actions/checkout@v5
 
@@ -85,6 +89,9 @@ jobs:
   linked:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # as in check
+    env:
+      TGRADISH_REQUIRE_FFMPEG: 1
     steps:
       - uses: actions/checkout@v5
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
