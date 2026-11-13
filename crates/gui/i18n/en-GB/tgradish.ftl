@@ -105,7 +105,7 @@ convert-all = { $count ->
 }
     .hint = Convert every file without an up-to-date result
 remove-all = Remove all
-no-files = Files you add show up here.
+no-files = Files you add show up here
 remove = Remove
 remove-file = Remove it from the list
 # A file's button that makes its result, before it has one.
@@ -122,7 +122,7 @@ row-exists = a file is in the way
 row-stopped = stopped
 # The large area shown while no files are open.
 drop-here = Drop videos, GIFs, images or Aseprite files here
-drop-here-note = To convert into video, animated, or image sticker
+drop-here-note = To convert into a video, animated or image sticker or emoji
 paste = Paste
     .hint = Ctrl+V
 # A file's name in the list when it is more than its first input.
@@ -132,12 +132,12 @@ name-and-more = { $name } and { $more } more
 # When a file's name has characters no font, the window's or the system's,
 # can draw: each is shown by its code, as U+2FE0.
 no-font = { $count ->
-    [one] No font was found for { $codes }, neither among the window's own nor the system's, so it is shown by its code. The file itself is fine.
-   *[other] No font was found for { $codes }, neither among the window's own nor the system's, so they are shown by their codes. The file itself is fine.
+    [one] No font was found for { $codes }, neither among the window's own nor the system's, so it is shown by its code. The file itself is fine
+   *[other] No font was found for { $codes }, neither among the window's own nor the system's, so they are shown by their codes. The file itself is fine
 }
 
 
-## The bar under the preview of the file picked
+## The bar under the settings of the file picked
 
 stop = Stop
 stopping = Stopping…
@@ -176,8 +176,8 @@ result-no-frames = The result has no frames
 
 ## The result's small picture over the preview
 
-# Its label: how large it is shown, as a share of its own pixels, then what
-# it is, as "512×512, 2.40 s".
+# Its label: how large it is shown, as a share of its own pixels, then, on
+# a line under it, its size, as "512 × 512 px".
 inset-label = Result at { $scale }%
     .plain = Result
     .drag = Drag it to another corner
@@ -267,8 +267,8 @@ needs-webm-sticker = WebM, 512 px on the longer side, up to 256 KiB
 needs-webm-emoji = WebM, 100 × 100 px, up to 64 KiB
 needs-tgs = TGS, square, up to 64 KiB
 needs-image-sticker = WebP, 512 px on the longer side, up to 512 KiB
-needs-image-emoji = WebP, 100 × 100 px
-not-pixel-art = "{ format-animation }" is meant for pixel art, converted to vector so it stays crisp. This doesn't look like pixel art: "{ format-video }" suits it better.
+needs-image-emoji = WebP, 100 × 100 px, up to 512 KiB
+not-pixel-art = "{ format-animation }" is meant for pixel art, converted to vector so it stays crisp. This doesn't look like pixel art: "{ format-video }" suits it better
 preset = Preset
     .hint = How hard to work on the result; your own values below go on top
     .image = A picture takes only the preset's picture settings, how it is squared and scaled: it is saved lossless where that fits, otherwise at the best quality which still fits
@@ -342,7 +342,7 @@ square-stretch = By stretching
 square-exact = Fixed integer scale keeps all of the picture: pad it instead
 scaling = Scaling
     .hint = How the input's pixels become the result's
-scaling-auto = Auto
+scaling-auto = Automatic
     .hint = Sharp pixels for pixel art made twice as large or more, smooth otherwise
 scaling-smooth = Smooth
     .hint = Neighbouring pixels blend
@@ -373,7 +373,7 @@ scale-each-way = ×{ $across } across and ×{ $down } down
 scale-shrinks = The crop is larger than the result, so it shrinks with sharp pixels: a fixed scale like ×1/2 shrinks it by whole blocks
 margins = Margins
     .hint = Edge rows and columns that are transparent in all input frames
-auto-crop = Auto crop empty margins
+auto-crop = Crop empty margins automatically
     .hint = Cuts the pixel art to the smallest rectangle with visible pixels in any frame
     .after = Applies after the crop above
 art-pixel = Art pixel size
@@ -386,7 +386,7 @@ art-pixel-detected = Detected
 
 time = Time
 used-part = Used part
-    .hint = Where the part of the input used starts and ends; the bar under the preview sets it too
+    .hint = Where the part of the input used starts and ends; the timeline under the preview sets it too
 # Between the fields of the used part's start and end.
 part-from = From
 part-to = to
@@ -438,7 +438,7 @@ default-duration = Default
     .hint = A short duration Telegram accepts
 frame = Frame
 frame-at = Frame at
-    .hint = The time of the frame the picture is made of; the bar under the preview picks it too
+    .hint = The time of the frame the picture is made of; the timeline under the preview picks it too
 
 
 ## Settings: size and quality of a WebM
@@ -622,8 +622,8 @@ plan-square-stretch = Stretched to a square
 plan-square-pad = Padded to a square
 # The part used: from and to as seconds, the first without its unit.
 plan-cut = Cut to { $from }–{ $to } of { $length }
-plan-faster = Sped up by a factor of { $factor }
-plan-slower = Slowed down by a factor of { $factor }
+plan-faster = Sped up ×{ $factor }
+plan-slower = Slowed down ×{ $factor }
 plan-cut-3-s = Cut at 3 s of { $played }
 plan-spoofed = Duration spoofed, so all { $played } plays
 # "Always spoof", where the result is short enough not to need it.
@@ -745,7 +745,7 @@ encodes-up-to = { $count ->
 art-size = { $width } × { $height } art pixels
     .scaled = { $width } × { $height } art pixels, each { $scale } × { $scale } input pixels
 art-summary = { $size }; { $colours }, { $frames }
-art-tempo = Plays { $tempo }× as fast as the input
+art-tempo = Plays at ×{ $tempo } the input's speed
 art-off-grid = Most of it looks like { $scale }× pixel art with some pixels off the grid; an art pixel size of { $scale } snaps them
 # The shapes of a TGS animation, and how large its JSON is before it is
 # compressed.
@@ -872,8 +872,8 @@ preset-name-builtin = "{ $name }" is a built-in preset's name
 preset-name-taken = Another preset is named "{ $name }"
 preset-extended = "{ $other }" extends it: rename it there first
 your-presets = Your presets
-your-presets-note = Changes are kept as you make them. "{ preset-fast }", "{ preset-balanced }" and "{ preset-best }" are built in and stay as they are.
-no-presets = None yet: "{ -save-settings }", under the preview.
+your-presets-note = Changes are kept as you make them. "{ preset-fast }", "{ preset-balanced }" and "{ preset-best }" are built in and stay as they are
+no-presets = None yet: "{ -save-settings }", in the bar under the settings
 preset-broken = Its file can't be read
 delete-it = Delete it
 deleted = Deleted "{ $name }"
