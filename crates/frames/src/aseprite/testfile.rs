@@ -176,11 +176,16 @@ pub(super) fn tileset() -> Vec<u8> {
 /// A tilemap cel on layer 0, of one row of `tiles` kept in `bits` bits
 /// each, the top three of 32 for flips.
 pub(super) fn tilemap(bits: u16, tiles: &[u32]) -> Vec<u8> {
+    let ids = if bits == 32 { 0x1fff_ffff } else { (1u32 << bits) - 1 };
+    masked_tilemap(bits, ids, tiles)
+}
+
+/// [`tilemap`] with tiles' ids in the bits of `ids`.
+pub(super) fn masked_tilemap(bits: u16, ids: u32, tiles: &[u32]) -> Vec<u8> {
     let mut data = cel_header(0, 0, 0, 255, 3);
     data.extend((tiles.len() as u16).to_le_bytes());
     data.extend(1u16.to_le_bytes());
     data.extend(bits.to_le_bytes());
-    let ids = if bits == 32 { 0x1fff_ffff } else { (1u32 << bits) - 1 };
     for mask in [ids, 0x2000_0000, 0x4000_0000, 0x8000_0000] {
         data.extend(mask.to_le_bytes());
     }

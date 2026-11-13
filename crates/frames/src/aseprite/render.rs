@@ -305,8 +305,11 @@ impl Sprite {
                     if tile & flip_mask != 0 {
                         return Err(error("flipped tiles aren't supported"));
                     }
-                    let id = tile & id_mask;
-                    let empty = if set.zero_is_empty { id == 0 } else { id == *id_mask };
+                    // checked when reading: the mask is one run of bits,
+                    // whose lowest is an id's lowest
+                    let shift = id_mask.trailing_zeros();
+                    let (id, all) = ((tile & id_mask) >> shift, id_mask >> shift);
+                    let empty = if set.zero_is_empty { id == 0 } else { id == all };
                     if empty {
                         continue;
                     }
@@ -529,5 +532,19 @@ mod tests {
         assert_eq!(pixels(&decode(&sprite(&[2, 0, 1])).unwrap(), 0), [GREEN, [0; 4], RED]);
         assert!(matches!(decode(&sprite(&[2 | 0x2000_0000, 0, 1])), Err(Error::Decode { .. })));
         assert!(matches!(decode(&sprite(&[9, 0, 1])), Err(Error::Decode { .. })));
+    }
+
+    #[test]
+    fn takes_tile_ids_from_where_their_mask_says() {
+        let sprite = |ids: u32, tiles: &[u32]| {
+            let tilemap = masked_tilemap(32, ids, tiles);
+            file(3, 1, 32, 1, &[vec![layer(1, 2, 0, 0, 255), tileset(), tilemap]])
+        };
+        let drawn = decode(&sprite(0x0000_ff00, &[0x200, 0x0, 0x1ff])).unwrap();
+        assert_eq!(pixels(&drawn, 0), [GREEN, [0; 4], RED]);
+        for broken in [0, 0x0000_f0f0] {
+            let refused = decode(&sprite(broken, &[1, 1, 1]));
+            assert!(matches!(refused, Err(Error::Decode { .. })), "{broken:#x}");
+        }
     }
 }
