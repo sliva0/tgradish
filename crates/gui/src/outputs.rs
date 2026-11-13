@@ -77,7 +77,7 @@ impl App {
             .iter()
             .filter(|other| other.id != item.id)
             .flat_map(|other| {
-                let waiting = other.job.as_ref().map(|(job, ..)| job.output.as_path());
+                let waiting = other.job.as_ref().map(|conversion| conversion.job.output.as_path());
                 waiting.into_iter().chain(other.made.as_ref().map(|made| made.job.output.as_path()))
             })
             .collect();

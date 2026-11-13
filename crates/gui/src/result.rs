@@ -12,8 +12,8 @@ use crate::{theme, widgets};
 /// The last result of an item in short: its size and what Telegram would
 /// say, beside the preview.
 pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
-    if let Some((job, ..)) = &item.job {
-        progress_column(ui, job, queued);
+    if let Some(conversion) = &item.job {
+        progress_column(ui, &conversion.job, queued);
     }
     if let Some(failed) = &item.failed {
         widgets::section(ui, &fl!("last-conversion"));

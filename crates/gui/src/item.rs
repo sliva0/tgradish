@@ -376,13 +376,19 @@ impl Framing {
     }
 }
 
-/// A finished conversion: the job and what it was made from. As
-/// [`Item::made`], its status is always [`crate::jobs::Status::Done`]; as
-/// [`Item::failed`], never.
-pub struct Made {
+/// A conversion of an item: the job and what it is made from. As
+/// [`Item::job`] it waits or runs; as [`Item::made`] its status is always
+/// [`crate::jobs::Status::Done`]; as [`Item::failed`], never.
+pub struct Conversion {
     pub job: Job,
     pub format: Format,
     pub choices: Choices,
+}
+
+impl Conversion {
+    pub fn of(job: Job, format: Format, choices: Choices) -> Conversion {
+        Conversion { job, format, choices }
+    }
 }
 
 pub struct Item {
@@ -418,12 +424,12 @@ pub struct Item {
     pub aseprite_seen: Option<std::rc::Rc<AsepriteSeen>>,
     pub input_thumb: Option<egui::TextureHandle>,
     /// The conversion waiting or running.
-    pub job: Option<(Job, Format, Choices)>,
+    pub job: Option<Conversion>,
     /// The last conversion that made a sticker.
-    pub made: Option<Made>,
+    pub made: Option<Conversion>,
     /// The last conversion, if it failed, was stopped or found a file in
     /// the way: newer than `made`.
-    pub failed: Option<Made>,
+    pub failed: Option<Conversion>,
     /// A finished WebM result, decoded.
     pub result_clip: Load<Clip>,
     pub result_thumb: Option<egui::TextureHandle>,

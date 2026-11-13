@@ -18,7 +18,7 @@ use crate::about::about;
 use crate::canvas::Screen;
 use crate::fonts::fonts;
 use crate::inset::Inset;
-use crate::item::Item;
+use crate::item::{Conversion, Item};
 use crate::jobs::Job;
 use crate::keys::direct_scrolling;
 use crate::l10n::fl;
@@ -386,9 +386,9 @@ impl App {
 
     pub(crate) fn remove(&mut self, id: u64) {
         if let Some(item) = self.item(id)
-            && let Some((job, ..)) = &item.job
+            && let Some(conversion) = &item.job
         {
-            job.cancel();
+            conversion.job.cancel();
         }
         self.items.retain(|item| item.id != id);
         self.queue.retain(|&other| other != id);
@@ -404,10 +404,10 @@ impl App {
         // as things are now, not as they were when the frame started
         let output = self.work_out_output(item);
         let item = self.item_mut(id).expect("found above");
-        if let Some((job, ..)) = &item.job {
-            job.cancel();
+        if let Some(conversion) = &item.job {
+            conversion.job.cancel();
         }
-        item.job = Some((Job::waiting(output), item.format, item.choices.clone()));
+        item.job = Some(Conversion::of(Job::waiting(output), item.format, item.choices.clone()));
         self.queue.retain(|&other| other != id);
         self.queue.push_back(id);
     }
@@ -462,12 +462,12 @@ const STOPPING: std::time::Duration = std::time::Duration::from_secs(3);
 impl App {
     /// Stops every conversion, and waits a little for them to clean up.
     fn stop_converting(&mut self) {
-        let jobs = || self.items.iter().filter_map(|item| item.job.as_ref().map(|(job, ..)| job));
+        let jobs = || self.items.iter().filter_map(|item| item.job.as_ref().map(|c| &c.job));
         jobs().for_each(Job::cancel);
         let deadline = std::time::Instant::now() + STOPPING;
         for item in &mut self.items {
-            if let Some((job, ..)) = &mut item.job {
-                job.wait_until(deadline);
+            if let Some(conversion) = &mut item.job {
+                conversion.job.wait_until(deadline);
             }
         }
     }
@@ -721,12 +721,11 @@ mod tests {
         finish(&mut harness);
         convert(&harness);
         harness.run_steps(2);
-        let running =
-            |app: &App| app.items[0].job.as_ref().is_some_and(|(job, ..)| job.is_running());
+        let running = |app: &App| app.items[0].job.as_ref().is_some_and(|c| c.job.is_running());
         assert!(running(harness.state()));
         eframe::App::on_exit(harness.state_mut(), None);
         // its worker is done, having said it stopped
-        let (job, ..) = harness.state_mut().items[0].job.as_mut().unwrap();
+        let job = &mut harness.state_mut().items[0].job.as_mut().unwrap().job;
         assert!(job.wait_until(std::time::Instant::now()));
         job.poll();
         assert!(matches!(job.status, crate::jobs::Status::Cancelled), "{:?}", job.status);
