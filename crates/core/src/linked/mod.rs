@@ -301,10 +301,8 @@ fn open_encoder(
     }
     let unused: Vec<_> = unused.iter().map(|(name, _)| name.to_string()).collect();
     if !unused.is_empty() {
-        return Err(Error::InvalidOptions(format!(
-            "unknown encoder options: {}",
-            unused.join(", ")
-        )));
+        let reason = format!("has names libvpx-vp9 doesn't know: {}", unused.join(", "));
+        return Err(Error::invalid("encoder-options", reason));
     }
     Ok(ff::encoder::video::Encoder(encoder))
 }

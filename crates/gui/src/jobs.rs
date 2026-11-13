@@ -213,9 +213,11 @@ pub(crate) fn failure(err: &Error) -> String {
             fl!("nothing-fits", limit = limit, smallest = smallest)
         }
         Error::Clipboard(details) => fl!("clipboard-failed", details = details.as_str()),
-        // as a preset's settings are wrong: what is wrong, without the
-        // command line's "invalid options"
-        Error::InvalidOptions(details) => {
+        Error::OutputIsInput(path) => fl!("output-is-input", name = name(path)),
+        Error::NothingToConvert => fl!("nothing-to-convert"),
+        // as a preset's settings are wrong: what is wrong, as core says it
+        Error::InvalidOption { .. } | Error::Preset(_) | Error::Config { .. } => {
+            let details = err.to_string();
             let mut chars = details.chars();
             chars
                 .next()
@@ -681,9 +683,8 @@ mod tests {
 
     #[test]
     fn words_failures_as_the_window_does() {
-        let invalid = Error::InvalidOptions("crf must be at most 63".into());
+        let invalid = Error::InvalidOption { option: "crf", reason: "must be at most 63".into() };
         assert_eq!(failure(&invalid), "Crf must be at most 63");
-        assert_eq!(failure(&Error::InvalidOptions(String::new())), "");
         let missing = failure(&Error::FfmpegNotFound("not on PATH".into()));
         assert_eq!(missing, fl!("ffmpeg-not-found", details = "not on PATH"));
         let unreadable =

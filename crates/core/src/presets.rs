@@ -161,6 +161,32 @@ fn builtin() -> Vec<Preset> {
     ]
 }
 
+/// Why a preset can't be had, or saved, renamed or described as asked.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PresetError {
+    /// No preset has the name; `known` are those that do.
+    #[error("unknown preset {name:?}, available: {}", known.join(", "))]
+    Unknown { name: String, known: Vec<String> },
+    /// Its file, or that of one it extends, isn't a preset's: the message
+    /// names it and says why.
+    #[error("broken preset {0}")]
+    Broken(String),
+    #[error("preset {0:?} extends itself")]
+    ExtendsItself(String),
+    /// A name too short, too long or starting with a space.
+    #[error("a preset's name has 1 to {LONGEST_NAME} characters, not starting with a space")]
+    NameLength,
+    /// A name with what a file's name shouldn't have.
+    #[error("a preset's name has only letters, digits, spaces, - and _")]
+    NameCharacters,
+    /// Another preset, built in or not, has the name.
+    #[error("another preset is named {0:?}")]
+    NameTaken(String),
+    /// Renaming it would break the preset named, which extends it.
+    #[error("{0:?} extends it: rename it there first")]
+    Extended(String),
+}
+
 /// All presets, by name. Broken preset files are kept as errors so that
 /// one bad file does not break the others.
 #[derive(Debug, Clone)]
@@ -176,8 +202,8 @@ pub struct Presets {
 /// had.
 #[derive(Debug, Clone)]
 struct Resolved {
-    webm: std::result::Result<Options, String>,
-    tgs: std::result::Result<TgsOptions, String>,
+    webm: std::result::Result<Options, PresetError>,
+    tgs: std::result::Result<TgsOptions, PresetError>,
 }
 
 impl Presets {
@@ -190,8 +216,8 @@ impl Presets {
     /// The presets with every one's options worked out.
     fn resolved(mut self) -> Self {
         let message = |err: Error| match err {
-            Error::InvalidOptions(message) => message,
-            other => other.to_string(),
+            Error::Preset(err) => err,
+            other => PresetError::Broken(other.to_string()),
         };
         self.resolved = self
             .entries
@@ -254,13 +280,10 @@ impl Presets {
     pub fn get(&self, name: &str) -> Result<&Preset> {
         match self.entries.get(name) {
             Some(Ok(preset)) => Ok(preset),
-            Some(Err(message)) => Err(Error::InvalidOptions(format!("broken preset {message}"))),
+            Some(Err(message)) => Err(PresetError::Broken(message.clone()).into()),
             None => {
-                let known: Vec<_> = self.entries.keys().map(String::as_str).collect();
-                Err(Error::InvalidOptions(format!(
-                    "unknown preset {name:?}, available: {}",
-                    known.join(", ")
-                )))
+                let known = self.entries.keys().cloned().collect();
+                Err(PresetError::Unknown { name: name.to_owned(), known }.into())
             }
         }
     }
@@ -270,7 +293,7 @@ impl Presets {
         let mut chain = vec![self.get(name)?];
         while let Some(base) = &chain.last().unwrap().extends {
             if chain.iter().any(|p| &p.name == base) {
-                return Err(Error::InvalidOptions(format!("preset {name:?} extends itself")));
+                return Err(PresetError::ExtendsItself(name.to_owned()).into());
             }
             chain.push(self.get(base)?);
         }
@@ -290,7 +313,7 @@ impl Presets {
     /// Options of `name` for WebM results.
     pub fn webm(&self, name: &str) -> Result<Options> {
         match self.resolved.get(name) {
-            Some(resolved) => resolved.webm.clone().map_err(Error::InvalidOptions),
+            Some(resolved) => resolved.webm.clone().map_err(Error::Preset),
             None => Err(self.get(name).expect_err("every preset is resolved")),
         }
     }
@@ -298,7 +321,7 @@ impl Presets {
     /// Options of `name` for `.tgs` results.
     pub fn tgs(&self, name: &str) -> Result<TgsOptions> {
         match self.resolved.get(name) {
-            Some(resolved) => resolved.tgs.clone().map_err(Error::InvalidOptions),
+            Some(resolved) => resolved.tgs.clone().map_err(Error::Preset),
             None => Err(self.get(name).expect_err("every preset is resolved")),
         }
     }
@@ -314,7 +337,7 @@ impl Presets {
             let options: T = table(preset).clone().try_into().map_err(|err| {
                 let place =
                     preset.path.as_ref().map_or(preset.name.clone(), |p| p.display().to_string());
-                Error::InvalidOptions(format!("broken preset {place}: {err}"))
+                PresetError::Broken(format!("{place}: {err}"))
             })?;
             Ok(merged(acc, &options))
         })
@@ -334,14 +357,10 @@ pub const LONGEST_NAME: usize = 64;
 pub fn check_name(name: &str) -> Result<()> {
     let allowed = |c: char| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_');
     if name.trim().is_empty() || name.starts_with(' ') || name.chars().count() > LONGEST_NAME {
-        return Err(Error::InvalidOptions(format!(
-            "a preset's name has 1 to {LONGEST_NAME} characters, not starting with a space"
-        )));
+        return Err(PresetError::NameLength.into());
     }
     if !name.chars().all(allowed) {
-        return Err(Error::InvalidOptions(
-            "a preset's name has only letters, digits, spaces, - and _".into(),
-        ));
+        return Err(PresetError::NameCharacters.into());
     }
     Ok(())
 }
@@ -401,7 +420,7 @@ pub fn save(
     }
     file.insert("webm".into(), table(&shareable(webm)).into());
     file.insert("tgs".into(), table(&shareable_tgs(tgs)).into());
-    let text = toml::to_string(&file).map_err(|err| Error::InvalidOptions(err.to_string()))?;
+    let text = toml::to_string(&file).map_err(|err| PresetError::Broken(err.to_string()))?;
     std::fs::create_dir_all(dir)?;
     let path = dir.join(format!("{name}.toml"));
     crate::fsutil::write_output(&path, text.as_bytes(), replace)?;
@@ -414,17 +433,14 @@ pub fn save(
 pub fn rename(dir: &Path, from: &str, to: &str, presets: &Presets) -> Result<PathBuf> {
     check_name(to)?;
     if to != from && presets.iter().any(|(name, _)| name == to) {
-        return Err(Error::InvalidOptions(format!("another preset is named {to:?}")));
+        return Err(PresetError::NameTaken(to.to_owned()).into());
     }
     let extending = presets
         .iter()
         .filter_map(|(_, preset)| preset.ok())
         .find(|preset| preset.extends.as_deref() == Some(from));
     if let Some(other) = extending {
-        return Err(Error::InvalidOptions(format!(
-            "{:?} extends it: rename it there first",
-            other.name
-        )));
+        return Err(PresetError::Extended(other.name.clone()).into());
     }
     let (old, new) = (dir.join(format!("{from}.toml")), dir.join(format!("{to}.toml")));
     // a name changed only in case names the same file where case doesn't
@@ -457,12 +473,12 @@ fn same_file(a: &Path, b: &Path) -> bool {
 pub fn describe(path: &Path, description: &str) -> Result<()> {
     let text = std::fs::read_to_string(path)?;
     let mut file: toml::Table = toml::from_str(&text)
-        .map_err(|err| Error::InvalidOptions(format!("{}: {err}", path.display())))?;
+        .map_err(|err| PresetError::Broken(format!("{}: {err}", path.display())))?;
     file.remove("description");
     if !description.is_empty() {
         file.insert("description".into(), description.into());
     }
-    let text = toml::to_string(&file).map_err(|err| Error::InvalidOptions(err.to_string()))?;
+    let text = toml::to_string(&file).map_err(|err| PresetError::Broken(err.to_string()))?;
     crate::fsutil::write_output(path, text.as_bytes(), true)
 }
 

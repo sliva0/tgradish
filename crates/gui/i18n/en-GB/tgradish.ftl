@@ -874,6 +874,9 @@ no-video = { $name } has no video in it
 no-frame-at = { $name } has no frame at { $seconds }
 nothing-fits = Nothing fits the { $limit } limit: the smallest encode was { $smallest }. A shorter used part, a lower frame rate or a wider range to search within can help
 clipboard-failed = Couldn't paste from the clipboard: { $details }
+# The result would be written over one of the files converted.
+output-is-input = The result would be written over { $name }, which it is made of
+nothing-to-convert = There are no images to convert
 
 
 ## Saving and managing presets

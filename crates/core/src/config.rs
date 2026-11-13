@@ -136,8 +136,10 @@ impl Config {
     /// Reads `path`. A missing file gives the default config.
     pub fn load(path: &Path) -> Result<Self> {
         match std::fs::read_to_string(path) {
-            Ok(text) => toml::from_str(&text)
-                .map_err(|err| Error::InvalidOptions(format!("{}: {err}", path.display()))),
+            Ok(text) => toml::from_str(&text).map_err(|err| Error::Config {
+                path: path.to_path_buf(),
+                message: err.to_string(),
+            }),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(err) => Err(err.into()),
         }
@@ -147,7 +149,7 @@ impl Config {
     /// existing file are lost.
     pub fn save(&self, path: &Path) -> Result<()> {
         let text = toml::to_string(self)
-            .map_err(|err| Error::InvalidOptions(format!("couldn't write the config: {err}")))?;
+            .map_err(|err| Error::Config { path: path.to_path_buf(), message: err.to_string() })?;
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }

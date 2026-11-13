@@ -192,11 +192,6 @@ fn is_option_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// Output, input or option problems detected while planning.
-fn invalid(message: impl Into<String>) -> Error {
-    Error::InvalidOptions(message.into())
-}
-
 /// Whether `output` is the same file as `input`, following `..` and links.
 fn same_file(input: &Path, output: &Path) -> bool {
     match (std::fs::canonicalize(input), std::fs::canonicalize(output)) {
@@ -216,14 +211,16 @@ fn check_range(range: Range, fit: Fit, length: f64) -> Result<Range> {
         Fit::Auto | Fit::Bitrate | Fit::Off => (1.0, f64::INFINITY, "bitrate"),
     };
     if range.min < low || range.max > high {
-        return Err(invalid(match (low, high.is_finite()) {
-            (f64::MIN_POSITIVE, _) => format!("{what} range must be above 0 and at most {high}"),
-            (_, false) => format!("{what} range must be at least {low}"),
-            _ => format!("{what} range must be within {low}..{high}"),
-        }));
+        let reason = match (low, high.is_finite()) {
+            (f64::MIN_POSITIVE, _) => format!("for {what} must be above 0 and at most {high}"),
+            (_, false) => format!("for {what} must be at least {low}"),
+            _ => format!("for {what} must be within {low}..{high}"),
+        };
+        return Err(Error::invalid("fit-range", reason));
     }
     if matches!(fit, Fit::Crf | Fit::Fps) && range.min.ceil() > range.max.floor() {
-        return Err(invalid(format!("{what} range {range} contains no whole number")));
+        let reason = format!("{range} for {what} contains no whole number");
+        return Err(Error::invalid("fit-range", reason));
     }
     Ok(range)
 }
@@ -315,30 +312,31 @@ pub fn exact_sizes(
     resize: Resize,
     used: (u32, u32),
     scale: ExactScale,
-) -> std::result::Result<Sizes, String> {
+) -> Result<Sizes> {
     let (box_w, box_h) = target.box_size();
+    let invalid = |reason: String| Error::invalid("exact-scale", reason);
     if !scale.is_valid() {
-        return Err(format!("scale {scale} has a side of 0: use N or 1/N"));
+        return Err(invalid(format!("{scale} has a side of 0: use N or 1/N")));
     }
     let (Some(width), Some(height)) = (scale.apply(used.0), scale.apply(used.1)) else {
-        return Err(format!(
-            "at scale {scale} the crop's sides must be multiples of {} pixels",
-            scale.down
-        ));
+        let down = scale.down;
+        return Err(invalid(format!(
+            "{scale} needs the crop's sides in multiples of {down} pixels"
+        )));
     };
     if width > box_w || height > box_h {
         let most = scale.most_input(box_w.max(box_h));
-        return Err(match most {
-            0 => format!("scale {scale} makes a pixel larger than a whole {}", target.name()),
-            most => {
-                format!("at scale {scale} the crop can be at most {most} pixels on its longer side")
-            }
-        });
+        return Err(invalid(match most {
+            0 => format!("{scale} makes a pixel larger than a whole {}", target.name()),
+            most => format!("{scale} takes a crop of at most {most} pixels on its longer side"),
+        }));
     }
     let even = |side: u32| side.next_multiple_of(2);
     let result = match resize {
         Resize::Crop | Resize::Stretch => {
-            return Err("an exact scale keeps all of the picture: use contain or pad".into());
+            let reason = "keeps the picture whole with an exact-scale: use contain or pad";
+            let name = if resize == Resize::Crop { "crop" } else { "stretch" };
+            return Err(Error::invalid("resize", format!("{name} {reason}")));
         }
         Resize::Pad => (box_w, box_h),
         _ if target.requires_exact_size() => (box_w, box_h),
@@ -400,7 +398,7 @@ pub fn default_resize(target: Target) -> Resize {
 /// The sizes a WebM or image result of a `used` part of the input has, as
 /// `options` ask. Planning a conversion uses this, and so can front-ends
 /// showing what it will make, so the two can't disagree.
-pub fn picture_sizes(options: &Options, used: (u32, u32)) -> std::result::Result<Sizes, String> {
+pub fn picture_sizes(options: &Options, used: (u32, u32)) -> Result<Sizes> {
     let target = options.target.unwrap_or_default();
     let resize = options.resize.unwrap_or(default_resize(target));
     match options.exact_scale {
@@ -418,12 +416,12 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     let target = o.target.unwrap_or_default();
     let resize = o.resize.unwrap_or(default_resize(target));
     if target.requires_exact_size() && resize == Resize::Contain {
-        return Err(invalid(format!(
-            "{} must be exactly {}x{}, use resize pad, crop or stretch",
-            target.name(),
-            target.box_size().0,
-            target.box_size().1
-        )));
+        let (width, height) = target.box_size();
+        let name = target.name();
+        let reason = format!(
+            "contain can't make {name}, exactly {width}x{height}: use pad, crop or stretch"
+        );
+        return Err(Error::invalid("resize", reason));
     }
 
     let output = request.output.clone().unwrap_or_else(|| default_output(&request.input, target));
@@ -433,7 +431,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         None => Vec::new(),
     };
     if std::iter::once(&request.input).chain(&frames).any(|input| same_file(input, &output)) {
-        return Err(invalid("output would overwrite the input"));
+        return Err(Error::OutputIsInput(output));
     }
     if !request.overwrite && output.exists() {
         return Err(Error::OutputExists(output));
@@ -442,34 +440,30 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     let spoof = o.spoof.unwrap_or(Spoof::Auto);
     let fake_duration = o.fake_duration.unwrap_or(options::DEFAULT_FAKE_DURATION);
     if !(fake_duration > 0.0 && fake_duration <= telegram::MAX_SECONDS) {
-        return Err(invalid(format!(
-            "fake duration must be more than 0 and at most {} seconds",
-            telegram::MAX_SECONDS
-        )));
+        let reason = format!("must be more than 0 and at most {} seconds", telegram::MAX_SECONDS);
+        return Err(Error::invalid("fake-duration", reason));
     }
 
     let start = o.start.unwrap_or(0.0);
     if !(start >= 0.0 && start.is_finite()) {
-        return Err(invalid("start must be 0 or more seconds"));
+        return Err(Error::invalid("start", "must be 0 or more seconds"));
     }
     let available = match source.duration {
         Some(duration) if start >= duration => {
-            return Err(invalid(format!("start is past the end of the input ({duration:.2} s)")));
+            let reason = format!("is past the end of the input ({duration:.2} s)");
+            return Err(Error::invalid("start", reason));
         }
         Some(duration) => duration - start,
         None => f64::INFINITY,
     };
     let tempo = o.tempo.unwrap_or(1.0);
     if !options::TEMPOS.contains(&tempo) {
-        return Err(invalid(format!(
-            "tempo must be from {} to {}",
-            options::TEMPOS.start(),
-            options::TEMPOS.end()
-        )));
+        let (slowest, fastest) = (options::TEMPOS.start(), options::TEMPOS.end());
+        return Err(Error::invalid("tempo", format!("must be from {slowest} to {fastest}")));
     }
     let used = match o.length {
         Some(length) if !(length > 0.0 && length.is_finite()) => {
-            return Err(invalid("length must be more than 0 seconds"));
+            return Err(Error::invalid("length", "must be more than 0 seconds"));
         }
         // a hundredth of a second over is rounding, not worth a warning
         Some(length) if length > available + 0.01 => {
@@ -494,10 +488,8 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     // doesn't make a single frame outlast the result
     let fps = match o.fps {
         Some(fps) if !(fps > 0.0 && fps <= telegram::MAX_FPS) => {
-            return Err(invalid(format!(
-                "fps must be more than 0 and at most {}",
-                telegram::MAX_FPS
-            )));
+            let reason = format!("must be more than 0 and at most {}", telegram::MAX_FPS);
+            return Err(Error::invalid("fps", reason));
         }
         Some(fps) => fps,
         None => {
@@ -510,11 +502,11 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     let crf = o.crf.unwrap_or(options::DEFAULT_CRF);
     if !options::CRFS.contains(&crf) {
         let (low, high) = (options::CRFS.start(), options::CRFS.end());
-        return Err(invalid(format!("crf must be between {low} and {high}")));
+        return Err(Error::invalid("crf", format!("must be between {low} and {high}")));
     }
     let bitrate = match o.bitrate {
         Some(bitrate) if !(bitrate >= 1.0 && bitrate.is_finite()) => {
-            return Err(invalid("bitrate must be at least 1 kbit/s"));
+            return Err(Error::invalid("bitrate", "must be at least 1 kbit/s"));
         }
         Some(bitrate) => bitrate,
         None => estimate_bitrate(length, target.max_bytes()),
@@ -523,11 +515,12 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     let fit = o.fit.unwrap_or(Fit::Auto);
     let attempts = o.attempts.unwrap_or(options::DEFAULT_ATTEMPTS);
     if !(1..=options::MAX_ATTEMPTS).contains(&attempts) {
-        return Err(invalid(format!("attempts must be between 1 and {}", options::MAX_ATTEMPTS)));
+        let reason = format!("must be between 1 and {}", options::MAX_ATTEMPTS);
+        return Err(Error::invalid("attempts", reason));
     }
     let lossless = o.lossless.unwrap_or(false);
     if lossless && !matches!(fit, Fit::Fps | Fit::Length | Fit::Off) {
-        return Err(invalid("lossless only works with fit fps, length or off"));
+        return Err(Error::invalid("lossless", "only works with fit fps, length or off"));
     }
     match fit {
         Fit::Auto | Fit::Bitrate if o.crf.is_some() => {
@@ -543,10 +536,10 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     // and the spoofing policy
     let fit_range = match (o.fit_range, fit) {
         (Some(range), _) if !(range.min.is_finite() && range.max.is_finite()) => {
-            return Err(invalid(format!("fit range {range} must be finite")));
+            return Err(Error::invalid("fit-range", format!("{range} must be finite")));
         }
         (Some(range), _) if range.min > range.max => {
-            return Err(invalid(format!("fit range {range} must have MIN <= MAX")));
+            return Err(Error::invalid("fit-range", format!("{range} must have MIN <= MAX")));
         }
         (Some(range), Fit::Length) if range.max > length => {
             warnings.push(format!("length range capped at {length:.2} s"));
@@ -558,16 +551,16 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
 
     let encoder_options = o.encoder_options.clone().unwrap_or_default();
     if let Some(name) = encoder_options.keys().find(|name| !is_option_name(name)) {
-        return Err(invalid(format!(
-            "{name:?} is not an encoder option name: use letters, digits, - and _"
-        )));
+        let reason =
+            format!("has {name:?}, which isn't an option's name: use letters, digits, - and _");
+        return Err(Error::invalid("encoder-options", reason));
     }
 
     if let Some(crop) = o.crop {
-        crop.check(source.width, source.height).map_err(invalid)?;
+        crop.check(source.width, source.height)?;
     }
     let used = o.crop.map_or((source.width, source.height), |crop| (crop.width, crop.height));
-    let sizes = picture_sizes(o, used).map_err(invalid)?;
+    let sizes = picture_sizes(o, used)?;
 
     let plan = Plan {
         input: request.input.clone(),
@@ -786,12 +779,7 @@ pub fn convert(
     plan.input = readable.path().to_path_buf();
     choose_auto_scaling(backend, &mut plan, &request.options, cancel)?;
     if !plan.extra_args.is_empty() && !backend.supports_extra_args() {
-        return Err(Error::InvalidOptions(
-            "extra-args are ffmpeg command line arguments, so they need ffmpeg as a \
-             separate program: use --ffmpeg-from system or --ffmpeg PATH, or \
-             --encoder-options for encoder settings, which work with the built-in ffmpeg"
-                .into(),
-        ));
+        return Err(Error::ExtraArgsNeedProgram);
     }
     // the input as given, not as drawn for ffmpeg
     let started = Plan { input: request.input.clone(), ..plan.clone() };
@@ -943,7 +931,7 @@ mod tests {
         let sneaky = dir.path().join("..").join(name).join("input.mp4");
         let request =
             Request { output: Some(sneaky), overwrite: true, ..Request::new(input.clone()) };
-        assert!(matches!(plan(&request, source(4.84)), Err(Error::InvalidOptions(_))));
+        assert!(matches!(plan(&request, source(4.84)), Err(Error::OutputIsInput(_))));
         // nor any frame of a sequence
         let (first, second) = (dir.path().join("1.png"), dir.path().join("2.webp"));
         std::fs::write(&first, b"").unwrap();
@@ -954,7 +942,7 @@ mod tests {
             overwrite: true,
             ..Request::new(first)
         };
-        assert!(matches!(plan(&request, source(4.84)), Err(Error::InvalidOptions(_))));
+        assert!(matches!(plan(&request, source(4.84)), Err(Error::OutputIsInput(_))));
     }
 
     #[test]
@@ -1102,7 +1090,8 @@ mod tests {
         // made in code, with nothing to scale by
         for zero in [ExactScale { up: 0, down: 1 }, ExactScale { up: 1, down: 0 }] {
             let wrong = exact(Target::Sticker, (4, 4), zero).unwrap_err();
-            assert!(wrong.contains("side of 0"), "{wrong}");
+            assert!(wrong.to_string().contains("side of 0"), "{wrong}");
+            assert!(matches!(wrong, Error::InvalidOption { option: "exact-scale", .. }));
         }
         assert_eq!((half.to_string(), twice.to_string()), ("1/2".into(), "2".into()));
 
@@ -1123,7 +1112,7 @@ mod tests {
         assert_eq!((emoji.scaled, emoji.width, emoji.height), ((99, 60), 100, 100));
         // never larger than the box, and only whole blocks when shrinking
         let wrong = exact(Target::Sticker, (300, 100), twice).unwrap_err();
-        assert!(wrong.contains("at most 256 pixels"), "{wrong}");
+        assert!(wrong.to_string().contains("at most 256 pixels"), "{wrong}");
         assert!(exact(Target::Emoji, (51, 40), twice).is_err());
         assert!(exact(Target::Sticker, (1023, 576), half).is_err());
         assert!(exact_sizes(Target::Sticker, Resize::Crop, (256, 100), twice).is_err());

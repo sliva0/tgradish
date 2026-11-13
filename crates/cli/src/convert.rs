@@ -18,6 +18,24 @@ use crate::Context;
 use crate::args::{ConversionArgs, ConvertArgs};
 use crate::{term, ui};
 
+/// Why converting one input failed.
+#[derive(Debug, thiserror::Error)]
+pub enum Failed {
+    #[error(transparent)]
+    Core(#[from] tgradish_core::Error),
+    /// Another input of the same command was converted into `output`.
+    #[error(
+        "{} was already written from {}; inputs with the same name need different output \
+         directories",
+        output.display(),
+        other.display()
+    )]
+    SameOutput { output: PathBuf, other: PathBuf },
+    /// The folder the output goes in couldn't be made.
+    #[error("couldn't create {}: {error}", dir.display())]
+    Folder { dir: PathBuf, error: std::io::Error },
+}
+
 /// Options of the format a command converts to.
 enum Resolved {
     Webm { options: Options, backend: Backend },
@@ -137,7 +155,7 @@ impl<'a> Converter<'a> {
         input: &Path,
         output: Option<PathBuf>,
         overwrite: bool,
-    ) -> tgradish_core::Result<()> {
+    ) -> Result<(), Failed> {
         self.run_inputs(&[input.to_path_buf()], false, output, overwrite)
     }
 
@@ -149,7 +167,7 @@ impl<'a> Converter<'a> {
         sequence: bool,
         output: Option<PathBuf>,
         overwrite: bool,
-    ) -> tgradish_core::Result<()> {
+    ) -> Result<(), Failed> {
         let input = &inputs[0];
         let output = output.unwrap_or_else(|| self.output_for(input));
         let key = std::path::absolute(&output).unwrap_or_else(|_| output.clone());
@@ -157,15 +175,11 @@ impl<'a> Converter<'a> {
         if let Some(other) = self.written.borrow().get(&key)
             && *other != input_key
         {
-            return Err(tgradish_core::Error::InvalidOptions(format!(
-                "{} was already written from {}; inputs with the same name need \
-                 different output directories",
-                output.display(),
-                other.display()
-            )));
+            return Err(Failed::SameOutput { output, other: other.clone() });
         }
         if let Some(parent) = output.parent().filter(|p| !p.as_os_str().is_empty()) {
-            std::fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent)
+                .map_err(|error| Failed::Folder { dir: parent.to_path_buf(), error })?;
         }
         let cancel = &self.ctx.cancel;
         let json = self.ctx.global.json;
@@ -283,7 +297,7 @@ impl<'a> Converter<'a> {
     }
 
     /// Reports a failed conversion of one of several inputs.
-    pub fn report_failure(&self, input: &Path, err: tgradish_core::Error) {
+    pub fn report_failure(&self, input: &Path, err: Failed) {
         let err = explain(err);
         if self.ctx.global.json {
             crate::print_json_error(&err, Some(input));
@@ -295,11 +309,12 @@ impl<'a> Converter<'a> {
 }
 
 /// Adds hints to errors where the CLI knows what to do about them.
-fn explain(err: tgradish_core::Error) -> anyhow::Error {
+fn explain(err: Failed) -> anyhow::Error {
     match err {
-        tgradish_core::Error::OutputExists(path) => {
+        Failed::Core(tgradish_core::Error::OutputExists(path)) => {
             anyhow::anyhow!("{} already exists, use --overwrite to replace it", path.display())
         }
+        Failed::Core(err) => err.into(),
         err => err.into(),
     }
 }
@@ -338,7 +353,7 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
         };
         match converter.run(input, output, converter.overwrite()) {
             Ok(_) => {}
-            Err(tgradish_core::Error::Cancelled) => {
+            Err(Failed::Core(tgradish_core::Error::Cancelled)) => {
                 return Err(tgradish_core::Error::Cancelled.into());
             }
             Err(err) => {

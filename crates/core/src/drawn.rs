@@ -104,6 +104,18 @@ pub fn layers(show: Option<&[String]>, hide: Option<&[String]>) -> Layers {
     Layers { show: names(show), hide: names(hide) }
 }
 
+/// The error for a `tag` or `chosen` layers given for what isn't an
+/// Aseprite file, which alone has them; `None` if neither is.
+pub(crate) fn not_aseprite(tag: Option<&str>, chosen: &Layers) -> Option<Error> {
+    let option = match (tag, chosen.show.is_empty()) {
+        (Some(_), _) => "tag",
+        (None, false) => "show-layers",
+        (None, true) if !chosen.hide.is_empty() => "hide-layers",
+        (None, true) => return None,
+    };
+    Some(Error::invalid(option, "can only be used for Aseprite files"))
+}
+
 /// `input` as ffmpeg can read it: an Aseprite file drawn with the tag and
 /// layers `options` choose; with `sequence`, the frames of one animation,
 /// image files or folders of them, `fps` a second, [`DEFAULT_FPS`] unless
@@ -118,8 +130,8 @@ pub fn readable(
 ) -> Result<Readable> {
     let layers = layers(options.show_layers.as_deref(), options.hide_layers.as_deref());
     let aseprite = sequence.is_none() && is_aseprite(input);
-    if !aseprite && (options.tag.is_some() || !layers.is_empty()) {
-        return Err(Error::InvalidOptions("tags and layers are only in Aseprite files".into()));
+    if let Some(err) = not_aseprite(options.tag.as_deref(), &layers).filter(|_| !aseprite) {
+        return Err(err);
     }
     let (animation, aseprite) = match sequence {
         Some(frames) => (source::read_sequence(frames, options.fps, cancel)?, Aseprite::default()),
@@ -278,7 +290,7 @@ mod tests {
         let tagged = Options { tag: Some("idle".into()), ..Options::default() };
         assert!(matches!(
             readable(&gif, None, &tagged, &CancelToken::new()),
-            Err(Error::InvalidOptions(_))
+            Err(Error::InvalidOption { option: "tag", .. })
         ));
     }
 

@@ -481,7 +481,8 @@ fn rejects_contain_for_emoji() {
     };
     for backend in &backends {
         let result = convert(backend, &request, &CancelToken::new(), &mut |_| {});
-        assert!(matches!(result, Err(Error::InvalidOptions(_))), "{result:?}");
+        let resize = matches!(result, Err(Error::InvalidOption { option: "resize", .. }));
+        assert!(resize, "{result:?}");
     }
 }
 
@@ -924,7 +925,7 @@ fn builtin_backend_rejects_extra_args() {
         ..Request::new(input)
     };
     let result = convert(&Backend::Linked, &request, &CancelToken::new(), &mut |_| {});
-    assert!(matches!(result, Err(Error::InvalidOptions(_))), "{result:?}");
+    assert!(matches!(result, Err(Error::ExtraArgsNeedProgram)), "{result:?}");
 }
 
 /// Red, green, blue and white: the frames of [`uneven_gif`].
