@@ -31,6 +31,7 @@ use webm::webm_quality;
 
 pub(crate) use picture::{exact_of, ratio, resize_of, webm_sizes};
 pub use plan::plan;
+pub(crate) use webm::{fit_of, follow_fit};
 
 /// What the settings depend on besides the item.
 pub struct Context<'a> {
@@ -205,9 +206,9 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     if chosen != current {
         // another preset may fit another way, as the item's own range
         // then can't say
-        let before = webm::fit_of(&item.choices, context);
+        let before = webm::fit_of(&item.choices, context.presets, context.config);
         item.choices.preset = (chosen != default).then(|| chosen.to_owned());
-        let after = webm::fit_of(&item.choices, context);
+        let after = webm::fit_of(&item.choices, context.presets, context.config);
         webm::follow_fit(&mut item.choices.webm, before, after);
     }
     match (builtin_description(chosen, item.format), context.presets.get(chosen)) {

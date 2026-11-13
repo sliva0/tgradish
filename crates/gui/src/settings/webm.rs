@@ -7,6 +7,8 @@ use tgradish_core::options::{
     CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, Fit, MAX_ATTEMPTS, Options, Range, Speed,
 };
 
+use tgradish_core::config::Config;
+use tgradish_core::presets::Presets;
 use tgradish_core::{convert, telegram};
 
 use super::{Context, commands};
@@ -37,8 +39,8 @@ fn webm_speeds() -> [Choice<Speed>; 3] {
 }
 
 /// The way of fitting the item's choices use, its own or its preset's.
-pub(super) fn fit_of(choices: &Choices, context: &Context) -> Fit {
-    let base = choices.webm_base(context.presets, context.config).unwrap_or_default();
+pub(crate) fn fit_of(choices: &Choices, presets: &Presets, config: &Config) -> Fit {
+    let base = choices.webm_base(presets, config).unwrap_or_default();
     choices.webm.fit.or(base.fit).unwrap_or(Fit::Auto)
 }
 
@@ -51,7 +53,7 @@ fn counted(fit: Fit) -> &'static str {
 /// to `after`, a way that counts in another unit: a range of bitrates is
 /// no range of qualities, and kept it would be cut to the ends of the new
 /// unit's, as 63 to 63. Fitting then searches its own for the new way.
-pub(super) fn follow_fit(options: &mut Options, before: Fit, after: Fit) {
+pub(crate) fn follow_fit(options: &mut Options, before: Fit, after: Fit) {
     if counted(before) != counted(after) {
         options.fit_range = None;
     }
