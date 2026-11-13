@@ -107,8 +107,9 @@ pub struct File {
 }
 
 /// Every animated sprite as a file, in the format that suits it: partial
-/// alpha in WebP and APNG, the rest in GIF, and the walker also as an
-/// Aseprite file with an "idle" tag of its first two frames.
+/// alpha in WebP and APNG, the rest in GIF, and the walker at twice its
+/// size, `walker_2x`, also as an Aseprite file with an "idle" tag of its
+/// first two frames.
 pub fn files() -> Vec<File> {
     let mut files = Vec::new();
     for sprite in sprites() {

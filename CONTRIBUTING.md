@@ -56,7 +56,10 @@ cargo test --workspace
 
 needs `ffmpeg` and `ffprobe` on PATH, with libvpx, and libx264 for the
 video clips of the corpus; tests that need them print "skipped" and pass
-without. `nix develop` gives everything below.
+without. `nix develop` gives everything below but cargo-about, of which
+nixpkgs has another version than the one `cargo xtask licenses` takes.
+tgradish is built and tested for Linux and Windows; macOS is untested and
+not supported.
 
 - The built-in ffmpeg: `cargo test --workspace --features tgradish/linked`,
   with ffmpeg's development files, pkg-config and libclang.
@@ -115,8 +118,9 @@ tgradish is MIT. Every binary carries every notice it needs
 window shows. The notices are in `crates/core/licenses`, and every published
 crate has its own copy of `LICENSE.txt`, since a crate is packaged without
 the repository around it. After changing dependencies, run `cargo xtask
-licenses` with cargo-about 0.9.2, which CI uses too; it renews those copies
-as well. `cargo xtask ffmpeg` keeps `crates/core/licenses/ffmpeg` up to
+licenses` with cargo-about 0.9.2, which CI uses too (`cargo install
+--locked cargo-about@0.9.2 --features cli`); it renews those copies as
+well. `cargo xtask ffmpeg` keeps `crates/core/licenses/ffmpeg` up to
 date. ffmpeg stays LGPL: never enable its GPL parts. Paths and commands say
 "licenses", prose says "licences".
 
@@ -128,8 +132,11 @@ date. ffmpeg stays LGPL: never enable its GPL parts. Paths and commands say
    `packaging/aur/*/PKGBUILD`. The two libraries, `tgradish-frames` and
    `tgradish-tgs`, have versions of their own: raise one in its manifest
    and under `[workspace.dependencies]` when it changed since it was last
-   published. Then refresh `Cargo.lock` with `cargo update --workspace`
-   and commit it, as release builds use `--locked`. The release workflow
+   published. Then refresh `Cargo.lock` with `cargo update --workspace`,
+   and `crates/tgs-lab/Cargo.lock`, which records the versions of the
+   workspace's crates it uses, with the same and `--manifest-path
+   crates/tgs-lab/Cargo.toml`, and commit them, as release builds and CI
+   use `--locked`. The release workflow
    checks the PKGBUILDs; the Windows executable takes its version from
    `Cargo.toml` when it is built.
 2. `cargo xtask local-release` builds every variant into
