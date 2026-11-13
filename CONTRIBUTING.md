@@ -36,8 +36,8 @@ Fitting works on estimates: a quick encode packed by `gzip -9`, scaled to
 what the real encoder and zopfli make of it. The scale is measured once the
 art comes near the limit. Each round keeps the reduction that saves the
 most bytes for the least visible change, and when the real result still
-misses, fitting aims a little lower and goes again. `crates/tgs/src/sticker.rs`
-explains each constant involved.
+misses, fitting aims a little lower and goes again.
+`crates/tgs/src/sticker/fit.rs` explains each constant involved.
 
 The encoder's weights, such as `TILE` and `CORE_SHARE`, were measured on
 the corpus. `cargo run --release -- bench --save before.tsv` in
