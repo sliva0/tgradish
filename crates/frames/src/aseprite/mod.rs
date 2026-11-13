@@ -10,11 +10,11 @@
 //! drawn wrong.
 
 mod blend;
-#[cfg(test)]
-mod build;
 mod chunks;
 mod read;
 mod render;
+#[cfg(test)]
+mod testfile;
 
 use std::time::Duration;
 
@@ -568,7 +568,7 @@ impl Sprite {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aseprite::build::*;
+    use crate::aseprite::testfile::*;
 
     #[test]
     fn plays_tags_in_order() {
