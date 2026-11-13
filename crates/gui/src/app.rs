@@ -428,6 +428,24 @@ impl App {
     }
 }
 
+/// How long a closing window waits for conversions to stop, so they take
+/// their temporary files and ffmpeg's processes with them.
+const STOPPING: std::time::Duration = std::time::Duration::from_secs(3);
+
+impl App {
+    /// Stops every conversion, and waits a little for them to clean up.
+    fn stop_converting(&mut self) {
+        let jobs = || self.items.iter().filter_map(|item| item.job.as_ref().map(|(job, ..)| job));
+        jobs().for_each(Job::cancel);
+        let deadline = std::time::Instant::now() + STOPPING;
+        for item in &mut self.items {
+            if let Some((job, ..)) = &mut item.job {
+                job.wait_until(deadline);
+            }
+        }
+    }
+}
+
 /// Makes the window light or dark.
 pub(crate) fn set_theme(ctx: &egui::Context, theme: tgradish_core::config::Theme) {
     use tgradish_core::config::Theme;
@@ -451,6 +469,7 @@ pub(crate) struct FoundBackend {
 impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.save_session();
+        self.stop_converting();
         // the listener shares winit's Wayland connection, which closes next
         #[cfg(all(unix, not(target_os = "macos")))]
         if let Some(drops) = &mut self.drops {
@@ -661,6 +680,29 @@ mod tests {
         finish(&mut second);
         assert_eq!(crate::testing::made_job(&second.state().items[0]).output, output);
         assert_eq!(std::fs::read_dir(dir.path().join("out")).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn stops_converting_when_the_window_closes() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = crate::testing::video_of(dir.path(), "1280x720", 8) else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = tgradish_core::ffmpeg::FfmpegChoice::System;
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        convert(&harness);
+        harness.run_steps(2);
+        let running =
+            |app: &App| app.items[0].job.as_ref().is_some_and(|(job, ..)| job.is_running());
+        assert!(running(harness.state()));
+        eframe::App::on_exit(harness.state_mut(), None);
+        // its worker is done, having said it stopped
+        let (job, ..) = harness.state_mut().items[0].job.as_mut().unwrap();
+        assert!(job.wait_until(std::time::Instant::now()));
+        job.poll();
+        assert!(matches!(job.status, crate::jobs::Status::Cancelled), "{:?}", job.status);
     }
 
     #[test]
