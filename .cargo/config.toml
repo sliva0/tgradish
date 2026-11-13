@@ -1,2 +1,4 @@
 [alias]
-xtask = "run --quiet --package xtask --"
+# --locked, so a stale Cargo.lock fails here rather than being rewritten
+# before release builds' own --locked could see it
+xtask = "run --quiet --locked --package xtask --"
