@@ -452,6 +452,28 @@ mod tests {
     }
 
     #[test]
+    fn finds_where_to_read_for_a_frame() {
+        let close = |found: f64, expected: f64| (found - expected).abs() < 1e-9;
+        // evenly, 10 a second: a millisecond before the frame showing
+        assert_eq!(frame_start(0.0, &[], 10.0), 0.0);
+        assert_eq!(frame_start(0.05, &[], 10.0), 0.0);
+        assert!(close(frame_start(0.25, &[], 10.0), 0.199));
+        // on a frame's start, which float error leaves a hair short of
+        assert!(close(frame_start(0.3 - 1e-9, &[], 10.0), 0.299));
+        // where frames start: the first, and short and long frames
+        let starts = [0.0, 0.1, 0.1002, 0.7];
+        assert_eq!(frame_start(0.05, &starts, 10.0), 0.0);
+        assert!(close(frame_start(0.1, &starts, 10.0), 0.099));
+        // a quarter of a gap shorter than four milliseconds
+        assert!(close(frame_start(0.5, &starts, 10.0), 0.10015));
+        assert!(close(frame_start(9.0, &starts, 10.0), 0.699));
+        // the first of the frames known is read from the start, unlike
+        // the second of frames counted evenly
+        assert_eq!(frame_start(0.05, &[0.04], 25.0), 0.0);
+        assert_eq!(frame_start(0.05, &[], 25.0), 0.04 - 1e-3);
+    }
+
+    #[test]
     fn encodes_losslessly_with_metadata() {
         // half transparent, half a gradient
         let rgba: Vec<u8> = (0..64u32 * 32)
