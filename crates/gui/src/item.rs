@@ -209,7 +209,7 @@ impl Choices {
         Ok(match format {
             Format::Webm => Recipe::Webm(self.webm_options(presets, config)?),
             Format::Tgs => Recipe::Tgs(self.tgs_options(presets, config)?),
-            Format::Webp => Recipe::Image(self.image_options(presets, config)?),
+            Format::Webp => Recipe::Webp(self.image_options(presets, config)?),
         })
     }
 
@@ -261,7 +261,7 @@ impl Choices {
 pub(crate) enum Recipe {
     Webm(Options),
     Tgs(tgs::Options),
-    Image(Options),
+    Webp(Options),
 }
 
 /// `options` without the values of settings that are hidden or greyed

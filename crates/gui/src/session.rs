@@ -694,6 +694,17 @@ mod tests {
         assert!(!json.contains('_'), "{json}");
     }
 
+    #[test]
+    fn names_results_as_their_formats_are_named() {
+        let mut item = Item::new(1, vec![PathBuf::from("/a.png")], false, Target::Sticker);
+        let job = Job::waiting("/a.sticker.webp".into());
+        let mut made = Conversion::of(job, Format::Webp, item.choices.clone());
+        made.recipe = Some(Recipe::Webp(Default::default()));
+        item.earlier = Some((made, Load::Idle));
+        let json = session(&[item], None).to_json().unwrap();
+        assert!(json.contains(r#""recipe":{"webp":{"#), "{json}");
+    }
+
     #[cfg(unix)]
     #[test]
     fn leaves_out_what_it_cannot_hold() {
