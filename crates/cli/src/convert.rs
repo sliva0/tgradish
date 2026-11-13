@@ -272,22 +272,25 @@ impl<'a> Converter<'a> {
         Ok(Verdict::of(refused))
     }
 
-    /// What an image came out as, with what Telegram would refuse.
+    /// What an image came out as, with what Telegram would refuse: the
+    /// result on stdout, even when quiet, as every format's is.
     fn print_still(&self, outcome: &webp::Outcome) {
-        if self.ctx.global.quiet {
-            return;
-        }
-        let output = term::link(outcome.output.display(), &outcome.output);
-        let mut line =
-            format!("{output}, {}x{}, {}", outcome.width, outcome.height, ui::kib(outcome.bytes));
+        let output = term::link_out(style(outcome.output.display()).bold(), &outcome.output);
+        let mut line = format!(
+            "{output} {}, {}x{}",
+            ui::size_within(outcome.bytes, tgradish_core::telegram::MAX_STILL_BYTES),
+            outcome.width,
+            outcome.height
+        );
         if let webp::Encoding::Lossy { quality } = outcome.encoding {
-            line.push_str(&format!(", lossy at quality {quality} to fit 512 KiB"));
+            line.push_str(&format!(", lossy at quality {quality} to fit"));
         }
-        eprintln!("{}", ui::status("Made", line));
+        outln!("{}", ui::status("Finished", line));
         for issue in &outcome.issues {
             eprintln!("{} Telegram will refuse it: {issue}", ui::warning_label());
         }
-        if term::shows_pictures()
+        if !self.ctx.global.quiet
+            && term::shows_pictures()
             && let Ok(preview) = webp::preview(&outcome.output)
         {
             show_result(&preview);

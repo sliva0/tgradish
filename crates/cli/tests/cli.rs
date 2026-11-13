@@ -340,6 +340,39 @@ fn exits_3_for_webm_over_the_limit() {
     assert_eq!(tgradish(&["inspect", out.to_str().unwrap()]).status.code(), Some(3));
 }
 
+/// Every format's result is a line on stdout, which --quiet keeps, and
+/// the rest goes to stderr or nowhere.
+#[test]
+fn reports_results_on_stdout() {
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("dot.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let mut formats = vec!["tgs"];
+    if tgradish_corpus::ffmpeg_on_path() {
+        formats.extend(["webp", "webm"]);
+    }
+    for format in formats {
+        let run = |quiet: bool| {
+            let mut args = vec!["--ffmpeg-from", "system", "convert", png.to_str().unwrap()];
+            args.extend(["--format", format, "-y", "--preset", "fast"]);
+            if quiet {
+                args.push("-q");
+            }
+            tgradish(&args)
+        };
+        for quiet in [false, true] {
+            let output = run(quiet);
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let line = format!("dot.sticker.{format}");
+            assert!(stdout.trim().starts_with("Finished") && stdout.contains(&line), "{stdout}");
+            assert_eq!(stdout.lines().count(), 1, "{format}: {stdout}");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(!quiet || stderr.is_empty(), "{format}: {stderr}");
+        }
+    }
+}
+
 #[test]
 fn makes_animated_stickers() {
     let dir = tempfile::tempdir().unwrap();
