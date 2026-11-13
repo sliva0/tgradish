@@ -588,11 +588,9 @@ fn keep_aspect(item: &mut Item, size: Option<(u32, u32)>, exact: Option<Exact>) 
     item.choices.crop = (cut != full).then_some(cut);
 }
 
-/// Integer scaling: the largest whole multiple that fits, or a scale of
-/// your own, with what it makes. Without integer scaling, only the
-/// controls, greyed out.
 /// The whole scale of integer scaling: the largest that fits, or a fixed
-/// one, the item's or else the `preset`'s.
+/// one, the item's or else the `preset`'s, with what it makes. Without
+/// integer scaling, only the controls, greyed out.
 fn integer_scale(
     ui: &mut egui::Ui,
     item: &mut Item,

@@ -24,13 +24,16 @@ fn spoofs() -> [Choice<Spoof>; 3] {
     ]
 }
 
+/// The time of a video or a `.tgs` animation. A picture has only its
+/// frame, which [`frame`] shows instead.
 pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
+    let tgs = item.format == Format::Tgs;
     let animated = item.input_length().is_some();
     // what the preset sets, which the item's own values go over
     let webm_base = item.choices.webm_base(context.presets, context.config).unwrap_or_default();
     let tgs_base = item.choices.tgs_base(context.presets, context.config).unwrap_or_default();
     let sheet = item.choices.tgs.sheet.is_some() || tgs_base.sheet.is_some();
-    let sequence = item.format == Format::Tgs && (item.sequence || sheet);
+    let sequence = tgs && (item.sequence || sheet);
     if !animated && !sequence {
         return;
     }
@@ -40,18 +43,11 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let tempo = item.tempo(context.presets, context.config);
     let played = used.map(|used| used / tempo);
     // the average rate, and the most a video of variable rate reaches
-    let input_fps = match item.format {
-        Format::Webm | Format::Image => {
-            item.video.ready().map(|video| (video.probe.fps, video.probe.base_fps))
-        }
-        Format::Tgs => None,
-    };
+    let input_fps =
+        item.video.ready().filter(|_| !tgs).map(|video| (video.probe.fps, video.probe.base_fps));
     let spoof = item.choices.webm.spoof.or(webm_base.spoof).unwrap_or(Spoof::Auto);
     // a preset's tempo is what the automatic choice stands for
-    let preset_tempo = match item.format {
-        Format::Webm | Format::Image => webm_base.tempo,
-        Format::Tgs => tgs_base.tempo,
-    };
+    let preset_tempo = if tgs { tgs_base.tempo } else { webm_base.tempo };
     if let Some(length) = item.input_length() {
         row(ui, &fl!("used-part"), &fl!("used-part", "hint"), Ok(()), |ui| {
             used_part(ui, item, length, context.in_frames)
@@ -64,16 +60,16 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 let fitted = used.is_some_and(telegram::too_long);
                 let input = (fl!("from-input"), fl!("from-input", "speed"));
                 let fits = (fl!("fits-3-s"), fl!("fits-3-s", "hint"));
-                let (value, automatic) = match item.format {
-                    Format::Webm | Format::Image => (&mut item.choices.webm.tempo, input),
-                    Format::Tgs if fitted => (&mut item.choices.tgs.tempo, fits),
-                    Format::Tgs => (&mut item.choices.tgs.tempo, input),
+                let (value, automatic) = match tgs {
+                    false => (&mut item.choices.webm.tempo, input),
+                    true if fitted => (&mut item.choices.tgs.tempo, fits),
+                    true => (&mut item.choices.tgs.tempo, input),
                 };
                 let automatic = (automatic.0.as_str(), automatic.1.as_str());
                 preset_number(ui, value, preset_tempo, automatic, Some(tempo), 1.0, |value| {
                     value.range(TEMPOS).speed(0.01).max_decimals(2).prefix("×")
                 });
-                if item.format == Format::Webm
+                if !tgs
                     && let Some(used) = used
                     && ui.button(fl!("fit-3-s")).on_hover_text(fl!("fit-3-s", "hint")).clicked()
                 {
@@ -82,7 +78,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 }
             });
             // .tgs results, and honest WebM ones, last 3 seconds at most
-            let cut = item.format == Format::Tgs || spoof == Spoof::Never;
+            let cut = tgs || spoof == Spoof::Never;
             match played {
                 Some(played) if cut && telegram::too_long(played) => note(
                     ui,
@@ -98,7 +94,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         });
     }
     match item.format {
-        Format::Webm | Format::Image => {
+        Format::Webm => {
             let options = &mut item.choices.webm;
             // as converting chooses it, and more would repeat the input's
             // frames
@@ -179,7 +175,8 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 sequence_rate(ui, &mut item.choices.tgs.fps, tgs_base.fps);
             });
         }
-        Format::Tgs => {}
+        // pictures never come here
+        Format::Tgs | Format::Image => {}
     }
 }
 
