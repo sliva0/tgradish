@@ -656,6 +656,22 @@ mod tests {
     }
 
     #[test]
+    fn leaves_a_presets_range_to_its_way_of_fitting() {
+        let dir = tempfile::tempdir().unwrap();
+        let preset = "[webm]\nfit = 'crf'\nfit-range = { min = 20, max = 40 }\n";
+        std::fs::write(dir.path().join("quality.toml"), preset).unwrap();
+        let presets = Presets::load(Some(dir.path())).unwrap();
+        let mut choices = Choices::new(Target::Sticker);
+        choices.preset = Some("quality".into());
+        let config = Config::default();
+        let range = |choices: &Choices| choices.webm_options(&presets, &config).unwrap().fit_range;
+        assert!(range(&choices).is_some());
+        // a range of qualities is none of bitrates
+        choices.webm.fit = Some(Fit::Bitrate);
+        assert_eq!(range(&choices), None);
+    }
+
+    #[test]
     fn reads_art_at_the_presets_frame_rate() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("slow.toml"), "[tgs]\nfps = 2.0\n").unwrap();

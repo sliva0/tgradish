@@ -30,7 +30,9 @@ use crate::error::{Error, FileAction, Result};
 use crate::events::{Event, Params, Rate};
 use crate::ffmpeg::{Output, Probe};
 use crate::fit::{self, Attempt, Encoder};
-use crate::options::{self, Crop, ExactScale, Fit, Options, Range, Resize, Scaling, Speed, Spoof};
+use crate::options::{
+    self, Crop, ExactScale, Fit, FitUnit, Options, Range, Resize, Scaling, Speed, Spoof,
+};
 use crate::telegram::{self, Issue, Target};
 use crate::webm::{self, Patch};
 
@@ -200,15 +202,41 @@ fn same_file(input: &Path, output: &Path) -> bool {
     }
 }
 
-/// Validates a user-given fit range, finite and in order as [`plan`]
-/// checks first, against what `fit` tunes. Integer ranges must contain an
-/// integer.
-fn check_range(range: Range, fit: Fit, length: f64) -> Result<Range> {
-    let (low, high, what) = match fit {
-        Fit::Crf => (f64::from(*options::CRFS.start()), f64::from(*options::CRFS.end()), "crf"),
-        Fit::Fps => (1.0, telegram::MAX_FPS, "fps"),
-        Fit::Length => (f64::MIN_POSITIVE, length, "length"),
-        Fit::Auto | Fit::Bitrate | Fit::Off => (1.0, f64::INFINITY, "bitrate"),
+/// Checks a fit range given against what `fit` tunes, the one place that
+/// does: finite and in order, within [`Fit::range_limits`], and holding a
+/// whole number where only those are tried. A range of lengths past the
+/// result's `length` is cut to it, which `warnings` says.
+fn check_fit_range(
+    range: Range,
+    fit: Fit,
+    length: f64,
+    warnings: &mut Vec<String>,
+) -> Result<Range> {
+    if !(range.min.is_finite() && range.max.is_finite()) {
+        return Err(Error::invalid("fit-range", format!("{range} must be finite")));
+    }
+    if range.min > range.max {
+        return Err(Error::invalid("fit-range", format!("{range} must have MIN <= MAX")));
+    }
+    // length fitting may only shorten: `length` already respects the input
+    // and the spoofing policy
+    let range = match fit {
+        Fit::Length if range.max > length => {
+            warnings.push(format!("length range capped at {length:.2} s"));
+            Range { min: range.min.min(length), max: length }
+        }
+        _ => range,
+    };
+    let what = match fit.unit() {
+        FitUnit::Kbps => "bitrate",
+        FitUnit::Crf => "crf",
+        FitUnit::Fps => "fps",
+        FitUnit::Seconds => "length",
+    };
+    let limits = fit.range_limits();
+    let (low, high) = match fit {
+        Fit::Length => (*limits.start(), length),
+        _ => (*limits.start(), *limits.end()),
     };
     if range.min < low || range.max > high {
         let reason = match (low, high.is_finite()) {
@@ -532,21 +560,9 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         _ => {}
     }
 
-    // length fitting may only shorten: `length` already respects the input
-    // and the spoofing policy
-    let fit_range = match (o.fit_range, fit) {
-        (Some(range), _) if !(range.min.is_finite() && range.max.is_finite()) => {
-            return Err(Error::invalid("fit-range", format!("{range} must be finite")));
-        }
-        (Some(range), _) if range.min > range.max => {
-            return Err(Error::invalid("fit-range", format!("{range} must have MIN <= MAX")));
-        }
-        (Some(range), Fit::Length) if range.max > length => {
-            warnings.push(format!("length range capped at {length:.2} s"));
-            check_range(Range { min: range.min.min(length), max: length }, fit, length)?
-        }
-        (Some(range), _) => check_range(range, fit, length)?,
-        (None, fit) => default_fit_range(fit, fps, length),
+    let fit_range = match o.fit_range {
+        Some(range) => check_fit_range(range, fit, length, &mut warnings)?,
+        None => default_fit_range(fit, fps, length),
     };
 
     let encoder_options = o.encoder_options.clone().unwrap_or_default();

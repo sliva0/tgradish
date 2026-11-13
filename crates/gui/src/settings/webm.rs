@@ -4,7 +4,7 @@
 
 use eframe::egui;
 use tgradish_core::options::{
-    CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, Fit, MAX_ATTEMPTS, Options, Range, Speed,
+    CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, Fit, FitUnit, MAX_ATTEMPTS, Options, Range, Speed,
 };
 
 use crate::config::Config;
@@ -44,17 +44,14 @@ pub(crate) fn fit_of(choices: &Choices, presets: &Presets, config: &Config) -> F
     choices.webm.fit.or(base.fit).unwrap_or(Fit::Auto)
 }
 
-/// What the range fitting searches counts, for `fit`.
-fn counted(fit: Fit) -> &'static str {
-    RangeBounds::of(fit).unit
-}
-
 /// Drops the item's own range to search once fitting goes from `before`
 /// to `after`, a way that counts in another unit: a range of bitrates is
 /// no range of qualities, and kept it would be cut to the ends of the new
-/// unit's, as 63 to 63. Fitting then searches its own for the new way.
+/// unit's, as 63 to 63. Fitting then searches its own for the new way. A
+/// preset's range under the item's own way of fitting core drops itself,
+/// as it merges them.
 pub(crate) fn follow_fit(options: &mut Options, before: Fit, after: Fit) {
-    if counted(before) != counted(after) {
+    if before.unit() != after.unit() {
         options.fit_range = None;
     }
 }
@@ -109,11 +106,15 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
         });
     });
     let bounds = RangeBounds::of(fit);
+    // the preset's range, unless the item fits in another unit, which
+    // drops it
+    let inherited = base.clone().merged(&Options { fit: options.fit, ..Options::default() });
+    let inherited = inherited.fit_range;
     let mut asked_custom = false;
     row(ui, &fl!("search-within"), &fl!("search-within", "hint"), fitting, |ui| {
         ui.horizontal(|ui| {
             let mut custom = options.fit_range.is_some();
-            let automatic = match base.fit_range {
+            let automatic = match inherited {
                 Some(_) => widgets::from_preset(),
                 None => (fl!("search-auto"), fl!("search-auto", "hint")),
             };
@@ -128,7 +129,7 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
             // automatic, the range isn't shown: it is fitting's to choose,
             // unless the preset sets one
             let set = options.fit_range;
-            let known = set.or(base.fit_range);
+            let known = set.or(inherited);
             let mut shown = known.unwrap_or(Range { min: 0.0, max: 0.0 });
             let pick = fl!("custom", "hint");
             let (min, max) = (&mut shown.min, &mut shown.max);
@@ -153,7 +154,7 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
                 .map_or((30.0, telegram::MAX_SECONDS), |(_, plan)| (plan.fps, plan.length));
             convert::default_fit_range(fit, fps, length)
         };
-        item.choices.webm.fit_range = Some(base.fit_range.unwrap_or_else(searched));
+        item.choices.webm.fit_range = Some(inherited.unwrap_or_else(searched));
     }
     let options = &mut item.choices.webm;
     let quality = match fit {
@@ -224,19 +225,12 @@ struct RangeBounds {
 
 impl RangeBounds {
     fn of(fit: Fit) -> Self {
-        let (range, takes, decimals, speed, unit) = match fit {
-            Fit::Auto | Fit::Bitrate | Fit::Off => {
-                (1.0..=50_000.0, 1.0..=f64::INFINITY, 0, 5.0, " kbit/s")
-            }
-            Fit::Fps => {
-                let fps = 1.0..=telegram::MAX_FPS;
-                (fps.clone(), fps, 0, 0.1, " fps")
-            }
-            Fit::Length => (0.01..=3600.0, f64::MIN_POSITIVE..=f64::INFINITY, 2, 0.01, " s"),
-            Fit::Crf => {
-                let crf = f64::from(*CRFS.start())..=f64::from(*CRFS.end());
-                (crf.clone(), crf, 0, 0.1, "")
-            }
+        let takes = fit.range_limits();
+        let (range, decimals, speed, unit) = match fit.unit() {
+            FitUnit::Kbps => (1.0..=50_000.0, 0, 5.0, " kbit/s"),
+            FitUnit::Fps => (takes.clone(), 0, 0.1, " fps"),
+            FitUnit::Seconds => (0.01..=3600.0, 2, 0.01, " s"),
+            FitUnit::Crf => (takes.clone(), 0, 0.1, ""),
         };
         Self { range, takes, decimals, speed, unit }
     }
