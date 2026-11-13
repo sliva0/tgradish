@@ -95,7 +95,7 @@ impl App {
             Ok(Some(Picked::Ffmpeg(file))) => self.config.ffmpeg.path = Some(file),
             Ok(Some(Picked::OutputDir(dir))) => self.config.gui.output_dir = Some(dir),
             Ok(None) => {}
-            Err(message) => self.say(message),
+            Err(message) => self.say(crate::banner::Message::warning(message)),
         }
     }
 

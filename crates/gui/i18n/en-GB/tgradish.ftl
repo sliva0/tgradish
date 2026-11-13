@@ -19,8 +19,6 @@ language-name = English
 
 ## Shared by many places
 
-# A button that dismisses a message at the bottom of the window.
-ok = OK
 close = Close
 # The small button beside a setting a preset can set, back to the preset's
 # value when it has been changed.
@@ -64,33 +62,81 @@ of-limit = { $used } of { $limit }
 telegram-accepts = Telegram should accept it
 
 
-## The window
+## Messages over the bottom of the window
 
-# The application's settings file couldn't be read on start.
-settings-unreadable = The settings couldn't be read, so the defaults are used: { $error }
-# Under settings-unreadable: where the file is copied as it was, since
-# saving Settings writes over it.
-settings-kept = A copy of the file as it was is kept as { $path }
-presets-unreadable = Your presets couldn't be read, so only the built-in ones are offered: { $error }
+# Each message says what happened first; under it, in smaller words where
+# there is one, the file it is about, then a line of what it means, buttons
+# that do something about it, and what went wrong as a program said it.
+#
+# The cross at the right of each message's first line, and under several,
+# the link that dismisses them all.
+dismiss = Dismiss
+    .all = Dismiss all
+# Beside a message said again while it showed, how many times it was said.
+said-times = ×{ $count }
+# The toggle of what went wrong, as a program said it, when that is long.
+details = Details
+# The settings file couldn't be read as the window opened, as when it was
+# changed by hand or by another version of tgradish: the defaults are used.
+settings-unreadable = The settings file can't be read, so the defaults are in use
+# A setting changed outside the Settings dialog, such as the theme, which is
+# saved at once, couldn't be saved to the settings file; .unreadable as the
+# file can't be read.
+setting-unsaved = Your change couldn't be saved to the settings file
+    .unreadable = Your change wasn't saved: the settings file can't be read
+# Under settings-unreadable and setting-unsaved.unreadable, before buttons
+# of fresh-settings, read-again, copy-path and show-folder.
+settings-file-note = It may have been edited by hand or by another version of tgradish. Changes can't be saved until it is fixed or replaced; nothing in it is lost.
+# A button that writes the settings the window has in place of a settings
+# file that can't be read. .saved and .kept say it did: the file shown is
+# the old one, kept beside the new under the name given. .failed says it
+# couldn't, why under it.
+fresh-settings = Start with fresh settings
+    .hint = Write the settings in use now as a new settings file; the old one is kept beside it
+    .saved = Fresh settings are saved
+    .kept = The old file is kept as { $name }, beside them
+    .failed = Fresh settings couldn't be written
+# A button that reads a file that couldn't be read again, as once it is put
+# right by hand; .failed beside it for a moment when it still can't be.
+read-again = Try again
+    .hint = Read it again, once it is fixed
+    .failed = Still can't be read
+# Said once the settings file was read again and could be; the file under
+# it.
+settings-read = The settings file reads again, and its settings are in use
+# A button that copies the whole path of the file a message is about;
+# .done beside it for a moment once it has.
+copy-path = Copy path
+    .hint = Copy where the file is, to open it in an editor
+    .done = Copied
+# The hover of show-folder's button in a message.
+folder-of = Show in folder
+    .hint = Open the folder it is in
+# The user's presets couldn't be read, their folder and why under it.
+presets-unreadable = Your presets couldn't be read, so only the built-in ones are offered
 # Files open when the window last closed, which aren't there any more.
 files-gone = { $count ->
     [one] { $count } file is gone since last time
    *[other] { $count } files are gone since last time
 }
 # The list of them couldn't be read, as when a newer tgradish kept it. It
-# is renamed rather than written over, to the path given.
-session-unreadable = The files of last time couldn't be read, so none are open. Their list is kept as { $path }
+# is renamed rather than written over, to the file shown under this.
+session-unreadable = The files of last time couldn't be read, so none are open; their list is set aside
 # Some of the list couldn't: those are left out, and a copy of the list as
-# it was is kept at the path given.
+# it was is kept, as the file shown under this.
 files-unreadable = { $count ->
-    [one] { $count } file of last time couldn't be read and is left out. The list as it was is kept as { $path }
-   *[other] { $count } files of last time couldn't be read and are left out. The list as it was is kept as { $path }
+    [one] { $count } file of last time couldn't be read and is left out; the list as it was is set aside
+   *[other] { $count } files of last time couldn't be read and are left out; the list as it was is set aside
 }
-# The files open now couldn't be saved to be opened again next time.
-session-unsaved = The open files couldn't be kept for next time: { $error }
-# A setting changed outside the Settings dialog, such as the theme, which is
-# saved at once.
-setting-unsaved = The change couldn't be saved to the settings file: { $error }
+# The files open now couldn't be saved to be opened again next time; the
+# file they are kept in and why under it.
+session-unsaved = The open files couldn't be kept for next time
+# Pasting failed, why under it.
+paste-failed = Nothing could be pasted
+
+
+## The window
+
 # Over the window while files are dragged over it.
 drop-to-add = Drop to add
 
@@ -912,7 +958,8 @@ delete-it = Delete it
 deleted = Deleted "{ $name }"
 undo = Undo
     .hint = Put it back
-not-put-back = It couldn't be put back: { $error }
+# A message: the preset deleted couldn't be put back, why under it.
+not-put-back = It couldn't be put back
 
 
 ## About and licences

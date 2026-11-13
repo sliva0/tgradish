@@ -79,7 +79,7 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     config.ffmpeg.choice = FfmpegChoice::System;
     let mut harness =
         Harness::builder().with_size([1280.0, 820.0]).wgpu().build_eframe(move |cc| {
-            let app = App::with(config.clone(), None, Presets::builtin(), None);
+            let app = App::with(config.clone(), None, Presets::builtin());
             app.style(&cc.egui_ctx);
             app
         });
@@ -97,9 +97,10 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
 
     // a notice over the bottom of the window
     select(&mut harness, 0);
-    harness.state_mut().message = Some(fl!("files-gone", count = 2));
+    harness.state_mut().say(crate::banner::Message::info(fl!("files-gone", count = 2)));
+    harness.run_steps(2);
     save(&mut harness, "notice");
-    harness.state_mut().message = None;
+    harness.state_mut().banner.rows.clear();
 
     // the folded settings, open
     for fold in [fl!("commands"), fl!("encoder-options")] {

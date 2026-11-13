@@ -586,9 +586,9 @@ mod tests {
     #[test]
     fn notes_the_messages_shown() {
         record::start();
-        let ok = fl!("ok");
+        let close = fl!("close");
         let attribute = fl!("custom", "hint");
-        assert_eq!(record::take(), [("ok", ok), ("custom.hint", attribute)]);
+        assert_eq!(record::take(), [("close", close), ("custom.hint", attribute)]);
     }
 
     #[test]

@@ -18,6 +18,7 @@ use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 
 use crate::app::App;
+use crate::banner::{Action, Message, Subject};
 use crate::item::Item;
 use crate::jobs::failure;
 use crate::l10n::fl;
@@ -216,12 +217,25 @@ impl App {
         };
     }
 
-    /// Reads the presets again, after one changed.
-    fn reload_presets(&mut self) {
+    /// Reads the presets again, as after one changed; gives whether they
+    /// could be.
+    pub(crate) fn reload_presets(&mut self) -> bool {
         match Presets::load(self.presets_dir.as_deref()) {
-            Ok(presets) => self.presets = presets,
+            Ok(presets) => {
+                self.presets = presets;
+                self.banner.forget(Subject::Presets);
+                true
+            }
             Err(err) => {
-                self.say(fl!("presets-unreadable", error = failure(&err)));
+                let (file, detail) = crate::app::error_parts(&err);
+                let message = Message::warning(fl!("presets-unreadable")).detail(detail);
+                let message = match file.or_else(|| self.presets_dir.clone()) {
+                    Some(file) => message.file(file),
+                    None => message,
+                };
+                let actions = [Action::ReadPresetsAgain, Action::CopyPath, Action::ShowInFolder];
+                self.say(message.actions(&actions).about(Subject::Presets));
+                false
             }
         }
     }
@@ -512,7 +526,8 @@ impl App {
                         return;
                     }
                     Err(err) => {
-                        self.say(fl!("not-put-back", error = failure(&err)));
+                        let message = Message::warning(fl!("not-put-back"));
+                        self.say(message.detail(failure(&err)));
                     }
                 }
             }
@@ -708,12 +723,12 @@ mod tests {
     fn says_presets_are_unreadable_under_what_it_said_before() {
         let dir = tempfile::tempdir().unwrap();
         let Some(unlistable) = crate::testing::unlistable(dir.path()) else { return };
-        let mut app = crate::app::App::with(Config::default(), None, Presets::builtin(), None);
+        let mut app = crate::app::App::with(Config::default(), None, Presets::builtin());
         app.presets_dir = Some(unlistable.clone());
-        app.say("Something said before".into());
+        app.say(crate::banner::Message::info("Something said before"));
         app.reload_presets();
         crate::testing::listable(&unlistable);
-        let said = app.message.unwrap_or_default();
+        let said = crate::testing::said(&app);
         assert!(said.starts_with("Something said before\n"), "{said}");
         assert!(said.contains("presets couldn't be read"), "{said}");
     }
@@ -725,7 +740,7 @@ mod tests {
         presets::save(dir.path(), "base", "", (&webm, &tgs::Options::default()), false).unwrap();
         std::fs::write(dir.path().join("child.toml"), "extends = 'base'\n").unwrap();
         let presets = Presets::load(Some(dir.path())).unwrap();
-        let mut app = crate::app::App::with(Config::default(), None, presets, None);
+        let mut app = crate::app::App::with(Config::default(), None, presets);
         app.presets_dir = Some(dir.path().to_path_buf());
         let mut managing = super::Managing::of(&app.presets);
         let id = managing.rows.iter().find(|row| row.name == "base").unwrap().id;
@@ -755,7 +770,7 @@ mod tests {
         presets::save(dir.path(), "by quality", "", (&webm, &tgs::Options::default()), false)
             .unwrap();
         let presets = Presets::load(Some(dir.path())).unwrap();
-        let mut app = crate::app::App::with(Config::default(), None, presets, None);
+        let mut app = crate::app::App::with(Config::default(), None, presets);
         let qualities = Some(Range { min: 20.0, max: 40.0 });
         for id in [1, 2] {
             let mut item =

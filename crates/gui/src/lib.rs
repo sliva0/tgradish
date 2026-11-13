@@ -10,6 +10,7 @@ mod about;
 mod accent;
 mod actions;
 mod app;
+mod banner;
 mod canvas;
 mod config;
 mod cuts;
