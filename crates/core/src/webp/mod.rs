@@ -10,6 +10,8 @@
 mod encode;
 mod inspect;
 
+/// An image takes WebM's options, of which it uses [`PICTURE_OPTIONS`].
+pub use crate::webm::Options;
 pub use encode::Encoding;
 #[cfg(test)]
 pub(crate) use encode::encode;
@@ -28,7 +30,7 @@ use crate::input::Input;
 use crate::picture;
 use crate::presets::Format;
 use crate::telegram::{self, Issue};
-use crate::webm::{self, Options, Plan};
+use crate::webm::{self, Plan};
 
 /// A picture to make.
 #[derive(Debug, Clone, PartialEq)]
@@ -37,7 +39,6 @@ pub struct Request {
     /// Where the result goes: by default [`Input::default_output`], as
     /// [`Request::output`] gives it.
     pub output: Option<PathBuf>,
-    /// WebM's options, of which a picture takes [`PICTURE_OPTIONS`].
     pub options: Options,
     /// Replace the output if it exists.
     pub overwrite: bool,
