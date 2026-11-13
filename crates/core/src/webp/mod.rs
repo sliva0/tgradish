@@ -82,6 +82,10 @@ pub enum Event {
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct Outcome {
+    /// The input as given, or a sequence's first picture: a picture has no
+    /// event before it is made to name it, as WebM's and `.tgs`'s start.
+    #[serde(serialize_with = "crate::protocol::serialize_path")]
+    pub input: PathBuf,
     #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub output: PathBuf,
     pub bytes: u64,
@@ -207,6 +211,7 @@ pub fn convert(
     crate::fsutil::write_output(&plan.output, &webp, request.overwrite)?;
     let bytes = webp.len() as u64;
     let outcome = Outcome {
+        input: request.input.first().to_path_buf(),
         output: plan.output.clone(),
         bytes,
         width: plan.width,

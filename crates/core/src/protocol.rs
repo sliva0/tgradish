@@ -318,6 +318,7 @@ mod tests {
         .map(|event| serde_json::to_value(event).unwrap());
         let still = [
             webp::Event::Finished(Outcome {
+                input: "in.png".into(),
                 output: "in.sticker.webp".into(),
                 bytes: 100_000,
                 width: 512,
@@ -519,7 +520,7 @@ mod tests {
             ),
             Some(r#"{"event":"error","message":"it failed","input":null}"#),
             Some(
-                r#"{"event":"finished","output":"in.sticker.webp","bytes":100000,"width":512,"height":384,"encoding":{"kind":"lossy","quality":80},"issues":[{"kind":"wrong-size","width":512,"height":384,"side":100,"exact":true,"severity":"error","message":"size is 512x384, expected 100x100"}]}"#,
+                r#"{"event":"finished","input":"in.png","output":"in.sticker.webp","bytes":100000,"width":512,"height":384,"encoding":{"kind":"lossy","quality":80},"issues":[{"kind":"wrong-size","width":512,"height":384,"side":100,"exact":true,"severity":"error","message":"size is 512x384, expected 100x100"}]}"#,
             ),
             Some(r#"{"event":"warning","message":"a warning"}"#),
             Some(r#"{"event":"error","message":"it failed","input":null}"#),
