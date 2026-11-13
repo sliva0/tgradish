@@ -207,6 +207,13 @@ impl<T> Load<T> {
         true
     }
 
+    /// Idle again if loading failed, to be loaded once more.
+    pub fn forget_failure(&mut self) {
+        if matches!(self, Load::Failed(_)) {
+            *self = Load::Idle;
+        }
+    }
+
     pub fn ready(&self) -> Option<&T> {
         match self {
             Load::Ready(value) | Load::Reloading(value, _) => Some(value),

@@ -62,6 +62,9 @@ pub(crate) struct App {
     /// seconds, to notice one installed meanwhile, or when the settings
     /// change.
     pub(crate) found_backend: std::cell::RefCell<Option<FoundBackend>>,
+    /// The ffmpeg inputs were last read with, or why there was none: when
+    /// it changes, reads that failed are tried again.
+    pub(crate) read_with: Option<Result<Backend, String>>,
     pub(crate) screen: Screen,
     pub(crate) inset: Inset,
     pub(crate) prefs: prefs::Prefs,
@@ -224,6 +227,7 @@ impl App {
             made_by_tgradish: Default::default(),
             outputs: Default::default(),
             found_backend: Default::default(),
+            read_with: None,
             screen: Screen::default(),
             inset: Inset::default(),
             prefs: prefs::Prefs::default(),
