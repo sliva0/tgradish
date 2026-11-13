@@ -18,7 +18,7 @@ fn pixels() -> (usize, Vec<u8>) {
 
 /// The icon's side and straight RGBA pixels, each of its pixels a square
 /// of `scale`.
-pub fn scaled(scale: usize) -> (usize, Vec<u8>) {
+pub(crate) fn scaled(scale: usize) -> (usize, Vec<u8>) {
     let (side, pixels) = pixels();
     let rgba = pixels
         .chunks_exact(side * 4)
@@ -33,7 +33,7 @@ pub fn scaled(scale: usize) -> (usize, Vec<u8>) {
 
 /// The icon for the taskbar and the like, four times as large: systems
 /// shrink it to the size they want instead of blurring it bigger.
-pub fn window() -> egui::IconData {
+pub(crate) fn window() -> egui::IconData {
     let (side, rgba) = scaled(4);
     egui::IconData { rgba, width: side as u32, height: side as u32 }
 }
@@ -53,7 +53,7 @@ fn texture(ctx: &egui::Context) -> egui::TextureHandle {
 
 /// Side in points of the icon with as many screen pixels for each of its
 /// own as fit in `room` points, and at least one.
-pub fn side(ctx: &egui::Context, room: f32) -> f32 {
+pub(crate) fn side(ctx: &egui::Context, room: f32) -> f32 {
     fit(texture(ctx).size()[0] as f32, ctx.pixels_per_point(), room)
 }
 
@@ -64,7 +64,7 @@ fn fit(pixels: f32, ppp: f32, room: f32) -> f32 {
 }
 
 /// Draws the icon at [`side`] for `room`.
-pub fn show(ui: &mut egui::Ui, room: f32) -> egui::Response {
+pub(crate) fn show(ui: &mut egui::Ui, room: f32) -> egui::Response {
     let shown = side(ui.ctx(), room);
     let (rect, response) = ui.allocate_exact_size(vec2(shown, shown), egui::Sense::hover());
     // from a screen pixel's corner, so the icon's pixels cover whole ones

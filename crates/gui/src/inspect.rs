@@ -16,21 +16,21 @@ use crate::jobs::Problem;
 use crate::l10n::fl;
 use crate::widgets::{self, gauge, label, note, problems};
 
-pub enum Found {
+pub(crate) enum Found {
     Webm { info: Box<WebmInfo>, target: Target },
     Tgs(Box<Stats>),
     Image { info: webp::Info, target: Target },
     Failed(String),
 }
 
-pub struct Inspection {
-    pub path: PathBuf,
-    pub found: Found,
-    pub problems: Vec<Problem>,
+pub(crate) struct Inspection {
+    pub(crate) path: PathBuf,
+    pub(crate) found: Found,
+    pub(crate) problems: Vec<Problem>,
 }
 
 impl Inspection {
-    pub fn of(path: &Path) -> Inspection {
+    pub(crate) fn of(path: &Path) -> Inspection {
         let (found, problems) = match inspect::inspect(path, None) {
             Ok(Inspected::Image { target, info, issues }) => {
                 let problems = issues.iter().map(|issue| Problem::refused(issue, target));
@@ -69,7 +69,7 @@ fn of(used: impl std::fmt::Display, limit: impl std::fmt::Display) -> String {
     fl!("of-limit", used = used.to_string(), limit = limit.to_string())
 }
 
-pub fn show(ui: &mut egui::Ui, inspection: &Inspection) {
+pub(crate) fn show(ui: &mut egui::Ui, inspection: &Inspection) {
     match &inspection.found {
         Found::Failed(message) => {
             ui.colored_label(widgets::BAD, message);

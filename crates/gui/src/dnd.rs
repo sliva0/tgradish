@@ -29,14 +29,14 @@ use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, event
 
 const URI_LIST: &str = "text/uri-list";
 
-pub enum Dropped {
+pub(crate) enum Dropped {
     /// Files are dragged over the window, or not any more.
     Hovering(bool),
     Files(Vec<PathBuf>),
 }
 
 /// Receives drags on Wayland; `None` elsewhere.
-pub struct Drops {
+pub(crate) struct Drops {
     receiver: Receiver<Dropped>,
     /// Tells the worker to stop, which it must before winit closes its
     /// connection.
@@ -46,7 +46,7 @@ pub struct Drops {
 
 impl Drops {
     /// Starts listening when the window is on Wayland.
-    pub fn start(window: &impl HasDisplayHandle, ctx: &egui::Context) -> Option<Drops> {
+    pub(crate) fn start(window: &impl HasDisplayHandle, ctx: &egui::Context) -> Option<Drops> {
         let display = match window.display_handle().ok()?.as_raw() {
             RawDisplayHandle::Wayland(handle) => handle.display,
             _ => return None,
@@ -80,12 +80,12 @@ impl Drops {
         Some(Drops { receiver, stop, worker: Some(worker) })
     }
 
-    pub fn poll(&self) -> Vec<Dropped> {
+    pub(crate) fn poll(&self) -> Vec<Dropped> {
         self.receiver.try_iter().collect()
     }
 
     /// Stops listening, waiting for the worker to let go of the connection.
-    pub fn stop(&mut self) {
+    pub(crate) fn stop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();

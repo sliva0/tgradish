@@ -5,7 +5,7 @@
 use eframe::egui::{self, Color32, CornerRadius, Stroke, vec2};
 
 /// Breeze's accent, for systems without one.
-pub const BREEZE_ACCENT: Color32 = Color32::from_rgb(61, 174, 233);
+pub(crate) const BREEZE_ACCENT: Color32 = Color32::from_rgb(61, 174, 233);
 
 /// What a colour scheme says, by Breeze's names for it.
 struct Scheme {
@@ -46,9 +46,9 @@ const DARK: Scheme = Scheme {
 };
 
 /// Text that says how things went, the same in both schemes.
-pub const POSITIVE: Color32 = Color32::from_rgb(39, 174, 96);
-pub const NEUTRAL: Color32 = Color32::from_rgb(246, 116, 0);
-pub const NEGATIVE: Color32 = Color32::from_rgb(218, 68, 83);
+pub(crate) const POSITIVE: Color32 = Color32::from_rgb(39, 174, 96);
+pub(crate) const NEUTRAL: Color32 = Color32::from_rgb(246, 116, 0);
+pub(crate) const NEGATIVE: Color32 = Color32::from_rgb(218, 68, 83);
 
 /// Breeze's frame radius, for buttons, fields and dialogs.
 const RADIUS: u8 = 5;
@@ -70,29 +70,29 @@ fn mix(from: Color32, to: Color32, amount: f32) -> Color32 {
 
 /// `accent` at `opacity`, over whatever is under it, as Breeze lays it on
 /// what it highlights.
-pub fn tint(accent: Color32, opacity: f32) -> Color32 {
+pub(crate) fn tint(accent: Color32, opacity: f32) -> Color32 {
     let alpha = (opacity * 255.0).round() as u8;
     Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), alpha)
 }
 
 /// The accent of `visuals`, which hovered widgets are outlined in.
-pub fn accent(visuals: &egui::Visuals) -> Color32 {
+pub(crate) fn accent(visuals: &egui::Visuals) -> Color32 {
     visuals.widgets.hovered.bg_stroke.color
 }
 
 /// The outline of what is on: half the accent, as Breeze outlines a
 /// dialog's default button.
-pub fn on_outline(visuals: &egui::Visuals) -> Stroke {
+pub(crate) fn on_outline(visuals: &egui::Visuals) -> Stroke {
     Stroke::new(1.0, mix(accent(visuals), visuals.widgets.inactive.bg_stroke.color, 0.5))
 }
 
 /// The background of stages pictures are shown on.
-pub fn stage(dark: bool) -> Color32 {
+pub(crate) fn stage(dark: bool) -> Color32 {
     if dark { DARK.header } else { LIGHT.header }
 }
 
 /// The colours of a theme, `accent` for selection, focus and hover.
-pub fn visuals(dark: bool, accent: Color32) -> egui::Visuals {
+pub(crate) fn visuals(dark: bool, accent: Color32) -> egui::Visuals {
     let scheme = if dark { &DARK } else { &LIGHT };
     let mut visuals = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
     // Breeze draws frames in a mix of the background and the text
@@ -142,7 +142,7 @@ pub fn visuals(dark: bool, accent: Color32) -> egui::Visuals {
 
 /// Gives both themes Breeze's look, with `accent`, or Breeze's where the
 /// system has none.
-pub fn apply(ctx: &egui::Context, accent: Option<Color32>) {
+pub(crate) fn apply(ctx: &egui::Context, accent: Option<Color32>) {
     let accent = accent.unwrap_or(BREEZE_ACCENT);
     for (theme, dark) in [(egui::Theme::Light, false), (egui::Theme::Dark, true)] {
         ctx.style_mut_of(theme, |style| {

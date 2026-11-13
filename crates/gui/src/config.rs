@@ -18,7 +18,7 @@ use tgradish_core::telegram::Target;
 pub(crate) struct Config {
     /// Core's, its `[gui]` holding only what the window doesn't know of.
     core: tgradish_core::config::Config,
-    pub gui: GuiConfig,
+    pub(crate) gui: GuiConfig,
 }
 
 impl Deref for Config {
@@ -45,18 +45,18 @@ impl From<tgradish_core::config::Config> for Config {
 
 impl Config {
     /// Default location of `config.toml`.
-    pub fn default_path() -> Option<PathBuf> {
+    pub(crate) fn default_path() -> Option<PathBuf> {
         tgradish_core::config::Config::default_path()
     }
 
     /// Reads `path`, as core does. A missing file gives the defaults.
-    pub fn load(path: &Path) -> tgradish_core::Result<Config> {
+    pub(crate) fn load(path: &Path) -> tgradish_core::Result<Config> {
         tgradish_core::config::Config::load(path).map(Config::from)
     }
 
     /// Writes the settings to `path`, with what the window doesn't know of
     /// in `[gui]` kept as it was read.
-    pub fn save(&self, path: &Path) -> tgradish_core::Result<()> {
+    pub(crate) fn save(&self, path: &Path) -> tgradish_core::Result<()> {
         let mut core = self.core.clone();
         self.gui.write(&mut core.gui);
         core.save(path)
@@ -69,24 +69,24 @@ impl Config {
 pub(crate) struct GuiConfig {
     /// Directory for results, instead of next to each input. Never empty.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_dir: Option<PathBuf>,
+    pub(crate) output_dir: Option<PathBuf>,
     /// Replace existing results.
-    pub overwrite: bool,
+    pub(crate) overwrite: bool,
     /// What new files become: stickers or emoji.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<Target>,
+    pub(crate) target: Option<Target>,
     /// Ease scrolling over a few frames instead of following the wheel.
-    pub smooth_scrolling: bool,
+    pub(crate) smooth_scrolling: bool,
     /// The window's language, as a tag like `de`; the system's when unset.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub language: Option<String>,
+    pub(crate) language: Option<String>,
     /// Light or dark, or as the system has it.
-    pub theme: Theme,
+    pub(crate) theme: Theme,
     /// Start with the files open when the window last closed.
-    pub reopen_files: bool,
+    pub(crate) reopen_files: bool,
     /// Show the timeline's cuts and times in frames rather than seconds.
-    pub timeline_frames: bool,
-    pub result_preview: ResultPreview,
+    pub(crate) timeline_frames: bool,
+    pub(crate) result_preview: ResultPreview,
 }
 
 impl Default for GuiConfig {
@@ -126,7 +126,7 @@ fn get<T: DeserializeOwned>(table: &toml::Table, key: &str) -> Option<T> {
 impl GuiConfig {
     /// The settings in `table`, each the default where it is missing or
     /// can't be read.
-    pub fn read(table: &toml::Table) -> GuiConfig {
+    pub(crate) fn read(table: &toml::Table) -> GuiConfig {
         let default = GuiConfig::default();
         GuiConfig {
             output_dir: get::<PathBuf>(table, "output-dir")
@@ -161,12 +161,12 @@ impl GuiConfig {
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct ResultPreview {
     /// From 1, the smallest, to [`ResultPreview::LARGEST`].
-    pub size: u8,
-    pub corner: Corner,
+    pub(crate) size: u8,
+    pub(crate) corner: Corner,
 }
 
 impl ResultPreview {
-    pub const LARGEST: u8 = 5;
+    pub(crate) const LARGEST: u8 = 5;
 
     fn read(table: &toml::Table) -> ResultPreview {
         let default = ResultPreview::default();
@@ -197,16 +197,16 @@ pub(crate) enum Corner {
 }
 
 impl Corner {
-    pub fn left(self) -> bool {
+    pub(crate) fn left(self) -> bool {
         matches!(self, Corner::TopLeft | Corner::BottomLeft)
     }
 
-    pub fn top(self) -> bool {
+    pub(crate) fn top(self) -> bool {
         matches!(self, Corner::TopLeft | Corner::TopRight)
     }
 
     /// The corner on the `left` or right, at the `top` or bottom.
-    pub fn at(left: bool, top: bool) -> Corner {
+    pub(crate) fn at(left: bool, top: bool) -> Corner {
         match (left, top) {
             (true, true) => Corner::TopLeft,
             (false, true) => Corner::TopRight,

@@ -19,7 +19,7 @@ use crate::l10n::fl;
 use crate::{cuts, widgets};
 
 /// The steps, under a heading naming what the input is.
-pub fn plan(ui: &mut egui::Ui, item: &Item, context: &Context) {
+pub(crate) fn plan(ui: &mut egui::Ui, item: &Item, context: &Context) {
     let animated = item.input_length().is_some();
     let title = match (item.kind, animated) {
         (Kind::Video, true) => fl!("plan-video"),

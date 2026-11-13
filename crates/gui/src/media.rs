@@ -22,17 +22,17 @@ use crate::jobs::failure;
 use crate::l10n::fl;
 
 /// Frames of a video or animation, as straight RGBA.
-pub struct Clip {
+pub(crate) struct Clip {
     /// Tells clips apart, so a texture showing one knows when it changes.
-    pub id: u64,
-    pub width: u32,
-    pub height: u32,
-    pub frames: Vec<Vec<u8>>,
+    pub(crate) id: u64,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) frames: Vec<Vec<u8>>,
     /// Seconds into the input where each frame starts, then where the last
     /// one ends.
-    pub times: Vec<f64>,
+    pub(crate) times: Vec<f64>,
     /// Art pixels, kept sharp when scaled up.
-    pub pixelated: bool,
+    pub(crate) pixelated: bool,
 }
 
 impl Clip {
@@ -50,7 +50,7 @@ impl Clip {
     }
 
     /// A sticker's frames, which last whole 60 fps frames.
-    pub fn from_preview(preview: Preview, pixelated: bool) -> Clip {
+    pub(crate) fn from_preview(preview: Preview, pixelated: bool) -> Clip {
         let mut times = vec![0.0];
         let mut ticks = 0;
         let mut frames = Vec::with_capacity(preview.frames.len());
@@ -69,27 +69,27 @@ impl Clip {
         }
     }
 
-    pub fn start(&self) -> f64 {
+    pub(crate) fn start(&self) -> f64 {
         self.times[0]
     }
 
-    pub fn end(&self) -> f64 {
+    pub(crate) fn end(&self) -> f64 {
         *self.times.last().expect("clips have times")
     }
 
-    pub fn is_animated(&self) -> bool {
+    pub(crate) fn is_animated(&self) -> bool {
         self.frames.len() > 1
     }
 
     /// The frame shown at `time`.
-    pub fn index_at(&self, time: f64) -> usize {
+    pub(crate) fn index_at(&self, time: f64) -> usize {
         self.times
             .partition_point(|&start| start <= time)
             .saturating_sub(1)
             .min(self.frames.len() - 1)
     }
 
-    pub fn image(&self, index: usize) -> egui::ColorImage {
+    pub(crate) fn image(&self, index: usize) -> egui::ColorImage {
         egui::ColorImage::from_rgba_unmultiplied(
             [self.width as usize, self.height as usize],
             &self.frames[index],
@@ -98,7 +98,7 @@ impl Clip {
 
     /// A frame from a third of the way in, which is rarely a black or
     /// empty first frame, scaled to at most `side` pixels.
-    pub fn thumbnail(&self, side: u32) -> egui::ColorImage {
+    pub(crate) fn thumbnail(&self, side: u32) -> egui::ColorImage {
         let rgba = &self.frames[self.frames.len() / 3];
         let scale = (f64::from(side) / f64::from(self.width.max(self.height))).min(1.0);
         let width = ((f64::from(self.width) * scale).round() as u32).max(1);
@@ -118,7 +118,7 @@ impl Clip {
 
     /// Whether this looks like pixel art to make a `.tgs` of, rather than
     /// a photo or video: few colours in its first frames.
-    pub fn looks_like_pixel_art(&self) -> bool {
+    pub(crate) fn looks_like_pixel_art(&self) -> bool {
         let frames = &self.frames[..self.frames.len().min(8)];
         tgradish_core::picture::has_few_colours(frames, self.width, None, TGS_COLOURS)
     }
@@ -137,13 +137,13 @@ fn next_id() -> u64 {
 const TGS_COLOURS: usize = 128;
 
 /// Work on another thread, cancelled when dropped.
-pub struct Task<T> {
+pub(crate) struct Task<T> {
     receiver: Receiver<Result<T, String>>,
     cancel: CancelToken,
 }
 
 impl<T: Send + 'static> Task<T> {
-    pub fn spawn(
+    pub(crate) fn spawn(
         ctx: &egui::Context,
         work: impl FnOnce(&CancelToken) -> Result<T, String> + Send + 'static,
     ) -> Task<T> {
@@ -163,7 +163,7 @@ impl<T: Send + 'static> Task<T> {
 
 impl<T> Task<T> {
     /// The result, once there is one.
-    pub fn poll(&self) -> Option<Result<T, String>> {
+    pub(crate) fn poll(&self) -> Option<Result<T, String>> {
         match self.receiver.try_recv() {
             Ok(result) => Some(result),
             Err(TryRecvError::Empty) => None,
@@ -179,7 +179,7 @@ impl<T> Drop for Task<T> {
 }
 
 /// Something loaded on another thread.
-pub enum Load<T> {
+pub(crate) enum Load<T> {
     Idle,
     Loading(Task<T>),
     /// What was loaded last, shown until what is loading again is there.
@@ -190,7 +190,7 @@ pub enum Load<T> {
 
 impl<T> Load<T> {
     /// Loads with `task`, keeping what is loaded meanwhile.
-    pub fn reload(&mut self, task: Task<T>) {
+    pub(crate) fn reload(&mut self, task: Task<T>) {
         *self = match std::mem::replace(self, Load::Idle) {
             Load::Ready(value) | Load::Reloading(value, _) => Load::Reloading(value, task),
             _ => Load::Loading(task),
@@ -198,7 +198,7 @@ impl<T> Load<T> {
     }
 
     /// Takes in a finished load; true if it just finished.
-    pub fn poll(&mut self) -> bool {
+    pub(crate) fn poll(&mut self) -> bool {
         let (Load::Loading(task) | Load::Reloading(_, task)) = self else { return false };
         match task.poll() {
             Some(Ok(value)) => *self = Load::Ready(value),
@@ -209,24 +209,24 @@ impl<T> Load<T> {
     }
 
     /// Idle again if loading failed, to be loaded once more.
-    pub fn forget_failure(&mut self) {
+    pub(crate) fn forget_failure(&mut self) {
         if matches!(self, Load::Failed(_)) {
             *self = Load::Idle;
         }
     }
 
-    pub fn ready(&self) -> Option<&T> {
+    pub(crate) fn ready(&self) -> Option<&T> {
         match self {
             Load::Ready(value) | Load::Reloading(value, _) => Some(value),
             _ => None,
         }
     }
 
-    pub fn is_idle(&self) -> bool {
+    pub(crate) fn is_idle(&self) -> bool {
         matches!(self, Load::Idle)
     }
 
-    pub fn is_loading(&self) -> bool {
+    pub(crate) fn is_loading(&self) -> bool {
         matches!(self, Load::Loading(_) | Load::Reloading(..))
     }
 }
@@ -240,25 +240,25 @@ const DETAIL_SIDE: u32 = 960;
 /// Memory for the frames of the part that is played.
 const DETAIL_BYTES: usize = 192 << 20;
 /// Longer side of finished WebM stickers' previews: their full size.
-pub const RESULT_SIDE: u32 = 512;
+pub(crate) const RESULT_SIDE: u32 = 512;
 
 /// A video or image read through ffmpeg, the way WebM conversions read it.
-pub struct Video {
-    pub probe: Probe,
+pub(crate) struct Video {
+    pub(crate) probe: Probe,
     /// All of it, a few frames a second.
-    pub overview: Clip,
+    pub(crate) overview: Clip,
     /// Where its frames start, in order: empty for a picture, or when they
     /// carry no times.
-    pub starts: Vec<f64>,
+    pub(crate) starts: Vec<f64>,
     /// What ffmpeg reads: the input, or an Aseprite file drawn for it.
-    pub readable: Arc<Readable>,
+    pub(crate) readable: Arc<Readable>,
     /// The overview is every frame at its full size, as pixel art drawn
     /// for ffmpeg is: nothing more is read to play or pause it.
-    pub complete: bool,
+    pub(crate) complete: bool,
     /// Where its frames start, which cuts land between: as its packets
     /// time them, or else at its frame rate. Worked out once, as the
     /// timeline and keys ask for it every frame.
-    pub frames: Option<Arc<cuts::Frames>>,
+    pub(crate) frames: Option<Arc<cuts::Frames>>,
 }
 
 /// Most bytes of drawn frames shown as they are, rather than read again
@@ -268,7 +268,7 @@ const DRAWN_BYTES: usize = 256 << 20;
 impl Video {
     /// `input` as ffmpeg reads it; `drawing` says how pixel art ffmpeg
     /// can't read is drawn for it.
-    pub fn load(
+    pub(crate) fn load(
         ctx: &egui::Context,
         backend: Backend,
         input: Input,
@@ -356,7 +356,7 @@ impl Video {
 
     /// `length` seconds from `start` at up to 30 frames a second, for
     /// playing.
-    pub fn load_part(
+    pub(crate) fn load_part(
         &self,
         ctx: &egui::Context,
         backend: Backend,
@@ -386,7 +386,12 @@ impl Video {
     }
 
     /// The frame shown at `time`, at full size.
-    pub fn load_still(&self, ctx: &egui::Context, backend: Backend, time: f64) -> Task<Clip> {
+    pub(crate) fn load_still(
+        &self,
+        ctx: &egui::Context,
+        backend: Backend,
+        time: f64,
+    ) -> Task<Clip> {
         let (probe, starts) = (self.probe.clone(), self.starts.clone());
         let readable = self.readable.clone();
         Task::spawn(ctx, move |cancel| {
@@ -411,23 +416,23 @@ impl Video {
 }
 
 /// Pixel art read the way `.tgs` conversions read it.
-pub struct Art {
-    pub clip: Clip,
+pub(crate) struct Art {
+    pub(crate) clip: Clip,
     /// Aseprite tags and layers.
-    pub tags: Vec<Tag>,
-    pub layers: Vec<LayerInfo>,
+    pub(crate) tags: Vec<Tag>,
+    pub(crate) layers: Vec<LayerInfo>,
     /// How long each frame of an Aseprite file shows, in seconds, its
     /// tags' or not.
-    pub durations: Vec<f64>,
+    pub(crate) durations: Vec<f64>,
     /// Where its frames start, when it is animated.
-    pub frames: Option<Arc<cuts::Frames>>,
+    pub(crate) frames: Option<Arc<cuts::Frames>>,
 }
 
 impl Art {
     /// `options` choose what is read: an Aseprite tag and layers, a sprite
     /// sheet's layout and the frame rate of sheets and sequences. Videos
     /// are read through `backend`.
-    pub fn load(
+    pub(crate) fn load(
         ctx: &egui::Context,
         input: Input,
         options: tgs::Options,
@@ -457,7 +462,7 @@ impl Art {
 }
 
 /// A finished WebM sticker, decoded.
-pub fn load_result(ctx: &egui::Context, backend: Backend, path: &Path) -> Task<Clip> {
+pub(crate) fn load_result(ctx: &egui::Context, backend: Backend, path: &Path) -> Task<Clip> {
     let path = path.to_path_buf();
     Task::spawn(ctx, move |cancel| {
         let preview = backend.preview(&path, RESULT_SIDE, cancel).map_err(|err| failure(&err))?;

@@ -22,7 +22,7 @@ use crate::l10n::fl;
 use crate::widgets;
 
 /// What a job converts with, fixed when it starts.
-pub enum Setup {
+pub(crate) enum Setup {
     Webm {
         options: Options,
         backend: Backend,
@@ -41,32 +41,32 @@ pub enum Setup {
 
 /// One encode while fitting a WebM sticker.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Attempt {
-    pub number: u32,
-    pub params: Params,
+pub(crate) struct Attempt {
+    pub(crate) number: u32,
+    pub(crate) params: Params,
     /// Size, once it is done.
-    pub bytes: Option<u64>,
-    pub fits: bool,
+    pub(crate) bytes: Option<u64>,
+    pub(crate) fits: bool,
     /// How much it looks like the source, from 0 to 1, when measured.
-    pub ssim: Option<f64>,
+    pub(crate) ssim: Option<f64>,
 }
 
 /// What a WebM conversion was planned to make.
 #[derive(Debug, Clone, PartialEq)]
-pub struct WebmPlan {
-    pub width: u32,
-    pub height: u32,
-    pub fps: f64,
-    pub length: f64,
+pub(crate) struct WebmPlan {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) fps: f64,
+    pub(crate) length: f64,
     /// How many times fitting may encode.
-    pub attempts: u32,
+    pub(crate) attempts: u32,
     /// The size limit, in bytes, which sizes are shown as shares of.
-    pub limit: u64,
+    pub(crate) limit: u64,
 }
 
 /// What a `.tgs` conversion is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum TgsStage {
+pub(crate) enum TgsStage {
     Reading,
     Drawing,
     Fitting,
@@ -75,28 +75,28 @@ pub enum TgsStage {
 
 /// What a conversion is doing or did, besides its result.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Progress {
+pub(crate) struct Progress {
     /// How far along the stage is, when that is known.
-    pub fraction: Option<f32>,
-    pub webm: Option<WebmPlan>,
-    pub attempts: Vec<Attempt>,
+    pub(crate) fraction: Option<f32>,
+    pub(crate) webm: Option<WebmPlan>,
+    pub(crate) attempts: Vec<Attempt>,
     /// What reading the pixel art found.
-    pub report: Option<Box<Report>>,
+    pub(crate) report: Option<Box<Report>>,
     /// The `.tgs` size estimate with the art unchanged, when that was too
     /// large.
-    pub unchanged_bytes: Option<usize>,
-    pub steps: Vec<Step>,
-    pub warnings: Vec<String>,
+    pub(crate) unchanged_bytes: Option<usize>,
+    pub(crate) steps: Vec<Step>,
+    pub(crate) warnings: Vec<String>,
     /// For `.tgs`: what it is doing.
-    pub tgs: Option<TgsStage>,
+    pub(crate) tgs: Option<TgsStage>,
     /// For `.tgs`: the art is never changed to fit.
-    pub tgs_exact: bool,
+    pub(crate) tgs_exact: bool,
 }
 
 impl Progress {
     /// How far fitting a `.tgs` got: the size taken off so far, against
     /// what has to go, on a log scale, as reductions save shares.
-    pub fn tgs_fitting(&self) -> Option<f32> {
+    pub(crate) fn tgs_fitting(&self) -> Option<f32> {
         let unchanged = self.unchanged_bytes? as f64;
         let now = self.steps.last().map_or(unchanged, |step| step.bytes as f64);
         let target = tgs::MAX_BYTES as f64;
@@ -107,7 +107,7 @@ impl Progress {
     }
 
     /// How far the whole conversion got, roughly.
-    pub fn overall(&self) -> Option<f32> {
+    pub(crate) fn overall(&self) -> Option<f32> {
         if let Some(stage) = self.tgs {
             return Some(match stage {
                 TgsStage::Reading => 0.03,
@@ -125,20 +125,20 @@ impl Progress {
 
 /// A problem Telegram would have with a result.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Problem {
+pub(crate) struct Problem {
     /// Telegram refuses it, rather than only frowning on it.
-    pub refused: bool,
-    pub text: String,
+    pub(crate) refused: bool,
+    pub(crate) text: String,
 }
 
 impl Problem {
     /// Something Telegram refuses in a result for `target`.
-    pub fn refused(issue: &telegram::Issue, target: telegram::Target) -> Problem {
+    pub(crate) fn refused(issue: &telegram::Issue, target: telegram::Target) -> Problem {
         Problem { refused: true, text: issue_text(issue, target) }
     }
 
     /// What checking a `.tgs` found, which may only be frowned on.
-    pub fn of_tgs(issue: Issue) -> Problem {
+    pub(crate) fn of_tgs(issue: Issue) -> Problem {
         Problem { refused: issue.severity == Severity::Error, text: issue.message }
     }
 }
@@ -233,29 +233,29 @@ pub(crate) fn failure(err: &Error) -> String {
 }
 
 #[derive(Debug)]
-pub struct Done {
-    pub output: PathBuf,
-    pub bytes: u64,
-    pub limit: u64,
+pub(crate) struct Done {
+    pub(crate) output: PathBuf,
+    pub(crate) bytes: u64,
+    pub(crate) limit: u64,
     /// Changed to fit: frames or colours given up for `.tgs`.
-    pub lossy: bool,
+    pub(crate) lossy: bool,
     /// For WebM: the attempt kept and whether its duration is spoofed.
-    pub kept: Option<u32>,
-    pub spoofed: bool,
+    pub(crate) kept: Option<u32>,
+    pub(crate) spoofed: bool,
     /// For `.tgs`: its Lottie's size, layers and rectangles.
-    pub json_bytes: Option<u64>,
-    pub shapes: Option<(usize, usize)>,
-    pub problems: Vec<Problem>,
+    pub(crate) json_bytes: Option<u64>,
+    pub(crate) shapes: Option<(usize, usize)>,
+    pub(crate) problems: Vec<Problem>,
     /// The frames of `.tgs` results, as drawn while making them, and of
     /// pictures, until the window takes them; WebM ones are decoded from
     /// the file.
-    pub preview: Option<Preview>,
+    pub(crate) preview: Option<Preview>,
 }
 
 impl Done {
     /// What a result made earlier is, read from the file, for a window
     /// that didn't make it; `None` when it is gone.
-    pub fn of_file(path: &Path, format: Format, target: telegram::Target) -> Option<Done> {
+    pub(crate) fn of_file(path: &Path, format: Format, target: telegram::Target) -> Option<Done> {
         match format {
             Format::Webm => {
                 let info = tgradish_core::webm::container::inspect_file(path).ok()?;
@@ -309,7 +309,7 @@ impl Done {
 }
 
 #[derive(Debug)]
-pub enum Status {
+pub(crate) enum Status {
     Waiting,
     Running,
     Done(Box<Done>),
@@ -328,12 +328,12 @@ enum Message {
 
 /// One conversion of an item, waiting, running or finished. Dropped, it
 /// stops converting.
-pub struct Job {
-    pub output: PathBuf,
+pub(crate) struct Job {
+    pub(crate) output: PathBuf,
     /// The output replaces a file made at another time.
-    pub replaces: bool,
-    pub status: Status,
-    pub progress: Progress,
+    pub(crate) replaces: bool,
+    pub(crate) status: Status,
+    pub(crate) progress: Progress,
     cancel: CancelToken,
     messages: Option<Receiver<Message>>,
     worker: Option<std::thread::JoinHandle<()>>,
@@ -346,7 +346,7 @@ impl Drop for Job {
 }
 
 impl Job {
-    pub fn waiting(output: PathBuf) -> Job {
+    pub(crate) fn waiting(output: PathBuf) -> Job {
         Job {
             output,
             replaces: false,
@@ -358,20 +358,26 @@ impl Job {
         }
     }
 
-    pub fn is_running(&self) -> bool {
+    pub(crate) fn is_running(&self) -> bool {
         matches!(self.status, Status::Running)
     }
 
-    pub fn is_waiting(&self) -> bool {
+    pub(crate) fn is_waiting(&self) -> bool {
         matches!(self.status, Status::Waiting)
     }
 
-    pub fn is_finished(&self) -> bool {
+    pub(crate) fn is_finished(&self) -> bool {
         !self.is_running() && !self.is_waiting()
     }
 
     /// Starts converting on a worker thread, which repaints `ctx` as it goes.
-    pub fn start(&mut self, setup: Setup, input: Input, overwrite: bool, ctx: &egui::Context) {
+    pub(crate) fn start(
+        &mut self,
+        setup: Setup,
+        input: Input,
+        overwrite: bool,
+        ctx: &egui::Context,
+    ) {
         let (sender, receiver) = channel();
         self.messages = Some(receiver);
         self.status = Status::Running;
@@ -402,13 +408,13 @@ impl Job {
         }));
     }
 
-    pub fn cancel(&self) {
+    pub(crate) fn cancel(&self) {
         self.cancel.cancel();
     }
 
     /// Waits until `deadline` at most for the worker to end, as it does
     /// once it has cleaned up after a conversion stopped; true if it did.
-    pub fn wait_until(&mut self, deadline: std::time::Instant) -> bool {
+    pub(crate) fn wait_until(&mut self, deadline: std::time::Instant) -> bool {
         let Some(worker) = &self.worker else { return true };
         while !worker.is_finished() {
             if std::time::Instant::now() >= deadline {
@@ -421,12 +427,12 @@ impl Job {
     }
 
     /// Asked to stop, and not yet stopped.
-    pub fn is_stopping(&self) -> bool {
+    pub(crate) fn is_stopping(&self) -> bool {
         self.is_running() && self.cancel.is_cancelled()
     }
 
     /// Takes in what the worker reported; true when it just finished.
-    pub fn poll(&mut self) -> bool {
+    pub(crate) fn poll(&mut self) -> bool {
         let Some(messages) = &self.messages else { return false };
         let mut finished = false;
         while let Ok(message) = messages.try_recv() {

@@ -34,7 +34,7 @@ struct Read {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct Session {
+pub(crate) struct Session {
     version: u32,
     items: Vec<Saved>,
     /// Which of them is selected.
@@ -70,14 +70,14 @@ struct SavedResult {
 }
 
 /// A session's files, open again.
-pub struct Restored {
-    pub items: Vec<Item>,
-    pub selected: Option<u64>,
+pub(crate) struct Restored {
+    pub(crate) items: Vec<Item>,
+    pub(crate) selected: Option<u64>,
     /// How many were left out because their files are gone.
-    pub gone: usize,
+    pub(crate) gone: usize,
     /// The results among them that an earlier run wrote, for the items
     /// that have them now.
-    pub written: Vec<(PathBuf, Written)>,
+    pub(crate) written: Vec<(PathBuf, Written)>,
 }
 
 /// Where pasted images are kept, next to the session file.
@@ -94,24 +94,24 @@ fn plain_name(name: &str) -> bool {
 
 /// What a session file held.
 #[derive(Default)]
-pub struct Loaded {
-    pub session: Session,
+pub(crate) struct Loaded {
+    pub(crate) session: Session,
     /// Set when some or all of it couldn't be read.
-    pub unreadable: Option<Unreadable>,
+    pub(crate) unreadable: Option<Unreadable>,
 }
 
 /// A session file this version of tgradish couldn't read all of.
-pub struct Unreadable {
+pub(crate) struct Unreadable {
     /// How many of its files were left out; `None` when none of it could
     /// be read.
-    pub files: Option<usize>,
+    pub(crate) files: Option<usize>,
     /// Where the file is kept as it was.
-    pub kept: PathBuf,
+    pub(crate) kept: PathBuf,
 }
 
 /// A window's session file: where it is, what the window last wrote there,
 /// and which copies of pasted images are the window's to remove.
-pub struct Store {
+pub(crate) struct Store {
     path: PathBuf,
     /// The session as last written or read, so it is only written again
     /// when it changes.
@@ -127,12 +127,12 @@ impl Store {
     /// The session at `path`, for this window alone: `None` while another
     /// window has it, as two would write over each other's files and
     /// remove each other's pasted images.
-    pub fn open(path: PathBuf) -> Option<Store> {
+    pub(crate) fn open(path: PathBuf) -> Option<Store> {
         let lock = lock(&path).ok()?;
         Some(Store { path, written: String::new(), copies: HashSet::new(), _lock: lock })
     }
 
-    pub fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 
@@ -145,7 +145,7 @@ impl Store {
     /// moved aside, and one that can only be read in part is copied there
     /// first, so that nothing is lost when the session is next written;
     /// an error where that can't be done.
-    pub fn read(&mut self) -> std::io::Result<Loaded> {
+    pub(crate) fn read(&mut self) -> std::io::Result<Loaded> {
         let text = match std::fs::read(&self.path) {
             Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Loaded::default()),
@@ -170,7 +170,7 @@ impl Store {
     /// Copies the pasted image of item `id` next to the session file, so
     /// the window can open it again, and gives the copy's name, which no
     /// other has had.
-    pub fn keep_pasted(&mut self, id: u64, image: &Path) -> std::io::Result<String> {
+    pub(crate) fn keep_pasted(&mut self, id: u64, image: &Path) -> std::io::Result<String> {
         let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
         let extension = image.extension().and_then(|e| e.to_str()).unwrap_or("png");
         let name = format!("{time:x}-{id}.{extension}");
@@ -183,7 +183,7 @@ impl Store {
 
     /// Writes `session` if it changed, whole or not at all, and removes
     /// the copies of pasted images it no longer has.
-    pub fn save(&mut self, session: &Session) -> std::io::Result<()> {
+    pub(crate) fn save(&mut self, session: &Session) -> std::io::Result<()> {
         let json = session.to_json().map_err(std::io::Error::other)?;
         if json == self.written {
             return Ok(());
@@ -266,7 +266,7 @@ fn keeps(item: &Item) -> bool {
 impl Session {
     /// What `items` are, `selected` the one selected, without those the
     /// session can't hold. `written` are the results the window wrote.
-    pub fn of(
+    pub(crate) fn of(
         items: &[Item],
         selected: Option<u64>,
         written: &HashMap<PathBuf, Written>,
@@ -301,12 +301,12 @@ impl Session {
         Session { version: VERSION, items: saved, selected }
     }
 
-    pub fn to_json(&self) -> serde_json::Result<String> {
+    pub(crate) fn to_json(&self) -> serde_json::Result<String> {
         serde_json::to_string(self)
     }
 
     /// The items again, numbered from `next_id`.
-    pub fn restore(self, path: &Path, mut next_id: u64) -> Restored {
+    pub(crate) fn restore(self, path: &Path, mut next_id: u64) -> Restored {
         let mut restored =
             Restored { items: Vec::new(), selected: None, gone: 0, written: Vec::new() };
         for (index, saved) in self.items.into_iter().enumerate() {
