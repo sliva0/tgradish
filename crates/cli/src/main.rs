@@ -1,3 +1,22 @@
+/// `println!` for what goes to stdout, which ends the program quietly when
+/// stdout was closed, as by `tgradish licenses | head -2`, rather than
+/// panicking as `println!` does: see [`write_out`].
+macro_rules! outln {
+    () => {
+        $crate::write_out(format_args!(""), true)
+    };
+    ($($arg:tt)*) => {
+        $crate::write_out(format_args!($($arg)*), true)
+    };
+}
+
+/// [`outln`] without the line's end, as `print!`.
+macro_rules! out {
+    ($($arg:tt)*) => {
+        $crate::write_out(format_args!($($arg)*), false)
+    };
+}
+
 mod args;
 mod commands;
 mod convert;
@@ -57,12 +76,38 @@ pub const REFUSED: u8 = 3;
 #[error("exit with status {0}")]
 pub struct Exit(pub u8);
 
+/// The exit status when whoever read stdout stopped reading: 141 on Unix,
+/// as shells show a program SIGPIPE ended, which Rust's programs ignore;
+/// 1 elsewhere, where nothing says otherwise.
+const STDOUT_CLOSED: i32 = if cfg!(unix) { 128 + 13 } else { 1 };
+
+/// Writes to stdout for [`outln`] and [`out`]. A closed pipe ends the
+/// program then and there, quietly: there is no one to tell, and nothing
+/// after it would be read.
+pub fn write_out(text: std::fmt::Arguments<'_>, newline: bool) {
+    use std::io::Write;
+    let mut stdout = std::io::stdout().lock();
+    let mut written = stdout.write_fmt(text);
+    if newline {
+        // stdout keeps lines until their end, so this is where a closed
+        // pipe shows
+        written = written.and_then(|()| stdout.write_all(b"\n"));
+    }
+    match written {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => {
+            std::process::exit(STDOUT_CLOSED)
+        }
+        Err(err) => panic!("failed printing to stdout: {err}"),
+    }
+}
+
 /// Prints `value` as one line of JSON, as `--json` prints events and
 /// each file's findings; or if it can't be, as a config holding a path
 /// that isn't Unicode can't, an error event saying why.
 pub fn json_line(value: &impl serde::Serialize) {
     match serde_json::to_string(value) {
-        Ok(line) => println!("{line}"),
+        Ok(line) => outln!("{line}"),
         Err(err) => {
             let failure = tgradish_core::protocol::Failure {
                 message: format!("couldn't write this as JSON: {err}"),

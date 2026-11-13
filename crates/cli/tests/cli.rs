@@ -79,6 +79,31 @@ fn carries_licences() {
     assert!(text.matches("used by:").count() > 40);
 }
 
+/// A reader that stops early, as `tgradish licenses | head -2`, ends the
+/// command without a panic's message.
+#[test]
+fn stops_quietly_when_stdout_closes() {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    for args in [&["licenses"][..], &["--json", "describe"], &["preset", "list"]] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
+            .args(args)
+            .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdout = child.stdout.take().unwrap();
+        let _ = stdout.read(&mut [0; 16]).unwrap();
+        drop(stdout);
+        let output = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.is_empty(), "{args:?}: {stderr}");
+        assert_ne!(output.status.code(), Some(101), "{args:?}");
+    }
+}
+
 #[test]
 fn reports_errors_as_json() {
     let output = tgradish(&["--json", "convert", "missing.mp4", "--preset", "nope"]);
