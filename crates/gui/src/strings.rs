@@ -126,7 +126,7 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
         harness.state_mut().inspection = None;
     }
     select(&mut harness, 1);
-    harness.state_mut().items[1].format = Format::Image;
+    harness.state_mut().items[1].format = Format::Webp;
     harness.run_steps(2);
     convert(&harness);
     harness.run_steps(2);
@@ -151,7 +151,7 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().items[1].format = Format::Tgs;
     finish(&mut harness);
     save(&mut harness, "tgs-picture");
-    harness.state_mut().items[1].format = Format::Image;
+    harness.state_mut().items[1].format = Format::Webp;
 
     // the long video: spoofed, cut at 3 s, and slowed down
     select(&mut harness, 2);
@@ -203,7 +203,7 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().queue.push_back(waiting);
     let item = &mut harness.state_mut().items[1];
     let later = Job::waiting(dir.path().join("later.png"));
-    item.job = Some(Conversion::of(later, Format::Image, item.choices.clone()));
+    item.job = Some(Conversion::of(later, Format::Webp, item.choices.clone()));
     let later = id(&harness, 1);
     harness.state_mut().queue.push_back(later);
     select(&mut harness, 2);

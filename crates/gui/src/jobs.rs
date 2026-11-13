@@ -274,7 +274,7 @@ impl Done {
                     preview: None,
                 })
             }
-            Format::Image => {
+            Format::Webp => {
                 let info = still::inspect_file(path).ok()?;
                 let issues = info.issues(target);
                 Some(Done {

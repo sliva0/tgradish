@@ -50,9 +50,9 @@ fn describes_protocol() {
     assert_eq!(format("tgs")["output-extension"], "tgs");
     assert!(format("tgs")["options"]["properties"]["reductions"].is_object());
     // images take WebM's options and presets
-    assert_eq!(format("image")["output-extension"], "webp");
-    assert_eq!(format("image")["default-preset"], "balanced");
-    assert!(format("image")["options"]["properties"]["start"].is_object());
+    assert_eq!(format("webp")["output-extension"], "webp");
+    assert_eq!(format("webp")["default-preset"], "balanced");
+    assert!(format("webp")["options"]["properties"]["start"].is_object());
     let presets = description["presets"].as_array().unwrap();
     let preset = |name: &str| presets.iter().find(|p| p["name"] == name).unwrap();
     // presets say how, for both formats, and nothing about the target
@@ -416,11 +416,14 @@ fn makes_image_stickers() {
     assert_eq!(event["encoding"]["kind"], "lossless");
     assert!(event["issues"].as_array().unwrap().is_empty());
     assert_eq!(&std::fs::read(&out).unwrap()[8..12], b"WEBP");
-    // what an image doesn't use is refused
-    let output =
-        tgradish(&["convert", input.to_str().unwrap(), "--format", "image", "--crf", "30"]);
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("--crf can't be used"));
+    // what an image doesn't use is refused, asked for by its kind too
+    for format in ["webp", "image"] {
+        let output =
+            tgradish(&["convert", input.to_str().unwrap(), "--format", format, "--crf", "30"]);
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("--crf can't be used for webp output"), "{stderr}");
+    }
 }
 
 /// serde refuses paths that aren't Unicode, which every line names with

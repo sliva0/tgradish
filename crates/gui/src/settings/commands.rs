@@ -85,7 +85,7 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
     match item.format {
         Format::Webm => {}
         Format::Tgs => args.extend(["--format".into(), "tgs".into()]),
-        Format::Image => args.extend(["--format".into(), "image".into()]),
+        Format::Webp => args.extend(["--format".into(), "webp".into()]),
     }
     let choices = &item.choices;
     let (presets, config) = (context.presets, context.config);
@@ -123,7 +123,7 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
     }
     args.extend(match item.format {
         Format::Webm => tgradish_core::options::flags(&webm.merged(&choices.shared_webm())),
-        Format::Image => {
+        Format::Webp => {
             // a picture is one frame, where its start is
             let picture = tgradish_core::still::picture_options(&webm);
             let shared = Options { start: choices.frame, length: None, ..choices.shared_webm() };
@@ -274,7 +274,7 @@ mod tests {
         let mut walk = Item::new(3, vec!["walk.ase".into()], false, Target::Sticker);
         walk.choices.tag = Some("idle".into());
         walk.choices.hide_layers = Some(vec!["sketch".into(), "back, old".into()]);
-        for format in [Format::Webm, Format::Tgs, Format::Image] {
+        for format in [Format::Webm, Format::Tgs, Format::Webp] {
             walk.format = format;
             // each flag and its value, whether one word or two
             let line = command_line(&walk, &plain).join("\n").replace('=', "\n");

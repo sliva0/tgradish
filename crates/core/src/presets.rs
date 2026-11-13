@@ -47,15 +47,26 @@ pub enum Format {
     Tgs,
     /// Image stickers and emoji: one frame of a video, or an image, as
     /// WebP. They take WebM's options where a still picture has them.
-    Image,
+    /// Read as `image` too, the kind of sticker it makes.
+    #[serde(alias = "image")]
+    Webp,
 }
 
 impl Format {
+    /// What `--format` and the JSON call it, which messages name it by.
+    pub fn name(self) -> &'static str {
+        match self {
+            Format::Webm => "webm",
+            Format::Tgs => "tgs",
+            Format::Webp => "webp",
+        }
+    }
+
     pub fn extension(self) -> &'static str {
         match self {
             Format::Webm => "webm",
             Format::Tgs => "tgs",
-            Format::Image => "webp",
+            Format::Webp => "webp",
         }
     }
 
@@ -64,14 +75,14 @@ impl Format {
         match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
             "webm" => Some(Format::Webm),
             "tgs" => Some(Format::Tgs),
-            "webp" => Some(Format::Image),
+            "webp" => Some(Format::Webp),
             _ => None,
         }
     }
 
     pub fn default_preset(self) -> &'static str {
         match self {
-            Format::Webm | Format::Image => DEFAULT_PRESET,
+            Format::Webm | Format::Webp => DEFAULT_PRESET,
             Format::Tgs => DEFAULT_TGS_PRESET,
         }
     }
@@ -84,7 +95,7 @@ pub enum FormatOptions {
     Webm(Options),
     Tgs(TgsOptions),
     /// WebM's options, for an image.
-    Image(Options),
+    Webp(Options),
 }
 
 impl FormatOptions {
@@ -92,7 +103,7 @@ impl FormatOptions {
         match self {
             FormatOptions::Webm(_) => Format::Webm,
             FormatOptions::Tgs(_) => Format::Tgs,
-            FormatOptions::Image(_) => Format::Image,
+            FormatOptions::Webp(_) => Format::Webp,
         }
     }
 }
@@ -308,7 +319,7 @@ impl Presets {
         Ok(match format {
             Format::Webm => FormatOptions::Webm(self.webm(name)?),
             Format::Tgs => FormatOptions::Tgs(self.tgs(name)?),
-            Format::Image => FormatOptions::Image(self.webm(name)?),
+            Format::Webp => FormatOptions::Webp(self.webm(name)?),
         })
     }
 
@@ -599,6 +610,16 @@ mod tests {
 
     fn write(dir: &Path, name: &str, text: &str) {
         std::fs::write(dir.join(format!("{name}.toml")), text).unwrap();
+    }
+
+    #[test]
+    fn names_the_image_format_webp() {
+        assert_eq!(serde_json::to_value(Format::Webp).unwrap(), "webp");
+        for name in ["\"webp\"", "\"image\""] {
+            assert_eq!(serde_json::from_str::<Format>(name).unwrap(), Format::Webp, "{name}");
+        }
+        assert_eq!(Format::of_path(Path::new("a.WebP")), Some(Format::Webp));
+        assert_eq!(Format::Webp.name(), "webp");
     }
 
     #[test]

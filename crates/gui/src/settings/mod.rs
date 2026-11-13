@@ -104,7 +104,7 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let formats = [
         (Format::Webm, fl!("format-video"), fl!("format-video", "hint")),
         (Format::Tgs, fl!("format-animation"), fl!("format-animation", "hint")),
-        (Format::Image, fl!("format-image"), fl!("format-image", "hint")),
+        (Format::Webp, fl!("format-image"), fl!("format-image", "hint")),
     ];
     let mut format = item.format;
     if segments(ui, &mut format, &formats, |_| Ok(())) {
@@ -119,8 +119,8 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             (Format::Webm, Target::Sticker) => fl!("needs-webm-sticker"),
             (Format::Webm, Target::Emoji) => fl!("needs-webm-emoji"),
             (Format::Tgs, _) => fl!("needs-tgs"),
-            (Format::Image, Target::Sticker) => fl!("needs-image-sticker"),
-            (Format::Image, Target::Emoji) => fl!("needs-image-emoji"),
+            (Format::Webp, Target::Sticker) => fl!("needs-image-sticker"),
+            (Format::Webp, Target::Emoji) => fl!("needs-image-emoji"),
         },
     );
     // picked for what isn't pixel art, which would come out blocky; the
@@ -136,7 +136,7 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     // presets say how to encode videos and animations; a picture takes
     // only how they square and scale it
     ui.add_space(8.0);
-    let image = item.format == Format::Image;
+    let image = item.format == Format::Webp;
     let pictures = fl!("preset", "image");
     let users =
         context.presets.iter().any(|(_, preset)| preset.is_err() || preset.is_ok_and(is_users));
@@ -344,7 +344,7 @@ impl Part {
             Format::Webm => parts.extend([Part::Quality, Part::Advanced]),
             Format::Tgs => parts.extend([Part::Quality, Part::Reading]),
             // lossless, or lossy where only that fits: nothing to choose
-            Format::Image => {}
+            Format::Webp => {}
         }
         parts
     }
@@ -353,13 +353,13 @@ impl Part {
         match (self, item.format) {
             (Part::Aseprite, _) => aseprite(ui, item, context),
             (Part::Picture, _) => picture(ui, item, context),
-            (Part::Time, Format::Image) => frame(ui, item, context.in_frames),
+            (Part::Time, Format::Webp) => frame(ui, item, context.in_frames),
             (Part::Time, _) => time(ui, item, context),
             (Part::Quality, Format::Webm) => webm_quality(ui, item, context),
             (Part::Quality, Format::Tgs) => tgs_quality(ui, item, context),
             (Part::Reading, _) => reading(ui, item, context),
             (Part::Advanced, _) => advanced(ui, item, context),
-            (Part::Quality, Format::Image) => {}
+            (Part::Quality, Format::Webp) => {}
         }
     }
 }
@@ -393,7 +393,7 @@ mod tests {
             in_frames: false,
         };
         let mut item = Item::new(1, vec!["photo.png".into()], false, Target::Sticker);
-        item.format = Format::Image;
+        item.format = Format::Webp;
         let mut harness =
             Harness::new_ui_state(|ui, item: &mut Item| make(ui, item, &context), item);
         harness.run_steps(2);

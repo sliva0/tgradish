@@ -176,7 +176,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             });
         }
         // pictures never come here
-        Format::Tgs | Format::Image => {}
+        Format::Tgs | Format::Webp => {}
     }
 }
 

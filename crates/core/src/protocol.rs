@@ -145,11 +145,11 @@ pub fn describe(presets: &Presets, default_presets: [&str; 2]) -> Description {
                 events: printed::<TgsEvent>(),
             },
             FormatDescription {
-                format: Format::Image,
+                format: Format::Webp,
                 description: "Image sticker or emoji, from one frame of a video or an image: \
                               WebM's options where a still picture has them, start being \
                               the frame's time",
-                output_extension: Format::Image.extension(),
+                output_extension: Format::Webp.extension(),
                 default_preset: webm.to_string(),
                 options: schema_for!(Options),
                 events: printed::<crate::still::StillEvent>(),

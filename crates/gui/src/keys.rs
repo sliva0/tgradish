@@ -150,7 +150,7 @@ impl Keys {
                 }
             }
             // a picture is made of the frame picked
-            Show::Input if item.format == Format::Image => {
+            Show::Input if item.format == Format::Webp => {
                 let Some(frames) = item.input_frames() else { return };
                 if moves {
                     let at =

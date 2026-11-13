@@ -40,7 +40,7 @@ pub enum Failed {
 enum Resolved {
     Webm { options: Options, backend: Backend },
     Tgs { options: TgsOptions },
-    Image { options: Options, backend: Backend },
+    Webp { options: Options, backend: Backend },
 }
 
 /// Runs conversions with the options and output settings of one command.
@@ -72,19 +72,19 @@ impl<'a> Converter<'a> {
             bail!(
                 "the output is a .{} file, but this converts to {}",
                 asked.extension(),
-                format.extension()
+                format.name()
             );
         }
         let foreign = args.options.foreign(format);
         if !foreign.is_empty() {
-            bail!("{} can't be used for {} output", foreign.join(", "), format.extension());
+            bail!("{} can't be used for {} output", foreign.join(", "), format.name());
         }
         if args.keep_temp && format != Format::Webm {
             bail!("--keep-temp is for WebM output, which alone leaves intermediate files");
         }
         // preset, then --options-json, then flags
         let name = args.preset.as_deref().unwrap_or_else(|| ctx.config.preset_for(format));
-        let invalid_json = || format!("invalid --options-json for {} output", format.extension());
+        let invalid_json = || format!("invalid --options-json for {} output", format.name());
         let webm = |mut options: Options| -> Result<Options> {
             if let Some(json) = &args.options_json {
                 let overlay: Options = serde_json::from_str(json).with_context(invalid_json)?;
@@ -97,9 +97,9 @@ impl<'a> Converter<'a> {
                 let backend = ctx.backend().map_err(crate::explain)?;
                 Resolved::Webm { options: webm(options)?, backend }
             }
-            FormatOptions::Image(options) => {
+            FormatOptions::Webp(options) => {
                 let backend = ctx.backend().map_err(crate::explain)?;
-                Resolved::Image { options: webm(options)?, backend }
+                Resolved::Webp { options: webm(options)?, backend }
             }
             FormatOptions::Tgs(mut options) => {
                 if let Some(json) = &args.options_json {
@@ -135,7 +135,7 @@ impl<'a> Converter<'a> {
             Resolved::Tgs { options } => {
                 tgs::default_output(input, options.target.unwrap_or_default())
             }
-            Resolved::Image { options, .. } => {
+            Resolved::Webp { options, .. } => {
                 still::default_output(input, options.target.unwrap_or_default())
             }
         };
@@ -252,7 +252,7 @@ impl<'a> Converter<'a> {
                     }
                 }
             }
-            Resolved::Image { options, backend } => {
+            Resolved::Webp { options, backend } => {
                 let request = Request {
                     input: input.to_path_buf(),
                     sequence: frames,
