@@ -10,6 +10,7 @@ use std::process::Command;
 
 use common::{backends, clip, name};
 use tgradish_core::CancelToken;
+use tgradish_core::Error;
 use tgradish_core::backend::{Backend, FramesRequest};
 use tgradish_core::convert::{Request, convert};
 use tgradish_core::events::Event;
@@ -17,7 +18,7 @@ use tgradish_core::ffmpeg;
 use tgradish_core::mark::made_by_tgradish;
 use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Speed};
 use tgradish_core::telegram::{self, Target};
-use tgradish_core::{Error, webm};
+use tgradish_core::webm::container;
 use tgradish_corpus::Clip;
 
 fn fast(fit: Fit) -> Options {
@@ -57,7 +58,7 @@ fn converts_short_clip_without_spoofing() {
         assert!(matches!(events.first(), Some(Event::Started { .. })));
         assert!(matches!(events.last(), Some(Event::Finished { .. })));
 
-        let info = webm::inspect_file(&outcome.output).unwrap();
+        let info = container::inspect_file(&outcome.output).unwrap();
         assert_eq!(info.video_frames, 50, "{name}");
         assert!((info.header_duration.unwrap() - 2.0).abs() < 1e-3, "{name}");
         assert_eq!(info.title, None, "{name}: source metadata must be dropped");
@@ -176,7 +177,7 @@ fn converts_long_clip_with_spoofing() {
         let name = name(backend);
         assert!(outcome.spoofed);
         assert!(outcome.issues.is_empty(), "{name}: {:?}", outcome.issues);
-        let info = webm::inspect_file(&outcome.output).unwrap();
+        let info = container::inspect_file(&outcome.output).unwrap();
         let video = info.video.unwrap();
         // 258x320 scaled so the long side is 512
         assert_eq!((video.width, video.height), (412, 512), "{name}");
@@ -201,7 +202,7 @@ fn starts_at_offset() {
             ..Request::new(input.clone())
         };
         let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
-        let info = webm::inspect_file(&outcome.output).unwrap();
+        let info = container::inspect_file(&outcome.output).unwrap();
         assert_eq!(info.video_frames, 25, "{}", name(backend));
     }
 }
@@ -219,8 +220,8 @@ fn previews_results() {
     convert(&backends[0], &request, &CancelToken::new(), &mut |_| {}).unwrap();
     // spoofed, it still plays for a second
     let spoofed = dir.path().join("spoofed.webm");
-    let changes = webm::Patch { duration: Some(0.25), ..Default::default() };
-    webm::patch_file(&output, &spoofed, &changes, false).unwrap();
+    let changes = container::Patch { duration: Some(0.25), ..Default::default() };
+    container::patch_file(&output, &spoofed, &changes, false).unwrap();
     for backend in &backends {
         let name = name(backend);
         for path in [&output, &spoofed] {
@@ -290,7 +291,7 @@ fn makes_transparent_emoji_from_image() {
         let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
         assert!(outcome.issues.is_empty(), "{name}: {:?}", outcome.issues);
 
-        let info = webm::inspect_file(&output).unwrap();
+        let info = container::inspect_file(&output).unwrap();
         let video = info.video.unwrap();
         assert_eq!((video.width, video.height, video.alpha), (100, 100, true), "{name}");
         // the hidden mark, in the track's UID
@@ -373,7 +374,7 @@ fn crops_odd_sizes_exactly() {
                 ..Request::new(input.clone())
             };
             convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
-            let video = webm::inspect_file(&output).unwrap().video.unwrap();
+            let video = container::inspect_file(&output).unwrap().video.unwrap();
             assert_eq!(
                 (video.width, video.height),
                 (size.0 as u64, size.1 as u64),
@@ -454,7 +455,7 @@ fn pads_pictures_of_odd_size_whole() {
             ..Request::new(image.clone())
         };
         convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
-        let video = webm::inspect_file(&output).unwrap().video.unwrap();
+        let video = container::inspect_file(&output).unwrap().video.unwrap();
         assert_eq!((video.width, video.height), (512, 256), "{name}");
         // the last column and row are there, inside the transparent margin;
         // half-resolution colour mixes a line of one pixel with its neighbour
@@ -536,7 +537,7 @@ fn stays_under_three_seconds_without_spoofing() {
         let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
         let name = name(backend);
         assert!(outcome.issues.is_empty(), "{name}: {:?}", outcome.issues);
-        let header = webm::inspect_file(&outcome.output).unwrap().header_duration.unwrap();
+        let header = container::inspect_file(&outcome.output).unwrap().header_duration.unwrap();
         assert!(header <= telegram::MAX_SECONDS, "{name}: header duration {header}");
         // 71 frames at 23.976 fps
         assert!((header - 71.0 / 23.976).abs() < 2e-3, "{name}: header duration {header}");
@@ -555,7 +556,7 @@ fn plays_at_a_tempo() {
         };
         let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
         let name = name(backend);
-        let info = webm::inspect_file(&outcome.output).unwrap();
+        let info = container::inspect_file(&outcome.output).unwrap();
         // 4 seconds at 25 fps play in 2, every frame of them
         assert_eq!(info.video_frames, 100, "{name}");
         let header = info.header_duration.unwrap();
@@ -700,7 +701,7 @@ fn handles_offset_and_missing_timestamps() {
             };
             let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {})
                 .unwrap_or_else(|err| panic!("{} {}: {err}", name(backend), path.display()));
-            let info = webm::inspect_file(&outcome.output).unwrap();
+            let info = container::inspect_file(&outcome.output).unwrap();
             assert_eq!(info.video_frames, 25, "{} {}", name(backend), path.display());
         }
     }
@@ -824,16 +825,18 @@ fn tells_its_own_stickers_from_look_alikes() {
     let ours = webm("ours.webm", marked);
     assert!(made_by_tgradish(&ours));
     assert!(!made_by_tgradish(&webm("unmarked.webm", unmarked.clone())));
-    let other =
-        webm::Patch { signature: Some("tgradish someone else's".into()), ..Default::default() };
-    webm::patch_file(&ours, &path("signed.webm"), &other, false).unwrap();
+    let other = container::Patch {
+        signature: Some("tgradish someone else's".into()),
+        ..Default::default()
+    };
+    container::patch_file(&ours, &path("signed.webm"), &other, false).unwrap();
     assert!(!made_by_tgradish(&path("signed.webm")));
-    let named = webm::Patch {
+    let named = container::Patch {
         muxing_app: Some(tgradish_core::TOOL_ID.into()),
         writing_app: Some(tgradish_core::TOOL_ID.into()),
         ..Default::default()
     };
-    webm::patch_file(&path("unmarked.webm"), &path("named.webm"), &named, false).unwrap();
+    container::patch_file(&path("unmarked.webm"), &path("named.webm"), &named, false).unwrap();
     assert!(!made_by_tgradish(&path("named.webm")));
     std::fs::copy(&input, path("video.webm")).unwrap();
     assert!(!made_by_tgradish(&path("video.webm")));
@@ -1059,7 +1062,7 @@ fn counts_time_from_where_the_video_starts() {
                     ..Request::new(input.clone())
                 };
                 let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
-                let info = webm::inspect_file(&outcome.output).unwrap();
+                let info = container::inspect_file(&outcome.output).unwrap();
                 assert_eq!(info.video_frames, frames, "{name}: {part:?}");
             }
         }
@@ -1154,7 +1157,7 @@ fn converts_aseprite_files_through_ffmpeg() {
         // told as given, not as drawn for ffmpeg
         let started = events.first();
         assert!(matches!(started, Some(Event::Started { plan }) if plan.input == ase), "{name}");
-        let info = webm::inspect_file(&made.output).unwrap();
+        let info = container::inspect_file(&made.output).unwrap();
         assert_eq!(info.video_frames, 2, "{name}");
         // a picture of its first frame
         let output = Some(dir.path().join(format!("{name}.webp")));
@@ -1348,7 +1351,7 @@ fn makes_sequences_into_videos_and_pictures() {
         };
         let made = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
         assert_eq!(made.output, dir.path().join("walk.v2.sticker.webm"), "{name}");
-        let info = webm::inspect_file(&made.output).unwrap();
+        let info = container::inspect_file(&made.output).unwrap();
         assert_eq!(info.video_frames, 2, "{name}");
         assert!((info.header_duration.unwrap() - 0.5).abs() < 1e-3, "{name}");
         // a picture's frames come twelve a second, whatever else says

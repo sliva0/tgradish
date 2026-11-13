@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::error::Result;
 use crate::telegram::{self, Target};
-use crate::webm::{self, WebmInfo};
+use crate::webm::container::{self, WebmInfo};
 use crate::{still, tgs};
 
 /// The kinds of sticker file.
@@ -65,7 +65,7 @@ pub fn inspect(path: &Path, target: Option<Target>) -> Result<Inspected> {
             Inspected::Tgs { info: Box::new(info), issues }
         }
         Kind::Webm => {
-            let info = webm::inspect_file(path)?;
+            let info = container::inspect_file(path)?;
             let target = target.unwrap_or_else(|| info.target());
             let issues = telegram::check(&info, target);
             Inspected::Webm { target, info: Box::new(info), issues }

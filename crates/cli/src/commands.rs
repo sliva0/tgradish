@@ -10,7 +10,7 @@ use tgradish_core::options::Options;
 use tgradish_core::presets::{self, Format, Presets};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::tgs::TgsOptions;
-use tgradish_core::webm::{self, Patch, WebmInfo};
+use tgradish_core::webm::container::{self, Patch, WebmInfo};
 use tgradish_core::{TOOL_ID, protocol};
 use tgradish_core::{still, tgs};
 
@@ -37,7 +37,7 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
         ..Default::default()
     };
     let replace = args.overwrite || output == args.input;
-    let report = webm::patch_file(&args.input, &output, &changes, replace)
+    let report = container::patch_file(&args.input, &output, &changes, replace)
         .with_context(|| format!("couldn't spoof {}", args.input.display()))?;
 
     if ctx.global.json {

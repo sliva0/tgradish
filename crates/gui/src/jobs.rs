@@ -259,7 +259,7 @@ impl Done {
     pub fn of_file(path: &Path, format: Format, target: telegram::Target) -> Option<Done> {
         match format {
             Format::Webm => {
-                let info = tgradish_core::webm::inspect_file(path).ok()?;
+                let info = tgradish_core::webm::container::inspect_file(path).ok()?;
                 let spoofed = info.spoofed();
                 Some(Done {
                     output: path.to_path_buf(),

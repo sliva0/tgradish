@@ -521,7 +521,7 @@ mod tests {
         let Status::Done(done) = &made_job(item).status else {
             panic!("{:?}", made_job(item).status)
         };
-        let info = tgradish_core::webm::inspect_file(&done.output).unwrap();
+        let info = tgradish_core::webm::container::inspect_file(&done.output).unwrap();
         let picture = info.video.unwrap();
         assert_eq!((picture.width, picture.height), (512, 256));
         assert!(item.result_clip.ready().is_some());

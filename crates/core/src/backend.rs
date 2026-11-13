@@ -216,7 +216,8 @@ impl Backend {
         let fps = probe.fps_or_default().clamp(1.0, crate::preview::TICKS);
         // spoofed stickers say in their header that they are shorter than
         // they play; their frames tell the truth
-        let played = crate::webm::inspect_file(path).ok().and_then(|info| info.content_duration);
+        let played =
+            crate::webm::container::inspect_file(path).ok().and_then(|info| info.content_duration);
         let longer = probe.width.max(probe.height).max(1);
         let scale = (f64::from(max_side) / f64::from(longer)).min(1.0);
         let frame_bytes = (f64::from(probe.width) * scale).ceil()

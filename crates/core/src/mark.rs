@@ -205,7 +205,7 @@ pub(crate) fn read_file(path: &std::path::Path) -> Option<Mark> {
             Mark::from_bytes(bytes.try_into().ok()?)
         })
     } else {
-        let info = crate::webm::inspect_file(path).ok()?;
+        let info = crate::webm::container::inspect_file(path).ok()?;
         info.video.and_then(|video| video.uid).and_then(Mark::from_u64)
     }
 }
@@ -235,7 +235,7 @@ pub fn made_by_tgradish(path: &std::path::Path) -> bool {
                 .and_then(|value| value.get("nm")?.as_str().map(tgradish_name))
                 .unwrap_or(false)
         }
-        crate::inspect::Kind::Webm => crate::webm::head_file(path).is_ok_and(|head| {
+        crate::inspect::Kind::Webm => crate::webm::container::head_file(path).is_ok_and(|head| {
             let app = |app: &Option<String>| app.as_deref().is_some_and(is_tool_id);
             app(&head.writing_app)
                 && app(&head.muxing_app)
@@ -331,7 +331,7 @@ mod tests {
         };
         assert!(tgradish_name(&named(None)) && tgradish_name(&named(Some("dance"))));
         // and how inspecting finds the signature in WebM padding
-        assert!(crate::signature().starts_with(crate::webm::SIGNATURE_PREFIX));
+        assert!(crate::signature().starts_with(crate::webm::container::SIGNATURE_PREFIX));
     }
 
     #[test]

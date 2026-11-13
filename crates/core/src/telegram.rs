@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::tgs::Severity;
-use crate::webm::WebmInfo;
+use crate::webm::container::WebmInfo;
 
 /// Largest video sticker @Stickers accepts, in bytes; one more is "too big".
 pub const MAX_STICKER_BYTES: u64 = 256 * 1024;
@@ -265,7 +265,7 @@ pub fn check(info: &WebmInfo, target: Target) -> Vec<Issue> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::webm::VideoTrack;
+    use crate::webm::container::VideoTrack;
 
     fn info(size: u64, file_size: u64, fps: f64) -> WebmInfo {
         WebmInfo {

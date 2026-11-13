@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::presets::PresetError;
-use crate::webm::WebmError;
+use crate::webm::container::WebmError;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
