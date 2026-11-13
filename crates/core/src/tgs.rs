@@ -121,8 +121,7 @@ pub struct TgsOptions {
     /// Name stored in the sticker.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// Name the sticker as made by tgradish. A mark hidden in its shapes
-    /// stays either way. Default: true.
+    /// Name the sticker as made by tgradish. Default: true.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watermark: Option<bool>,
 }

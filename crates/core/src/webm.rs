@@ -64,8 +64,7 @@ pub struct VideoTrack {
     pub alpha: bool,
     /// Frame duration declared by the track, in nanoseconds.
     pub default_duration_ns: Option<u64>,
-    /// The track's UID, which holds tgradish's hidden mark (see
-    /// [`crate::mark`]).
+    /// The track's UID.
     pub uid: Option<u64>,
 }
 
