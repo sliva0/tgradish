@@ -395,7 +395,7 @@ pub fn is_image(path: &Path) -> bool {
 /// What the WebP at `path` is.
 pub fn inspect_file(path: &Path) -> Result<Info> {
     let bytes = std::fs::read(path)?;
-    let invalid = |message: String| Error::Probe { path: path.to_path_buf(), message };
+    let invalid = |message: String| Error::Unreadable { path: path.to_path_buf(), message };
     let mut decoder = image_webp::WebPDecoder::new(Cursor::new(&bytes))
         .map_err(|err| invalid(err.to_string()))?;
     let (width, height) = decoder.dimensions();
@@ -417,7 +417,7 @@ pub fn inspect_file(path: &Path) -> Result<Info> {
 /// A WebP's size in pixels, which tests check results by.
 pub fn dimensions(path: &Path) -> Result<(u32, u32)> {
     let bytes = std::fs::read(path)?;
-    let invalid = |message: String| Error::Probe { path: path.to_path_buf(), message };
+    let invalid = |message: String| Error::Unreadable { path: path.to_path_buf(), message };
     let decoder = image_webp::WebPDecoder::new(Cursor::new(&bytes))
         .map_err(|err| invalid(err.to_string()))?;
     Ok(decoder.dimensions())
@@ -426,7 +426,7 @@ pub fn dimensions(path: &Path) -> Result<(u32, u32)> {
 /// A WebP, decoded for a preview: one frame, as long as a `.tgs` one.
 pub fn preview(path: &Path) -> Result<crate::preview::Preview> {
     let bytes = std::fs::read(path)?;
-    let invalid = |message: String| Error::Probe { path: path.to_path_buf(), message };
+    let invalid = |message: String| Error::Unreadable { path: path.to_path_buf(), message };
     let mut decoder = image_webp::WebPDecoder::new(Cursor::new(&bytes))
         .map_err(|err| invalid(err.to_string()))?;
     let (width, height) = decoder.dimensions();

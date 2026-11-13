@@ -16,8 +16,10 @@ pub enum Error {
     FfmpegNotFound(FfmpegMissing),
     #[error("{program} failed ({status}):\n{stderr}")]
     Ffmpeg { program: &'static str, status: String, stderr: String },
+    /// An input that couldn't be read: missing, of a kind nothing here
+    /// reads, or broken.
     #[error("couldn't read {}: {message}", path.display())]
-    Probe { path: PathBuf, message: String },
+    Unreadable { path: PathBuf, message: String },
     #[error("{} has no video stream", .0.display())]
     NoVideo(PathBuf),
     #[error("{} has no frame at {at:.3} s", path.display())]

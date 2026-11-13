@@ -910,7 +910,7 @@ fn builtin_backend_rejects_fifos() {
     let fifo = dir.path().join("fifo.mp4");
     assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
     let result = Backend::Linked.probe(&fifo, &CancelToken::new());
-    assert!(matches!(result, Err(Error::Probe { .. })), "{result:?}");
+    assert!(matches!(result, Err(Error::Unreadable { .. })), "{result:?}");
 }
 
 #[cfg(feature = "linked")]
