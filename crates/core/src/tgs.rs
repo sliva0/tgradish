@@ -444,8 +444,12 @@ fn load(
         }
     };
     let (animation, aseprite) = match sheet {
+        // a sheet is one picture: an animation's first frame
         Some(sheet) => decoded.and_then(|(image, aseprite)| {
-            Ok((frames::split_sheet(&image, &sheet, &limits)?, aseprite))
+            let (width, height) = (image.width(), image.height());
+            let first = image.into_frames().swap_remove(0);
+            let picture = frames::Animation::new(width, height, vec![first])?;
+            Ok((frames::split_sheet(&picture, &sheet, &limits)?, aseprite))
         }),
         None => decoded,
     }

@@ -49,6 +49,8 @@ pub enum Error {
     SheetGrid { width: u32, height: u32, columns: u32, rows: u32 },
     #[error("the sprite sheet has {cells} cells, {frames} frames were asked for")]
     SheetFrames { cells: u32, frames: u32 },
+    #[error("a sprite sheet is one picture, this has {frames} frames")]
+    SheetAnimated { frames: usize },
     #[error("the input is too large: {0}")]
     TooLarge(String),
 }
