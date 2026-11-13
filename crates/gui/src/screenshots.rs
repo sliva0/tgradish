@@ -476,13 +476,14 @@ fn edges(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     harness.ctx.memory_mut(|memory| memory.reset_areas());
     shot(&mut harness, save, "edge-narrow-long-name");
     harness.set_size(egui::vec2(1280.0, 820.0));
-    // four presets of the user's own, and the dialog that manages them, in
-    // the light theme
+    // five presets of the user's own, one with a long name, and the dialog
+    // that manages them, in the light theme
     set_theme(&harness.ctx, Theme::Light);
     let presets_dir = dir.path().join("presets");
     let quick = Options { fit: Some(Fit::Bitrate), ..Options::default() };
     let mine = (&quick, &tgs::Options::default());
-    for name in ["my stickers", "pixel art crisp", "long loops", "emoji pack"] {
+    let long = "my stickers for the whole family summer holiday";
+    for name in ["my stickers", "pixel art crisp", "long loops", "emoji pack", long] {
         tgradish_core::presets::save(&presets_dir, name, "Quick", mine, false).unwrap();
     }
     let state = harness.state_mut();

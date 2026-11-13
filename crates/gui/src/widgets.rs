@@ -552,8 +552,9 @@ pub(crate) fn as_choice<'a>(
 
 /// One of several choices, on a button of its own styled as a
 /// [`segments`] option. They wrap as words do, in a `horizontal_wrapped`
-/// row; one too long for a line of its own is cut short, and said in full
-/// on hover.
+/// row; one too long for a line has one of its own, its words on as many
+/// lines as they take, and only a word too long for the line is cut
+/// short, said in full on hover.
 pub(crate) fn choice(
     ui: &mut egui::Ui,
     selected: bool,
@@ -561,23 +562,31 @@ pub(crate) fn choice(
     enabled: bool,
 ) -> egui::Response {
     let height = ui.spacing().interact_size.y;
-    let button = egui::Button::selectable(selected, text).truncate().min_size(vec2(0.0, height));
+    let button = egui::Button::selectable(selected, text).min_size(vec2(0.0, height));
     let button = if selected {
         button.stroke(theme::on_outline(ui.visuals()))
     } else {
         button.frame_when_inactive(true)
     };
     let line = ui.max_rect().width();
-    if text_width(ui, text, 2.0 * ui.spacing().button_padding.x) <= line {
-        return ui.add_enabled(enabled, button);
+    let padding = 2.0 * ui.spacing().button_padding.x;
+    if text_width(ui, text, padding) <= line {
+        return ui.add_enabled(enabled, button.wrap_mode(egui::TextWrapMode::Extend));
     }
+    // a line of its own
+    if ui.cursor().min.x > ui.max_rect().min.x + 0.5 {
+        ui.end_row();
+    }
+    let longest = text.split_whitespace().map(|word| text_width(ui, word, padding));
+    let cut = longest.fold(0.0, f32::max) > line;
+    let button = if cut { button.truncate() } else { button.wrap() };
     let response = ui
         .scope(|ui| {
             ui.set_max_width(line);
             ui.add_enabled(enabled, button)
         })
         .inner;
-    response.on_hover_text(text)
+    if cut { response.on_hover_text(text) } else { response }
 }
 
 /// Radius of a [`swatch`]'s colour, and of the ring round it when chosen
