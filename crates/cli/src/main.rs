@@ -167,11 +167,11 @@ fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         #[cfg(feature = "gui")]
-        Command::Gui => tgradish_gui::run(tgradish_gui::Launch {
-            config_path,
-            ffmpeg_choice: ctx.global.ffmpeg_from.map(Into::into),
-            ffmpeg_path: ctx.global.ffmpeg.clone(),
-        })
+        Command::Gui => tgradish_gui::run(
+            tgradish_gui::Launch::default()
+                .config_path(config_path)
+                .ffmpeg(ctx.global.ffmpeg_from.map(Into::into), ctx.global.ffmpeg.clone()),
+        )
         .map_err(|err| anyhow::anyhow!("{err}")),
     }
 }

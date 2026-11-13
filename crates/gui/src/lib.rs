@@ -58,19 +58,51 @@ use crate::app::App;
 /// and the column beside it.
 pub(crate) const MIN_WIDTH: f32 = 920.0;
 
-/// How the window starts, from the command line.
+/// How the window starts, from the command line: by default with the
+/// user's own config and the ffmpeg it chooses.
 #[derive(Debug, Default)]
 pub struct Launch {
     /// The `config.toml` to read and save; the user's own when `None`.
-    pub config_path: Option<PathBuf>,
+    pub(crate) config_path: Option<PathBuf>,
     /// Which ffmpeg to use instead of the config's.
-    pub ffmpeg_choice: Option<FfmpegChoice>,
+    pub(crate) ffmpeg_choice: Option<FfmpegChoice>,
     /// An ffmpeg executable or directory to use instead of the config's.
-    pub ffmpeg_path: Option<PathBuf>,
+    pub(crate) ffmpeg_path: Option<PathBuf>,
+}
+
+impl Launch {
+    /// Reads and saves the `config.toml` at `path`, or with `None` the
+    /// user's own.
+    pub fn config_path(self, path: Option<PathBuf>) -> Launch {
+        Launch { config_path: path, ..self }
+    }
+
+    /// Uses the ffmpeg `choice` says, and the executable or directory at
+    /// `path`, over the config's where either is given.
+    pub fn ffmpeg(self, choice: Option<FfmpegChoice>, path: Option<PathBuf>) -> Launch {
+        Launch { ffmpeg_choice: choice, ffmpeg_path: path, ..self }
+    }
+}
+
+/// Why the window couldn't open, or stopped.
+#[derive(Debug)]
+pub struct Error(eframe::Error);
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::error::Error for Error {
+    // its own message is eframe's, which is said once
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        std::error::Error::source(&self.0)
+    }
 }
 
 /// Opens the window and runs until it is closed.
-pub fn run(launch: Launch) -> eframe::Result<()> {
+pub fn run(launch: Launch) -> Result<(), Error> {
     tgradish_core::mark::set_client(tgradish_core::mark::Client::Window);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -99,6 +131,7 @@ pub fn run(launch: Launch) -> eframe::Result<()> {
             Ok(Box::new(app))
         }),
     )
+    .map_err(Error)
 }
 
 /// Shows an error in a dialog, for when there is no terminal to print to.
