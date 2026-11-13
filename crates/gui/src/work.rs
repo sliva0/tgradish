@@ -24,6 +24,11 @@ impl App {
     /// Takes in loads and conversions, and starts what is due.
     pub(crate) fn pump(&mut self, ctx: &egui::Context) {
         let backend = self.backend();
+        // as when ffmpeg is installed, or another chosen in Settings
+        if self.read_with.as_ref() != Some(&backend) {
+            self.items.iter_mut().for_each(retry);
+            self.read_with = Some(backend.clone());
+        }
         let selected = self.selected;
         let mut reading = self
             .items
@@ -277,6 +282,13 @@ fn settle(ctx: &egui::Context, item: &mut Item) {
     }
 }
 
+/// Lets what failed to be read of an item be read again.
+fn retry(item: &mut Item) {
+    item.video.forget_failure();
+    item.art.forget_failure();
+    item.result_clip.forget_failure();
+}
+
 /// Frees an item's big frames; its thumbnails stay. All are read again
 /// when it is selected.
 pub(crate) fn release(item: &mut Item) {
@@ -483,6 +495,26 @@ mod tests {
         let item = &harness.state().items[0];
         assert!(matches!(item.failed.as_ref().unwrap().job.status, Status::Failed(_)));
         assert!(item.made.is_some() && !item.result_is_current());
+    }
+
+    #[test]
+    fn reads_inputs_again_once_ffmpeg_is_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video(dir.path(), "64x48") else { return };
+        let mut config = Config::default();
+        config.ffmpeg.path = Some(dir.path().join("no-ffmpeg-here"));
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        assert!(harness.state().items[0].input_error().is_some());
+        // as Settings would change it
+        let ffmpeg = &mut harness.state_mut().config.ffmpeg;
+        (ffmpeg.choice, ffmpeg.path) = (FfmpegChoice::System, None);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let item = &harness.state().items[0];
+        assert_eq!((item.input_error(), item.input_size()), (None, Some((64, 48))));
+        assert!(item.input_thumb.is_some());
     }
 
     #[test]
