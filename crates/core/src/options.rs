@@ -607,6 +607,40 @@ impl Options {
     }
 }
 
+/// `options` without the values that have no say in a conversion that
+/// gets `effective`, all it is given, by how fitting uses them: the tries
+/// and range of fitting that is off; a quality, or lossless encoding,
+/// where a bitrate or the quality itself is fitted; a bitrate where a
+/// quality is kept, or where fitting finds its own from the start; a
+/// quality beside lossless encoding, or beside a bitrate that encoding
+/// once goes by; and the duration spoofing writes
+/// where it never spoofs. Planning warns of a quality or bitrate given
+/// where it has no say, and refuses lossless encoding there; front-ends
+/// set such values aside.
+pub fn in_effect(mut options: Options, effective: &Options) -> Options {
+    let fit = effective.fit_or_default();
+    let constant_quality = matches!(fit, Fit::Fps | Fit::Length | Fit::Off);
+    let lossless = constant_quality && effective.lossless_or_default();
+    if fit == Fit::Off {
+        (options.attempts, options.fit_range) = (None, None);
+    }
+    if !constant_quality {
+        (options.crf, options.lossless) = (None, None);
+    }
+    // fitting a bitrate starts from the one given; the others don't
+    // encode by one, but off does
+    if !matches!(fit, Fit::Bitrate | Fit::Off) || lossless {
+        options.bitrate = None;
+    }
+    if lossless || (fit == Fit::Off && effective.bitrate.is_some()) {
+        options.crf = None;
+    }
+    if effective.spoof == Some(Spoof::Never) {
+        options.fake_duration = None;
+    }
+    options
+}
+
 /// The keys of the values `options` sets, as files, JSON and flags name
 /// them, in the order of its fields.
 pub fn set_keys(options: &impl Serialize) -> Vec<String> {
@@ -758,6 +792,43 @@ mod tests {
         assert_eq!(merged.fit, Some(Fit::Auto));
         assert_eq!(merged.crf, Some(40));
         assert_eq!(merged.title.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn sets_aside_what_has_no_say() {
+        let all = Options {
+            attempts: Some(3),
+            fit_range: Some(Range { min: 1.0, max: 2.0 }),
+            crf: Some(30),
+            bitrate: Some(500.0),
+            lossless: Some(false),
+            fake_duration: Some(1.0),
+            ..Options::default()
+        };
+        // what is kept
+        let with = |fit, more: Options| {
+            let effective = Options { fit: Some(fit), ..more.merged(&all) };
+            set_keys(&in_effect(all.clone(), &effective))
+        };
+        let none = Options::default();
+        assert_eq!(with(Fit::Auto, none.clone()), ["attempts", "fit-range", "fake-duration"]);
+        assert_eq!(
+            with(Fit::Bitrate, none.clone()),
+            ["attempts", "fit-range", "bitrate", "fake-duration"]
+        );
+        assert_eq!(
+            with(Fit::Fps, none.clone()),
+            ["attempts", "fit-range", "crf", "lossless", "fake-duration"]
+        );
+        // off encodes once, by the bitrate given rather than the quality
+        assert_eq!(with(Fit::Off, none), ["bitrate", "lossless", "fake-duration"]);
+        let crf = Options { bitrate: None, ..all.clone() };
+        let effective = Options { fit: Some(Fit::Off), ..crf.clone() };
+        assert_eq!(set_keys(&in_effect(crf, &effective)), ["crf", "lossless", "fake-duration"]);
+        let lossless =
+            Options { lossless: Some(true), spoof: Some(Spoof::Never), ..Options::default() };
+        let effective = Options { fit: Some(Fit::Off), ..all.clone().merged(&lossless) };
+        assert_eq!(set_keys(&in_effect(all.clone(), &effective)), ["lossless"]);
     }
 
     #[test]

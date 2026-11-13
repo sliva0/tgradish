@@ -555,14 +555,16 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     if lossless && !matches!(fit, Fit::Fps | Fit::Length | Fit::Off) {
         return Err(Error::invalid("lossless", "only works with fit fps, length or off"));
     }
-    match fit {
-        Fit::Auto | Fit::Bitrate if o.crf.is_some() => {
-            warnings.push("crf is ignored while fitting bitrate".into());
+    let in_effect = options::in_effect(o.clone(), o);
+    let fitting = serde_json::to_value(fit).ok().and_then(|v| v.as_str().map(str::to_owned));
+    let fitting = fitting.unwrap_or_default();
+    for (key, asked, kept) in [
+        ("crf", o.crf.is_some(), in_effect.crf.is_some()),
+        ("bitrate", o.bitrate.is_some(), in_effect.bitrate.is_some()),
+    ] {
+        if asked && !kept {
+            warnings.push(format!("{key} is ignored with fit {fitting}"));
         }
-        Fit::Crf | Fit::Fps | Fit::Length if o.bitrate.is_some() => {
-            warnings.push("bitrate is ignored while fitting at constant quality".into());
-        }
-        _ => {}
     }
 
     let fit_range = match o.fit_range {
