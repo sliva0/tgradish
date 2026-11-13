@@ -108,7 +108,7 @@ pub(super) fn spend(spent: &mut usize, bytes: usize, limits: &Limits) -> Result<
 
 #[cfg(test)]
 mod tests {
-    use crate::aseprite::build::*;
+    use crate::aseprite::testfile::*;
     use crate::aseprite::{Layers, Sprite};
     use crate::{Error, Limits};
 

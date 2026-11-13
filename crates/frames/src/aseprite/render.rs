@@ -329,7 +329,7 @@ impl Sprite {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aseprite::build::*;
+    use crate::aseprite::testfile::*;
     use std::time::Duration;
 
     use crate::Error;

@@ -194,7 +194,7 @@ pub(super) fn read_old_palette(
 mod tests {
     use super::*;
     use crate::aseprite::Sprite;
-    use crate::aseprite::build::*;
+    use crate::aseprite::testfile::*;
     use crate::{Error, Limits};
 
     #[test]
