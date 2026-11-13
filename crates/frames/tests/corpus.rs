@@ -110,7 +110,7 @@ fn decodes_each_image_of_a_sequence_in_what_the_others_leave() {
     };
     // decoding a PNG takes twice its pixels, beside the three images before
     let frame = 27 * 31 * 4;
-    assert!(matches!(joined(5 * frame - 1), Err(Error::TooLarge(_))));
+    assert!(matches!(joined(5 * frame - 1), Err(Error::TooLarge { .. })));
     assert_eq!(joined(5 * frame).unwrap().frames().len(), 4);
 }
 
@@ -200,7 +200,7 @@ fn refuses_huge_gifs() {
     gif.extend([2, 2, 0x44, 0x01, 0, 0x3b]);
     assert!(matches!(
         decode(&gif, &DecodeOptions::default(), &Limits::default()),
-        Err(Error::TooLarge(_))
+        Err(Error::TooLarge { .. })
     ));
 }
 
@@ -214,7 +214,7 @@ fn counts_the_rgba_copy_of_still_images() {
         let limits = Limits { max_dimension: 4096, max_bytes };
         decode(&bytes, &DecodeOptions::default(), &limits)
     };
-    assert!(matches!(decode(300_000), Err(Error::TooLarge(_))));
+    assert!(matches!(decode(300_000), Err(Error::TooLarge { .. })));
     assert_eq!(decode(500_000).unwrap().frames().len(), 1);
 }
 
