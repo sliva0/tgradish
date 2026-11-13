@@ -453,9 +453,10 @@ pub struct Options {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tempo: Option<f64>,
     /// Frame rate of the result, at most 60: more than the input's at the
-    /// tempo only repeats its frames. For a sequence of images, how fast
-    /// its frames play, which the result's follows. Default: the input's
-    /// at the tempo, from 1 to 60; 12 for a sequence.
+    /// tempo only repeats its frames. For a sequence of images it is also
+    /// the rate its pictures are read at, how fast they play, so the
+    /// result's is the same. Default: the input's at the tempo, from 1 to
+    /// 60; 12 for a sequence.
     #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 60))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<f64>,

@@ -109,7 +109,8 @@ pub struct TgsOptions {
     #[schemars(range(min = 1))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sheet_frames: Option<u32>,
-    /// Frame rate of sprite sheets and image sequences. Default: 12.
+    /// The rate the pictures of a sprite sheet or an image sequence are
+    /// read at: how fast they play. Default: 12.
     #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 60))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<f64>,
