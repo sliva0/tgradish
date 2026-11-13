@@ -39,7 +39,7 @@ fn describes_protocol() {
     let output = tgradish(&["describe"]);
     assert!(output.status.success());
     let description: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(description["protocol"], 4);
+    assert_eq!(description["protocol"], 1);
     assert_eq!(description["default-format"], "webm");
     let formats = description["formats"].as_array().unwrap();
     let format = |name: &str| formats.iter().find(|f| f["format"] == name).unwrap();
