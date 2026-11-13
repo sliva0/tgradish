@@ -315,7 +315,7 @@ mod tests {
         // would take up from the preset and refuse
         item.choices.webm.fit = Some(Fit::Auto);
         let line = command_line(&item, &context).join(" ");
-        assert!(line.contains("--preset still") && line.contains("--lossless=false"), "{line}");
+        assert!(line.contains("--preset still") && line.contains("--no-lossless"), "{line}");
         // without integer scaling the preset's scale has no say, which the
         // command line can't be told
         item.choices.webm.scaling = Some(Scaling::Smooth);

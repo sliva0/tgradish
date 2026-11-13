@@ -426,7 +426,7 @@ pub fn set_keys(options: &impl Serialize) -> Vec<String> {
 /// field has its name, as `tgradish convert` has them. A flag and its
 /// value are one word, `--name=value`: in a word of its own, a value that
 /// starts with a dash, as a title or a layer's name can, would be taken
-/// for another flag.
+/// for another flag. A switch is `--name` on and `--no-name` off.
 pub fn flags(options: &impl Serialize) -> Vec<String> {
     let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(options) else {
         return Vec::new();
@@ -484,7 +484,7 @@ pub fn flags(options: &impl Serialize) -> Vec<String> {
                 flags.push(set(&items.join(",")));
             }
             (_, Value::Bool(true)) => flags.push(flag),
-            (_, Value::Bool(false)) => flags.push(set(&false)),
+            (_, Value::Bool(false)) => flags.push(format!("--no-{name}")),
             (_, Value::String(text)) => flags.push(set(&text)),
             (_, value @ Value::Number(_)) => flags.push(set(&number(&value))),
             _ => {}
@@ -535,7 +535,7 @@ mod tests {
                 "--show-layers=a, b",
                 "--lossless",
                 "--title=-_-",
-                "--watermark=false",
+                "--no-watermark",
                 "--encoder-options=aq-mode=2",
             ]
         );
