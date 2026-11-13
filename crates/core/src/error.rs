@@ -67,14 +67,56 @@ pub enum Error {
     Tgs(#[from] tgradish_tgs::Error),
     #[error("couldn't encode the WebP: {0}")]
     Webp(String),
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
+    /// Something done to a file failed, as writing the result: `action`
+    /// says what, and `error` why.
+    #[error("couldn't {action} {}: {error}", path.display())]
+    Io { action: FileAction, path: PathBuf, error: std::io::Error },
 }
 
 impl Error {
+    /// A function making an [`Error::Io`] of an `io::Error` met in doing
+    /// `action` to `path`, for `map_err`.
+    pub(crate) fn io(
+        action: FileAction,
+        path: impl Into<PathBuf>,
+    ) -> impl FnOnce(std::io::Error) -> Error {
+        let path = path.into();
+        move |error| Error::Io { action, path, error }
+    }
+
     /// An [`Error::InvalidOption`] of the option `option`.
     pub(crate) fn invalid(option: &'static str, reason: impl Into<String>) -> Error {
         Error::InvalidOption { option, reason: reason.into() }
+    }
+}
+
+/// What was being done to a file when it failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FileAction {
+    Read,
+    Write,
+    /// Making a folder, or a temporary one.
+    Create,
+    /// Listing what a folder holds.
+    List,
+    Rename,
+    Remove,
+    /// Starting a program, as ffmpeg.
+    Run,
+}
+
+impl std::fmt::Display for FileAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            FileAction::Read => "read",
+            FileAction::Write => "write",
+            FileAction::Create => "create",
+            FileAction::List => "list",
+            FileAction::Rename => "rename",
+            FileAction::Remove => "remove",
+            FileAction::Run => "run",
+        })
     }
 }
 

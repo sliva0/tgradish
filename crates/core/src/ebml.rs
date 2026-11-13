@@ -74,6 +74,7 @@ const MAX_ID_LEN: usize = 4;
 /// Longest data size allowed by the default `EBMLMaxSizeLength`.
 const MAX_SIZE_LEN: usize = 8;
 
+/// Where EBML, which WebM is written in, stops making sense.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum EbmlError {
     #[error("unexpected end of data at byte {0}")]

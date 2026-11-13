@@ -14,7 +14,7 @@ use tgradish_tgs::frames::{self, Animation, Limits};
 
 use crate::CancelToken;
 use crate::backend::Backend;
-use crate::error::{Error, Result};
+use crate::error::{Error, FileAction, Result};
 use crate::ffmpeg::Probe;
 use crate::options::Options;
 use crate::source::{self, Aseprite};
@@ -156,14 +156,17 @@ pub fn readable(
         }
     };
     cancel.check()?;
-    let dir = tempfile::Builder::new().prefix("tgradish-drawn-").tempdir()?;
+    let dir = tempfile::Builder::new()
+        .prefix("tgradish-drawn-")
+        .tempdir()
+        .map_err(Error::io(FileAction::Create, std::env::temp_dir()))?;
     // named after the input, for ffmpeg's messages
     let stem = input.file_stem().map_or("drawn".into(), |stem| stem.to_string_lossy());
     let path = dir.path().join(format!("{stem}.png"));
     // a sequence plays for as long as its frames, even only one
     let animated = sequence.is_some() || animation.frames().len() > 1;
     write_png(&path, &animation, animated)
-        .map_err(|err| Error::Io(std::io::Error::other(err.to_string())))?;
+        .map_err(|err| Error::io(FileAction::Write, &path)(std::io::Error::other(err)))?;
     let rate = sequence.map(|_| (animation.frames().len(), options.fps.unwrap_or(DEFAULT_FPS)));
     let drawn = Some((animation, !animated));
     Ok(Readable { path, dir: Some(dir), aseprite, drawn, sequence: rate })
