@@ -229,7 +229,7 @@ pub(crate) fn direct_scrolling(ctx: &egui::Context) {
 
 #[cfg(test)]
 mod tests {
-    use tgradish_core::config::Config;
+    use crate::config::Config;
     use tgradish_core::ffmpeg::FfmpegChoice;
 
     use super::*;

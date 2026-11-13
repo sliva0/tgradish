@@ -58,7 +58,7 @@ impl App {
     /// Where an item's result goes: next to its input or in the folder
     /// for results, numbered if another file in the window has the name.
     pub(crate) fn work_out_output(&self, item: &Item) -> PathBuf {
-        let dir = self.config.gui.output_dir.clone().filter(|dir| !dir.as_os_str().is_empty());
+        let dir = self.config.gui.output_dir.clone();
         let input = &item.inputs[0];
         let next_to_input = match item.format {
             Format::Webm => convert::default_output(input, item.choices.target),
@@ -156,9 +156,9 @@ fn free_name(
 
 #[cfg(test)]
 mod tests {
+    use crate::config::Config;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
-    use tgradish_core::config::Config;
 
     use super::*;
     use crate::jobs::Status;

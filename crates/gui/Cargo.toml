@@ -22,6 +22,7 @@ i18n-embed-fl.workspace = true
 png.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 skrifa.workspace = true
 sys-locale.workspace = true
 rfd.workspace = true

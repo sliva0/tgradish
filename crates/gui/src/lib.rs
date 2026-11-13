@@ -7,6 +7,7 @@ mod accent;
 mod actions;
 mod app;
 mod canvas;
+mod config;
 #[cfg(all(unix, not(target_os = "macos")))]
 #[allow(unsafe_code)]
 mod dbus;

@@ -383,9 +383,9 @@ fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backe
 mod tests {
     use std::time::Duration;
 
+    use crate::config::Config;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
-    use tgradish_core::config::Config;
     use tgradish_core::ffmpeg::FfmpegChoice;
     use tgradish_core::options::Crop;
     use tgradish_core::telegram;

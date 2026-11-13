@@ -5,10 +5,10 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
+use crate::config::Config;
 use eframe::egui::{self, Color32};
 use tgradish_core::backend::Backend;
 use tgradish_core::clipboard::Pasted;
-use tgradish_core::config::Config;
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::paths;
 use tgradish_core::presets::Presets;
@@ -80,7 +80,7 @@ pub(crate) struct App {
     pub(crate) preset_dialog: Option<preset_dialogs::Dialog>,
     pub(crate) inspection: Option<inspect::Inspection>,
     /// The theme Settings showed last, to apply a change made there.
-    pub(crate) prefs_theme: Option<tgradish_core::config::Theme>,
+    pub(crate) prefs_theme: Option<crate::config::Theme>,
     /// Where the open files are kept between runs; `None` where they
     /// aren't.
     pub(crate) session: Option<session::Store>,
@@ -143,7 +143,7 @@ impl App {
     pub(crate) fn reopen(&mut self, path: PathBuf) {
         let Some(mut store) = session::Store::open(path) else { return };
         // with the setting off, the first save empties what is there
-        if !self.config.gui.forget_files {
+        if self.config.gui.reopen_files {
             let loaded = match store.read() {
                 Ok(loaded) => loaded,
                 // not to be written over, then
@@ -183,7 +183,7 @@ impl App {
     /// can't be kept: that is said once, as when writing it fails.
     fn keep_pasted(&mut self) {
         let Some(store) = &mut self.session else { return };
-        if self.config.gui.forget_files {
+        if !self.config.gui.reopen_files {
             return;
         }
         for item in self.items.iter_mut().filter(|item| item.kept.is_none()) {
@@ -205,7 +205,7 @@ impl App {
         self.keep_pasted();
         let Some(store) = &mut self.session else { return };
         // with the setting off, nothing is kept: an empty session
-        let items: &[Item] = if self.config.gui.forget_files { &[] } else { &self.items };
+        let items: &[Item] = if self.config.gui.reopen_files { &self.items } else { &[] };
         let session = session::Session::of(items, self.selected, &self.written);
         if let Err(err) = store.save(&session) {
             self.message = Some(fl!("session-unsaved", error = err.to_string()));
@@ -421,7 +421,7 @@ impl App {
 
     /// Changes a setting of the window, and keeps that change in the config
     /// file at once, without the rest of what Settings changed.
-    pub(crate) fn keep(&mut self, change: impl Fn(&mut tgradish_core::config::GuiConfig)) {
+    pub(crate) fn keep(&mut self, change: impl Fn(&mut crate::config::GuiConfig)) {
         self.keep_config(|config| change(&mut config.gui));
     }
 
@@ -482,8 +482,8 @@ impl App {
 }
 
 /// Makes the window light or dark.
-pub(crate) fn set_theme(ctx: &egui::Context, theme: tgradish_core::config::Theme) {
-    use tgradish_core::config::Theme;
+pub(crate) fn set_theme(ctx: &egui::Context, theme: crate::config::Theme) {
+    use crate::config::Theme;
     ctx.set_theme(match theme {
         Theme::System => egui::ThemePreference::System,
         Theme::Light => egui::ThemePreference::Light,
@@ -795,7 +795,7 @@ mod tests {
         drop(harness);
         std::fs::write(&state, "anything").unwrap();
         let mut config = Config::default();
-        config.gui.forget_files = true;
+        config.gui.reopen_files = false;
         let mut harness = self::harness(config);
         harness.state_mut().reopen(state.clone());
         harness.state_mut().save_session();

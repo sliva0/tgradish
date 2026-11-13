@@ -2,8 +2,8 @@
 //! or scripted outside the window: the `tgradish` one, and for WebM the
 //! ffmpeg ones it runs, quoted for the shell of the system at hand.
 
+use crate::config::Config;
 use eframe::egui::{self, RichText};
-use tgradish_core::config::Config;
 use tgradish_core::convert;
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{Options, Scaling};

@@ -520,6 +520,7 @@ impl App {
         let names = |name: &Option<String>| name.as_deref() == Some(from);
         if names(&self.config.preset) || names(&self.config.tgs_preset) {
             self.keep_config(|config| {
+                let config: &mut tgradish_core::config::Config = config;
                 for name in [&mut config.preset, &mut config.tgs_preset] {
                     if name.as_deref() == Some(from) {
                         *name = to.map(str::to_owned);
@@ -553,8 +554,8 @@ fn take_up(item: &mut Item, name: &str) {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::Config;
     use egui_kittest::kittest::Queryable;
-    use tgradish_core::config::Config;
     use tgradish_core::options::{Fit, Options, Resize};
     use tgradish_core::presets::{self, Format, Presets};
     use tgradish_core::tgs::TgsOptions;
@@ -613,7 +614,9 @@ mod tests {
         presets::save(&presets_dir, "mine", "", (&webm, &TgsOptions::default()), false).unwrap();
         let art = dir.path().join("art.png");
         square(&art, [255, 0, 0, 255]);
-        let config = Config { preset: Some("mine".into()), ..Config::default() };
+        let config =
+            tgradish_core::config::Config { preset: Some("mine".into()), ..Default::default() };
+        let config = Config::from(config);
         let mut harness = harness(config);
         let state = harness.state_mut();
         state.presets_dir = Some(presets_dir.clone());

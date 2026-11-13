@@ -2,9 +2,9 @@
 
 use std::path::PathBuf;
 
+use crate::config::Config;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
-use tgradish_core::config::Config;
 use tgradish_core::inputs;
 use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Spoof};
 use tgradish_core::presets::{Format, Presets};

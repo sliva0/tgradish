@@ -7,7 +7,7 @@ use tgradish_core::options::{
     CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, Fit, MAX_ATTEMPTS, Options, Range, Speed,
 };
 
-use tgradish_core::config::Config;
+use crate::config::Config;
 use tgradish_core::presets::Presets;
 use tgradish_core::{convert, telegram};
 
@@ -276,9 +276,9 @@ mod tests {
 
     #[test]
     fn drops_a_custom_range_once_fitting_counts_another_way() {
+        use crate::config::Config;
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        use tgradish_core::config::Config;
         use tgradish_core::presets::Presets;
         use tgradish_core::telegram::Target;
 

@@ -4,6 +4,7 @@
     "```"
 )]
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -20,89 +21,13 @@ pub struct Config {
     /// Preset used when none is given, for `.tgs`.
     pub tgs_preset: Option<String>,
     pub ffmpeg: FfmpegConfig,
-    pub gui: GuiConfig,
-}
-
-/// Settings of the tgradish window.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
-pub struct GuiConfig {
-    /// Directory for results, instead of next to each input.
-    pub output_dir: Option<PathBuf>,
-    /// Replace existing results.
-    pub overwrite: bool,
-    /// What new files become: stickers or emoji.
-    pub target: Option<crate::telegram::Target>,
-    /// Ease scrolling over a few frames instead of following the wheel.
-    pub smooth_scrolling: bool,
-    /// The window's language, as a tag like `de`; the system's when unset.
-    pub language: Option<String>,
-    /// Light or dark, or as the system has it.
-    pub theme: Theme,
-    /// Start with no files, rather than those open when the window last
-    /// closed.
-    pub forget_files: bool,
-    /// Show the timeline's cuts and times in frames rather than seconds.
-    pub timeline_frames: bool,
-    pub result_preview: ResultPreview,
-}
-
-/// The result's small picture beside the input in the window: how large
-/// it is, and in which corner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
-pub struct ResultPreview {
-    /// From 1, the smallest, to 5.
-    pub size: u8,
-    pub corner: Corner,
-}
-
-impl Default for ResultPreview {
-    fn default() -> ResultPreview {
-        ResultPreview { size: 3, corner: Corner::default() }
-    }
-}
-
-/// A corner of the preview.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum Corner {
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    #[default]
-    BottomRight,
-}
-
-impl Corner {
-    pub fn left(self) -> bool {
-        matches!(self, Corner::TopLeft | Corner::BottomLeft)
-    }
-
-    pub fn top(self) -> bool {
-        matches!(self, Corner::TopLeft | Corner::TopRight)
-    }
-
-    /// The corner on the `left` or right, at the `top` or bottom.
-    pub fn at(left: bool, top: bool) -> Corner {
-        match (left, top) {
-            (true, true) => Corner::TopLeft,
-            (false, true) => Corner::TopRight,
-            (true, false) => Corner::BottomLeft,
-            (false, false) => Corner::BottomRight,
-        }
-    }
-}
-
-/// The window's colours.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum Theme {
-    /// As the system has it.
-    #[default]
-    System,
-    Light,
-    Dark,
+    /// The window's settings, which the window reads and words itself:
+    /// kept here as written, and saved again with the rest. They aren't
+    /// held to this file's strictness, so a setting a newer window writes
+    /// never breaks the command line.
+    #[serde(skip_serializing_if = "toml::Table::is_empty")]
+    #[schemars(with = "BTreeMap<String, serde_json::Value>")]
+    pub gui: toml::Table,
 }
 
 impl Config {
@@ -186,10 +111,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("config.toml");
         let mut config = Config { tgs_preset: Some("tgs-fast".into()), ..Config::default() };
-        config.gui.output_dir = Some(dir.path().join("out"));
+        config.gui.insert("output-dir".into(), "out".into());
         config.ffmpeg.choice = FfmpegChoice::System;
         config.save(&path).unwrap();
         assert_eq!(Config::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn leaves_the_window_its_own_settings() {
+        // what the window writes is its own to read, even keys it learns
+        // later; the rest of the file still catches typos
+        let text = "preset = 'fast'\n[gui]\nnewer-setting = { any = 1 }\ntheme = 7\n";
+        let config: Config = toml::from_str(text).unwrap();
+        assert_eq!(config.gui["theme"].as_integer(), Some(7));
+        let saved: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+        assert_eq!(saved, config);
+        assert!(toml::from_str::<Config>("presett = 'fast'\n").is_err());
+        assert!(!toml::to_string(&Config::default()).unwrap().contains("[gui]"));
     }
 
     #[cfg(unix)]

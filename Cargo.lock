@@ -3903,6 +3903,7 @@ dependencies = [
  "tgradish-core",
  "tgradish-corpus",
  "tgradish-tgs",
+ "toml 1.1.7+spec-1.1.0",
  "wayland-backend",
  "wayland-client",
  "wayland-protocols",
