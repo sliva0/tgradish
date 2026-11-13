@@ -1,5 +1,6 @@
-//! The settings dialog: ffmpeg, where results go, and what new files start
-//! with. Changes apply at once; Save keeps them in `config.toml`.
+//! The Settings dialog, of the window's own settings: ffmpeg, where
+//! results go, and what new files start with. Changes apply at once; Save
+//! keeps them in `config.toml`.
 
 use std::path::{Path, PathBuf};
 
@@ -10,13 +11,13 @@ use tgradish_core::backend::Backend;
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::presets::{Format, Presets};
 
+use crate::file_settings;
 use crate::l10n::{self, fl};
 use crate::media::Task;
-use crate::settings;
 use crate::widgets::{self, note, row, segments};
 
 #[derive(Default)]
-pub(crate) struct Prefs {
+pub(crate) struct SettingsDialog {
     open: bool,
     /// Whether the window of tgradish's version and licences is open.
     pub(crate) about: bool,
@@ -37,7 +38,7 @@ pub(crate) struct Prefs {
     folder_unchosen: bool,
 }
 
-impl Prefs {
+impl SettingsDialog {
     pub(crate) fn open(&mut self) {
         let ffmpeg = match tgradish_core::ffmpeg::Ffmpeg::on_path() {
             Ok(found) => fl!("ffmpeg-found", path = found.ffmpeg.display().to_string()),
@@ -47,11 +48,11 @@ impl Prefs {
         let folder = tgradish_core::paths::pictures_dir()
             .map(|dir| fl!("for-example", example = dir.join("Stickers").display().to_string()))
             .unwrap_or_default();
-        *self = Prefs {
+        *self = SettingsDialog {
             open: true,
             about: self.about,
             placeholders: (ffmpeg, folder),
-            ..Prefs::default()
+            ..SettingsDialog::default()
         };
     }
 
@@ -64,18 +65,18 @@ impl Prefs {
 /// that started the window chose its ffmpeg, over the settings'.
 pub(crate) fn show(
     ctx: &egui::Context,
-    prefs: &mut Prefs,
+    dialog: &mut SettingsDialog,
     config: &mut Config,
     ffmpeg_given: bool,
     config_path: Option<&Path>,
     presets: &Presets,
 ) {
-    if !prefs.open {
+    if !dialog.open {
         return;
     }
-    if let Some(found) = prefs.checking.as_ref().and_then(Task::poll) {
-        prefs.ffmpeg_status = Some(found.unwrap_or_else(|message| (false, message)));
-        prefs.checking = None;
+    if let Some(found) = dialog.checking.as_ref().and_then(Task::poll) {
+        dialog.ffmpeg_status = Some(found.unwrap_or_else(|message| (false, message)));
+        dialog.checking = None;
     }
     let mut close = false;
     let modal = egui::Modal::new(egui::Id::new("settings")).show(ctx, |ui| {
@@ -92,12 +93,12 @@ pub(crate) fn show(
         // the dialog fits the window, its settings scrolling within
         let room = (ctx.content_rect().height() - 150.0).max(200.0);
         egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
-            sections(ui, prefs, config, ffmpeg_given, presets);
+            sections(ui, dialog, config, ffmpeg_given, presets);
         });
         ui.separator();
         ui.horizontal(|ui| {
             if ui.button(fl!("save")).on_hover_text(fl!("save", "hint")).clicked() {
-                prefs.saved = Some(match config_path {
+                dialog.saved = Some(match config_path {
                     Some(path) => match config.save(path) {
                         Ok(()) => Ok(fl!("saved-to", path = path.display().to_string())),
                         Err(err) => Err(fl!("not-saved", error = err.to_string())),
@@ -107,12 +108,12 @@ pub(crate) fn show(
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button(fl!("about-and-licences")).clicked() {
-                    prefs.about = true;
+                    dialog.about = true;
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     // cut short where it is long, as a path can be
                     let weak = |text: &str| egui::RichText::new(text).weak().size(12.5);
-                    let text = match &prefs.saved {
+                    let text = match &dialog.saved {
                         Some(Ok(saved)) => weak(saved),
                         Some(Err(error)) => egui::RichText::new(error).color(widgets::BAD),
                         None => weak(&fl!("settings-note")),
@@ -124,13 +125,13 @@ pub(crate) fn show(
     });
     // changes stay either way, until tgradish closes unless saved
     if close || modal.should_close() {
-        prefs.open = false;
+        dialog.open = false;
     }
 }
 
 fn sections(
     ui: &mut egui::Ui,
-    prefs: &mut Prefs,
+    dialog: &mut SettingsDialog,
     config: &mut Config,
     ffmpeg_given: bool,
     presets: &Presets,
@@ -157,19 +158,19 @@ fn sections(
             let mut text =
                 ffmpeg.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
             let edit = egui::TextEdit::singleline(&mut text)
-                .hint_text(prefs.placeholders.0.as_str())
+                .hint_text(dialog.placeholders.0.as_str())
                 .desired_width(280.0);
             if ui.add(edit).changed() {
                 ffmpeg.path = (!text.trim().is_empty()).then(|| PathBuf::from(text.trim()));
             }
             if ui.button(fl!("choose")).clicked() {
-                prefs.pick = Some(crate::files::Pick::Ffmpeg);
+                dialog.pick = Some(crate::files::Pick::Ffmpeg);
             }
         });
         ui.horizontal(|ui| {
             let check = egui::Button::new(fl!("check"));
             let clicked = ui
-                .add_enabled(prefs.checking.is_none(), check)
+                .add_enabled(dialog.checking.is_none(), check)
                 .on_hover_text(fl!("check", "hint"))
                 .clicked();
             if clicked {
@@ -177,15 +178,15 @@ fn sections(
                 // chose another ffmpeg for this run: Check sits beside
                 // them, and Save keeps them
                 let ffmpeg = config.ffmpeg.clone();
-                prefs.checking = Some(Task::spawn(ui.ctx(), move |cancel| {
+                dialog.checking = Some(Task::spawn(ui.ctx(), move |cancel| {
                     Ok(check_ffmpeg(ffmpeg.choice, ffmpeg.path.as_deref(), cancel))
                 }));
-                prefs.ffmpeg_status = None;
+                dialog.ffmpeg_status = None;
             }
-            if prefs.checking.is_some() {
+            if dialog.checking.is_some() {
                 ui.spinner();
                 note(ui, fl!("checking-ffmpeg"));
-            } else if let Some((ok, status)) = &prefs.ffmpeg_status {
+            } else if let Some((ok, status)) = &dialog.ffmpeg_status {
                 let colour = if *ok { widgets::GOOD } else { widgets::BAD };
                 ui.add(egui::Label::new(egui::RichText::new(status).color(colour)).truncate());
             }
@@ -194,16 +195,16 @@ fn sections(
 
     widgets::section(ui, &fl!("results"));
     let gui = &mut config.gui;
-    let placeholder = &prefs.placeholders.1;
+    let placeholder = &dialog.placeholders.1;
     row(ui, &fl!("save-results"), "", Ok(()), |ui| {
-        let mut elsewhere = gui.output_dir.is_some() || prefs.folder_unchosen;
+        let mut elsewhere = gui.output_dir.is_some() || dialog.folder_unchosen;
         let choices = [
             (false, fl!("next-to-input"), String::new()),
             (true, fl!("in-a-folder"), String::new()),
         ];
         if segments(ui, &mut elsewhere, &choices, |_| Ok(())) {
             gui.output_dir = None;
-            prefs.folder_unchosen = elsewhere;
+            dialog.folder_unchosen = elsewhere;
         }
         ui.add_enabled_ui(elsewhere, |ui| {
             ui.horizontal(|ui| {
@@ -215,10 +216,10 @@ fn sections(
                 if ui.add(edit).changed() {
                     let dir = PathBuf::from(text.trim());
                     gui.output_dir = (!dir.as_os_str().is_empty()).then_some(dir);
-                    prefs.folder_unchosen = gui.output_dir.is_none();
+                    dialog.folder_unchosen = gui.output_dir.is_none();
                 }
                 if ui.button(fl!("choose")).clicked() {
-                    prefs.pick = Some(crate::files::Pick::OutputDir);
+                    dialog.pick = Some(crate::files::Pick::OutputDir);
                 }
             });
         });
@@ -269,22 +270,22 @@ fn sections(
     widgets::section(ui, &fl!("new-files"));
     row(ui, &fl!("make"), "", Ok(()), |ui| {
         let mut target = gui.target.unwrap_or_default();
-        if segments(ui, &mut target, &settings::targets(), |_| Ok(())) {
+        if segments(ui, &mut target, &file_settings::targets(), |_| Ok(())) {
             gui.target = Some(target);
         }
     });
     for (format, text) in
         [(Format::Webm, fl!("preset-for-webm")), (Format::Tgs, fl!("preset-for-tgs"))]
     {
-        let names = settings::preset_names(presets);
+        let names = file_settings::preset_names(presets);
         // what built-in presets do differs by format
         let choices: Vec<widgets::Choice<&str>> = names
             .iter()
             .map(|(name, description)| {
                 let builtin = presets.get(name).is_ok_and(|preset| preset.path.is_none());
-                let hint = settings::builtin_description(name, format).filter(|_| builtin);
+                let hint = file_settings::builtin_description(name, format).filter(|_| builtin);
                 let description = description.as_deref().unwrap_or("").to_owned();
-                (name.as_str(), settings::preset_label(name), hint.unwrap_or(description))
+                (name.as_str(), file_settings::preset_label(name), hint.unwrap_or(description))
             })
             .collect();
         let current = config.preset_for(format).to_owned();
@@ -348,7 +349,7 @@ mod tests {
         let mut harness = Harness::builder().with_size([1280.0, 820.0]).build_eframe(move |_| {
             App::with(Config::default(), Some(at.clone()), Presets::builtin(), None)
         });
-        harness.state_mut().prefs.open();
+        harness.state_mut().settings_dialog.open();
         harness.run_steps(2);
         // a change applies at once, and stays in the file once saved
         harness.state_mut().config.gui.overwrite = true;
@@ -360,7 +361,9 @@ mod tests {
         harness.state_mut().config.gui.reopen_files = false;
         harness.get_by_label("✖").click_accesskit();
         harness.run_steps(2);
-        assert!(!harness.state().prefs.is_open() && !harness.state().config.gui.reopen_files);
+        assert!(
+            !harness.state().settings_dialog.is_open() && !harness.state().config.gui.reopen_files
+        );
         assert!(Config::load(&path).unwrap().gui.reopen_files);
     }
 
@@ -372,7 +375,7 @@ mod tests {
         let mut harness = Harness::builder().with_size([1280.0, 820.0]).build_eframe(move |_| {
             App::with(Config::default(), Some(at.clone()), Presets::builtin(), None)
         });
-        harness.state_mut().prefs.open();
+        harness.state_mut().settings_dialog.open();
         harness.run_steps(2);
         harness.get_by_label(&fl!("in-a-folder")).click_accesskit();
         harness.run_steps(2);
@@ -393,21 +396,21 @@ mod tests {
         // the command line's choice is used, and said to be, but the
         // setting is what is checked
         harness.state_mut().ffmpeg_override = (Some(FfmpegChoice::System), None);
-        harness.state_mut().prefs.open();
+        harness.state_mut().settings_dialog.open();
         harness.run_steps(2);
         harness.get_by_label_contains("ffmpeg its command line gave");
         harness.get_by_label("Check").click_accesskit();
         harness.run_steps(2);
         // what it finds is taken in as the window draws
         for _ in 0..500 {
-            if harness.state().prefs.ffmpeg_status.is_some() {
+            if harness.state().settings_dialog.ffmpeg_status.is_some() {
                 break;
             }
             harness.step();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         // in the window's words, as reading a file without it would say
-        let status = harness.state().prefs.ffmpeg_status.clone();
+        let status = harness.state().settings_dialog.ffmpeg_status.clone();
         assert!(
             matches!(&status, Some((false, said)) if said.starts_with("ffmpeg wasn't found")),
             "{status:?}"

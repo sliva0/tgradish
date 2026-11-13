@@ -25,7 +25,7 @@ use crate::l10n::fl;
 use crate::outputs::{FileVersion, Written};
 use crate::widgets::toast;
 use crate::work::release;
-use crate::{accent, fallback, inspect, prefs, preset_dialogs, session, system, theme};
+use crate::{accent, fallback, inspect, preset_dialogs, session, settings_dialog, system, theme};
 #[cfg(all(unix, not(target_os = "macos")))]
 use crate::{dnd, toplevel_icon};
 
@@ -71,7 +71,7 @@ pub(crate) struct App {
     pub(crate) read_with: Option<Result<Backend, String>>,
     pub(crate) screen: Screen,
     pub(crate) inset: Inset,
-    pub(crate) prefs: prefs::Prefs,
+    pub(crate) settings_dialog: settings_dialog::SettingsDialog,
     /// The file dialog open, if one is, on a thread of its own.
     pub(crate) picking: Option<crate::media::Task<Option<crate::files::Picked>>>,
     /// A file dialog parented to the window, to ask with.
@@ -80,7 +80,7 @@ pub(crate) struct App {
     pub(crate) preset_dialog: Option<preset_dialogs::Dialog>,
     pub(crate) inspection: Option<inspect::Inspection>,
     /// The theme Settings showed last, to apply a change made there.
-    pub(crate) prefs_theme: Option<crate::config::Theme>,
+    pub(crate) theme_shown: Option<crate::config::Theme>,
     /// Where the open files are kept between runs; `None` where they
     /// aren't.
     pub(crate) session: Option<session::Store>,
@@ -238,12 +238,12 @@ impl App {
             read_with: None,
             screen: Screen::default(),
             inset: Inset::default(),
-            prefs: prefs::Prefs::default(),
+            settings_dialog: settings_dialog::SettingsDialog::default(),
             picking: None,
             file_dialog: rfd::FileDialog::new(),
             preset_dialog: None,
             inspection: None,
-            prefs_theme: None,
+            theme_shown: None,
             session: None,
             next_save: 0.0,
             fallbacks: fallback::Fallbacks::new(fonts()),
@@ -442,8 +442,8 @@ impl App {
     /// Whether a dialog is open over the window.
     pub(crate) fn dialog_open(&self) -> bool {
         self.picking.is_some()
-            || self.prefs.is_open()
-            || self.prefs.about
+            || self.settings_dialog.is_open()
+            || self.settings_dialog.about
             || self.inspection.is_some()
             || self.preset_dialog.is_some()
     }
@@ -540,25 +540,25 @@ impl eframe::App for App {
             });
         egui::CentralPanel::default().show(ui, |ui| self.main_panel(ui));
         let ffmpeg_given = self.ffmpeg_override != (None, None);
-        prefs::show(
+        settings_dialog::show(
             &ctx,
-            &mut self.prefs,
+            &mut self.settings_dialog,
             &mut self.config,
             ffmpeg_given,
             self.config_path.as_deref(),
             &self.presets,
         );
-        if let Some(pick) = self.prefs.pick.take() {
+        if let Some(pick) = self.settings_dialog.pick.take() {
             self.pick(&ctx, pick);
         }
         // as Settings or the theme button changes it
-        if self.prefs_theme != Some(self.config.gui.theme) {
+        if self.theme_shown != Some(self.config.gui.theme) {
             set_theme(&ctx, self.config.gui.theme);
-            self.prefs_theme = Some(self.config.gui.theme);
+            self.theme_shown = Some(self.config.gui.theme);
         }
         self.inspection_dialog(&ctx);
         self.preset_dialogs(&ctx);
-        if self.prefs.about {
+        if self.settings_dialog.about {
             let modal = egui::Modal::new(egui::Id::new("about")).show(&ctx, |ui| {
                 ui.set_width(600.0);
                 about(ui);
@@ -569,7 +569,7 @@ impl eframe::App for App {
                 .inner
             });
             if modal.inner || modal.should_close() {
-                self.prefs.about = false;
+                self.settings_dialog.about = false;
             }
         }
         if let Some(message) = &self.message

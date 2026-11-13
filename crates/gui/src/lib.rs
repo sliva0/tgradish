@@ -19,6 +19,7 @@ mod dbus;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod dnd;
 mod fallback;
+mod file_settings;
 mod files;
 mod fonts;
 mod icon;
@@ -31,14 +32,13 @@ mod l10n;
 mod media;
 mod outputs;
 mod predict;
-mod prefs;
 mod preset_dialogs;
 mod preview;
 mod result;
 #[cfg(test)]
 mod screenshots;
 mod session;
-mod settings;
+mod settings_dialog;
 #[cfg(test)]
 mod strings;
 mod system;
