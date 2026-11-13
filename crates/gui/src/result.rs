@@ -69,7 +69,7 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
             },
         );
     }
-    if done.lossy {
+    if done.changed {
         widgets::note(ui, fl!("changed-to-fit"));
     }
     if made.job.replaces {
