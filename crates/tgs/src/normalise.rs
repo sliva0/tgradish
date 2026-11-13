@@ -16,8 +16,10 @@ use crate::limits::telegram::{FPS, MAX_FRAMES};
 use crate::{Error, Result};
 
 const NANOS: u64 = 1_000_000_000;
-/// The slowest and fastest an animation may play, as many times as fast as
-/// its input.
+/// The slowest and fastest tempo [`Options::tempo`] takes, as many times as
+/// fast as the input. Left to itself, normalising plays an input longer
+/// than 3 seconds as fast as fits it into them, which for one longer than
+/// 30 seconds is faster than may be asked for.
 pub const TEMPOS: std::ops::RangeInclusive<f64> = 0.1..=10.0;
 /// Longest stretch Telegram allows, in nanoseconds.
 const MAX_NANOS: u64 = MAX_FRAMES as u64 * NANOS / FPS as u64;
@@ -248,7 +250,8 @@ pub struct Report {
     pub likely_scale: Option<LikelyScale>,
     /// Input pixels a forced scale changed.
     pub snapped_pixels: u64,
-    /// Opaque colours, counting each (colour, alpha) once.
+    /// Visible colours, translucent ones too, counting each (colour,
+    /// alpha) once: all but the fully transparent.
     pub colours: usize,
     pub frames: usize,
     /// Consecutive identical frames joined into one.
