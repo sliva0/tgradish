@@ -189,7 +189,8 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
         version: env!("CARGO_PKG_VERSION"),
         default_format: Format::default(),
         cancel: "run with --cancel-on-stdin and write a line reading cancel to stdin: it stops \
-                 as Ctrl-C does, exiting with 130; without the flag stdin isn't read",
+                 as Ctrl-C does, convert exiting with 130 and watch stopping as done, with 0; \
+                 without the flag stdin isn't read",
         formats: vec![
             FormatDescription {
                 format: Format::Webm,

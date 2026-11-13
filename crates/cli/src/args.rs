@@ -40,7 +40,8 @@ const EXIT_STATUS: &str = "  0    Done.
   3    Everything was made or read, but Telegram would refuse a result or
        an inspected file: as a .tgs that --exact keeps too large, WebM
        with --fit off over the limit, or a picture of the wrong size.
-  130  Cancelled, by Ctrl-C or with --cancel-on-stdin.";
+  130  convert was cancelled, by Ctrl-C or with --cancel-on-stdin; watch
+       stops as done when cancelled, with 0.";
 
 /// `sections` under their headings, styled as clap styles its own.
 fn sections(sections: &[(&str, &str)]) -> String {
