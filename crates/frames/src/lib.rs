@@ -138,12 +138,11 @@ pub struct DecodeOptions {
     pub tag: Option<String>,
     /// Aseprite: layers to show or hide, over what the file shows.
     pub layers: Layers,
-    pub limits: Limits,
 }
 
-/// Decodes an animated or still image. Still images get one frame of
-/// [`DEFAULT_FRAME_DURATION`].
-pub fn decode(bytes: &[u8], options: &DecodeOptions) -> Result<Animation> {
+/// Decodes an animated or still image, within `limits`. Still images get
+/// one frame of [`DEFAULT_FRAME_DURATION`].
+pub fn decode(bytes: &[u8], options: &DecodeOptions, limits: &Limits) -> Result<Animation> {
     let format = Format::detect(bytes).ok_or(Error::UnknownFormat)?;
     if format != Format::Aseprite && options.tag.is_some() {
         return Err(Error::TagWithoutAseprite);
@@ -152,9 +151,10 @@ pub fn decode(bytes: &[u8], options: &DecodeOptions) -> Result<Animation> {
         return Err(Error::LayersWithoutAseprite);
     }
     match format {
-        Format::Aseprite => Sprite::read_with(bytes, &options.limits)?
-            .animation(options.tag.as_deref(), &options.layers),
-        _ => raster::decode(bytes, format, &options.limits),
+        Format::Aseprite => {
+            Sprite::read(bytes, limits)?.animation(options.tag.as_deref(), &options.layers)
+        }
+        _ => raster::decode(bytes, format, limits),
     }
 }
 
@@ -301,6 +301,9 @@ mod tests {
         assert_eq!(Format::detect(b"RIFF\0\0\0\0WEBPVP8 "), Some(Format::WebP));
         assert_eq!(Format::detect(b"\0\0\0\0\xe0\xa5"), Some(Format::Aseprite));
         assert_eq!(Format::detect(b"RIFF\0\0\0\0WAVE"), None);
-        assert_eq!(decode(b"nope", &DecodeOptions::default()), Err(Error::UnknownFormat));
+        assert_eq!(
+            decode(b"nope", &DecodeOptions::default(), &Limits::default()),
+            Err(Error::UnknownFormat)
+        );
     }
 }

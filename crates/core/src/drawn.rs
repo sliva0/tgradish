@@ -132,8 +132,9 @@ pub fn readable(
         None if is_animated_webp(input) => {
             cancel.check()?;
             let bytes = source::read(input)?;
-            let animation = frames::decode(&bytes, &frames::DecodeOptions::default())
-                .map_err(|err| source::unreadable(input, err))?;
+            let animation =
+                frames::decode(&bytes, &frames::DecodeOptions::default(), &Limits::default())
+                    .map_err(|err| source::unreadable(input, err))?;
             (animation, Aseprite::default())
         }
         None => {
@@ -234,11 +235,14 @@ mod tests {
             readable(path, None, &options, &CancelToken::new()).map(|readable| {
                 assert!(readable.is_drawn());
                 let bytes = std::fs::read(readable.path()).unwrap();
-                frames::decode(&bytes, &frames::DecodeOptions::default()).unwrap()
+                frames::decode(&bytes, &frames::DecodeOptions::default(), &Limits::default())
+                    .unwrap()
             })
         };
         // every frame, as long as each lasts
-        let sprite = frames::aseprite::Sprite::read(&std::fs::read(&ase).unwrap()).unwrap();
+        let sprite =
+            frames::aseprite::Sprite::read(&std::fs::read(&ase).unwrap(), &Limits::default())
+                .unwrap();
         let all = sprite.animation(None, &Layers::default()).unwrap();
         assert_eq!(read(&ase, Options::default()).unwrap(), all);
         let idle = Options { tag: Some("idle".into()), ..Options::default() };
@@ -292,7 +296,8 @@ mod tests {
         let sequence = [folder.clone()];
         let drawn = readable(&folder, Some(&sequence), &twelve, &CancelToken::new()).unwrap();
         let bytes = std::fs::read(drawn.path()).unwrap();
-        let animation = frames::decode(&bytes, &frames::DecodeOptions::default()).unwrap();
+        let animation =
+            frames::decode(&bytes, &frames::DecodeOptions::default(), &Limits::default()).unwrap();
         assert_eq!(animation.frames().len(), steps.len());
         let twelfth = std::time::Duration::from_secs(1) / 12;
         for frame in animation.frames() {
@@ -332,7 +337,9 @@ mod tests {
         std::fs::write(&path, &glow.bytes).unwrap();
         let drawn = readable(&path, None, &Options::default(), &CancelToken::new()).unwrap();
         assert!(drawn.is_drawn());
-        let decode = |bytes: &[u8]| frames::decode(bytes, &frames::DecodeOptions::default());
+        let decode = |bytes: &[u8]| {
+            frames::decode(bytes, &frames::DecodeOptions::default(), &Limits::default())
+        };
         let bytes = std::fs::read(drawn.path()).unwrap();
         assert_eq!(decode(&bytes).unwrap(), decode(&glow.bytes).unwrap());
         // a still one ffmpeg reads as it is

@@ -375,11 +375,7 @@ pub struct Sprite {
 }
 
 impl Sprite {
-    pub fn read(bytes: &[u8]) -> Result<Sprite> {
-        Sprite::read_with(bytes, &Limits::default())
-    }
-
-    pub fn read_with(bytes: &[u8], limits: &Limits) -> Result<Sprite> {
+    pub fn read(bytes: &[u8], limits: &Limits) -> Result<Sprite> {
         let mut file = Reader::new(bytes);
         let mut header = Reader::new(file.take(128)?);
         header.skip(4)?;
@@ -1278,7 +1274,7 @@ mod tests {
     }
 
     fn decode(bytes: &[u8]) -> Result<Animation> {
-        Sprite::read(bytes)?.animation(None, &Layers::default())
+        Sprite::read(bytes, &Limits::default())?.animation(None, &Layers::default())
     }
 
     #[test]
@@ -1311,7 +1307,7 @@ mod tests {
                 vec![linked_cel(0, 0)],
             ],
         );
-        let sprite = Sprite::read(&bytes).unwrap();
+        let sprite = Sprite::read(&bytes, &Limits::default()).unwrap();
         let first = |tag| -> Vec<Colour> {
             let animation = sprite.animation(tag, &Layers::default()).unwrap();
             (0..animation.frames().len()).map(|i| animation.pixel(i, 0, 0).unwrap()).collect()
@@ -1364,7 +1360,7 @@ mod tests {
                 image_cel(0, (0, 0), (1, 1), &RED, false),
             ]],
         );
-        let sprite = Sprite::read(&bytes).unwrap();
+        let sprite = Sprite::read(&bytes, &Limits::default()).unwrap();
         let colours: Vec<_> = sprite.tags().iter().map(|tag| tag.colour).collect();
         assert_eq!(colours, [[1, 2, 3, 255], [7, 8, 9, 200]]);
     }
@@ -1579,7 +1575,7 @@ mod tests {
                 image_cel(5, (3, 0), (1, 1), &BLUE, false),
             ]],
         );
-        let sprite = Sprite::read(&bytes).unwrap();
+        let sprite = Sprite::read(&bytes, &Limits::default()).unwrap();
         let listed: Vec<_> = sprite
             .layers()
             .into_iter()
@@ -1771,10 +1767,10 @@ mod tests {
     fn keeps_within_limits() {
         let big = file(5000, 5000, 32, 1, &[vec![layer(1, 0, 0, 0, 255)]]);
         let small = Limits { max_dimension: 4096, max_bytes: 1 << 20 };
-        assert!(matches!(Sprite::read_with(&big, &small), Err(Error::TooLarge(_))));
+        assert!(matches!(Sprite::read(&big, &small), Err(Error::TooLarge(_))));
         let roomy = Limits { max_dimension: 8192, max_bytes: 1 << 20 };
         // the canvas is fine, 100 MB of frames aren't
-        let sprite = Sprite::read_with(&big, &roomy).unwrap();
+        let sprite = Sprite::read(&big, &roomy).unwrap();
         assert!(matches!(sprite.animation(None, &Layers::default()), Err(Error::TooLarge(_))));
         // nor is a cel that claims to be huge
         let cel = file(
@@ -1784,7 +1780,7 @@ mod tests {
             1,
             &[vec![layer(1, 0, 0, 0, 255), image_cel(0, (0, 0), (60000, 60000), &RED, false)]],
         );
-        assert!(matches!(Sprite::read_with(&cel, &roomy), Err(Error::TooLarge(_))));
+        assert!(matches!(Sprite::read(&cel, &roomy), Err(Error::TooLarge(_))));
     }
 
     #[test]
@@ -1795,9 +1791,9 @@ mod tests {
         let bytes = file(4, 4, 32, 1, &[vec![layer(1, 0, 0, 0, 255), cel]]);
         let limits = |max_bytes| Limits { max_dimension: 8192, max_bytes };
         let draw = |max_bytes| {
-            Sprite::read_with(&bytes, &limits(max_bytes))?.animation(None, &Layers::default())
+            Sprite::read(&bytes, &limits(max_bytes))?.animation(None, &Layers::default())
         };
-        assert!(matches!(Sprite::read_with(&bytes, &limits(63)), Err(Error::TooLarge(_))));
+        assert!(matches!(Sprite::read(&bytes, &limits(63)), Err(Error::TooLarge(_))));
         assert!(matches!(draw(191), Err(Error::TooLarge(_))));
         assert_eq!(draw(192).unwrap().frames().len(), 1);
 
@@ -1806,8 +1802,8 @@ mod tests {
         // the tileset's 12 bytes of pixels
         let tiles =
             file(1, 1, 32, 1, &[vec![layer(1, 2, 0, 0, 255), tileset(), tilemap(8, &[1; 100])]]);
-        assert!(matches!(Sprite::read_with(&tiles, &limits(511)), Err(Error::TooLarge(_))));
-        let sprite = Sprite::read_with(&tiles, &limits(512)).unwrap();
+        assert!(matches!(Sprite::read(&tiles, &limits(511)), Err(Error::TooLarge(_))));
+        let sprite = Sprite::read(&tiles, &limits(512)).unwrap();
         assert_eq!(sprite.spent, 412);
     }
 
@@ -1908,7 +1904,7 @@ mod tests {
         // and the default where the header says 0 too
         assert_eq!(durations(bytes([0, 40], 0)), [100, 40]);
         assert_eq!(
-            Sprite::read(&bytes([0, 40], 0)).unwrap().durations()[0],
+            Sprite::read(&bytes([0, 40], 0), &Limits::default()).unwrap().durations()[0],
             DEFAULT_FRAME_DURATION
         );
     }

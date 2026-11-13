@@ -152,7 +152,8 @@ mod tests {
 
     /// How long each frame of a decoded file shows, in milliseconds.
     fn delays(bytes: &[u8]) -> Vec<u128> {
-        let animation = crate::decode(bytes, &DecodeOptions::default()).unwrap();
+        let animation =
+            crate::decode(bytes, &DecodeOptions::default(), &crate::Limits::default()).unwrap();
         animation.frames().iter().map(|frame| frame.duration.as_millis()).collect()
     }
 
