@@ -25,14 +25,18 @@ const VERSION: u32 = 1;
 
 /// A session file as it is read: its items one by one, so that one this
 /// version can't read, as with an option it doesn't know, is left out alone.
+/// Anything this version doesn't know, an item's or the session's, makes
+/// what holds it unreadable, so that it is set aside whole rather than
+/// written again without what a newer version kept there.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Read {
     version: u32,
     items: Vec<serde_json::Value>,
     selected: Option<usize>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct Session {
     version: u32,
@@ -42,7 +46,7 @@ pub(crate) struct Session {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 struct Saved {
     inputs: Vec<PathBuf>,
     sequence: bool,
@@ -58,7 +62,7 @@ struct Saved {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 struct SavedResult {
     output: PathBuf,
     /// The file as the window wrote it, by which it knows its own result
@@ -622,6 +626,43 @@ mod tests {
         three.pasted_copy = Some(store.copy_pasted(3, &three.inputs[0]).unwrap());
         store.save(&session(&[three], None)).unwrap();
         assert_eq!(copies(&path), 1);
+    }
+
+    #[test]
+    fn sets_aside_whatever_holds_what_it_does_not_know() {
+        let mut item = Item::new(1, vec![PathBuf::from("/a.png")], false, Target::Sticker);
+        item.earlier = Some((
+            Conversion::of(
+                Job::waiting("/a.sticker.tgs".into()),
+                Format::Tgs,
+                item.choices.clone(),
+            ),
+            Load::Idle,
+        ));
+        item.earlier.as_mut().unwrap().0.recipe = Some(Recipe::Tgs(Default::default()));
+        let written = HashMap::from([(
+            PathBuf::from("/a.sticker.tgs"),
+            Written { item: 1, version: FileVersion::of(Path::new("/")).unwrap() },
+        )]);
+        let text = Session::of(&[item], None, &written).to_json().unwrap();
+        assert_eq!(
+            parse(&text).map(|(session, unread)| (session.items.len(), unread)),
+            Some((1, 0))
+        );
+        // a key of its own anywhere in an item leaves the item out
+        for within in
+            [r#""items":[{"#, r#""choices":{"#, r#""result":{"#, r#""written":{"#, r#""tgs":{"#]
+        {
+            assert!(text.contains(within), "{within} in {text}");
+            // where it is all there is, as in options none of which are set
+            let newer =
+                text.replacen(within, &format!(r#"{within}"made-up":1,"#), 1).replace(",}", "}");
+            let read = parse(&newer).map(|(session, unread)| (session.items.len(), unread));
+            assert_eq!(read, Some((0, 1)), "{newer}");
+        }
+        // and one of the session's own leaves out all of it
+        let newer = text.replacen('{', r#"{"made-up":1,"#, 1);
+        assert!(parse(&newer).is_none(), "{newer}");
     }
 
     #[test]
