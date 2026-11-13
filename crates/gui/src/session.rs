@@ -7,15 +7,17 @@
 //! set aside rather than written over, and the copies it may name are left
 //! alone. Only one window at a time keeps a session, the first to open.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use tgradish_core::clipboard::PASTED_IMAGE_NAME;
 use tgradish_core::presets::Format;
 
 use crate::item::{Choices, Item, Made};
 use crate::jobs::{Done, Job, Status};
+use crate::outputs::{FileVersion, Written};
 
 /// What the file says it is, so a session of another layout is left alone.
 const VERSION: u32 = 1;
@@ -56,8 +58,22 @@ struct Saved {
 #[serde(rename_all = "kebab-case")]
 struct SavedResult {
     output: PathBuf,
+    /// The file as the window wrote it, by which it knows its own result
+    /// again; `None` for one it found.
+    written: Option<FileVersion>,
     format: Format,
     choices: Choices,
+}
+
+/// A session's files, open again.
+pub struct Restored {
+    pub items: Vec<Item>,
+    pub selected: Option<u64>,
+    /// How many were left out because their files are gone.
+    pub gone: usize,
+    /// The results among them that an earlier run wrote, for the items
+    /// that have them now.
+    pub written: Vec<(PathBuf, Written)>,
 }
 
 /// Where pasted images are kept, next to the session file.
@@ -245,8 +261,12 @@ fn keeps(item: &Item) -> bool {
 
 impl Session {
     /// What `items` are, `selected` the one selected, without those the
-    /// session can't hold.
-    pub fn of(items: &[Item], selected: Option<u64>) -> Session {
+    /// session can't hold. `written` are the results the window wrote.
+    pub fn of(
+        items: &[Item],
+        selected: Option<u64>,
+        written: &HashMap<PathBuf, Written>,
+    ) -> Session {
         let kept: Vec<&Item> = items.iter().filter(|item| keeps(item)).collect();
         let saved = kept
             .iter()
@@ -262,6 +282,10 @@ impl Session {
                     choices: item.choices.clone(),
                     result: made.map(|made| SavedResult {
                         output: made.job.output.clone(),
+                        written: written
+                            .get(&made.job.output)
+                            .filter(|written| written.item == item.id)
+                            .map(|written| written.version),
                         format: made.format,
                         choices: made.choices.clone(),
                     }),
@@ -276,34 +300,38 @@ impl Session {
         serde_json::to_string(self)
     }
 
-    /// The items again, numbered from `next_id`, and which is selected;
-    /// also how many were left out because their files are gone.
-    pub fn restore(self, path: &Path, mut next_id: u64) -> (Vec<Item>, Option<u64>, usize) {
-        let mut items = Vec::new();
-        let mut selected = None;
-        let mut gone = 0;
+    /// The items again, numbered from `next_id`.
+    pub fn restore(self, path: &Path, mut next_id: u64) -> Restored {
+        let mut restored =
+            Restored { items: Vec::new(), selected: None, gone: 0, written: Vec::new() };
         for (index, saved) in self.items.into_iter().enumerate() {
+            let result =
+                saved.result.as_ref().map(|result| (result.output.clone(), result.written));
             let Some(item) = restore_item(saved, path, next_id) else {
-                gone += 1;
+                restored.gone += 1;
                 continue;
             };
             if self.selected == Some(index) {
-                selected = Some(item.id);
+                restored.selected = Some(item.id);
+            }
+            if let Some((output, Some(version))) = result {
+                restored.written.push((output, Written { item: item.id, version }));
             }
             next_id += 1;
-            items.push(item);
+            restored.items.push(item);
         }
-        (items, selected, gone)
+        restored
     }
 }
 
 fn restore_item(saved: Saved, path: &Path, id: u64) -> Option<Item> {
-    // a pasted image goes back into a folder of its own
     let (inputs, pasted) = match &saved.pasted {
         Some(name) if !plain_name(name) => return None,
+        // a pasted image goes back into a folder of its own, under the
+        // name it was pasted with, which its result is named after
         Some(name) => {
             let dir = tempfile::Builder::new().prefix("tgradish-pasted-").tempdir().ok()?;
-            let image = dir.path().join(name);
+            let image = dir.path().join(PASTED_IMAGE_NAME);
             std::fs::copy(pasted_dir(path).join(name), &image).ok()?;
             (vec![image], Some(dir))
         }
@@ -335,7 +363,7 @@ mod tests {
 
     fn pasted(id: u64, bytes: &[u8]) -> Item {
         let dir = tempfile::tempdir().unwrap();
-        let image = dir.path().join("pasted.png");
+        let image = dir.path().join(PASTED_IMAGE_NAME);
         std::fs::write(&image, bytes).unwrap();
         let mut item = Item::new(id, vec![image], false, Target::Sticker);
         item.pasted = Some(dir);
@@ -354,9 +382,14 @@ mod tests {
         for item in items.iter_mut().filter(|item| item.kept.is_none()) {
             item.kept = Some(store.keep_pasted(item.id, &item.inputs[0]).unwrap());
         }
-        store.save(&Session::of(items, None)).unwrap();
+        store.save(&session(items, None)).unwrap();
         drop(store);
-        Store::open(path.to_path_buf()).unwrap().read().unwrap().session.restore(path, 1).0
+        Store::open(path.to_path_buf()).unwrap().read().unwrap().session.restore(path, 1).items
+    }
+
+    /// The session of `items`, none of whose results the window wrote.
+    fn session(items: &[Item], selected: Option<u64>) -> Session {
+        Session::of(items, selected, &HashMap::new())
     }
 
     fn copies(path: &Path) -> usize {
@@ -374,6 +407,10 @@ mod tests {
         let mut items = again(&mut items, &path);
         let items = again(&mut items, &path);
         assert_eq!(contents(&items), [b"two".to_vec(), b"three".to_vec()]);
+        // named as when they were pasted, as their results are named after them
+        for item in &items {
+            assert_eq!(item.inputs[0].file_name().unwrap(), PASTED_IMAGE_NAME);
+        }
         // and only their copies are kept
         assert_eq!(copies(&path), 2);
     }
@@ -408,9 +445,9 @@ mod tests {
             // come and go, and leaves the other's alone
             let mut items = [pasted(1, b"one")];
             items[0].kept = Some(store.keep_pasted(1, &items[0].inputs[0]).unwrap());
-            store.save(&Session::of(&items, None)).unwrap();
+            store.save(&session(&items, None)).unwrap();
             assert_eq!(copies(&path), 2);
-            store.save(&Session::of(&[], None)).unwrap();
+            store.save(&session(&[], None)).unwrap();
             assert_eq!(copies(&path), 1);
             assert_eq!(std::fs::read(pasted_dir(&path).join("19a0-3.png")).unwrap(), b"pasted");
             assert_eq!(std::fs::read_to_string(&unreadable.kept).unwrap(), text);
@@ -427,7 +464,7 @@ mod tests {
             item.kept = Some(store.keep_pasted(item.id, &item.inputs[0]).unwrap());
             item.choices.webm.crf = Some(20);
         }
-        store.save(&Session::of(&items, Some(2))).unwrap();
+        store.save(&session(&items, Some(2))).unwrap();
         // as a newer tgradish would keep the first, with an option of its own
         let text = std::fs::read_to_string(&path).unwrap();
         let newer = text.replacen(r#""webm":{"#, r#""webm":{"made-up":1,"#, 1);
@@ -441,10 +478,11 @@ mod tests {
         assert_eq!(unreadable.files, Some(1));
         assert_eq!(std::fs::read_to_string(&unreadable.kept).unwrap(), newer);
         // the other is there, and still the one selected
-        let (items, selected, gone) = loaded.session.restore(&path, 7);
-        assert_eq!((contents(&items), selected, gone), (vec![b"two".to_vec()], Some(7), 0));
+        let restored = loaded.session.restore(&path, 7);
+        assert_eq!(contents(&restored.items), [b"two".to_vec()]);
+        assert_eq!((restored.selected, restored.gone), (Some(7), 0));
         // and writing the session leaves the copy of the one left out
-        store.save(&Session::of(&items, selected)).unwrap();
+        store.save(&session(&restored.items, restored.selected)).unwrap();
         assert_eq!(copies(&path), 2);
     }
 
@@ -456,9 +494,8 @@ mod tests {
         std::fs::write(&outside, b"keep").unwrap();
         let mut one = pasted(1, b"one");
         one.kept = Some(outside.to_str().unwrap().to_owned());
-        let session = Session::of(&[one], None);
-        let (items, _, gone) = session.restore(&path, 1);
-        assert!(items.is_empty() && gone == 1);
+        let restored = session(&[one], None).restore(&path, 1);
+        assert!(restored.items.is_empty() && restored.gone == 1);
         assert_eq!(std::fs::read(&outside).unwrap(), b"keep");
         for name in ["../a.png", "a/b.png", "..", ""] {
             assert!(!plain_name(name), "{name}");
@@ -471,7 +508,7 @@ mod tests {
         let mut item = Item::new(1, vec![PathBuf::from("/a.png")], false, Target::Sticker);
         item.choices.show_layers = Some(vec!["sketch".into()]);
         item.choices.webm.exact_scale = "2".parse().ok();
-        let json = Session::of(&[item], None).to_json().unwrap();
+        let json = session(&[item], None).to_json().unwrap();
         for name in ["format-guessed", "show-layers", "exact-scale"] {
             assert!(json.contains(&format!("\"{name}\":")), "{name} in {json}");
         }
@@ -491,7 +528,7 @@ mod tests {
             Item::new(2, vec![fine], false, Target::Sticker),
             pasted(3, b"three"),
         ];
-        let session = Session::of(&items, Some(2));
+        let session = session(&items, Some(2));
         assert!(session.to_json().is_ok());
         assert_eq!((session.items.len(), session.selected), (1, Some(0)));
     }
