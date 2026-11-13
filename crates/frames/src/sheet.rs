@@ -18,14 +18,20 @@ pub struct Sheet {
     pub frame_duration: Duration,
 }
 
-/// Splits a still image into the frames of a sprite sheet.
+/// Splits a still image into the frames of a sprite sheet. Animated
+/// images are refused, as [`split_sheet`] refuses them.
 pub fn sprite_sheet(bytes: &[u8], sheet: &Sheet, limits: &Limits) -> Result<Animation> {
     split_sheet(&decode(bytes, &DecodeOptions::default(), limits)?, sheet, limits)
 }
 
-/// Splits a decoded `image` into the frames of a sprite sheet, counting
-/// them against `limits` beside the image.
+/// Splits a decoded still `image` into the frames of a sprite sheet,
+/// counting them against `limits` beside the image. An animation of
+/// several frames is refused, as which of them holds the sheet isn't
+/// this function's to guess.
 pub fn split_sheet(image: &Animation, sheet: &Sheet, limits: &Limits) -> Result<Animation> {
+    let [picture] = image.frames() else {
+        return Err(Error::SheetAnimated { frames: image.frames().len() });
+    };
     let (width, height) = (image.width(), image.height());
     let grid_error =
         || Error::SheetGrid { width, height, columns: sheet.columns, rows: sheet.rows };
@@ -44,8 +50,7 @@ pub fn split_sheet(image: &Animation, sheet: &Sheet, limits: &Limits) -> Result<
         return Err(Error::SheetFrames { cells, frames });
     }
 
-    // Only the first frame of an animated image is used as the sheet.
-    let source = &image.frames()[0].rgba;
+    let source = &picture.rgba;
     let row_bytes = cell_width as usize * 4;
     let rows = |cell: u32| {
         let left = (cell % sheet.columns * cell_width) as usize;
@@ -64,7 +69,7 @@ pub fn split_sheet(image: &Animation, sheet: &Sheet, limits: &Limits) -> Result<
             .map_or(1, |last| last as u32 + 1),
     };
     // the cells are copied out while the sheet is held
-    let held = image.frames().iter().map(|frame| frame.rgba.len()).sum::<usize>();
+    let held = source.len();
     let left = Limits { max_bytes: limits.max_bytes.saturating_sub(held), ..*limits };
     left.check(cell_width, cell_height, count as usize)?;
     let frames = (0..count)
@@ -135,6 +140,10 @@ mod tests {
         assert_eq!(durations(split), [Duration::from_millis(1); 2]);
 
         let joined = sequence([&png[..], &png[..]], Duration::ZERO, &limits).unwrap();
-        assert_eq!(durations(joined), [DEFAULT_FRAME_DURATION; 2]);
+        assert_eq!(durations(joined.clone()), [DEFAULT_FRAME_DURATION; 2]);
+
+        // an animation isn't a sheet
+        let animated = split_sheet(&joined, &sheet(Duration::ZERO), &limits);
+        assert_eq!(animated, Err(Error::SheetAnimated { frames: 2 }));
     }
 }
