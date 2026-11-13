@@ -33,7 +33,9 @@ impl App {
         let mut reading = self
             .items
             .iter()
-            .filter(|item| item.video.is_loading() || item.art.is_loading())
+            .filter(|item| {
+                item.video.is_loading() || item.art.is_loading() || item.result_clip.is_loading()
+            })
             .count();
         for item in &mut self.items {
             let is_selected = selected == Some(item.id);
@@ -63,6 +65,17 @@ impl App {
                 if !kept {
                     item.result_clip = Load::Idle;
                 }
+            }
+            // the result's thumbnail, as made in an earlier run, and all of
+            // it for the selected item
+            let result_wanted = is_selected || item.result_thumb.is_none();
+            if result_wanted
+                && item.result_clip.is_idle()
+                && item.made.is_some()
+                && (is_selected || reading < READING)
+            {
+                load_result_clip(ctx, item, &backend);
+                reading += usize::from(item.result_clip.is_loading());
             }
             // read what the item needs
             let wanted = is_selected || item.input_thumb.is_none();
@@ -113,9 +126,6 @@ impl App {
                     }
                     reading += 1;
                 }
-            }
-            if is_selected && item.result_clip.is_idle() && item.made.is_some() {
-                load_result_clip(ctx, item, &backend);
             }
         }
         self.load_detail(ctx, &backend);

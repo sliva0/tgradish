@@ -135,7 +135,7 @@ impl App {
     /// settings say not to, and keeps the session there from now on. A
     /// window opened while another has the session starts empty and keeps
     /// none.
-    fn reopen(&mut self, path: PathBuf) {
+    pub(crate) fn reopen(&mut self, path: PathBuf) {
         let Some(mut store) = session::Store::open(path) else { return };
         // with the setting off, the first save empties what is there
         if !self.config.gui.forget_files {
@@ -195,7 +195,7 @@ impl App {
     }
 
     /// Keeps the open files and their settings, if they changed.
-    fn save_session(&mut self) {
+    pub(crate) fn save_session(&mut self) {
         // those pasted while the setting was on have none yet
         self.keep_pasted();
         let Some(store) = &mut self.session else { return };
