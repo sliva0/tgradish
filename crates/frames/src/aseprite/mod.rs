@@ -17,6 +17,9 @@ use std::time::Duration;
 
 use blend::Colour;
 
+/// A blend mode: the backdrop, what is drawn over it, and its opacity.
+type Mode = fn(Colour, Colour, u8) -> Colour;
+
 use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Format, Frame, Limits, Result};
 
 /// Groups nested deeper than this are refused; Aseprite's interface makes
@@ -320,7 +323,7 @@ impl Surface {
     }
 
     /// Draws `over`, which lies within this one, onto it.
-    fn blend(&mut self, over: &Surface, mode: fn(Colour, Colour, u8) -> Colour, opacity: u8) {
+    fn blend(&mut self, over: &Surface, mode: Mode, opacity: u8) {
         let Bounds { left, top, right, .. } = over.bounds;
         for (row, line) in over.pixels.chunks_exact(over.bounds.width()).enumerate() {
             for (back, &src) in self.row(top + row, left, right).iter_mut().zip(line) {
@@ -357,6 +360,8 @@ pub struct Sprite {
     layers: Vec<Layer>,
     /// Children of each layer, and of the top level last.
     children: Vec<Vec<usize>>,
+    /// Where each layer is among its parent's children, from the bottom.
+    positions: Vec<usize>,
     /// Deepest nesting of groups.
     depth_of_groups: usize,
     /// Each frame's duration and cels, sorted by layer.
@@ -414,6 +419,7 @@ impl Sprite {
             frame_palettes: Vec::new(),
             layers: Vec::new(),
             children: Vec::new(),
+            positions: Vec::new(),
             depth_of_groups: 0,
             frames: Vec::with_capacity(frame_count.into()),
             tags: Vec::new(),
@@ -611,8 +617,11 @@ impl Sprite {
             self.depth_of_groups = self.depth_of_groups.max(level);
         }
         self.children = vec![Vec::new(); self.layers.len() + 1];
+        self.positions = Vec::with_capacity(self.layers.len());
         for (index, layer) in self.layers.iter().enumerate() {
-            self.children[layer.parent.unwrap_or(self.layers.len())].push(index);
+            let siblings = &mut self.children[layer.parent.unwrap_or(self.layers.len())];
+            self.positions.push(siblings.len());
+            siblings.push(index);
         }
         Ok(())
     }
@@ -779,12 +788,35 @@ impl Sprite {
         Bounds { left: 0, top: 0, right: self.width as usize, bottom: self.height as usize }
     }
 
+    // A cel's z-index moves it among the layers as Aseprite's RenderPlan
+    // (src/doc/render_plan.cpp) orders them, by where its layer is plus its
+    // z-index, the lower z-index first on ties. Where groups are drawn into
+    // the layers under them, it orders every layer of the sprite at once,
+    // counted bottom first as the file lists them, groups and hidden layers
+    // too, so a cel can move into or out of a group; where they are
+    // composited on their own, each group's own layers by where they are
+    // in it.
+
     /// A frame, with the layers `shown` says, which are hidden with their
     /// groups.
     fn render(&self, frame: usize, shown: &[bool]) -> Result<Vec<Colour>> {
         let mut canvas = Surface::new(self.canvas());
-        let plan = self.plan(frame, shown);
-        self.draw_children(self.layers.len(), frame, &plan, &mut canvas)?;
+        if self.composite_groups {
+            let plan = self.plan(frame, shown);
+            self.draw_children(self.layers.len(), frame, &plan, &mut canvas)?;
+        } else {
+            let mut order: Vec<(i64, i64, usize)> = self.frames[frame]
+                .1
+                .iter()
+                .filter(|cel| shown[cel.layer] && self.layers[cel.layer].kind != LayerKind::Group)
+                .filter(|cel| self.cel_bounds(frame, cel.layer).is_some())
+                .map(|cel| (cel.layer as i64 + cel.z, cel.z, cel.layer))
+                .collect();
+            order.sort_unstable();
+            for (_, _, index) in order {
+                self.draw_layer(index, frame, &mut canvas)?;
+            }
+        }
         Ok(canvas.pixels)
     }
 
@@ -806,7 +838,8 @@ impl Sprite {
         self.canvas().clip((cel.x, cel.y), size)
     }
 
-    /// What a frame draws of the layers `shown` says.
+    /// What a frame draws of the layers `shown` says, groups composited
+    /// on their own.
     fn plan(&self, frame: usize, shown: &[bool]) -> Plan {
         let mut plan = Plan::default();
         for stored in &self.frames[frame].1 {
@@ -836,7 +869,7 @@ impl Sprite {
     }
 
     /// Draws the layers of a group (or of the top level) that `plan` says
-    /// draw something, in order.
+    /// draw something, in order, each composited on its own.
     fn draw_children(
         &self,
         parent: usize,
@@ -845,47 +878,55 @@ impl Sprite {
         canvas: &mut Surface,
     ) -> Result<()> {
         let Some(children) = plan.children.get(&parent) else { return Ok(()) };
-        // a cel's z-index moves it among the layers, as Aseprite orders them
         let mut order: Vec<(i64, i64, usize)> = children
             .iter()
             .map(|&index| {
+                // groups have no cels of their own
                 let z = match self.layers[index].kind {
                     LayerKind::Group => 0,
                     _ => self.stored_cel(frame, index).map_or(0, |cel| cel.z),
                 };
-                (index as i64 + z, z, index)
+                (self.positions[index] as i64 + z, z, index)
             })
             .collect();
         order.sort_unstable();
         for (_, _, index) in order {
             let layer = &self.layers[index];
-            let opacity = if self.layer_opacity { layer.opacity } else { 255 };
-            let mode = blend::by_number(layer.blend)
-                .ok_or_else(|| error(format!("unknown blend mode {}", layer.blend)))?;
-            match layer.kind {
-                // only over what its layers cover: a canvas of the frame's
-                // size for every group let a small file of many groups on a
-                // large canvas take hours
-                LayerKind::Group if self.composite_groups => {
-                    let mut group = Surface::new(plan.bounds[&index]);
-                    self.draw_children(index, frame, plan, &mut group)?;
-                    canvas.blend(&group, mode, opacity);
-                }
-                LayerKind::Group => self.draw_children(index, frame, plan, canvas)?,
-                LayerKind::Image | LayerKind::Tilemap { .. } => {
-                    // the plan holds only layers with cels
-                    let (cel, content) = self.cel(frame, index).unwrap();
-                    let paint = Paint {
-                        background: layer.background,
-                        opacity: blend::mul_un8(cel.opacity.into(), opacity.into()) as u8,
-                        mode,
-                        palette: &self.palettes[self.frame_palettes[frame]],
-                    };
-                    self.draw_cel(cel, content, layer, &paint, canvas)?;
-                }
+            if layer.kind != LayerKind::Group {
+                self.draw_layer(index, frame, canvas)?;
+                continue;
             }
+            let (mode, opacity) = self.paint_of(layer)?;
+            // only over what its layers cover: a canvas of the frame's size
+            // for every group let a small file of many groups on a large
+            // canvas take hours
+            let mut group = Surface::new(plan.bounds[&index]);
+            self.draw_children(index, frame, plan, &mut group)?;
+            canvas.blend(&group, mode, opacity);
         }
         Ok(())
+    }
+
+    /// A layer's blend mode, and its opacity where the file says to use it.
+    fn paint_of(&self, layer: &Layer) -> Result<(Mode, u8)> {
+        let opacity = if self.layer_opacity { layer.opacity } else { 255 };
+        let mode = blend::by_number(layer.blend)
+            .ok_or_else(|| error(format!("unknown blend mode {}", layer.blend)))?;
+        Ok((mode, opacity))
+    }
+
+    /// Draws the cel of a layer that isn't a group, which it has in `frame`.
+    fn draw_layer(&self, index: usize, frame: usize, canvas: &mut Surface) -> Result<()> {
+        let layer = &self.layers[index];
+        let (mode, opacity) = self.paint_of(layer)?;
+        let (cel, content) = self.cel(frame, index).expect("only layers with cels are drawn");
+        let paint = Paint {
+            background: layer.background,
+            opacity: blend::mul_un8(cel.opacity.into(), opacity.into()) as u8,
+            mode,
+            palette: &self.palettes[self.frame_palettes[frame]],
+        };
+        self.draw_cel(cel, content, layer, &paint, canvas)
     }
 
     fn colour(&self, pixel: &[u8], paint: &Paint) -> Colour {
@@ -971,7 +1012,7 @@ struct Paint<'a> {
     /// Cels on the background layer show the transparent index too.
     background: bool,
     opacity: u8,
-    mode: fn(Colour, Colour, u8) -> Colour,
+    mode: Mode,
     /// The palette of the frame being drawn.
     palette: &'a [Colour],
 }
@@ -1422,6 +1463,82 @@ mod tests {
         assert_eq!(animation.pixel(0, 0, 0), Some([55, 0, 200, 255]));
         assert_eq!(animation.pixel(0, 299, 299), Some([0, 0, 255, 200]));
         assert_eq!(animation.pixel(0, 300, 300), Some([0; 4]));
+    }
+
+    /// A 1x1 image cel of `colour` with a z-index.
+    fn z_cel(layer: u16, z: i16, colour: Colour) -> Vec<u8> {
+        let mut data = cel_header(layer, 0, 0, 255, 0);
+        data[9..11].copy_from_slice(&z.to_le_bytes());
+        data.extend(1u16.to_le_bytes());
+        data.extend(1u16.to_le_bytes());
+        data.extend(colour);
+        chunk(0x2005, &data)
+    }
+
+    #[test]
+    fn orders_cels_by_z_index_as_aseprite_does() {
+        let top = |flags, chunks: Vec<Vec<u8>>| {
+            let animation = decode(&file(1, 1, 32, flags, &[chunks])).unwrap();
+            animation.pixel(0, 0, 0).unwrap()
+        };
+        // bottom first: red, a group of green, and blue, where green's cel
+        // moves 2 up from 2, to 4, over blue at 3
+        let into = |flags| {
+            top(
+                flags,
+                vec![
+                    layer(1, 0, 0, 0, 255),
+                    layer(1, 1, 0, 0, 255),
+                    layer(1, 0, 1, 0, 255),
+                    layer(1, 0, 0, 0, 255),
+                    z_cel(0, 0, RED),
+                    z_cel(2, 2, GREEN),
+                    z_cel(3, 0, BLUE),
+                ],
+            )
+        };
+        // which takes it out of its group, unless groups are composited on
+        // their own, where it moves among the group's layers alone
+        assert_eq!(into(1), GREEN);
+        assert_eq!(into(1 | 2), BLUE);
+
+        // red, a group of green under a hidden layer, then blue moved 1
+        // down: composited on their own, it goes from 2 to 1, the group's
+        // place, and under it, being the lower z-index; otherwise from 4 to
+        // 3, the hidden layer's, and over green at 2
+        let out_of = |flags| {
+            top(
+                flags,
+                vec![
+                    layer(1, 0, 0, 0, 255),
+                    layer(1, 1, 0, 0, 255),
+                    layer(1, 0, 1, 0, 255),
+                    layer(0, 0, 1, 0, 255),
+                    layer(1, 0, 0, 0, 255),
+                    z_cel(0, 0, RED),
+                    z_cel(2, 0, GREEN),
+                    z_cel(3, 0, RED),
+                    z_cel(4, -1, BLUE),
+                ],
+            )
+        };
+        assert_eq!(out_of(1 | 2), GREEN);
+        assert_eq!(out_of(1), BLUE);
+
+        // on a tie the lower z-index goes under, whichever layer is lower:
+        // red at 0 moved up to 1 and green at 1 make 1 each, red on top
+        let tie = |z| {
+            top(
+                1,
+                vec![
+                    layer(1, 0, 0, 0, 255),
+                    layer(1, 0, 0, 0, 255),
+                    z_cel(0, z, RED),
+                    z_cel(1, 0, GREEN),
+                ],
+            )
+        };
+        assert_eq!((tie(0), tie(1), tie(-5)), (GREEN, RED, GREEN));
     }
 
     #[test]
