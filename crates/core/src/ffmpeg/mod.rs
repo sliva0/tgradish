@@ -59,6 +59,7 @@ pub enum FfmpegSource {
 
 /// What an ffmpeg build can do, as far as tgradish cares.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
 pub struct Capabilities {
     /// First line of `ffmpeg -version`.
     pub version: String,
@@ -86,6 +87,7 @@ pub fn capabilities(ffmpeg: &Ffmpeg, cancel: &CancelToken) -> crate::Result<Capa
 
 /// ffmpeg and ffprobe executables.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
     pub ffprobe: PathBuf,

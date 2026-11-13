@@ -12,7 +12,7 @@ use crate::telegram::Issue;
 
 /// Rate control used by one encode.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "kebab-case")]
 pub enum Rate {
     /// Two-pass average bitrate, in kbit/s.
     Bitrate(f64),
@@ -23,6 +23,7 @@ pub enum Rate {
 
 /// Settings of one encode.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
 pub struct Params {
     pub fps: f64,
     /// Length in seconds.
@@ -31,7 +32,7 @@ pub struct Params {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
-#[serde(tag = "event", rename_all = "snake_case")]
+#[serde(tag = "event", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 pub enum Event {
     /// The conversion is planned and about to start encoding: the first
     /// event of every conversion.

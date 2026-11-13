@@ -70,7 +70,7 @@ impl Target {
 
 /// Something about a file that Telegram will reject.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
-#[serde(tag = "issue", rename_all = "snake_case")]
+#[serde(tag = "issue", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 pub enum Issue {
     NotWebm {
         doc_type: String,

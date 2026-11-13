@@ -28,7 +28,7 @@ pub fn default_output(input: &Path, target: Target) -> PathBuf {
 /// What `convert --json` prints for an image: once it is made, or why it
 /// couldn't be.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
-#[serde(tag = "event", rename_all = "snake_case")]
+#[serde(tag = "event", rename_all = "kebab-case")]
 pub enum StillEvent {
     Finished(Outcome),
     /// A conversion failed. Never sent by the library, which returns
@@ -44,6 +44,7 @@ pub enum StillEvent {
 
 /// A finished image sticker or emoji.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
 pub struct Outcome {
     pub output: PathBuf,
     pub bytes: u64,
@@ -230,7 +231,7 @@ const LOSSLESS_EFFORT: i32 = 6;
 
 /// How a picture was made to fit the size limit.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
-#[serde(tag = "encoding", rename_all = "snake_case")]
+#[serde(tag = "encoding", rename_all = "kebab-case")]
 pub enum Encoding {
     Lossless,
     /// Lossy at this quality, from 0 to 100, as lossless didn't fit.
@@ -352,6 +353,7 @@ pub fn creator_tool(webp: &[u8]) -> Option<String> {
 
 /// What an image sticker is, for inspecting it.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
 pub struct Info {
     pub width: u32,
     pub height: u32,

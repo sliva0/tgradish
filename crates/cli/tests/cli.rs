@@ -40,18 +40,18 @@ fn describes_protocol() {
     assert!(output.status.success());
     let description: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(description["protocol"], 4);
-    assert_eq!(description["default_format"], "webm");
+    assert_eq!(description["default-format"], "webm");
     let formats = description["formats"].as_array().unwrap();
     let format = |name: &str| formats.iter().find(|f| f["format"] == name).unwrap();
-    assert_eq!(format("webm")["default_preset"], "balanced");
+    assert_eq!(format("webm")["default-preset"], "balanced");
     assert!(format("webm")["options"]["properties"]["fit"].is_object());
     assert!(format("webm")["options"]["properties"]["crop"].is_object());
-    assert_eq!(format("tgs")["default_preset"], "best");
-    assert_eq!(format("tgs")["output_extension"], "tgs");
+    assert_eq!(format("tgs")["default-preset"], "best");
+    assert_eq!(format("tgs")["output-extension"], "tgs");
     assert!(format("tgs")["options"]["properties"]["reductions"].is_object());
     // images take WebM's options and presets
-    assert_eq!(format("image")["output_extension"], "webp");
-    assert_eq!(format("image")["default_preset"], "balanced");
+    assert_eq!(format("image")["output-extension"], "webp");
+    assert_eq!(format("image")["default-preset"], "balanced");
     assert!(format("image")["options"]["properties"]["start"].is_object());
     let presets = description["presets"].as_array().unwrap();
     let preset = |name: &str| presets.iter().find(|p| p["name"] == name).unwrap();
@@ -243,7 +243,7 @@ fn makes_video_and_image_stickers_of_sequences() {
     assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
     let inspected = tgradish(&["--json", "inspect", webm.to_str().unwrap()]);
     let info = &json_lines(&inspected)[0];
-    assert_eq!(info["info"]["video_frames"], 2, "{info}");
+    assert_eq!(info["info"]["video-frames"], 2, "{info}");
     // a picture of the first, 2.png
     let webp = dir.path().join("walk.webp");
     let made = tgradish(&[
@@ -291,7 +291,7 @@ fn status_without_vp9_is_one_document() {
         tgradish(&["--json", "--ffmpeg", dir.path().to_str().unwrap(), "ffmpeg", "status"]);
     assert_eq!(output.status.code(), Some(1));
     let status: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(status["capabilities"]["libvpx_vp9"], false);
+    assert_eq!(status["capabilities"]["libvpx-vp9"], false);
     assert_eq!(status["capabilities"]["version"], "ffmpeg version fake");
 }
 

@@ -8,7 +8,7 @@ use serde::Serialize;
 /// How frames are turned for display, from a video's display matrix. This
 /// is what the ffmpeg command line applies when it autorotates.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "kebab-case")]
 pub enum Orientation {
     #[default]
     Normal,

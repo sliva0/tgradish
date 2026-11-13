@@ -70,6 +70,7 @@ impl Request {
 /// Every setting of a conversion, after defaults and input properties are
 /// taken into account.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
 pub struct Plan {
     pub input: PathBuf,
     pub output: PathBuf,
@@ -657,9 +658,10 @@ fn looks_like_pixel_art(backend: &Backend, plan: &Plan, cancel: &CancelToken) ->
     Ok(is_pixel_art(&frames.frames, frames.width, plan.crop))
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 /// What converting made: all that [`Event::Finished`] says, whether or not
 /// events were followed.
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
 pub struct Outcome {
     pub output: PathBuf,
     pub bytes: u64,

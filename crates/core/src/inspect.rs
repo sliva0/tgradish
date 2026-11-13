@@ -37,7 +37,7 @@ impl Kind {
 
 /// What a sticker file holds, and what Telegram would refuse of it.
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "format", rename_all = "snake_case")]
+#[serde(tag = "format", rename_all = "kebab-case")]
 pub enum Inspected {
     /// A WebP picture, judged as `target`.
     Image { target: Target, info: still::Info, issues: Vec<telegram::Issue> },

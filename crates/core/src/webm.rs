@@ -55,6 +55,7 @@ pub enum WebmError {
 pub type Result<T> = std::result::Result<T, WebmError>;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct VideoTrack {
     pub number: u64,
     pub codec_id: String,
@@ -69,6 +70,7 @@ pub struct VideoTrack {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct WebmInfo {
     pub doc_type: String,
     pub file_size: u64,
@@ -154,6 +156,7 @@ pub struct Patch {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct PatchReport {
     pub old_duration: Option<f64>,
     pub new_duration: Option<f64>,

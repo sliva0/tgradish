@@ -68,7 +68,7 @@ pub enum Backend {
 
 /// Which backend is used, for status output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum BackendInfo {
     Process {
         #[serde(flatten)]

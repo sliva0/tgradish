@@ -16,6 +16,7 @@ use crate::error::{Error, Result};
 
 /// Properties of an input video, as reported by ffprobe.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
 pub struct Probe {
     pub format: String,
     pub codec: String,
