@@ -953,7 +953,10 @@ mod tests {
         let sep = std::path::MAIN_SEPARATOR;
         assert_eq!(
             shortened(&file, Some(home)),
-            format!("~{sep}{}", Path::new(".config/tgradish/config.toml").display())
+            format!(
+                "~{sep}{}",
+                Path::new(".config").join("tgradish").join("config.toml").display()
+            )
         );
         assert_eq!(shortened(Path::new("/etc/tgradish"), Some(home)), "/etc/tgradish");
         assert_eq!(shortened(home, Some(home)), "~");
