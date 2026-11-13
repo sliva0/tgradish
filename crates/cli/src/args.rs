@@ -179,6 +179,27 @@ pub enum Command {
     Gui,
 }
 
+impl Cli {
+    /// What clap can't tell is wrong with the command line: `--json` for
+    /// the window, which prints nothing to read, and an input named true
+    /// or false that isn't there, as `--watermark false` gives one.
+    pub fn misused(&self) -> Option<String> {
+        if self.command.is_window() && self.global.json {
+            return Some("--json can't be used with gui: the window prints nothing to read".into());
+        }
+        let Command::Convert(args) = &self.command else { return None };
+        let word = args
+            .inputs
+            .iter()
+            .find(|input| matches!(input.to_str(), Some("true" | "false")) && !input.exists())?;
+        Some(format!(
+            "there is no input {}: switches take no value, --watermark turns one on and \
+             --no-watermark off",
+            word.display()
+        ))
+    }
+}
+
 impl Command {
     /// Whether it opens the window, which takes Ctrl-C as any program
     /// does and marks what it makes as its own.
