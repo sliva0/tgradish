@@ -221,7 +221,7 @@ impl App {
         match Presets::load(self.presets_dir.as_deref()) {
             Ok(presets) => self.presets = presets,
             Err(err) => {
-                self.message = Some(fl!("presets-unreadable", error = failure(&err)));
+                self.say(fl!("presets-unreadable", error = failure(&err)));
             }
         }
     }
@@ -512,7 +512,7 @@ impl App {
                         return;
                     }
                     Err(err) => {
-                        self.message = Some(fl!("not-put-back", error = failure(&err)));
+                        self.say(fl!("not-put-back", error = failure(&err)));
                     }
                 }
             }
@@ -701,6 +701,21 @@ mod tests {
         state.change_preset(&presets_dir, &mut managing, Change::Rename(0));
         assert!(managing.rows[0].problem.is_some());
         assert_eq!(state.presets.webm("fast").unwrap().crf, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn says_presets_are_unreadable_under_what_it_said_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(unlistable) = crate::testing::unlistable(dir.path()) else { return };
+        let mut app = crate::app::App::with(Config::default(), None, Presets::builtin(), None);
+        app.presets_dir = Some(unlistable.clone());
+        app.say("Something said before".into());
+        app.reload_presets();
+        crate::testing::listable(&unlistable);
+        let said = app.message.unwrap_or_default();
+        assert!(said.starts_with("Something said before\n"), "{said}");
+        assert!(said.contains("presets couldn't be read"), "{said}");
     }
 
     #[test]

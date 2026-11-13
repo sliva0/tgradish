@@ -116,24 +116,34 @@ impl App {
         };
         // before anything is said
         crate::l10n::choose(config.gui.language.as_deref());
-        let mut message = unreadable.map(|(err, kept)| match kept {
-            Some(kept) => {
-                let kept = fl!("settings-kept", path = kept.display().to_string());
-                format!("{}\n{kept}", fl!("settings-unreadable", error = err.to_string()))
-            }
-            None => fl!("settings-unreadable", error = err.to_string()),
-        });
-        let presets = Presets::load_user().unwrap_or_else(|err| {
-            message = Some(fl!("presets-unreadable", error = err.to_string()));
-            Presets::builtin()
-        });
-        let mut app = App::with(config, config_path, presets, message);
+        let mut app = App::with(config, config_path, Presets::builtin(), None);
         app.ffmpeg_override = (launch.ffmpeg_choice, launch.ffmpeg_path);
-        app.presets_dir = tgradish_core::presets::user_dir();
+        app.start(unreadable, tgradish_core::presets::user_dir());
         if let Some(dir) = paths::state_dir() {
             app.reopen(dir.join("session.json"));
         }
         app
+    }
+
+    /// Says why the settings couldn't be read, where `unreadable` gives
+    /// why and where they were kept, and reads the presets in
+    /// `presets_dir`, as the window opens.
+    fn start(
+        &mut self,
+        unreadable: Option<(tgradish_core::Error, Option<PathBuf>)>,
+        presets_dir: Option<PathBuf>,
+    ) {
+        if let Some((err, kept)) = unreadable {
+            self.say(fl!("settings-unreadable", error = err.to_string()));
+            if let Some(kept) = kept {
+                self.say(fl!("settings-kept", path = kept.display().to_string()));
+            }
+        }
+        match Presets::load(presets_dir.as_deref()) {
+            Ok(presets) => self.presets = presets,
+            Err(err) => self.say(fl!("presets-unreadable", error = err.to_string())),
+        }
+        self.presets_dir = presets_dir;
     }
 
     /// Opens the files of last time from the session at `path`, unless the
@@ -171,7 +181,7 @@ impl App {
     }
 
     /// Shows `message` over the window, under what it already says there.
-    fn say(&mut self, message: String) {
+    pub(crate) fn say(&mut self, message: String) {
         self.message = Some(match self.message.take() {
             Some(said) => format!("{said}\n{message}"),
             None => message,
@@ -191,9 +201,8 @@ impl App {
             match store.copy_pasted(item.id, image) {
                 Ok(name) => item.pasted_copy = Some(name),
                 Err(err) => {
-                    self.message = Some(fl!("session-unsaved", error = err.to_string()));
                     self.session = None;
-                    return;
+                    return self.say(fl!("session-unsaved", error = err.to_string()));
                 }
             }
         }
@@ -215,9 +224,9 @@ impl App {
         };
         let session = session::Session::of(items, self.selected, &self.written);
         if let Err(err) = store.save(&session) {
-            self.message = Some(fl!("session-unsaved", error = err.to_string()));
             // once is enough
             self.session = None;
+            self.say(fl!("session-unsaved", error = err.to_string()));
         }
     }
 
@@ -382,7 +391,7 @@ impl App {
         match tgradish_core::clipboard::paste() {
             Ok(Pasted { files, image_dir: None }) => self.add(files),
             Ok(Pasted { files, image_dir: Some(dir) }) => self.add_pasted(files, dir),
-            Err(err) => self.message = Some(crate::jobs::failure(&err)),
+            Err(err) => self.say(crate::jobs::failure(&err)),
         }
     }
 
@@ -441,7 +450,7 @@ impl App {
                 saved.save(path)
             });
             if let Err(err) = saved {
-                self.message = Some(fl!("setting-unsaved", error = err.to_string()));
+                self.say(fl!("setting-unsaved", error = err.to_string()));
             }
         }
     }
@@ -847,6 +856,41 @@ mod tests {
         // a file that is fine is left alone
         std::fs::write(&path, "").unwrap();
         assert!(load_config(&path).1.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn says_everything_it_cannot_read_as_it_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(presets) = crate::testing::unlistable(dir.path()) else { return };
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "made-up = 1\n").unwrap();
+        let mut app = App::with(Config::default(), Some(path.clone()), Presets::builtin(), None);
+        app.start(load_config(&path).1, Some(presets.clone()));
+        let said = app.message.unwrap_or_default();
+        for saying in ["settings couldn't be read", "config.toml.unreadable", "presets couldn't"] {
+            assert!(said.contains(saying), "{saying} in {said}");
+        }
+        crate::testing::listable(&presets);
+    }
+
+    #[test]
+    fn says_the_session_is_unsaved_under_what_it_said_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let mut app = App::with(Config::default(), None, Presets::builtin(), None);
+        app.reopen(state.join("session.json"));
+        // where its folder should be
+        std::fs::remove_dir_all(&state).unwrap();
+        std::fs::write(&state, b"in the way").unwrap();
+        app.say("Something said before".into());
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        app.add(vec![art]);
+        app.save_session();
+        let said = app.message.unwrap_or_default();
+        assert!(said.starts_with("Something said before\n"), "{said}");
+        assert!(said.contains("kept for next time"), "{said}");
     }
 
     #[test]

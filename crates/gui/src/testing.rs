@@ -146,3 +146,24 @@ pub(crate) fn walking_video(dir: &Path) -> Option<PathBuf> {
         }
     }
 }
+
+/// A folder that can't be listed, as presets that can't be read are
+/// in; `None` where it can, as for root.
+#[cfg(unix)]
+pub(crate) fn unlistable(dir: &Path) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let unlistable = dir.join("unlistable");
+    std::fs::create_dir(&unlistable).unwrap();
+    std::fs::set_permissions(&unlistable, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read_dir(&unlistable).is_ok() {
+        return None;
+    }
+    Some(unlistable)
+}
+
+/// The folder [`unlistable`] made listed again, so it can be removed.
+#[cfg(unix)]
+pub(crate) fn listable(dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
