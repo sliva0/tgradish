@@ -523,7 +523,7 @@ fn run(
                     progress.tgs = Some(TgsStage::Drawing);
                 })),
                 TgsEvent::TooLarge { bytes } => update(Box::new(move |progress| {
-                    progress.lossless_bytes = Some(bytes);
+                    progress.lossless_bytes = Some(bytes as usize);
                     progress.tgs = Some(TgsStage::Fitting);
                 })),
                 TgsEvent::Reduced { step } => update(Box::new(move |progress| {
