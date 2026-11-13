@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use eframe::egui;
 use tgradish_core::inspect::{self, Inspected};
-use tgradish_core::still;
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::webm::container::WebmInfo;
+use tgradish_core::webp;
 use tgradish_tgs::check::Stats;
 use tgradish_tgs::limits::{self, telegram as server};
 
@@ -19,7 +19,7 @@ use crate::widgets::{self, gauge, label, note, problems};
 pub enum Found {
     Webm { info: Box<WebmInfo>, target: Target },
     Tgs(Box<Stats>),
-    Image { info: still::Info, target: Target },
+    Image { info: webp::Info, target: Target },
     Failed(String),
 }
 
@@ -176,7 +176,7 @@ fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target) {
     });
 }
 
-fn image(ui: &mut egui::Ui, info: &still::Info, target: Target) {
+fn image(ui: &mut egui::Ui, info: &webp::Info, target: Target) {
     note(
         ui,
         match target {

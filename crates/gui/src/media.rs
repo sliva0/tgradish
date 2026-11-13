@@ -392,7 +392,7 @@ impl Video {
         let readable = self.readable.clone();
         Task::spawn(ctx, move |cancel| {
             let fps = probe.fps_or_default();
-            let start = tgradish_core::still::frame_start(time, &starts, fps);
+            let start = tgradish_core::webp::frame_start(time, &starts, fps);
             let request = FramesRequest {
                 start,
                 length: Some(1.0 / fps),

@@ -9,7 +9,7 @@ use serde::Serialize;
 use crate::error::Result;
 use crate::telegram::{self, Target};
 use crate::webm::container::{self, WebmInfo};
-use crate::{still, tgs};
+use crate::{tgs, webp};
 
 /// The kinds of sticker file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,7 +26,7 @@ pub enum Kind {
 impl Kind {
     /// The kind of sticker at `path`, as tgradish tells them apart.
     pub fn of(path: &Path) -> Kind {
-        if still::is_image(path) {
+        if webp::is_image(path) {
             Kind::Image
         } else if tgs::is_sticker(path) {
             Kind::Tgs
@@ -43,7 +43,7 @@ impl Kind {
 #[non_exhaustive]
 pub enum Inspected {
     /// A WebP picture, judged as `target`.
-    Image { target: Target, info: still::Info, issues: Vec<telegram::Issue> },
+    Image { target: Target, info: webp::Info, issues: Vec<telegram::Issue> },
     /// A `.tgs`, whose limits are the same for stickers and emoji.
     Tgs { info: Box<tgs::Stats>, issues: Vec<tgs::Issue> },
     /// A WebM video, judged as `target`.
@@ -55,7 +55,7 @@ pub enum Inspected {
 pub fn inspect(path: &Path, target: Option<Target>) -> Result<Inspected> {
     Ok(match Kind::of(path) {
         Kind::Image => {
-            let info = still::inspect_file(path)?;
+            let info = webp::inspect_file(path)?;
             let target = target.unwrap_or_else(|| info.target());
             let issues = info.issues(target);
             Inspected::Image { target, info, issues }

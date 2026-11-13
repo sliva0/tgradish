@@ -8,7 +8,7 @@ pub const TICKS: f64 = 60.0;
 /// ([`TICKS`]) it shows for. `.tgs` previews have a pixel per art pixel
 /// ([`crate::tgs`]), WebM previews fit the size asked for
 /// ([`crate::backend::Backend::preview`]), and image stickers are one
-/// frame ([`crate::still::preview`]).
+/// frame ([`crate::webp::preview`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preview {
     pub width: u32,

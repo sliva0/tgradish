@@ -9,11 +9,11 @@ use tgradish_core::CancelToken;
 use tgradish_core::backend::Backend;
 use tgradish_core::presets::Format;
 use tgradish_core::preview::Preview;
-use tgradish_core::still;
 use tgradish_core::tgs::{self, TgsEvent, TgsOptions, TgsRequest};
 use tgradish_core::webm::Options;
 use tgradish_core::webm::{Event, Params};
 use tgradish_core::webm::{Request, convert};
+use tgradish_core::webp;
 use tgradish_core::{Error, FfmpegMissing, telegram};
 use tgradish_tgs::check::{Issue, Severity};
 use tgradish_tgs::normalise::Report;
@@ -275,7 +275,7 @@ impl Done {
                 })
             }
             Format::Webp => {
-                let info = still::inspect_file(path).ok()?;
+                let info = webp::inspect_file(path).ok()?;
                 let issues = info.issues(target);
                 Some(Done {
                     output: path.to_path_buf(),
@@ -504,15 +504,15 @@ fn run(
                 keep_temp: false,
             };
             let target = request.options.target.unwrap_or_default();
-            let outcome = still::convert(&backend, &request, cancel)?;
+            let outcome = webp::convert(&backend, &request, cancel)?;
             let warnings = outcome.warnings.clone();
             update(Box::new(move |progress| progress.warnings.extend(warnings)));
-            let preview = still::preview(&outcome.output).ok();
+            let preview = webp::preview(&outcome.output).ok();
             Ok(Done {
                 output: outcome.output,
                 bytes: outcome.bytes,
                 limit: telegram::MAX_STILL_BYTES,
-                lossy: matches!(outcome.encoding, still::Encoding::Lossy { .. }),
+                lossy: matches!(outcome.encoding, webp::Encoding::Lossy { .. }),
                 kept: None,
                 spoofed: false,
                 json_bytes: None,

@@ -8,11 +8,11 @@ use console::style;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use tgradish_core::backend::Backend;
 use tgradish_core::presets::{Format, FormatOptions, Presets};
-use tgradish_core::still;
 use tgradish_core::tgs::{self, TgsEvent, TgsOptions, TgsRequest};
 use tgradish_core::webm::Event;
 use tgradish_core::webm::Options;
 use tgradish_core::webm::{Request, convert, default_output};
+use tgradish_core::webp;
 
 use crate::Context;
 use crate::args::{ConversionArgs, ConvertArgs};
@@ -149,7 +149,7 @@ impl<'a> Converter<'a> {
                 tgs::default_output(input, options.target.unwrap_or_default())
             }
             Resolved::Webp { options, .. } => {
-                still::default_output(input, options.target.unwrap_or_default())
+                webp::default_output(input, options.target.unwrap_or_default())
             }
         };
         let (Some(dir), Some(name)) = (&self.args.output_dir, output.file_name()) else {
@@ -273,9 +273,9 @@ impl<'a> Converter<'a> {
                     overwrite,
                     keep_temp: false,
                 };
-                let outcome = still::convert(backend, &request, cancel)?;
+                let outcome = webp::convert(backend, &request, cancel)?;
                 if json {
-                    let event = still::StillEvent::Finished(outcome);
+                    let event = webp::StillEvent::Finished(outcome);
                     crate::json_line(&event);
                 } else {
                     self.print_still(&outcome);
@@ -287,7 +287,7 @@ impl<'a> Converter<'a> {
     }
 
     /// What an image came out as, with what Telegram would refuse.
-    fn print_still(&self, outcome: &still::Outcome) {
+    fn print_still(&self, outcome: &webp::Outcome) {
         for warning in &outcome.warnings {
             eprintln!("{} {warning}", ui::warning_label());
         }
@@ -297,7 +297,7 @@ impl<'a> Converter<'a> {
         let output = term::link(outcome.output.display(), &outcome.output);
         let mut line =
             format!("{output}, {}x{}, {}", outcome.width, outcome.height, ui::kib(outcome.bytes));
-        if let still::Encoding::Lossy { quality } = outcome.encoding {
+        if let webp::Encoding::Lossy { quality } = outcome.encoding {
             line.push_str(&format!(", lossy at quality {quality} to fit 512 KiB"));
         }
         eprintln!("{}", ui::status("Made", line));
@@ -305,7 +305,7 @@ impl<'a> Converter<'a> {
             eprintln!("{} Telegram will refuse it: {issue}", ui::warning_label());
         }
         if term::shows_pictures()
-            && let Ok(preview) = still::preview(&outcome.output)
+            && let Ok(preview) = webp::preview(&outcome.output)
         {
             show_result(&preview);
         }

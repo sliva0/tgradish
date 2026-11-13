@@ -3,7 +3,7 @@
 //! images, as any of three kinds of result:
 //!
 //! - VP9 WebM ([`webm`]), fitted to the size limit by [`webm::fit`];
-//! - WebP pictures ([`still`]);
+//! - WebP pictures ([`webp`]);
 //! - `.tgs` vector animations ([`tgs`]), over the `tgradish-tgs` crate,
 //!   which turns pixel art into shapes.
 //!
@@ -37,10 +37,10 @@ pub mod presets;
 pub mod preview;
 pub mod protocol;
 mod source;
-pub mod still;
 pub mod telegram;
 pub mod tgs;
 pub mod webm;
+pub mod webp;
 
 pub use cancel::CancelToken;
 pub use error::{Error, FfmpegMissing, FileAction, Result};

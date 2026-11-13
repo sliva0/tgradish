@@ -161,7 +161,7 @@ impl Choices {
     /// has, and the frame for its start.
     pub fn image_options(&self, presets: &Presets, config: &Config) -> Result<Options, String> {
         let options = self.webm_options(presets, config)?;
-        Ok(Options { start: self.frame, ..tgradish_core::still::picture_options(&options) })
+        Ok(Options { start: self.frame, ..tgradish_core::webp::picture_options(&options) })
     }
 
     /// Everything a `.tgs` conversion gets.

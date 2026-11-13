@@ -165,7 +165,7 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
                 output_extension: Format::Webp.extension(),
                 default_preset: default_preset(Format::Webp),
                 options: schema_for!(Options),
-                events: printed::<crate::still::StillEvent>(),
+                events: printed::<crate::webp::StillEvent>(),
             },
         ],
         presets,
@@ -179,10 +179,10 @@ mod tests {
     use super::Failure;
     use super::*;
     use crate::ffmpeg::Probe;
-    use crate::still::{Encoding, Outcome, StillEvent};
     use crate::telegram::Issue;
     use crate::webm::{Params, Rate};
     use crate::webm::{Plan, Request};
+    use crate::webp::{Encoding, Outcome, StillEvent};
 
     fn probe() -> Probe {
         Probe {
