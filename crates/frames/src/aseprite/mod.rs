@@ -1881,6 +1881,39 @@ mod tests {
     }
 
     #[test]
+    fn shows_frames_of_0_ms_at_the_headers_speed() {
+        let bytes = |frame_ms: [u16; 2], speed: u16| {
+            let frame = |colour: Colour| vec![image_cel(0, (0, 0), (1, 1), &colour, true)];
+            let mut bytes = file(
+                1,
+                1,
+                32,
+                1,
+                &[[vec![layer(1, 0, 0, 0, 255)], frame(RED)].concat(), frame(BLUE)],
+            );
+            bytes[18..20].copy_from_slice(&speed.to_le_bytes());
+            // each frame's duration is 8 bytes into its header
+            let second = 128 + u32::from_le_bytes(bytes[128..132].try_into().unwrap()) as usize;
+            for (at, ms) in [128, second].into_iter().zip(frame_ms) {
+                bytes[at + 8..at + 10].copy_from_slice(&ms.to_le_bytes());
+            }
+            bytes
+        };
+        let durations = |bytes: Vec<u8>| -> Vec<u128> {
+            let animation = decode(&bytes).unwrap();
+            animation.frames().iter().map(|frame| frame.duration.as_millis()).collect()
+        };
+        assert_eq!(durations(bytes([30, 0], 70)), [30, 70]);
+        assert_eq!(durations(bytes([0, 0], 70)), [70, 70]);
+        // and the default where the header says 0 too
+        assert_eq!(durations(bytes([0, 40], 0)), [100, 40]);
+        assert_eq!(
+            Sprite::read(&bytes([0, 40], 0)).unwrap().durations()[0],
+            DEFAULT_FRAME_DURATION
+        );
+    }
+
+    #[test]
     fn links_keep_their_own_place() {
         // the second frame links to the first frame's red pixel, but one
         // pixel to the right and at half opacity
