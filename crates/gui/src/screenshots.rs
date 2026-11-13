@@ -33,10 +33,12 @@ fn screenshots() {
     let out =
         PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
     crate::l10n::choose(None);
-    walk(|harness, name| {
+    let mut save = |harness: &mut Harness<App>, name: &str| {
         let image = harness.render().expect("rendering needs a GPU");
         image.save(out.join(format!("tgradish-{name}.png"))).unwrap();
-    });
+    };
+    walk(&mut save);
+    edges(&mut save);
 }
 
 /// Takes the window through each state worth a picture, handing each to
@@ -81,7 +83,13 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         save(&mut harness, "add-menu");
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
-        harness.get_by_label(&crate::l10n::fl!("show-folder")).click();
+        // its short name where longer words leave no room for the long one
+        let (full, short) =
+            (crate::l10n::fl!("show-folder"), crate::l10n::fl!("show-folder", "short"));
+        match harness.query_by_label(&full) {
+            Some(folder) => folder.click(),
+            None => harness.get_by_label(&short).click(),
+        }
         harness.run_steps(2);
         save(&mut harness, "folder-menu");
         harness.key_press(egui::Key::Escape);
@@ -341,6 +349,137 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         });
     harness.run_steps(3);
     save(&mut harness, "scaled");
+}
+
+/// The window where it is most likely to break: a result in a short
+/// window, the keyboard's focus, a result out of date, a conversion that
+/// failed, at the usual width and the narrowest, a long name, many presets
+/// of the user's own, and every section open. Needs ffmpeg.
+fn edges(save: &mut impl FnMut(&mut Harness<App>, &str)) {
+    use crate::config::Theme;
+    use crate::l10n::fl;
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::default();
+    config.gui.output_dir = Some(dir.path().join("out"));
+    config.ffmpeg.choice = FfmpegChoice::System;
+    let filtering = egui_wgpu::RendererOptions {
+        predictable_texture_filtering: false,
+        ..egui_wgpu::RendererOptions::PREDICTABLE
+    };
+    let mut harness = Harness::builder()
+        .with_size([1280.0, 820.0])
+        .with_render_options(filtering)
+        .wgpu()
+        .build_eframe(move |cc| {
+            let app = App::with(config.clone(), None, Presets::builtin());
+            app.style(&cc.egui_ctx);
+            app
+        });
+    // a video under `name`, each made in a folder of its own
+    let named = |name: &str| {
+        let made = dir.path().join(format!("made {name}"));
+        std::fs::create_dir_all(&made).unwrap();
+        let named = dir.path().join(name);
+        std::fs::rename(video(&made, "640x360")?, &named).unwrap();
+        Some(named)
+    };
+    let shot = |harness: &mut Harness<App>, save: &mut dyn FnMut(&mut Harness<App>, &str), name| {
+        // the pointer away from what it would hover
+        harness.event(egui::Event::PointerGone);
+        harness.run_steps(3);
+        save(harness, name);
+    };
+    let pause = |harness: &mut Harness<App>| {
+        for item in &mut harness.state_mut().items {
+            item.view.playing = false;
+        }
+        harness.run_steps(3);
+    };
+    let (Some(clip), Some(other)) = (named("clip.mp4"), named("cat jumps.mp4")) else { return };
+    let art = dir.path().join("pixel heart.png");
+    square(&art, [220, 30, 60, 255]);
+    harness.state_mut().add(vec![clip, other, art]);
+    finish(&mut harness);
+    let first = harness.state().items[0].id;
+    harness.state_mut().select(first);
+    convert(&harness);
+    harness.run_steps(2);
+    finish(&mut harness);
+    pause(&mut harness);
+    shot(&mut harness, save, "edge-made");
+    harness.get_by_label("☀").focus();
+    shot(&mut harness, save, "edge-focus");
+    harness.ctx.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
+    set_theme(&harness.ctx, Theme::Light);
+    shot(&mut harness, save, "edge-made-light");
+    set_theme(&harness.ctx, Theme::Dark);
+    // every section open, on a tall window
+    harness.set_size(egui::vec2(1280.0, 2400.0));
+    harness.run_steps(3);
+    for label in [fl!("encoder-options"), fl!("commands")] {
+        if let Some(node) = harness.query_by_label(&label) {
+            node.click();
+            harness.run_steps(3);
+        }
+    }
+    shot(&mut harness, save, "edge-all-open");
+    harness.set_size(egui::vec2(1280.0, 820.0));
+    // out of date: played faster since
+    harness.state_mut().items[0].choices.webm.tempo = Some(2.0);
+    shot(&mut harness, save, "edge-outdated");
+    // a crop outside the picture, which fails
+    harness.state_mut().items[0].choices.crop =
+        Some(Crop { x: 700, y: 400, width: 40, height: 40 });
+    harness.run_steps(2);
+    convert(&harness);
+    harness.run_steps(2);
+    finish(&mut harness);
+    shot(&mut harness, save, "edge-failed");
+    harness.set_size(egui::vec2(crate::MIN_WIDTH, 820.0));
+    harness.ctx.memory_mut(|memory| memory.reset_areas());
+    shot(&mut harness, save, "edge-narrow-failed");
+    harness.set_size(egui::vec2(1280.0, 820.0));
+    harness.run_steps(3);
+    // a long name, made
+    let long = "holiday at the seaside with the whole family, the long cut, final edit (2).mp4";
+    let Some(long) = named(long) else { return };
+    harness.state_mut().add(vec![long]);
+    finish(&mut harness);
+    let last = harness.state().items.last().unwrap().id;
+    harness.state_mut().select(last);
+    harness.run_steps(2);
+    convert(&harness);
+    harness.run_steps(2);
+    finish(&mut harness);
+    pause(&mut harness);
+    shot(&mut harness, save, "edge-long-name");
+    harness.set_size(egui::vec2(crate::MIN_WIDTH, 820.0));
+    harness.ctx.memory_mut(|memory| memory.reset_areas());
+    shot(&mut harness, save, "edge-narrow-long-name");
+    harness.set_size(egui::vec2(1280.0, 820.0));
+    // four presets of the user's own, and the dialog that manages them, in
+    // the light theme
+    set_theme(&harness.ctx, Theme::Light);
+    let presets_dir = dir.path().join("presets");
+    let quick = Options { fit: Some(Fit::Bitrate), ..Options::default() };
+    let mine = (&quick, &tgs::Options::default());
+    for name in ["my stickers", "pixel art crisp", "long loops", "emoji pack"] {
+        tgradish_core::presets::save(&presets_dir, name, "Quick", mine, false).unwrap();
+    }
+    let state = harness.state_mut();
+    state.presets = Presets::load(Some(&presets_dir)).unwrap();
+    state.presets_dir = Some(presets_dir);
+    shot(&mut harness, save, "edge-presets");
+    preset_dialogs::ask(&harness.ctx, preset_dialogs::Ask::Manage);
+    shot(&mut harness, save, "edge-manage-presets");
+    harness.state_mut().preset_dialog = None;
+    harness.set_size(egui::vec2(crate::MIN_WIDTH, 820.0));
+    harness.ctx.memory_mut(|memory| memory.reset_areas());
+    shot(&mut harness, save, "edge-narrow-presets");
 }
 
 /// The banner of messages over the bottom of the window: a settings file
