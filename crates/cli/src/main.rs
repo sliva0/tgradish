@@ -59,12 +59,13 @@ pub fn json_line(value: &impl serde::Serialize) {
     println!("{}", serde_json::to_string(value).expect("output serialises"));
 }
 
-/// Prints an error as a JSON line, see `Event::Error`.
+/// Prints an error as a JSON line, see `Event::Error`: the same in every
+/// stream.
 pub fn print_json_error(err: &anyhow::Error, input: Option<&std::path::Path>) {
-    json_line(&tgradish_core::events::Event::Error {
+    json_line(&tgradish_core::events::Event::Error(tgradish_core::events::Failure {
         message: format!("{err:#}"),
         input: input.map(Into::into),
-    });
+    }));
 }
 
 /// Settings shared by all commands.

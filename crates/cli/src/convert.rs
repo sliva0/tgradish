@@ -341,16 +341,15 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
             Err(tgradish_core::Error::Cancelled) => {
                 return Err(tgradish_core::Error::Cancelled.into());
             }
-            Err(err) if inputs.len() > 1 => {
+            Err(err) => {
                 failed += 1;
                 converter.report_failure(input, err);
             }
-            Err(err) => return Err(explain(err)),
         }
     }
     if failed > 0 {
-        if ctx.global.json {
-            // each failure was already reported with its input
+        // each failure was already reported with its input
+        if ctx.global.json || inputs.len() == 1 {
             return Err(crate::Exit(1).into());
         }
         bail!("{failed} of {} conversions failed", inputs.len());

@@ -272,7 +272,18 @@ fn reports_batch_failures_per_input() {
     assert_eq!(output.status.code(), Some(1));
     let lines = json_lines(&output);
     assert_eq!(lines.len(), 2, "only per-file lines on stdout");
-    assert!(lines.iter().all(|line| line["error"].is_string() && line["file"].is_string()));
+    let failed = |line: &Value| line["event"] == "error" && line["message"].is_string();
+    assert!(lines.iter().all(|line| failed(line) && line["input"].is_string()));
+    // one input fails as one of several does
+    let output = tgradish(&["--json", "inspect", missing.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(1));
+    let lines = json_lines(&output);
+    assert_eq!(lines.len(), 1);
+    assert!(failed(&lines[0]) && lines[0]["input"] == missing.to_str().unwrap());
+    let output = tgradish(&["--json", "convert", missing.to_str().unwrap(), "--format", "tgs"]);
+    let lines = json_lines(&output);
+    assert_eq!((output.status.code(), lines.len()), (Some(1), 1));
+    assert!(failed(&lines[0]) && lines[0]["input"] == missing.to_str().unwrap());
 }
 
 /// An "ffmpeg" without the VP9 encoder must give one JSON document.

@@ -107,12 +107,19 @@ pub enum Event {
         /// Problems Telegram would still have with the result.
         issues: Vec<Issue>,
     },
-    /// A conversion failed. Only printed by the CLI; the library returns
-    /// errors instead.
-    Error {
-        message: String,
-        /// The input that failed when converting several, `None` when the
-        /// whole command failed.
-        input: Option<PathBuf>,
-    },
+    /// A conversion, or the whole command, failed. Only printed by the
+    /// CLI; the library returns errors instead.
+    Error(Failure),
+}
+
+/// Why a conversion, or the whole command, failed: the error event of
+/// every stream `convert --json`, `watch --json` and `inspect --json`
+/// print, the same in each. Only printed by the CLI; the library returns
+/// errors instead.
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub struct Failure {
+    pub message: String,
+    /// The input that failed, `None` when the whole command did.
+    pub input: Option<PathBuf>,
 }
