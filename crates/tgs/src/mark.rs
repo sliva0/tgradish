@@ -14,18 +14,35 @@
 
 use crate::lottie::{Animation, Item};
 
-/// Where a rectangle is, as the sort key: top, left, height, width in
-/// millionths, so written and read numbers sort alike.
+/// Where a rectangle is, as the sort key: twice its top, twice its left,
+/// its height and its width, in millionths.
+///
+/// Both sides work it out from the numbers as the JSON gives them, in
+/// whole millionths, so the writer's key is the reader's exactly: worked
+/// out from the unrounded numbers, two rectangles of one top could come
+/// apart once their centres and sizes were rounded to 6 decimals, as those
+/// of art pixels a crop cut to a third do, and sort the other way round.
 type Key = [i64; 4];
 
-fn key(centre: [f64; 2], size: [f64; 2]) -> Key {
-    let micro = |value: f64| (value * 1e6).round() as i64;
-    [
-        micro(centre[1] - size[1] / 2.0),
-        micro(centre[0] - size[0] / 2.0),
-        micro(size[1]),
-        micro(size[0]),
-    ]
+fn key(centre: [i64; 2], size: [i64; 2]) -> Key {
+    [2 * centre[1] - size[1], 2 * centre[0] - size[0], size[1], size[0]]
+}
+
+/// A number the JSON holds in whole millionths. The reader's numbers have
+/// only the 6 decimals written, so this is exactly what was written.
+fn micro(value: f64) -> i64 {
+    (value * 1e6).round() as i64
+}
+
+/// A number the writer prints, in whole millionths, as the reader finds it:
+/// [`crate::lottie`] writes rectangles with 6 decimals, rounding.
+fn written(value: f64) -> i64 {
+    micro(format!("{value:.6}").parse().expect("Rust prints numbers it can read"))
+}
+
+/// The key of a rectangle as it is written.
+fn written_key(centre: [f64; 2], size: [f64; 2]) -> Key {
+    key(centre.map(written), size.map(written))
 }
 
 /// How many copies of a payload [`embed`] writes at most: each costs
@@ -83,7 +100,7 @@ fn keys(items: &[Item]) -> Vec<Key> {
     let mut keys: Vec<Key> = items
         .iter()
         .filter_map(|item| match *item {
-            Item::Rect { centre, size } => Some(key(centre, size)),
+            Item::Rect { centre, size } => Some(written_key(centre, size)),
             _ => None,
         })
         .collect();
@@ -103,7 +120,7 @@ fn write_group(items: &mut [Item], bits: &mut impl Iterator<Item = bool>) {
     let mut rects: Vec<(Key, Item)> = places
         .iter()
         .map(|&i| match items[i] {
-            Item::Rect { centre, size } => (key(centre, size), items[i].clone()),
+            Item::Rect { centre, size } => (written_key(centre, size), items[i].clone()),
             _ => unreachable!("only rectangles were picked"),
         })
         .collect();
@@ -138,9 +155,9 @@ pub fn hidden_bits(json: &[u8]) -> Vec<bool> {
 }
 
 fn read_group(items: &[serde_json::Value], bits: &mut Vec<bool>) {
-    let pair = |value: Option<&serde_json::Value>| -> Option<[f64; 2]> {
+    let pair = |value: Option<&serde_json::Value>| -> Option<[i64; 2]> {
         let values = value?.get("k")?.as_array()?;
-        Some([values.first()?.as_f64()?, values.get(1)?.as_f64()?])
+        Some([micro(values.first()?.as_f64()?), micro(values.get(1)?.as_f64()?)])
     };
     // (key, place in the file)
     let mut rects: Vec<(Key, usize)> = items
@@ -209,6 +226,43 @@ mod tests {
         embed(&mut sorted, &[]);
         assert_ne!(json, sorted.to_json(Style::default()));
         assert_eq!(json.len(), sorted.to_json(Style::default()).len());
+    }
+
+    #[test]
+    fn reads_back_bits_among_art_pixels_cut_to_thirds() {
+        // edges of art pixels 3 input pixels wide, the first cut to 1 and 2,
+        // as fractions of an art pixel: rectangles of one top have centres
+        // and sizes that round apart at 6 decimals
+        for cut in [1.0, 2.0] {
+            let edges: Vec<f64> = (0..8)
+                .map(|i| if i == 0 { 0.0 } else { (cut + f64::from(i - 1) * 3.0) / 3.0 - 0.5 })
+                .collect();
+            let mut items = Vec::new();
+            for rows in [(0, 1), (0, 2), (1, 2), (0, 3), (1, 3), (2, 5), (0, 4), (3, 4), (1, 6)] {
+                for columns in [(0, 1), (1, 2), (0, 2), (2, 4), (0, 5)] {
+                    let (x0, x1, y0, y1) =
+                        (edges[columns.0], edges[columns.1], edges[rows.0], edges[rows.1]);
+                    items.push(Item::Rect {
+                        centre: [(x0 + x1) / 2.0, (y0 + y1) / 2.0],
+                        size: [x1 - x0, y1 - y0],
+                    });
+                }
+            }
+            items.push(Item::Fill { colour: [255, 0, 0, 255], rule: FillRule::NonZero });
+            items.push(Item::GroupTransform { opacity: Vec::new() });
+            let mut lottie = animation(0);
+            lottie.layers[0].items = vec![Item::Group(items)];
+            assert_eq!(capacity(&lottie), 22);
+            let payload = [0b1011_0001, 0x5a];
+            assert!(embed(&mut lottie, &payload));
+            let bits = hidden_bits(lottie.to_json(Style::default()).as_bytes());
+            let expected: Vec<bool> = payload
+                .iter()
+                .flat_map(|&byte| (0..8).rev().map(move |bit| byte >> bit & 1 == 1))
+                .collect();
+            assert_eq!(bits[..16], expected[..], "cut to {cut}");
+            assert!(bits[16..].iter().all(|&bit| !bit), "cut to {cut}");
+        }
     }
 
     #[test]
