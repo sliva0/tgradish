@@ -62,7 +62,7 @@ const GREEDY_ORDER: usize = 256;
 /// How hard to look for a small encoding.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "kebab-case")]
 pub enum Effort {
     /// A quick guess at the drawing order: larger colours first.
     Fast,

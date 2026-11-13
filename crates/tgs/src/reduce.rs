@@ -14,8 +14,8 @@ use crate::{Error, Result};
 /// One reduction at one strength. [`Reduction::apply`] refuses strengths
 /// outside the range each kind gives.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
-#[serde(tag = "reduction", rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, serde::Deserialize)]
+#[serde(tag = "reduction", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum Reduction {
     /// Snaps the art onto a pixel grid most of it follows, of art pixels
@@ -809,5 +809,28 @@ mod tests {
         let snapped = Reduction::SnapToGrid { scale: 2 }.apply(&off).unwrap();
         assert_eq!(snapped.grid().scale(), 2);
         assert!(distortion(&off, &snapped) > 0.0);
+    }
+
+    #[test]
+    fn names_what_it_writes_in_kebab_case() {
+        use serde_json::json;
+
+        use crate::sticker::{Progress, Step};
+
+        let step = Step::new(Reduction::MergeColours { distance: 0.5 }, 10, 0.25);
+        let written =
+            json!({"reduction": "merge-colours", "distance": 0.5, "bytes": 10, "distortion": 0.25});
+        assert_eq!(serde_json::to_value(&step).unwrap(), written);
+        let read: Reduction =
+            serde_json::from_value(json!({"reduction": "snap-to-grid", "scale": 2})).unwrap();
+        assert_eq!(read, Reduction::SnapToGrid { scale: 2 });
+        assert_eq!(serde_json::to_value(Kind::DropFrames).unwrap(), "drop-frames");
+        let too_large = serde_json::to_value(Progress::TooLarge { bytes: 1 }).unwrap();
+        assert_eq!(too_large, json!({"stage": "too-large", "bytes": 1}));
+        let input =
+            Animation::new(1, 1, vec![Frame { rgba: RED.to_vec(), duration: Duration::ZERO }]);
+        let (_, report) = normalise(&input.unwrap(), &Options::default()).unwrap();
+        let report = serde_json::to_value(report).unwrap();
+        assert!(report.get("input-width").is_some() && report.get("snapped-pixels").is_some());
     }
 }
