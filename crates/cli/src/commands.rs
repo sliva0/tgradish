@@ -12,7 +12,7 @@ use tgradish_core::tgs::TgsOptions;
 use tgradish_core::webm::Options;
 use tgradish_core::webm::container::{self, Patch, WebmInfo};
 use tgradish_core::{TOOL_ID, protocol};
-use tgradish_core::{still, tgs};
+use tgradish_core::{tgs, webp};
 
 use crate::term;
 
@@ -72,7 +72,7 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
 
 fn print_image(
     path: &std::path::Path,
-    info: &still::Info,
+    info: &webp::Info,
     target: Target,
     issues: &[telegram::Issue],
 ) {

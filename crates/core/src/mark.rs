@@ -221,7 +221,7 @@ pub fn made_by_tgradish(path: &std::path::Path) -> bool {
     let small = || crate::fsutil::read_at_most(path, MADE_BYTES).ok().flatten();
     match crate::inspect::Kind::of(path) {
         crate::inspect::Kind::Image => {
-            let tool = small().and_then(|webp| crate::still::creator_tool(&webp));
+            let tool = small().and_then(|webp| crate::webp::creator_tool(&webp));
             tool.as_deref().is_some_and(is_tool_id)
         }
         crate::inspect::Kind::Tgs => {

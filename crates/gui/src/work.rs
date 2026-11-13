@@ -7,8 +7,8 @@
 use eframe::egui;
 use tgradish_core::backend::Backend;
 use tgradish_core::presets::Format;
-use tgradish_core::still;
 use tgradish_core::webm::Options;
+use tgradish_core::webp;
 
 use crate::app::App;
 use crate::files::THUMB;
@@ -366,7 +366,7 @@ fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backe
             Load::Loading(media::load_result(ctx, backend.clone(), &done.output))
         }
         // small enough to read at once
-        (Format::Webp, _) => match still::preview(&done.output) {
+        (Format::Webp, _) => match webp::preview(&done.output) {
             Ok(preview) => Load::Ready(Clip::from_preview(preview, true)),
             Err(err) => Load::Failed(crate::jobs::failure(&err)),
         },
@@ -490,7 +490,7 @@ mod tests {
         let item = &harness.state().items[0];
         assert!(matches!(made_job(item).status, Status::Done(_)));
         let out = dir.path().join("out").join("clip.sticker.webp");
-        assert_eq!(still::dimensions(&out).unwrap(), (512, 384));
+        assert_eq!(webp::dimensions(&out).unwrap(), (512, 384));
         assert!(item.result_clip.ready().is_some());
         harness.get_by_label_contains("Telegram should accept it");
     }

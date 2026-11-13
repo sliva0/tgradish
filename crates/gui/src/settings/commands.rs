@@ -122,7 +122,7 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
         Format::Webm => tgradish_core::options::flags(&webm.merged(&choices.shared_webm())),
         Format::Webp => {
             // a picture is one frame, where its start is
-            let picture = tgradish_core::still::picture_options(&webm);
+            let picture = tgradish_core::webp::picture_options(&webm);
             let shared = Options { start: choices.frame, length: None, ..choices.shared_webm() };
             tgradish_core::options::flags(&picture.merged(&shared))
         }

@@ -397,7 +397,7 @@ mod tests {
         assert_eq!(decode(&bytes).unwrap(), decode(&glow.bytes).unwrap());
         // a still one ffmpeg reads as it is
         let still = dir.path().join("still.webp");
-        std::fs::write(&still, crate::still::encode(&[255, 0, 0, 255], 1, 1, None).unwrap())
+        std::fs::write(&still, crate::webp::encode(&[255, 0, 0, 255], 1, 1, None).unwrap())
             .unwrap();
         let as_is = readable(&still, None, &Options::default(), &CancelToken::new()).unwrap();
         assert!(!as_is.is_drawn());

@@ -10,7 +10,7 @@ use tgradish_core::options::{Fit, Speed};
 
 use tgradish_core::webm::Options;
 use tgradish_core::webm::{Request, convert};
-use tgradish_core::{CancelToken, Error, still};
+use tgradish_core::{CancelToken, Error, webp};
 
 #[test]
 fn reads_names_that_look_like_urls_and_options() {
@@ -46,7 +46,7 @@ fn reads_names_that_look_like_urls_and_options() {
             assert!(made.output.exists(), "{label}");
             let options = Options { start: Some(0.1), ..Options::default() };
             let request = Request { options, overwrite: true, ..Request::new(input.clone()) };
-            let made = still::convert(backend, &request, &cancel);
+            let made = webp::convert(backend, &request, &cancel);
             assert!(made.unwrap_or_else(|err| panic!("{label}: {err}")).output.exists(), "{label}");
         }
     }

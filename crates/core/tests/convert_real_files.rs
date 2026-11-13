@@ -807,8 +807,8 @@ fn passes_encoder_options() {
 /// not replace without asking.
 #[test]
 fn tells_its_own_stickers_from_look_alikes() {
-    use tgradish_core::still;
     use tgradish_core::tgs::{self, TgsOptions, TgsRequest};
+    use tgradish_core::webp;
     let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     let backend = &backends[0];
     let dir = tempfile::tempdir().unwrap();
@@ -848,7 +848,7 @@ fn tells_its_own_stickers_from_look_alikes() {
         options: unmarked,
         ..Request::new(input.clone())
     };
-    assert!(!made_by_tgradish(&still::convert(backend, &picture, &cancel).unwrap().output));
+    assert!(!made_by_tgradish(&webp::convert(backend, &picture, &cancel).unwrap().output));
     let walker = corpus_file(dir.path(), "walker_2x.gif", "walker.gif");
     std::fs::write(
         path("png.webp"),
@@ -994,8 +994,8 @@ fn finds_where_frames_start() {
                 let options = Options { start: Some(time), ..Options::default() };
                 let output = Some(dir.path().join(format!("{name}-{}-{time}.webp", delays[0])));
                 let request = Request { options, output, ..Request::new(gif.clone()) };
-                let made = tgradish_core::still::convert(backend, &request, &CancelToken::new());
-                let preview = tgradish_core::still::preview(&made.unwrap().output).unwrap();
+                let made = tgradish_core::webp::convert(backend, &request, &CancelToken::new());
+                let preview = tgradish_core::webp::preview(&made.unwrap().output).unwrap();
                 <[u8; 4]>::try_from(&preview.frames[0].0[..4]).unwrap()
             };
             for (time, frame) in shown {
@@ -1085,12 +1085,12 @@ fn makes_image_stickers_from_a_frame() {
         };
         let request = Request { options, ..Request::new(input.clone()) };
         let request = Request { output: Some(dir.path().join("out.webp")), ..request };
-        let made = tgradish_core::still::convert(backend, &request, &CancelToken::new()).unwrap();
+        let made = tgradish_core::webp::convert(backend, &request, &CancelToken::new()).unwrap();
         assert!(made.issues.is_empty(), "{name}: {:?}", made.issues);
         assert!(made_by_tgradish(&made.output), "{name}");
         assert_eq!((made.width, made.height), (512, 256), "{name}");
-        assert_eq!(made.encoding, tgradish_core::still::Encoding::Lossless, "{name}");
-        let preview = tgradish_core::still::preview(&made.output).unwrap();
+        assert_eq!(made.encoding, tgradish_core::webp::Encoding::Lossless, "{name}");
+        let preview = tgradish_core::webp::preview(&made.output).unwrap();
         assert_eq!((preview.width, preview.height), (512, 256), "{name}");
         pictures.push(preview.frames[0].0.clone());
         // an emoji, padded square
@@ -1100,18 +1100,18 @@ fn makes_image_stickers_from_a_frame() {
             output: Some(dir.path().join("emoji.webp")),
             ..request.clone()
         };
-        let made = tgradish_core::still::convert(backend, &request, &CancelToken::new()).unwrap();
+        let made = tgradish_core::webp::convert(backend, &request, &CancelToken::new()).unwrap();
         assert!(made.issues.is_empty(), "{name}: {:?}", made.issues);
         assert_eq!((made.width, made.height), (100, 100), "{name}");
-        let corner = &tgradish_core::still::preview(&made.output).unwrap().frames[0].0[..4];
+        let corner = &tgradish_core::webp::preview(&made.output).unwrap().frames[0].0[..4];
         assert_eq!(corner[3], 0, "{name}: the padding is transparent");
         // the frame that shows at a time, from where it starts, and the last
         let at = |start| {
             let options = Options { start: Some(start), ..Options::default() };
             let output = Some(dir.path().join(format!("at-{start}.webp")));
             let request = Request { options, output, overwrite: true, ..request.clone() };
-            let made = tgradish_core::still::convert(backend, &request, &CancelToken::new());
-            tgradish_core::still::preview(&made.unwrap().output).unwrap().frames[0].0.clone()
+            let made = tgradish_core::webp::convert(backend, &request, &CancelToken::new());
+            tgradish_core::webp::preview(&made.unwrap().output).unwrap().frames[0].0.clone()
         };
         assert_eq!(at(0.5), at(0.48), "{name}");
         assert_ne!(at(0.5), at(0.52), "{name}");
@@ -1120,7 +1120,7 @@ fn makes_image_stickers_from_a_frame() {
         for start in [-1.0, 60.0] {
             let options = Options { start: Some(start), ..Options::default() };
             let request = Request { options, ..request.clone() };
-            let made = tgradish_core::still::convert(backend, &request, &CancelToken::new());
+            let made = tgradish_core::webp::convert(backend, &request, &CancelToken::new());
             assert!(made.is_err(), "{name}: {start}");
         }
     }
@@ -1163,7 +1163,7 @@ fn converts_aseprite_files_through_ffmpeg() {
         // a picture of its first frame
         let output = Some(dir.path().join(format!("{name}.webp")));
         let picture = Request { output, ..request.clone() };
-        let made = tgradish_core::still::convert(backend, &picture, &CancelToken::new()).unwrap();
+        let made = tgradish_core::webp::convert(backend, &picture, &CancelToken::new()).unwrap();
         assert!(made.issues.is_empty(), "{name}: {:?}", made.issues);
     }
 }
@@ -1359,8 +1359,8 @@ fn makes_sequences_into_videos_and_pictures() {
         let picture = |fps| {
             let options = Options { start: Some(0.15), fps, ..Options::default() };
             let request = Request { options, ..request.clone() };
-            let made = tgradish_core::still::convert(backend, &request, &CancelToken::new());
-            tgradish_core::still::preview(&made.unwrap().output).unwrap().frames[0].0[..4].to_vec()
+            let made = tgradish_core::webp::convert(backend, &request, &CancelToken::new());
+            tgradish_core::webp::preview(&made.unwrap().output).unwrap().frames[0].0[..4].to_vec()
         };
         assert_eq!(picture(None), [0, 0, 255, 255], "{name}");
         assert_eq!(picture(Some(4.0)), [0, 0, 255, 255], "{name}");

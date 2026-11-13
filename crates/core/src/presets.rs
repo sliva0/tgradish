@@ -89,7 +89,7 @@ impl Format {
     /// Whether this format uses the option `key`, as files, JSON and flags
     /// name it: WebM all of [`Options`], `.tgs` all of [`TgsOptions`], and
     /// images those of WebM's a still picture has,
-    /// [`crate::still::PICTURE_OPTIONS`].
+    /// [`crate::webp::PICTURE_OPTIONS`].
     pub fn uses(self, key: &str) -> bool {
         static WEBM: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
         static TGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
@@ -103,7 +103,7 @@ impl Format {
         match self {
             Format::Webm => known(&WEBM, || schemars::schema_for!(Options)),
             Format::Tgs => known(&TGS, || schemars::schema_for!(TgsOptions)),
-            Format::Webp => crate::still::PICTURE_OPTIONS.contains(&key),
+            Format::Webp => crate::webp::PICTURE_OPTIONS.contains(&key),
         }
     }
 
@@ -688,7 +688,7 @@ mod tests {
             ["crf", "exact", "lossless", "keep-canvas", "spoof", "nope"]
         );
         // every option a picture has is WebM's
-        for key in crate::still::PICTURE_OPTIONS {
+        for key in crate::webp::PICTURE_OPTIONS {
             assert!(Format::Webm.uses(key), "{key}");
         }
         let all = Options {
@@ -696,7 +696,7 @@ mod tests {
             crop: Some(crate::options::Crop::whole((8, 8))),
             ..Default::default()
         };
-        assert_eq!(crate::options::set_keys(&crate::still::picture_options(&all)), ["crop"]);
+        assert_eq!(crate::options::set_keys(&crate::webp::picture_options(&all)), ["crop"]);
     }
 
     #[test]
