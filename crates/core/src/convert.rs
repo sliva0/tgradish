@@ -26,7 +26,7 @@ use serde::Serialize;
 
 use crate::CancelToken;
 use crate::backend::{Backend, FramesRequest, Pass};
-use crate::error::{Error, Result};
+use crate::error::{Error, FileAction, Result};
 use crate::events::{Event, Params, Rate};
 use crate::ffmpeg::{Output, Probe};
 use crate::fit::{self, Attempt, Encoder};
@@ -745,7 +745,7 @@ impl Encoder for BackendEncoder<'_> {
             self.run_pass(attempt, (passes, passes), &params, Pass::Second(&log), Some(&path))?;
         }
 
-        let bytes = std::fs::metadata(&path)?.len();
+        let bytes = std::fs::metadata(&path).map_err(Error::io(FileAction::Read, &path))?.len();
         let fits = bytes <= self.plan.target.max_bytes();
         (self.on_event)(Event::AttemptFinished { attempt, params, bytes, fits });
         Ok(Attempt { number: attempt, params, bytes, path })
@@ -794,7 +794,8 @@ pub fn convert(
     let temp = tempfile::Builder::new()
         .prefix("tgradish-")
         .disable_cleanup(request.keep_temp)
-        .tempdir()?;
+        .tempdir()
+        .map_err(Error::io(FileAction::Create, std::env::temp_dir()))?;
     let made = encode_in(temp.path(), backend, request, plan, cancel, on_event);
     if made.is_err() && request.keep_temp {
         // the outcome says where they are, and there is none
@@ -868,7 +869,7 @@ fn encode_in(
         track_uid: Some(crate::mark::Mark::current().to_u64()),
         ..Default::default()
     };
-    let mut bytes = std::fs::read(&best.path)?;
+    let mut bytes = std::fs::read(&best.path).map_err(Error::io(FileAction::Read, &best.path))?;
     let spoofed = patch_what_fits(&mut bytes, changes, on_event)?.duration.is_some();
     // checked again here: the output may have appeared while encoding
     crate::fsutil::write_output(&plan.output, &bytes, request.overwrite)?;

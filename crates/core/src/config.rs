@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Error, Result};
+use crate::error::{Error, FileAction, Result};
 use crate::ffmpeg::FfmpegChoice;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -141,7 +141,7 @@ impl Config {
                 message: err.to_string(),
             }),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(err) => Err(err.into()),
+            Err(err) => Err(Error::io(FileAction::Read, path)(err)),
         }
     }
 
@@ -151,9 +151,10 @@ impl Config {
         let text = toml::to_string(self)
             .map_err(|err| Error::Config { path: path.to_path_buf(), message: err.to_string() })?;
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
+            std::fs::create_dir_all(dir).map_err(Error::io(FileAction::Create, dir))?;
         }
-        crate::fsutil::write_file(path, text.as_bytes(), true)?;
+        crate::fsutil::write_file(path, text.as_bytes(), true)
+            .map_err(Error::io(FileAction::Write, path))?;
         Ok(())
     }
 }

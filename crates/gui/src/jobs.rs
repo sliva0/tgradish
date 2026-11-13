@@ -471,7 +471,11 @@ fn run(
     update: Update,
 ) -> Result<Done, Error> {
     if let Some(dir) = output.parent().filter(|dir| !dir.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir)?;
+        std::fs::create_dir_all(dir).map_err(|error| Error::Io {
+            action: tgradish_core::FileAction::Create,
+            path: dir.to_path_buf(),
+            error,
+        })?;
     }
     // the frames of one animation, which pixel art drawing joins
     let frames = (sequence || inputs.len() > 1).then(|| inputs.clone());

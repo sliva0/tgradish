@@ -20,11 +20,14 @@ use std::path::Path;
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::ebml::{self, EbmlError, Element, ids};
+pub use crate::ebml::EbmlError;
+use crate::ebml::{self, Element, ids};
+use crate::source::unreadable;
 
 /// Default TimestampScale: durations are in milliseconds.
 const DEFAULT_TIMESTAMP_SCALE: u64 = 1_000_000;
 
+/// What is wrong with a WebM's bytes, for reading or patching them.
 #[derive(Debug, Error)]
 pub enum WebmError {
     #[error("malformed WebM: {0}")]
@@ -48,8 +51,9 @@ pub enum WebmError {
     NoRoom { needed: usize, available: usize },
     #[error("the SeekHead entry for Info is too narrow to store its new position")]
     SeekPositionTooNarrow,
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
+    /// Larger than [`MAX_INSPECTED_BYTES`], which isn't read.
+    #[error("it has more than {} MiB, far more than a sticker", MAX_INSPECTED_BYTES >> 20)]
+    TooLarge,
 }
 
 pub type Result<T> = std::result::Result<T, WebmError>;
@@ -536,27 +540,26 @@ pub const MAX_INSPECTED_BYTES: u64 = 256 << 20;
 
 /// [`inspect`] of the file at `path`, which is read only if it starts as
 /// WebM does and has at most [`MAX_INSPECTED_BYTES`].
-pub fn inspect_file(path: &Path) -> Result<WebmInfo> {
+pub fn inspect_file(path: &Path) -> crate::Result<WebmInfo> {
     starts_as_webm(path)?;
-    let bytes = crate::fsutil::read_at_most(path, MAX_INSPECTED_BYTES)?.ok_or_else(|| {
-        std::io::Error::other(format!(
-            "it has more than {} MiB, far more than a sticker",
-            MAX_INSPECTED_BYTES >> 20
-        ))
-    })?;
-    inspect(&bytes)
+    let bytes = crate::fsutil::read_at_most(path, MAX_INSPECTED_BYTES)
+        .map_err(|err| unreadable(path, err))?
+        .ok_or(WebmError::TooLarge)?;
+    Ok(inspect(&bytes)?)
 }
 
 /// Fails unless the file at `path` starts with the EBML header's ID.
-fn starts_as_webm(path: &Path) -> Result<()> {
+fn starts_as_webm(path: &Path) -> crate::Result<()> {
     let mut start = [0u8; 4];
     let read = std::fs::File::open(path)
         .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut start));
     match read {
         Ok(()) if start == EBML_MAGIC => Ok(()),
-        Ok(()) => Err(WebmError::NotEbml),
-        Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => Err(WebmError::NotEbml),
-        Err(err) => Err(err.into()),
+        Ok(()) => Err(WebmError::NotEbml.into()),
+        Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
+            Err(WebmError::NotEbml.into())
+        }
+        Err(err) => Err(unreadable(path, err)),
     }
 }
 
@@ -575,12 +578,15 @@ const HEAD_BYTES: u64 = 64 << 10;
 
 /// The [`Head`] of the WebM file at `path`, from no more of it than
 /// [`HEAD_BYTES`].
-pub(crate) fn head_file(path: &Path) -> Result<Head> {
+pub(crate) fn head_file(path: &Path) -> crate::Result<Head> {
     starts_as_webm(path)?;
     let mut bytes = Vec::new();
-    let file = std::fs::File::open(path)?;
-    std::io::Read::read_to_end(&mut std::io::Read::take(file, HEAD_BYTES), &mut bytes)?;
-    head(&bytes)
+    std::fs::File::open(path)
+        .and_then(|file| {
+            std::io::Read::read_to_end(&mut std::io::Read::take(file, HEAD_BYTES), &mut bytes)
+        })
+        .map_err(|err| unreadable(path, err))?;
+    Ok(head(&bytes)?)
 }
 
 /// The [`Head`] of WebM `buf`, which may stop part of the way: what comes
@@ -922,23 +928,24 @@ fn patch_in_place(buf: &mut [u8], patch: &Patch) -> Result<PatchReport> {
 
 /// Patches `input` and writes the result to `output`, which may be the same
 /// file. The output is written to a temporary file first and then renamed.
-/// Without `replace`, an existing output is an
-/// [`AlreadyExists`](std::io::ErrorKind::AlreadyExists) error.
+/// Without `replace`, an existing output is
+/// [`Error::OutputExists`](crate::Error::OutputExists).
 pub fn patch_file(
     input: &Path,
     output: &Path,
     changes: &Patch,
     replace: bool,
-) -> Result<PatchReport> {
-    let mut buf = std::fs::read(input)?;
+) -> crate::Result<PatchReport> {
+    let mut buf = crate::source::read(input)?;
     let report = patch(&mut buf, changes)?;
-    crate::fsutil::write_file(output, &buf, replace)?;
+    crate::fsutil::write_output(output, &buf, replace)?;
     Ok(report)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Error;
     use crate::ebml::build::*;
 
     /// Options for the synthetic WebM files used in tests.
@@ -1351,15 +1358,16 @@ mod tests {
             path
         };
         let video = sparse("video.mp4", b"\x00\x00\x00\x18ftypisom");
-        assert!(matches!(inspect_file(&video), Err(WebmError::NotEbml)));
-        assert!(matches!(head_file(&video), Err(WebmError::NotEbml)));
+        let not_ebml = |result| matches!(result, Err(Error::Webm(WebmError::NotEbml)));
+        assert!(not_ebml(inspect_file(&video).map(drop)));
+        assert!(not_ebml(head_file(&video).map(drop)));
         let long = sparse("long.webm", &Fixture::default().build());
-        assert!(matches!(inspect_file(&long), Err(WebmError::Io(_))));
+        assert!(matches!(inspect_file(&long), Err(Error::Webm(WebmError::TooLarge))));
         // its start, which is a WebM's, reads
         assert_eq!(head_file(&long).unwrap().muxing_app.as_deref(), Some("Lavf63.1.102"));
         let empty = dir.path().join("empty.webm");
         std::fs::write(&empty, b"").unwrap();
-        assert!(matches!(inspect_file(&empty), Err(WebmError::NotEbml)));
+        assert!(not_ebml(inspect_file(&empty).map(drop)));
     }
 
     #[test]

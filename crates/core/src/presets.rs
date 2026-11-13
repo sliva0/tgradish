@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Error, Result};
+use crate::error::{Error, FileAction, Result};
 use crate::options::{Fit, Options, Speed};
 use crate::tgs::TgsOptions;
 
@@ -242,8 +242,9 @@ impl Presets {
     pub fn load(dir: Option<&Path>) -> Result<Self> {
         let mut presets = Self::builtin();
         let Some(dir) = dir.filter(|dir| dir.is_dir()) else { return Ok(presets) };
-        for entry in std::fs::read_dir(dir)? {
-            let path = entry?.path();
+        let list = |err| Error::io(FileAction::List, dir)(err);
+        for entry in std::fs::read_dir(dir).map_err(list)? {
+            let path = entry.map_err(list)?.path();
             if path.extension().is_none_or(|ext| ext != "toml") {
                 continue;
             }
@@ -421,7 +422,7 @@ pub fn save(
     file.insert("webm".into(), table(&shareable(webm)).into());
     file.insert("tgs".into(), table(&shareable_tgs(tgs)).into());
     let text = toml::to_string(&file).map_err(|err| PresetError::Broken(err.to_string()))?;
-    std::fs::create_dir_all(dir)?;
+    std::fs::create_dir_all(dir).map_err(Error::io(FileAction::Create, dir))?;
     let path = dir.join(format!("{name}.toml"));
     crate::fsutil::write_output(&path, text.as_bytes(), replace)?;
     Ok(path)
@@ -448,7 +449,7 @@ pub fn rename(dir: &Path, from: &str, to: &str, presets: &Presets) -> Result<Pat
     if new.exists() && !same_file(&old, &new) {
         return Err(Error::OutputExists(new));
     }
-    std::fs::rename(&old, &new)?;
+    std::fs::rename(&old, &new).map_err(Error::io(FileAction::Rename, &old))?;
     Ok(new)
 }
 
@@ -471,7 +472,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 /// Says the preset at `path` is `description`, keeping its options. The
 /// file is written anew, without any comments it had.
 pub fn describe(path: &Path, description: &str) -> Result<()> {
-    let text = std::fs::read_to_string(path)?;
+    let text = std::fs::read_to_string(path).map_err(Error::io(FileAction::Read, path))?;
     let mut file: toml::Table = toml::from_str(&text)
         .map_err(|err| PresetError::Broken(format!("{}: {err}", path.display())))?;
     file.remove("description");
@@ -485,15 +486,15 @@ pub fn describe(path: &Path, description: &str) -> Result<()> {
 /// Deletes the preset at `path`, and returns what it held, which
 /// [`restore`] puts back.
 pub fn remove(path: &Path) -> Result<String> {
-    let text = std::fs::read_to_string(path)?;
-    std::fs::remove_file(path)?;
+    let text = std::fs::read_to_string(path).map_err(Error::io(FileAction::Read, path))?;
+    std::fs::remove_file(path).map_err(Error::io(FileAction::Remove, path))?;
     Ok(text)
 }
 
 /// Puts back as `name` in `dir` a preset [`remove`] deleted, which held
 /// `text`, unless another of its name is there now.
 pub fn restore(dir: &Path, name: &str, text: &str) -> Result<PathBuf> {
-    std::fs::create_dir_all(dir)?;
+    std::fs::create_dir_all(dir).map_err(Error::io(FileAction::Create, dir))?;
     let path = dir.join(format!("{name}.toml"));
     crate::fsutil::write_output(&path, text.as_bytes(), false)?;
     Ok(path)

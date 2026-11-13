@@ -7,7 +7,7 @@ use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
 
 use crate::CancelToken;
-use crate::error::{Error, Result};
+use crate::error::{Error, FileAction, Result};
 
 /// Output of a running ffmpeg.
 pub(crate) enum Output {
@@ -41,7 +41,7 @@ fn spawn(
             let program = std::path::PathBuf::from(cmd.get_program());
             Error::FfmpegNotFound(crate::error::FfmpegMissing::NoProgram(program))
         }
-        _ => Error::Io(err),
+        _ => Error::io(FileAction::Run, cmd.get_program())(err),
     })?;
     let stdout = child.stdout.take().expect("stdout is piped");
     let stderr = child.stderr.take().expect("stderr is piped");
@@ -64,7 +64,7 @@ fn wait(
 ) -> Result<()> {
     let status = child.lock().unwrap().wait();
     cancel.register(None);
-    let status = status?;
+    let status = status.map_err(Error::io(FileAction::Run, program))?;
     cancel.check()?;
     if !status.success() {
         return Err(Error::Ffmpeg {
@@ -175,7 +175,7 @@ fn run_reading<T>(
         })
         .collect();
     wait(&child, program, cancel, &lines[lines.len().saturating_sub(STDERR_TAIL)..])?;
-    Ok(read?)
+    read.map_err(Error::io(FileAction::Run, program))
 }
 
 fn spawn_reader(

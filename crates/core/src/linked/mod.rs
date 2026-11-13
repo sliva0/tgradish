@@ -18,7 +18,7 @@ use self::source::Source;
 use crate::CancelToken;
 use crate::backend::{Pass, pass_log_file};
 use crate::convert::{Plan, frame_count};
-use crate::error::{Error, Result};
+use crate::error::{Error, FileAction, Result};
 use crate::events::{Params, Rate};
 use crate::ffmpeg::{Capabilities, Output, Probe};
 use crate::ffmpeg::{Facts, Orientation, frames_filter, picture_filter, read_seconds};
@@ -374,7 +374,8 @@ impl Encoder {
             Pass::First(_) => flags |= codec::Flags::PASS1,
             Pass::Second(log) => {
                 flags |= codec::Flags::PASS2;
-                let stats = std::fs::read(pass_log_file(log))?;
+                let file = pass_log_file(log);
+                let stats = std::fs::read(&file).map_err(Error::io(FileAction::Read, &file))?;
                 let stats = CString::new(stats)
                     .map_err(|_| Error::Libav("invalid first-pass statistics".into()))?;
                 let stats = stats_in.insert(AvString::new(&stats));
@@ -446,7 +447,8 @@ impl Encoder {
                 let stats = (*self.encoder.as_ptr()).stats_out;
                 if stats.is_null() { Vec::new() } else { CStr::from_ptr(stats).to_bytes().to_vec() }
             };
-            std::fs::write(pass_log_file(log), stats)?;
+            let file = pass_log_file(log);
+            std::fs::write(&file, stats).map_err(Error::io(FileAction::Write, &file))?;
         }
         if let Some(output) = &mut self.output {
             output.write_trailer().map_err(libav("finishing the output"))?;

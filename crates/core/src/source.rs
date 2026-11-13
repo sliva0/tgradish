@@ -68,9 +68,9 @@ pub(crate) fn sequence_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     for input in inputs {
         if input.is_dir() {
-            let mut found: Vec<PathBuf> = std::fs::read_dir(input)?
-                .map(|entry| entry.map(|entry| entry.path()))
-                .collect::<std::io::Result<_>>()?;
+            let mut found: Vec<PathBuf> = std::fs::read_dir(input)
+                .and_then(|entries| entries.map(|entry| entry.map(|entry| entry.path())).collect())
+                .map_err(|err| unreadable(input, err))?;
             found.retain(|path| path.is_file() && crate::inputs::is_frame(path));
             files.extend(found);
         } else {

@@ -61,7 +61,7 @@ pub(crate) fn read_at_most(path: &Path, most: u64) -> std::io::Result<Option<Vec
 pub(crate) fn write_output(path: &Path, bytes: &[u8], replace: bool) -> crate::Result<()> {
     write_file(path, bytes, replace).map_err(|err| match err.kind() {
         std::io::ErrorKind::AlreadyExists => crate::Error::OutputExists(path.to_path_buf()),
-        _ => err.into(),
+        _ => crate::Error::io(crate::FileAction::Write, path)(err),
     })
 }
 
