@@ -1,18 +1,38 @@
 //! Everything tgradish's command line and window share: Telegram stickers
 //! and emoji made from videos, pictures, Aseprite files and sequences of
-//! images, as any of three kinds of result:
+//! images, as any of three kinds of result, each converted by its module's
+//! `convert(backend, &Request, &cancel, on_event)`, which reports through
+//! its `Event`s and returns its `Outcome`:
 //!
-//! - VP9 WebM ([`webm`]), fitted to the size limit;
-//! - WebP pictures ([`webp`]);
-//! - `.tgs` vector animations ([`tgs`]), over the `tgradish-tgs` crate,
-//!   which turns pixel art into shapes.
+//! - [`webm`]: VP9 WebM, planned from its [`webm::Options`] and the input,
+//!   fitted to the size limit, and the container inspected and patched,
+//!   as duration spoofing does, in [`webm::container`];
+//! - [`webp`]: pictures, from WebM's options for a picture;
+//! - [`tgs`]: `.tgs` vector animations of pixel art, made by
+//!   [`tgradish_tgs`], which this crate re-exports.
 //!
-//! ffmpeg reads videos and encodes WebM through a [`backend::Backend`]:
-//! the ffmpeg programs ([`ffmpeg`]), or with the `linked` feature its
-//! libraries, made to do what those programs' command lines do. What
-//! ffmpeg can't read, tgradish reads itself, and draws for it ([`drawn`]).
-//! WebM inspection and duration spoofing ([`webm::container`]), presets, the user's
-//! config and the events front-ends follow are here too.
+//! What they convert is an [`input::Input`], a file or a sequence of
+//! pictures, whose result goes where [`input::Input::default_output`]
+//! says unless a request names it; [`input::sniff`] tells kinds of file
+//! apart. The rest:
+//!
+//! - [`picture`]: where a picture lands in a WebM or image sticker, and
+//!   telling pixel art, which auto scaling keeps sharp;
+//! - [`backend`] and [`ffmpeg`]: ffmpeg, which reads videos and encodes
+//!   WebM, as the `ffmpeg` and `ffprobe` programs or with the `linked`
+//!   feature its libraries, made to do what those programs' command lines
+//!   do; [`drawn`] draws what ffmpeg can't read, which tgradish reads
+//!   itself, for it;
+//! - [`options`]: the values every format's options take, and how options
+//!   layer and become flags; [`presets`] and [`config`], the user's;
+//! - [`inspect`], what a sticker file holds, judged by [`telegram`]'s
+//!   limits; [`preview`], finished stickers decoded for showing;
+//! - [`protocol`]: what `--json` and `describe` print, by the rules its
+//!   docs give;
+//! - [`licenses`], [`paths`], and with the `clipboard` feature
+//!   `clipboard`.
+//!
+//! Errors are an [`Error`], which says what is wrong without naming flags.
 
 mod art;
 pub mod backend;

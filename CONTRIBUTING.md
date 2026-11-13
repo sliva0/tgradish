@@ -6,8 +6,8 @@
 | --- | --- |
 | `crates/frames` (`tgradish-frames`) | RGBA animations with frame times, and pure-Rust decoders for GIF, PNG and APNG, WebP, JPEG, BMP, Aseprite, sprite sheets and image sequences, within limits on what they allocate. Works on bytes only, so it builds for `wasm32-unknown-unknown`. What only Aseprite files have, as tags and layers, is in its `aseprite` module. |
 | `crates/tgs` (`tgradish-tgs`) | Pixel art to Telegram `.tgs` stickers: normalising the art to its grid, the painter's encoder that draws it as rectangles in layers, the reductions that fit it into 64 KiB, packing, and Telegram's limits and checks. No files, processes or ffmpeg either, and threads only with its `threads` feature. `make` and what it reads and reports are its public interface, serialised in kebab-case; the encoder's interior (scenes, Lottie, layout, the painter, packing and marks) is public only with the `internals` feature, which tgs-lab turns on and semver doesn't cover. |
-| `crates/core` (`tgradish-core`) | What the command line and the window share: planning WebM conversions and fitting them to the size limit, image stickers, `.tgs` conversion of files, WebM inspection and duration spoofing, presets, the config file, and the events front-ends follow. ffmpeg runs through a `Backend`: the `ffmpeg` and `ffprobe` programs, or with the `linked` feature its libraries, used to do exactly what those command lines do. What it serialises for `--json` and `describe` keeps the rules `protocol`'s docs give, as kebab-case and an object a line, and its errors say what is wrong without naming flags, which the command line adds and the window words its own way. |
-| `crates/gui` (`tgradish-gui`) | The egui window, which calls core directly. |
+| `crates/core` (`tgradish-core`) | What the command line and the window share. A module for each kind of result, `webm`, `webp` and `tgs`, converts an `input::Input`, a file or a sequence of pictures, by the same `convert(backend, &Request, &cancel, on_event)`, reporting through its `Event`s; `webm` also plans and fits WebM to the size limit, and in `webm::container` inspects WebM and patches it for duration spoofing. Beside them: `picture`, where a picture lands in a sticker and telling pixel art; `input`, results' default names and `sniff`, which tells kinds of file apart; `drawn`, pixel art drawn for ffmpeg; presets, the config file, and `inspect`. ffmpeg runs through a `Backend`: the `ffmpeg` and `ffprobe` programs, or with the `linked` feature its libraries, used to do exactly what those command lines do. It re-exports `tgradish-tgs`, so the types of it that core's API names are reached through core. What it serialises for `--json` and `describe` keeps the rules `protocol`'s docs give, as kebab-case and an object a line, and its errors say what is wrong without naming flags, which the command line adds and the window words its own way. |
+| `crates/gui` (`tgradish-gui`) | The egui window, which calls core directly, and reaches `tgradish-tgs` through it. |
 | `crates/cli` (`tgradish`) | The binary: arguments and terminal output. It includes the window unless built with `--no-default-features`. |
 | `crates/corpus` | Test art drawn in code, and video clips made with ffmpeg, so nothing in the repository belongs to anyone else. `tgs-lab corpus DIR` writes it all out. |
 | `crates/tgs-lab` | Encoder research: benchmarks, renders checked against tlottie and rlottie, and the probes that measured Telegram's limits. A workspace of its own with its own `Cargo.lock`, so tlottie, which isn't on crates.io, and rlottie stay out of what packagers fetch: run it from its folder, as `cargo run -- corpus DIR`, or with `--manifest-path crates/tgs-lab/Cargo.toml`. |
@@ -23,10 +23,10 @@ and `Backend::frame_starts` gives frame times with it taken off.
 
 A video cut keeps the frames that start at or after its start, as ffmpeg
 does, so a cut meant to start on a frame is written a little before it
-(`convert::read_from`), never more than a millisecond, in case times are
+(`webm::read_from`), never more than a millisecond, in case times are
 rounded on the way. Pixel art is cut by overlap instead: a frame is kept
-when any of it falls within the cut. The window's timeline writes cuts by
-both rules (`timeline::Frames`), and the tests
+when any of it falls within the cut. The window writes cuts by both rules
+(`cuts::Frames`, which its timeline edits), and the tests
 `counts_time_from_where_the_video_starts`, `finds_where_frames_start` and
 `cuts_where_converting_keeps_the_frames_meant` hold them.
 
