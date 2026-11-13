@@ -9,9 +9,7 @@ use tgradish_core::tgradish_tgs::reduce::{self, Kind as Reduction};
 use super::Context;
 use crate::item::{Item, Kind};
 use crate::l10n::fl;
-use crate::widgets::{
-    self, Choice, chosen_hint, flag, preset_number, preset_segments, row, section,
-};
+use crate::widgets::{self, Choice, chosen_hint, flag, preset_segments, row, section};
 
 fn tgs_speeds() -> [Choice<Speed>; 3] {
     [
@@ -102,12 +100,11 @@ const FIRST_SHEET: Sheet = Sheet { columns: 4, rows: 1 };
 
 /// How a picture is read: as a sprite sheet, or as it is. Only the item
 /// says, as a sheet's layout is one file's, which no preset holds.
-pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
+pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item) {
     if item.kind != Kind::Image || item.inputs.len() != 1 || item.sequence {
         return;
     }
     section(ui, &fl!("reading-art"));
-    let base = item.choices.tgs_base(context.presets, context.config).unwrap_or_default();
     let options = &mut item.choices.tgs;
     row(ui, &fl!("sprite-sheet"), &fl!("sprite-sheet", "hint"), Ok(()), |ui| {
         let mut sheet = options.sheet.is_some();
@@ -129,10 +126,14 @@ pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 let all = columns * rows;
                 let automatic = (fl!("sheet-all"), fl!("sheet-all", "hint"));
                 let automatic = (automatic.0.as_str(), automatic.1.as_str());
-                let (frames, preset) = (&mut options.sheet_frames, base.sheet_frames);
-                preset_number(ui, frames, preset, automatic, Some(all), all, |value| {
-                    value.range(1..=all)
-                });
+                widgets::auto_number(
+                    ui,
+                    &mut options.sheet_frames,
+                    automatic,
+                    Some(all),
+                    all,
+                    |value| value.range(1..=all),
+                );
             });
         });
     });

@@ -7,7 +7,6 @@ use eframe::egui::{self, RichText};
 use tgradish_core::presets::Format;
 use tgradish_core::tgradish_tgs::frames::aseprite::{Direction, LayerInfo, Tag};
 
-use super::Context;
 use crate::cuts::{Cut, Frames};
 use crate::item::{Choices, Item};
 use crate::l10n::fl;
@@ -18,33 +17,8 @@ const LEVEL: f32 = 20.0;
 /// Where a level's line runs, from the start of its indent.
 const TRUNK: f32 = 9.0;
 
-/// What the preset reads of an Aseprite file, which the item's choices go
-/// over: a tag, and layers shown and hidden.
-#[derive(Default)]
-struct Preset {
-    tag: Option<String>,
-    show: Option<Vec<String>>,
-    hide: Option<Vec<String>>,
-}
-
-impl Preset {
-    fn of(item: &Item, context: &Context) -> Preset {
-        let (presets, config) = (context.presets, context.config);
-        let choices = &item.choices;
-        let read = match item.format {
-            Format::Tgs => choices
-                .tgs_base(presets, config)
-                .map(|options| (options.tag, options.show_layers, options.hide_layers)),
-            Format::Webm | Format::Webp => choices
-                .webm_base(presets, config)
-                .map(|options| (options.tag, options.show_layers, options.hide_layers)),
-        };
-        read.map_or_else(|_| Preset::default(), |(tag, show, hide)| Preset { tag, show, hide })
-    }
-}
-
 /// The tag and layers to read, if there is a choice.
-pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
+pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item) {
     // kept, copied only when it changes, to show while it is read again
     let fresh = item.aseprite().map(|(tags, layers, durations)| {
         let seen = item.aseprite_seen.as_deref();
@@ -90,17 +64,16 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             ui.add(egui::Spinner::new().size(12.0));
         }
     });
-    let preset = Preset::of(item, context);
     let format = item.format;
     let choices = &mut item.choices;
     if !tags.is_empty() {
         row(ui, &fl!("tag"), &fl!("tag", "hint"), Ok(()), |ui| {
-            tag_row(ui, choices, &preset, tags, frames, format)
+            tag_row(ui, choices, tags, frames, format)
         });
     }
     if listed {
         row(ui, &fl!("layers"), &fl!("layers", "hint"), Ok(()), |ui| {
-            layer_list(ui, choices, &preset, layers)
+            layer_list(ui, choices, layers)
         });
     }
 }
@@ -119,12 +92,10 @@ fn frames_of(durations: &[f64], format: Format) -> Option<Frames> {
 /// The tags to pick, as buttons of their colours. One played forward
 /// sets where the input starts and ends, or for a picture, the frame it
 /// is, as the timeline writes them; one that plays backwards, or there and
-/// back, is read in its own order, which a cut can't do. With a preset's
-/// tag, which a cut would be counted in, every tag is read by name.
+/// back, is read in its own order, which a cut can't do.
 fn tag_row(
     ui: &mut egui::Ui,
     choices: &mut Choices,
-    preset: &Preset,
     tags: &[Tag],
     durations: &[f64],
     format: Format,
@@ -137,12 +108,12 @@ fn tag_row(
         let from = (tag.from as usize).min(count - 1);
         (from, (tag.to as usize + 1).clamp(from + 1, count))
     };
-    let read = choices.tag.clone().or(preset.tag.clone());
+    let read = choices.tag.clone();
     let picture = format == Format::Webp;
     // the part used, which a tag played forward sets
     let used = frames.part(total, choices.start, choices.length);
     let shown = frames.at(choices.frame.unwrap_or(0.0));
-    let by_name = |tag: &Tag| tag.direction != Direction::Forward || preset.tag.is_some();
+    let by_name = |tag: &Tag| tag.direction != Direction::Forward;
     let whole = read.is_none() && (picture || used == (0, count));
     let picked = |tag: &Tag| match by_name(tag) || read.is_some() {
         false if picture => (span(tag).0..span(tag).1).contains(&shown),
@@ -151,12 +122,8 @@ fn tag_row(
     };
     let picks: Vec<bool> = tags.iter().map(picked).collect();
     ui.horizontal_wrapped(|ui| {
-        // a preset's tag can be changed here, not left out
         let all = egui::Button::new(fl!("all-frames")).selected(whole && !picks.contains(&true));
-        let all = ui
-            .add_enabled(preset.tag.is_none(), all)
-            .on_hover_text(fl!("all-frames", "hint"))
-            .on_disabled_hover_text(fl!("all-frames", "preset"));
+        let all = ui.add(all).on_hover_text(fl!("all-frames", "hint"));
         if all.clicked() {
             choices.tag = None;
             (choices.start, choices.length) = (None, None);
@@ -248,7 +215,7 @@ fn last_of_group(layers: &[LayerInfo]) -> Vec<bool> {
 
 /// A box for each layer, under its group, ticked where it shows, with
 /// lines joining each to its group, as `tree` draws them.
-fn layer_list(ui: &mut egui::Ui, choices: &mut Choices, preset: &Preset, layers: &[LayerInfo]) {
+fn layer_list(ui: &mut egui::Ui, choices: &mut Choices, layers: &[LayerInfo]) {
     // a list, closer than rows of settings
     ui.spacing_mut().item_spacing.y = 2.0;
     let last = last_of_group(layers);
@@ -262,7 +229,7 @@ fn layer_list(ui: &mut egui::Ui, choices: &mut Choices, preset: &Preset, layers:
         }
         let level = usize::from(layer.level);
         going_on.truncate(level);
-        let mut on = shows(&named(choices, preset), layer);
+        let mut on = shows(&named(choices), layer);
         let row = ui.horizontal(|ui| {
             ui.add_space(LEVEL * (level + 1) as f32);
             // as Aseprite writes them, the background underlined
@@ -273,16 +240,12 @@ fn layer_list(ui: &mut egui::Ui, choices: &mut Choices, preset: &Preset, layers:
                 .add_enabled(hidden_from.is_none(), egui::Checkbox::new(&mut on, name))
                 .on_disabled_hover_text(fl!("layers", "group-hidden"));
             if response.changed() {
-                set(choices, preset, layer, on);
+                set(choices, layer, on);
             }
-            // the first ends with a way back to the preset's or the file's
-            let back = match (&preset.show, &preset.hide) {
-                (None, None) => fl!("layers", "file"),
-                _ => fl!("layers", "preset"),
-            };
+            // the first ends with a way back to the file's
             if index == 0
                 && (choices.show_layers.is_some() || choices.hide_layers.is_some())
-                && widgets::reset_to(ui, &back)
+                && widgets::reset_to(ui, &fl!("layers", "file"))
             {
                 (choices.show_layers, choices.hide_layers) = (None, None);
             }
@@ -307,12 +270,10 @@ fn layer_list(ui: &mut egui::Ui, choices: &mut Choices, preset: &Preset, layers:
     }
 }
 
-/// The layers shown and hidden by name: the item's, or else the preset's.
-fn named(choices: &Choices, preset: &Preset) -> (Vec<String>, Vec<String>) {
-    let list = |item: &Option<Vec<String>>, preset: &Option<Vec<String>>| {
-        item.as_ref().or(preset.as_ref()).cloned().unwrap_or_default()
-    };
-    (list(&choices.show_layers, &preset.show), list(&choices.hide_layers, &preset.hide))
+/// The layers the item shows and hides by name.
+fn named(choices: &Choices) -> (Vec<String>, Vec<String>) {
+    let list = |names: &Option<Vec<String>>| names.clone().unwrap_or_default();
+    (list(&choices.show_layers), list(&choices.hide_layers))
 }
 
 /// Whether `layer` shows: as the file says, unless it is named.
@@ -321,20 +282,16 @@ fn shows((show, hide): &(Vec<String>, Vec<String>), layer: &LayerInfo) -> bool {
 }
 
 /// Shows or hides every layer named as `layer` is, naming it only where
-/// that differs from the file, and keeping to the preset's lists where
-/// they say the same.
-fn set(choices: &mut Choices, preset: &Preset, layer: &LayerInfo, on: bool) {
-    let (mut show, mut hide) = named(choices, preset);
+/// that differs from the file.
+fn set(choices: &mut Choices, layer: &LayerInfo, on: bool) {
+    let (mut show, mut hide) = named(choices);
     show.retain(|name| *name != layer.name);
     hide.retain(|name| *name != layer.name);
     if on != layer.visible {
         if on { &mut show } else { &mut hide }.push(layer.name.clone());
     }
-    let own = |list: Vec<String>, preset: &Option<Vec<String>>| {
-        (list != preset.clone().unwrap_or_default()).then_some(list)
-    };
-    choices.show_layers = own(show, &preset.show);
-    choices.hide_layers = own(hide, &preset.hide);
+    choices.show_layers = (!show.is_empty()).then_some(show);
+    choices.hide_layers = (!hide.is_empty()).then_some(hide);
 }
 
 #[cfg(test)]
@@ -355,11 +312,11 @@ mod tests {
         };
         let tags = [tag("idle", 0, 1), tag("walk", 2, 5)];
         let durations = [0.1; 8];
-        let run = |choices: Choices, preset: Preset, format: Format| {
+        let run = |choices: Choices, format: Format| {
             let tags = tags.to_vec();
             let mut harness = Harness::new_ui_state(
                 move |ui, choices: &mut Choices| {
-                    tag_row(ui, choices, &preset, &tags, &durations, format);
+                    tag_row(ui, choices, &tags, &durations, format);
                 },
                 choices,
             );
@@ -374,7 +331,7 @@ mod tests {
         for format in [Format::Webm, Format::Tgs] {
             // written as the timeline writes the frames, so converting keeps
             // them, and still picked once the timeline writes them again
-            let mut harness = run(Choices::new(Target::Sticker), Preset::default(), format);
+            let mut harness = run(Choices::new(Target::Sticker), format);
             harness.get_by_label("walk").click();
             harness.run_steps(2);
             let frames = frames_of(&durations, format).unwrap();
@@ -385,21 +342,8 @@ mod tests {
             assert_eq!(frames.part(0.8, start, length), (2, 6));
             assert!(picked(&harness, "walk") && !picked(&harness, "idle"));
         }
-        // a preset's tag: another forward tag is read by name, not cut from
-        // the preset's tag's frames
-        let preset = Preset { tag: Some("idle".into()), ..Preset::default() };
-        let mut harness = run(Choices::new(Target::Sticker), preset, Format::Webm);
-        assert!(picked(&harness, "idle"));
-        harness.get_by_label("walk").click();
-        harness.run_steps(2);
-        let choices = harness.state();
-        assert_eq!(
-            (choices.tag.as_deref(), choices.start, choices.length),
-            (Some("walk"), None, None)
-        );
-        assert!(picked(&harness, "walk") && !picked(&harness, "idle"));
         // a picture's frame starts where the picker puts it
-        let mut harness = run(Choices::new(Target::Sticker), Preset::default(), Format::Webp);
+        let mut harness = run(Choices::new(Target::Sticker), Format::Webp);
         harness.get_by_label("walk").click();
         harness.run_steps(2);
         let frames = frames_of(&durations, Format::Webp).unwrap();
@@ -415,27 +359,16 @@ mod tests {
             layer
         };
         let (shadow, sketch) = (layer("Shadow", true), layer("Sketch", false));
-        let none = Preset::default();
         let mut choices = Choices::new(Target::Sticker);
-        set(&mut choices, &none, &shadow, false);
-        set(&mut choices, &none, &sketch, true);
+        set(&mut choices, &shadow, false);
+        set(&mut choices, &sketch, true);
         assert_eq!(choices.hide_layers, Some(vec!["Shadow".into()]));
         assert_eq!(choices.show_layers, Some(vec!["Sketch".into()]));
-        let both = named(&choices, &none);
+        let both = named(&choices);
         assert!(!shows(&both, &shadow) && shows(&both, &sketch));
         // back as the file has them, nothing is named
-        set(&mut choices, &none, &shadow, true);
-        set(&mut choices, &none, &sketch, false);
+        set(&mut choices, &shadow, true);
+        set(&mut choices, &sketch, false);
         assert_eq!((&choices.show_layers, &choices.hide_layers), (&None, &None));
-
-        // a preset showing the sketch: ticked, and hidden over it
-        let preset = Preset { show: Some(vec!["Sketch".into()]), ..Preset::default() };
-        assert!(shows(&named(&choices, &preset), &sketch));
-        set(&mut choices, &preset, &sketch, false);
-        assert_eq!(choices.show_layers, Some(Vec::new()));
-        assert!(!shows(&named(&choices, &preset), &sketch));
-        // shown again, as the preset has it
-        set(&mut choices, &preset, &sketch, true);
-        assert_eq!((choices.show_layers, choices.hide_layers), (None, None));
     }
 }

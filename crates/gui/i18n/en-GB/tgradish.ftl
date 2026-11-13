@@ -578,7 +578,6 @@ tag = Tag
     .hint = Picks the frames of a tag: as where it starts and ends, or read in its own order where it plays backwards or there and back
 all-frames = All frames
     .hint = Every frame of the file
-    .preset = The preset reads one tag
 # A tag's frames, counted from 1 as Aseprite counts them, and how it plays.
 tag-frame = Frame { $number }
 tag-frames = Frames { $from } to { $to }
@@ -589,7 +588,6 @@ layers = Layers
     .hint = Which layers show, the top one first; a hidden group hides the layers in it
     .group-hidden = Its group is hidden
     .file = Go back to the layers the file shows
-    .preset = Go back to the layers the preset shows
 
 
 ## Settings: encoder options, folded away under the rest
