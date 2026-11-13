@@ -10,15 +10,44 @@ use serde::Serialize;
 use crate::convert::Plan;
 use crate::telegram::Issue;
 
-/// Rate control used by one encode.
+/// Rate control used by one encode. Serialised tagged by `mode`, as
+/// `{"mode":"bitrate","kbps":500}`, `{"mode":"crf","crf":32}` or
+/// `{"mode":"lossless"}`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
+#[serde(into = "RateMode")]
 pub enum Rate {
     /// Two-pass average bitrate, in kbit/s.
     Bitrate(f64),
     /// Constant quality.
     Crf(u8),
     Lossless,
+}
+
+/// [`Rate`] as it is serialised: an internally tagged enum needs fields
+/// to put its tag beside.
+#[derive(Serialize, JsonSchema)]
+#[serde(tag = "mode", rename_all = "kebab-case")]
+enum RateMode {
+    /// Two-pass average bitrate.
+    Bitrate {
+        /// In kbit/s.
+        kbps: f64,
+    },
+    /// Constant quality, from 0 (best) to 63.
+    Crf {
+        crf: u8,
+    },
+    Lossless,
+}
+
+impl From<Rate> for RateMode {
+    fn from(rate: Rate) -> RateMode {
+        match rate {
+            Rate::Bitrate(kbps) => RateMode::Bitrate { kbps },
+            Rate::Crf(crf) => RateMode::Crf { crf },
+            Rate::Lossless => RateMode::Lossless,
+        }
+    }
 }
 
 /// Settings of one encode.
