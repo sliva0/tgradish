@@ -202,6 +202,119 @@ fn square_png(path: &Path, colour: [u8; 4]) {
     std::fs::write(path, tgradish_corpus::encode::png(&canvas)).unwrap();
 }
 
+/// `frames` frames of 24x24 noise in four levels of each colour, in a
+/// folder of their own: as a `.tgs` kept exact, far over 64 KiB.
+fn noise(dir: &Path, frames: u32) -> PathBuf {
+    let folder = dir.join("noise");
+    std::fs::create_dir_all(&folder).unwrap();
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut level = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % 4) as u8 * 85
+    };
+    for frame in 0..frames {
+        let mut canvas = Canvas::new(24, 24);
+        for y in 0..24 {
+            for x in 0..24 {
+                canvas.set(x, y, [level(), level(), level(), 255]);
+            }
+        }
+        std::fs::write(folder.join(format!("{frame}.png")), tgradish_corpus::encode::png(&canvas))
+            .unwrap();
+    }
+    folder
+}
+
+#[test]
+fn exits_3_when_telegram_would_refuse_a_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let art = noise(dir.path(), 24);
+    let tgs = dir.path().join("noise.tgs");
+    let made = |extra: &[&str]| {
+        let mut args = vec!["convert", art.to_str().unwrap(), "--sequence"];
+        args.extend(["-o", tgs.to_str().unwrap(), "-y", "--speed", "fast", "--fps", "24"]);
+        args.extend(extra);
+        tgradish(&args)
+    };
+    // made, as exact keeps it, and too large
+    let output = made(&[]);
+    assert_eq!(output.status.code(), Some(3), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(tgs.is_file());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("too large; --no-exact lets fitting change the art"), "{stderr}");
+    assert!(!stderr.contains("Fitting"), "nothing is fitted: {stderr}");
+    let output = made(&["--json"]);
+    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(json_lines(&output).last().unwrap()["event"], "finished");
+    // read, and refused
+    assert_eq!(tgradish(&["inspect", tgs.to_str().unwrap()]).status.code(), Some(3));
+    assert_eq!(tgradish(&["--json", "inspect", tgs.to_str().unwrap()]).status.code(), Some(3));
+    // a failure beats a refusal
+    let missing = dir.path().join("missing.tgs");
+    let both = tgradish(&["inspect", tgs.to_str().unwrap(), missing.to_str().unwrap()]);
+    assert_eq!(both.status.code(), Some(1));
+    let png = dir.path().join("noise").join("0.png");
+    let both = tgradish(&[
+        "convert",
+        png.to_str().unwrap(),
+        missing.to_str().unwrap(),
+        "--format",
+        "tgs",
+        "-O",
+        dir.path().join("out").to_str().unwrap(),
+    ]);
+    assert_eq!(both.status.code(), Some(1));
+
+    // a picture is judged as what it was made for
+    if !tgradish_corpus::ffmpeg_on_path() {
+        return;
+    }
+    let webp = dir.path().join("still.webp");
+    let output = tgradish(&[
+        "--ffmpeg-from",
+        "system",
+        "convert",
+        png.to_str().unwrap(),
+        "-o",
+        webp.to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(tgradish(&["inspect", webp.to_str().unwrap()]).status.code(), Some(0));
+    let as_emoji = tgradish(&["inspect", webp.to_str().unwrap(), "--target", "emoji"]);
+    assert_eq!(as_emoji.status.code(), Some(3));
+}
+
+/// WebM fitted to nothing, larger than an emoji may be.
+#[test]
+fn exits_3_for_webm_over_the_limit() {
+    let Some(input) = clip(Clip::Square) else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("big.webm");
+    let output = tgradish(&[
+        "--ffmpeg-from",
+        "system",
+        "convert",
+        input.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+        "--target",
+        "emoji",
+        "--fit",
+        "off",
+        "--crf",
+        "0",
+        "--length",
+        "1",
+        "--speed",
+        "fast",
+    ]);
+    assert_eq!(output.status.code(), Some(3), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Telegram will refuse it"));
+    assert_eq!(tgradish(&["inspect", out.to_str().unwrap()]).status.code(), Some(3));
+}
+
 #[test]
 fn makes_animated_stickers() {
     let dir = tempfile::tempdir().unwrap();

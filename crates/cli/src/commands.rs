@@ -45,11 +45,14 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
     let report = container::patch_file(&args.input, &output, &changes, replace)
         .with_context(|| format!("couldn't spoof {}", args.input.display()))?;
 
+    // a duration Telegram doesn't take makes a file it refuses
+    let refused = args.fake_duration > telegram::MAX_SECONDS;
+    let done = || if refused { Err(crate::Exit(crate::REFUSED).into()) } else { Ok(()) };
     if ctx.global.json {
         crate::json_line(&json!({ "output": output.to_string_lossy(), "report": report }));
-        return Ok(());
+        return done();
     }
-    if args.fake_duration > telegram::MAX_SECONDS {
+    if refused {
         eprintln!(
             "{} {} is longer than {} s, Telegram will still refuse it",
             ui::warning_label(),
@@ -72,7 +75,7 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
             )
         )
     );
-    Ok(())
+    done()
 }
 
 fn print_image(
@@ -165,7 +168,7 @@ fn print_failure(ctx: &Context, path: &std::path::Path, err: &impl std::fmt::Dis
 }
 
 pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
-    let mut failed = 0;
+    let (mut failed, mut refused) = (0, false);
     for (i, path) in args.files.iter().enumerate() {
         let inspected = match inspect::inspect(path, args.target.map(Into::into)) {
             Ok(inspected) => inspected,
@@ -175,6 +178,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
                 continue;
             }
         };
+        refused |= inspected.refused();
         if ctx.global.json {
             #[derive(serde::Serialize)]
             struct Line<'a> {
@@ -203,6 +207,9 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
             return Err(crate::Exit(1).into());
         }
         bail!("{failed} of {} couldn't be read", ui::count(args.files.len(), "file"));
+    }
+    if refused {
+        return Err(crate::Exit(crate::REFUSED).into());
     }
     Ok(())
 }
