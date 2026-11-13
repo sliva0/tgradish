@@ -492,7 +492,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         Some(duration) => duration - start,
         None => f64::INFINITY,
     };
-    let tempo = o.tempo.unwrap_or(1.0);
+    let tempo = o.tempo_or_default();
     if !options::TEMPOS.contains(&tempo) {
         let (slowest, fastest) = (options::TEMPOS.start(), options::TEMPOS.end());
         return Err(Error::invalid("tempo", format!("must be from {slowest} to {fastest}")));
