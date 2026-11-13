@@ -251,7 +251,12 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
 
 /// What the window loads when it opens, as Debian packages and as the
 /// libraries an .rpm can ask for by name, which Fedora and openSUSE both
-/// resolve: the graphics libraries, and D-Bus for file dialogs.
+/// resolve: the graphics libraries, and D-Bus for file dialogs. winit opens
+/// libX11, libX11-xcb, libXcursor and libXi, and does RandR through x11rb,
+/// which loads libxcb; glutin opens libXrender, and egui libEGL and libGL;
+/// xkbcommon-dl loads libxkbcommon and its X11 half. The AUR packages'
+/// `depends` and `packaging/nix/package.nix` list the same, by their own
+/// names.
 const WINDOW_LIBRARIES: [(&str, &str); 13] = [
     ("libegl1", "libEGL.so.1"),
     ("libgl1", "libGL.so.1"),

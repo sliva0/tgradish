@@ -9,6 +9,8 @@ url='https://github.com/sliva0/tgradish'
 license=(MIT BSD-3-Clause)
 # ffmpeg runs as a program; the window loads the graphics libraries when
 # it opens, and D-Bus for file dialogues
+# the window's libraries are those of WINDOW_LIBRARIES in xtask/src/package.rs,
+# which says where each comes from: keep them alike
 depends=(
   dbus
   ffmpeg
@@ -16,11 +18,12 @@ depends=(
   glibc
   libglvnd
   libx11
+  libxcb
   libxcursor
   libxi
   libxkbcommon
   libxkbcommon-x11
-  libxrandr
+  libxrender
   wayland
 )
 makedepends=(cargo)
