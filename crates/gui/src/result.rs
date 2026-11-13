@@ -152,9 +152,10 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     }
 }
 
-/// The accent, half let through, so the text over it stays readable.
+/// The accent, half let through, or less where the text over it wouldn't
+/// read on that.
 fn running_colour(ui: &egui::Ui) -> Color32 {
-    theme::tint(theme::accent(ui.visuals()), 0.5)
+    theme::fill(ui.visuals(), 0.5)
 }
 
 /// What each stage of a `.tgs` conversion says, once it is at `stage`.

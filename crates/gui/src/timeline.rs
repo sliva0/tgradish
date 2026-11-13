@@ -311,7 +311,7 @@ fn bar(
     let (from, to) = ends(*start, *used);
     let painter = ui.painter_at(rect);
     let visuals = ui.visuals();
-    painter.rect_filled(track, 3.0, theme::tint(theme::accent(visuals), 0.5));
+    painter.rect_filled(track, 3.0, theme::tint(theme::mark(visuals), 0.5));
     // the unused parts, dimmed
     painter.rect_filled(
         Rect::from_min_max(track.min, pos2(x_of(from), track.max.y)),
@@ -404,7 +404,7 @@ pub(crate) fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &m
         let x = track.left() + (*time / length) as f32 * track.width();
         let played = Rect::from_min_max(track.min, pos2(x, track.max.y));
         // clipped rather than shrunk, so the start of the bar keeps its shape
-        ui.painter_at(played).rect_filled(track, 3.0, theme::tint(theme::accent(visuals), 0.5));
+        ui.painter_at(played).rect_filled(track, 3.0, theme::tint(theme::mark(visuals), 0.5));
         painter.circle_filled(pos2(x, track.center().y), 6.0, visuals.strong_text_color());
         ui.label(text);
     });
@@ -485,7 +485,7 @@ pub(crate) fn frame_picker(
         // the other frames dimmed, as the unused part is in the other modes
         painter.rect_filled(track, 3.0, visuals.extreme_bg_color);
         // the frame lit, the bar's rounded ends kept
-        painter.with_clip_rect(span(index)).rect_filled(track, 3.0, theme::accent(visuals));
+        painter.with_clip_rect(span(index)).rect_filled(track, 3.0, theme::mark(visuals));
         // where frames meet, while they are far enough apart to tell
         if track.width() / frames.count() as f32 >= MARKED_FRAME {
             let gap = Stroke::new(1.0, visuals.panel_fill);

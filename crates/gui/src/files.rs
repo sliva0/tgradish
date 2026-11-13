@@ -224,7 +224,7 @@ impl App {
     pub(crate) fn empty(&mut self, ui: &mut egui::Ui) {
         let zone = ui.max_rect().shrink(28.0);
         let colour = if self.hovering {
-            theme::accent(ui.visuals())
+            theme::mark(ui.visuals())
         } else {
             ui.visuals().widgets.noninteractive.bg_stroke.color
         };
@@ -321,13 +321,12 @@ fn row(
     // as Breeze marks items: the accent let through, more for the
     // selected one, which is outlined in it too, yet little enough that
     // the row's small coloured text still reads
-    let accent = theme::accent(visuals);
     if selected {
-        ui.painter().rect_filled(rect, 6.0, theme::tint(accent, theme::ROW_SELECTED));
-        let outline = egui::Stroke::new(1.0, accent);
+        ui.painter().rect_filled(rect, 6.0, theme::row(visuals, true));
+        let outline = egui::Stroke::new(1.0, theme::mark(visuals));
         ui.painter().rect_stroke(rect, 6.0, outline, egui::StrokeKind::Inside);
     } else if response.hovered() {
-        ui.painter().rect_filled(rect, 6.0, theme::tint(accent, theme::ROW_HOVERED));
+        ui.painter().rect_filled(rect, 6.0, theme::row(visuals, false));
     }
     let inner = rect.shrink2(vec2(6.0, 6.0));
     let input = egui::Rect::from_min_size(inner.min, vec2(THUMB, THUMB));
@@ -467,7 +466,7 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
         (Some(job), _) if job.is_running() => {
             ui.add_space(3.0);
             let size = vec2(ui.available_width(), 6.0);
-            let colour = theme::accent(ui.visuals());
+            let colour = theme::mark(ui.visuals());
             let fill = widgets::Fill::working(job.progress.overall());
             widgets::bar_sized(ui, size, fill, "", colour);
         }
