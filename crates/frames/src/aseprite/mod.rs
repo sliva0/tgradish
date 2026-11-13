@@ -401,6 +401,13 @@ impl Sprite {
         // two DWORDs that must be 0
         header.skip(8)?;
         let transparent = header.u8()?;
+        header.skip(3)?;
+        // the palette before any palette chunk changes it, in opaque black,
+        // as Aseprite starts it; 0 in old files means 256
+        let colours = match header.u16()? {
+            0 => 256,
+            n => usize::from(n),
+        };
         if width == 0 || height == 0 {
             return Err(error(format!("the canvas is {width}x{height}")));
         }
@@ -427,9 +434,13 @@ impl Sprite {
             limits: *limits,
             spent: 0,
         };
-        let mut old_palette: Option<Vec<Colour>> = None;
+        // Aseprite 1.1 saved old palette chunks beside new ones, which are
+        // to be read instead: like Aseprite, old ones count only until a
+        // new one has been read, anywhere in the file
         let mut new_palette = false;
-        let mut palette: Vec<Colour> = Vec::new();
+        // only indexed colour has a use for one
+        let colours = if depth == Depth::Indexed { colours } else { 0 };
+        let mut palette: Vec<Colour> = vec![[0, 0, 0, 255]; colours];
         // bytes of pixels decoded so far
         let mut spent = 0;
         for _ in 0..frame_count {
@@ -460,8 +471,12 @@ impl Sprite {
                 let mut chunk = Reader::new(body.take(size)?);
                 let next_tag = tag_data.take();
                 match kind {
-                    0x0004 | 0x0011 if !new_palette => {
-                        old_palette = Some(read_old_palette(&mut chunk, kind == 0x0011)?);
+                    // 4 and 11, written as 0x0011 in the specification but 11
+                    // in Aseprite's own source, each changing the palette
+                    // from its frame on, as new ones do
+                    0x0004 | 0x000b if !new_palette => {
+                        read_old_palette(&mut chunk, kind == 0x000b, &mut palette)?;
+                        changed = true;
                     }
                     0x2004 => sprite.layers.push(read_layer(&mut chunk)?),
                     0x2005 => cels.push(sprite.read_cel(&mut chunk, &mut spent)?),
@@ -505,11 +520,6 @@ impl Sprite {
                 sprite.palettes.push(palette.clone());
             }
             sprite.frame_palettes.push(sprite.palettes.len() - 1);
-        }
-        // old files have only old palette chunks, which apply throughout
-        if !new_palette && let Some(old) = old_palette {
-            sprite.palettes = vec![old];
-            sprite.frame_palettes.fill(0);
         }
         if sprite.frames.is_empty() {
             return Err(Error::Empty);
@@ -1101,27 +1111,29 @@ fn read_palette(chunk: &mut Reader, palette: &mut Vec<Colour>) -> Result<()> {
     Ok(())
 }
 
-/// The palettes of old files: packets of opaque colours, with 6-bit
-/// channels in chunk 0x0011.
-fn read_old_palette(chunk: &mut Reader, six_bits: bool) -> Result<Vec<Colour>> {
-    let mut palette = vec![[0, 0, 0, 255]; 256];
-    let mut index = 0usize;
+/// An old palette chunk, which changes entries of `palette` in packets of
+/// opaque colours, with 6-bit channels in chunk 11. As Aseprite reads them
+/// (`readColorChunk` in src/dio/aseprite_decoder.cpp): each packet starts
+/// as many entries after the one before started as it says, and entries
+/// past the palette's size are left out.
+fn read_old_palette(chunk: &mut Reader, six_bits: bool, palette: &mut [Colour]) -> Result<()> {
+    // Aseprite's `scale_6bits_to_8bits`
+    let scale = |c: u8| if six_bits { c.min(63) << 2 | c.min(63) >> 4 } else { c };
+    let mut start = 0usize;
     for _ in 0..chunk.u16()? {
-        index += usize::from(chunk.u8()?);
+        start += usize::from(chunk.u8()?);
         let count = match chunk.u8()? {
             0 => 256,
             n => usize::from(n),
         };
-        for _ in 0..count {
+        for index in start..start + count {
             let [r, g, b] = chunk.array::<3>()?;
-            let scale = |c: u8| if six_bits { (u16::from(c.min(63)) * 255 / 63) as u8 } else { c };
             if let Some(entry) = palette.get_mut(index) {
                 *entry = [scale(r), scale(g), scale(b), 255];
             }
-            index += 1;
         }
     }
-    Ok(palette)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1820,6 +1832,52 @@ mod tests {
         let animation = decode(&bytes).unwrap();
         let colours: Vec<Colour> = (0..3).map(|f| animation.pixel(f, 0, 0).unwrap()).collect();
         assert_eq!(colours, [RED, GREEN, GREEN]);
+    }
+
+    /// An old palette chunk of `packets`, each of entries to skip from the
+    /// last packet's start and its colours.
+    fn old_palette(kind: u16, packets: &[(u8, &[[u8; 3]])]) -> Vec<u8> {
+        let mut data = (packets.len() as u16).to_le_bytes().to_vec();
+        for &(skip, colours) in packets {
+            data.extend([skip, colours.len() as u8]);
+            data.extend(colours.concat());
+        }
+        chunk(kind, &data)
+    }
+
+    #[test]
+    fn reads_old_palette_chunks() {
+        // indices 0 to 6 on a background layer, which shows index 0 too
+        let indexed = |frames: Vec<Vec<Vec<u8>>>| {
+            let mut frames = frames;
+            for (index, chunks) in frames.iter_mut().enumerate() {
+                if index == 0 {
+                    chunks.push(layer(1 | 8, 0, 0, 0, 255));
+                }
+                chunks.push(image_cel(0, (0, 0), (7, 1), &[0, 1, 2, 3, 4, 5, 6], false));
+            }
+            let animation = decode(&file(7, 1, 8, 1, &frames)).unwrap();
+            (0..animation.frames().len()).map(|frame| pixels(&animation, frame)).collect::<Vec<_>>()
+        };
+        const BLACK: Colour = [0, 0, 0, 255];
+        // chunk 4, of 8 bits: the second packet starts 5 after the first
+        // started, and what no packet sets stays opaque black
+        let eight = old_palette(4, &[(0, &[[255, 0, 0], [0, 255, 0]]), (5, &[[0, 0, 255]])]);
+        assert_eq!(indexed(vec![vec![eight]]), [[RED, GREEN, BLACK, BLACK, BLACK, BLUE, BLACK]]);
+        // chunk 11, of 6 bits, as Aseprite scales them
+        let six = old_palette(11, &[(1, &[[63, 32, 1]])]);
+        let scaled = [255, 130, 4, 255];
+        assert_eq!(indexed(vec![vec![six.clone()]])[0][..3], [BLACK, scaled, BLACK]);
+        // each from its frame on, over the palette before it
+        let red = old_palette(4, &[(2, &[[255, 0, 0]])]);
+        let frames = indexed(vec![vec![six.clone()], vec![red.clone()], vec![]]);
+        let changed: Vec<_> = frames.iter().map(|frame| (frame[1], frame[2])).collect();
+        assert_eq!(changed, [(scaled, BLACK), (scaled, RED), (scaled, RED)]);
+        // but not once a new palette chunk has been read: Aseprite 1.1 wrote
+        // both, and the new one is the one to read
+        let new = palette(&[GREEN, BLUE]);
+        let frames = indexed(vec![vec![six.clone(), new], vec![red]]);
+        assert_eq!(frames[1][..3], [GREEN, BLUE, [0; 4]]);
     }
 
     #[test]
