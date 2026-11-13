@@ -318,7 +318,8 @@ enum Message {
     Crashed(String),
 }
 
-/// One conversion of an item, waiting, running or finished.
+/// One conversion of an item, waiting, running or finished. Dropped, it
+/// stops converting.
 pub struct Job {
     pub output: PathBuf,
     /// The output replaces a file made at another time.
@@ -327,6 +328,13 @@ pub struct Job {
     pub progress: Progress,
     cancel: CancelToken,
     messages: Option<Receiver<Message>>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for Job {
+    fn drop(&mut self) {
+        self.cancel();
+    }
 }
 
 impl Job {
@@ -338,6 +346,7 @@ impl Job {
             progress: Progress::default(),
             cancel: CancelToken::new(),
             messages: None,
+            worker: None,
         }
     }
 
@@ -369,7 +378,7 @@ impl Job {
         let output = self.output.clone();
         let cancel = self.cancel.clone();
         let ctx = ctx.clone();
-        std::thread::spawn(move || {
+        self.worker = Some(std::thread::spawn(move || {
             let send = |message| {
                 let _ = sender.send(message);
                 ctx.request_repaint();
@@ -389,11 +398,25 @@ impl Job {
                         .unwrap_or_default(),
                 ),
             });
-        });
+        }));
     }
 
     pub fn cancel(&self) {
         self.cancel.cancel();
+    }
+
+    /// Waits until `deadline` at most for the worker to end, as it does
+    /// once it has cleaned up after a conversion stopped; true if it did.
+    pub fn wait_until(&mut self, deadline: std::time::Instant) -> bool {
+        let Some(worker) = &self.worker else { return true };
+        while !worker.is_finished() {
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let _ = self.worker.take().map(std::thread::JoinHandle::join);
+        true
     }
 
     /// Asked to stop, and not yet stopped.
