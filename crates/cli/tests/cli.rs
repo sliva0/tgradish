@@ -72,9 +72,12 @@ fn carries_licences() {
     let alias = tgradish(&["licences"]);
     assert!(alias.status.success() && alias.stdout == output.stdout);
     let text = String::from_utf8_lossy(&output.stdout);
-    for title in
-        ["tgradish", "Font: Ubuntu Light and Medium, subsets", "libwebp: licence", "Rust crates"]
-    {
+    for title in [
+        "tgradish",
+        "Font: Ubuntu Light and Medium derivative tgradish, subsets",
+        "libwebp: licence",
+        "Rust crates",
+    ] {
         assert!(text.lines().any(|line| line == title), "no {title:?}");
     }
     // each crate's own license file, with who holds its copyright
