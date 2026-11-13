@@ -14,6 +14,7 @@ use crate::app::App;
 use crate::fonts::drawable_in;
 use crate::jobs::Problem;
 use crate::l10n::fl;
+use crate::theme;
 use crate::widgets::{self, gauge, label, note, problems};
 
 pub(crate) enum Found {
@@ -72,7 +73,7 @@ fn of(used: impl std::fmt::Display, limit: impl std::fmt::Display) -> String {
 pub(crate) fn show(ui: &mut egui::Ui, inspection: &Inspection) {
     match &inspection.found {
         Found::Failed(message) => {
-            ui.colored_label(widgets::BAD, message);
+            ui.colored_label(theme::bad(ui.visuals()), message);
             return;
         }
         Found::Webm { info, target } => webm(ui, info, *target),

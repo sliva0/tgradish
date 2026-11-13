@@ -15,6 +15,7 @@ use crate::app::App;
 use crate::file_settings;
 use crate::l10n::{self, fl};
 use crate::media::Task;
+use crate::theme;
 use crate::widgets::{self, note, row, segments};
 
 #[derive(Default)]
@@ -149,7 +150,9 @@ pub(crate) fn show(
                     let weak = |text: &str| egui::RichText::new(text).weak().size(12.5);
                     let text = match &dialog.saved {
                         Some(Ok(saved)) => weak(saved),
-                        Some(Err(error)) => egui::RichText::new(error).color(widgets::BAD),
+                        Some(Err(error)) => {
+                            egui::RichText::new(error).color(theme::bad(ui.visuals()))
+                        }
                         None => weak(&fl!("settings-note")),
                     };
                     ui.add(egui::Label::new(text).truncate());
@@ -221,7 +224,7 @@ fn sections(
                 ui.spinner();
                 note(ui, fl!("checking-ffmpeg"));
             } else if let Some((ok, status)) = &dialog.ffmpeg_status {
-                let colour = if *ok { widgets::GOOD } else { widgets::BAD };
+                let colour = if *ok { theme::good(ui.visuals()) } else { theme::bad(ui.visuals()) };
                 ui.add(egui::Label::new(egui::RichText::new(status).color(colour)).truncate());
             }
         });

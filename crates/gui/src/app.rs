@@ -669,6 +669,7 @@ impl eframe::App for App {
         for (message, action) in self.banner.show(&ctx) {
             self.act(&ctx, &message, action);
         }
+        theme::focus_ring(&ctx);
         if self.hovering {
             let painter =
                 ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, "drop".into()));

@@ -9,7 +9,7 @@ use crate::fonts::{drawable, missing_note, text_format};
 use crate::jobs::Status;
 use crate::l10n::fl;
 use crate::outputs::Written;
-use crate::{system, widgets};
+use crate::{system, theme, widgets};
 
 /// Room the right of the bar takes, at least: the result's name and the
 /// button that shows its folder.
@@ -103,10 +103,10 @@ impl App {
                         match &failed.job.status {
                             Status::Failed(message) => {
                                 let failed = fl!("failed", error = message.as_str());
-                                ui.colored_label(widgets::BAD, failed);
+                                ui.colored_label(theme::bad(ui.visuals()), failed);
                             }
                             Status::Exists(path) => {
-                                ui.colored_label(widgets::WARN, fl!("in-the-way"));
+                                ui.colored_label(theme::warn(ui.visuals()), fl!("in-the-way"));
                                 if ui.button(fl!("replace-it")).clicked() {
                                     replace = Some(path.clone());
                                 }
@@ -138,7 +138,7 @@ impl App {
                     system::reveal(output);
                 }
                 if let Some(replaces) = &replaces {
-                    ui.colored_label(widgets::WARN, format!("⚠ {replaces}"));
+                    ui.colored_label(theme::warn(ui.visuals()), format!("⚠ {replaces}"));
                 }
                 ui.label(name).on_hover_ui(|ui| {
                     let plain = text_format(ui, ui.visuals().text_color());

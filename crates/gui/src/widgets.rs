@@ -6,11 +6,6 @@ use crate::jobs::Problem;
 use crate::l10n::fl;
 use crate::theme;
 
-/// Colours that say how things are: Breeze's, the same in either theme.
-pub(crate) const GOOD: Color32 = theme::POSITIVE;
-pub(crate) const WARN: Color32 = theme::NEUTRAL;
-pub(crate) const BAD: Color32 = theme::NEGATIVE;
-
 pub(crate) fn kib(bytes: u64) -> String {
     format!("{:.1} KiB", bytes as f64 / 1024.0)
 }
@@ -307,7 +302,7 @@ pub(crate) fn preset_picking<T: PartialEq + Copy>(
             *value = (current != base).then_some(current);
             changed = true;
         }
-        if value.is_some() && reset(ui) {
+        if reset(ui, value.is_some()) {
             *value = None;
             changed = true;
         }
@@ -344,14 +339,25 @@ pub(crate) fn chosen_hint<T: PartialEq + Copy>(ui: &mut egui::Ui, value: T, choi
     }
 }
 
-/// The small button that goes back to the preset's value.
-pub(crate) fn reset(ui: &mut egui::Ui) -> bool {
-    reset_to(ui, &fl!("back-to-preset"))
+/// Side of the slot a [`reset`] button keeps.
+const RESET: f32 = 20.0;
+
+/// The small button that goes back to the preset's value, where `shown`.
+pub(crate) fn reset(ui: &mut egui::Ui, shown: bool) -> bool {
+    reset_to(ui, shown, &fl!("back-to-preset"))
 }
 
-/// A small button back to what `hint` says.
-pub(crate) fn reset_to(ui: &mut egui::Ui, hint: &str) -> bool {
-    ui.add(egui::Button::new(RichText::new("⟲").size(13.0)).small().frame(false))
+/// A small button back to what `hint` says, where `shown`, in the accent
+/// so it reads as a button though it has no frame. Its room is kept where
+/// it isn't shown, so what follows it doesn't move as it comes and goes.
+pub(crate) fn reset_to(ui: &mut egui::Ui, shown: bool, hint: &str) -> bool {
+    let size = vec2(RESET, RESET);
+    if !shown {
+        ui.allocate_exact_size(size, egui::Sense::hover());
+        return false;
+    }
+    let glyph = RichText::new("⟲").size(13.0).color(theme::accent_text(ui.visuals()));
+    ui.add(egui::Button::new(glyph).small().frame(false).min_size(size))
         .on_hover_text(hint)
         .clicked()
 }
@@ -373,7 +379,7 @@ pub(crate) fn flag(
             *value = (checked != base).then_some(checked);
             changed = true;
         }
-        if value.is_some() && reset(ui) {
+        if reset(ui, value.is_some()) {
             *value = None;
             changed = true;
         }
@@ -455,7 +461,7 @@ pub(crate) fn from_preset() -> (String, String) {
 /// How much of a limit something uses: a bar, red when over.
 pub(crate) fn gauge(ui: &mut egui::Ui, used: u64, limit: u64, text: String) {
     let share = used as f32 / limit.max(1) as f32;
-    let colour = if share > 1.0 { BAD } else { GOOD };
+    let colour = if share > 1.0 { theme::NEGATIVE } else { theme::POSITIVE };
     bar(ui, Fill::Share(share), &text, colour.gamma_multiply(0.55));
 }
 
@@ -495,7 +501,8 @@ pub(crate) fn bar_sized(
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let rounding = (size.y / 2.0).min(4.0);
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, rounding, ui.visuals().extreme_bg_color);
+    let (track, outline) = theme::track(ui.visuals());
+    painter.rect_filled(rect, rounding, track);
     // the whole bar's shape, cut to how far it got: no blob at its start
     // when it is nearly empty
     if let Fill::Share(share) | Fill::Working(share) = fill {
@@ -519,6 +526,7 @@ pub(crate) fn bar_sized(
         ui.painter_at(part.intersect(rect)).rect_filled(rect, rounding, shade);
         ui.ctx().request_repaint();
     }
+    painter.rect_stroke(rect, rounding, outline, egui::StrokeKind::Inside);
     painter.text(
         rect.left_center() + egui::vec2(8.0, 0.0),
         egui::Align2::LEFT_CENTER,
@@ -531,10 +539,14 @@ pub(crate) fn bar_sized(
 /// Telegram's problems with a result, or that it has none.
 pub(crate) fn problems(ui: &mut egui::Ui, problems: &[Problem]) {
     if problems.is_empty() {
-        ui.colored_label(GOOD, format!("✔ {}", fl!("telegram-accepts")));
+        ui.colored_label(theme::good(ui.visuals()), format!("✔ {}", fl!("telegram-accepts")));
     }
     for problem in problems {
-        let (colour, mark) = if problem.refused { (BAD, "✖") } else { (WARN, "⚠") };
+        let (colour, mark) = if problem.refused {
+            (theme::bad(ui.visuals()), "✖")
+        } else {
+            (theme::warn(ui.visuals()), "⚠")
+        };
         ui.colored_label(colour, format!("{mark} {}", problem.text));
     }
 }

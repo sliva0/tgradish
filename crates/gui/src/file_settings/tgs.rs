@@ -81,7 +81,7 @@ pub(super) fn tgs_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context)
                     }
                     changed = true;
                 }
-                if index == 0 && options.reductions.is_some() && widgets::reset(ui) {
+                if index == 0 && widgets::reset(ui, options.reductions.is_some()) {
                     options.reductions = None;
                 }
             });

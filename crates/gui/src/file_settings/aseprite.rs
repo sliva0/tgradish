@@ -243,10 +243,8 @@ fn layer_list(ui: &mut egui::Ui, choices: &mut Choices, layers: &[LayerInfo]) {
                 set(choices, layer, on);
             }
             // the first ends with a way back to the file's
-            if index == 0
-                && (choices.show_layers.is_some() || choices.hide_layers.is_some())
-                && widgets::reset_to(ui, &fl!("layers", "file"))
-            {
+            let own = choices.show_layers.is_some() || choices.hide_layers.is_some();
+            if index == 0 && widgets::reset_to(ui, own, &fl!("layers", "file")) {
                 (choices.show_layers, choices.hide_layers) = (None, None);
             }
         });

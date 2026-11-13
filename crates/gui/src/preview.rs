@@ -283,7 +283,7 @@ fn preview(
                 } else {
                     "⚠".to_owned()
                 };
-                let stale = RichText::new(text).color(widgets::WARN);
+                let stale = RichText::new(text).color(theme::warn(ui.visuals()));
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add(egui::Label::new(stale).truncate())
                         .on_hover_text(fl!("outdated", "hint"));
@@ -346,7 +346,7 @@ fn preview(
     match item.view.show {
         Show::Input => {
             if let Some(message) = error {
-                message_in(ui, rect, &fl!("unreadable", error = message), widgets::BAD);
+                message_in(ui, rect, &fl!("unreadable", error = message), theme::bad(ui.visuals()));
             } else if let (Some(clip), Some(size)) = (overview, input_size) {
                 // a picture is one frame: shown still, where it is picked
                 let picking = item.format == Format::Webp;

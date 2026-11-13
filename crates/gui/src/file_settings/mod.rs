@@ -21,6 +21,7 @@ use crate::config::Config;
 use crate::item::{Item, Kind};
 use crate::l10n::fl;
 use crate::preset_dialogs::{self, Ask, is_users};
+use crate::theme;
 use crate::widgets::{self, Choice, note, segments};
 use advanced::advanced;
 use aseprite::aseprite;
@@ -128,7 +129,7 @@ pub(crate) fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         && !matches!(item.kind, Kind::Aseprite | Kind::Frames)
         && item.art.ready().is_some_and(|art| !art.clip.looks_like_pixel_art());
     if not_art {
-        ui.colored_label(widgets::WARN, format!("⚠ {}", fl!("not-pixel-art")));
+        ui.colored_label(theme::warn(ui.visuals()), format!("⚠ {}", fl!("not-pixel-art")));
     }
 
     // presets say how to encode videos and animations; a picture takes
@@ -218,7 +219,7 @@ pub(crate) fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             } else {
                 fl!("preset", "missing", name = preset_label(chosen))
             };
-            ui.colored_label(widgets::WARN, format!("⚠ {why}"));
+            ui.colored_label(theme::warn(ui.visuals()), format!("⚠ {why}"));
             if known {
                 note(ui, crate::jobs::failure(&err));
             }
