@@ -371,8 +371,8 @@ impl Preview {
 struct Loaded {
     animation: frames::Animation,
     /// Tags and layers of an Aseprite file, which the options choose from.
-    tags: Vec<frames::Tag>,
-    layers: Vec<frames::LayerInfo>,
+    tags: Vec<frames::aseprite::Tag>,
+    layers: Vec<frames::aseprite::LayerInfo>,
     /// How long each frame of an Aseprite file shows, in seconds, its
     /// tags' or not.
     durations: Vec<f64>,
@@ -583,10 +583,10 @@ pub struct Source {
     /// Straight RGBA, each frame with how long it shows, in seconds.
     pub frames: Vec<(Vec<u8>, f64)>,
     /// Tags of an Aseprite file, which `tag` can choose from.
-    pub tags: Vec<frames::Tag>,
+    pub tags: Vec<frames::aseprite::Tag>,
     /// Layers of an Aseprite file, as its Layers panel lists them, which
     /// `show-layers` and `hide-layers` choose from.
-    pub layers: Vec<frames::LayerInfo>,
+    pub layers: Vec<frames::aseprite::LayerInfo>,
     /// How long each frame of an Aseprite file shows, in seconds, its
     /// tags' or not.
     pub durations: Vec<f64>,

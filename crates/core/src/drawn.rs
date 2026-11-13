@@ -9,7 +9,8 @@
 
 use std::path::{Path, PathBuf};
 
-use tgradish_tgs::frames::{self, Animation, LayerInfo, Layers, Limits, Tag};
+use tgradish_tgs::frames::aseprite::{LayerInfo, Layers, Tag};
+use tgradish_tgs::frames::{self, Animation, Limits};
 
 use crate::CancelToken;
 use crate::backend::Backend;
@@ -237,7 +238,7 @@ mod tests {
             })
         };
         // every frame, as long as each lasts
-        let sprite = frames::Sprite::read(&std::fs::read(&ase).unwrap()).unwrap();
+        let sprite = frames::aseprite::Sprite::read(&std::fs::read(&ase).unwrap()).unwrap();
         let all = sprite.animation(None, &Layers::default()).unwrap();
         assert_eq!(read(&ase, Options::default()).unwrap(), all);
         let idle = Options { tag: Some("idle".into()), ..Options::default() };
