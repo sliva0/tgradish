@@ -8,9 +8,12 @@
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
+use eframe::egui::Color32;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tgradish_core::telegram::Target;
+
+use crate::theme;
 
 /// Core's config, and the window's own settings from its `[gui]` table.
 /// It stands for core's where that is asked for, as presets are chosen by
@@ -102,6 +105,8 @@ pub(crate) struct GuiConfig {
     pub(crate) language: Option<String>,
     /// Light or dark, or as the system has it.
     pub(crate) theme: Theme,
+    /// The colour that marks what is chosen, hovered and focused.
+    pub(crate) accent: Accent,
     /// Start with the files open when the window last closed.
     pub(crate) reopen_files: bool,
     /// Show the timeline's cuts and times in frames rather than seconds.
@@ -118,6 +123,7 @@ impl Default for GuiConfig {
             smooth_scrolling: false,
             language: None,
             theme: Theme::default(),
+            accent: Accent::default(),
             reopen_files: true,
             timeline_frames: false,
             result_preview: ResultPreview::default(),
@@ -126,13 +132,14 @@ impl Default for GuiConfig {
 }
 
 /// The keys of `[gui]` the window reads and writes; others are kept.
-const KEYS: [&str; 9] = [
+const KEYS: [&str; 10] = [
     "output-dir",
     "overwrite",
     "target",
     "smooth-scrolling",
     "language",
     "theme",
+    "accent",
     "reopen-files",
     "timeline-frames",
     "result-preview",
@@ -156,6 +163,7 @@ impl GuiConfig {
             smooth_scrolling: get(table, "smooth-scrolling").unwrap_or(default.smooth_scrolling),
             language: get(table, "language"),
             theme: get(table, "theme").unwrap_or(default.theme),
+            accent: get(table, "accent").unwrap_or(default.accent),
             reopen_files: get(table, "reopen-files").unwrap_or(default.reopen_files),
             timeline_frames: get(table, "timeline-frames").unwrap_or(default.timeline_frames),
             result_preview: match table.get("result-preview") {
@@ -253,6 +261,78 @@ pub(crate) enum Theme {
     Dark,
 }
 
+/// The window's accent colour: the system's, one of Plasma's, or one of
+/// the user's own. Written as `system`, a name of [`theme::ACCENTS`], or
+/// `#rrggbb`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(into = "String")]
+pub(crate) enum Accent {
+    /// As the system has it, or Breeze's where it has none.
+    #[default]
+    System,
+    /// One of [`theme::ACCENTS`], by its name.
+    Named(&'static str),
+    Own(Color32),
+}
+
+impl Accent {
+    /// The colour, unless it is the system's.
+    pub(crate) fn colour(self) -> Option<Color32> {
+        match self {
+            Accent::System => None,
+            Accent::Named(name) => {
+                theme::ACCENTS.iter().find(|(each, _)| *each == name).map(|(_, colour)| *colour)
+            }
+            Accent::Own(colour) => Some(colour),
+        }
+    }
+
+    /// `#rrggbb`, in either case, as a colour.
+    pub(crate) fn hex(text: &str) -> Option<Color32> {
+        let digits = text.strip_prefix('#')?;
+        if digits.len() != 6 || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        let channel = |at: usize| u8::from_str_radix(&digits[at..at + 2], 16).ok();
+        Some(Color32::from_rgb(channel(0)?, channel(2)?, channel(4)?))
+    }
+}
+
+/// `colour` as `#rrggbb`.
+pub(crate) fn hex(colour: Color32) -> String {
+    format!("#{:02x}{:02x}{:02x}", colour.r(), colour.g(), colour.b())
+}
+
+impl TryFrom<String> for Accent {
+    type Error = String;
+
+    fn try_from(text: String) -> Result<Accent, String> {
+        if text == "system" {
+            return Ok(Accent::System);
+        }
+        if let Some((name, _)) = theme::ACCENTS.iter().find(|(name, _)| *name == text) {
+            return Ok(Accent::Named(name));
+        }
+        Accent::hex(&text).map(Accent::Own).ok_or_else(|| format!("no accent colour: {text}"))
+    }
+}
+
+impl<'de> Deserialize<'de> for Accent {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Accent, D::Error> {
+        Accent::try_from(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+impl From<Accent> for String {
+    fn from(accent: Accent) -> String {
+        match accent {
+            Accent::System => "system".to_owned(),
+            Accent::Named(name) => name.to_owned(),
+            Accent::Own(colour) => hex(colour),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,6 +354,40 @@ mod tests {
         assert_eq!(gui.result_preview, ResultPreview { size: 3, corner: Corner::TopLeft });
         // a table where a setting is expected is no setting
         assert_eq!(read("[gui]\nresult-preview = 4\n").result_preview, ResultPreview::default());
+    }
+
+    #[test]
+    fn reads_every_key_the_example_documents() {
+        let example = include_str!("../../core/src/config.example.toml");
+        let config =
+            Config::from(toml::from_str::<tgradish_core::config::Config>(example).unwrap());
+        // none left over as unknown, or as a value it couldn't read
+        assert!(config.core.gui.is_empty(), "{:?}", config.core.gui);
+        assert_eq!(config.gui.accent, Accent::System);
+    }
+
+    #[test]
+    fn reads_accents_by_name_or_colour() {
+        let accent = |value: &str| read(&format!("[gui]\naccent = {value}\n")).accent;
+        assert_eq!(accent("'system'"), Accent::System);
+        assert_eq!(accent("'teal'"), Accent::Named("teal"));
+        assert_eq!(accent("'#3DAEe9'"), Accent::Own(theme::BREEZE_ACCENT));
+        // what it can't read: the system's
+        for unread in ["'mauve'", "'#3dae'", "'3daee9'", "'#3daeeg'", "7", "'#ffffffff'"] {
+            assert_eq!(accent(unread), Accent::System, "{unread}");
+        }
+        assert_eq!(Accent::Named("grey").colour(), Some(Color32::from_rgb(104, 107, 111)));
+        // written as it is read
+        for accent in
+            [Accent::System, Accent::Named("pink"), Accent::Own(Color32::from_rgb(1, 2, 254))]
+        {
+            let gui = GuiConfig { accent, ..GuiConfig::default() };
+            let written = toml::Table::try_from(&gui).unwrap();
+            assert_eq!(GuiConfig::read(&written).accent, accent);
+        }
+        let own =
+            GuiConfig { accent: Accent::Own(Color32::from_rgb(1, 2, 254)), ..Default::default() };
+        assert_eq!(toml::Table::try_from(&own).unwrap()["accent"].as_str(), Some("#0102fe"));
     }
 
     #[test]

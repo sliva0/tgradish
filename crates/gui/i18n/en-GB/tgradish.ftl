@@ -761,6 +761,32 @@ theme = Theme
     .hint = The button beside ⚙ switches between light and dark too
 theme-light = Light
 theme-dark = Dark
+accent = Accent colour
+    .hint = What marks the chosen, the hovered and the focused
+# The first of the accent colours, "As the system" again.
+accent-system = { as-the-system }
+    .hint = The desktop's accent colour, or Breeze's blue where it has none
+# The accent colours on offer, each said on hover, as Plasma offers them.
+accent-pink = Pink
+accent-red = Red
+accent-orange = Orange
+accent-yellow = Yellow
+accent-green = Green
+accent-teal = Teal
+accent-blue = Blue
+accent-purple = Purple
+accent-violet = Violet
+accent-grey = Grey
+# The last of the accent colours, which opens a colour picker; once one is
+# picked, it is said as #rrggbb.
+accent-own = A colour of your own
+    .chosen = A colour of your own, { $colour }
+# What screen readers call the two parts of the colour picker: a square of
+# the shades of one colour, and a strip of the colours of the rainbow.
+accent-shade = Shade
+accent-hue = Hue
+# Beside a field of the colour picked, as #rrggbb.
+accent-hex = Hex
 files = Files
 reopen-files = Reopen the files of last time, with their settings
 scrolling = Scrolling

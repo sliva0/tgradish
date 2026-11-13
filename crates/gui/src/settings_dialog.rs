@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::config::Config;
+use crate::config::{self, Accent, Config};
 use eframe::egui;
 use tgradish_core::CancelToken;
 use tgradish_core::backend::Backend;
@@ -44,6 +44,8 @@ pub(crate) struct SettingsDialog {
     /// Save wrote the settings file, which the window takes up, as what
     /// it said of the file is past.
     pub(crate) wrote: bool,
+    /// The accent colour of one's own as typed, `#rrggbb`, while it is.
+    accent_typed: String,
 }
 
 impl SettingsDialog {
@@ -291,6 +293,9 @@ fn sections(
         ];
         segments(ui, &mut gui.theme, &themes, |_| Ok(()));
     });
+    row(ui, &fl!("accent"), &fl!("accent", "hint"), Ok(()), |ui| {
+        accents(ui, &mut gui.accent, &mut dialog.accent_typed);
+    });
     row(ui, &fl!("files"), "", Ok(()), |ui| {
         ui.checkbox(&mut gui.reopen_files, fl!("reopen-files"));
     });
@@ -332,6 +337,73 @@ fn sections(
         if picked != current {
             dialog.default_preset = Some((format, picked));
         }
+    }
+}
+
+/// The accent colours to choose from: the system's, Plasma's, and one's
+/// own, which a colour picker under it sets, or `typed` as `#rrggbb`.
+fn accents(ui: &mut egui::Ui, accent: &mut Accent, typed: &mut String) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let system = *accent == Accent::System;
+        let button = widgets::choice(ui, system, &fl!("accent-system"), true);
+        if button.on_hover_text(fl!("accent-system", "hint")).clicked() {
+            *accent = Accent::System;
+        }
+        ui.add_space(6.0);
+        for (name, colour) in theme::ACCENTS {
+            let chosen = *accent == Accent::Named(name);
+            if widgets::swatch(ui, Some(colour), chosen, &accent_name(name)).clicked() {
+                *accent = Accent::Named(name);
+            }
+        }
+        let own = match *accent {
+            Accent::Own(colour) => Some(colour),
+            _ => None,
+        };
+        let name = match own {
+            Some(colour) => fl!("accent-own", "chosen", colour = config::hex(colour)),
+            None => fl!("accent-own"),
+        };
+        let swatch = widgets::swatch(ui, own, own.is_some(), &name);
+        let picker = egui::Popup::from_toggle_button_response(&swatch)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+        picker.show(|ui| {
+            // from the accent shown, until one is picked
+            let mut colour = own.unwrap_or_else(|| theme::accent(ui.visuals()));
+            let names = [fl!("accent-shade"), fl!("accent-hue")];
+            if widgets::colour_picker(ui, &mut colour, [&names[0], &names[1]]) {
+                *accent = Accent::Own(colour);
+            }
+            ui.horizontal(|ui| {
+                ui.label(fl!("accent-hex"));
+                let field = ui.add(widgets::text_field(typed).desired_width(90.0));
+                if field.changed() {
+                    if let Some(colour) = Accent::hex(typed.trim()) {
+                        *accent = Accent::Own(colour);
+                    }
+                } else if !field.has_focus() {
+                    *typed = config::hex(colour);
+                }
+            });
+        });
+    });
+}
+
+/// The name of one of [`theme::ACCENTS`], in the window's language.
+fn accent_name(name: &str) -> String {
+    match name {
+        "pink" => fl!("accent-pink"),
+        "red" => fl!("accent-red"),
+        "orange" => fl!("accent-orange"),
+        "yellow" => fl!("accent-yellow"),
+        "green" => fl!("accent-green"),
+        "teal" => fl!("accent-teal"),
+        "blue" => fl!("accent-blue"),
+        "purple" => fl!("accent-purple"),
+        "violet" => fl!("accent-violet"),
+        "grey" => fl!("accent-grey"),
+        _ => name.to_owned(),
     }
 }
 
@@ -383,6 +455,7 @@ fn check_ffmpeg(choice: FfmpegChoice, path: Option<&Path>, cancel: &CancelToken)
 
 #[cfg(test)]
 mod tests {
+    use eframe::egui::Color32;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
 
@@ -470,6 +543,44 @@ mod tests {
         // preset of its own, by bitrate still
         let ranges: Vec<_> = app.items.iter().map(|item| item.choices.webm.fit_range).collect();
         assert_eq!(ranges, [None, bitrates]);
+    }
+
+    #[test]
+    fn takes_up_an_accent_as_it_is_chosen() {
+        let mut harness = crate::testing::harness(Config::default());
+        harness.state().style(&harness.ctx);
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(2);
+        let shown = |harness: &Harness<App>| theme::accent(&harness.ctx.global_style().visuals);
+        assert_eq!(shown(&harness), theme::BREEZE_ACCENT);
+        harness.get_by_label(&fl!("accent-teal")).click_accesskit();
+        harness.run_steps(2);
+        assert_eq!(harness.state().config.gui.accent, Accent::Named("teal"));
+        assert_eq!(shown(&harness), Color32::from_rgb(0, 211, 184));
+        // one's own, typed in the picker
+        harness.get_by_label(&fl!("accent-own")).click_accesskit();
+        harness.run_steps(2);
+        harness.get_by_label(&fl!("accent-hex"));
+        let field = || {
+            let role = egui::accesskit::Role::TextInput;
+            egui_kittest::kittest::by().value("#00d3b8").role(role)
+        };
+        harness.get(field()).focus();
+        harness.run_steps(1);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.get(field()).type_text("#FF8800");
+        harness.run_steps(2);
+        let own = Color32::from_rgb(255, 136, 0);
+        assert_eq!(harness.state().config.gui.accent, Accent::Own(own));
+        assert_eq!(shown(&harness), own);
+        harness.get_by_label(&fl!("accent-own", "chosen", colour = "#ff8800"));
+        // and back to the system's
+        // the theme's is the first
+        let system = fl!("accent-system");
+        harness.get_all_by_label(&system).last().unwrap().click_accesskit();
+        harness.run_steps(2);
+        assert_eq!(harness.state().config.gui.accent, Accent::System);
+        assert_eq!(shown(&harness), theme::BREEZE_ACCENT);
     }
 
     #[test]

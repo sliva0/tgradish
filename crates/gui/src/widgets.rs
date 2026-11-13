@@ -580,6 +580,167 @@ pub(crate) fn choice(
     response.on_hover_text(text)
 }
 
+/// Radius of a [`swatch`]'s colour, and of the ring round it when chosen
+/// or hovered.
+const SWATCH: f32 = 10.0;
+const SWATCH_RING: f32 = 12.5;
+
+/// A colour to choose, round, in a square as high as a control: `colour`,
+/// or where there is none, a wheel of every hue, for a colour of one's
+/// own. Where `chosen`, it is ticked in black or white, whichever reads on
+/// it, and ringed in the text colour, which reads on the window whatever
+/// the colour; `name` is said on hover and to screen readers.
+pub(crate) fn swatch(
+    ui: &mut egui::Ui,
+    colour: Option<Color32>,
+    chosen: bool,
+    name: &str,
+) -> egui::Response {
+    let side = theme::CONTROL;
+    let (rect, response) = ui.allocate_exact_size(vec2(side, side), egui::Sense::click());
+    let enabled = ui.is_enabled();
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, chosen, name)
+    });
+    if !ui.is_rect_visible(rect) {
+        return response.on_hover_text(name);
+    }
+    let visuals = ui.visuals();
+    let painter = ui.painter();
+    let centre = rect.center();
+    match colour {
+        Some(colour) => {
+            painter.circle_filled(centre, SWATCH, colour);
+        }
+        None => {
+            // white in the middle, each hue at the edge
+            let mut wheel = egui::Mesh::default();
+            wheel.colored_vertex(centre, Color32::WHITE);
+            let steps = 48;
+            for step in 0..=steps {
+                let turn = step as f32 / steps as f32;
+                let angle = turn * std::f32::consts::TAU;
+                let at = centre + SWATCH * vec2(angle.cos(), angle.sin());
+                wheel.colored_vertex(at, egui::ecolor::Hsva::new(turn, 1.0, 1.0, 1.0).into());
+                if step > 0 {
+                    wheel.add_triangle(0, step, step + 1);
+                }
+            }
+            painter.add(wheel);
+        }
+    }
+    // apart from the window, though it be the window's colour
+    painter.circle_stroke(centre, SWATCH, visuals.widgets.inactive.bg_stroke);
+    let text = visuals.text_color();
+    if chosen {
+        let fill = colour.unwrap_or(Color32::WHITE);
+        let tick = [Color32::WHITE, Color32::BLACK]
+            .into_iter()
+            .max_by(|a, b| theme::contrast(*a, fill).total_cmp(&theme::contrast(*b, fill)))
+            .unwrap_or(Color32::BLACK);
+        let points = [vec2(-4.5, 0.0), vec2(-1.5, 3.0), vec2(4.5, -3.5)].map(|at| centre + at);
+        painter.add(egui::Shape::line(points.to_vec(), egui::Stroke::new(2.0, tick)));
+        // the keyboard's focus rings it in the accent instead
+        if !response.has_focus() {
+            painter.circle_stroke(centre, SWATCH_RING, egui::Stroke::new(1.5, text));
+        }
+    } else if response.hovered() && enabled {
+        painter.circle_stroke(centre, SWATCH_RING, egui::Stroke::new(1.0, text));
+    }
+    response.on_hover_text(name)
+}
+
+/// A picker of opaque colours: a square of the shades of one hue, more
+/// saturated to the right and lighter to the top, and a strip of the hues
+/// under it. `names` are what screen readers call the two. True when
+/// `colour` changed.
+pub(crate) fn colour_picker(ui: &mut egui::Ui, colour: &mut Color32, names: [&str; 2]) -> bool {
+    use egui::ecolor::HsvaGamma;
+    // the hue kept while the colour is grey, which has none of its own
+    let id = ui.id().with("colour-picker");
+    let kept = ui.data(|data| data.get_temp::<(Color32, HsvaGamma)>(id));
+    let mut hsv = match kept {
+        Some((kept, hsv)) if kept == *colour => hsv,
+        _ => HsvaGamma::from(*colour),
+    };
+    let width = 240.0;
+    let enabled = ui.is_enabled();
+    let outline = ui.visuals().widgets.noninteractive.bg_stroke;
+    let area = |ui: &mut egui::Ui, height: f32, name: &str| {
+        let sense = egui::Sense::click_and_drag();
+        let (rect, response) = ui.allocate_exact_size(vec2(width, height), sense);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Slider, enabled, name));
+        let at = response.interact_pointer_pos().map(|at| {
+            let at = (at - rect.min) / rect.size();
+            vec2(at.x.clamp(0.0, 1.0), at.y.clamp(0.0, 1.0))
+        });
+        (rect, at)
+    };
+    let (square, picked) = area(ui, 150.0, names[0]);
+    if let Some(at) = picked {
+        (hsv.s, hsv.v) = (at.x, 1.0 - at.y);
+    }
+    let (strip, picked) = area(ui, 16.0, names[1]);
+    if let Some(at) = picked {
+        hsv.h = at.x;
+    }
+    // each drawn as a grid of the colours at its corners
+    let grid = |rect: egui::Rect, steps: (usize, usize), at: &dyn Fn(f32, f32) -> Color32| {
+        let mut mesh = egui::Mesh::default();
+        for row in 0..=steps.1 {
+            for column in 0..=steps.0 {
+                let (x, y) = (column as f32 / steps.0 as f32, row as f32 / steps.1 as f32);
+                mesh.colored_vertex(rect.min + rect.size() * vec2(x, y), at(x, y));
+                if row > 0 && column > 0 {
+                    let index = |row: usize, column: usize| (row * (steps.0 + 1) + column) as u32;
+                    let (a, b) = (index(row - 1, column - 1), index(row - 1, column));
+                    let (c, d) = (index(row, column - 1), index(row, column));
+                    mesh.add_triangle(a, b, c);
+                    mesh.add_triangle(b, d, c);
+                }
+            }
+        }
+        mesh
+    };
+    let painter = ui.painter();
+    let shade = |s, v| Color32::from(HsvaGamma { h: hsv.h, s, v, a: 1.0 });
+    painter.add(grid(square, (16, 16), &|x, y| shade(x, 1.0 - y)));
+    painter.add(grid(strip, (36, 1), &|x, _| HsvaGamma { h: x, s: 1.0, v: 1.0, a: 1.0 }.into()));
+    for rect in [square, strip] {
+        painter.rect_stroke(rect, 0.0, outline, egui::StrokeKind::Outside);
+    }
+    // where the colour is, ringed in black and white, which shows on any
+    let ring = |at: egui::Pos2, radius: f32| {
+        painter.circle_stroke(at, radius + 1.0, egui::Stroke::new(1.0, Color32::BLACK));
+        painter.circle_stroke(at, radius, egui::Stroke::new(1.0, Color32::WHITE));
+    };
+    ring(square.min + square.size() * vec2(hsv.s, 1.0 - hsv.v), 5.0);
+    let x = strip.left() + strip.width() * hsv.h;
+    painter.rect_stroke(
+        egui::Rect::from_center_size(
+            egui::pos2(x, strip.center().y),
+            vec2(5.0, strip.height() + 4.0),
+        ),
+        1.0,
+        egui::Stroke::new(1.0, Color32::BLACK),
+        egui::StrokeKind::Middle,
+    );
+    painter.rect_stroke(
+        egui::Rect::from_center_size(
+            egui::pos2(x, strip.center().y),
+            vec2(3.0, strip.height() + 2.0),
+        ),
+        1.0,
+        egui::Stroke::new(1.0, Color32::WHITE),
+        egui::StrokeKind::Middle,
+    );
+    let picked = Color32::from(hsv);
+    ui.data_mut(|data| data.insert_temp(id, (picked, hsv)));
+    let changed = picked != *colour;
+    *colour = picked;
+    changed
+}
+
 /// [`segments`] for a value a preset may set.
 pub(crate) fn preset_segments<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
