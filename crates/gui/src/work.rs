@@ -14,7 +14,7 @@ use crate::app::App;
 use crate::files::THUMB;
 use crate::item::{Conversion, Item, Kind, Recipe, Show};
 use crate::jobs::{Done, Setup, Status};
-use crate::media::{self, Art, Clip, Load, Video};
+use crate::media::{self, Art, Clip, Load, Task, Video};
 use crate::outputs::Written;
 
 /// How many items read their inputs at once, besides the selected one.
@@ -34,7 +34,10 @@ impl App {
             .items
             .iter()
             .filter(|item| {
-                item.video.is_loading() || item.art.is_loading() || item.result_clip.is_loading()
+                item.sniffed.is_loading()
+                    || item.video.is_loading()
+                    || item.art.is_loading()
+                    || item.result_clip.is_loading()
             })
             .count();
         for item in &mut self.items {
@@ -42,6 +45,11 @@ impl App {
             check_earlier(ctx, item);
             let is_selected = selected == Some(item.id);
             let kept = is_selected || self.recent.contains(&item.id);
+            if item.sniffed.poll() {
+                // taken by its name where it couldn't be read
+                let kind = item.sniffed.ready().copied().unwrap_or(item.kind);
+                item.take_kind(kind);
+            }
             let finished = item.video.poll() | item.art.poll();
             if let Some((_, part)) = &mut item.part {
                 part.poll();
@@ -82,6 +90,15 @@ impl App {
             // read what the item needs
             let wanted = is_selected || item.input_thumb.is_none();
             if !wanted || (!is_selected && reading >= READING) {
+                continue;
+            }
+            // what the file is by its content, which says what reads it
+            if item.sniffed.is_idle() {
+                let path = item.inputs[0].clone();
+                item.sniffed = Load::Loading(Task::spawn(ctx, move |_| Ok(Kind::of_file(&path))));
+                reading += 1;
+            }
+            if item.sniffed.is_loading() {
                 continue;
             }
             let reads_art =
@@ -750,6 +767,27 @@ mod tests {
         finish(&mut harness);
         let item = &harness.state().items[1];
         assert_eq!((item.kind, item.format), (Kind::Image, Format::Webp));
+    }
+
+    #[test]
+    fn tells_files_apart_by_their_content_before_their_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.mp4");
+        square(&art, [255, 0, 0, 255]);
+        let ase = corpus(dir.path(), "walker_2x.ase", "walker.dat");
+        let mut harness = harness(Config::default());
+        harness.state_mut().add(vec![art, ase]);
+        // taken by their names until they are read
+        let kinds = |harness: &Harness<App>| -> Vec<_> {
+            harness.state().items.iter().map(|item| (item.kind, item.format)).collect()
+        };
+        assert_eq!(kinds(&harness), [(Kind::Video, Format::Webm), (Kind::Video, Format::Webm)]);
+        for index in [0, 1] {
+            let id = harness.state().items[index].id;
+            harness.state_mut().select(id);
+            finish(&mut harness);
+        }
+        assert_eq!(kinds(&harness), [(Kind::Image, Format::Tgs), (Kind::Aseprite, Format::Tgs)]);
     }
 
     #[test]
