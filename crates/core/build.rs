@@ -9,8 +9,11 @@
 use std::io::Write;
 use std::path::Path;
 
+include!("src/notice_titles.rs");
+
 fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    println!("cargo:rerun-if-changed=src/notice_titles.rs");
     let read = |path: &str| {
         let path = root.join(path);
         println!("cargo:rerun-if-changed={}", path.display());
@@ -22,7 +25,7 @@ fn main() {
     // those aren't the build these files describe
     if std::env::var_os("CARGO_FEATURE_LINKED_STATIC").is_some() {
         for (file, title) in [
-            ("SOURCES.txt", "ffmpeg: what is built in, and its sources"),
+            ("SOURCES.txt", FFMPEG_SOURCES),
             ("ffmpeg-COPYING.LGPLv2.1", "ffmpeg: GNU Lesser General Public License 2.1"),
             ("ffmpeg-LICENSE.md", "ffmpeg: licence notes"),
             ("libvpx-LICENSE", "libvpx: licence"),
@@ -37,7 +40,7 @@ fn main() {
     for (file, title) in [("COPYING", "libwebp: licence"), ("PATENTS", "libwebp: patent grant")] {
         notices.push((title.to_owned(), read(&format!("licenses/libwebp/{file}"))));
     }
-    notices.push(("Rust crates".to_owned(), read("licenses/THIRD-PARTY-CRATES.txt")));
+    notices.push((CRATES.to_owned(), read("licenses/THIRD-PARTY-CRATES.txt")));
 
     // titles and texts, apart by unit and record separators
     let mut packed = String::new();
