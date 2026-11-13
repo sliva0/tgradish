@@ -15,13 +15,33 @@ pub fn kib(bytes: u64) -> String {
     format!("{:.1} KiB", bytes as f64 / 1024.0)
 }
 
-/// Seconds as `1:02.50` or `2.50 s`.
+/// Seconds as `1:02.50` or `2.50 s`, to the hundredth: rounded first, so
+/// 119.996 is `2:00.00`, not `1:60.00`.
 pub fn seconds(value: f64) -> String {
-    if value >= 60.0 {
-        format!("{}:{:05.2}", (value / 60.0).floor(), value % 60.0)
+    let hundredths = (value * 100.0).round();
+    if hundredths >= 6000.0 {
+        let hundredths = hundredths as u64;
+        let (minutes, rest) = (hundredths / 6000, hundredths % 6000);
+        format!("{minutes}:{:02}.{:02}", rest / 100, rest % 100)
     } else {
         format!("{value:.2} s")
     }
+}
+
+/// Seconds typed as [`seconds`] writes them, `1:02.50` or `2.50 s`, or as
+/// a number alone.
+pub fn parse_seconds(text: &str) -> Option<f64> {
+    let text = text.trim();
+    let text = text.strip_suffix('s').unwrap_or(text).trim();
+    let value = match text.split_once(':') {
+        Some((minutes, rest)) => {
+            let minutes: u32 = minutes.trim().parse().ok()?;
+            let rest: f64 = rest.trim().parse().ok()?;
+            (0.0..60.0).contains(&rest).then(|| f64::from(minutes) * 60.0 + rest)?
+        }
+        None => text.parse().ok()?,
+    };
+    value.is_finite().then_some(value)
 }
 
 /// A heading over a group of settings, apart from the group before by a
@@ -637,5 +657,16 @@ mod tests {
     fn writes_times() {
         assert_eq!(seconds(2.5), "2.50 s");
         assert_eq!(seconds(62.5), "1:02.50");
+        assert_eq!(seconds(119.996), "2:00.00");
+        // what is written reads back, to the hundredth
+        for (time, written) in [(59.996, "1:00.00"), (60.0, "1:00.00"), (119.996, "2:00.00")] {
+            assert_eq!(seconds(time), written);
+            let read = parse_seconds(written).unwrap();
+            assert!((read - (time * 100.0_f64).round() / 100.0).abs() < 1e-9, "{written}");
+        }
+        assert_eq!(parse_seconds("2.50 s"), Some(2.5));
+        assert_eq!(parse_seconds(" 4 "), Some(4.0));
+        assert_eq!(parse_seconds("1:75"), None);
+        assert_eq!(parse_seconds("x"), None);
     }
 }
