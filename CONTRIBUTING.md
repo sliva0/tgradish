@@ -4,8 +4,8 @@
 
 | Crate | What it holds |
 | --- | --- |
-| `crates/frames` (`tgradish-frames`) | RGBA animations with frame times, and pure-Rust decoders for GIF, PNG and APNG, WebP, JPEG, BMP, Aseprite, sprite sheets and image sequences. Works on bytes only, so it builds for `wasm32-unknown-unknown`. |
-| `crates/tgs` (`tgradish-tgs`) | Pixel art to Telegram `.tgs` stickers: normalising the art to its grid, the painter's encoder that draws it as rectangles in layers, the reductions that fit it into 64 KiB, packing, and Telegram's limits and checks. No files, processes or ffmpeg either, and threads only with its `threads` feature. |
+| `crates/frames` (`tgradish-frames`) | RGBA animations with frame times, and pure-Rust decoders for GIF, PNG and APNG, WebP, JPEG, BMP, Aseprite, sprite sheets and image sequences, within limits on what they allocate. Works on bytes only, so it builds for `wasm32-unknown-unknown`. What only Aseprite files have, as tags and layers, is in its `aseprite` module. |
+| `crates/tgs` (`tgradish-tgs`) | Pixel art to Telegram `.tgs` stickers: normalising the art to its grid, the painter's encoder that draws it as rectangles in layers, the reductions that fit it into 64 KiB, packing, and Telegram's limits and checks. No files, processes or ffmpeg either, and threads only with its `threads` feature. `make` and what it reads and reports are its public interface, serialised in kebab-case; the encoder's interior (scenes, Lottie, layout, the painter, packing and marks) is public only with the `internals` feature, which tgs-lab turns on and semver doesn't cover. |
 | `crates/core` (`tgradish-core`) | What the command line and the window share: planning WebM conversions and fitting them to the size limit, image stickers, `.tgs` conversion of files, WebM inspection and duration spoofing, presets, the config file, and the events front-ends follow. ffmpeg runs through a `Backend`: the `ffmpeg` and `ffprobe` programs, or with the `linked` feature its libraries, used to do exactly what those command lines do. |
 | `crates/gui` (`tgradish-gui`) | The egui window, which calls core directly. |
 | `crates/cli` (`tgradish`) | The binary: arguments and terminal output. It includes the window unless built with `--no-default-features`. |
@@ -64,7 +64,9 @@ not supported.
 
 - The built-in ffmpeg: `cargo test --workspace --features tgradish/linked`,
   with ffmpeg's development files, pkg-config and libclang.
-- `.tgs` on one thread, as for the web: `cargo test -p tgradish-tgs`.
+- `.tgs` on one thread, as for the web: `cargo test -p tgradish-tgs`;
+  `--features internals` builds it with its interior public, as tgs-lab
+  does.
 - tgs-lab, which renders with tlottie, and with rlottie too:
   `cargo test --manifest-path crates/tgs-lab/Cargo.toml --features rlottie`
   (cmake, ninja and clang).
