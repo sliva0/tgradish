@@ -665,7 +665,10 @@ no-ffmpeg-commands = No ffmpeg commands: { $why }
 
 save = Save
     .hint = Keep current settings for next time
+# Beside Save once it has saved; .kept when the file there couldn't be
+# read, so it was copied aside first.
 saved-to = Saved to { $path }
+    .kept = Saved to { $path }; the file that couldn't be read is kept as { $kept }
 not-saved = Couldn't save: { $error }
 no-home = There is no home folder to keep settings in
 about-and-licences = About and licences…
