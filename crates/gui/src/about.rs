@@ -35,7 +35,7 @@ pub(crate) fn about(ui: &mut egui::Ui) {
             egui::CollapsingHeader::new(&notice.title).id_salt(("notice", &notice.title)).show(
                 ui,
                 |ui| {
-                    if notice.title.starts_with("ffmpeg: what") {
+                    if notice.title == tgradish_core::licenses::FFMPEG_SOURCES {
                         widgets::link(
                             ui,
                             fl!("ffmpeg-sources"),
@@ -83,7 +83,7 @@ pub(crate) fn about(ui: &mut egui::Ui) {
 /// The licence notices of this build: tgradish's, its fonts', and those
 /// [`tgradish_core::licenses`] has.
 pub fn notices() -> Vec<tgradish_core::licenses::Notice> {
-    use tgradish_core::licenses::Notice;
+    use tgradish_core::licenses::{CRATES, Notice};
     let fonts = [
         ("Font: Ubuntu Light, a subset", include_str!("../assets/fonts/Ubuntu-LICENCE.txt")),
         (
@@ -97,8 +97,7 @@ pub fn notices() -> Vec<tgradish_core::licenses::Notice> {
     ];
     let mut notices = tgradish_core::licenses::notices();
     // before the long list of crates
-    let at =
-        notices.iter().position(|notice| notice.title == "Rust crates").unwrap_or(notices.len());
+    let at = notices.iter().position(|notice| notice.title == CRATES).unwrap_or(notices.len());
     for (offset, (title, text)) in fonts.into_iter().enumerate() {
         notices.insert(at + offset, Notice { title: title.into(), text: text.into() });
     }
