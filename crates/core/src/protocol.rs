@@ -42,6 +42,9 @@ pub struct Description {
     pub version: &'static str,
     /// The format conversions make when nothing asks for another.
     pub default_format: Format,
+    /// How a front-end stops `convert` or `watch` where it can't send
+    /// Ctrl-C.
+    pub cancel: &'static str,
     pub formats: Vec<FormatDescription>,
     pub presets: Vec<PresetDescription>,
 }
@@ -140,6 +143,8 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
         tool: "tgradish",
         version: env!("CARGO_PKG_VERSION"),
         default_format: Format::default(),
+        cancel: "run with --cancel-on-stdin and write a line reading cancel to stdin: it stops \
+                 as Ctrl-C does, exiting with 130; without the flag stdin isn't read",
         formats: vec![
             FormatDescription {
                 format: Format::Webm,

@@ -41,6 +41,7 @@ fn describes_protocol() {
     let description: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(description["protocol"], 1);
     assert_eq!(description["default-format"], "webm");
+    assert!(description["cancel"].as_str().unwrap().contains("--cancel-on-stdin"));
     let formats = description["formats"].as_array().unwrap();
     let format = |name: &str| formats.iter().find(|f| f["format"] == name).unwrap();
     assert_eq!(format("webm")["default-preset"], "balanced");
@@ -138,6 +139,7 @@ fn cancels_from_stdin() {
     let out = dir.path().join("out.webm");
     let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["--json", "convert", input.to_str().unwrap(), "-o", out.to_str().unwrap()])
+        .arg("--cancel-on-stdin")
         .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -157,6 +159,30 @@ fn cancels_from_stdin() {
     assert_eq!(status.code(), Some(130));
     assert_eq!(last["event"], "error");
     assert!(!out.exists());
+}
+
+/// Without `--cancel-on-stdin`, stdin is the caller's: a loop reading
+/// files from it converts every one.
+#[cfg(unix)]
+#[test]
+fn leaves_stdin_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut list = String::new();
+    for name in ["a", "b", "c"] {
+        let path = dir.path().join(format!("{name}.png"));
+        square_png(&path, [255, 0, 0, 255]);
+        list.push_str(&format!("{}\n", path.display()));
+    }
+    std::fs::write(dir.path().join("list"), list).unwrap();
+    let script = r#"while read f; do "$0" --json convert "$f" --format tgs; done < "$1""#;
+    let output = Command::new("sh")
+        .args(["-c", script, env!("CARGO_BIN_EXE_tgradish")])
+        .arg(dir.path().join("list"))
+        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .output()
+        .unwrap();
+    let finished = json_lines(&output).iter().filter(|e| e["event"] == "finished").count();
+    assert_eq!(finished, 3, "{}", String::from_utf8_lossy(&output.stderr));
 }
 
 #[test]
