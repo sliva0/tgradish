@@ -54,7 +54,8 @@ pub(crate) fn finish(harness: &mut Harness<App>) {
         harness.step();
         let state = harness.state();
         let reading = state.items.iter().any(|item| {
-            item.video.is_loading()
+            item.sniffed.is_loading()
+                || item.video.is_loading()
                 || item.art.is_loading()
                 || item.result_clip.is_loading()
                 || item.earlier.is_some()

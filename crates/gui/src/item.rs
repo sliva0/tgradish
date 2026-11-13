@@ -1,11 +1,11 @@
 //! A file in the list: what it is, what to make of it, and what came out.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::config::Config;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
-use tgradish_core::input::{self, Input};
+use tgradish_core::input::{self, FileKind, Input};
 use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::Target;
@@ -35,20 +35,19 @@ pub(crate) enum Kind {
 }
 
 impl Kind {
+    /// What `inputs` are taken for until they are read: a single file
+    /// by its name, which [`Kind::of_file`] then checks by its content.
     pub(crate) fn of(inputs: &[PathBuf], sequence: bool) -> Kind {
         match inputs {
-            [input] if !sequence && !input.is_dir() => {
-                let extension = input::extension(input);
-                if input::ASEPRITE.contains(&extension.as_str()) {
-                    Kind::Aseprite
-                } else if input::IMAGES.contains(&extension.as_str()) {
-                    Kind::Image
-                } else {
-                    Kind::Video
-                }
-            }
+            [input] if !sequence && !input.is_dir() => Kind::from(FileKind::of_name(input)),
             _ => Kind::Frames,
         }
+    }
+
+    /// What the single file at `path` is by its content, as core tells
+    /// it; this reads the file.
+    pub(crate) fn of_file(path: &Path) -> Kind {
+        Kind::from(input::sniff(path))
     }
 
     /// The format to start with; images switch to `.tgs` once they turn
@@ -57,6 +56,17 @@ impl Kind {
         match self {
             Kind::Aseprite | Kind::Frames => Format::Tgs,
             Kind::Video | Kind::Image => Format::Webm,
+        }
+    }
+}
+
+impl From<FileKind> for Kind {
+    fn from(kind: FileKind) -> Kind {
+        match kind {
+            FileKind::Aseprite => Kind::Aseprite,
+            FileKind::Webp { .. } | FileKind::Picture => Kind::Image,
+            // WebM, .tgs and the rest, which only ffmpeg reads
+            _ => Kind::Video,
         }
     }
 }
@@ -433,10 +443,15 @@ pub(crate) struct Item {
     pub(crate) paste_dir: Option<tempfile::TempDir>,
     /// The name of the pasted image's copy kept with the session.
     pub(crate) pasted_copy: Option<String>,
+    /// What the input is, by the name of a single file until
+    /// [`Item::sniffed`] says.
     pub(crate) kind: Kind,
+    /// What a single file is by its content, read on a thread before the
+    /// file itself is, as what reads it depends on it.
+    pub(crate) sniffed: Load<Kind>,
     pub(crate) format: Format,
-    /// The format was not picked by the user yet, so finding pixel art may
-    /// change it.
+    /// The format was not picked by the user yet, so what the file turns
+    /// out to be, and for an image whether it is pixel art, may change it.
     pub(crate) format_guessed: bool,
     pub(crate) choices: Choices,
     pub(crate) view: View,
@@ -485,8 +500,10 @@ impl Item {
             paste_dir: None,
             pasted_copy: None,
             kind,
+            // folders and sequences are what they are named
+            sniffed: if kind == Kind::Frames { Load::Ready(kind) } else { Load::Idle },
             format: kind.first_format(),
-            format_guessed: kind == Kind::Image,
+            format_guessed: kind != Kind::Frames,
             choices: Choices::new(target),
             view: View::default(),
             video: Load::Idle,
@@ -509,6 +526,16 @@ impl Item {
 
     /// What converting the item converts: its file, or its files and
     /// folders as one animation.
+    /// Takes in what the input turned out to be by its content, and the
+    /// format that goes with that, unless one was picked.
+    pub(crate) fn take_kind(&mut self, kind: Kind) {
+        self.kind = kind;
+        if self.format_guessed {
+            self.format = kind.first_format();
+            self.format_guessed = kind == Kind::Image;
+        }
+    }
+
     pub(crate) fn input(&self) -> Input {
         match &self.inputs[..] {
             [input] if !self.sequence => Input::File(input.clone()),
@@ -666,6 +693,18 @@ mod tests {
         assert_eq!(Kind::of(&path("a.aseprite"), false), Kind::Aseprite);
         assert_eq!(Kind::of(&[dir.path().to_path_buf()], false), Kind::Frames);
         assert_eq!(Kind::of(&[PathBuf::from("1.png"), PathBuf::from("2.png")], true), Kind::Frames);
+    }
+
+    #[test]
+    fn keeps_a_format_picked_before_the_file_is_read() {
+        let mut item = Item::new(1, vec!["a.mp4".into()], false, Target::Sticker);
+        assert!(item.format_guessed);
+        item.take_kind(Kind::Aseprite);
+        assert_eq!((item.format, item.format_guessed), (Format::Tgs, false));
+        let mut picked = Item::new(2, vec!["a.mp4".into()], false, Target::Sticker);
+        (picked.format, picked.format_guessed) = (Format::Webp, false);
+        picked.take_kind(Kind::Image);
+        assert_eq!((picked.kind, picked.format), (Kind::Image, Format::Webp));
     }
 
     #[test]
