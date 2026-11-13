@@ -2,9 +2,9 @@
 //! palettes.
 
 use super::blend::Colour;
-use super::read::{Reader, budget, error, inflate, spend};
+use super::read::{Reader, budget, error, inflate, kept, spend};
 use super::{Cel, Content, Direction, Layer, LayerKind, Sprite, Tag, Tileset};
-use crate::Result;
+use crate::{Limits, Result};
 
 impl Sprite {
     pub(super) fn read_cel(&self, chunk: &mut Reader, spent: &mut usize) -> Result<Cel> {
@@ -108,9 +108,16 @@ pub(super) fn read_layer(chunk: &mut Reader) -> Result<Layer> {
     })
 }
 
-pub(super) fn read_tags(chunk: &mut Reader) -> Result<Vec<Tag>> {
+/// The tags in `chunk`, whose room, with their names, which the chunk
+/// holds, is added to `spent` before it is made.
+pub(super) fn read_tags(
+    chunk: &mut Reader,
+    spent: &mut usize,
+    limits: &Limits,
+) -> Result<Vec<Tag>> {
     let count = chunk.u16()?;
     chunk.skip(8)?;
+    spend(spent, kept::<Tag>(count.into()) + chunk.left(), limits)?;
     (0..count)
         .map(|_| {
             let (from, to) = (chunk.u16()?.into(), chunk.u16()?.into());

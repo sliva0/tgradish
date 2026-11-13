@@ -61,6 +61,11 @@ impl<'a> Reader<'a> {
         Ok(String::from_utf8_lossy(self.take(length.into())?).into_owned())
     }
 
+    /// How many bytes are left to read.
+    pub(super) fn left(&self) -> usize {
+        self.bytes.len() - self.at
+    }
+
     pub(super) fn rest(&mut self) -> &'a [u8] {
         let out = &self.bytes[self.at..];
         self.at = self.bytes.len();
@@ -95,6 +100,11 @@ pub(super) fn budget(factors: [usize; 3], limits: &Limits) -> Result<usize> {
         .try_fold(1usize, |total, &n| total.checked_mul(n))
         .filter(|&bytes| bytes <= limits.max_bytes)
         .ok_or_else(|| too_large(limits))
+}
+
+/// What `count` of `T` take where they are kept, side by side.
+pub(super) fn kept<T>(count: usize) -> usize {
+    count.saturating_mul(size_of::<T>())
 }
 
 /// Adds `bytes` to what decoding has used so far, within the limits.
@@ -132,27 +142,67 @@ mod tests {
         assert!(matches!(Sprite::read(&cel, &roomy), Err(Error::TooLarge { .. })));
     }
 
+    /// The least `max_bytes` that `works` within.
+    fn least(works: impl Fn(Limits) -> bool) -> usize {
+        let (mut low, mut high) = (0, 1 << 20);
+        while low < high {
+            let mid = (low + high) / 2;
+            if works(Limits { max_dimension: 8192, max_bytes: mid }) {
+                high = mid;
+            } else {
+                low = mid + 1;
+            }
+        }
+        low
+    }
+
     #[test]
     fn counts_the_sprite_beside_its_frames() {
-        // a 4x4 cel of 64 bytes on a 4x4 canvas: drawing takes the frame
-        // and a canvas, 128 bytes, while the sprite still holds the cel
-        let cel = image_cel(0, (0, 0), (4, 4), &[RED; 16].concat(), false);
-        let bytes = file(4, 4, 32, 1, &[vec![layer(1, 0, 0, 0, 255), cel]]);
-        let limits = |max_bytes| Limits { max_dimension: 8192, max_bytes };
-        let draw = |max_bytes| {
-            Sprite::read(&bytes, &limits(max_bytes))?.animation(None, &Layers::default())
+        let square = |side: u16| {
+            let pixels = [RED].repeat(usize::from(side).pow(2)).concat();
+            let cel = image_cel(0, (0, 0), (side, side), &pixels, false);
+            file(4, 4, 32, 1, &[vec![layer(1, 0, 0, 0, 255), cel]])
         };
-        assert!(matches!(Sprite::read(&bytes, &limits(63)), Err(Error::TooLarge { .. })));
-        assert!(matches!(draw(191), Err(Error::TooLarge { .. })));
-        assert_eq!(draw(192).unwrap().frames().len(), 1);
+        let read = |bytes: &[u8]| least(|limits| Sprite::read(bytes, &limits).is_ok());
+        let draw = |bytes: &[u8]| {
+            least(|limits| {
+                Sprite::read(bytes, &limits)
+                    .and_then(|sprite| sprite.animation(None, &Layers::default()))
+                    .is_ok()
+            })
+        };
+        // a 4x4 cel holds 64 bytes, a 2x2 one 16, and all else is alike
+        assert_eq!(read(&square(4)) - read(&square(2)), 48);
+        // drawing takes the frame and a canvas, 128 bytes, while the sprite
+        // still holds what it read
+        let (bytes, limits) = (square(4), |max_bytes| Limits { max_dimension: 8192, max_bytes });
+        let held = Sprite::read(&bytes, &limits(1 << 20)).unwrap().spent;
+        assert_eq!(draw(&bytes), held + 128);
 
-        // 100 tiles of a byte each in the file are 400 bytes as they are
-        // kept, with the file's 100 beside them while they are read, and
-        // the tileset's 12 bytes of pixels
-        let tiles =
-            file(1, 1, 32, 1, &[vec![layer(1, 2, 0, 0, 255), tileset(), tilemap(8, &[1; 100])]]);
-        assert!(matches!(Sprite::read(&tiles, &limits(511)), Err(Error::TooLarge { .. })));
-        let sprite = Sprite::read(&tiles, &limits(512)).unwrap();
-        assert_eq!(sprite.spent, 412);
+        // a tile of a byte in the file is 4 bytes as it is kept, with the
+        // file's byte beside them while it is read
+        let tiles = |count| {
+            let tiles = vec![1; count];
+            file(1, 1, 32, 1, &[vec![layer(1, 2, 0, 0, 255), tileset(), tilemap(8, &tiles)]])
+        };
+        let held = |count| Sprite::read(&tiles(count), &limits(1 << 20)).unwrap().spent;
+        assert_eq!(held(100) - held(50), 50 * 4);
+        assert_eq!(read(&tiles(100)) - read(&tiles(50)), 50 * 5);
+    }
+
+    #[test]
+    fn counts_what_it_keeps_of_layers_tags_and_frames() {
+        let limits = Limits { max_dimension: 8192, max_bytes: 1024 };
+        let tiny = |chunks: Vec<Vec<u8>>| file(1, 1, 32, 1, &[chunks]);
+        // layers with nothing in them, each kept with its name and place
+        let layers = tiny(vec![layer(0, 0, 0, 0, 255); 1000]);
+        assert!(matches!(Sprite::read(&layers, &limits), Err(Error::TooLarge { .. })));
+        let tag = (0, 0, 0, "tag");
+        let tagged = tiny(vec![tags(&[tag; 1000])]);
+        assert!(matches!(Sprite::read(&tagged, &limits), Err(Error::TooLarge { .. })));
+        let frames = file(1, 1, 32, 1, &vec![Vec::new(); 1000]);
+        assert!(matches!(Sprite::read(&frames, &limits), Err(Error::TooLarge { .. })));
+        // as few as a file has are well within it
+        assert!(Sprite::read(&tiny(vec![layer(0, 0, 0, 0, 255); 3]), &limits).is_ok());
     }
 }
