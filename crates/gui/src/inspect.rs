@@ -271,15 +271,14 @@ impl App {
         );
         let title = drawable_in(&self.fallbacks, &name, format, style.visuals.code_bg_color).0;
         let (mut another, mut close) = (false, false);
-        let modal = egui::Modal::new(egui::Id::new("inspect")).show(ctx, |ui| {
+        let modal = widgets::dialog(ctx, "inspect").show(ctx, |ui| {
             ui.set_width(520.0);
-            ui.add(egui::Label::new(title).truncate());
+            close = widgets::dialog_title(ui, title);
             ui.add_space(4.0);
             show(ui, inspection);
-            ui.separator();
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                close = ui.button(fl!("close")).clicked();
-                another = ui.button(fl!("inspect-another")).clicked();
+            widgets::dialog_buttons(ui, |ui| {
+                close |= ui.add(widgets::dialog_button(fl!("close"))).clicked();
+                another = ui.add(widgets::dialog_button(fl!("inspect-another"))).clicked();
             });
         });
         if close || modal.should_close() {

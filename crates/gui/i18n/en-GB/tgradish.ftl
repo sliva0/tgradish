@@ -964,6 +964,8 @@ not-put-back = It couldn't be put back
 
 ## About and licences
 
+# The dialog's title.
+about-title = About and licences
 # Under the name and version; a link to the source code follows.
 about-summary = Telegram stickers from videos and pixel art. MIT licence;
 source-code = source code

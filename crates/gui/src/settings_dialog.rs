@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::config::Config;
-use eframe::egui::{self, Vec2};
+use eframe::egui;
 use tgradish_core::CancelToken;
 use tgradish_core::backend::Backend;
 use tgradish_core::ffmpeg::FfmpegChoice;
@@ -116,48 +116,41 @@ pub(crate) fn show(
         dialog.checking = None;
     }
     let mut close = false;
-    let modal = egui::Modal::new(egui::Id::new("settings")).show(ctx, |ui| {
+    let modal = widgets::dialog(ctx, "settings").show(ctx, |ui| {
         ui.set_width(620.0);
-        ui.horizontal(|ui| {
-            ui.heading(fl!("settings"));
-            // in the corner, square, level with the heading
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let side = ui.spacing().interact_size.y;
-                let cross = egui::Button::new("✖").frame(false).min_size(Vec2::splat(side));
-                close = ui.add(cross).on_hover_text(fl!("close")).clicked();
-            });
-        });
+        close = widgets::dialog_title(ui, widgets::title_text(ui, fl!("settings")));
         // the dialog fits the window, its settings scrolling within
-        let room = (ctx.content_rect().height() - 150.0).max(200.0);
+        let room = (ctx.content_rect().height() - 210.0).max(200.0);
         egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
             widgets::settings_spacing(ui);
             sections(ui, dialog, config, ffmpeg_given, presets);
         });
-        ui.separator();
-        ui.horizontal(|ui| {
-            if ui.button(fl!("save")).on_hover_text(fl!("save", "hint")).clicked() {
+        // what saving did, under the settings, where a path has the
+        // dialog's width
+        ui.add_space(4.0);
+        match &dialog.saved {
+            Some(Ok(saved)) => widgets::note(ui, saved),
+            Some(Err(error)) => {
+                ui.colored_label(theme::bad(ui.visuals()), error);
+            }
+            None => widgets::note(ui, fl!("settings-note")),
+        }
+        widgets::dialog_buttons(ui, |ui| {
+            close |= ui.add(widgets::dialog_button(fl!("close"))).clicked();
+            let button = widgets::dialog_button(widgets::medium(ui, fl!("save"), 14.0));
+            let button = widgets::primary(ui, true, button);
+            if button.on_hover_text(fl!("save", "hint")).clicked() {
                 dialog.saved = Some(match config_path {
                     Some(path) => save(config, path),
                     None => Err(fl!("no-home")),
                 });
                 dialog.wrote = matches!(dialog.saved, Some(Ok(_)));
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(fl!("about-and-licences")).clicked() {
+            // at the left, the way to About, which isn't a setting
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                if ui.add(widgets::dialog_button(fl!("about-and-licences"))).clicked() {
                     dialog.about = true;
                 }
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    // cut short where it is long, as a path can be
-                    let weak = |text: &str| egui::RichText::new(text).weak().size(12.5);
-                    let text = match &dialog.saved {
-                        Some(Ok(saved)) => weak(saved),
-                        Some(Err(error)) => {
-                            egui::RichText::new(error).color(theme::bad(ui.visuals()))
-                        }
-                        None => weak(&fl!("settings-note")),
-                    };
-                    ui.add(egui::Label::new(text).truncate());
-                });
             });
         });
     });

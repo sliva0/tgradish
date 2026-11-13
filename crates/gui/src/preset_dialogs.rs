@@ -163,26 +163,6 @@ fn name_problem(name: &str) -> Option<String> {
     presets::check_name(name).err().map(|err| problem(&err))
 }
 
-/// A dialog's title, with a cross in the corner, level with it, that
-/// closes it.
-fn title(ui: &mut egui::Ui, text: &str) -> bool {
-    ui.horizontal(|ui| {
-        ui.heading(text);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let side = ui.spacing().interact_size.y;
-            let cross = egui::Button::new("✖").frame(false).min_size(vec2(side, side));
-            ui.add(cross).on_hover_text(fl!("close")).clicked()
-        })
-        .inner
-    })
-    .inner
-}
-
-/// A dialog's main button: framed and strong, so it reads as the way on.
-fn main_button(text: &str) -> egui::Button<'_> {
-    egui::Button::new(RichText::new(text).strong()).min_size(vec2(90.0, 28.0))
-}
-
 impl App {
     /// Opens a preset dialog the settings asked for, and shows the one
     /// open.
@@ -260,9 +240,9 @@ impl App {
         };
         let exists = valid.is_ok() && dir.join(format!("{name}.toml")).exists();
         let (mut close, mut save) = (false, false);
-        let modal = egui::Modal::new(egui::Id::new("save preset")).show(ctx, |ui| {
+        let modal = widgets::dialog(ctx, "save preset").show(ctx, |ui| {
             ui.set_width(400.0);
-            close = title(ui, &fl!("save-preset-title"));
+            close = widgets::dialog_title(ui, widgets::title_text(ui, fl!("save-preset-title")));
             widgets::note(ui, fl!("save-preset-note"));
             ui.add_space(8.0);
             egui::Grid::new("save preset fields").num_columns(2).spacing([10.0, 8.0]).show(
@@ -296,18 +276,16 @@ impl App {
             if let Some(problem) = &saving.problem {
                 ui.colored_label(theme::bad(ui.visuals()), problem);
             }
-            ui.add_space(4.0);
-            ui.separator();
-            ui.horizontal(|ui| {
+            widgets::dialog_buttons(ui, |ui| {
+                close |= ui.add(widgets::dialog_button(fl!("cancel"))).clicked();
                 let text = if exists { fl!("replace") } else { fl!("save") };
-                let button = ui.add_enabled(valid.is_ok(), main_button(&text));
+                let button = widgets::dialog_button(widgets::medium(ui, text, 14.0));
+                let button = widgets::primary(ui, valid.is_ok(), button);
                 let button = match &valid {
                     Err(err) if !name.is_empty() => button.on_disabled_hover_text(err),
                     _ => button.on_disabled_hover_text(fl!("name-it-first")),
                 };
                 save |= button.clicked();
-                let cancel = egui::Button::new(fl!("cancel")).min_size(vec2(0.0, 28.0));
-                close |= ui.add(cancel).clicked();
             });
         });
         if close || modal.should_close() {
@@ -347,9 +325,9 @@ impl App {
     ) -> Option<Managing> {
         let mut close = false;
         let mut changes = Vec::new();
-        let modal = egui::Modal::new(egui::Id::new("manage presets")).show(ctx, |ui| {
+        let modal = widgets::dialog(ctx, "manage presets").show(ctx, |ui| {
             ui.set_width(560.0);
-            close = title(ui, &fl!("your-presets"));
+            close = widgets::dialog_title(ui, widgets::title_text(ui, fl!("your-presets")));
             widgets::note(ui, fl!("your-presets-note"));
             ui.add_space(8.0);
             if managing.rows.is_empty() && managing.deleted.is_empty() {
@@ -410,11 +388,8 @@ impl App {
                     });
                 }
             });
-            ui.add_space(4.0);
-            ui.separator();
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let button = egui::Button::new(fl!("close")).min_size(vec2(90.0, 28.0));
-                close |= ui.add(button).clicked();
+            widgets::dialog_buttons(ui, |ui| {
+                close |= ui.add(widgets::dialog_button(fl!("close"))).clicked();
             });
         });
         // in the order asked, as a field left by clicking a button asks
