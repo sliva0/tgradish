@@ -1,7 +1,9 @@
 //! The window's look: KDE's Breeze Light and Breeze Dark colour schemes and
 //! Breeze's sizes, as far as egui's style has them, with the system's
-//! accent where it has one. Every colour that follows the accent is made
-//! from the one given to [`apply`], so changing it changes them all.
+//! accent where it has one, or one the user chose. Every colour that
+//! follows the accent is made from the one given to [`apply`], so changing
+//! it changes them all; any accent leaves text readable and outlines seen,
+//! however light, dark or grey it is.
 
 use eframe::egui::{self, Color32, CornerRadius, Stroke, vec2};
 
@@ -80,8 +82,8 @@ const BLEND: f32 = 0.3;
 /// How much of the accent a list row lets through, selected and hovered:
 /// less than [`BLEND`], so the small coloured text on a row stays
 /// readable; the selected row is outlined in the accent as well.
-pub(crate) const ROW_SELECTED: f32 = 0.15;
-pub(crate) const ROW_HOVERED: f32 = 0.07;
+const ROW_SELECTED: f32 = 0.15;
+const ROW_HOVERED: f32 = 0.07;
 
 /// How much of the accent a primary button mixes into its fill.
 const PRIMARY: f32 = 0.45;
@@ -93,6 +95,15 @@ const PRESSED: f32 = 0.08;
 
 /// The contrast small text needs against what is under it.
 const READABLE: f32 = 4.5;
+
+/// The contrast an outline or a mark needs against the window to be seen,
+/// as WCAG asks of controls and of the keyboard's focus.
+const SEEN: f32 = 3.0;
+
+/// The contrast against the window of the colour a fill lets some of
+/// through, so that a little of it still shows: Breeze's blue has it on
+/// Breeze Light, an accent as light as that window wouldn't.
+const SHOWS: f32 = 2.0;
 
 /// `from` moved `amount` of the way to `to`.
 pub(crate) fn mix(from: Color32, to: Color32, amount: f32) -> Color32 {
@@ -117,25 +128,85 @@ fn scheme(visuals: &egui::Visuals) -> &'static Scheme {
     if visuals.dark_mode { &DARK } else { &LIGHT }
 }
 
-/// The accent of `visuals`, which hovered widgets are outlined in.
+/// The accent of `visuals`, as it was given: what fills are tinted with.
+/// It is kept as the fill of an open widget's box, which egui draws for
+/// checkboxes and sliders, which are never open.
 pub(crate) fn accent(visuals: &egui::Visuals) -> Color32 {
+    visuals.widgets.open.bg_fill
+}
+
+/// The accent as an outline or a mark on the window, as hovered widgets
+/// and the keyboard's focus are outlined: darkened or lightened towards
+/// the text colour as far as it takes to be seen, as a light accent is too
+/// faint on Breeze Light and a dark one on Breeze Dark.
+pub(crate) fn mark(visuals: &egui::Visuals) -> Color32 {
     visuals.widgets.hovered.bg_stroke.color
 }
 
 /// The accent as small text or a glyph on the window: darkened or
-/// lightened towards the text colour as far as it takes to read, as a light
-/// accent is too faint on Breeze Light.
+/// lightened towards the text colour as far as it takes to read.
 pub(crate) fn accent_text(visuals: &egui::Visuals) -> Color32 {
     let scheme = scheme(visuals);
-    readable(accent(visuals), scheme.text, scheme.window)
+    towards(accent(visuals), scheme.text, &[scheme.window], READABLE)
 }
 
-/// `colour` moved towards `text` until it reads on `background`.
-fn readable(colour: Color32, text: Color32, background: Color32) -> Color32 {
+/// `colour` moved towards `text` until it stands out of each of
+/// `backgrounds` at `ratio`.
+fn towards(colour: Color32, text: Color32, backgrounds: &[Color32], ratio: f32) -> Color32 {
     (0..=20)
         .map(|step| mix(colour, text, step as f32 / 20.0))
-        .find(|shade| contrast(*shade, background) >= READABLE)
+        .find(|shade| backgrounds.iter().all(|background| contrast(*shade, *background) >= ratio))
         .unwrap_or(text)
+}
+
+/// `wanted`, or as much less of `accent` mixed into each of `backgrounds`
+/// as it takes for each of `texts` to read on it.
+fn bounded(accent: Color32, wanted: f32, texts: &[Color32], backgrounds: &[Color32]) -> f32 {
+    let reads = |amount: f32| {
+        // as much as a tint of it lets through, to the 255th
+        let amount = (amount * 255.0).round() / 255.0;
+        backgrounds.iter().all(|background| {
+            let under = mix(*background, accent, amount);
+            texts.iter().all(|text| contrast(*text, under) >= READABLE)
+        })
+    };
+    let steps = (wanted * 100.0).round() as i32;
+    (0..=steps).rev().map(|step| step as f32 / 100.0).find(|amount| reads(*amount)).unwrap_or(0.0)
+}
+
+/// The accent fills let some of through: as it was given, or darkened or
+/// lightened towards the text colour where it is too like the window for
+/// a little of it to show.
+fn tinted(visuals: &egui::Visuals) -> Color32 {
+    let scheme = scheme(visuals);
+    towards(accent(visuals), scheme.text, &[scheme.window], SHOWS)
+}
+
+/// What the scheme's text is drawn on: the window, striped rows, fields
+/// and buttons, and the stage pictures are shown on.
+fn grounds(scheme: &Scheme) -> [Color32; 5] {
+    [scheme.window, scheme.window_alternate, scheme.view, scheme.button, scheme.header]
+}
+
+/// The accent at `opacity`, or less, as far as it takes for the text over
+/// it to read, over anything the scheme draws text on.
+pub(crate) fn fill(visuals: &egui::Visuals, opacity: f32) -> Color32 {
+    let (accent, scheme) = (tinted(visuals), scheme(visuals));
+    tint(accent, bounded(accent, opacity, &[scheme.text], &grounds(scheme)))
+}
+
+/// What a list row lays over the window, `selected` or hovered: little
+/// enough of the accent that the row's small coloured text still reads.
+pub(crate) fn row(visuals: &egui::Visuals, selected: bool) -> Color32 {
+    let (accent, scheme) = (tinted(visuals), scheme(visuals));
+    let wanted = if selected { ROW_SELECTED } else { ROW_HOVERED };
+    tint(accent, bounded(accent, wanted, &small_texts(scheme), &[scheme.window]))
+}
+
+/// The scheme's small coloured text, as a list row has: weaker and status
+/// text.
+fn small_texts(scheme: &Scheme) -> [Color32; 4] {
+    [scheme.inactive, scheme.positive, scheme.neutral, scheme.negative]
 }
 
 /// The contrast of two colours, as WCAG measures it: 1 to 21.
@@ -169,7 +240,7 @@ pub(crate) fn bad(visuals: &egui::Visuals) -> Color32 {
 /// The outline of what is on: half the accent, as Breeze outlines a
 /// dialog's default button.
 pub(crate) fn on_outline(visuals: &egui::Visuals) -> Stroke {
-    Stroke::new(1.0, mix(accent(visuals), visuals.widgets.inactive.bg_stroke.color, 0.5))
+    Stroke::new(1.0, mix(mark(visuals), visuals.widgets.inactive.bg_stroke.color, 0.5))
 }
 
 /// The background of stages pictures are shown on.
@@ -191,18 +262,21 @@ pub(crate) fn track(visuals: &egui::Visuals) -> (Color32, Stroke) {
 
 /// `visuals` for a primary button, the one way on in its place: its fill
 /// the button colour mixed with the accent, more when hovered or pressed,
-/// and outlined in the accent.
+/// and outlined in the accent. All three take less of an accent the text
+/// would not read on, alike, so hovering and pressing still show.
 pub(crate) fn primary(visuals: &mut egui::Visuals) {
-    let accent = accent(visuals);
-    let button = scheme(visuals).button;
-    let outline = Stroke::new(1.0, accent);
+    let (accent, mark) = (tinted(visuals), mark(visuals));
+    let scheme = scheme(visuals);
+    let most = PRIMARY + 0.2;
+    let share = bounded(accent, most, &[scheme.text], &[scheme.button]) / most;
+    let outline = Stroke::new(1.0, mark);
     let widgets = &mut visuals.widgets;
     for (state, amount) in [
         (&mut widgets.inactive, PRIMARY),
         (&mut widgets.hovered, PRIMARY + 0.1),
-        (&mut widgets.active, PRIMARY + 0.2),
+        (&mut widgets.active, most),
     ] {
-        state.weak_bg_fill = mix(button, accent, amount);
+        state.weak_bg_fill = mix(scheme.button, accent, amount * share);
         state.bg_stroke = outline;
     }
 }
@@ -223,8 +297,12 @@ pub(crate) fn visuals(dark: bool, accent: Color32) -> egui::Visuals {
         corner_radius: radius,
         expansion: 0.0,
     };
-    // hovering outlines in the accent; pressing shades the button
-    let hover = Stroke::new(1.0, accent);
+    // hovering outlines in the accent, as it can be seen on the window;
+    // pressing shades the button
+    let hover = Stroke::new(
+        1.0,
+        towards(accent, scheme.text, &[scheme.window, scheme.window_alternate], SEEN),
+    );
     let pressed = mix(scheme.button, scheme.text, PRESSED);
     visuals.widgets = egui::style::Widgets {
         noninteractive: state(scheme.window, scheme.window, Stroke::new(1.0, separator)),
@@ -232,10 +310,13 @@ pub(crate) fn visuals(dark: bool, accent: Color32) -> egui::Visuals {
         inactive: state(scheme.view, scheme.button, Stroke::new(1.0, outline)),
         hovered: state(scheme.view, scheme.button, hover),
         active: state(scheme.view, pressed, hover),
-        open: state(scheme.view, scheme.button, hover),
+        // the accent as it was given, where [`accent`] finds it
+        open: state(accent, scheme.button, hover),
     };
+    let tinted = tinted(&visuals);
+    let selected = bounded(tinted, BLEND, &[scheme.text], &grounds(scheme));
     visuals.selection = egui::style::Selection {
-        bg_fill: tint(accent, BLEND),
+        bg_fill: tint(tinted, selected),
         stroke: Stroke::new(1.0, scheme.text),
     };
     visuals.weak_text_color = Some(scheme.inactive);
@@ -292,7 +373,7 @@ pub(crate) fn focus_ring(ctx: &egui::Context) {
         return;
     }
     let visuals = ctx.global_style().visuals.clone();
-    let ring = Stroke::new(2.0, accent(&visuals));
+    let ring = Stroke::new(2.0, mark(&visuals));
     // cut to what is shown of it, as in a list scrolled part of the way
     let painter = ctx.layer_painter(response.layer_id).with_clip_rect(response.interact_rect);
     let radius = visuals.widgets.inactive.corner_radius;
@@ -314,29 +395,108 @@ mod tests {
             // hovered and pressed buttons only outline in it, so that one
             // with the focus, drawn pressed, doesn't look chosen
             assert_eq!(visuals.widgets.hovered.weak_bg_fill, scheme.button);
-            assert_eq!(visuals.widgets.active.bg_stroke.color, orange);
+            assert_eq!(visuals.widgets.active.bg_stroke.color, mark(&visuals));
             assert_ne!(visuals.widgets.active.weak_bg_fill, mix(scheme.button, orange, BLEND));
         }
+        // outlined in it as it is where it is seen, darker where it isn't
+        assert_eq!(mark(&visuals(true, orange)), orange);
+        let light = mark(&visuals(false, orange));
+        assert!(contrast(light, LIGHT.window) >= SEEN && contrast(orange, LIGHT.window) < SEEN);
     }
 
     #[test]
     fn keeps_small_text_readable() {
-        for (dark, scheme) in [(false, &LIGHT), (true, &DARK)] {
-            // on the window, striped rows, the stage, and a list row lit as
-            // selected, with Breeze's accent
-            let row = mix(scheme.window, BREEZE_ACCENT, ROW_SELECTED);
-            for background in [scheme.window, scheme.window_alternate, scheme.header, row] {
-                for text in [scheme.inactive, scheme.positive, scheme.neutral, scheme.negative] {
+        for scheme in [&LIGHT, &DARK] {
+            // on the window, striped rows, and the stage
+            for background in [scheme.window, scheme.window_alternate, scheme.header] {
+                for text in small_texts(scheme) {
                     let ratio = contrast(text, background);
                     assert!(ratio >= READABLE, "{text:?} on {background:?}: {ratio}");
                 }
             }
             assert!(contrast(scheme.link, scheme.window) >= READABLE);
-            // a light accent darkened till it reads, which a dark one does
-            let visuals = visuals(dark, BREEZE_ACCENT);
-            assert!(contrast(accent_text(&visuals), scheme.window) >= READABLE);
         }
-        let yellow = visuals(false, Color32::from_rgb(253, 188, 75));
-        assert!(contrast(accent_text(&yellow), LIGHT.window) >= READABLE);
+    }
+
+    /// `tint` of `accent` over `background`, as the window draws it.
+    fn over(background: Color32, accent: Color32, tint: Color32) -> Color32 {
+        mix(background, accent, f32::from(tint.a()) / 255.0)
+    }
+
+    #[test]
+    fn keeps_any_accent_readable_and_seen() {
+        // Plasma's, and those no scheme suits: as light or as dark as the
+        // window, grey, and a yellow that is light at full strength
+        let hostile = [
+            Color32::WHITE,
+            Color32::BLACK,
+            Color32::from_rgb(128, 128, 128),
+            Color32::from_rgb(255, 255, 0),
+            LIGHT.window,
+            DARK.window,
+        ];
+        let plasma = [
+            (233, 58, 154),
+            (233, 61, 88),
+            (233, 100, 58),
+            (232, 203, 45),
+            (61, 212, 37),
+            (0, 211, 184),
+            (61, 174, 233),
+            (184, 117, 220),
+            (146, 110, 228),
+            (104, 107, 111),
+        ];
+        let accents = plasma.map(|(r, g, b)| Color32::from_rgb(r, g, b)).into_iter().chain(hostile);
+        for given in accents {
+            for (dark, scheme) in [(false, &LIGHT), (true, &DARK)] {
+                let visuals = visuals(dark, given);
+                assert_eq!(accent(&visuals), given);
+                let tinted = tinted(&visuals);
+                let reads = |text: Color32, under: Color32, what: &str| {
+                    let ratio = contrast(text, under);
+                    assert!(ratio >= READABLE, "{what} with {given:?}, dark {dark}: {ratio}");
+                };
+                // a chosen segment, and chosen text, on anything
+                for background in grounds(scheme) {
+                    reads(
+                        scheme.text,
+                        over(background, tinted, visuals.selection.bg_fill),
+                        "selection",
+                    );
+                    reads(scheme.text, over(background, tinted, fill(&visuals, 0.5)), "a fill");
+                }
+                // and what is chosen still shows
+                let chosen = over(scheme.window, tinted, visuals.selection.bg_fill);
+                let ratio = contrast(chosen, scheme.window);
+                assert!(ratio >= 1.15, "selection of {given:?}, dark {dark}: {ratio}");
+                // a list row's small coloured text, lit or hovered
+                for selected in [true, false] {
+                    let row = over(scheme.window, tinted, row(&visuals, selected));
+                    for text in small_texts(scheme) {
+                        reads(text, row, "a list row");
+                    }
+                }
+                // the primary button's words, hovered and pressed too
+                let mut primary_visuals = visuals.clone();
+                primary(&mut primary_visuals);
+                let widgets = &primary_visuals.widgets;
+                for state in [widgets.inactive, widgets.hovered, widgets.active] {
+                    reads(scheme.text, state.weak_bg_fill, "the primary button");
+                }
+                // and is still lit: more as it is hovered and pressed
+                assert!(
+                    contrast(widgets.active.weak_bg_fill, scheme.button)
+                        >= contrast(widgets.inactive.weak_bg_fill, scheme.button)
+                );
+                // small text in it, on the window
+                reads(accent_text(&visuals), scheme.window, "accent text");
+                // outlines and the keyboard's focus, seen on the window
+                for background in [scheme.window, scheme.window_alternate] {
+                    let ratio = contrast(mark(&visuals), background);
+                    assert!(ratio >= SEEN, "outline of {given:?}, dark {dark}: {ratio}");
+                }
+            }
+        }
     }
 }

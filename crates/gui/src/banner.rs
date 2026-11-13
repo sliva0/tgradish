@@ -676,7 +676,7 @@ fn paint_icon(ui: &egui::Ui, severity: Severity, rect: egui::Rect) {
             painter.circle_filled(egui::pos2(centre.x, centre.y + side * 0.29), 1.1, mark);
         }
         Severity::Info => {
-            painter.circle_filled(centre, side * 0.5, theme::accent(ui.visuals()));
+            painter.circle_filled(centre, side * 0.5, theme::mark(ui.visuals()));
             painter.line_segment(
                 [
                     egui::pos2(centre.x, centre.y - side * 0.07),

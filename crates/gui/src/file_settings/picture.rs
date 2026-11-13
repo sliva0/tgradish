@@ -458,7 +458,7 @@ fn sketch(ui: &mut egui::Ui, (width, height): (u32, u32), crop: Crop, wide: f32)
     let (rect, _) = ui.allocate_exact_size(room, egui::Sense::hover());
     let visuals = ui.visuals();
     let (back, edge) = (visuals.extreme_bg_color, visuals.widgets.noninteractive.bg_stroke);
-    let accent = crate::theme::accent(visuals);
+    let (accent, mark) = (crate::theme::accent(visuals), crate::theme::mark(visuals));
     let weak = visuals.weak_text_color();
     let painter = ui.painter_at(rect);
     // the input at its shape, as large as fits, its shorter side at least
@@ -476,7 +476,7 @@ fn sketch(ui: &mut egui::Ui, (width, height): (u32, u32), crop: Crop, wide: f32)
         egui::vec2(crop.width as f32 * across, crop.height as f32 * down),
     );
     painter.rect_filled(cut, 0.0, accent.gamma_multiply(0.15));
-    let dashed = egui::Stroke::new(1.0, accent);
+    let dashed = egui::Stroke::new(1.0, mark);
     for [from, to] in [
         [cut.left_top(), cut.right_top()],
         [cut.right_top(), cut.right_bottom()],
