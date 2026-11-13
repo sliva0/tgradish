@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use schemars::generate::SchemaSettings;
 use schemars::{JsonSchema, Schema, schema_for};
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::config::Config;
 use crate::presets::{Format, Presets};
@@ -117,6 +118,50 @@ fn printed<T: JsonSchema>() -> Schema {
     SchemaSettings::default().for_serialize().into_generator().into_root_schema_for::<T>()
 }
 
+/// `schema` with only the properties named `keys`, and only the
+/// definitions they still refer to: what a format takes of another's
+/// options, so that a front-end building options from it is never refused.
+fn only_properties(mut schema: Schema, keys: &[&str]) -> Schema {
+    let Some(root) = schema.as_object_mut() else { return schema };
+    if let Some(Value::Object(properties)) = root.get_mut("properties") {
+        properties.retain(|key, _| keys.contains(&key.as_str()));
+    }
+    if let Some(Value::Array(required)) = root.get_mut("required") {
+        required.retain(|key| key.as_str().is_some_and(|key| keys.contains(&key)));
+    }
+    // definitions refer to each other, so follow references until no more turn up
+    let mut wanted = Vec::new();
+    let mut unread = vec![root.get("properties").cloned().unwrap_or_default()];
+    while let Some(value) = unread.pop() {
+        for reference in references(&value) {
+            let name = reference.trim_start_matches("#/$defs/").to_owned();
+            if !wanted.contains(&name) {
+                unread.extend(root.get("$defs").and_then(|defs| defs.get(&name)).cloned());
+                wanted.push(name);
+            }
+        }
+    }
+    if let Some(Value::Object(definitions)) = root.get_mut("$defs") {
+        definitions.retain(|name, _| wanted.contains(name));
+    }
+    schema
+}
+
+/// Every `$ref` in `value`, at any depth.
+fn references(value: &Value) -> Vec<&str> {
+    match value {
+        Value::Object(map) => map
+            .iter()
+            .flat_map(|(key, value)| match (key.as_str(), value) {
+                ("$ref", Value::String(reference)) => vec![reference.as_str()],
+                _ => references(value),
+            })
+            .collect(),
+        Value::Array(items) => items.iter().flat_map(references).collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// `config` says which preset each format uses when none is given.
 pub fn describe(presets: &Presets, config: &Config) -> Description {
     let presets = presets
@@ -169,7 +214,7 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
                               the frame's time",
                 output_extension: Format::Webp.extension(),
                 default_preset: default_preset(Format::Webp),
-                options: schema_for!(Options),
+                options: only_properties(schema_for!(Options), &crate::webp::PICTURE_OPTIONS),
                 events: printed::<crate::webp::Event>(),
             },
         ],
@@ -179,7 +224,7 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, json};
+    use serde_json::json;
 
     use super::Failure;
     use super::*;
@@ -381,6 +426,31 @@ mod tests {
             }
             Value::Array(items) => items.iter().for_each(|item| schema_names(item, found)),
             _ => {}
+        }
+    }
+
+    #[test]
+    fn describes_exactly_the_options_each_format_takes() {
+        let description = describe(&Presets::builtin(), &Config::default());
+        for format in description.formats {
+            let schema = serde_json::to_value(&format.options).unwrap();
+            let properties: Vec<&str> =
+                schema["properties"].as_object().unwrap().keys().map(String::as_str).collect();
+            let refused = format.format.unused(properties.iter().copied());
+            assert!(refused.is_empty(), "{:?} refuses {refused:?}", format.format);
+            let all: Vec<String> = [schema_for!(Options), schema_for!(tgs::Options)]
+                .iter()
+                .flat_map(|schema| schema.get("properties").unwrap().as_object().unwrap().keys())
+                .cloned()
+                .collect();
+            for key in all.iter().filter(|key| format.format.uses(key)) {
+                assert!(properties.contains(&key.as_str()), "{:?} lacks {key}", format.format);
+            }
+            // every reference still leads somewhere
+            for reference in references(&schema) {
+                let name = reference.trim_start_matches("#/$defs/");
+                assert!(schema["$defs"].get(name).is_some(), "{:?}: {reference}", format.format);
+            }
         }
     }
 
