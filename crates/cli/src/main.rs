@@ -47,6 +47,10 @@ fn return_freed_memory_sooner() {
     }
 }
 
+/// The exit status when everything was made or read, but Telegram would
+/// refuse a result, which was said with it.
+pub const REFUSED: u8 = 3;
+
 /// Ends the program with an exit code, after the command already reported
 /// why.
 #[derive(Debug, thiserror::Error)]

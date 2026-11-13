@@ -11,6 +11,17 @@ use tgradish_core::webm::{self, Options};
 
 pub use crate::term::ColourChoice;
 
+/// The exit statuses, as the help pages list them.
+const EXIT_STATUS: &str = "\
+Exit status:
+  0    Done.
+  1    Something failed. With several inputs, this beats 3.
+  2    The command line was wrong.
+  3    Everything was made or read, but Telegram would refuse a result or
+       an inspected file: as a .tgs that --exact keeps too large, WebM
+       with --fit off over the limit, or a picture of the wrong size.
+  130  Cancelled, by Ctrl-C or with --cancel-on-stdin.";
+
 const TGS: &str = "Animated stickers (TGS)";
 const ASEPRITE: &str = "Aseprite files";
 
@@ -18,7 +29,8 @@ const ASEPRITE: &str = "Aseprite files";
 /// to bypass the 3 second limit, pictures and frames into image stickers,
 /// and pixel art into animated stickers.
 #[derive(Debug, Parser)]
-#[command(version, max_term_width = 100, styles = crate::ui::help_styles())]
+#[command(version, max_term_width = 100, styles = crate::ui::help_styles(),
+          after_help = EXIT_STATUS)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -86,6 +98,7 @@ impl From<FfmpegFrom> for FfmpegChoice {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Convert videos or images into stickers or emoji.
+    #[command(after_help = EXIT_STATUS)]
     Convert(ConvertArgs),
     /// Convert every video or image that appears in a directory.
     Watch(WatchArgs),
@@ -93,6 +106,7 @@ pub enum Command {
     Spoof(SpoofArgs),
     /// Show properties of WebM, WebP and TGS files and check them against
     /// Telegram's limits.
+    #[command(after_help = EXIT_STATUS)]
     Inspect(InspectArgs),
     /// Print a JSON description of options, presets and events for
     /// front-ends.

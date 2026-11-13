@@ -28,6 +28,19 @@ pub enum Inspected {
     Webm { target: Target, info: Box<WebmInfo>, issues: Vec<telegram::Issue> },
 }
 
+impl Inspected {
+    /// Whether Telegram would refuse the file: any issue of WebM or WebP,
+    /// and of a `.tgs` those it refuses rather than frowns on.
+    pub fn refused(&self) -> bool {
+        match self {
+            Inspected::Image { issues, .. } | Inspected::Webm { issues, .. } => !issues.is_empty(),
+            Inspected::Tgs { issues, .. } => {
+                issues.iter().any(|issue| issue.severity == check::Severity::Error)
+            }
+        }
+    }
+}
+
 /// What the sticker at `path` holds, judged as `target`, or else as what
 /// its size says it is.
 pub fn inspect(path: &Path, target: Option<Target>) -> Result<Inspected> {

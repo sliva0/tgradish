@@ -9,6 +9,7 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use tgradish_core::backend::Backend;
 use tgradish_core::input::Input;
 use tgradish_core::presets::{Format, FormatOptions, Presets};
+use tgradish_core::tgradish_tgs::check::Severity;
 use tgradish_core::webm::{self, Event, Options};
 use tgradish_core::{tgs, webp};
 
@@ -32,6 +33,21 @@ pub enum Failed {
     /// The folder the output goes in couldn't be made.
     #[error("couldn't create {}: {error}", dir.display())]
     Folder { dir: PathBuf, error: std::io::Error },
+}
+
+/// What Telegram would say of a result that was made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    Accepted,
+    /// It was made, but Telegram would refuse it, as the issues printed
+    /// with it say: the command exits with [`crate::REFUSED`].
+    Refused,
+}
+
+impl Verdict {
+    fn of(refused: bool) -> Verdict {
+        if refused { Verdict::Refused } else { Verdict::Accepted }
+    }
 }
 
 /// Runs conversions with the options and output settings of one command.
@@ -160,7 +176,7 @@ impl<'a> Converter<'a> {
         input: &Input,
         output: Option<PathBuf>,
         overwrite: bool,
-    ) -> Result<(), Failed> {
+    ) -> Result<Verdict, Failed> {
         let output = output.unwrap_or_else(|| self.output_for(input, None));
         let key = std::path::absolute(&output).unwrap_or_else(|_| output.clone());
         let first = input.first();
@@ -177,7 +193,7 @@ impl<'a> Converter<'a> {
         let cancel = &self.ctx.cancel;
         let json = self.ctx.global.json;
         let (input, output) = (input.clone(), Some(output));
-        match &self.options {
+        let refused = match &self.options {
             FormatOptions::Webm(options) => {
                 let backend = self.backend()?;
                 let options = options.clone();
@@ -209,16 +225,17 @@ impl<'a> Converter<'a> {
                 {
                     show_result(&preview);
                 }
+                !outcome.issues.is_empty()
             }
             FormatOptions::Tgs(options) => {
                 // only videos need ffmpeg
                 let backend = tgs::needs_ffmpeg(&input).then(|| self.backend()).transpose()?;
                 let exact = options.exact_or_default();
                 let request = tgs::Request { input, output, options: options.clone(), overwrite };
-                if json {
+                let outcome = if json {
                     tgs::convert(backend.as_ref(), &request, cancel, &mut |event| {
                         crate::json_line(&event);
-                    })?;
+                    })?
                 } else {
                     let mut printer = TgsPrinter::new(self.ctx, exact);
                     let result =
@@ -228,15 +245,17 @@ impl<'a> Converter<'a> {
                     if !self.ctx.global.quiet && term::shows_pictures() {
                         show_result(&outcome.preview);
                     }
-                }
+                    outcome
+                };
+                outcome.issues.iter().any(|issue| issue.severity == Severity::Error)
             }
             FormatOptions::Webp(options) => {
                 let backend = self.backend()?;
                 let request = webp::Request { input, output, options: options.clone(), overwrite };
-                if json {
+                let outcome = if json {
                     webp::convert(&backend, &request, cancel, &mut |event| {
                         crate::json_line(&event);
-                    })?;
+                    })?
                 } else {
                     let outcome = webp::convert(&backend, &request, cancel, &mut |event| {
                         if let webp::Event::Warning { message } = event {
@@ -244,11 +263,13 @@ impl<'a> Converter<'a> {
                         }
                     })?;
                     self.print_still(&outcome);
-                }
+                    outcome
+                };
+                !outcome.issues.is_empty()
             }
-        }
+        };
         self.written.borrow_mut().insert(key, input_key);
-        Ok(())
+        Ok(Verdict::of(refused))
     }
 
     /// What an image came out as, with what Telegram would refuse.
@@ -297,7 +318,11 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
     let converter = Converter::new(ctx, &args.conversion, args.output.as_deref())?;
     if args.sequence {
         let input = Input::Sequence(args.inputs.clone());
-        return converter.run(&input, args.output.clone(), converter.overwrite()).map_err(explain);
+        let verdict = converter.run(&input, args.output.clone(), converter.overwrite());
+        return match verdict.map_err(explain)? {
+            Verdict::Accepted => Ok(()),
+            Verdict::Refused => Err(crate::Exit(crate::REFUSED).into()),
+        };
     }
     // keeps a pasted image on disk until it is converted
     let mut pasted_image = None;
@@ -312,7 +337,7 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
         bail!("--output only works with a single input, or with --sequence");
     }
 
-    let mut failed = 0;
+    let (mut failed, mut refused) = (0, false);
     for path in &inputs {
         let input = Input::File(path.clone());
         // a pasted image lives in a temporary directory; its result goes to
@@ -326,7 +351,8 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
             (None, _) => None,
         };
         match converter.run(&input, output, converter.overwrite()) {
-            Ok(_) => {}
+            Ok(Verdict::Accepted) => {}
+            Ok(Verdict::Refused) => refused = true,
             Err(Failed::Core(tgradish_core::Error::Cancelled)) => {
                 return Err(tgradish_core::Error::Cancelled.into());
             }
@@ -342,6 +368,10 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
             return Err(crate::Exit(1).into());
         }
         bail!("{failed} of {} conversions failed", inputs.len());
+    }
+    if refused {
+        // each says why with its result
+        return Err(crate::Exit(crate::REFUSED).into());
     }
     Ok(())
 }
@@ -629,7 +659,7 @@ impl TgsPrinter {
                 );
                 for issue in issues {
                     let label = match issue.severity {
-                        tgradish_core::tgradish_tgs::check::Severity::Error => ui::error_label(),
+                        Severity::Error => ui::error_label(),
                         _ => ui::warning_label(),
                     };
                     eprintln!("{label} {}", issue.message);
