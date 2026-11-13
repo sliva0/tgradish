@@ -526,7 +526,7 @@ struct TgsPrinter {
     quiet: bool,
     bar: Bar,
     /// The lossless size, to show how much fitting has taken off.
-    lossless: Option<usize>,
+    lossless: Option<u64>,
 }
 
 impl TgsPrinter {
@@ -585,7 +585,7 @@ impl TgsPrinter {
                     "Fitting",
                     format!(
                         "about {} losslessly, too large",
-                        ui::size_within(bytes as u64, tgs::MAX_BYTES)
+                        ui::size_within(bytes, tgs::MAX_BYTES)
                     ),
                 ));
                 term::progress(Some(0.3));
