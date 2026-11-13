@@ -65,6 +65,26 @@ impl SettingsDialog {
     }
 }
 
+/// Saves `config` to `path`, or says why it couldn't. A file there that
+/// can't be read is kept beside it first, as what it held is lost
+/// otherwise: the settings shown are the defaults where it was unreadable
+/// as the window opened.
+fn save(config: &mut Config, path: &Path) -> Result<String, String> {
+    let shown = path.display().to_string();
+    let kept = match Config::load(path) {
+        Err(tgradish_core::Error::Config { .. }) => match crate::app::keep_aside(path) {
+            Ok(kept) => Some(kept.display().to_string()),
+            Err(err) => return Err(fl!("not-saved", error = err.to_string())),
+        },
+        _ => None,
+    };
+    match (config.save(path), kept) {
+        (Ok(()), None) => Ok(fl!("saved-to", path = shown)),
+        (Ok(()), Some(kept)) => Ok(fl!("saved-to", "kept", path = shown, kept = kept)),
+        (Err(err), _) => Err(fl!("not-saved", error = err.to_string())),
+    }
+}
+
 /// Shows the dialog if it is open. `ffmpeg_given` says an ffmpeg was given
 /// as the window was started, which it uses over the settings'.
 pub(crate) fn show(
@@ -103,10 +123,7 @@ pub(crate) fn show(
         ui.horizontal(|ui| {
             if ui.button(fl!("save")).on_hover_text(fl!("save", "hint")).clicked() {
                 dialog.saved = Some(match config_path {
-                    Some(path) => match config.save(path) {
-                        Ok(()) => Ok(fl!("saved-to", path = path.display().to_string())),
-                        Err(err) => Err(fl!("not-saved", error = err.to_string())),
-                    },
+                    Some(path) => save(config, path),
                     None => Err(fl!("no-home")),
                 });
             }
@@ -385,6 +402,24 @@ mod tests {
             !harness.state().settings_dialog.is_open() && !harness.state().config.gui.reopen_files
         );
         assert!(Config::load(&path).unwrap().gui.reopen_files);
+    }
+
+    #[test]
+    fn keeps_a_file_it_cannot_read_beside_the_one_it_saves() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[ffmpeg]\nuse = \"auto\"\n").unwrap();
+        let mut config = Config::default();
+        config.gui.overwrite = true;
+        let said = save(&mut config, &path).unwrap();
+        let aside = dir.path().join("config.toml.unreadable");
+        assert!(said.contains("config.toml.unreadable"), "{said}");
+        assert_eq!(std::fs::read_to_string(&aside).unwrap(), "[ffmpeg]\nuse = \"auto\"\n");
+        assert!(Config::load(&path).unwrap().gui.overwrite);
+        // a file that reads is written over, and nothing more is kept
+        std::fs::remove_file(&aside).unwrap();
+        assert!(!save(&mut config, &path).unwrap().contains("unreadable"));
+        assert!(!aside.exists());
     }
 
     #[test]

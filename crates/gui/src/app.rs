@@ -473,12 +473,17 @@ impl App {
 fn load_config(path: &Path) -> (Config, Option<(tgradish_core::Error, Option<PathBuf>)>) {
     match Config::load(path) {
         Ok(config) => (config, None),
-        Err(err) => {
-            let aside = path.with_extension("toml.unreadable");
-            let kept = std::fs::copy(path, &aside).is_ok().then_some(aside);
-            (Config::default(), Some((err, kept)))
-        }
+        Err(err) => (Config::default(), Some((err, keep_aside(path).ok()))),
     }
+}
+
+/// Copies the settings file at `path`, which can't be read, to
+/// `config.toml.unreadable` beside it, before it is written over; gives
+/// where.
+pub(crate) fn keep_aside(path: &Path) -> std::io::Result<PathBuf> {
+    let aside = path.with_extension("toml.unreadable");
+    std::fs::copy(path, &aside)?;
+    Ok(aside)
 }
 
 /// How long a closing window waits for conversions to stop, so they take
