@@ -575,29 +575,20 @@ fn readme_screenshot() {
     let out =
         PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
     crate::l10n::choose(None);
-    // a folder whose name reads well where results are said to go
-    let dir = std::env::temp_dir().join("tgradish-readme");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    // the synthetic art the tests use
-    let names = ["hammer_4x.gif", "walker_2x.gif", "dance.gif", "slime_jittered.gif"];
-    let mut inputs = Vec::new();
-    for file in tgradish_corpus::files() {
-        if names.contains(&file.name.as_str()) {
-            let path = dir.join(&file.name);
-            std::fs::write(&path, &file.bytes).unwrap();
-            inputs.push(path);
-        }
-    }
+    let dir = tempfile::tempdir().unwrap();
+    let inputs = readme_inputs(dir.path());
     let mut config = Config::default();
-    config.gui.output_dir = Some(dir.join("Stickers"));
+    config.gui.output_dir = Some(dir.path().join("Stickers"));
     config.gui.theme = crate::config::Theme::Dark;
     let filtering = egui_wgpu::RendererOptions {
         predictable_texture_filtering: false,
         ..egui_wgpu::RendererOptions::PREDICTABLE
     };
+    // wide enough for the settings to go in two columns, which they do
+    // from 1605, with room to spare; as tall as 16:10, where both columns
+    // end between two settings rather than through one
     let mut harness = Harness::builder()
-        .with_size([1280.0, 820.0])
+        .with_size([1680.0, 1050.0])
         .with_render_options(filtering)
         .wgpu()
         .build_eframe(move |cc| {
@@ -607,26 +598,110 @@ fn readme_screenshot() {
         });
     harness.state_mut().add(inputs);
     finish(&mut harness);
-    // one made, another chosen, with the result's small picture
-    let first = harness.state().items[0].id;
-    harness.state_mut().select(first);
-    harness.run_steps(2);
-    convert(&harness);
-    harness.run_steps(2);
-    finish(&mut harness);
-    let shown = harness.state().items[3].id;
-    harness.state_mut().select(shown);
-    let item = &mut harness.state_mut().items[3];
+    // [frog, sparkle, fox, cherry, eagle, house, seaside]: the sparkle a
+    // custom emoji, the eagle a video sticker, the house a picture one
+    let state = harness.state_mut();
+    state.items[1].choices.target = tgradish_core::telegram::Target::Emoji;
+    (state.items[4].format, state.items[4].format_guessed) = (Format::Webm, false);
+    (state.items[5].format, state.items[5].format_guessed) = (Format::Webp, false);
+    // the sparkle and the cherry made, with the results' small pictures
+    for made in [1, 3] {
+        let id = harness.state().items[made].id;
+        harness.state_mut().select(id);
+        harness.run_steps(2);
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+    }
+    // said to go where pictures usually do, rather than to the test's
+    // temporary folder
+    harness.state_mut().config.gui.output_dir = Some("/home/user/Pictures/Stickers".into());
+    // the frog chosen, its idle tag, with the result's small picture
+    let frog = harness.state().items[0].id;
+    harness.state_mut().select(frog);
+    let item = &mut harness.state_mut().items[0];
+    item.choices.tag = Some("idle".into());
     item.view.inset = true;
-    // a square crop, its handles out
-    item.choices.crop = Some(Crop { x: 0, y: 2, width: 40, height: 40 });
+    finish(&mut harness);
+    let item = &mut harness.state_mut().items[0];
+    item.view.playing = false;
+    // its first frame, calm, in the preview and the result alike
+    (item.view.time, item.view.result_time) = (0.0, 0.0);
     harness.event(egui::Event::PointerGone);
     harness.run_steps(3);
     std::thread::sleep(Duration::from_millis(300));
     harness.run_steps(3);
     let image = harness.render().expect("rendering needs a GPU");
     image.save(out.join("tgradish-readme.png")).unwrap();
-    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The README's inputs, written to `dir`: pixel art from ansimuz's Sunny
+/// Land (CC0, see readme-art/CREDITS.md) as a sticker artist would have it.
+/// The frog and the fox are Aseprite files of their sheets, tagged, and the
+/// seaside a video of a camera panning along the shore.
+fn readme_inputs(dir: &std::path::Path) -> Vec<PathBuf> {
+    use tgradish_corpus::{Canvas, Sprite};
+    let art = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("readme-art");
+    // the frames of a sheet of cells `width` wide
+    let cells = |name: &str, width: u32| {
+        let sheet = image::open(art.join(name)).unwrap().to_rgba8();
+        let height = sheet.height();
+        (0..sheet.width() / width)
+            .map(|cell| {
+                let frame = image::imageops::crop_imm(&sheet, cell * width, 0, width, height);
+                let rgba = frame.to_image().into_raw();
+                Canvas { width, height, rgba }
+            })
+            .collect::<Vec<_>>()
+    };
+    // an Aseprite file of `tags` in turn, each of its frames, 100 ms a
+    // frame, as the pack's GIFs show them
+    let aseprite = |name: &str, tags: Vec<(&str, Vec<Canvas>)>| {
+        let (mut frames, mut ranges) = (Vec::new(), Vec::new());
+        for (tag, cells) in tags {
+            let first = frames.len() as u16;
+            frames.extend(cells);
+            ranges.push((tag, first, frames.len() as u16 - 1));
+        }
+        let delays = vec![100; frames.len()];
+        let sprite =
+            Sprite { name: "art", about: "", frames, delays, scale: 1, likely_scale: None };
+        let path = dir.join(name);
+        std::fs::write(&path, tgradish_corpus::encode::aseprite_with(&sprite, &ranges, &[]))
+            .unwrap();
+        path
+    };
+    // the frog sits calm for a second, then croaks, as the pack's GIF
+    // has it; the calm frame repeated rather than held, so that the
+    // list's small picture, a third of the way in, is of it too
+    let idle = cells("frog-idle.png", 35);
+    let calm = std::iter::repeat_n(idle[0].clone(), 10);
+    let idle = calm.chain(idle[1..].iter().cloned()).collect();
+    let frog =
+        aseprite("frog.aseprite", vec![("idle", idle), ("jump", cells("frog-jump.png", 35))]);
+    let fox = aseprite(
+        "fox.aseprite",
+        vec![("idle", cells("fox-idle.png", 33)), ("run", cells("fox-run.png", 33))],
+    );
+    let copied = |name: &str| {
+        std::fs::copy(art.join(name), dir.join(name)).unwrap();
+        dir.join(name)
+    };
+    let mut inputs = vec![frog, copied("sparkle.gif"), fox, copied("cherry.gif")];
+    inputs.extend([copied("eagle.gif"), copied("house.png")]);
+    // three seconds along the shore, at twice the art's size
+    let seaside = dir.join("seaside.mp4");
+    let made = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-loop", "1", "-framerate", "30", "-i"])
+        .arg(art.join("seaside.png"))
+        .args(["-vf", "crop=384:216:min(t*124\\,372):0,scale=768:432:flags=neighbor"])
+        .args(["-t", "3", "-pix_fmt", "yuv420p"])
+        .arg(&seaside)
+        .status()
+        .expect("the README's screenshot needs ffmpeg");
+    assert!(made.success(), "ffmpeg could not make the seaside");
+    inputs.push(seaside);
+    inputs
 }
 
 /// The window in accents of its own, in both themes: one of Plasma's, a
