@@ -149,9 +149,52 @@ impl Store {
         &self.path
     }
 
-    /// Where a session that couldn't be read is kept.
-    fn aside(&self) -> PathBuf {
-        self.path.with_extension("json.unreadable")
+    /// The name a session that couldn't be read is kept under, with a
+    /// number after it for every one but the first.
+    fn aside_name(&self) -> String {
+        let name = self.path.file_name().unwrap_or_default().to_string_lossy();
+        format!("{name}.unreadable")
+    }
+
+    /// Keeps `bytes`, a session that couldn't be read, beside it under a
+    /// name no other has, and gives where.
+    fn set_aside(&self, bytes: &[u8]) -> std::io::Result<PathBuf> {
+        let first = self.path.with_file_name(self.aside_name());
+        for number in 1.. {
+            let aside = match number {
+                1 => first.clone(),
+                _ => first.with_extension(format!("unreadable-{number}")),
+            };
+            let options = std::fs::File::options().write(true).create_new(true).clone();
+            match options.open(&aside) {
+                Ok(mut file) => {
+                    use std::io::Write;
+                    return match file.write_all(bytes).and_then(|()| file.sync_all()) {
+                        Ok(()) => Ok(aside),
+                        Err(err) => {
+                            drop(file);
+                            let _ = std::fs::remove_file(&aside);
+                            Err(err)
+                        }
+                    };
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(err) => return Err(err),
+            }
+        }
+        unreachable!("a name is found before the numbers run out")
+    }
+
+    /// The sessions set aside beside this one.
+    fn set_aside_sessions(&self) -> Vec<PathBuf> {
+        let name = self.aside_name();
+        let Some(dir) = self.path.parent() else { return Vec::new() };
+        let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+        entries
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(&name))
+            .map(|entry| entry.path())
+            .collect()
     }
 
     /// Reads the session, if there is one. A file that can't be read is
@@ -159,19 +202,19 @@ impl Store {
     /// first, so that nothing is lost when the session is next written;
     /// an error where that can't be done.
     pub(crate) fn read(&mut self) -> std::io::Result<Loaded> {
-        let text = match std::fs::read(&self.path) {
-            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+        let bytes = match std::fs::read(&self.path) {
+            Ok(bytes) => bytes,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Loaded::default()),
             Err(err) => return Err(err),
         };
-        let Some((session, unread)) = parse(&text) else {
-            std::fs::rename(&self.path, self.aside())?;
-            let unreadable = Unreadable { files: None, aside: self.aside() };
+        let Some((session, unread)) = parse(&String::from_utf8_lossy(&bytes)) else {
+            let aside = self.set_aside(&bytes)?;
+            std::fs::remove_file(&self.path)?;
+            let unreadable = Unreadable { files: None, aside };
             return Ok(Loaded { session: Session::default(), unreadable: Some(unreadable) });
         };
         let unreadable = if unread > 0 {
-            std::fs::copy(&self.path, self.aside())?;
-            Some(Unreadable { files: Some(unread), aside: self.aside() })
+            Some(Unreadable { files: Some(unread), aside: self.set_aside(&bytes)? })
         } else {
             None
         };
@@ -212,7 +255,7 @@ impl Store {
             session.items.iter().filter_map(|item| item.pasted_copy.clone()).collect();
         // copies nobody names are left over, unless a session set aside
         // may name them: then only this window's own go
-        let all = !self.aside().exists();
+        let all = self.set_aside_sessions().is_empty();
         if let Ok(entries) = std::fs::read_dir(pasted_dir(&self.path)) {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
@@ -507,6 +550,29 @@ mod tests {
         // and writing the session leaves the copy of the one left out
         store.save(&session(&restored.items, restored.selected)).unwrap();
         assert_eq!(copies(&path), 2);
+    }
+
+    #[test]
+    fn keeps_every_session_it_cannot_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let mut texts = vec![
+            "not a session".to_owned(),
+            r#"{"version":2,"items":[],"selected":null}"#.to_owned(),
+        ];
+        // and one read in part, which is copied aside rather than moved
+        let item = Item::new(1, vec![PathBuf::from("/a.png")], false, Target::Sticker);
+        let text = session(&[item], None).to_json().unwrap();
+        texts.push(text.replacen(r#""webm":{"#, r#""webm":{"made-up":1,"#, 1));
+        let mut asides = Vec::new();
+        for text in &texts {
+            std::fs::write(&path, text).unwrap();
+            let mut store = Store::open(path.clone()).unwrap();
+            asides.push(store.read().unwrap().unreadable.expect("unreadable").aside);
+        }
+        let kept: Vec<String> =
+            asides.iter().map(|aside| std::fs::read_to_string(aside).unwrap()).collect();
+        assert_eq!(kept, texts);
     }
 
     #[test]
