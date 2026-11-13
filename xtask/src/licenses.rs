@@ -12,7 +12,25 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail, ensure};
 
-use crate::{NOTICES, cargo, run, workspace_root};
+use crate::{NOTICES, cargo, output, run, workspace_root};
+
+/// The cargo-about that writes the list. Others word it differently, so
+/// the list they write never matches the committed one; CI installs this
+/// one too.
+const CARGO_ABOUT: &str = "0.9.2";
+
+/// Fails unless cargo-about is [`CARGO_ABOUT`].
+fn check_cargo_about() -> Result<()> {
+    let install = format!("cargo install --locked cargo-about@{CARGO_ABOUT} --features cli");
+    let version = output(cargo().args(["about", "--version"]))
+        .with_context(|| format!("cargo-about is missing: {install}"))?;
+    ensure!(
+        version.split_whitespace().nth(1) == Some(CARGO_ABOUT),
+        "found {}, but the list is written with cargo-about {CARGO_ABOUT}: {install}",
+        version.trim()
+    );
+    Ok(())
+}
 
 /// Width of the rule above each licence's section, which `xtask/about.hbs`
 /// draws: the two must match for the sections to be found.
@@ -72,6 +90,7 @@ pub fn crate_licenses(args: &[String]) -> Result<()> {
     };
     let root = workspace_root();
     own_licence(root, check)?;
+    check_cargo_about()?;
     let file = root.join(NOTICES).join("THIRD-PARTY-CRATES.txt");
     let fresh = root.join("target/THIRD-PARTY-CRATES.txt");
     run(cargo()

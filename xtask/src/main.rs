@@ -12,7 +12,9 @@
 //! `windows-x86_64`.
 //!
 //! The static libraries end up in `target/ffmpeg/prefix-<triple>`, and the
-//! licences of everything in them in `target/ffmpeg/licenses-<triple>`.
+//! licences of everything in them in `target/ffmpeg/licenses-<triple>`; the
+//! archives downloaded in `target/ffmpeg/sources`, and the trees they are
+//! built in in `target/ffmpeg/build-<triple>`.
 //! Libraries already built from the same recipe, the sources and
 //! everything in `xtask/src/ffmpeg.rs`, are kept unless `--force` is given.
 //! ffmpeg is configured without GPL parts, so it is LGPL 2.1 or later.
@@ -46,7 +48,7 @@
 //! published, as a crate is packaged without the repository around it;
 //! `--check` fails if either is out of date, as after dependencies change.
 //! Needs cargo-about 0.9.2, which CI uses too: other versions word the list
-//! differently. cargo-about skips files a `.gitignore` above the crates'
+//! differently, so it refuses them. cargo-about skips files a `.gitignore` above the crates'
 //! sources ignores, such as one of a home directory kept in git: then set
 //! `CARGO_HOME` to a directory outside it. `cargo xtask ffmpeg` keeps
 //! `crates/core/licenses/ffmpeg` up to date the same way.
@@ -69,7 +71,7 @@ mod package;
 mod release;
 mod strings;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -211,10 +213,16 @@ fn run(cmd: &mut Command) -> Result<()> {
     Ok(())
 }
 
-/// What `cmd` prints, failing if it does.
+/// What `cmd` prints, failing if it does, with what it said on stderr,
+/// which says why.
 fn output(cmd: &mut Command) -> Result<String> {
     let out = cmd.output().with_context(|| format!("could not run {cmd:?}"))?;
-    ensure!(out.status.success(), "{cmd:?} failed with {}", out.status);
+    ensure!(
+        out.status.success(),
+        "{cmd:?} failed with {}:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr).trim_end()
+    );
     Ok(String::from_utf8(out.stdout)?)
 }
 
@@ -229,4 +237,40 @@ fn workspace_root() -> &'static Path {
 /// cargo from PATH when xtask runs on its own.
 fn cargo() -> Command {
     Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+}
+
+/// rustc, as a command, of the same toolchain as [`cargo`]: `RUSTC` if set,
+/// as cargo itself takes it, else the one beside `CARGO`, as rustup and
+/// distributions install them, else rustc from PATH. PATH's may be another
+/// toolchain's, as rust-toolchain.toml picks one only through rustup.
+fn rustc() -> Command {
+    let beside_cargo = || {
+        let cargo = PathBuf::from(std::env::var_os("CARGO")?);
+        let rustc = cargo.with_file_name(format!("rustc{}", std::env::consts::EXE_SUFFIX));
+        rustc.is_file().then(|| rustc.into_os_string())
+    };
+    Command::new(std::env::var_os("RUSTC").or_else(beside_cargo).unwrap_or_else(|| "rustc".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// cargo-about lists the crates of the targets xtask/about.toml names,
+    /// which must be those releases are built for.
+    #[test]
+    fn about_toml_lists_every_target() {
+        let about = std::fs::read_to_string(workspace_root().join("xtask/about.toml")).unwrap();
+        let (_, list) = about.split_once("targets = [").unwrap();
+        let (list, _) = list.split_once(']').unwrap();
+        let mut listed: Vec<&str> = list
+            .lines()
+            .map(|line| line.trim().trim_end_matches(',').trim_matches('"'))
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .collect();
+        let mut built: Vec<&str> = Target::ALL.map(Target::triple).to_vec();
+        listed.sort();
+        built.sort();
+        assert_eq!(listed, built);
+    }
 }
