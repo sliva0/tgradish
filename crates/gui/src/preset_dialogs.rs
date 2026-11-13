@@ -1,6 +1,6 @@
 //! The user's own presets: the selected item's settings saved as one, and
 //! a dialog to rename, describe or delete them. The settings and the bar
-//! under the preview ask for them; the window opens them over everything.
+//! under them ask for them; the window opens them over everything.
 //!
 //! An item saved as a preset takes it up: its own values over the preset
 //! it started from, of every format, but none that only make sense for its
