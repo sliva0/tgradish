@@ -3,10 +3,10 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::config::Config;
 use eframe::egui::{self, Vec2};
 use tgradish_core::CancelToken;
 use tgradish_core::backend::Backend;
-use tgradish_core::config::Config;
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::presets::{Format, Presets};
 
@@ -32,6 +32,9 @@ pub struct Prefs {
     placeholders: (String, String),
     /// A file dialog asked for, which the window opens.
     pub pick: Option<crate::files::Pick>,
+    /// Results are to go in a folder not chosen yet: kept here, as the
+    /// settings never hold a folder without a name.
+    folder_unchosen: bool,
 }
 
 impl Prefs {
@@ -193,13 +196,14 @@ fn sections(
     let gui = &mut config.gui;
     let placeholder = &prefs.placeholders.1;
     row(ui, &fl!("save-results"), "", Ok(()), |ui| {
-        let mut elsewhere = gui.output_dir.is_some();
+        let mut elsewhere = gui.output_dir.is_some() || prefs.folder_unchosen;
         let choices = [
             (false, fl!("next-to-input"), String::new()),
             (true, fl!("in-a-folder"), String::new()),
         ];
         if segments(ui, &mut elsewhere, &choices, |_| Ok(())) {
-            gui.output_dir = elsewhere.then(PathBuf::new);
+            gui.output_dir = None;
+            prefs.folder_unchosen = elsewhere;
         }
         ui.add_enabled_ui(elsewhere, |ui| {
             ui.horizontal(|ui| {
@@ -209,14 +213,16 @@ fn sections(
                     .hint_text(placeholder.as_str())
                     .desired_width(280.0);
                 if ui.add(edit).changed() {
-                    gui.output_dir = Some(PathBuf::from(text.trim()));
+                    let dir = PathBuf::from(text.trim());
+                    gui.output_dir = (!dir.as_os_str().is_empty()).then_some(dir);
+                    prefs.folder_unchosen = gui.output_dir.is_none();
                 }
                 if ui.button(fl!("choose")).clicked() {
                     prefs.pick = Some(crate::files::Pick::OutputDir);
                 }
             });
         });
-        if gui.output_dir.as_ref().is_some_and(|dir| dir.as_os_str().is_empty()) {
+        if elsewhere && gui.output_dir.is_none() {
             note(ui, fl!("in-a-folder", "unchosen"));
         }
     });
@@ -245,7 +251,7 @@ fn sections(
         });
     }
     row(ui, &fl!("theme"), &fl!("theme", "hint"), Ok(()), |ui| {
-        use tgradish_core::config::Theme;
+        use crate::config::Theme;
         let themes = [
             (Theme::System, fl!("as-the-system"), String::new()),
             (Theme::Light, fl!("theme-light"), String::new()),
@@ -254,10 +260,7 @@ fn sections(
         segments(ui, &mut gui.theme, &themes, |_| Ok(()));
     });
     row(ui, &fl!("files"), "", Ok(()), |ui| {
-        let mut reopen = !gui.forget_files;
-        if ui.checkbox(&mut reopen, fl!("reopen-files")).changed() {
-            gui.forget_files = !reopen;
-        }
+        ui.checkbox(&mut gui.reopen_files, fl!("reopen-files"));
     });
     row(ui, &fl!("scrolling"), "", Ok(()), |ui| {
         ui.checkbox(&mut gui.smooth_scrolling, fl!("smooth-scrolling"));
@@ -354,11 +357,31 @@ mod tests {
         assert!(Config::load(&path).unwrap().gui.overwrite);
         harness.get_by_label_contains("Saved to");
         // closing keeps what changed
-        harness.state_mut().config.gui.forget_files = true;
+        harness.state_mut().config.gui.reopen_files = false;
         harness.get_by_label("✖").click_accesskit();
         harness.run_steps(2);
-        assert!(!harness.state().prefs.is_open() && harness.state().config.gui.forget_files);
-        assert!(!Config::load(&path).unwrap().gui.forget_files);
+        assert!(!harness.state().prefs.is_open() && !harness.state().config.gui.reopen_files);
+        assert!(Config::load(&path).unwrap().gui.reopen_files);
+    }
+
+    #[test]
+    fn keeps_no_folder_without_a_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let at = path.clone();
+        let mut harness = Harness::builder().with_size([1280.0, 820.0]).build_eframe(move |_| {
+            App::with(Config::default(), Some(at.clone()), Presets::builtin(), None)
+        });
+        harness.state_mut().prefs.open();
+        harness.run_steps(2);
+        harness.get_by_label(&fl!("in-a-folder")).click_accesskit();
+        harness.run_steps(2);
+        // in a folder, said to be unchosen, yet none is kept
+        harness.get_by_label(&fl!("in-a-folder", "unchosen"));
+        assert_eq!(harness.state().config.gui.output_dir, None);
+        harness.get_by_label("Save").click_accesskit();
+        harness.run_steps(2);
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("output-dir"));
     }
 
     #[test]

@@ -84,8 +84,8 @@ fn wait_for(started: std::io::Result<std::process::Child>) {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::Config;
     use egui_kittest::kittest::Queryable;
-    use tgradish_core::config::Config;
 
     use super::*;
     use crate::testing::harness;

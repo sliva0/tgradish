@@ -13,10 +13,11 @@ mod webm;
 use std::collections::HashMap;
 
 use eframe::egui::{self, RichText, vec2};
-use tgradish_core::config::{Config, FfmpegConfig};
+use tgradish_core::config::FfmpegConfig;
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::Target;
 
+use crate::config::Config;
 use crate::item::{Item, Kind};
 use crate::l10n::fl;
 use crate::preset_dialogs::{self, Ask, is_users};

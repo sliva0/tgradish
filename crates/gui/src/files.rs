@@ -28,9 +28,9 @@ impl App {
     fn theme_button(&mut self, ui: &mut egui::Ui) {
         let dark = ui.visuals().dark_mode;
         let (icon, hint, theme) = if dark {
-            ("☀", fl!("light-theme"), tgradish_core::config::Theme::Light)
+            ("☀", fl!("light-theme"), crate::config::Theme::Light)
         } else {
-            ("🌓", fl!("dark-theme"), tgradish_core::config::Theme::Dark)
+            ("🌓", fl!("dark-theme"), crate::config::Theme::Dark)
         };
         if !ui.button(icon).on_hover_text(hint).clicked() {
             return;
@@ -519,7 +519,7 @@ pub(crate) fn kind(format: Format, target: telegram::Target) -> String {
 
 #[cfg(test)]
 mod tests {
-    use tgradish_core::config::Config;
+    use crate::config::Config;
     use tgradish_core::ffmpeg::FfmpegChoice;
     use tgradish_core::options::Fit;
 

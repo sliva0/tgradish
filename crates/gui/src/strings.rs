@@ -53,7 +53,7 @@ fn strings() {
 /// long and slowed videos, a picture read as pixel art, settings checked
 /// and saved, and preset names that won't do.
 fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
-    use tgradish_core::config::Config;
+    use crate::config::Config;
     use tgradish_core::ffmpeg::FfmpegChoice;
     use tgradish_core::options::Spoof;
     use tgradish_core::presets::{Format, Presets};

@@ -6,6 +6,8 @@ from = "auto"         # auto (built in if there is one, else system),
                       # builtin or system, as --ffmpeg-from
 path = "/opt/ffmpeg"  # ffmpeg executable or its directory, overrides `from`
 
+# the window's own: keys it doesn't know are kept, and a value it can't
+# read leaves that setting as it would be without it
 [gui]
 output-dir = "/home/me/stickers"  # results go here instead of next to inputs
 overwrite = false                  # replace existing results
@@ -13,7 +15,7 @@ target = "sticker"                 # what new files become, or "emoji"
 smooth-scrolling = false           # ease scrolling instead of following the wheel
 language = "en-GB"                 # the window's; the system's if left out
 theme = "system"                   # or "light" or "dark"
-forget-files = false               # don't reopen the files of last time
+reopen-files = true                # reopen the files of last time
 timeline-frames = false            # count the timeline in frames, not seconds
 
 [gui.result-preview]

@@ -3,9 +3,9 @@
 //! look like, and its settings beside and below it. What is drawn on the
 //! preview itself is `canvas`'s, and its timeline `timeline`'s.
 
+use crate::config::ResultPreview;
 use eframe::egui::{self, Color32, Rect, RichText, pos2, vec2};
 use tgradish_core::backend::Backend;
-use tgradish_core::config::ResultPreview;
 use tgradish_core::convert;
 use tgradish_core::options::{Crop, Options, Resize, Scaling};
 use tgradish_core::presets::Format;
@@ -601,9 +601,9 @@ fn message_in(ui: &egui::Ui, rect: egui::Rect, text: &str, colour: Color32) {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::Config;
     use egui_kittest::Harness;
     use egui_kittest::kittest::{NodeT, Queryable};
-    use tgradish_core::config::Config;
     use tgradish_core::presets::Presets;
 
     use super::*;

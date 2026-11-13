@@ -710,7 +710,7 @@ fn multiples(sizes: &convert::Sizes, used: (u32, u32)) -> String {
 
 #[cfg(test)]
 mod tests {
-    use tgradish_core::config::Config;
+    use crate::config::Config;
     use tgradish_core::ffmpeg::FfmpegChoice;
     use tgradish_core::telegram;
 

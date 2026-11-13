@@ -8,10 +8,10 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::config::{Config, ResultPreview};
 use eframe::egui;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use tgradish_core::config::{Config, ResultPreview};
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{Crop, Fit, Options, Scaling};
 use tgradish_core::presets::{Format, Presets};
@@ -208,7 +208,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     harness.run_steps(3);
     save(&mut harness, "about");
     harness.state_mut().prefs.about = false;
-    set_theme(&harness.ctx, tgradish_core::config::Theme::Light);
+    set_theme(&harness.ctx, crate::config::Theme::Light);
     let item = harness.state_mut().items.last_mut().unwrap();
     item.job = None;
     item.view.inset = true;
@@ -221,7 +221,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     harness.run_steps(3);
     save(&mut harness, "zoomed");
     harness.state_mut().config.gui.result_preview =
-        ResultPreview { size: 5, corner: tgradish_core::config::Corner::TopLeft };
+        ResultPreview { size: 5, corner: crate::config::Corner::TopLeft };
     harness.step();
     std::thread::sleep(Duration::from_millis(300));
     harness.run_steps(3);
@@ -365,7 +365,7 @@ fn readme_screenshot() {
     }
     let mut config = Config::default();
     config.gui.output_dir = Some(dir.join("Stickers"));
-    config.gui.theme = tgradish_core::config::Theme::Dark;
+    config.gui.theme = crate::config::Theme::Dark;
     let filtering = egui_wgpu::RendererOptions {
         predictable_texture_filtering: false,
         ..egui_wgpu::RendererOptions::PREDICTABLE

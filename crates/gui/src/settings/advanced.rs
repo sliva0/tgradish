@@ -205,10 +205,10 @@ fn arguments(ui: &mut egui::Ui, id: u64, options: &mut Options, preset: &Option<
 
 #[cfg(test)]
 mod tests {
+    use crate::config::Config;
     use eframe::egui::accesskit::Role;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
-    use tgradish_core::config::Config;
     use tgradish_core::presets::Presets;
     use tgradish_core::telegram::Target;
 

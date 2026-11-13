@@ -3,8 +3,8 @@
 //! dragging it to another corner, and easing it into place as it moves.
 //! What it shows is predicted in [`crate::predict`].
 
+use crate::config::Corner;
 use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2};
-use tgradish_core::config::Corner;
 
 use crate::canvas::MARGIN;
 use crate::l10n::fl;

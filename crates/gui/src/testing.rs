@@ -6,9 +6,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::config::Config;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use tgradish_core::config::Config;
 use tgradish_core::presets::Presets;
 
 use crate::app::App;

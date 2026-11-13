@@ -171,9 +171,9 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::Config;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
-    use tgradish_core::config::Config;
     use tgradish_core::ffmpeg::FfmpegChoice;
 
     use super::*;
