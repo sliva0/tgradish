@@ -122,7 +122,18 @@ pub(crate) struct Store {
     /// the folder may belong to a session that was set aside.
     copies: HashSet<String>,
     /// Held while the window runs, so no other keeps a session here.
-    _lock: Option<std::fs::File>,
+    lock: Option<std::fs::File>,
+}
+
+impl Drop for Store {
+    // Closing the file alone may not let go: a process being started at
+    // that moment shares it until it runs its program, as ffmpeg's are
+    // while another window, or test, opens the session.
+    fn drop(&mut self) {
+        if let Some(lock) = &self.lock {
+            let _ = lock.unlock();
+        }
+    }
 }
 
 impl Store {
@@ -131,7 +142,7 @@ impl Store {
     /// remove each other's pasted images.
     pub(crate) fn open(path: PathBuf) -> Option<Store> {
         let lock = lock(&path).ok()?;
-        Some(Store { path, written: String::new(), copies: HashSet::new(), _lock: lock })
+        Some(Store { path, written: String::new(), copies: HashSet::new(), lock })
     }
 
     pub(crate) fn path(&self) -> &Path {
@@ -218,8 +229,9 @@ impl Store {
 /// Another window holds the session.
 struct Held;
 
-/// Takes the lock beside the session at `path`, which lasts until the file
-/// is closed, as when the window ends in any way. No file where there is
+/// Takes the lock beside the session at `path`, which lasts until the
+/// store lets go of it or the file is closed, as when the window ends in
+/// any way. No file where there is
 /// no telling whether another window is open, as the folder can't be
 /// written to or its file system has no locks: the session is kept as if
 /// there were none, and where it can't be, writing it says so.
