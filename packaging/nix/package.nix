@@ -8,24 +8,27 @@
   libxkbcommon,
   wayland,
   libx11,
+  libxcb,
   libxcursor,
   libxi,
-  libxrandr,
+  libxrender,
 }:
 
 let
   version = (lib.importTOML ../../Cargo.toml).workspace.package.version;
   # the window loads these with dlopen when it opens, and D-Bus for file
-  # dialogues
+  # dialogues; they are WINDOW_LIBRARIES in xtask/src/package.rs, which
+  # says where each comes from: keep them alike
   windowLibraries = [
     dbus
     libGL
     libxkbcommon
     wayland
     libx11
+    libxcb
     libxcursor
     libxi
-    libxrandr
+    libxrender
   ];
 in
 rustPlatform.buildRustPackage {
