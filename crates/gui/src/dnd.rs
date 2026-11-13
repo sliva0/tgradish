@@ -185,9 +185,17 @@ impl State {
                 Err(_) => return None,
             }
         }
-        let text = String::from_utf8_lossy(&text);
-        Some(tgradish_core::clipboard::paths_in_text(&text, false))
+        Some(files_in(&String::from_utf8_lossy(&text)))
     }
+}
+
+/// The files a drop's URI list names. It may name other things, as a link
+/// dragged from a browser does, which aren't files to add, and which
+/// ffmpeg would fetch.
+fn files_in(uri_list: &str) -> Vec<PathBuf> {
+    let files: Vec<&str> =
+        uri_list.lines().map(str::trim).filter(|line| line.starts_with("file://")).collect();
+    tgradish_core::clipboard::paths_in_text(&files.join("\n"), false)
 }
 
 impl Dispatch<WlDataDevice, ()> for State {
@@ -298,5 +306,17 @@ impl Dispatch<WlDataDeviceManager, ()> for State {
         _: &Connection,
         _: &QueueHandle<State>,
     ) {
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn takes_only_files_from_a_drop() {
+        let dropped = "# from a browser\r\nhttps://example.com/a.mp4\r\nfile:///tmp/a%20b.gif\r\n/tmp/c.png\r\n";
+        assert_eq!(files_in(dropped), [PathBuf::from("/tmp/a b.gif")]);
+        assert!(files_in("https://example.com/a.mp4").is_empty());
     }
 }
