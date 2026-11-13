@@ -241,6 +241,10 @@ fn verify_file(args: &[String]) -> Result<()> {
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if asks_for_help(&args) {
+        println!("{USAGE}");
+        return Ok(());
+    }
     let paths = || args[1..].iter().map(PathBuf::from).collect::<Vec<_>>();
     match args.first().map(String::as_str) {
         Some("info") if args.len() > 1 => info(&paths()),
@@ -253,7 +257,7 @@ fn main() -> Result<()> {
                 let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
                 Ok((name, encoded(&load(&path)?.0, false)?))
             });
-            probes::write(Path::new(&args[1]), art.transpose()?)
+            probes::write(folder(&args[1])?, art.transpose()?)
         }
         Some("limits") if args.len() > 1 => {
             let art = args[2..]
@@ -264,7 +268,7 @@ fn main() -> Result<()> {
                     Ok((name, encoded(&load(path)?.0, false)?))
                 })
                 .collect::<Result<_>>()?;
-            probes::write_limits(Path::new(&args[1]), art)
+            probes::write_limits(folder(&args[1])?, art)
         }
         Some("sizes") if args.len() > 1 => {
             let one_x = args[2..]
@@ -275,22 +279,27 @@ fn main() -> Result<()> {
                     Ok((name, String::from_utf8(read_lottie(path)?)?))
                 })
                 .collect::<Result<Vec<_>>>()?;
-            probes::write_sizes(Path::new(&args[1]), &one_x)
+            probes::write_sizes(folder(&args[1])?, &one_x)
         }
-        Some("features") if args.len() == 2 => features::write(Path::new(&args[1])),
+        Some("features") if args.len() == 2 => features::write(folder(&args[1])?),
         Some("corpus") if args.len() == 2 => {
-            tgradish_corpus::write(Path::new(&args[1])).context("cannot write the corpus")
+            tgradish_corpus::write(folder(&args[1])?).context("cannot write the corpus")
         }
         Some("bench") => {
             let (paths, rest) = options(&args[1..], &["--save", "--against"])?;
             let flag = |name: &str| rest.contains(&name);
+            if let Some(unknown) =
+                rest.iter().find(|arg| arg.starts_with('-') && !BENCH_FLAGS.contains(arg))
+            {
+                bail!("unknown option {unknown}\n{USAGE}");
+            }
             let path = |name: &str| {
                 paths
                     .iter()
                     .find(|(option, _)| *option == name)
                     .map(|(_, path)| PathBuf::from(path))
             };
-            let dir = rest.iter().find(|arg| !arg.starts_with("--"));
+            let dir = rest.iter().find(|arg| !arg.starts_with('-'));
             bench::run(
                 dir.map(Path::new),
                 &bench::Bench {
@@ -316,18 +325,62 @@ fn main() -> Result<()> {
                 },
             )
         }
-        _ => bail!(
-            "usage: tgs-lab info FILE...\n       \
-             tgs-lab render INPUT [--frame N] [--size PX] OUTPUT.png\n       \
-             tgs-lab normalise FILE...\n       \
-             tgs-lab encode SOURCE OUTPUT.tgs [--runs]\n       \
-             tgs-lab verify SOURCE [STICKER.tgs] [--sizes 100,160,237,512] [--frames 0,4] [--picture PREFIX] [--explain N] [--runs]\n       \
-             tgs-lab probes DIR [ART]\n       \
-             tgs-lab limits DIR [ART...]\n       \
-             tgs-lab sizes DIR [1X.tgs...]\n       \
-             tgs-lab features DIR\n       \
-             tgs-lab corpus DIR\n       \
-             tgs-lab bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--no-reuse] [--fast-effort|--best] [--full]\n                   [--save FILE] [--against FILE] [DIR]"
-        ),
+        _ => bail!("{USAGE}"),
+    }
+}
+
+/// What each command takes, which `--help` prints and a wrong command
+/// line gets.
+const USAGE: &str = "usage: tgs-lab info FILE...
+       tgs-lab render INPUT [--frame N] [--size PX] OUTPUT.png
+       tgs-lab normalise FILE...
+       tgs-lab encode SOURCE OUTPUT.tgs [--runs]
+       tgs-lab verify SOURCE [STICKER.tgs] [--sizes 100,160,237,512] [--frames 0,4] [--picture PREFIX] [--explain N] [--runs]
+       tgs-lab probes DIR [ART]
+       tgs-lab limits DIR [ART...]
+       tgs-lab sizes DIR [1X.tgs...]
+       tgs-lab features DIR
+       tgs-lab corpus DIR
+       tgs-lab bench [--fast] [--verify] [--no-lifetimes] [--no-split] [--no-reuse] [--fast-effort|--best] [--full]
+                     [--save FILE] [--against FILE] [DIR]";
+
+/// The switches `bench` takes, besides `--save` and `--against`.
+const BENCH_FLAGS: [&str; 8] = [
+    "--fast",
+    "--verify",
+    "--no-lifetimes",
+    "--no-split",
+    "--no-reuse",
+    "--fast-effort",
+    "--best",
+    "--full",
+];
+
+/// Whether the command line asks for help, wherever it does.
+fn asks_for_help(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == "--help" || arg == "-h")
+}
+
+/// `arg` as a folder to read or write, refusing what looks like an option,
+/// which would otherwise be made a folder of that name.
+fn folder(arg: &str) -> Result<&Path> {
+    if arg.starts_with("--") {
+        bail!("unknown option {arg}, where a folder was expected\n{USAGE}");
+    }
+    Ok(Path::new(arg))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn takes_options_for_options_and_not_folders() {
+        let args = |line: &str| line.split(' ').map(str::to_owned).collect::<Vec<_>>();
+        assert!(asks_for_help(&args("bench --help")));
+        assert!(asks_for_help(&args("corpus -h")));
+        assert!(!asks_for_help(&args("corpus out")));
+        assert!(folder("--help").is_err() && folder("--verify").is_err());
+        assert_eq!(folder("out").unwrap(), Path::new("out"));
     }
 }
