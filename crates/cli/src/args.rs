@@ -221,11 +221,11 @@ pub struct OptionArgs {
     /// seconds; what still lasts longer is cut]
     #[arg(long, value_name = "TIMES", help_heading = "Output")]
     pub tempo: Option<f64>,
-    /// Frame rate: how fast the frames of image sequences, and of sprite
-    /// sheets for TGS, play [default: 12]; otherwise of the result for
-    /// WebM, at most 60, where more than the input's at the tempo only
-    /// repeats its frames [default: the input's at the tempo, from 1 to
-    /// 60].
+    /// Frame rate of the result for WebM, at most 60, where more than the
+    /// input's at the tempo only repeats its frames [default: the input's
+    /// at the tempo, from 1 to 60]. For image sequences, and sprite sheets
+    /// for TGS, it is also the rate their pictures are read at, how fast
+    /// they play [default: 12].
     #[arg(long, help_heading = "Output")]
     pub fps: Option<f64>,
 
