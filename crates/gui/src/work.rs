@@ -26,7 +26,7 @@ impl App {
         let backend = self.backend();
         // as when ffmpeg is installed, or another chosen in Settings
         if self.read_with.as_ref() != Some(&backend) {
-            self.items.iter_mut().for_each(retry);
+            self.items.iter_mut().for_each(read_again);
             self.read_with = Some(backend.clone());
         }
         let selected = self.selected;
@@ -343,11 +343,19 @@ fn check_earlier(ctx: &egui::Context, item: &mut Item) {
     }
 }
 
-/// Lets what failed to be read of an item be read again.
-fn retry(item: &mut Item) {
-    item.video.forget_failure();
-    item.art.forget_failure();
-    item.result_clip.forget_failure();
+/// Lets what of an item failed to be read, or is still being read, be
+/// read again, once ffmpeg changed: what is being read is read with the
+/// ffmpeg it started with, which may fail where the new one wouldn't.
+fn read_again(item: &mut Item) {
+    item.video.restart();
+    item.art.restart();
+    item.result_clip.restart();
+    if !item.part.as_ref().is_some_and(|(_, part)| part.is_ready()) {
+        item.part = None;
+    }
+    if !item.still.as_ref().is_some_and(|(_, still)| still.is_ready()) {
+        item.still = None;
+    }
 }
 
 /// Frees an item's big frames; its thumbnails stay. All are read again
@@ -852,6 +860,32 @@ mod tests {
             let done = made_job(&harness.state().items[0]);
             assert!(matches!(&done.status, Status::Done(_)), "{format:?}: {:?}", done.status);
         }
+    }
+
+    #[test]
+    fn reads_again_what_an_ffmpeg_changed_from_was_reading() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video(dir.path(), "320x240") else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        // as if read with an ffmpeg that is slow to fail, and another chosen
+        // before it does
+        let (fail, failing) = std::sync::mpsc::channel::<()>();
+        let ctx = harness.ctx.clone();
+        let app = harness.state_mut();
+        app.items[0].video = Load::Loading(Task::spawn(&ctx, move |_| {
+            let _ = failing.recv();
+            Err("the old ffmpeg failed".into())
+        }));
+        app.read_with = Some(Err("the old ffmpeg".into()));
+        harness.step();
+        fail.send(()).unwrap();
+        finish(&mut harness);
+        let video = &harness.state().items[0].video;
+        assert!(video.ready().is_some(), "{:?}", harness.state().items[0].input_error());
     }
 
     #[test]

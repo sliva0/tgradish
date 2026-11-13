@@ -208,11 +208,17 @@ impl<T> Load<T> {
         true
     }
 
-    /// Idle again if loading failed, to be loaded once more.
-    pub(crate) fn forget_failure(&mut self) {
-        if matches!(self, Load::Failed(_)) {
+    /// Idle again unless it is loaded, to be loaded once more: what
+    /// failed, and what is still loading, which stops.
+    pub(crate) fn restart(&mut self) {
+        if !self.is_ready() {
             *self = Load::Idle;
         }
+    }
+
+    /// Whether it is loaded, and not loading again.
+    pub(crate) fn is_ready(&self) -> bool {
+        matches!(self, Load::Ready(_))
     }
 
     pub(crate) fn ready(&self) -> Option<&T> {
