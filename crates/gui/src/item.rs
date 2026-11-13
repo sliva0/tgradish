@@ -696,6 +696,103 @@ mod tests {
     }
 
     #[test]
+    fn says_of_every_option_whether_it_frames_the_input() {
+        use serde_json::{Value, json};
+        // what the choices hold apart from the options, which Framing
+        // takes from them, and the item's preset, whose change shows on
+        // the result
+        let Choices {
+            preset: _,
+            target: _,
+            tag: _,
+            show_layers: _,
+            hide_layers: _,
+            crop: _,
+            start: _,
+            length: _,
+            frame: _,
+            webm: _,
+            tgs: _,
+        } = Choices::new(Target::Sticker);
+        let shared = ["target", "tag", "show-layers", "hide-layers", "crop", "start", "length"];
+        // of the rest, those that change what of the input is used or how
+        // it fits, with a value other than their default, and those that
+        // don't: an option core adds goes in one or the other
+        let webm_framing = json!({
+            "resize": "pad",
+            "scaling": "sharp",
+            "exact-scale": "2",
+            "tempo": 2.0,
+        });
+        let webm_other = [
+            "fit",
+            "attempts",
+            "fit-range",
+            // the rate it is encoded at
+            "fps",
+            "bitrate",
+            "crf",
+            "speed",
+            "lossless",
+            "spoof",
+            "fake-duration",
+            "title",
+            "watermark",
+            "encoder-options",
+            "ffmpeg-args",
+        ];
+        let tgs_framing = json!({
+            "keep-canvas": true,
+            "pixel-scale": 2,
+            "resize": "pad",
+            "sheet": "2x2",
+            "sheet-frames": 3,
+            "fps": 5.0,
+            "tempo": 2.0,
+        });
+        let tgs_other = ["speed", "exact", "reductions", "compromise", "title", "watermark"];
+        let described = serde_json::to_value(tgradish_core::protocol::describe(
+            &Presets::builtin(),
+            &Default::default(),
+        ))
+        .unwrap();
+        let keys = |format: &str| -> Vec<String> {
+            let formats = described["formats"].as_array().unwrap();
+            let described = formats.iter().find(|described| described["format"] == format);
+            let mut keys: Vec<String> = described.unwrap()["options"]["properties"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect();
+            keys.sort();
+            keys
+        };
+        let decided = |framing: &Value, other: &[&str]| -> Vec<String> {
+            let framing = framing.as_object().unwrap().keys().map(String::as_str);
+            let mut keys: Vec<String> =
+                shared.iter().chain(other).copied().chain(framing).map(str::to_owned).collect();
+            keys.sort();
+            keys
+        };
+        assert_eq!(keys("webm"), decided(&webm_framing, &webm_other), "WebM's options");
+        assert_eq!(keys("tgs"), decided(&tgs_framing, &tgs_other), ".tgs's options");
+        // and Framing takes those that frame it, each on its own
+        let item = || Item::new(1, vec!["a.mp4".into()], false, Target::Sticker);
+        let unchanged = Framing::of(&item());
+        for (key, value) in webm_framing.as_object().unwrap() {
+            let mut changed = item();
+            changed.choices.webm = serde_json::from_value(json!({ key: value })).unwrap();
+            assert_ne!(Framing::of(&changed), unchanged, "WebM's {key}");
+        }
+        for (key, value) in tgs_framing.as_object().unwrap() {
+            let mut changed = item();
+            changed.choices.tgs = serde_json::from_value(json!({ key: value })).unwrap();
+            assert_ne!(Framing::of(&changed), unchanged, ".tgs's {key}");
+        }
+    }
+
+    #[test]
     fn keeps_a_format_picked_before_the_file_is_read() {
         let mut item = Item::new(1, vec!["a.mp4".into()], false, Target::Sticker);
         assert!(item.format_guessed);
