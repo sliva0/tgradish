@@ -525,8 +525,87 @@ pub fn inspect(buf: &[u8]) -> Result<WebmInfo> {
     })
 }
 
+/// How a WebM file starts: the EBML header's ID.
+const EBML_MAGIC: [u8; 4] = [0x1A, 0x45, 0xDF, 0xA3];
+
+/// The largest file [`inspect_file`] reads, in bytes: far more than any
+/// sticker, so a video it is pointed at isn't read into memory whole.
+pub const MAX_INSPECTED_BYTES: u64 = 256 << 20;
+
+/// [`inspect`] of the file at `path`, which is read only if it starts as
+/// WebM does and has at most [`MAX_INSPECTED_BYTES`].
 pub fn inspect_file(path: &Path) -> Result<WebmInfo> {
-    inspect(&std::fs::read(path)?)
+    starts_as_webm(path)?;
+    let bytes = crate::fsutil::read_at_most(path, MAX_INSPECTED_BYTES)?.ok_or_else(|| {
+        std::io::Error::other(format!(
+            "it has more than {} MiB, far more than a sticker",
+            MAX_INSPECTED_BYTES >> 20
+        ))
+    })?;
+    inspect(&bytes)
+}
+
+/// Fails unless the file at `path` starts with the EBML header's ID.
+fn starts_as_webm(path: &Path) -> Result<()> {
+    let mut start = [0u8; 4];
+    let read = std::fs::File::open(path)
+        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut start));
+    match read {
+        Ok(()) if start == EBML_MAGIC => Ok(()),
+        Ok(()) => Err(WebmError::NotEbml),
+        Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => Err(WebmError::NotEbml),
+        Err(err) => Err(err.into()),
+    }
+}
+
+/// What the start of a WebM file says of the app that made it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Head {
+    pub(crate) muxing_app: Option<String>,
+    pub(crate) writing_app: Option<String>,
+    /// See [`WebmInfo::signature`].
+    pub(crate) signature: Option<String>,
+}
+
+/// How much of a file [`head_file`] reads: ffmpeg writes Info and the
+/// padding beside it in the first few hundred bytes.
+const HEAD_BYTES: u64 = 64 << 10;
+
+/// The [`Head`] of the WebM file at `path`, from no more of it than
+/// [`HEAD_BYTES`].
+pub(crate) fn head_file(path: &Path) -> Result<Head> {
+    starts_as_webm(path)?;
+    let mut bytes = Vec::new();
+    let file = std::fs::File::open(path)?;
+    std::io::Read::read_to_end(&mut std::io::Read::take(file, HEAD_BYTES), &mut bytes)?;
+    head(&bytes)
+}
+
+/// The [`Head`] of WebM `buf`, which may stop part of the way: what comes
+/// before the first Cluster.
+pub(crate) fn head(buf: &[u8]) -> Result<Head> {
+    let mut top = ebml::Children::new(buf, 0, buf.len());
+    match top.next() {
+        Some(Ok(el)) if el.id == ids::EBML => {}
+        Some(Err(err)) => return Err(err.into()),
+        _ => return Err(WebmError::NotEbml),
+    }
+    let segment = top.find_id(ids::SEGMENT)?.ok_or(WebmError::NoSegment)?;
+    let mut head = Head::default();
+    for child in segment.children(buf) {
+        // where the part read ends
+        let Ok(child) = child else { break };
+        match child.id {
+            ids::CLUSTER => break,
+            ids::INFO if !child.truncated => {
+                let fields = parse_info(buf, &child)?;
+                (head.muxing_app, head.writing_app) = (fields.muxing_app, fields.writing_app);
+            }
+            ids::VOID if head.signature.is_none() => head.signature = void_signature(buf, &child),
+            _ => {}
+        }
+    }
+    Ok(head)
 }
 
 /// Formats seconds the way ffmpeg writes `DURATION` tags.
@@ -1236,6 +1315,49 @@ mod tests {
         patch(&mut buf, &signed).unwrap();
         patch(&mut buf, &Patch { duration: Some(0.5), ..Default::default() }).unwrap();
         assert_eq!(inspect(&buf).unwrap().signature.as_deref(), Some("tgradish was here"));
+    }
+
+    #[test]
+    fn reads_the_apps_from_the_head_alone() {
+        let mut buf = Fixture::default().build();
+        let changes = Patch {
+            muxing_app: Some("tgradish 2.0.0".into()),
+            writing_app: Some("tgradish 2.0.0 (libvpx-vp9)".into()),
+            signature: Some("tgradish 2.0.0 was here".into()),
+            ..Default::default()
+        };
+        patch(&mut buf, &changes).unwrap();
+        let whole = head(&buf).unwrap();
+        assert_eq!(whole.muxing_app, changes.muxing_app);
+        assert_eq!(whole.writing_app, changes.writing_app);
+        assert_eq!(whole.signature, changes.signature);
+        // as much as is read of a longer file, cut in a block
+        let cluster = inspect(&buf).unwrap().file_size as usize - 20;
+        assert_eq!(head(&buf[..cluster]).unwrap(), whole);
+        assert!(matches!(head(b"\x00\x00ftyp"), Err(WebmError::Ebml(_) | WebmError::NotEbml)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reads_no_more_of_large_files_than_it_needs() {
+        let dir = tempfile::tempdir().unwrap();
+        // without blocks on the disk, as long as a long video
+        let sparse = |name: &str, start: &[u8]| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, start).unwrap();
+            std::fs::File::options().write(true).open(&path).unwrap().set_len(8 << 30).unwrap();
+            path
+        };
+        let video = sparse("video.mp4", b"\x00\x00\x00\x18ftypisom");
+        assert!(matches!(inspect_file(&video), Err(WebmError::NotEbml)));
+        assert!(matches!(head_file(&video), Err(WebmError::NotEbml)));
+        let long = sparse("long.webm", &Fixture::default().build());
+        assert!(matches!(inspect_file(&long), Err(WebmError::Io(_))));
+        // its start, which is a WebM's, reads
+        assert_eq!(head_file(&long).unwrap().muxing_app.as_deref(), Some("Lavf63.1.102"));
+        let empty = dir.path().join("empty.webm");
+        std::fs::write(&empty, b"").unwrap();
+        assert!(matches!(inspect_file(&empty), Err(WebmError::NotEbml)));
     }
 
     #[test]

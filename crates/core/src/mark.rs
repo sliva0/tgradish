@@ -214,25 +214,32 @@ pub(crate) fn read_file(path: &std::path::Path) -> Option<Mark> {
 /// replace it: by the marks it shows, exactly as tgradish writes them. The
 /// name of `.tgs` stickers; in WebM files both apps and the signature in
 /// padding; in WebP images the tool their XMP names.
+/// Only the start of a WebM is read, and a picture or `.tgs` larger than
+/// [`MADE_BYTES`] is no sticker tgradish made, so pointing this at a long
+/// video reads little of it.
 pub fn made_by_tgradish(path: &std::path::Path) -> bool {
+    let small = || crate::fsutil::read_at_most(path, MADE_BYTES).ok().flatten();
     match crate::inspect::Kind::of(path) {
         crate::inspect::Kind::Image => {
-            let webp = std::fs::read(path).ok();
-            let tool = webp.and_then(|webp| crate::still::creator_tool(&webp));
+            let tool = small().and_then(|webp| crate::still::creator_tool(&webp));
             tool.as_deref().is_some_and(is_tool_id)
         }
         crate::inspect::Kind::Tgs => {
-            let Ok(json) = crate::tgs::read_json(path) else { return false };
-            serde_json::from_slice::<serde_json::Value>(&json)
-                .ok()
+            let Some(bytes) = small() else { return false };
+            let json = match bytes.starts_with(&[0x1f, 0x8b]) {
+                true => tgradish_tgs::file::unpack(&bytes).ok(),
+                // plain Lottie JSON, named .tgs
+                false => Some(bytes),
+            };
+            json.and_then(|json| serde_json::from_slice::<serde_json::Value>(&json).ok())
                 .and_then(|value| value.get("nm")?.as_str().map(tgradish_name))
                 .unwrap_or(false)
         }
-        crate::inspect::Kind::Webm => crate::webm::inspect_file(path).is_ok_and(|info| {
+        crate::inspect::Kind::Webm => crate::webm::head_file(path).is_ok_and(|head| {
             let app = |app: &Option<String>| app.as_deref().is_some_and(is_tool_id);
-            app(&info.writing_app)
-                && app(&info.muxing_app)
-                && info.signature.as_deref().is_some_and(|signature| {
+            app(&head.writing_app)
+                && app(&head.muxing_app)
+                && head.signature.as_deref().is_some_and(|signature| {
                     signature
                         .strip_suffix(crate::REPOSITORY)
                         .and_then(|tool| tool.strip_suffix(' '))
@@ -241,6 +248,11 @@ pub fn made_by_tgradish(path: &std::path::Path) -> bool {
         }),
     }
 }
+
+/// The largest picture or `.tgs` [`made_by_tgradish`] reads: many times
+/// what Telegram takes, which is all tgradish makes, even of stickers
+/// that don't fit.
+const MADE_BYTES: u64 = 16 << 20;
 
 /// Whether `text` is `tgradish VERSION`, as `crate::TOOL_ID` is: numbers
 /// between dots, and after them what a pre-release or a build adds, as
