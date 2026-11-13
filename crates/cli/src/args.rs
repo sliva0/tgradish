@@ -313,7 +313,7 @@ pub struct OptionArgs {
     pub pixel_scale: Option<u32>,
     /// Read the input as a sprite sheet of equal cells, frames row by row.
     #[arg(long, value_name = "COLUMNSxROWS", help_heading = TGS)]
-    pub sheet: Option<String>,
+    pub sheet: Option<options::Sheet>,
     /// How many sprite sheet cells hold frames. [default: all but
     /// transparent ones at the end]
     #[arg(long, value_name = "N", help_heading = TGS)]
@@ -407,7 +407,7 @@ impl OptionArgs {
             tag: self.tag.clone(),
             show_layers: names(&self.show_layers),
             hide_layers: names(&self.hide_layers),
-            sheet: self.sheet.clone(),
+            sheet: self.sheet,
             sheet_frames: self.sheet_frames,
             fps: self.fps,
             title: self.title.clone(),
@@ -776,7 +776,7 @@ mod tests {
             tag: Some("-run".into()),
             show_layers: Some(vec!["Outline".into()]),
             hide_layers: Some(vec!["Sketch".into(), "Guides, old".into()]),
-            sheet: Some("4x2".into()),
+            sheet: "4x2".parse().ok(),
             sheet_frames: Some(7),
             fps: Some(12.5),
             title: Some("-_-".into()),

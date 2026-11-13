@@ -3,7 +3,7 @@
 //! up is the user's to choose.
 
 use eframe::egui;
-use tgradish_core::options::Speed;
+use tgradish_core::options::{Sheet, Speed};
 use tgradish_core::tgs;
 use tgradish_tgs::reduce::Kind as Reduction;
 
@@ -97,9 +97,12 @@ pub(super) fn tgs_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context)
     });
 }
 
-/// How a picture is read: as a sprite sheet, or as it is. A sheet the
-/// preset sets is read as one too: its cells can be changed here, but it
-/// can't be read as one picture.
+/// The layout a picture first gets once it is read as a sprite sheet: a
+/// strip, as sheets most often are.
+const FIRST_SHEET: Sheet = Sheet { columns: 4, rows: 1 };
+
+/// How a picture is read: as a sprite sheet, or as it is. Only the item
+/// says, as a sheet's layout is one file's, which no preset holds.
 pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     if item.kind != Kind::Image || item.inputs.len() != 1 || item.sequence {
         return;
@@ -108,16 +111,11 @@ pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let base = item.choices.tgs_base(context.presets, context.config).unwrap_or_default();
     let options = &mut item.choices.tgs;
     row(ui, &fl!("sprite-sheet"), &fl!("sprite-sheet", "hint"), Ok(()), |ui| {
-        let read = options.sheet.clone().or(base.sheet.clone());
-        let mut sheet = read.is_some();
-        let tick = egui::Checkbox::new(&mut sheet, fl!("read-as-sheet"));
-        let tick = ui
-            .add_enabled(base.sheet.is_none(), tick)
-            .on_disabled_hover_text(fl!("read-as-sheet", "preset"));
-        if tick.changed() {
-            options.sheet = sheet.then(|| "4x1".to_owned());
+        let mut sheet = options.sheet.is_some();
+        if ui.checkbox(&mut sheet, fl!("read-as-sheet")).changed() {
+            options.sheet = sheet.then_some(FIRST_SHEET);
         }
-        let (mut columns, mut rows) = parse_sheet(read.as_deref()).unwrap_or((4, 1));
+        let Sheet { mut columns, mut rows } = options.sheet.unwrap_or(FIRST_SHEET);
         ui.add_enabled_ui(sheet, |ui| {
             ui.horizontal(|ui| {
                 ui.label(fl!("sheet-cells"));
@@ -125,11 +123,7 @@ pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 ui.label("×");
                 let b = ui.add(egui::DragValue::new(&mut rows).range(1..=256));
                 if sheet && (a.changed() || b.changed()) {
-                    let cells = Some(format!("{columns}x{rows}"));
-                    options.sheet = cells.filter(|cells| Some(cells) != base.sheet.as_ref());
-                }
-                if base.sheet.is_some() && options.sheet.is_some() && widgets::reset(ui) {
-                    options.sheet = None;
+                    options.sheet = Some(Sheet { columns, rows });
                 }
                 ui.add_space(14.0);
                 ui.label(fl!("sheet-frames"));
@@ -143,9 +137,4 @@ pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             });
         });
     });
-}
-
-fn parse_sheet(sheet: Option<&str>) -> Option<(u32, u32)> {
-    let (columns, rows) = sheet?.split_once('x')?;
-    Some((columns.parse().ok()?, rows.parse().ok()?))
 }

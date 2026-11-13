@@ -106,9 +106,8 @@ pub struct TgsOptions {
     pub hide_layers: Option<Vec<String>>,
     /// Read the input as a sprite sheet of COLUMNSxROWS equal cells, frames
     /// row by row, for example 4x2.
-    #[schemars(regex(pattern = r"^[1-9][0-9]*x[1-9][0-9]*$"))]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sheet: Option<String>,
+    pub sheet: Option<crate::options::Sheet>,
     /// How many cells of the sprite sheet hold frames. Default: all but
     /// transparent ones at the end.
     #[schemars(range(min = 1))]
@@ -157,14 +156,14 @@ impl TgsOptions {
     }
 
     fn sheet_layout(&self) -> Result<Option<Sheet>> {
-        let Some(text) = &self.sheet else { return Ok(None) };
-        let invalid = || Error::invalid("sheet", format!("{text:?} is not COLUMNSxROWS"));
-        let (columns, rows) = text.split_once(['x', 'X']).ok_or_else(invalid)?;
-        let number = |n: &str| n.trim().parse::<u32>().ok().filter(|&n| n > 0).ok_or_else(invalid);
+        let Some(sheet) = self.sheet else { return Ok(None) };
+        if sheet.columns == 0 || sheet.rows == 0 {
+            return Err(Error::invalid("sheet", format!("{sheet} has no cells")));
+        }
         Ok(Some(Sheet {
             frames: self.sheet_frames,
             frame_duration: self.frame_duration()?,
-            ..Sheet::new(number(columns)?, number(rows)?)
+            ..Sheet::new(sheet.columns, sheet.rows)
         }))
     }
 
@@ -781,7 +780,7 @@ mod tests {
         // a sheet is the first frame, whatever the tag
         let sheet = TgsOptions {
             tag: Some("idle".into()),
-            sheet: Some("2x1".into()),
+            sheet: Some(crate::options::Sheet { columns: 2, rows: 1 }),
             ..TgsOptions::default()
         };
         assert_eq!(read(sheet).0, width / 2);
@@ -899,13 +898,15 @@ mod tests {
         );
         let settings = merged.sticker_options().unwrap();
         assert_eq!((settings.effort, settings.fit), (Effort::Fast, Fit::Exact));
-        let sheet = TgsOptions { sheet: Some("4x2".into()), ..Default::default() };
+        let sheet = TgsOptions { sheet: "4x2".parse().ok(), ..Default::default() };
         let layout = sheet.sheet_layout().unwrap().unwrap();
         assert_eq!(
             (layout.columns, layout.rows, layout.frame_duration),
             (4, 2, Duration::from_secs_f64(1.0 / DEFAULT_FPS))
         );
-        let bad = TgsOptions { sheet: Some("4 by 2".into()), ..Default::default() };
+        // made in code, which reading refuses
+        let none = crate::options::Sheet { columns: 0, rows: 2 };
+        let bad = TgsOptions { sheet: Some(none), ..Default::default() };
         assert!(bad.sheet_layout().is_err());
         assert_eq!(default_output(Path::new("a/b.gif"), Target::Emoji), Path::new("a/b.emoji.tgs"));
     }

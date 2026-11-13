@@ -614,7 +614,7 @@ mod tests {
             exact: Some(false),
             pixel_scale: Some(2),
             // one file's: left out
-            sheet: Some("4x2".into()),
+            sheet: "4x2".parse().ok(),
             ..TgsOptions::default()
         };
         let path = save(dir.path(), "my small", "Small ones", (&webm, &tgs), false).unwrap();
