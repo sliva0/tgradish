@@ -162,12 +162,18 @@ impl Shape {
 
     /// Adds the shape's vertical edges crossing row `y` to `winding`, which
     /// holds the change in winding number at each column edge from `left`.
+    /// Edges past its end are left out: no cell before them counts them.
     fn add_crossings(&self, y: u32, left: u32, winding: &mut [i32]) {
+        let mut add = |x: u32, change: i32| {
+            if let Some(edge) = winding.get_mut((x - left) as usize) {
+                *edge += change;
+            }
+        };
         match *self {
             Shape::Rect { x, y: top, width, height } => {
                 if (top..top.saturating_add(height)).contains(&y) {
-                    winding[(x - left) as usize] += 1;
-                    winding[(x.saturating_add(width) - left) as usize] -= 1;
+                    add(x, 1);
+                    add(x.saturating_add(width), -1);
                 }
             }
             Shape::Path(ref corners) => {
@@ -178,9 +184,9 @@ impl Shape {
                     }
                     // a clockwise outline goes up on its left side
                     if y1 < y0 && (y1..y0).contains(&y) {
-                        winding[(x - left) as usize] += 1;
+                        add(x, 1);
                     } else if y0 < y1 && (y0..y1).contains(&y) {
-                        winding[(x - left) as usize] -= 1;
+                        add(x, -1);
                     }
                 }
             }
@@ -218,8 +224,10 @@ impl Coverage {
 
 #[cfg(any(test, feature = "internals"))]
 impl Group {
-    /// Cells the group fills.
-    pub(crate) fn coverage(&self) -> Coverage {
+    /// Cells the group fills of a scene `width` by `height`. What is past
+    /// its edges is cut off, so a shape reaching far past them costs no more
+    /// than one that ends at them.
+    pub(crate) fn coverage(&self, width: u32, height: u32) -> Coverage {
         let (left, top, right, bottom) = self
             .shapes
             .iter()
@@ -227,6 +235,7 @@ impl Group {
             .fold((u32::MAX, u32::MAX, 0, 0), |(x0, y0, x1, y1), (a, b, c, d)| {
                 (x0.min(a), y0.min(b), x1.max(c), y1.max(d))
             });
+        let (right, bottom) = (right.min(width), bottom.min(height));
         if left >= right || top >= bottom {
             return Coverage { left: 0, top: 0, width: 0, cells: Vec::new() };
         }
@@ -301,10 +310,7 @@ impl Scene {
         let mut cells = vec![Paint::Clear; self.width as usize * self.height as usize];
         for group in self.visible(tick) {
             let opaque = opaque(palette, group.colour);
-            for (x, y) in group.coverage().cells() {
-                if x >= self.width || y >= self.height {
-                    continue;
-                }
+            for (x, y) in group.coverage(self.width, self.height).cells() {
                 let cell = &mut cells[(y * self.width + x) as usize];
                 *cell = match *cell {
                     Paint::Clear => Paint::Colour(group.colour),
@@ -352,14 +358,13 @@ impl Scene {
         let changes = self.changes();
         for &tick in &changes[..changes.len() - 1] {
             let groups: Vec<&Group> = self.visible(tick).collect();
-            let coverage: Vec<Coverage> = groups.iter().map(|group| group.coverage()).collect();
+            let coverage: Vec<Coverage> =
+                groups.iter().map(|group| group.coverage(self.width, self.height)).collect();
             // the topmost group at each cell, and whether it is opaque
             let mut top: Vec<Option<usize>> = vec![None; w * h];
             for (index, cover) in coverage.iter().enumerate() {
                 for (x, y) in cover.cells() {
-                    if (x as usize) < w && (y as usize) < h {
-                        top[y as usize * w + x as usize] = Some(index);
-                    }
+                    top[y as usize * w + x as usize] = Some(index);
                 }
             }
             let opaque = |cell: usize| top[cell].is_some_and(|g| opaque(palette, groups[g].colour));
@@ -528,5 +533,8 @@ mod tests {
         let odd = self::scene(2, 1, vec![group(9, vec![rect(1, 0, u32::MAX, 1)])]);
         assert_eq!(colours(&odd), [Paint::Clear, Paint::Colour(9)]);
         assert!(odd.seams(&PALETTE).is_empty());
+        // nor cost more than ones that end at it
+        let huge = group(9, vec![rect(0, 0, 1, u32::MAX), rect(1, 0, u32::MAX, u32::MAX)]);
+        assert_eq!(huge.coverage(2, 1).cells().collect::<Vec<_>>(), [(0, 0), (1, 0)]);
     }
 }
