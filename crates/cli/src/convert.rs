@@ -352,10 +352,17 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
     let converter = Converter::new(ctx, &args.conversion, args.format, args.output.as_deref())?;
     if args.sequence {
         let input = Input::Sequence(args.inputs.clone());
-        let verdict = converter.run(&input, args.output.clone(), converter.overwrite());
-        return match verdict.map_err(explain)? {
-            Verdict::Accepted => Ok(()),
-            Verdict::Refused => Err(crate::Exit(crate::REFUSED).into()),
+        return match converter.run(&input, args.output.clone(), converter.overwrite()) {
+            Ok(Verdict::Accepted) => Ok(()),
+            Ok(Verdict::Refused) => Err(crate::Exit(crate::REFUSED).into()),
+            Err(Failed::Core(tgradish_core::Error::Cancelled)) => {
+                Err(tgradish_core::Error::Cancelled.into())
+            }
+            // named by its first picture, as its result is
+            Err(err) => {
+                converter.report_failure(input.first(), err);
+                Err(crate::Exit(1).into())
+            }
         };
     }
     // keeps a pasted image on disk until it is converted

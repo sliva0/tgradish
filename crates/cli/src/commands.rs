@@ -25,6 +25,17 @@ use crate::ui;
 pub const SPOOFED: &str = ".spoofed.webm";
 
 pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
+    match spoof_file(ctx, &args) {
+        // what went wrong is about the input, which --json names
+        Err(err) if ctx.global.json && err.downcast_ref::<crate::Exit>().is_none() => {
+            crate::print_json_error(&err, Some(&args.input));
+            Err(crate::Exit(1).into())
+        }
+        done => done,
+    }
+}
+
+fn spoof_file(ctx: &Context, args: &SpoofArgs) -> Result<()> {
     let output = match (&args.output, args.in_place) {
         (_, true) => args.input.clone(),
         (Some(output), false) => output.clone(),

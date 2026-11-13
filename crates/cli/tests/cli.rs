@@ -541,6 +541,17 @@ fn reports_batch_failures_per_input() {
     let lines = json_lines(&output);
     assert_eq!((output.status.code(), lines.len()), (Some(1), 1));
     assert!(failed(&lines[0]) && lines[0]["input"] == missing.to_str().unwrap());
+    // a sequence by its first input, and a file spoofing couldn't read
+    let (missing, other) = (missing.to_str().unwrap(), other.to_str().unwrap());
+    for args in [
+        &["--json", "convert", "--sequence", missing, other, "--format", "tgs"][..],
+        &["--json", "spoof", missing],
+    ] {
+        let output = tgradish(args);
+        let lines = json_lines(&output);
+        assert_eq!((output.status.code(), lines.len()), (Some(1), 1), "{args:?}");
+        assert!(failed(&lines[0]) && lines[0]["input"] == missing, "{args:?}: {}", lines[0]);
+    }
 }
 
 /// An "ffmpeg" without the VP9 encoder must give one JSON document.
