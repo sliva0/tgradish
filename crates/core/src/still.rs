@@ -34,7 +34,9 @@ pub enum StillEvent {
     /// Something worth knowing about more than one picture, as `watch`
     /// says of folders it can't read; what is about one is in its
     /// outcome's warnings.
-    Warning { message: String },
+    Warning {
+        message: String,
+    },
     /// A conversion, or the whole command, failed. Only printed by the
     /// CLI; the library returns errors instead.
     Error(crate::events::Failure),

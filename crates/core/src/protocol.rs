@@ -195,6 +195,7 @@ mod tests {
                 params: Params { rate: Rate::Crf(32), ..params },
                 spoofed: false,
                 issues: vec![too_big.clone()],
+                temp_dir: Some("/tmp/tgradish-x".into()),
             },
             Event::Error(Failure { message: "it failed".into(), input: Some("in.mp4".into()) }),
         ]

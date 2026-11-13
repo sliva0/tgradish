@@ -107,6 +107,9 @@ pub enum Event {
         spoofed: bool,
         /// Problems Telegram would still have with the result.
         issues: Vec<Issue>,
+        /// Where the intermediate files are, when they were kept.
+        #[serde(serialize_with = "crate::protocol::serialize_optional_path")]
+        temp_dir: Option<PathBuf>,
     },
     /// A conversion, or the whole command, failed. Only printed by the
     /// CLI; the library returns errors instead.
