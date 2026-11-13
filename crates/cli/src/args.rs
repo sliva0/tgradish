@@ -532,11 +532,11 @@ pub struct SpoofArgs {
     /// Replace an existing output file.
     #[arg(short = 'y', long)]
     pub overwrite: bool,
-    /// Duration to encode into the metadata. [default: a short one Telegram
-    /// accepts]
-    #[arg(short, long, value_name = "SECONDS", default_value_t = options::DEFAULT_FAKE_DURATION,
-          hide_default_value = true)]
-    pub duration: f64,
+    /// Duration to encode into the metadata, as convert's --fake-duration.
+    /// [default: a short one Telegram accepts]
+    #[arg(short = 'd', long, value_name = "SECONDS",
+          default_value_t = options::DEFAULT_FAKE_DURATION, hide_default_value = true)]
+    pub fake_duration: f64,
     /// Title to store in the file.
     #[arg(long)]
     pub title: Option<String>,
@@ -682,6 +682,16 @@ mod tests {
             assert_eq!(options("--exact").foreign(format), ["--exact"]);
         }
         assert_eq!(options("--exact=false").to_tgs_options().exact, Some(false));
+    }
+
+    #[test]
+    fn spoofs_with_the_flag_convert_has() {
+        for flag in ["--fake-duration=1.5", "-d1.5"] {
+            let cli = Cli::parse_from(["tgradish", "spoof", "a.webm", flag]);
+            let Command::Spoof(args) = cli.command else { panic!() };
+            assert_eq!(args.fake_duration, 1.5, "{flag}");
+        }
+        assert!(Cli::try_parse_from(["tgradish", "spoof", "a.webm", "--duration=1"]).is_err());
     }
 
     #[test]
