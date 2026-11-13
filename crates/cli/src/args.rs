@@ -159,7 +159,7 @@ pub struct ConvertArgs {
     #[arg(long, conflicts_with = "inputs")]
     pub clipboard: bool,
     /// Output file. Only with a single input, or with --sequence.
-    #[arg(short, long, conflicts_with = "output_dir")]
+    #[arg(short, long, value_name = "FILE", conflicts_with = "output_dir")]
     pub output: Option<PathBuf>,
     /// Join the inputs (images, or directories of them) into one animation,
     /// in name order with numbers counted as numbers.
@@ -194,7 +194,7 @@ pub struct ConversionArgs {
     /// pixel art, or a video of it) or webp (image sticker or emoji, from
     /// any picture or the frame at --start; image works too).
     /// [default: by the output's extension, then webm]
-    #[arg(long, value_enum)]
+    #[arg(short, long, value_enum)]
     pub format: Option<FormatArg>,
     /// Directory for results. Default: next to each input, as
     /// NAME.sticker.webm, NAME.emoji.webm or the same with .tgs or .webp.
@@ -271,7 +271,7 @@ pub struct OptionArgs {
 
     /// What to tune to get close to the file size limit: 256 KiB for
     /// stickers, 64 KiB for emoji. [default: auto]
-    #[arg(short, long, value_enum, help_heading = "Size fitting")]
+    #[arg(long, value_enum, help_heading = "Size fitting")]
     pub fit: Option<FitArg>,
     /// Maximum number of encodes while fitting. [default: 8]
     #[arg(long, value_name = "N", help_heading = "Size fitting")]
@@ -551,7 +551,7 @@ pub struct SpoofArgs {
     /// WebM file to spoof.
     pub input: PathBuf,
     /// Output file. Default: NAME.spoofed.webm next to the input.
-    #[arg(short, long, conflicts_with = "in_place")]
+    #[arg(short, long, value_name = "FILE", conflicts_with = "in_place")]
     pub output: Option<PathBuf>,
     /// Modify the input file.
     #[arg(short, long)]
@@ -719,6 +719,18 @@ mod tests {
             assert_eq!(options("--exact").unused(format, None), ["--exact"]);
         }
         assert_eq!(options("--no-exact").to_tgs_options().exact, Some(false));
+    }
+
+    /// -f is the format, as anyone who knows ffmpeg reads it; fitting has
+    /// no short flag.
+    #[test]
+    fn reads_f_as_the_format() {
+        let cli = Cli::parse_from(["tgradish", "convert", "a.png", "-f", "tgs"]);
+        let Command::Convert(args) = cli.command else { panic!() };
+        assert!(matches!(args.conversion.format, Some(FormatArg::Tgs)));
+        assert!(Cli::try_parse_from(["tgradish", "convert", "a.png", "-f", "crf"]).is_err());
+        let help = Cli::command().find_subcommand_mut("convert").unwrap().render_help();
+        assert!(help.to_string().contains("-o, --output <FILE>"), "{help}");
     }
 
     #[test]
