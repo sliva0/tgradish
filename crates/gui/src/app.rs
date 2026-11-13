@@ -479,11 +479,32 @@ fn load_config(path: &Path) -> (Config, Option<(tgradish_core::Error, Option<Pat
 
 /// Copies the settings file at `path`, which can't be read, to
 /// `config.toml.unreadable` beside it, before it is written over; gives
-/// where.
+/// where. A copy kept earlier of something else is never written over:
+/// this one goes to `config.toml.unreadable-2` and on, unless one of them
+/// holds the same already.
 pub(crate) fn keep_aside(path: &Path) -> std::io::Result<PathBuf> {
-    let aside = path.with_extension("toml.unreadable");
-    std::fs::copy(path, &aside)?;
-    Ok(aside)
+    use std::io::{ErrorKind, Write};
+    let bytes = std::fs::read(path)?;
+    for number in 1..=999 {
+        let extension = match number {
+            1 => "toml.unreadable".to_owned(),
+            _ => format!("toml.unreadable-{number}"),
+        };
+        let aside = path.with_extension(extension);
+        match std::fs::read(&aside) {
+            Ok(kept) if kept == bytes => return Ok(aside),
+            Ok(_) => continue,
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+        // not even another window's copy made meanwhile is written over
+        match std::fs::File::create_new(&aside) {
+            Ok(mut file) => return file.write_all(&bytes).map(|()| aside),
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err),
+        }
+    }
+    Err(std::io::Error::other("too many copies of unreadable settings are kept"))
 }
 
 /// How long a closing window waits for conversions to stop, so they take
@@ -865,6 +886,22 @@ mod tests {
         // a file that is fine is left alone
         std::fs::write(&path, "").unwrap();
         assert!(load_config(&path).1.is_none());
+    }
+
+    #[test]
+    fn never_writes_over_a_copy_of_settings_kept_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let aside = |name: &str| dir.path().join(name);
+        std::fs::write(&path, "first = 1\n").unwrap();
+        assert_eq!(keep_aside(&path).unwrap(), aside("config.toml.unreadable"));
+        // the same again is kept once; something else beside it
+        assert_eq!(keep_aside(&path).unwrap(), aside("config.toml.unreadable"));
+        std::fs::write(&path, "second = 2\n").unwrap();
+        assert_eq!(keep_aside(&path).unwrap(), aside("config.toml.unreadable-2"));
+        let read = |name: &str| std::fs::read_to_string(aside(name)).unwrap();
+        assert_eq!(read("config.toml.unreadable"), "first = 1\n");
+        assert_eq!(read("config.toml.unreadable-2"), "second = 2\n");
     }
 
     #[cfg(unix)]
