@@ -82,6 +82,39 @@ impl Format {
         }
     }
 
+    /// Whether this format uses the option `key`, as files, JSON and flags
+    /// name it: WebM all of [`Options`], `.tgs` all of [`TgsOptions`], and
+    /// images those of WebM's a still picture has,
+    /// [`crate::still::PICTURE_OPTIONS`].
+    pub fn uses(self, key: &str) -> bool {
+        static WEBM: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+        static TGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+        let known = |keys: &std::sync::OnceLock<Vec<String>>, schema: fn() -> schemars::Schema| {
+            let keys = keys.get_or_init(|| {
+                let schema = serde_json::to_value(schema()).unwrap_or_default();
+                schema["properties"].as_object().map_or(Vec::new(), |p| p.keys().cloned().collect())
+            });
+            keys.iter().any(|known| known == key)
+        };
+        match self {
+            Format::Webm => known(&WEBM, || schemars::schema_for!(Options)),
+            Format::Tgs => known(&TGS, || schemars::schema_for!(TgsOptions)),
+            Format::Webp => crate::still::PICTURE_OPTIONS.contains(&key),
+        }
+    }
+
+    /// Those of `keys` this format doesn't use, as [`Format::uses`] says,
+    /// in their order: what a front-end refuses rather than quietly drop.
+    pub fn unused<'k>(self, keys: impl IntoIterator<Item = &'k str>) -> Vec<&'k str> {
+        let mut unused: Vec<&str> = Vec::new();
+        for key in keys {
+            if !self.uses(key) && !unused.contains(&key) {
+                unused.push(key);
+            }
+        }
+        unused
+    }
+
     pub fn default_preset(self) -> &'static str {
         match self {
             Format::Webm | Format::Webp => DEFAULT_PRESET,
@@ -639,6 +672,27 @@ mod tests {
 
     fn write(dir: &Path, name: &str, text: &str) {
         std::fs::write(dir.join(format!("{name}.toml")), text).unwrap();
+    }
+
+    #[test]
+    fn says_which_options_each_format_uses() {
+        let keys = ["crf", "exact", "lossless", "crop", "keep-canvas", "spoof", "crf", "nope"];
+        assert_eq!(Format::Webm.unused(keys), ["exact", "keep-canvas", "nope"]);
+        assert_eq!(Format::Tgs.unused(keys), ["crf", "lossless", "spoof", "nope"]);
+        assert_eq!(
+            Format::Webp.unused(keys),
+            ["crf", "exact", "lossless", "keep-canvas", "spoof", "nope"]
+        );
+        // every option a picture has is WebM's
+        for key in crate::still::PICTURE_OPTIONS {
+            assert!(Format::Webm.uses(key), "{key}");
+        }
+        let all = Options {
+            crf: Some(30),
+            crop: Some(crate::options::Crop::whole((8, 8))),
+            ..Default::default()
+        };
+        assert_eq!(crate::options::set_keys(&crate::still::picture_options(&all)), ["crop"]);
     }
 
     #[test]

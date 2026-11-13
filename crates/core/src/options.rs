@@ -579,6 +579,15 @@ impl Options {
     }
 }
 
+/// The keys of the values `options` sets, as files, JSON and flags name
+/// them, in the order of its fields.
+pub fn set_keys(options: &impl Serialize) -> Vec<String> {
+    match serde_json::to_value(options) {
+        Ok(serde_json::Value::Object(fields)) => fields.keys().cloned().collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// Command line flags that set the values `options` sets: the flag of each
 /// field has its name, as `tgradish convert` has them. A flag and its
 /// value are one word, `--name=value`: in a word of its own, a value that

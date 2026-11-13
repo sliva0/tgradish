@@ -57,22 +57,28 @@ pub struct Outcome {
     pub warnings: Vec<String>,
 }
 
-/// The options of `options` a still picture has.
+/// The options a still picture has, of WebM's: what to make, what is read
+/// and where, how it is squared and scaled, and its metadata. The rest are
+/// about time and encoding video, which a picture has none of.
+pub const PICTURE_OPTIONS: [&str; 11] = [
+    "target",
+    "tag",
+    "show-layers",
+    "hide-layers",
+    "crop",
+    "resize",
+    "scaling",
+    "exact-scale",
+    "start",
+    "title",
+    "watermark",
+];
+
+/// The options of `options` a still picture has, [`PICTURE_OPTIONS`].
 pub fn picture_options(options: &Options) -> Options {
-    Options {
-        target: options.target,
-        tag: options.tag.clone(),
-        show_layers: options.show_layers.clone(),
-        hide_layers: options.hide_layers.clone(),
-        crop: options.crop,
-        resize: options.resize,
-        scaling: options.scaling,
-        exact_scale: options.exact_scale,
-        start: options.start,
-        title: options.title.clone(),
-        watermark: options.watermark,
-        ..Options::default()
-    }
+    let mut table = toml::Table::try_from(options).expect("options serialise to a table");
+    table.retain(|key, _| PICTURE_OPTIONS.contains(&key));
+    table.try_into().expect("options read back with fewer set")
 }
 
 /// Where to start reading for the frame that shows at `time`. `starts`

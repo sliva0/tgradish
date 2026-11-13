@@ -336,58 +336,25 @@ pub struct OptionArgs {
 }
 
 impl OptionArgs {
-    /// Flags given that `format` doesn't use.
-    pub fn foreign(&self, format: Format) -> Vec<&'static str> {
-        let given = |set: bool, name: &'static str| set.then_some(name);
-        let flags = match format {
-            Format::Webm => vec![
-                given(self.exact.is_some(), "--exact"),
-                given(!self.reductions.is_empty(), "--reductions"),
-                given(self.compromise.is_some(), "--compromise"),
-                given(self.keep_canvas.is_some(), "--keep-canvas"),
-                given(self.pixel_scale.is_some(), "--pixel-scale"),
-                given(self.sheet.is_some(), "--sheet"),
-                given(self.sheet_frames.is_some(), "--sheet-frames"),
-            ],
-            Format::Webp => vec![
-                given(self.fit.is_some(), "--fit"),
-                given(self.attempts.is_some(), "--attempts"),
-                given(self.fit_range.is_some(), "--fit-range"),
-                given(self.length.is_some(), "--length"),
-                given(self.tempo.is_some(), "--tempo"),
-                given(self.fps.is_some(), "--fps"),
-                given(self.bitrate.is_some(), "--bitrate"),
-                given(self.crf.is_some(), "--crf"),
-                given(self.speed.is_some(), "--speed"),
-                given(self.lossless.is_some(), "--lossless"),
-                given(!self.encoder_options.is_empty(), "--encoder-options"),
-                given(self.ffmpeg_args.is_some(), "--ffmpeg-args"),
-                given(self.spoof.is_some(), "--spoof"),
-                given(self.fake_duration.is_some(), "--fake-duration"),
-                given(self.exact.is_some(), "--exact"),
-                given(!self.reductions.is_empty(), "--reductions"),
-                given(self.compromise.is_some(), "--compromise"),
-                given(self.keep_canvas.is_some(), "--keep-canvas"),
-                given(self.pixel_scale.is_some(), "--pixel-scale"),
-                given(self.sheet.is_some(), "--sheet"),
-                given(self.sheet_frames.is_some(), "--sheet-frames"),
-            ],
-            Format::Tgs => vec![
-                given(self.scaling.is_some(), "--scaling"),
-                given(self.exact_scale.is_some(), "--exact-scale"),
-                given(self.fit.is_some(), "--fit"),
-                given(self.attempts.is_some(), "--attempts"),
-                given(self.fit_range.is_some(), "--fit-range"),
-                given(self.bitrate.is_some(), "--bitrate"),
-                given(self.crf.is_some(), "--crf"),
-                given(self.lossless.is_some(), "--lossless"),
-                given(!self.encoder_options.is_empty(), "--encoder-options"),
-                given(self.ffmpeg_args.is_some(), "--ffmpeg-args"),
-                given(self.spoof.is_some(), "--spoof"),
-                given(self.fake_duration.is_some(), "--fake-duration"),
-            ],
-        };
-        flags.into_iter().flatten().collect()
+    /// The options given that `format` doesn't use, as core says, named by
+    /// their flags; and those of `json`, the object `--options-json` gave,
+    /// named as keys in it.
+    pub fn unused(
+        &self,
+        format: Format,
+        json: Option<&serde_json::Map<String, serde_json::Value>>,
+    ) -> Vec<String> {
+        let mut flags = options::set_keys(&self.to_options());
+        flags.extend(options::set_keys(&self.to_tgs_options()));
+        let json: Vec<&str> =
+            json.map_or(Vec::new(), |json| json.keys().map(String::as_str).collect());
+        let mut named: Vec<String> = format
+            .unused(flags.iter().map(String::as_str))
+            .iter()
+            .map(|key| format!("--{key}"))
+            .collect();
+        named.extend(format.unused(json).iter().map(|key| format!("{key:?} in --options-json")));
+        named
     }
 
     pub fn to_tgs_options(&self) -> TgsOptions {
@@ -660,13 +627,21 @@ mod tests {
         ]);
         let Command::Convert(args) = cli.command else { panic!() };
         let options = &args.conversion.options;
-        assert_eq!(options.foreign(Format::Tgs), ["--crf"]);
+        assert_eq!(options.unused(Format::Tgs, None), ["--crf"]);
         assert_eq!(
-            options.foreign(Format::Webm),
+            options.unused(Format::Webm, None),
             ["--reductions", "--compromise", "--keep-canvas"]
         );
-        assert!(!options.foreign(Format::Webp).iter().any(|flag| flag.contains("layer")));
-        assert!(!options.foreign(Format::Webp).contains(&"--tag"));
+        let webp = options.unused(Format::Webp, None);
+        assert!(!webp.iter().any(|flag| flag.contains("layer") || flag == "--tag"), "{webp:?}");
+        // what JSON sets is held to the same
+        let json = serde_json::json!({ "crf": 30, "spoof": "always", "crop": "8x8" });
+        let none = Cli::parse_from(["tgradish", "convert", "a.png"]);
+        let Command::Convert(none) = none.command else { panic!() };
+        assert_eq!(
+            none.conversion.options.unused(Format::Webp, json.as_object()),
+            ["\"crf\" in --options-json", "\"spoof\" in --options-json"]
+        );
         let tgs = options.to_tgs_options();
         assert_eq!(tgs.reductions.unwrap(), [tgs::Kind::MergeColours, tgs::Kind::DropFrames]);
         assert_eq!(tgs.compromise, Some(tgs::Compromise::Motion));
@@ -681,10 +656,10 @@ mod tests {
             args.conversion.options
         };
         // lossless VP9 is WebM's, keeping the art exact is .tgs's
-        assert_eq!(options("--lossless").foreign(Format::Tgs), ["--lossless"]);
-        assert!(options("--lossless").foreign(Format::Webm).is_empty());
+        assert_eq!(options("--lossless").unused(Format::Tgs, None), ["--lossless"]);
+        assert!(options("--lossless").unused(Format::Webm, None).is_empty());
         for format in [Format::Webm, Format::Webp] {
-            assert_eq!(options("--exact").foreign(format), ["--exact"]);
+            assert_eq!(options("--exact").unused(format, None), ["--exact"]);
         }
         assert_eq!(options("--exact=false").to_tgs_options().exact, Some(false));
     }

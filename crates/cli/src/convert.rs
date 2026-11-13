@@ -53,6 +53,15 @@ pub struct Converter<'a> {
     written: RefCell<HashMap<PathBuf, PathBuf>>,
 }
 
+/// The options `--options-json` gave, as `format` takes them.
+fn overlay<T: serde::de::DeserializeOwned>(
+    json: &serde_json::Map<String, serde_json::Value>,
+    format: Format,
+) -> Result<T> {
+    serde_json::from_value(json.clone().into())
+        .with_context(|| format!("invalid --options-json for {} output", format.name()))
+}
+
 /// The format a command converts to: `--format`, or else the extension of
 /// `output` (the `-o` file), or else WebM.
 fn format_of(args: &ConversionArgs, output: Option<&Path>) -> Format {
@@ -75,20 +84,26 @@ impl<'a> Converter<'a> {
                 format.name()
             );
         }
-        let foreign = args.options.foreign(format);
-        if !foreign.is_empty() {
-            bail!("{} can't be used for {} output", foreign.join(", "), format.name());
+        let invalid_json = || format!("invalid --options-json for {} output", format.name());
+        let json = match &args.options_json {
+            Some(json) => Some(
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(json)
+                    .with_context(invalid_json)?,
+            ),
+            None => None,
+        };
+        let unused = args.options.unused(format, json.as_ref());
+        if !unused.is_empty() {
+            bail!("{} can't be used for {} output", unused.join(", "), format.name());
         }
         if args.keep_temp && format != Format::Webm {
             bail!("--keep-temp is for WebM output, which alone leaves intermediate files");
         }
         // preset, then --options-json, then flags
         let name = args.preset.as_deref().unwrap_or_else(|| ctx.config.preset_for(format));
-        let invalid_json = || format!("invalid --options-json for {} output", format.name());
         let webm = |mut options: Options| -> Result<Options> {
-            if let Some(json) = &args.options_json {
-                let overlay: Options = serde_json::from_str(json).with_context(invalid_json)?;
-                options = options.merged(&overlay);
+            if let Some(json) = &json {
+                options = options.merged(&overlay(json, format)?);
             }
             Ok(options.merged(&args.options.to_options()))
         };
@@ -102,10 +117,8 @@ impl<'a> Converter<'a> {
                 Resolved::Webp { options: webm(options)?, backend }
             }
             FormatOptions::Tgs(mut options) => {
-                if let Some(json) = &args.options_json {
-                    let overlay: TgsOptions =
-                        serde_json::from_str(json).with_context(invalid_json)?;
-                    options = options.merged(&overlay);
+                if let Some(json) = &json {
+                    options = options.merged(&overlay(json, format)?);
                 }
                 Resolved::Tgs { options: options.merged(&args.options.to_tgs_options()) }
             }
