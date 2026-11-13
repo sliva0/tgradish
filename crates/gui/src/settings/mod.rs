@@ -62,7 +62,7 @@ pub fn preset_names(presets: &Presets) -> Vec<(String, Result<String, String>)> 
     let mut names: Vec<(String, Result<String, String>)> = presets
         .iter()
         .map(|(name, preset)| {
-            (name.to_owned(), preset.map(|p| p.description.clone()).map_err(str::to_owned))
+            (name.to_owned(), preset.map(|p| p.description.clone()).map_err(ToString::to_string))
         })
         .collect();
     names.sort_by_key(|(name, _)| {

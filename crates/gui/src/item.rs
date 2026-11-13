@@ -656,13 +656,13 @@ mod tests {
     }
 
     #[test]
-    fn reads_art_with_the_presets_sheet() {
+    fn reads_art_at_the_presets_frame_rate() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("sheets.toml"), "[tgs]\nsheet = '4x1'\nfps = 2.0\n")
-            .unwrap();
+        std::fs::write(dir.path().join("slow.toml"), "[tgs]\nfps = 2.0\n").unwrap();
         let presets = Presets::load(Some(dir.path())).unwrap();
         let mut choices = Choices::new(Target::Sticker);
-        choices.preset = Some("sheets".into());
+        choices.preset = Some("slow".into());
+        choices.tgs.sheet = Some("4x1".into());
         let reading = choices.reading(&presets, &Config::default());
         assert_eq!((reading.sheet.as_deref(), reading.fps), (Some("4x1"), Some(2.0)));
     }

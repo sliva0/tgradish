@@ -77,15 +77,16 @@ struct Row {
 }
 
 impl Row {
-    fn of(id: u64, name: &str, preset: Result<&presets::Preset, &str>) -> Row {
-        let description = preset.map(|preset| preset.description.clone()).unwrap_or_default();
+    fn of(id: u64, name: &str, preset: Result<&presets::Preset, String>) -> Row {
+        let description =
+            preset.as_ref().map(|preset| preset.description.clone()).unwrap_or_default();
         Row {
             id,
             name: name.to_owned(),
             typed_name: name.to_owned(),
             typed_description: description.clone(),
             description,
-            broken: preset.err().map(str::to_owned),
+            broken: preset.err(),
             problem: None,
         }
     }
@@ -111,7 +112,7 @@ impl Managing {
             .iter()
             .filter(|(_, preset)| preset.is_err() || preset.is_ok_and(is_users))
             .enumerate()
-            .map(|(id, (name, preset))| Row::of(id as u64, name, preset))
+            .map(|(id, (name, preset))| Row::of(id as u64, name, preset.map_err(|e| e.to_string())))
             .collect();
         Managing { rows, deleted: Vec::new() }
     }
@@ -485,7 +486,7 @@ impl App {
                         self.reload_presets();
                         let row = match self.presets.get(&deleted.name) {
                             Ok(preset) => Row::of(id, &deleted.name, Ok(preset)),
-                            Err(err) => Row::of(id, &deleted.name, Err(&err.to_string())),
+                            Err(err) => Row::of(id, &deleted.name, Err(err.to_string())),
                         };
                         let at = managing.rows.partition_point(|other| other.name < row.name);
                         managing.rows.insert(at, row);
