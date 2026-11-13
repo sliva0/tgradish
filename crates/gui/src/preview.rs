@@ -56,9 +56,11 @@ impl App {
             ui.add_space(6.0);
         });
         let output = self.item(id).map(|item| self.output_for(item));
+        let (choice, path) = self.ffmpeg_settings();
         let context = settings::Context {
             presets: &self.presets,
             config: &self.config,
+            ffmpeg: tgradish_core::config::FfmpegConfig { choice, path },
             extra_args,
             output,
             config_path: self.config_path.as_deref(),

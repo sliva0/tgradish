@@ -13,7 +13,7 @@ mod webm;
 use std::collections::HashMap;
 
 use eframe::egui::{self, RichText, vec2};
-use tgradish_core::config::Config;
+use tgradish_core::config::{Config, FfmpegConfig};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::Target;
 
@@ -36,6 +36,9 @@ pub use plan::plan;
 pub struct Context<'a> {
     pub presets: &'a Presets,
     pub config: &'a Config,
+    /// The ffmpeg the window runs with: the config's, unless the command
+    /// line that started it gave another.
+    pub ffmpeg: FfmpegConfig,
     /// ffmpeg is a separate program, so raw arguments can be passed.
     pub extra_args: bool,
     /// Where the result goes.
@@ -381,6 +384,7 @@ mod tests {
         let context = Context {
             presets: &presets,
             config: &config,
+            ffmpeg: config.ffmpeg.clone(),
             extra_args: true,
             output: None,
             config_path: None,
@@ -411,6 +415,7 @@ mod tests {
         let context = Context {
             presets: &presets,
             config: &config,
+            ffmpeg: config.ffmpeg.clone(),
             extra_args: true,
             output: None,
             config_path: None,
