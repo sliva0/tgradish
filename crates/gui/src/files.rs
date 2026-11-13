@@ -399,7 +399,9 @@ fn row(
     child.spacing_mut().item_spacing.y = 2.0;
     // nothing in it takes the click that selects the row
     child.style_mut().interaction.selectable_labels = false;
-    let strong = text_format(&child, child.visuals().strong_text_color());
+    // the file's name in the headings' weight, over what is said of it
+    let mut strong = text_format(&child, child.visuals().strong_text_color());
+    strong.font_id.family = crate::fonts::medium_in(child.ctx());
     let (name, _) = drawable(&child, fallbacks, &item.name(), strong);
     child.add(egui::Label::new(name).truncate());
     let what = kind(item.format, item.choices.target);

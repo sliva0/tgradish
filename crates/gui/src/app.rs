@@ -25,7 +25,9 @@ use crate::keys::direct_scrolling;
 use crate::l10n::fl;
 use crate::outputs::{FileVersion, Written};
 use crate::work::release;
-use crate::{accent, fallback, inspect, preset_dialogs, session, settings_dialog, system, theme};
+use crate::{
+    accent, fallback, inspect, preset_dialogs, session, settings_dialog, system, theme, widgets,
+};
 #[cfg(all(unix, not(target_os = "macos")))]
 use crate::{dnd, toplevel_icon};
 
@@ -273,8 +275,9 @@ impl App {
         theme::apply(ctx, self.applied_accent);
         ctx.all_styles_mut(|style| {
             use egui::{FontFamily, FontId, TextStyle};
+            // headings stand out by their weight more than their size
             style.text_styles = [
-                (TextStyle::Heading, FontId::new(19.0, FontFamily::Proportional)),
+                (TextStyle::Heading, FontId::new(widgets::TITLE, crate::fonts::medium())),
                 (TextStyle::Body, FontId::new(14.0, FontFamily::Proportional)),
                 (TextStyle::Button, FontId::new(14.0, FontFamily::Proportional)),
                 (TextStyle::Small, FontId::new(11.5, FontFamily::Proportional)),

@@ -39,6 +39,17 @@ pub(crate) fn parse_seconds(text: &str) -> Option<f64> {
     value.is_finite().then_some(value)
 }
 
+/// Size of a section's heading, in the headings' weight: hardly larger
+/// than the text under it, as the weight sets it apart.
+pub(crate) const HEADING: f32 = 14.5;
+/// Size of a dialog's title, and of the window's other headings.
+pub(crate) const TITLE: f32 = 17.0;
+
+/// `text` in the headings' weight, Ubuntu Medium, at `size`.
+pub(crate) fn medium(ui: &egui::Ui, text: impl Into<String>, size: f32) -> RichText {
+    RichText::new(text).family(crate::fonts::medium_in(ui.ctx())).size(size).strong()
+}
+
 /// A heading over a group of settings, apart from the group before by a
 /// line, unless it is the first of its column.
 pub(crate) fn section(ui: &mut egui::Ui, title: &str) {
@@ -61,7 +72,7 @@ pub(crate) fn section_with(ui: &mut egui::Ui, title: &str, beside: impl FnOnce(&
     }
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(title).strong().size(15.5));
+        ui.label(medium(ui, title, HEADING));
         beside(ui);
     });
     ui.add_space(4.0);
