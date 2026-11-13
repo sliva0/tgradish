@@ -285,17 +285,26 @@ impl JsonSchema for Sheet {
 /// A scale that lines input pixels up with the result's: a whole number of
 /// result pixels for each input pixel (`2`), or the other way round
 /// (`1/2`). Written as `N`, `1/N` or a decimal like `0.5`; reading it, as
-/// from a preset, refuses anything else, zero included.
+/// from a preset, refuses anything else, zero included, but for nothing at
+/// all, which is [`ExactScale::NONE`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct ExactScale {
-    /// Result pixels along an input pixel; 1 when shrinking. Never 0.
+    /// Result pixels along an input pixel; 1 when shrinking. Never 0, but
+    /// in [`ExactScale::NONE`].
     pub up: u32,
-    /// Input pixels along a result pixel; 1 when growing. Never 0.
+    /// Input pixels along a result pixel; 1 when growing. Never 0, but in
+    /// [`ExactScale::NONE`].
     pub down: u32,
 }
 
 impl ExactScale {
+    /// No exact scale, over options below that have one, as a preset's:
+    /// written as nothing, as `--exact-scale=` gives it. Layering options
+    /// by `merged` leaves none in its place, so what converts never sees
+    /// it; with no options below, it is the same as none.
+    pub const NONE: ExactScale = ExactScale { up: 0, down: 0 };
+
     /// The largest scale either way: a pixel to a whole sticker side.
     pub const MAX: u32 = 512;
 
@@ -330,6 +339,9 @@ impl std::str::FromStr for ExactScale {
                 ExactScale::MAX
             )
         };
+        if s.trim().is_empty() {
+            return Ok(ExactScale::NONE);
+        }
         let text = s.trim().trim_end_matches(['x', '×']);
         let whole =
             |v: &str| v.trim().parse::<u32>().ok().filter(|&n| (1..=ExactScale::MAX).contains(&n));
@@ -357,6 +369,9 @@ impl std::str::FromStr for ExactScale {
 
 impl std::fmt::Display for ExactScale {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if *self == ExactScale::NONE {
+            return Ok(());
+        }
         match self.down {
             1 => write!(f, "{}", self.up),
             down => write!(f, "{}/{down}", self.up),
@@ -385,8 +400,9 @@ impl JsonSchema for ExactScale {
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
             "type": "string",
-            "pattern": r"^([1-9][0-9]*|1/[1-9][0-9]*)$",
-            "description": "N result pixels for each input pixel, or 1/N"
+            "pattern": r"^([1-9][0-9]*|1/[1-9][0-9]*|)$",
+            "description": "N result pixels for each input pixel, or 1/N; nothing for none, over \
+                            a preset's"
         })
     }
 }
@@ -575,6 +591,23 @@ mod tests {
         }
         let half: ExactScale = "1/2".parse().unwrap();
         assert!(half.is_valid() && half.apply(4) == Some(2) && half.most_input(512) == 1024);
+        // nothing is none, which planning never sees
+        assert_eq!("".parse(), Ok(ExactScale::NONE));
+        assert!(!ExactScale::NONE.is_valid() && ExactScale::NONE.to_string().is_empty());
+    }
+
+    /// `--exact-scale=` clears a preset's scale, as flags write it.
+    #[test]
+    fn clears_an_exact_scale() {
+        let preset = Options { exact_scale: "2".parse().ok(), ..Default::default() };
+        let none = Options { exact_scale: Some(ExactScale::NONE), ..Default::default() };
+        assert_eq!(preset.clone().merged(&none).exact_scale, None);
+        assert_eq!(Options::default().merged(&none).exact_scale, None);
+        assert_eq!(none.clone().merged(&Options::default()).exact_scale, None);
+        assert_eq!(flags(&none), ["--exact-scale="]);
+        let read: Options = toml::from_str("exact-scale = ''").unwrap();
+        assert_eq!(read, none);
+        assert!(crate::picture::picture_sizes(&none, (8, 8)).is_ok());
     }
 
     #[test]

@@ -5,7 +5,7 @@
 use crate::config::Config;
 use eframe::egui::{self, RichText};
 use tgradish_core::ffmpeg::FfmpegChoice;
-use tgradish_core::options::Scaling;
+use tgradish_core::options::{ExactScale, Scaling};
 use tgradish_core::presets::Format;
 use tgradish_core::webm::Options;
 use tgradish_core::{picture, webm};
@@ -103,28 +103,28 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
     if base.resize.is_some() && effective.resize.is_none() {
         webm.resize = Some(picture::default_resize(choices.target));
     }
-    // and one it can't be told to set aside: then everything the window
-    // uses goes on the command line, over a built-in preset that sets
-    // nothing more than it
-    let whole =
-        item.format != Format::Tgs && base.exact_scale.is_some() && effective.exact_scale.is_none();
+    // and an exact scale, which no value sets aside but nothing does
+    let no_scale = base.exact_scale.is_some() && effective.exact_scale.is_none();
+    let flags = |mut options: Options| {
+        if no_scale {
+            options.exact_scale = Some(ExactScale::NONE);
+        }
+        tgradish_core::options::flags(&options)
+    };
     // image stickers take their picture settings from the preset too;
     // named unless it is the format's own, as the window's settings may
     // choose another than the config file
     let preset = choices.preset_name(item.format, config);
-    if whole {
-        args.extend(["--preset".into(), tgradish_core::presets::DEFAULT_PRESET.into()]);
-        webm = effective;
-    } else if choices.preset.is_some() || preset != item.format.default_preset() {
+    if choices.preset.is_some() || preset != item.format.default_preset() {
         args.extend(["--preset".into(), preset.to_owned()]);
     }
     args.extend(match item.format {
-        Format::Webm => tgradish_core::options::flags(&webm.merged(&choices.shared_webm())),
+        Format::Webm => flags(webm.merged(&choices.shared_webm())),
         Format::Webp => {
             // a picture is one frame, where its start is
             let picture = tgradish_core::webp::picture_options(&webm);
             let shared = Options { start: choices.frame, length: None, ..choices.shared_webm() };
-            tgradish_core::options::flags(&picture.merged(&shared))
+            flags(picture.merged(&shared))
         }
         Format::Tgs => {
             tgradish_core::options::flags(&choices.tgs.clone().merged(&choices.shared_tgs()))
@@ -317,10 +317,11 @@ mod tests {
         let line = command_line(&item, &context).join(" ");
         assert!(line.contains("--preset still") && line.contains("--no-lossless"), "{line}");
         // without integer scaling the preset's scale has no say, which the
-        // command line can't be told
+        // command line is told by a scale of nothing
         item.choices.webm.scaling = Some(Scaling::Smooth);
-        let line = command_line(&item, &context).join(" ");
-        assert!(line.contains("--preset balanced") && !line.contains("--exact-scale"), "{line}");
+        let line = command_line(&item, &context);
+        assert!(line.contains(&"--exact-scale=".to_owned()), "{line:?}");
+        assert!(line.join(" ").contains("--preset still"), "{line:?}");
         assert_eq!(presets.webm("still").unwrap().exact_scale, Some(ExactScale { up: 2, down: 1 }));
 
         // encoder options all removed: none, over the preset's

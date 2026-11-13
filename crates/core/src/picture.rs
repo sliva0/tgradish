@@ -176,7 +176,7 @@ pub fn default_resize(target: Target) -> Resize {
 pub fn picture_sizes(options: &Options, used: (u32, u32)) -> Result<Sizes> {
     let target = options.target.unwrap_or_default();
     let resize = options.resize.unwrap_or(default_resize(target));
-    match options.exact_scale {
+    match options.exact_scale() {
         Some(scale) => exact_sizes(target, resize, used, scale),
         None => Ok(sizes(target, resize, options.scaling_or_default(), used)),
     }
