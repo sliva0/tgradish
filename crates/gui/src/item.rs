@@ -13,7 +13,7 @@ use tgradish_core::tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 
-use crate::cuts::Frames;
+use crate::cuts::{self, Frames};
 use crate::jobs::{Done, Job};
 use crate::l10n::fl;
 use crate::media::{Art, Clip, Load, Video};
@@ -594,9 +594,7 @@ impl Item {
     /// The range of the input that is used, in seconds.
     pub fn range(&self) -> Option<(f64, f64)> {
         let length = self.input_length()?;
-        let start = self.choices.start.unwrap_or(0.0).clamp(0.0, length);
-        let end = self.choices.length.map_or(length, |l| (start + l).min(length));
-        Some((start, end))
+        Some(cuts::part(length, self.choices.start, self.choices.length))
     }
 
     /// How many times as fast as the input the result plays: the tempo
