@@ -151,8 +151,11 @@ date. ffmpeg stays LGPL: never enable its GPL parts. Paths and commands say
    the musl builds on Alpine, and the AUR packages, built with makepkg, on
    Arch Linux, and drafts a release with the archives, packages,
    checksums and ffmpeg's sources. Check the draft, then publish it.
-4. In each `packaging/aur/*` folder, `updpkgsums`, then
-   `makepkg --printsrcinfo > .SRCINFO`, and push to the AUR.
+4. Copy each `packaging/aur/*/PKGBUILD` into your clone of that package
+   on the AUR, and there run `updpkgsums`, then `makepkg --printsrcinfo >
+   .SRCINFO`, and push. The checksums go in the AUR clones alone: the
+   repository keeps `SKIP`, since `test-aur` builds the packages from
+   archives each run makes anew, which no checksum written down matches.
 
 5. `cargo publish -p` each crate whose version is new, in the order they
    depend on each other: `tgradish-frames`, `tgradish-tgs`,
