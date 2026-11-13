@@ -2,9 +2,9 @@ preset = "balanced"   # preset used when none is given, for WebM and images
 tgs-preset = "best"   # the same for TGS
 
 [ffmpeg]
-use = "auto"          # auto (built in if there is one, else system),
-                      # builtin or system
-path = "/opt/ffmpeg"  # ffmpeg executable or its directory, overrides `use`
+from = "auto"         # auto (built in if there is one, else system),
+                      # builtin or system, as --ffmpeg-from
+path = "/opt/ffmpeg"  # ffmpeg executable or its directory, overrides `from`
 
 [gui]
 output-dir = "/home/me/stickers"  # results go here instead of next to inputs

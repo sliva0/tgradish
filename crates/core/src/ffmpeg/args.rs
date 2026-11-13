@@ -1,5 +1,5 @@
 //! The ffmpeg command lines conversions run, and the filter chains in
-//! them, which the linked backend builds its filter graphs from too, so
+//! them, which the built-in ffmpeg builds its filter graphs from too, so
 //! both backends make the same pictures. A chain goes: tempo, then frame
 //! rate and frame count (`fps`, `trim`), the crop in display pixels,
 //! scaling (in linear light where pixels blend), centring or padding into

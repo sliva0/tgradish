@@ -119,11 +119,11 @@ impl Config {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct FfmpegConfig {
-    /// Where to look for ffmpeg.
-    #[serde(rename = "use")]
+    /// Where to look for ffmpeg, as `--ffmpeg-from` says.
+    #[serde(rename = "from")]
     pub choice: FfmpegChoice,
     /// ffmpeg executable or the directory containing ffmpeg and ffprobe.
-    /// Overrides `use`.
+    /// Overrides `from`.
     pub path: Option<PathBuf>,
 }
 
@@ -173,10 +173,12 @@ mod tests {
 
     #[test]
     fn reads_config() {
-        let config: Config = toml::from_str("preset = 'fast'\n[ffmpeg]\nuse = 'system'\n").unwrap();
+        let config: Config =
+            toml::from_str("preset = 'fast'\n[ffmpeg]\nfrom = 'system'\n").unwrap();
         assert_eq!(config.preset.as_deref(), Some("fast"));
         assert_eq!(config.ffmpeg.choice, FfmpegChoice::System);
-        assert!(toml::from_str::<Config>("[ffmpeg]\nsource = 'system'\n").is_err());
+        // named as --ffmpeg-from is
+        assert!(toml::from_str::<Config>("[ffmpeg]\nuse = 'system'\n").is_err());
     }
 
     #[test]

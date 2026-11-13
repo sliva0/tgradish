@@ -1,6 +1,8 @@
 //! The two ways of running ffmpeg: as separate `ffmpeg` and `ffprobe`
-//! processes, or through libraries linked into the binary (the `linked`
-//! feature).
+//! processes, or through libraries linked into the binary, which users
+//! and callers know as the built-in ffmpeg. The cargo features `linked`
+//! and `linked-static` and the module `linked` keep the implementation's
+//! name for it, which packaging builds by.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -61,9 +63,10 @@ fn naming<T>(result: Result<T>, given: &Path, read: &Path) -> Result<T> {
 pub enum Backend {
     /// ffmpeg and ffprobe executables.
     Process(Ffmpeg),
-    /// ffmpeg libraries linked into tgradish.
+    /// The built-in ffmpeg: its libraries linked into tgradish, with the
+    /// `linked` feature.
     #[cfg(feature = "linked")]
-    Linked,
+    Builtin,
 }
 
 /// Which backend is used, for status output.
@@ -86,7 +89,7 @@ impl Backend {
         }
         match choice {
             #[cfg(feature = "linked")]
-            FfmpegChoice::Auto | FfmpegChoice::Builtin => Ok(Backend::Linked),
+            FfmpegChoice::Auto | FfmpegChoice::Builtin => Ok(Backend::Builtin),
             #[cfg(not(feature = "linked"))]
             FfmpegChoice::Builtin => {
                 Err(Error::FfmpegNotFound(crate::error::FfmpegMissing::NotBuiltIn))
@@ -105,7 +108,7 @@ impl Backend {
         match self {
             Backend::Process(ffmpeg) => BackendInfo::Process { ffmpeg: ffmpeg.clone() },
             #[cfg(feature = "linked")]
-            Backend::Linked => BackendInfo::Builtin,
+            Backend::Builtin => BackendInfo::Builtin,
         }
     }
 
@@ -114,7 +117,7 @@ impl Backend {
         let probe = match self {
             Backend::Process(ffmpeg) => ffmpeg::probe(ffmpeg, &read, cancel),
             #[cfg(feature = "linked")]
-            Backend::Linked => crate::linked::probe(&read, cancel),
+            Backend::Builtin => crate::linked::probe(&read, cancel),
         };
         naming(probe, input, &read)
     }
@@ -132,7 +135,7 @@ impl Backend {
         let in_file = match self {
             Backend::Process(ffmpeg) => ffmpeg::frame_starts(ffmpeg, &read, cancel),
             #[cfg(feature = "linked")]
-            Backend::Linked => crate::linked::frame_starts(&read, cancel),
+            Backend::Builtin => crate::linked::frame_starts(&read, cancel),
         };
         let in_file = naming(in_file, input, &read)?;
         Ok(in_video(in_file, probe.start))
@@ -142,7 +145,7 @@ impl Backend {
         match self {
             Backend::Process(ffmpeg) => ffmpeg::capabilities(ffmpeg, cancel),
             #[cfg(feature = "linked")]
-            Backend::Linked => crate::linked::capabilities(),
+            Backend::Builtin => crate::linked::capabilities(),
         }
     }
 
@@ -169,7 +172,7 @@ impl Backend {
                 ffmpeg::run(cmd, "ffmpeg", cancel, on_output).map(drop)
             }
             #[cfg(feature = "linked")]
-            Backend::Linked => {
+            Backend::Builtin => {
                 crate::linked::encode(&read, params, pass, output, cancel, on_output)
             }
         };
@@ -192,7 +195,7 @@ impl Backend {
                 ffmpeg::frames(ffmpeg, &read, probe, (start, fps), (width, height), count, cancel)
             }
             #[cfg(feature = "linked")]
-            Backend::Linked => {
+            Backend::Builtin => {
                 crate::linked::frames(&read, probe, (start, fps), (width, height), count, cancel)
             }
         };
@@ -240,7 +243,7 @@ impl Backend {
         let still = match self {
             Backend::Process(ffmpeg) => ffmpeg::still(ffmpeg, &read, cancel),
             #[cfg(feature = "linked")]
-            Backend::Linked => crate::linked::still(&read, cancel),
+            Backend::Builtin => crate::linked::still(&read, cancel),
         };
         naming(still, &plan.input, &read.input)
     }
@@ -263,7 +266,7 @@ impl Backend {
                 ffmpeg::ssim(ffmpeg, &read, &candidate, fps, cancel, on_line)
             }
             #[cfg(feature = "linked")]
-            Backend::Linked => crate::linked::ssim(&read, &candidate, fps, cancel),
+            Backend::Builtin => crate::linked::ssim(&read, &candidate, fps, cancel),
         };
         naming(ssim, &plan.input, &read.input)
     }

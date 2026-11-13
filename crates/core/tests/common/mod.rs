@@ -22,7 +22,7 @@ pub fn backends() -> Option<Vec<Backend>> {
     #[allow(unused_mut)]
     let mut backends = vec![Backend::Process(system)];
     #[cfg(feature = "linked")]
-    backends.push(Backend::Linked);
+    backends.push(Backend::Builtin);
     Some(backends)
 }
 

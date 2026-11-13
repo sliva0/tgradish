@@ -909,7 +909,7 @@ fn builtin_backend_rejects_fifos() {
     let dir = tempfile::tempdir().unwrap();
     let fifo = dir.path().join("fifo.mp4");
     assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
-    let result = Backend::Linked.probe(&fifo, &CancelToken::new());
+    let result = Backend::Builtin.probe(&fifo, &CancelToken::new());
     assert!(matches!(result, Err(Error::Unreadable { .. })), "{result:?}");
 }
 
@@ -924,7 +924,7 @@ fn builtin_backend_rejects_ffmpeg_args() {
         },
         ..Request::new(input)
     };
-    let result = convert(&Backend::Linked, &request, &CancelToken::new(), &mut |_| {});
+    let result = convert(&Backend::Builtin, &request, &CancelToken::new(), &mut |_| {});
     assert!(matches!(result, Err(Error::FfmpegArgsNeedProgram)), "{result:?}");
 }
 

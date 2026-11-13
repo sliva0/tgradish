@@ -43,7 +43,8 @@ pub enum FfmpegChoice {
     Auto,
     /// ffmpeg and ffprobe from `PATH`.
     System,
-    /// ffmpeg linked into tgradish, in builds with the `linked` feature.
+    /// The ffmpeg built into tgradish, in builds with the `linked`
+    /// feature.
     Builtin,
 }
 
