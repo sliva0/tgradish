@@ -408,6 +408,56 @@ pub struct Options {
     pub ffmpeg_args: Option<Vec<String>>,
 }
 
+/// Gives a struct of options, every field an `Option`, `overlaid`: the
+/// options with every value another sets in place of their own, which is
+/// how presets, items and flags layer. Every field is named, and the
+/// struct destructured by them, so adding one without naming it here fails
+/// to compile.
+macro_rules! layered {
+    ($options:ident { $($field:ident),* $(,)? }) => {
+        impl $options {
+            /// These options with every value `overlay` sets in place of
+            /// their own.
+            fn overlaid(mut self, overlay: &$options) -> $options {
+                let $options { $($field: _),* } = overlay;
+                $(if overlay.$field.is_some() {
+                    self.$field = overlay.$field.clone();
+                })*
+                self
+            }
+        }
+    };
+}
+pub(crate) use layered;
+
+layered!(Options {
+    target,
+    tag,
+    show_layers,
+    hide_layers,
+    crop,
+    resize,
+    scaling,
+    exact_scale,
+    fit,
+    attempts,
+    fit_range,
+    start,
+    length,
+    tempo,
+    fps,
+    bitrate,
+    crf,
+    speed,
+    lossless,
+    spoof,
+    fake_duration,
+    title,
+    watermark,
+    encoder_options,
+    ffmpeg_args,
+});
+
 impl Options {
     /// Whether how pixels are scaled is left to the input: auto, with no
     /// exact scale, which places pixels itself.
@@ -416,44 +466,8 @@ impl Options {
     }
 
     /// Returns `self` with every value set in `overlay` replacing its own.
-    pub fn merged(mut self, overlay: &Options) -> Options {
-        macro_rules! merge {
-            ($($field:ident),* $(,)?) => {
-                // destructuring makes this fail to compile when a field is added
-                let Options { $($field: _),* } = overlay;
-                $(if overlay.$field.is_some() {
-                    self.$field = overlay.$field.clone();
-                })*
-            };
-        }
-        merge!(
-            target,
-            tag,
-            show_layers,
-            hide_layers,
-            crop,
-            resize,
-            scaling,
-            exact_scale,
-            fit,
-            attempts,
-            fit_range,
-            start,
-            length,
-            tempo,
-            fps,
-            bitrate,
-            crf,
-            speed,
-            lossless,
-            spoof,
-            fake_duration,
-            title,
-            watermark,
-            encoder_options,
-            ffmpeg_args,
-        );
-        self
+    pub fn merged(self, overlay: &Options) -> Options {
+        self.overlaid(overlay)
     }
 }
 

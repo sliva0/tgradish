@@ -126,41 +126,34 @@ pub struct TgsOptions {
     pub watermark: Option<bool>,
 }
 
+crate::options::layered!(TgsOptions {
+    target,
+    start,
+    length,
+    tempo,
+    speed,
+    exact,
+    reductions,
+    compromise,
+    crop,
+    resize,
+    keep_canvas,
+    pixel_scale,
+    tag,
+    show_layers,
+    hide_layers,
+    sheet,
+    sheet_frames,
+    fps,
+    title,
+    watermark,
+});
+
 impl TgsOptions {
-    /// These options with every value `overlay` sets replaced.
-    pub fn merged(mut self, overlay: &TgsOptions) -> TgsOptions {
-        macro_rules! merge {
-            ($($field:ident),* $(,)?) => {
-                // destructuring makes this fail to compile when a field is added
-                let TgsOptions { $($field: _),* } = overlay;
-                $(if overlay.$field.is_some() {
-                    self.$field = overlay.$field.clone();
-                })*
-            };
-        }
-        merge!(
-            target,
-            start,
-            length,
-            tempo,
-            speed,
-            exact,
-            reductions,
-            compromise,
-            crop,
-            resize,
-            keep_canvas,
-            pixel_scale,
-            tag,
-            show_layers,
-            hide_layers,
-            sheet,
-            sheet_frames,
-            fps,
-            title,
-            watermark,
-        );
-        self
+    /// These options with every value `overlay` sets in place of their
+    /// own.
+    pub fn merged(self, overlay: &TgsOptions) -> TgsOptions {
+        self.overlaid(overlay)
     }
 
     fn sheet_layout(&self) -> Result<Option<Sheet>> {
