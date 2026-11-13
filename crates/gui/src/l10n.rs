@@ -159,7 +159,7 @@ pub(crate) mod record {
         text
     }
 
-    /// Starts noting every message given, on any thread, for `everything`.
+    /// Starts noting every message given, on any thread, for [`since`].
     pub(crate) fn remember() {
         REMEMBER.store(true, Ordering::Relaxed);
     }
