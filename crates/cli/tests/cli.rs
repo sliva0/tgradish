@@ -1243,3 +1243,27 @@ fn cancels_text_conversions_with_130() {
     assert!(text.contains("cancelled"), "{text}");
     assert!(!out.exists());
 }
+
+/// A closed stdout found only by reporting the command's error, its first
+/// write, still exits as SIGPIPE would have it.
+#[cfg(unix)]
+#[test]
+fn exits_as_stdout_closed_when_only_the_error_finds_it() {
+    let commands: [&[&str]; 2] = [
+        &["--json", "watch", "/nonexistent-dir"],
+        &["--json", "--config", "/dev/null/no.toml", "describe"],
+    ];
+    for args in commands {
+        // closed before anything is written
+        let (reader, writer) = std::io::pipe().unwrap();
+        drop(reader);
+        let status = Command::new(env!("CARGO_BIN_EXE_tgradish"))
+            .args(args)
+            .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+            .stdout(writer)
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(141), "{args:?}");
+    }
+}
