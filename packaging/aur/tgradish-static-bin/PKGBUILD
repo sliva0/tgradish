@@ -29,7 +29,7 @@ depends=(
 )
 optdepends=(
   'xdg-desktop-portal: file dialogues in the window'
-  'ffmpeg: raw ffmpeg arguments (--extra-args), which need ffmpeg as a separate program'
+  'ffmpeg: raw ffmpeg arguments (--ffmpeg-args), which need ffmpeg as a separate program'
 )
 provides=("$_pkgname")
 conflicts=("$_pkgname")

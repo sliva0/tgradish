@@ -93,8 +93,8 @@ pub fn explain(err: tgradish_core::Error) -> anyhow::Error {
         Error::FfmpegNotFound(FfmpegMissing::NotBuiltIn | FfmpegMissing::BuiltInIsNoProgram) => {
             anyhow!("{err}: use --ffmpeg-from system or --ffmpeg PATH")
         }
-        Error::ExtraArgsNeedProgram => anyhow!(
-            "--extra-args are arguments for ffmpeg's command line, which the built-in ffmpeg \
+        Error::FfmpegArgsNeedProgram => anyhow!(
+            "--ffmpeg-args are arguments for ffmpeg's command line, which the built-in ffmpeg \
              doesn't have: use --ffmpeg-from system or --ffmpeg PATH, or --encoder-options for \
              encoder settings, which work with either"
         ),

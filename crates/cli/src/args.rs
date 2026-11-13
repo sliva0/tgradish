@@ -268,7 +268,7 @@ pub struct OptionArgs {
     /// Raw ffmpeg output arguments, split like a shell would. Only with
     /// ffmpeg as a separate program (--ffmpeg-from system or --ffmpeg PATH).
     #[arg(long, value_name = "ARGS", allow_hyphen_values = true, help_heading = "Encoding")]
-    pub extra_args: Option<ShellWords>,
+    pub ffmpeg_args: Option<ShellWords>,
 
     /// When to spoof the duration so Telegram accepts videos longer than 3 s.
     /// [default: auto, only when needed]
@@ -360,7 +360,7 @@ impl OptionArgs {
                 given(self.speed.is_some(), "--speed"),
                 given(self.lossless.is_some(), "--lossless"),
                 given(!self.encoder_options.is_empty(), "--encoder-options"),
-                given(self.extra_args.is_some(), "--extra-args"),
+                given(self.ffmpeg_args.is_some(), "--ffmpeg-args"),
                 given(self.spoof.is_some(), "--spoof"),
                 given(self.fake_duration.is_some(), "--fake-duration"),
                 given(self.exact.is_some(), "--exact"),
@@ -381,7 +381,7 @@ impl OptionArgs {
                 given(self.crf.is_some(), "--crf"),
                 given(self.lossless.is_some(), "--lossless"),
                 given(!self.encoder_options.is_empty(), "--encoder-options"),
-                given(self.extra_args.is_some(), "--extra-args"),
+                given(self.ffmpeg_args.is_some(), "--ffmpeg-args"),
                 given(self.spoof.is_some(), "--spoof"),
                 given(self.fake_duration.is_some(), "--fake-duration"),
             ],
@@ -442,7 +442,7 @@ impl OptionArgs {
             watermark: self.watermark,
             encoder_options: (!self.encoder_options.is_empty())
                 .then(|| self.encoder_options.iter().cloned().collect()),
-            extra_args: self.extra_args.clone().map(|words| words.0),
+            ffmpeg_args: self.ffmpeg_args.clone().map(|words| words.0),
         }
     }
 }
@@ -677,18 +677,18 @@ mod tests {
     }
 
     #[test]
-    fn splits_extra_args_like_a_shell() {
+    fn splits_ffmpeg_args_like_a_shell() {
         let cli = Cli::parse_from([
             "tgradish",
             "convert",
             "a.mp4",
-            "--extra-args",
+            "--ffmpeg-args",
             r#"-metadata comment="hello world" -tune-content screen"#,
         ]);
         let Command::Convert(args) = cli.command else { panic!() };
-        let extra = args.conversion.options.to_options().extra_args.unwrap();
+        let extra = args.conversion.options.to_options().ffmpeg_args.unwrap();
         assert_eq!(extra, ["-metadata", "comment=hello world", "-tune-content", "screen"]);
-        assert!(Cli::try_parse_from(["tgradish", "convert", "a", "--extra-args", "'x"]).is_err());
+        assert!(Cli::try_parse_from(["tgradish", "convert", "a", "--ffmpeg-args", "'x"]).is_err());
     }
 
     /// Options parsed from the flags `options::flags` writes.
@@ -728,7 +728,7 @@ mod tests {
             title: Some("-_- a pig's \"sticker\"".into()),
             watermark: Some(false),
             encoder_options: Some([("tune-content".into(), "screen".into())].into()),
-            extra_args: Some(vec!["-x".into(), "a b".into()]),
+            ffmpeg_args: Some(vec!["-x".into(), "a b".into()]),
         };
         assert_eq!(parsed(options::flags(&webm)).to_options(), webm);
         let tgs = TgsOptions {

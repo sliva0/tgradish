@@ -289,7 +289,7 @@ mod tests {
             presets: &presets,
             config: &config,
             ffmpeg: config.ffmpeg.clone(),
-            extra_args: true,
+            ffmpeg_args: true,
             output: None,
             config_path: None,
             presets_dir: None,

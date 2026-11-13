@@ -120,7 +120,7 @@ pub struct Plan {
     pub watermark: bool,
     pub encoder_options: BTreeMap<String, String>,
     /// Raw ffmpeg arguments, only for ffmpeg as a separate program.
-    pub extra_args: Vec<String>,
+    pub ffmpeg_args: Vec<String>,
 }
 
 impl Plan {
@@ -592,7 +592,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         title: o.title.clone(),
         watermark: o.watermark.unwrap_or(true),
         encoder_options,
-        extra_args: o.extra_args.clone().unwrap_or_default(),
+        ffmpeg_args: o.ffmpeg_args.clone().unwrap_or_default(),
         source,
     };
     Ok((plan, warnings))
@@ -778,8 +778,8 @@ pub fn convert(
     let (mut plan, warnings) = plan(request, source)?;
     plan.input = readable.path().to_path_buf();
     choose_auto_scaling(backend, &mut plan, &request.options, cancel)?;
-    if !plan.extra_args.is_empty() && !backend.supports_extra_args() {
-        return Err(Error::ExtraArgsNeedProgram);
+    if !plan.ffmpeg_args.is_empty() && !backend.supports_ffmpeg_args() {
+        return Err(Error::FfmpegArgsNeedProgram);
     }
     // the input as given, not as drawn for ffmpeg
     let started = Plan { input: request.input.clone(), ..plan.clone() };
