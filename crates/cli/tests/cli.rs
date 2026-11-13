@@ -402,7 +402,7 @@ fn makes_image_stickers() {
     let event: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(event["event"], "finished");
     assert_eq!((event["width"].as_u64(), event["height"].as_u64()), (Some(512), Some(512)));
-    assert_eq!(event["encoding"]["encoding"], "lossless");
+    assert_eq!(event["encoding"]["kind"], "lossless");
     assert!(event["issues"].as_array().unwrap().is_empty());
     assert_eq!(&std::fs::read(&out).unwrap()[8..12], b"WEBP");
     // what an image doesn't use is refused
