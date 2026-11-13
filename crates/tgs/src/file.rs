@@ -17,6 +17,7 @@ pub enum ReadError {
     TooLarge,
 }
 
+internal! {
 /// Gzip with zopfli, which beats `gzip -9` by 8-15% on stickers.
 /// `iterations` trades time for size: 15 is zopfli's default.
 pub fn pack(json: &[u8], iterations: u64) -> Vec<u8> {
@@ -29,7 +30,9 @@ pub fn pack(json: &[u8], iterations: u64) -> Vec<u8> {
         .expect("compressing into memory can't fail");
     out
 }
+}
 
+internal! {
 /// `json` as a `.tgs` packed by `gzip -9`: much quicker than [`pack`],
 /// and a little larger.
 pub fn pack_quick(json: &[u8]) -> Vec<u8> {
@@ -38,11 +41,13 @@ pub fn pack_quick(json: &[u8]) -> Vec<u8> {
     encoder.write_all(json).expect("compressing into memory can't fail");
     encoder.finish().expect("compressing into memory can't fail")
 }
+}
 
 /// About how large `json` packs: its `gzip -9` size, much quicker than
 /// [`pack`], and close enough to how zopfli ranks candidates to compare
 /// them by; how much smaller zopfli packs varies with the art (see
 /// [`crate::sticker`]).
+#[cfg(feature = "internals")]
 pub fn quick_size(json: &[u8]) -> usize {
     pack_quick(json).len()
 }

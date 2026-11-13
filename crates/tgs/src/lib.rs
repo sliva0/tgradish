@@ -5,24 +5,50 @@
 //! processes, filesystem or `tgradish-core`. The `threads` feature tries
 //! fitting's candidates, and packs, in threads of their own, except on
 //! wasm; [`sticker::make`] says what that means for callers.
+//!
+//! The `internals` feature makes the encoder's interior public, for
+//! tgradish's own research tools: it is unstable, and exempt from semver.
 
 use std::time::Duration;
 
 use thiserror::Error;
 
+/// Declares a function of the interior: public with the `internals`
+/// feature, the crate's own without it.
+macro_rules! internal {
+    ($(#[$attr:meta])* pub fn $($rest:tt)*) => {
+        #[cfg(feature = "internals")]
+        $(#[$attr])* pub fn $($rest)*
+        #[cfg(not(feature = "internals"))]
+        $(#[$attr])* pub(crate) fn $($rest)*
+    };
+}
+
 pub mod check;
 pub mod encode;
 pub mod file;
-pub mod layout;
 pub mod limits;
-pub mod lottie;
 pub mod mark;
 pub mod normalise;
 pub mod reduce;
-pub mod scene;
 pub mod sticker;
 
+// the interior, with the `internals` feature
+#[cfg(feature = "internals")]
+pub mod layout;
+#[cfg(not(feature = "internals"))]
+mod layout;
+#[cfg(feature = "internals")]
+pub mod lottie;
+#[cfg(not(feature = "internals"))]
+mod lottie;
+#[cfg(feature = "internals")]
+pub mod scene;
+#[cfg(not(feature = "internals"))]
+mod scene;
+
 pub use normalise::{PixelAnim, normalise};
+pub use sticker::{Options, Progress, Sticker, make};
 pub use tgradish_frames as frames;
 
 #[derive(Debug, Clone, PartialEq, Error)]

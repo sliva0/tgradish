@@ -13,10 +13,10 @@ readme = "README.md"
 keywords = ["telegram", "sticker", "tgs", "lottie", "pixel-art"]
 categories = ["multimedia::images", "multimedia::encoding", "wasm"]
 
-# with the schemas and the threads; core's features need ffmpeg, so it has
-# no such line
+# with the schemas and the threads, but not the internals, which aren't
+# for others to use; core's features need ffmpeg, so it has no such line
 [package.metadata.docs.rs]
-all-features = true
+features = ["schema", "threads"]
 
 [dependencies]
 tgradish-frames.workspace = true
@@ -38,6 +38,11 @@ schema = ["dep:schemars"]
 # whole process, however many stickers are being made. Does nothing on
 # wasm, which has no threads to start.
 threads = []
+# The encoder's interior, public for tgs-lab's benchmarks, render checks
+# and probes: scenes, Lottie, layout, the painter and its settings, and
+# how stickers are packed and marked. Unstable, and exempt from semver:
+# anything behind it can change in any release.
+internals = []
 
 [dev-dependencies]
 tgradish-corpus.workspace = true

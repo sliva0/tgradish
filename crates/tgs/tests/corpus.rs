@@ -60,26 +60,6 @@ fn detects_pixel_scales() {
 }
 
 #[test]
-fn encodes_valid_lottie() {
-    use tgradish_tgs::check::{Severity, check};
-    use tgradish_tgs::encode;
-    use tgradish_tgs::layout::lay_out;
-    use tgradish_tgs::lottie::Style;
-
-    for file in corpus() {
-        let (anim, _) = normalise(&input(&file), &Options::default()).unwrap();
-        let fast = encode::Settings { effort: encode::Effort::Fast, ..Default::default() };
-        let scene = encode::painter(&anim, &fast, None, &|| false).unwrap();
-        assert_eq!(scene.compare(&anim), None, "{}", file.name);
-        let json = lay_out(&scene, &anim, Some("tgradish".into()), false).to_json(Style::default());
-        let (stats, issues) = check(json.as_bytes(), None).unwrap();
-        let errors: Vec<_> = issues.iter().filter(|i| i.severity == Severity::Error).collect();
-        assert!(errors.is_empty(), "{}: {errors:?}", file.name);
-        assert_eq!(stats.frames, f64::from(anim.ticks()));
-    }
-}
-
-#[test]
 fn checks_stickers_like_1x_made() {
     use tgradish_tgs::check::{Severity, check};
 
@@ -108,27 +88,6 @@ fn checks_stickers_like_1x_made() {
     let errors: Vec<_> = issues.iter().filter(|i| i.severity == Severity::Error).collect();
     assert!(errors.len() == 1 && errors[0].message.contains("empty tangents"), "{issues:?}");
     assert!(stats.features.contains("merge paths") && stats.features.contains("strokes"));
-}
-
-#[test]
-fn painter_is_exact_without_seams() {
-    use tgradish_tgs::encode::{Settings, painter};
-
-    for file in corpus() {
-        let (anim, _) = normalise(&input(&file), &Options::default()).unwrap();
-        for lifetimes in [true, false] {
-            let settings = Settings { lifetimes, ..Settings::default() };
-            let scene = painter(&anim, &settings, None, &|| false).unwrap();
-            assert_eq!(scene.compare(&anim), None, "{} ({lifetimes})", file.name);
-            let seams = scene.seams(anim.palette());
-            assert!(
-                seams.is_empty(),
-                "{} ({lifetimes}): {:?}",
-                file.name,
-                &seams[..seams.len().min(5)]
-            );
-        }
-    }
 }
 
 /// Copies of an animation side by side, `across` by `down`.

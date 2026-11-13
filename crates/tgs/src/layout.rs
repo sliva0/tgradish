@@ -62,6 +62,7 @@ impl Placement {
     }
 
     /// Canvas pixels of a cell corner.
+    #[cfg(any(test, feature = "internals"))]
     pub fn canvas(&self, column: u32, row: u32) -> [f64; 2] {
         let [x, y] = self.point(column, row);
         let Transform { position, scale } = self.transform;

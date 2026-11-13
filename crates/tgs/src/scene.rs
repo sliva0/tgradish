@@ -11,6 +11,7 @@
 //!   lower group itself), so anti-aliased inner edges are drawn over the
 //!   right colour instead of over transparency.
 
+#[cfg(any(test, feature = "internals"))]
 use crate::normalise::PixelAnim;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -36,10 +37,14 @@ pub struct Layer {
     pub groups: Vec<Group>,
 }
 
+/// How a group's shapes fill. The painter fills by [`FillRule::NonZero`]
+/// only; the even-odd rule is for tgs-lab, to check that renderers draw it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum FillRule {
+    /// Where outlines wind around a point any number of times but none.
     #[default]
     NonZero,
+    /// Where they wind around it an odd number of times.
     EvenOdd,
 }
 
@@ -54,20 +59,22 @@ pub struct Group {
     pub shown: Vec<(u32, u32)>,
 }
 
+/// What a group fills. The painter draws rectangles only; paths are for
+/// tgs-lab's probes and render checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Shape {
-    Rect {
-        x: u32,
-        y: u32,
-        width: u32,
-        height: u32,
-    },
+    /// A rectangle of cells.
+    Rect { x: u32, y: u32, width: u32, height: u32 },
+    // never made by the painter, whose scenes are all of this crate's
+    // without `internals`
+    #[cfg_attr(not(feature = "internals"), allow(dead_code))]
     /// A closed outline through corners, alternating horizontal and
     /// vertical edges. Clockwise (on screen, y down) like rectangles, so
     /// with the non-zero rule it adds to them; counter-clockwise cuts holes.
     Path(Vec<(u32, u32)>),
 }
 
+#[cfg(any(test, feature = "internals"))]
 /// A cell of a rasterised scene.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Paint {
@@ -80,15 +87,18 @@ pub enum Paint {
     Blend,
 }
 
+#[cfg(any(test, feature = "internals"))]
+/// Where a scene differs from the animation it should draw.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Mismatch {
-    pub tick: u32,
-    pub x: u32,
-    pub y: u32,
-    pub expected: u16,
-    pub got: Paint,
+pub enum Mismatch {
+    /// The scene is of another size or length: `(width, height, ticks)`
+    /// of each.
+    Size { expected: (u32, u32, u32), got: (u32, u32, u32) },
+    /// The first cell that shows something else.
+    Cell { tick: u32, x: u32, y: u32, expected: u16, got: Paint },
 }
 
+#[cfg(any(test, feature = "internals"))]
 /// A pair of neighbouring cells that breaks the seam invariant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seam {
@@ -99,11 +109,14 @@ pub struct Seam {
     pub neighbour: (u32, u32),
 }
 
+#[cfg(any(test, feature = "internals"))]
 impl Shape {
     /// The box around the shape: `x0, y0, x1, y1`, ends excluded.
     fn bounds(&self) -> (u32, u32, u32, u32) {
         match *self {
-            Shape::Rect { x, y, width, height } => (x, y, x + width, y + height),
+            Shape::Rect { x, y, width, height } => {
+                (x, y, x.saturating_add(width), y.saturating_add(height))
+            }
             Shape::Path(ref corners) => {
                 corners.iter().fold((u32::MAX, u32::MAX, 0, 0), |(x0, y0, x1, y1), &(x, y)| {
                     (x0.min(x), y0.min(y), x1.max(x), y1.max(y))
@@ -117,9 +130,9 @@ impl Shape {
     fn add_crossings(&self, y: u32, left: u32, winding: &mut [i32]) {
         match *self {
             Shape::Rect { x, y: top, width, height } => {
-                if (top..top + height).contains(&y) {
+                if (top..top.saturating_add(height)).contains(&y) {
                     winding[(x - left) as usize] += 1;
-                    winding[(x + width - left) as usize] -= 1;
+                    winding[(x.saturating_add(width) - left) as usize] -= 1;
                 }
             }
             Shape::Path(ref corners) => {
@@ -140,6 +153,7 @@ impl Shape {
     }
 }
 
+#[cfg(any(test, feature = "internals"))]
 /// The cells a group fills, kept for the box around its shapes only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Coverage {
@@ -149,6 +163,7 @@ pub(crate) struct Coverage {
     cells: Vec<bool>,
 }
 
+#[cfg(any(test, feature = "internals"))]
 impl Coverage {
     pub fn contains(&self, x: u32, y: u32) -> bool {
         let (Some(dx), Some(dy)) = (x.checked_sub(self.left), y.checked_sub(self.top)) else {
@@ -166,6 +181,7 @@ impl Coverage {
     }
 }
 
+#[cfg(any(test, feature = "internals"))]
 impl Group {
     /// Cells the group fills.
     pub(crate) fn coverage(&self) -> Coverage {
@@ -200,6 +216,13 @@ impl Group {
     }
 }
 
+#[cfg(any(test, feature = "internals"))]
+/// Whether `colour` of `palette` is opaque, or past its end.
+fn opaque(palette: &[[u8; 4]], colour: u16) -> bool {
+    palette.get(usize::from(colour)).is_none_or(|rgba| rgba[3] == 255)
+}
+
+#[cfg(any(test, feature = "internals"))]
 impl Layer {
     /// Whether the layer is shown at a frame.
     pub fn shown(&self, tick: u32) -> bool {
@@ -208,6 +231,7 @@ impl Layer {
     }
 }
 
+#[cfg(any(test, feature = "internals"))]
 impl Scene {
     /// Frames where the set of visible layers changes, from 0 to `ticks`.
     fn changes(&self) -> Vec<u32> {
@@ -237,10 +261,11 @@ impl Scene {
     }
 
     /// The scene at a frame, with `palette` alpha deciding what blends.
+    /// Colours past the palette count as opaque.
     pub(crate) fn rasterise(&self, tick: u32, palette: &[[u8; 4]]) -> Vec<Paint> {
         let mut cells = vec![Paint::Clear; self.width as usize * self.height as usize];
         for group in self.visible(tick) {
-            let opaque = palette[group.colour as usize][3] == 255;
+            let opaque = opaque(palette, group.colour);
             for (x, y) in group.coverage().cells() {
                 if x >= self.width || y >= self.height {
                     continue;
@@ -256,12 +281,12 @@ impl Scene {
         cells
     }
 
-    /// The first cell that differs from `anim`, if any. A scene of another
-    /// size or length differs at its first cell.
+    /// Where the scene first differs from `anim`, if it does.
     pub fn compare(&self, anim: &PixelAnim) -> Option<Mismatch> {
-        let differs = |tick| Mismatch { tick, x: 0, y: 0, expected: 0, got: Paint::Blend };
-        if (self.width, self.height, self.ticks) != (anim.width(), anim.height(), anim.ticks()) {
-            return Some(differs(0));
+        let expected = (anim.width(), anim.height(), anim.ticks());
+        let got = (self.width, self.height, self.ticks);
+        if got != expected {
+            return Some(Mismatch::Size { expected, got });
         }
         let changes = self.changes();
         let mut start = 0;
@@ -274,7 +299,7 @@ impl Scene {
                     let wanted = if expected == 0 { Paint::Clear } else { Paint::Colour(expected) };
                     if got != wanted {
                         let (x, y) = (index as u32 % self.width, index as u32 / self.width);
-                        return Some(Mismatch { tick, x, y, expected, got });
+                        return Some(Mismatch::Cell { tick, x, y, expected, got });
                     }
                 }
             }
@@ -284,7 +309,8 @@ impl Scene {
     }
 
     /// Every place the seam invariant is broken. Only pairs of opaque cells
-    /// count: a translucent colour can't be drawn over anything.
+    /// count: a translucent colour can't be drawn over anything. Colours
+    /// past `palette` count as opaque.
     pub fn seams(&self, palette: &[[u8; 4]]) -> Vec<Seam> {
         let (w, h) = (self.width as usize, self.height as usize);
         let mut out = Vec::new();
@@ -301,9 +327,7 @@ impl Scene {
                     }
                 }
             }
-            let opaque = |cell: usize| {
-                top[cell].is_some_and(|g| palette[groups[g].colour as usize][3] == 255)
-            };
+            let opaque = |cell: usize| top[cell].is_some_and(|g| opaque(palette, groups[g].colour));
             for y in 0..h {
                 for x in 0..w {
                     let a = y * w + x;
@@ -457,9 +481,17 @@ mod tests {
 
         let mut broken = scene.clone();
         broken.layers[1].groups.pop();
-        assert!(matches!(broken.compare(&anim), Some(Mismatch { tick: 6, .. })));
+        assert!(matches!(broken.compare(&anim), Some(Mismatch::Cell { tick: 6, .. })));
         let mut short = scene;
         short.ticks -= 1;
-        assert!(short.compare(&anim).is_some());
+        let (width, height, ticks) = (anim.width(), anim.height(), anim.ticks());
+        let size =
+            Mismatch::Size { expected: (width, height, ticks), got: (width, height, ticks - 1) };
+        assert_eq!(short.compare(&anim), Some(size));
+
+        // colours past the palette and rectangles past the edge don't panic
+        let odd = self::scene(2, 1, vec![group(9, vec![rect(1, 0, u32::MAX, 1)])]);
+        assert_eq!(colours(&odd), [Paint::Clear, Paint::Colour(9)]);
+        assert!(odd.seams(&PALETTE).is_empty());
     }
 }
