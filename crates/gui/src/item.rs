@@ -168,6 +168,20 @@ impl Choices {
         Ok(self.tgs_base(presets, config)?.merged(&self.tgs).merged(&self.shared_tgs()))
     }
 
+    /// Everything a conversion to `format` gets.
+    pub fn recipe(
+        &self,
+        format: Format,
+        presets: &Presets,
+        config: &Config,
+    ) -> Result<Recipe, String> {
+        Ok(match format {
+            Format::Webm => Recipe::Webm(self.webm_options(presets, config)?),
+            Format::Tgs => Recipe::Tgs(self.tgs_options(presets, config)?),
+            Format::Image => Recipe::Image(self.image_options(presets, config)?),
+        })
+    }
+
     /// The options that change what pixel art is read as, the preset's
     /// included.
     pub fn reading(&self, presets: &Presets, config: &Config) -> TgsOptions {
@@ -206,6 +220,17 @@ impl Choices {
             ..Options::default()
         }
     }
+}
+
+/// Everything a conversion gets, for the format it makes, with the preset
+/// in force then: two conversions with the same make the same result,
+/// whatever else of the choices differs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Recipe {
+    Webm(Options),
+    Tgs(TgsOptions),
+    Image(Options),
 }
 
 /// `options` without the values of settings that are hidden or greyed
@@ -383,11 +408,14 @@ pub struct Conversion {
     pub job: Job,
     pub format: Format,
     pub choices: Choices,
+    /// What the choices came to as it started; `None` before, or where
+    /// they couldn't be made into one.
+    pub recipe: Option<Recipe>,
 }
 
 impl Conversion {
     pub fn of(job: Job, format: Format, choices: Choices) -> Conversion {
-        Conversion { job, format, choices }
+        Conversion { job, format, choices, recipe: None }
     }
 }
 
@@ -433,6 +461,9 @@ pub struct Item {
     /// A finished WebM result, decoded.
     pub result_clip: Load<Clip>,
     pub result_thumb: Option<egui::TextureHandle>,
+    /// What converting would make now, worked out each frame, as presets
+    /// and the default ones may change too; `None` where it can't.
+    pub recipe: Option<Recipe>,
 }
 
 impl Item {
@@ -462,6 +493,7 @@ impl Item {
             failed: None,
             result_clip: Load::Idle,
             result_thumb: None,
+            recipe: None,
         }
     }
 
@@ -588,11 +620,9 @@ impl Item {
         })
     }
 
-    /// Whether the last sticker was made with what is chosen now.
+    /// Whether the last sticker is what converting would make now.
     pub fn result_is_current(&self) -> bool {
-        self.made
-            .as_ref()
-            .is_some_and(|made| made.format == self.format && made.choices == self.choices)
+        self.made.as_ref().is_some_and(|made| made.recipe.is_some() && made.recipe == self.recipe)
     }
 
     pub fn is_busy(&self) -> bool {
