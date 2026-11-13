@@ -152,9 +152,11 @@ fn sleep(ctx: &Context, seconds: f64) {
     }
 }
 
+/// Says something about watching, rather than one conversion, which
+/// goes on: as a warning, which events of every format can be.
 fn warn(ctx: &Context, message: String) {
     if ctx.global.json {
-        crate::print_json_error(&anyhow::anyhow!(message), None);
+        crate::json_line(&tgradish_core::events::Event::Warning { message });
     } else {
         eprintln!("{} {message}", ui::warning_label());
     }
