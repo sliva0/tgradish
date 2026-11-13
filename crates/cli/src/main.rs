@@ -337,25 +337,30 @@ fn main() -> ExitCode {
     }
     let json = cli.global.json;
     let ran = run(cli);
-    // whatever came of it, no one read it
-    if stdout_was_closed() {
-        return ExitCode::from(STDOUT_CLOSED);
+    // whatever came of it, no one read it, so it goes unsaid
+    let status = (!stdout_was_closed()).then(|| report(ran, json));
+    // told only now, as saying what came of it may be what finds stdout
+    // closed
+    match status {
+        Some(status) if !stdout_was_closed() => status,
+        _ => ExitCode::from(STDOUT_CLOSED),
     }
-    match ran {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            if let Some(Exit(code)) = err.downcast_ref() {
-                return ExitCode::from(*code);
-            }
-            let cancelled = matches!(err.downcast_ref(), Some(tgradish_core::Error::Cancelled));
-            if json {
-                print_json_error(&err, None);
-            } else {
-                eprintln!("{} {err:#}", ui::error_label());
-            }
-            if cancelled { ExitCode::from(130) } else { ExitCode::FAILURE }
-        }
+}
+
+/// Says what came of the command, where it failed and hasn't said so
+/// itself, and gives its exit status.
+fn report(ran: Result<()>, json: bool) -> ExitCode {
+    let Err(err) = ran else { return ExitCode::SUCCESS };
+    if let Some(Exit(code)) = err.downcast_ref() {
+        return ExitCode::from(*code);
     }
+    let cancelled = matches!(err.downcast_ref(), Some(tgradish_core::Error::Cancelled));
+    if json {
+        print_json_error(&err, None);
+    } else {
+        eprintln!("{} {err:#}", ui::error_label());
+    }
+    if cancelled { ExitCode::from(130) } else { ExitCode::FAILURE }
 }
 
 #[cfg(test)]
