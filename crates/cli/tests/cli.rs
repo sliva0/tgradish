@@ -592,6 +592,165 @@ fn watch_converts_new_files() {
     assert_eq!(status.code(), Some(0));
 }
 
+/// `tgradish watch` on a directory, its JSON events read as they come.
+#[cfg(unix)]
+struct Watching {
+    child: std::process::Child,
+    events: std::sync::mpsc::Receiver<Value>,
+}
+
+#[cfg(unix)]
+impl Watching {
+    fn start(dir: &Path, args: &[&str]) -> Watching {
+        use std::io::{BufRead, BufReader};
+        use std::process::Stdio;
+
+        let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
+            .args(["--json", "watch", dir.to_str().unwrap(), "--interval", "0.1"])
+            .args(args)
+            .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdout = BufReader::new(child.stdout.take().unwrap());
+        let (tx, events) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in stdout.lines().map_while(Result::ok) {
+                let _ = tx.send(serde_json::from_str::<Value>(&line).unwrap());
+            }
+        });
+        // files there when watching starts are left alone, so let it start
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        Watching { child, events }
+    }
+
+    /// The events up to the first that `until` takes, within 30 seconds.
+    fn until(&self, until: impl Fn(&Value) -> bool) -> Vec<Value> {
+        let mut seen = Vec::new();
+        while let Ok(event) = self.events.recv_timeout(std::time::Duration::from_secs(30)) {
+            let done = until(&event);
+            seen.push(event);
+            if done {
+                return seen;
+            }
+        }
+        panic!("not within 30 seconds, after {seen:?}");
+    }
+
+    /// The events in the next `seconds`.
+    fn during(&self, seconds: f64) -> Vec<Value> {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs_f64(seconds);
+        let mut seen = Vec::new();
+        while let Some(left) = until.checked_duration_since(std::time::Instant::now()) {
+            match self.events.recv_timeout(left) {
+                Ok(event) => seen.push(event),
+                Err(_) => break,
+            }
+        }
+        seen
+    }
+
+    /// Stops it with Ctrl-C, as a user would.
+    fn stop(self) -> Output {
+        Command::new("kill").args(["-INT", &self.child.id().to_string()]).status().unwrap();
+        self.child.wait_with_output().unwrap()
+    }
+}
+
+#[cfg(unix)]
+fn named(event: &Value, kind: &str, name: &str) -> bool {
+    let input = event["input"].as_str().or(event["output"].as_str()).unwrap_or_default();
+    event["event"] == kind && input.ends_with(name)
+}
+
+/// What watching converts: new files and links to them; never its own
+/// results, nor hidden or half-downloaded files.
+#[cfg(unix)]
+#[test]
+fn watch_converts_what_appears_and_only_that() {
+    let dir = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    // its results are pictures, which are inputs too but for their names
+    let format = if tgradish_corpus::ffmpeg_on_path() { "webp" } else { "tgs" };
+    let watching = Watching::start(dir.path(), &["--format", format, "--ffmpeg-from", "system"]);
+
+    square_png(&dir.path().join("a.png"), [255, 0, 0, 255]);
+    square_png(&dir.path().join(".hidden.png"), [255, 0, 0, 255]);
+    square_png(&dir.path().join("b.png.part"), [255, 0, 0, 255]);
+    square_png(&elsewhere.path().join("target.png"), [0, 0, 255, 255]);
+    std::os::unix::fs::symlink(elsewhere.path().join("target.png"), dir.path().join("link.png"))
+        .unwrap();
+    let mut events = watching.until(|e| named(e, "finished", &format!("a.sticker.{format}")));
+    events.extend(watching.until(|e| named(e, "finished", &format!("link.sticker.{format}"))));
+    // nothing more: not the results, which scans see from now on
+    events.extend(watching.during(1.5));
+    let finished: Vec<&str> = events
+        .iter()
+        .filter(|e| e["event"] == "finished")
+        .map(|e| e["output"].as_str().unwrap().rsplit('/').next().unwrap())
+        .collect();
+    let results = [format!("a.sticker.{format}"), format!("link.sticker.{format}")];
+    assert_eq!(finished, results, "{events:?}");
+    assert_eq!(watching.stop().status.code(), Some(0));
+}
+
+/// A file that changes while it is converted is converted again.
+#[cfg(unix)]
+#[test]
+fn watch_converts_a_file_again_that_changed_meanwhile() {
+    let dir = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let watching = Watching::start(dir.path(), &["--format", "tgs"]);
+    // noise takes a second or so as a .tgs
+    let slow = noise(elsewhere.path(), 1).join("0.png");
+    std::fs::copy(&slow, dir.path().join("c.png")).unwrap();
+    watching.until(|e| named(e, "started", "c.png"));
+    square_png(&dir.path().join("c.png"), [0, 255, 0, 255]);
+    let events = watching.until(|e| e["event"] == "started");
+    let again = events.last().unwrap();
+    assert!(named(again, "started", "c.png"), "{events:?}");
+    // the square's single colour, not the noise's
+    assert_eq!(again["report"]["colours"], 1, "{again}");
+    watching.until(|e| named(e, "finished", "c.sticker.tgs"));
+    assert_eq!(watching.stop().status.code(), Some(0));
+}
+
+/// Stopping is the only way out of a watch, so it ends as done, waiting
+/// or converting.
+#[cfg(unix)]
+#[test]
+fn watch_stops_as_done() {
+    use std::process::Stdio;
+
+    let dir = tempfile::tempdir().unwrap();
+    let watching = Watching::start(dir.path(), &["--format", "tgs"]);
+    let stopped = watching.stop();
+    assert_eq!(stopped.status.code(), Some(0));
+
+    // converting, which takes long enough with --speed best
+    let art = noise(dir.path(), 24);
+    let watching = Watching::start(dir.path(), &["--format", "tgs", "--speed", "best"]);
+    std::fs::rename(art.join("0.png"), dir.path().join("slow.png")).unwrap();
+    watching.until(|e| named(e, "started", "slow.png"));
+    let stopped = watching.stop();
+    assert_eq!(stopped.status.code(), Some(0), "{}", String::from_utf8_lossy(&stopped.stderr));
+    assert!(!dir.path().join("slow.sticker.tgs").exists());
+
+    // and says so
+    let child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
+        .args(["watch", dir.path().to_str().unwrap(), "--interval", "0.1"])
+        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    Command::new("kill").args(["-INT", &child.id().to_string()]).status().unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Stopped"));
+}
+
 #[test]
 fn refuses_to_merge_outputs_of_same_named_inputs() {
     if !tgradish_corpus::ffmpeg_on_path() {
