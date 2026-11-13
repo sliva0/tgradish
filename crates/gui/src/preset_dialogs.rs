@@ -12,7 +12,7 @@
 use std::path::Path;
 
 use eframe::egui::{self, RichText, vec2};
-use tgradish_core::options::Fit;
+use tgradish_core::options::{Fit, Range};
 use tgradish_core::presets::{self, Presets};
 use tgradish_core::tgs;
 use tgradish_core::webm::Options;
@@ -105,6 +105,9 @@ struct Deleted {
     /// Whether the config made it the default for WebM and pictures, and
     /// for `.tgs`.
     defaults: (bool, bool),
+    /// The items' own ranges to search that went with it, by item, with
+    /// the way of fitting they were for.
+    ranges: Vec<(u64, Range, Fit)>,
 }
 
 impl Managing {
@@ -451,8 +454,9 @@ impl App {
                             self.config.preset.as_deref() == Some(name.as_str()),
                             self.config.tgs_preset.as_deref() == Some(name.as_str()),
                         );
-                        self.follow_preset(&name, None);
-                        managing.deleted.push(Deleted { id, name, text, items, defaults });
+                        let ranges = self.follow_preset(&name, None);
+                        let deleted = Deleted { id, name, text, items, defaults, ranges };
+                        managing.deleted.push(deleted);
                     }
                     Err(err) => managing.rows[index].problem = Some(problem(&err)),
                 }
@@ -482,6 +486,23 @@ impl App {
                             }
                         });
                         self.reload_presets();
+                        // ranges dropped as fitting changed, where it is as
+                        // it was again and nothing took their place
+                        for &(id, range, fit) in &deleted.ranges {
+                            let Some(item) = self.items.iter_mut().find(|item| item.id == id)
+                            else {
+                                continue;
+                            };
+                            let now = crate::file_settings::fit_of(
+                                &item.choices,
+                                &self.presets,
+                                &self.config,
+                            );
+                            let webm = &mut item.choices.webm;
+                            if now.unit() == fit.unit() && webm.fit_range.is_none() {
+                                webm.fit_range = Some(range);
+                            }
+                        }
                         let row = match self.presets.get(&deleted.name) {
                             Ok(preset) => Row::of(id, &deleted.name, Ok(preset)),
                             Err(err) => Row::of(id, &deleted.name, Err(err.to_string())),
@@ -500,8 +521,9 @@ impl App {
     }
 
     /// Items and the config that named the preset `from` name `to` now, or
-    /// the default preset when it is gone.
-    fn follow_preset(&mut self, from: &str, to: Option<&str>) {
+    /// the default preset when it is gone. Gives the items' own ranges
+    /// that dropped, with the way of fitting they were for.
+    fn follow_preset(&mut self, from: &str, to: Option<&str>) -> Vec<(u64, Range, Fit)> {
         // the default may fit another way than a deleted preset, so that an
         // item's own range no longer suits it, as when another is chosen; a
         // renamed one fits as before. The presets are read again only
@@ -528,13 +550,19 @@ impl App {
                 }
             });
         }
+        let mut dropped = Vec::new();
         if let Some(fits) = fits {
             for (item, before) in self.items.iter_mut().zip(fits) {
                 let after =
                     crate::file_settings::fit_of(&item.choices, &self.presets, &self.config);
+                let range = item.choices.webm.fit_range;
                 crate::file_settings::follow_fit(&mut item.choices.webm, before, after);
+                if let (Some(range), None) = (range, item.choices.webm.fit_range) {
+                    dropped.push((item.id, range, before));
+                }
             }
         }
+        dropped
     }
 }
 
@@ -612,7 +640,7 @@ mod tests {
     fn renames_and_deletes_presets_and_puts_them_back() {
         let dir = tempfile::tempdir().unwrap();
         let presets_dir = dir.path().join("presets");
-        let webm = Options { crf: Some(20), ..Options::default() };
+        let webm = Options { crf: Some(20), fit: Some(Fit::Crf), ..Options::default() };
         presets::save(&presets_dir, "mine", "", (&webm, &tgs::Options::default()), false).unwrap();
         let art = dir.path().join("art.png");
         square(&art, [255, 0, 0, 255]);
@@ -625,7 +653,10 @@ mod tests {
         state.presets = Presets::load(Some(&presets_dir)).unwrap();
         state.add(vec![art]);
         finish(&mut harness);
-        harness.state_mut().items[0].choices.preset = Some("mine".into());
+        // a range of qualities to search, as the preset fits by quality
+        let range = tgradish_core::options::Range { min: 24.0, max: 40.0 };
+        let choices = &mut harness.state_mut().items[0].choices;
+        (choices.preset, choices.webm.fit_range) = (Some("mine".into()), Some(range));
         harness.run_steps(2);
         harness.get_by_label("Manage…").click();
         harness.run_steps(2);
@@ -642,16 +673,18 @@ mod tests {
         assert_eq!(state.config.preset.as_deref(), Some("yours"));
         assert_eq!(state.presets.webm("yours").unwrap().crf, Some(20));
 
-        // deleted: back to the default, until Undo
+        // deleted: back to the default, which fits by bitrate, until Undo
         state.change_preset(&presets_dir, &mut managing, Change::Delete(0));
         assert!(managing.rows.is_empty() && state.presets.get("yours").is_err());
         assert_eq!(
             (state.items[0].choices.preset.as_deref(), state.config.preset.as_deref()),
             (None, None)
         );
+        assert_eq!(state.items[0].choices.webm.fit_range, None);
         state.change_preset(&presets_dir, &mut managing, Change::Undo(0));
         assert_eq!(managing.rows.len(), 1);
         assert_eq!(state.items[0].choices.preset.as_deref(), Some("yours"));
+        assert_eq!(state.items[0].choices.webm.fit_range, Some(range));
         assert_eq!(state.config.preset.as_deref(), Some("yours"));
         assert_eq!(state.presets.webm("yours").unwrap().crf, Some(20));
 
