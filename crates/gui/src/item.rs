@@ -13,10 +13,10 @@ use tgradish_core::tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 
+use crate::cuts::Frames;
 use crate::jobs::{Done, Job};
 use crate::l10n::fl;
 use crate::media::{Art, Clip, Load, Video};
-use crate::timeline::Frames;
 
 /// What kind of input an item is, which limits what it can become.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

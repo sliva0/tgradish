@@ -17,9 +17,9 @@ use tgradish_core::tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 
+use crate::cuts::{self, Cut};
 use crate::jobs::failure;
 use crate::l10n::fl;
-use crate::timeline::{self, Cut};
 
 /// Frames of a video or animation, as straight RGBA.
 pub struct Clip {
@@ -258,7 +258,7 @@ pub struct Video {
     /// Where its frames start, which cuts land between: as its packets
     /// time them, or else at its frame rate. Worked out once, as the
     /// timeline and keys ask for it every frame.
-    pub frames: Option<Arc<timeline::Frames>>,
+    pub frames: Option<Arc<cuts::Frames>>,
 }
 
 /// Most bytes of drawn frames shown as they are, rather than read again
@@ -345,9 +345,9 @@ impl Video {
     fn timed(mut self) -> Video {
         let length = self.probe.duration.filter(|_| !self.probe.still_image);
         let frames = length.and_then(|length| {
-            timeline::Frames::starting(&self.starts, length, Cut::Video).or_else(|| {
+            cuts::Frames::starting(&self.starts, length, Cut::Video).or_else(|| {
                 let fps = self.probe.fps.or(self.probe.base_fps)?;
-                timeline::Frames::even(length, fps, Cut::Video)
+                cuts::Frames::even(length, fps, Cut::Video)
             })
         });
         self.frames = frames.map(Arc::new);
@@ -420,7 +420,7 @@ pub struct Art {
     /// tags' or not.
     pub durations: Vec<f64>,
     /// Where its frames start, when it is animated.
-    pub frames: Option<Arc<timeline::Frames>>,
+    pub frames: Option<Arc<cuts::Frames>>,
 }
 
 impl Art {
@@ -450,7 +450,7 @@ impl Art {
             let (tags, layers, durations) = (art.tags, art.layers, art.durations);
             let frames = clip
                 .is_animated()
-                .then(|| Arc::new(timeline::Frames { times: clip.times.clone(), cut: Cut::Art }));
+                .then(|| Arc::new(cuts::Frames { times: clip.times.clone(), cut: Cut::Art }));
             Ok(Art { clip, tags, layers, durations, frames })
         })
     }
