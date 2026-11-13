@@ -66,7 +66,73 @@ pub enum Severity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Issue {
     pub severity: Severity,
+    /// What was checked, for front-ends to tell issues apart by.
+    pub kind: IssueKind,
     pub message: String,
+}
+
+/// What an [`Issue`] is about: one of each thing [`check`] checks.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IssueKind {
+    /// The canvas isn't 512x512.
+    Canvas,
+    /// Not 60 fps, or 30, which is accepted against the rules.
+    FrameRate,
+    /// Longer than 3 seconds.
+    Length,
+    /// No frames at all.
+    NoFrames,
+    /// The `.tgs` is larger than 64 KiB.
+    FileSize,
+    /// Shapes and layers together cost more than Telegram's server takes.
+    Cost,
+    /// More layers than Telegram's server takes.
+    Layers,
+    /// More shapes in a layer than Telegram's server takes.
+    ShapesPerLayer,
+    /// More path points under one fill than Telegram's server takes.
+    PaintPoints,
+    /// Paths with empty tangents, which Telegram refuses.
+    EmptyTangents,
+    /// More JSON than Telegram Desktop plays.
+    JsonSize,
+    /// More fills and strokes in a layer than the renderer allows.
+    PaintsPerLayer,
+    /// More shapes painted in a layer than the renderer allows.
+    PaintSources,
+    /// More points in a path than the renderer allows.
+    PathPoints,
+    /// More keyframes in a property than the renderer allows.
+    Keyframes,
+    /// More assets than the renderer allows.
+    Assets,
+    /// More layers, precomps expanded, than the renderer allows.
+    ExpandedLayers,
+    /// Arrays and objects nested deeper than the renderer allows.
+    Nesting,
+    /// Groups inside each other deeper than the renderer allows.
+    GroupDepth,
+    /// A path point farther out than the renderer allows.
+    PathCoordinate,
+    /// Precomps that use each other in a loop.
+    PrecompLoop,
+    /// A Lottie feature the rules forbid or Telegram's apps ignore, named
+    /// in the message.
+    Feature,
+}
+
+/// Why Lottie JSON couldn't be checked at all.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum CheckError {
+    /// It nests deeper than Telegram's renderer reads, so deep that
+    /// reading it could exhaust the stack.
+    #[error("the JSON nests {depth} levels deep; Telegram's renderer reads up to {limit}")]
+    TooDeep { depth: usize, limit: usize },
+    /// It isn't JSON, as serde_json says.
+    #[error("{0}")]
+    Json(String),
 }
 
 /// Lottie features Telegram's rules forbid or its apps ignore, by the names
@@ -137,19 +203,17 @@ fn nesting(json: &[u8]) -> usize {
 /// Checks Lottie JSON; `tgs_bytes` is the size of the `.tgs` it came from.
 /// Fails on JSON that doesn't parse, or nests deeper than Telegram's
 /// renderer reads.
-pub fn check(json: &[u8], tgs_bytes: Option<usize>) -> Result<(Stats, Vec<Issue>), String> {
+pub fn check(json: &[u8], tgs_bytes: Option<usize>) -> Result<(Stats, Vec<Issue>), CheckError> {
     let depth = nesting(json);
     if depth > TLOTTIE.max_nesting_depth {
-        return Err(format!(
-            "the JSON nests {depth} levels deep; Telegram's renderer reads up to {}",
-            TLOTTIE.max_nesting_depth
-        ));
+        return Err(CheckError::TooDeep { depth, limit: TLOTTIE.max_nesting_depth });
     }
     // serde_json stops at 128 levels on its own; the depth is bounded above
     let mut parser = serde_json::Deserializer::from_slice(json);
     parser.disable_recursion_limit();
-    let root = Value::deserialize(&mut parser).map_err(|err| err.to_string())?;
-    parser.end().map_err(|err| err.to_string())?;
+    let json_error = |err: serde_json::Error| CheckError::Json(err.to_string());
+    let root = Value::deserialize(&mut parser).map_err(json_error)?;
+    parser.end().map_err(json_error)?;
     let number = |key: &str| root.get(key).and_then(Value::as_f64).unwrap_or(0.0);
     let mut walker = Walker {
         stats: Stats {
@@ -188,7 +252,10 @@ pub fn check(json: &[u8], tgs_bytes: Option<usize>) -> Result<(Stats, Vec<Issue>
     if walker.stats.assets <= TLOTTIE.max_assets {
         match walker.expand(layers, &mut HashMap::new(), &mut Vec::new()) {
             Some(count) => walker.stats.expanded_layers = count,
-            None => issues.push(error("precomps reference each other in a loop".into())),
+            None => issues.push(error(
+                IssueKind::PrecompLoop,
+                "precomps reference each other in a loop".into(),
+            )),
         }
     }
     let stats = walker.stats;
@@ -196,98 +263,151 @@ pub fn check(json: &[u8], tgs_bytes: Option<usize>) -> Result<(Stats, Vec<Issue>
     Ok((stats, issues))
 }
 
-fn error(message: String) -> Issue {
-    Issue { severity: Severity::Error, message }
+fn error(kind: IssueKind, message: String) -> Issue {
+    Issue { severity: Severity::Error, kind, message }
 }
 
 fn rules(stats: &Stats) -> Vec<Issue> {
     let mut issues = Vec::new();
-    let mut fail = |message: String| issues.push(error(message));
+    let mut fail = |kind: IssueKind, message: String| issues.push(error(kind, message));
     let canvas = f64::from(telegram::CANVAS);
     if (stats.width, stats.height) != (canvas, canvas) {
-        fail(format!("the canvas is {}x{}, stickers are 512x512", stats.width, stats.height));
+        fail(
+            IssueKind::Canvas,
+            format!("the canvas is {}x{}, stickers are 512x512", stats.width, stats.height),
+        );
     }
     // 30 fps was accepted too, and the limit is in seconds
     if stats.fps != f64::from(telegram::FPS) && stats.fps != 30.0 {
-        fail(format!("{} fps, stickers are 60 fps", stats.fps));
+        fail(IssueKind::FrameRate, format!("{} fps, stickers are 60 fps", stats.fps));
     }
     let max_seconds = f64::from(telegram::MAX_FRAMES) / f64::from(telegram::FPS);
     if stats.fps > 0.0 && stats.frames / stats.fps > max_seconds + 1e-9 {
-        fail(format!(
-            "{} frames at {} fps last {:.2} s, at most {max_seconds} s are allowed",
-            stats.frames,
-            stats.fps,
-            stats.frames / stats.fps
-        ));
+        fail(
+            IssueKind::Length,
+            format!(
+                "{} frames at {} fps last {:.2} s, at most {max_seconds} s are allowed",
+                stats.frames,
+                stats.fps,
+                stats.frames / stats.fps
+            ),
+        );
     }
     if stats.frames <= 0.0 {
-        fail("the animation has no frames".into());
+        fail(IssueKind::NoFrames, "the animation has no frames".into());
     }
     if let Some(bytes) = stats.tgs_bytes.filter(|&bytes| bytes > telegram::MAX_BYTES) {
-        fail(format!("the file is {bytes} bytes, at most {} are allowed", telegram::MAX_BYTES));
+        fail(
+            IssueKind::FileSize,
+            format!("the file is {bytes} bytes, at most {} are allowed", telegram::MAX_BYTES),
+        );
     }
     let cost = telegram::cost(stats.shapes, stats.layers);
     if cost > telegram::MAX_COST {
-        fail(format!(
-            "{} shapes in {} layers count {cost}, a layer as {}; Telegram takes at most {}",
-            stats.shapes,
-            stats.layers,
-            telegram::LAYER_COST,
-            telegram::MAX_COST
-        ));
+        fail(
+            IssueKind::Cost,
+            format!(
+                "{} shapes in {} layers count {cost}, a layer as {}; Telegram takes at most {}",
+                stats.shapes,
+                stats.layers,
+                telegram::LAYER_COST,
+                telegram::MAX_COST
+            ),
+        );
     }
     // Telegram's own limits are below tlottie's for these
     let server = [
-        ("layers", stats.layers, telegram::MAX_LAYERS),
-        ("shapes in a layer", stats.max_shapes_per_layer, telegram::MAX_SHAPES_PER_LAYER),
-        ("path points under one fill", stats.max_paint_points, telegram::MAX_PAINT_POINTS),
+        (IssueKind::Layers, "layers", stats.layers, telegram::MAX_LAYERS),
+        (
+            IssueKind::ShapesPerLayer,
+            "shapes in a layer",
+            stats.max_shapes_per_layer,
+            telegram::MAX_SHAPES_PER_LAYER,
+        ),
+        (
+            IssueKind::PaintPoints,
+            "path points under one fill",
+            stats.max_paint_points,
+            telegram::MAX_PAINT_POINTS,
+        ),
     ];
-    for (what, count, limit) in server {
+    for (kind, what, count, limit) in server {
         if count > limit {
-            fail(format!("{count} {what}; Telegram takes at most {limit}"));
+            fail(kind, format!("{count} {what}; Telegram takes at most {limit}"));
         }
     }
     if stats.empty_tangent_paths > 0 {
-        fail(format!(
-            "{} paths have empty tangents (`[]`, as pixelart2tgs 1.x wrote them); Telegram \
+        fail(
+            IssueKind::EmptyTangents,
+            format!(
+                "{} paths have empty tangents (`[]`, as pixelart2tgs 1.x wrote them); Telegram \
              refuses those now, `[0,0]` works",
-            stats.empty_tangent_paths
-        ));
+                stats.empty_tangent_paths
+            ),
+        );
     }
     if stats.json_bytes > MAX_RAW_JSON {
-        fail(format!(
-            "{} bytes of JSON; Telegram Desktop plays at most {MAX_RAW_JSON}",
-            stats.json_bytes
-        ));
+        fail(
+            IssueKind::JsonSize,
+            format!(
+                "{} bytes of JSON; Telegram Desktop plays at most {MAX_RAW_JSON}",
+                stats.json_bytes
+            ),
+        );
     }
     let limits = [
-        ("fills and strokes in a layer", stats.max_paints_per_layer, TLOTTIE.max_paints_per_layer),
         (
+            IssueKind::PaintsPerLayer,
+            "fills and strokes in a layer",
+            stats.max_paints_per_layer,
+            TLOTTIE.max_paints_per_layer,
+        ),
+        (
+            IssueKind::PaintSources,
             "shapes painted in a layer",
             stats.max_paint_sources_per_layer,
             TLOTTIE.max_paint_source_items_per_layer,
         ),
-        ("points in a path", stats.max_path_points, TLOTTIE.max_path_points),
-        ("keyframes in a property", stats.max_keyframes, TLOTTIE.max_keyframes),
-        ("assets", stats.assets, TLOTTIE.max_assets),
-        ("layers with precomps expanded", stats.expanded_layers, TLOTTIE.max_precomp_expansion),
-        ("levels of nesting", stats.depth, TLOTTIE.max_nesting_depth),
-        ("groups inside each other", stats.group_depth, TLOTTIE.max_group_depth),
+        (IssueKind::PathPoints, "points in a path", stats.max_path_points, TLOTTIE.max_path_points),
+        (
+            IssueKind::Keyframes,
+            "keyframes in a property",
+            stats.max_keyframes,
+            TLOTTIE.max_keyframes,
+        ),
+        (IssueKind::Assets, "assets", stats.assets, TLOTTIE.max_assets),
+        (
+            IssueKind::ExpandedLayers,
+            "layers with precomps expanded",
+            stats.expanded_layers,
+            TLOTTIE.max_precomp_expansion,
+        ),
+        (IssueKind::Nesting, "levels of nesting", stats.depth, TLOTTIE.max_nesting_depth),
+        (
+            IssueKind::GroupDepth,
+            "groups inside each other",
+            stats.group_depth,
+            TLOTTIE.max_group_depth,
+        ),
     ];
-    for (what, count, limit) in limits {
+    for (kind, what, count, limit) in limits {
         if count > limit {
-            fail(format!("{count} {what}; Telegram's renderer allows {limit}"));
+            fail(kind, format!("{count} {what}; Telegram's renderer allows {limit}"));
         }
     }
     if stats.max_path_coordinate > f64::from(TLOTTIE.max_path_coordinate_abs) {
-        fail(format!(
-            "a path point at {}; Telegram's renderer allows up to {}",
-            stats.max_path_coordinate, TLOTTIE.max_path_coordinate_abs
-        ));
+        fail(
+            IssueKind::PathCoordinate,
+            format!(
+                "a path point at {}; Telegram's renderer allows up to {}",
+                stats.max_path_coordinate, TLOTTIE.max_path_coordinate_abs
+            ),
+        );
     }
     if stats.fps == 30.0 {
         issues.push(Issue {
             severity: Severity::Warning,
+            kind: IssueKind::FrameRate,
             message: "30 fps: against the rules, but Telegram accepts this".into(),
         });
     }
@@ -304,7 +424,7 @@ fn rules(stats: &Stats) -> Vec<Issue> {
             ),
             (false, _) => format!("{feature}: Telegram's apps ignore this"),
         };
-        issues.push(Issue { severity: Severity::Warning, message });
+        issues.push(Issue { severity: Severity::Warning, kind: IssueKind::Feature, message });
     }
     issues
 }
@@ -624,13 +744,16 @@ mod tests {
             issues,
             [Issue {
                 severity: Severity::Warning,
+                kind: IssueKind::FrameRate,
                 message: "30 fps: against the rules, but Telegram accepts this".into()
             }]
         );
         let (_, issues) = check(sticker(180).as_bytes(), None).unwrap();
-        assert!(issues.iter().any(
-            |issue| issue.severity == Severity::Error && issue.message.contains("last 6.00 s")
-        ));
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.severity == Severity::Error && issue.kind == IssueKind::Length)
+        );
     }
 
     #[test]
@@ -712,7 +835,7 @@ mod tests {
             "assets":[{"id":"a","layers":[{"ty":0,"refId":"b"}]},{"id":"b","layers":[{"ty":0,"refId":"a"}]}],
             "layers":[{"ty":0,"refId":"a"},{"ty":0,"refId":"b"}]}"#;
         let (stats, issues) = check(json, None).unwrap();
-        assert!(issues.iter().any(|issue| issue.message.contains("loop")));
+        assert!(issues.iter().any(|issue| issue.kind == IssueKind::PrecompLoop));
         assert_eq!(stats.assets, 2);
 
         let json = br#"{"fr":60,"ip":0,"op":10,"w":512,"h":512,
@@ -743,7 +866,7 @@ mod tests {
         let (stats, issues) = check(json.as_bytes(), None).unwrap();
         assert!(started.elapsed().as_secs() < 2);
         assert!(stats.expanded_layers > TLOTTIE.max_precomp_expansion);
-        assert!(issues.iter().any(|issue| issue.message.contains("precomps expanded")));
+        assert!(issues.iter().any(|issue| issue.kind == IssueKind::ExpandedLayers));
     }
 
     #[test]
@@ -780,9 +903,12 @@ mod tests {
         assert_eq!(issues, []);
         // more groups inside groups than tlottie takes
         let (_, issues) = check(groups(70).as_bytes(), None).unwrap();
-        assert!(issues.iter().any(|issue| issue.message.contains("groups inside")));
+        assert!(issues.iter().any(|issue| issue.kind == IssueKind::GroupDepth));
         // nesting past what tlottie reads at all
-        assert!(check(groups(100).as_bytes(), None).unwrap_err().contains("nests"));
+        assert!(matches!(
+            check(groups(100).as_bytes(), None),
+            Err(CheckError::TooDeep { depth: 204, limit: 175 })
+        ));
         // brackets in strings don't count
         assert_eq!(nesting(br#"{"a":"[[[{{{\"]]]","b":[1]}"#), 2);
     }
@@ -799,6 +925,6 @@ mod tests {
         );
         let (stats, issues) = check(json.as_bytes(), None).unwrap();
         assert_eq!(stats.assets, 20_000);
-        assert!(issues.iter().any(|issue| issue.message.contains("assets")));
+        assert!(issues.iter().any(|issue| issue.kind == IssueKind::Assets));
     }
 }
