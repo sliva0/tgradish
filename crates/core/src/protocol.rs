@@ -1,5 +1,19 @@
 //! Machine-readable description of tgradish for front-ends that run the
-//! CLI, printed by `tgradish describe`.
+//! CLI, printed by `tgradish describe`, and the rules everything the CLI
+//! prints with `--json` keeps:
+//!
+//! - Every key and every enum value is kebab-case.
+//! - Every `--json` output is JSON Lines: one compact object per line.
+//!   `convert` and `watch` print an event a line, as the description's
+//!   schemas give them, `inspect` a file a line, `preset list` a preset a
+//!   line, and other commands one line.
+//! - A tagged union names its tag by what it distinguishes: `event` for
+//!   events, `format` for what `inspect` found, `kind` for issues,
+//!   encodings and ffmpeg backends, `mode` for an encode's rate control.
+//! - A file is named by its path as text, with what isn't Unicode in it
+//!   replaced, and a line about one input names it `input`.
+//! - Whatever fails is an `error` event, with its `message` and the
+//!   `input` that failed, or `null` where the whole command did.
 
 use std::path::{Path, PathBuf};
 
@@ -12,11 +26,12 @@ use crate::options::Options;
 use crate::presets::{Format, Presets};
 use crate::tgs::{TgsEvent, TgsOptions};
 
-/// Bumped on incompatible changes to the description, events or CLI flags
-/// used by front-ends. 2: `.tgs` output, formats and preset formats. 3:
-/// presets hold options for both formats, and say nothing about the target.
-/// 4: image output, with WebM's options.
-pub const PROTOCOL_VERSION: u32 = 4;
+/// The version of the protocol: of the description, the events, what
+/// `--json` prints and the flags front-ends use. It goes up with a change
+/// that would break a front-end following it, as a key renamed or removed
+/// or a flag gone; what is only added, as an event, a key or a flag,
+/// leaves it as it is, so front-ends ignore what they don't know.
+pub const PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
