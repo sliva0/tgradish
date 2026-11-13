@@ -1,6 +1,6 @@
-/// `println!` for what goes to stdout, which ends the program quietly when
-/// stdout was closed, as by `tgradish licenses | head -2`, rather than
-/// panicking as `println!` does: see [`write_out`].
+/// `println!` for what goes to stdout, which stops the program quietly
+/// when stdout was closed, as by `tgradish licenses | head -2`, rather
+/// than panicking as `println!` does: see [`write_out`].
 macro_rules! outln {
     () => {
         $crate::write_out(format_args!(""), true)
@@ -81,13 +81,30 @@ pub struct Exit(pub u8);
 /// The exit status when whoever read stdout stopped reading: 141 on Unix,
 /// as shells show a program SIGPIPE ended, which Rust's programs ignore;
 /// 1 elsewhere, where nothing says otherwise.
-const STDOUT_CLOSED: i32 = if cfg!(unix) { 128 + 13 } else { 1 };
+const STDOUT_CLOSED: u8 = if cfg!(unix) { 128 + 13 } else { 1 };
 
-/// Writes to stdout for [`outln`] and [`out`]. A closed pipe ends the
-/// program then and there, quietly: there is no one to tell, and nothing
-/// after it would be read.
+/// Whether a write to stdout found it closed.
+static STDOUT_WAS_CLOSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn stdout_was_closed() -> bool {
+    STDOUT_WAS_CLOSED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The command's token, which a closed stdout cancels.
+static CANCEL: std::sync::OnceLock<CancelToken> = std::sync::OnceLock::new();
+
+/// Writes to stdout for [`outln`] and [`out`]. A closed pipe stops the
+/// command, quietly: there is no one to tell, and nothing after it would
+/// be read. It is cancelled rather than ended then and there, which may
+/// be in the middle of a conversion's events, so that its temporary files
+/// go and ffmpeg is stopped; nothing more is written, and `main` exits
+/// with [`STDOUT_CLOSED`] once it is over.
 pub fn write_out(text: std::fmt::Arguments<'_>, newline: bool) {
     use std::io::Write;
+    use std::sync::atomic::Ordering;
+    if STDOUT_WAS_CLOSED.load(Ordering::Relaxed) {
+        return;
+    }
     let mut stdout = std::io::stdout().lock();
     let mut written = stdout.write_fmt(text);
     if newline {
@@ -98,7 +115,10 @@ pub fn write_out(text: std::fmt::Arguments<'_>, newline: bool) {
     match written {
         Ok(()) => {}
         Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => {
-            std::process::exit(STDOUT_CLOSED)
+            STDOUT_WAS_CLOSED.store(true, Ordering::Relaxed);
+            if let Some(cancel) = CANCEL.get() {
+                cancel.cancel();
+            }
         }
         Err(err) => panic!("failed printing to stdout: {err}"),
     }
@@ -206,7 +226,7 @@ fn run(cli: Cli) -> Result<()> {
         None => Config::default(),
     };
 
-    let cancel = CancelToken::new();
+    let cancel = CANCEL.get_or_init(CancelToken::new).clone();
     // the window never reads the token, so Ctrl-C there ends it as usual
     if !cli.command.is_window() {
         ctrlc::set_handler({
@@ -304,7 +324,7 @@ fn main() -> ExitCode {
     if std::env::args_os().len() == 1 {
         term::init(args::ColourChoice::Auto, false);
         ui::introduce();
-        return ExitCode::SUCCESS;
+        return if stdout_was_closed() { ExitCode::from(STDOUT_CLOSED) } else { ExitCode::SUCCESS };
     }
     let cli = Cli::parse();
     if let Some(misused) = cli.misused() {
@@ -316,7 +336,12 @@ fn main() -> ExitCode {
         tgradish_core::mark::set_client(tgradish_core::mark::Client::Cli);
     }
     let json = cli.global.json;
-    match run(cli) {
+    let ran = run(cli);
+    // whatever came of it, no one read it
+    if stdout_was_closed() {
+        return ExitCode::from(STDOUT_CLOSED);
+    }
+    match ran {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             if let Some(Exit(code)) = err.downcast_ref() {
