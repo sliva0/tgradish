@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Command;
 
 use common::clip;
-use tgradish_core::webm::{self, Patch};
+use tgradish_core::webm::container::{self, Patch};
 use tgradish_corpus::Clip;
 
 fn encode(input: &Path, output: &Path, seconds: &str) {
@@ -56,7 +56,7 @@ fn spoofs_and_watermarks_ffmpeg_output() {
         let patched = dir.path().join("patched.webm");
         encode(&input, &encoded, "4");
 
-        let before = webm::inspect_file(&encoded).unwrap();
+        let before = container::inspect_file(&encoded).unwrap();
         assert_eq!(before.doc_type, "webm");
         let video = before.video.as_ref().unwrap();
         assert_eq!(video.codec_id, "V_VP9");
@@ -76,13 +76,13 @@ fn spoofs_and_watermarks_ffmpeg_output() {
             signature: Some(format!("{} test signature", tgradish_core::TOOL_ID)),
             track_uid: Some(0x0123_4567_89ab_cdef),
         };
-        let report = webm::patch_file(&encoded, &patched, &changes, false).unwrap();
+        let report = container::patch_file(&encoded, &patched, &changes, false).unwrap();
         assert!(report.signature_written);
-        let uid = webm::inspect_file(&patched).unwrap().video.unwrap().uid;
+        let uid = container::inspect_file(&patched).unwrap().video.unwrap().uid;
         assert_eq!(uid, Some(0x0123_4567_89ab_cdef), "{name}");
         assert_eq!(report.duration_tags_patched, 1);
 
-        let after = webm::inspect_file(&patched).unwrap();
+        let after = container::inspect_file(&patched).unwrap();
         assert!(!before.spoofed() && after.spoofed(), "{name}");
         assert_eq!(after.file_size, before.file_size);
         assert_eq!(after.video_frames, before.video_frames);
@@ -99,7 +99,7 @@ fn spoofs_and_watermarks_ffmpeg_output() {
         assert!(decodes_cleanly(&patched), "{name}: patched file has decoding errors");
 
         // patching in place gives the same result
-        webm::patch_file(&encoded, &encoded, &changes, true).unwrap();
+        container::patch_file(&encoded, &encoded, &changes, true).unwrap();
         assert_eq!(std::fs::read(&encoded).unwrap(), std::fs::read(&patched).unwrap());
     }
 }

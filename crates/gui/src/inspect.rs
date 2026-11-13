@@ -6,7 +6,7 @@ use eframe::egui;
 use tgradish_core::inspect::{self, Inspected};
 use tgradish_core::still;
 use tgradish_core::telegram::{self, Target};
-use tgradish_core::webm::WebmInfo;
+use tgradish_core::webm::container::WebmInfo;
 use tgradish_tgs::check::Stats;
 use tgradish_tgs::limits::{self, telegram as server};
 

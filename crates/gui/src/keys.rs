@@ -308,7 +308,7 @@ mod tests {
         // converting keeps exactly those frames
         let made = made_job(&harness.state().items[0]);
         let Status::Done(done) = &made.status else { panic!("{:?}", made.status) };
-        let info = tgradish_core::webm::inspect_file(&done.output).unwrap();
+        let info = tgradish_core::webm::container::inspect_file(&done.output).unwrap();
         assert_eq!(info.video_frames, 5);
     }
 }

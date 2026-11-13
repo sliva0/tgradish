@@ -264,7 +264,7 @@ mod tests {
 
     /// What `inspect`, `spoof` and `ffmpeg status` print besides events.
     fn other_samples() -> Vec<Value> {
-        let info = crate::webm::WebmInfo {
+        let info = crate::webm::container::WebmInfo {
             doc_type: "webm".into(),
             file_size: 1000,
             timestamp_scale_ns: 1_000_000,
@@ -275,7 +275,7 @@ mod tests {
             writing_app: None,
             duration_tags: vec!["00:00:05.000000000".into()],
             signature: None,
-            video: Some(crate::webm::VideoTrack {
+            video: Some(crate::webm::container::VideoTrack {
                 number: 1,
                 codec_id: "V_VP9".into(),
                 width: 512,
@@ -292,7 +292,7 @@ mod tests {
         let issues = crate::telegram::check(&info, crate::telegram::Target::Emoji);
         let target = crate::telegram::Target::Emoji;
         let inspected = crate::inspect::Inspected::Webm { target, info: Box::new(info), issues };
-        let report = crate::webm::PatchReport {
+        let report = crate::webm::container::PatchReport {
             old_duration: Some(5.0),
             new_duration: Some(0.5),
             duration_tags_patched: 1,
