@@ -10,7 +10,9 @@ use crate::{Animation, DecodeOptions, Error, Frame, Limits, Result, decode};
 /// later keeps its default.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sheet {
+    /// Cells across.
     pub columns: u32,
+    /// Cells down.
     pub rows: u32,
     /// How many cells hold frames. By default all of them, except fully
     /// transparent cells at the end.

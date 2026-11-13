@@ -29,8 +29,10 @@ const MAX_GROUP_DEPTH: usize = 64;
 /// How a tag plays its frames.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Direction {
+    /// From its first frame to its last.
     #[default]
     Forward,
+    /// From its last frame to its first.
     Reverse,
     /// There and back: `from..=to`, then `to-1..from` without repeating the
     /// ends.
@@ -44,9 +46,13 @@ pub enum Direction {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Tag {
+    /// What it is called in the file.
     pub name: String,
+    /// Its first frame, from 0.
     pub from: u32,
+    /// Its last frame, which it includes.
     pub to: u32,
+    /// How it plays them.
     pub direction: Direction,
     /// The colour Aseprite shows it in, straight RGBA.
     pub colour: [u8; 4],
@@ -75,6 +81,7 @@ impl Tag {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct LayerInfo {
+    /// What it is called in the file.
     pub name: String,
     /// A group, which shows or hides the layers in it.
     pub group: bool,
@@ -92,7 +99,9 @@ pub struct LayerInfo {
 /// keeps its default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Layers {
+    /// Layers to show, hidden ones too.
     pub show: Vec<String>,
+    /// Layers to hide; a hidden group hides the layers in it.
     pub hide: Vec<String>,
 }
 
@@ -351,7 +360,9 @@ struct Plan {
     bounds: HashMap<usize, Bounds>,
 }
 
-/// A parsed Aseprite file.
+/// A parsed Aseprite file, from which animations of its tags and layers
+/// are drawn. [`decode`](crate::decode) reads one and draws it at once;
+/// reading it here first lists its tags and layers to choose from.
 #[derive(Debug, Clone)]
 pub struct Sprite {
     width: u32,
@@ -382,6 +393,8 @@ pub struct Sprite {
 }
 
 impl Sprite {
+    /// Parses an Aseprite file, holding what it stores within `limits`;
+    /// [`Sprite::animation`] draws frames within them too.
     pub fn read(bytes: &[u8], limits: &Limits) -> Result<Sprite> {
         let mut file = Reader::new(bytes);
         let mut header = Reader::new(file.take(128)?);
@@ -676,6 +689,7 @@ impl Sprite {
         Ok(())
     }
 
+    /// The tags, in the file's order.
     pub fn tags(&self) -> &[Tag] {
         &self.tags
     }
@@ -685,10 +699,12 @@ impl Sprite {
         self.frames.iter().map(|(duration, _)| *duration).collect()
     }
 
+    /// The canvas's width in pixels.
     pub fn width(&self) -> u32 {
         self.width
     }
 
+    /// The canvas's height in pixels.
     pub fn height(&self) -> u32 {
         self.height
     }
