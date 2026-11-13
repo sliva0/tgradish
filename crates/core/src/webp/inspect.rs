@@ -66,11 +66,6 @@ impl Info {
     }
 }
 
-/// Whether `path` names a WebP image, by its extension.
-pub fn is_image(path: &Path) -> bool {
-    path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("webp"))
-}
-
 /// What the WebP at `path` is.
 pub fn inspect_file(path: &Path) -> Result<Info> {
     let bytes = crate::art::read(path)?;

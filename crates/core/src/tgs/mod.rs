@@ -11,9 +11,9 @@ mod preview;
 mod read;
 
 pub use events::Event;
+pub use inspect::inspect_file;
 #[cfg(test)]
 pub(crate) use inspect::read_json;
-pub use inspect::{inspect_file, is_sticker};
 pub use options::Options;
 use read::load;
 pub use read::{Art, needs_ffmpeg, read_art};

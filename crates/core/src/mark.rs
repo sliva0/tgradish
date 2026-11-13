@@ -198,7 +198,7 @@ fn user_hash() -> u32 {
 /// The mark in a sticker file, if it has one.
 #[cfg(test)]
 pub(crate) fn read_file(path: &std::path::Path) -> Option<Mark> {
-    if crate::tgs::is_sticker(path) {
+    if crate::input::sniff(path) == crate::input::FileKind::Tgs {
         let json = crate::tgs::read_json(path).ok()?;
         Mark::from_bits(&tgradish_tgs::mark::hidden_bits(&json)).or_else(|| {
             let bytes = tgradish_tgs::mark::layer_name(&json)?;
@@ -219,12 +219,13 @@ pub(crate) fn read_file(path: &std::path::Path) -> Option<Mark> {
 /// reads little of it.
 pub fn made_by_tgradish(path: &std::path::Path) -> bool {
     let small = || crate::fsutil::read_at_most(path, MADE_BYTES).ok().flatten();
-    match crate::inspect::Kind::of(path) {
-        crate::inspect::Kind::Image => {
+    use crate::input::FileKind;
+    match crate::input::sniff(path) {
+        FileKind::Webp { .. } => {
             let tool = small().and_then(|webp| crate::webp::creator_tool(&webp));
             tool.as_deref().is_some_and(is_tool_id)
         }
-        crate::inspect::Kind::Tgs => {
+        FileKind::Tgs => {
             let Some(bytes) = small() else { return false };
             let json = match bytes.starts_with(&[0x1f, 0x8b]) {
                 true => tgradish_tgs::file::unpack(&bytes).ok(),
@@ -235,7 +236,7 @@ pub fn made_by_tgradish(path: &std::path::Path) -> bool {
                 .and_then(|value| value.get("nm")?.as_str().map(tgradish_name))
                 .unwrap_or(false)
         }
-        crate::inspect::Kind::Webm => crate::webm::container::head_file(path).is_ok_and(|head| {
+        FileKind::Webm => crate::webm::container::head_file(path).is_ok_and(|head| {
             let app = |app: &Option<String>| app.as_deref().is_some_and(is_tool_id);
             app(&head.writing_app)
                 && app(&head.muxing_app)
@@ -246,6 +247,8 @@ pub fn made_by_tgradish(path: &std::path::Path) -> bool {
                         .is_some_and(is_tool_id)
                 })
         }),
+        // tgradish makes no other kind of file
+        _ => false,
     }
 }
 

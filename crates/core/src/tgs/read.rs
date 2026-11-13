@@ -11,7 +11,7 @@ use crate::CancelToken;
 use crate::art::{self, Aseprite};
 use crate::backend::{Backend, FramesRequest};
 use crate::error::{Error, Result};
-use crate::input::Input;
+use crate::input::{Input, sniff, sniff_readable};
 use crate::telegram;
 
 /// What the inputs hold, as [`convert`](super::convert) reads them.
@@ -67,7 +67,7 @@ pub(super) fn load(
         Input::File(path) => path,
     };
     cancel.check()?;
-    if !reads_as_art(input)? {
+    if !sniff_readable(input)?.reads_as_art() {
         let backend = backend.ok_or_else(|| {
             Error::FfmpegNotFound(crate::error::FfmpegMissing::ForVideo(input.clone()))
         })?;
@@ -107,19 +107,9 @@ pub(super) fn load(
 /// which [`convert`](super::convert) then needs a backend for.
 pub fn needs_ffmpeg(input: &Input) -> bool {
     match input {
-        Input::File(path) => matches!(reads_as_art(path), Ok(false)),
+        Input::File(path) => !sniff(path).reads_as_art(),
         Input::Sequence(_) => false,
     }
-}
-
-/// Whether the pixel art reader reads `path`, by its first bytes: a
-/// picture or an Aseprite file, not a video.
-fn reads_as_art(path: &Path) -> Result<bool> {
-    let mut start = Vec::with_capacity(32);
-    std::fs::File::open(path)
-        .and_then(|file| std::io::Read::read_to_end(&mut std::io::Read::take(file, 32), &mut start))
-        .map_err(|err| Error::Unreadable { path: path.to_path_buf(), message: err.to_string() })?;
-    Ok(frames::Format::detect(&start).is_some())
 }
 
 /// Most frames a second a sticker shows.

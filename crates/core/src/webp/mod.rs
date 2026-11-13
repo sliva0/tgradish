@@ -12,7 +12,7 @@ mod inspect;
 
 pub use encode::{Encoding, encode};
 use encode::{fit, with_xmp, xmp};
-pub use inspect::{Info, creator_tool, dimensions, inspect_file, is_image, preview};
+pub use inspect::{Info, creator_tool, dimensions, inspect_file, preview};
 
 use std::path::PathBuf;
 

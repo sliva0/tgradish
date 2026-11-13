@@ -17,7 +17,7 @@ use crate::art::{self, Aseprite};
 use crate::backend::Backend;
 use crate::error::{Error, FileAction, Result};
 use crate::ffmpeg::Probe;
-use crate::input::Input;
+use crate::input::{FileKind, Input, sniff};
 use crate::tgs::DEFAULT_FPS;
 use crate::webm::Options;
 
@@ -111,24 +111,6 @@ impl Readable {
     }
 }
 
-/// Whether `path` is an Aseprite file, by its first bytes.
-pub(crate) fn is_aseprite(path: &Path) -> bool {
-    let mut start = [0u8; 6];
-    std::fs::File::open(path)
-        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut start))
-        .is_ok_and(|()| frames::Format::detect(&start) == Some(frames::Format::Aseprite))
-}
-
-/// Whether `path` is an animated WebP, by its extended header's flags.
-fn is_animated_webp(path: &Path) -> bool {
-    let mut start = [0u8; 21];
-    std::fs::File::open(path)
-        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut start))
-        .is_ok_and(|()| {
-            (&start[..4], &start[8..16]) == (b"RIFF", b"WEBPVP8X") && start[20] & 0x02 != 0
-        })
-}
-
 /// The layers to show and hide, from the options that name them.
 pub fn layers(show: Option<&[String]>, hide: Option<&[String]>) -> Layers {
     let names = |list: Option<&[String]>| list.map(<[String]>::to_vec).unwrap_or_default();
@@ -154,7 +136,7 @@ pub(crate) fn not_aseprite(tag: Option<&str>, chosen: &Layers) -> Option<Error> 
 pub fn readable(input: &Input, options: &Options, cancel: &CancelToken) -> Result<Readable> {
     input.refuse_folder()?;
     let layers = layers(options.show_layers.as_deref(), options.hide_layers.as_deref());
-    let aseprite = matches!(input, Input::File(path) if is_aseprite(path));
+    let aseprite = matches!(input, Input::File(path) if sniff(path) == FileKind::Aseprite);
     if let Some(err) = not_aseprite(options.tag.as_deref(), &layers).filter(|_| !aseprite) {
         return Err(err);
     }
@@ -169,7 +151,7 @@ pub fn readable(input: &Input, options: &Options, cancel: &CancelToken) -> Resul
             art::aseprite(&bytes, options.tag.as_deref(), &layers, &Limits::default())
                 .map_err(|err| art::unreadable(path, err))?
         }
-        Input::File(path) if is_animated_webp(path) => {
+        Input::File(path) if sniff(path) == (FileKind::Webp { animated: true }) => {
             cancel.check()?;
             let bytes = art::read(path)?;
             let animation =

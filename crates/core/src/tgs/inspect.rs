@@ -7,18 +7,6 @@ pub use tgradish_tgs::check::{Issue, Stats};
 use crate::art;
 use crate::error::{Error, Result};
 
-/// Whether `path` is a `.tgs` sticker: by its extension, or for other
-/// names by starting like gzip.
-pub fn is_sticker(path: &Path) -> bool {
-    if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("tgs")) {
-        return true;
-    }
-    let mut start = [0u8; 2];
-    std::fs::File::open(path)
-        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut start))
-        .is_ok_and(|()| start == [0x1f, 0x8b])
-}
-
 /// The Lottie JSON of a `.tgs` (or plain Lottie JSON) file, and the
 /// file's size when it was packed.
 fn read_lottie(path: &Path) -> Result<(Vec<u8>, Option<usize>)> {
