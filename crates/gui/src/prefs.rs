@@ -11,6 +11,7 @@ use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::presets::{Format, Presets};
 
 use crate::l10n::{self, fl};
+use crate::media::Task;
 use crate::settings;
 use crate::widgets::{self, note, row, segments};
 
@@ -19,7 +20,11 @@ pub struct Prefs {
     open: bool,
     /// Whether the window of tgradish's version and licences is open.
     pub about: bool,
+    /// What checking ffmpeg found: whether it is ready, and what to say.
     ffmpeg_status: Option<(bool, String)>,
+    /// Checking ffmpeg, which runs it, on a thread of its own: stopped if
+    /// the dialog is opened again or the window closes.
+    checking: Option<Task<(bool, String)>>,
     /// What Save did: where the settings went, or why they didn't.
     saved: Option<Result<String, String>>,
     /// What the fields show while empty, found once the dialog opens: the
@@ -62,6 +67,10 @@ pub fn show(
 ) {
     if !prefs.open {
         return;
+    }
+    if let Some(found) = prefs.checking.as_ref().and_then(Task::poll) {
+        prefs.ffmpeg_status = Some(found.unwrap_or_else(|message| (false, message)));
+        prefs.checking = None;
     }
     let mut close = false;
     let modal = egui::Modal::new(egui::Id::new("settings")).show(ctx, |ui| {
@@ -144,10 +153,22 @@ fn sections(ui: &mut egui::Ui, prefs: &mut Prefs, config: &mut Config, presets: 
             }
         });
         ui.horizontal(|ui| {
-            if ui.button(fl!("check")).on_hover_text(fl!("check", "hint")).clicked() {
-                prefs.ffmpeg_status = Some(check_ffmpeg(config));
+            let check = egui::Button::new(fl!("check"));
+            let clicked = ui
+                .add_enabled(prefs.checking.is_none(), check)
+                .on_hover_text(fl!("check", "hint"))
+                .clicked();
+            if clicked {
+                let ffmpeg = config.ffmpeg.clone();
+                prefs.checking = Some(Task::spawn(ui.ctx(), move |cancel| {
+                    Ok(check_ffmpeg(ffmpeg.choice, ffmpeg.path.as_deref(), cancel))
+                }));
+                prefs.ffmpeg_status = None;
             }
-            if let Some((ok, status)) = &prefs.ffmpeg_status {
+            if prefs.checking.is_some() {
+                ui.spinner();
+                note(ui, fl!("checking-ffmpeg"));
+            } else if let Some((ok, status)) = &prefs.ffmpeg_status {
                 let colour = if *ok { widgets::GOOD } else { widgets::BAD };
                 ui.add(egui::Label::new(egui::RichText::new(status).color(colour)).truncate());
             }
@@ -268,12 +289,14 @@ fn sections(ui: &mut egui::Ui, prefs: &mut Prefs, config: &mut Config, presets: 
     }
 }
 
-fn check_ffmpeg(config: &Config) -> (bool, String) {
-    let backend = match Backend::select(config.ffmpeg.choice, config.ffmpeg.path.as_deref()) {
+/// Whether the ffmpeg chosen, or at `path`, can make stickers, and what to
+/// say of it. Runs it, so it may take a while.
+fn check_ffmpeg(choice: FfmpegChoice, path: Option<&Path>, cancel: &CancelToken) -> (bool, String) {
+    let backend = match Backend::select(choice, path) {
         Ok(backend) => backend,
         Err(err) => return (false, err.to_string()),
     };
-    match backend.capabilities(&CancelToken::new()) {
+    match backend.capabilities(cancel) {
         Ok(caps) => {
             // "ffmpeg version 8.0 Copyright (c) …", or "… (built in)", where
             // builds from ffmpeg's git tags say "n8.0"
@@ -322,5 +345,27 @@ mod tests {
         harness.run_steps(2);
         assert!(!harness.state().prefs.is_open() && harness.state().config.gui.forget_files);
         assert!(!Config::load(&path).unwrap().gui.forget_files);
+    }
+
+    #[test]
+    fn checks_ffmpeg_while_the_window_draws() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.ffmpeg.path = Some(dir.path().join("no-ffmpeg-here"));
+        let mut harness = crate::testing::harness(config);
+        harness.state_mut().prefs.open();
+        harness.run_steps(2);
+        harness.get_by_label("Check").click_accesskit();
+        harness.run_steps(2);
+        // what it finds is taken in as the window draws
+        for _ in 0..500 {
+            if harness.state().prefs.ffmpeg_status.is_some() {
+                break;
+            }
+            harness.step();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let status = harness.state().prefs.ffmpeg_status.clone();
+        assert!(matches!(status, Some((false, _))), "{status:?}");
     }
 }

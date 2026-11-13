@@ -685,6 +685,8 @@ for-example = For example: { $example }
 choose = Choose…
 check = Check
     .hint = Check whether this ffmpeg can make stickers
+# Beside Check, while the ffmpeg chosen is run to see what it can do.
+checking-ffmpeg = Checking…
 # What checking ffmpeg found, its version as "8.0".
 ffmpeg-ready = ffmpeg { $version } with VP9: ready
 ffmpeg-no-vp9 = ffmpeg { $version } can't encode VP9 with libvpx
