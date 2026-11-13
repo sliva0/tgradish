@@ -282,17 +282,7 @@ impl App {
             self.inspection = None;
         }
         if another {
-            self.pick_inspected();
-        }
-    }
-
-    /// Asks for a sticker to inspect.
-    pub(crate) fn pick_inspected(&mut self) {
-        if let Some(file) = rfd::FileDialog::new()
-            .add_filter(fl!("stickers-filter"), &["webm", "tgs", "webp"])
-            .pick_file()
-        {
-            self.inspection = Some(Inspection::of(&file));
+            self.pick(ctx, crate::files::Pick::Inspected);
         }
     }
 }

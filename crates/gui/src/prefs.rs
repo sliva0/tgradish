@@ -25,6 +25,8 @@ pub struct Prefs {
     /// What the fields show while empty, found once the dialog opens: the
     /// ffmpeg on PATH, and a folder results could go to.
     placeholders: (String, String),
+    /// A file dialog asked for, which the window opens.
+    pub pick: Option<crate::files::Pick>,
 }
 
 impl Prefs {
@@ -137,10 +139,8 @@ fn sections(ui: &mut egui::Ui, prefs: &mut Prefs, config: &mut Config, presets: 
             if ui.add(edit).changed() {
                 ffmpeg.path = (!text.trim().is_empty()).then(|| PathBuf::from(text.trim()));
             }
-            if ui.button(fl!("choose")).clicked()
-                && let Some(file) = rfd::FileDialog::new().pick_file()
-            {
-                ffmpeg.path = Some(file);
+            if ui.button(fl!("choose")).clicked() {
+                prefs.pick = Some(crate::files::Pick::Ffmpeg);
             }
         });
         ui.horizontal(|ui| {
@@ -176,10 +176,8 @@ fn sections(ui: &mut egui::Ui, prefs: &mut Prefs, config: &mut Config, presets: 
                 if ui.add(edit).changed() {
                     gui.output_dir = Some(PathBuf::from(text.trim()));
                 }
-                if ui.button(fl!("choose")).clicked()
-                    && let Some(dir) = rfd::FileDialog::new().pick_folder()
-                {
-                    gui.output_dir = Some(dir);
+                if ui.button(fl!("choose")).clicked() {
+                    prefs.pick = Some(crate::files::Pick::OutputDir);
                 }
             });
         });

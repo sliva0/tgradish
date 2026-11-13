@@ -47,7 +47,7 @@ pub(crate) fn convert(harness: &Harness<App>) {
     harness.get(egui_kittest::kittest::by().label_contains(&keys)).click();
 }
 
-/// Steps the window until no item is busy.
+/// Steps the window until no item is busy and no file dialog is open.
 pub(crate) fn finish(harness: &mut Harness<App>) {
     for _ in 0..6000 {
         harness.step();
@@ -55,7 +55,8 @@ pub(crate) fn finish(harness: &mut Harness<App>) {
         let reading = state.items.iter().any(|item| {
             item.video.is_loading() || item.art.is_loading() || item.result_clip.is_loading()
         });
-        if !reading && state.queue.is_empty() && state.items.iter().all(|item| item.job.is_none()) {
+        let idle = state.queue.is_empty() && state.picking.is_none();
+        if !reading && idle && state.items.iter().all(|item| item.job.is_none()) {
             harness.run_steps(2);
             return;
         }

@@ -2,15 +2,19 @@
 //! result and how converting it went, under the buttons that add files,
 //! inspect a sticker, and open the settings.
 
+use std::path::PathBuf;
+
 use eframe::egui::{self, Color32, FontId, RichText, vec2};
 use tgradish_core::presets::Format;
 use tgradish_core::{inputs, telegram};
 
 use crate::app::{App, set_theme};
 use crate::fonts::{drawable, missing_note, text_format};
+use crate::inspect::Inspection;
 use crate::item::Item;
 use crate::jobs::Status;
 use crate::l10n::fl;
+use crate::media::Task;
 use crate::{fallback, icon, theme, widgets};
 
 /// Side of the thumbnails in the list.
@@ -37,18 +41,11 @@ impl App {
 
     fn add_menu(&mut self, ui: &mut egui::Ui) {
         if ui.button(fl!("add-folder")).on_hover_text(fl!("add-folder", "hint")).clicked() {
-            if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                self.add(vec![dir]);
-            }
+            self.pick(ui.ctx(), Pick::Folder);
             ui.close();
         }
         if ui.button(fl!("add-images")).on_hover_text(fl!("add-images", "hint")).clicked() {
-            if let Some(files) = rfd::FileDialog::new()
-                .add_filter(fl!("images-filter"), &[inputs::IMAGES, inputs::ASEPRITE].concat())
-                .pick_files()
-            {
-                self.add_frames(files);
-            }
+            self.pick(ui.ctx(), Pick::Frames);
             ui.close();
         }
         if ui.button(fl!("add-pasted")).on_hover_text(fl!("add-pasted", "hint")).clicked() {
@@ -57,9 +54,48 @@ impl App {
         }
     }
 
-    fn pick_files(&mut self) {
-        if let Some(files) = rfd::FileDialog::new().pick_files() {
-            self.add(files);
+    /// Asks for something with one of the system's file dialogs, parented
+    /// to the window. It runs on a thread of its own, so the window keeps
+    /// drawing and converting meanwhile, and what is picked is taken in as
+    /// it draws. One at a time: while one is open, others aren't asked for.
+    pub(crate) fn pick(&mut self, ctx: &egui::Context, pick: Pick) {
+        if self.picking.is_some() {
+            return;
+        }
+        let dialog = self.file_dialog.clone();
+        let (images, stickers) = (fl!("images-filter"), fl!("stickers-filter"));
+        self.picking = Some(Task::spawn(ctx, move |_| {
+            Ok(match pick {
+                Pick::Files => dialog.pick_files().map(Picked::Files),
+                Pick::Folder => dialog.pick_folder().map(Picked::Folder),
+                Pick::Frames => dialog
+                    .add_filter(images, &[inputs::IMAGES, inputs::ASEPRITE].concat())
+                    .pick_files()
+                    .map(Picked::Frames),
+                // read here too, as large files take a moment
+                Pick::Inspected => dialog
+                    .add_filter(stickers, &["webm", "tgs", "webp"])
+                    .pick_file()
+                    .map(|file| Picked::Inspected(Box::new(Inspection::of(&file)))),
+                Pick::Ffmpeg => dialog.pick_file().map(Picked::Ffmpeg),
+                Pick::OutputDir => dialog.pick_folder().map(Picked::OutputDir),
+            })
+        }));
+    }
+
+    /// Takes in what a file dialog picked, once it closes.
+    pub(crate) fn take_picked(&mut self) {
+        let Some(result) = self.picking.as_ref().and_then(Task::poll) else { return };
+        self.picking = None;
+        match result {
+            Ok(Some(Picked::Files(files))) => self.add(files),
+            Ok(Some(Picked::Folder(dir))) => self.add(vec![dir]),
+            Ok(Some(Picked::Frames(files))) => self.add_frames(files),
+            Ok(Some(Picked::Inspected(inspection))) => self.inspection = Some(*inspection),
+            Ok(Some(Picked::Ffmpeg(file))) => self.config.ffmpeg.path = Some(file),
+            Ok(Some(Picked::OutputDir(dir))) => self.config.gui.output_dir = Some(dir),
+            Ok(None) => {}
+            Err(message) => self.message = Some(message),
         }
     }
 
@@ -75,14 +111,14 @@ impl App {
             }
             self.theme_button(ui);
             if ui.button("🔬").on_hover_text(fl!("inspect")).clicked() {
-                self.pick_inspected();
+                self.pick(ui.ctx(), Pick::Inspected);
             }
             // a split button: files, or the rest from its arrow
             ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.x = 1.0;
                 ui.menu_button("⏷", |ui| self.add_menu(ui));
                 if ui.button(fl!("add-files")).clicked() {
-                    self.pick_files();
+                    self.pick(ui.ctx(), Pick::Files);
                 }
             });
             // the icon and name, where the buttons leave room for them
@@ -209,14 +245,13 @@ impl App {
                 let add = egui::Button::new(RichText::new(fl!("add-files")).strong())
                     .min_size(vec2(130.0, 34.0));
                 if ui.add(add).clicked() {
-                    self.pick_files();
+                    self.pick(ui.ctx(), Pick::Files);
                 }
                 if ui
                     .add(egui::Button::new(fl!("add-folder")).min_size(vec2(150.0, 34.0)))
                     .clicked()
-                    && let Some(dir) = rfd::FileDialog::new().pick_folder()
                 {
-                    self.add(vec![dir]);
+                    self.pick(ui.ctx(), Pick::Folder);
                 }
                 if ui
                     .add(egui::Button::new(fl!("paste")).min_size(vec2(90.0, 34.0)))
@@ -228,6 +263,33 @@ impl App {
             });
         });
     }
+}
+
+/// What a file dialog asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Pick {
+    /// Files to add, each its own.
+    Files,
+    /// A folder of frames to add.
+    Folder,
+    /// Images to add as one animation.
+    Frames,
+    /// A sticker to inspect.
+    Inspected,
+    /// The ffmpeg program, for Settings.
+    Ffmpeg,
+    /// The folder for results, for Settings.
+    OutputDir,
+}
+
+/// What a file dialog picked, for what it asked.
+pub(crate) enum Picked {
+    Files(Vec<PathBuf>),
+    Folder(PathBuf),
+    Frames(Vec<PathBuf>),
+    Inspected(Box<Inspection>),
+    Ffmpeg(PathBuf),
+    OutputDir(PathBuf),
 }
 
 /// What a row's own buttons ask for.
@@ -462,6 +524,36 @@ mod tests {
 
     use super::*;
     use crate::testing::{convert, finish, harness, square, video};
+
+    #[test]
+    fn takes_in_what_a_file_dialog_picked() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a.png"), dir.path().join("b.png"));
+        square(&a, [255, 0, 0, 255]);
+        square(&b, [0, 0, 255, 255]);
+        let mut harness = harness(Config::default());
+        // as a dialog answers, a moment later, while the window draws on
+        let (answer, picked) = std::sync::mpsc::channel();
+        let ctx = harness.ctx.clone();
+        harness.state_mut().picking =
+            Some(Task::spawn(&ctx, move |_| picked.recv().map_err(|err| err.to_string())));
+        harness.run_steps(3);
+        // another isn't asked for meanwhile
+        harness.state_mut().pick(&ctx, Pick::Files);
+        assert!(harness.state().items.is_empty());
+        answer.send(Some(Picked::Frames(vec![a, b]))).unwrap();
+        finish(&mut harness);
+        let app = harness.state();
+        assert!(app.picking.is_none());
+        assert_eq!((app.items.len(), app.items[0].inputs.len()), (1, 2));
+        // what Settings asks for goes there
+        let ctx = harness.ctx.clone();
+        let folder = dir.path().join("out");
+        harness.state_mut().picking =
+            Some(Task::spawn(&ctx, move |_| Ok(Some(Picked::OutputDir(folder)))));
+        finish(&mut harness);
+        assert_eq!(harness.state().config.gui.output_dir, Some(dir.path().join("out")));
+    }
 
     #[test]
     fn shows_results_of_last_time_in_the_list() {

@@ -72,6 +72,10 @@ pub(crate) struct App {
     pub(crate) screen: Screen,
     pub(crate) inset: Inset,
     pub(crate) prefs: prefs::Prefs,
+    /// The file dialog open, if one is, on a thread of its own.
+    pub(crate) picking: Option<crate::media::Task<Option<crate::files::Picked>>>,
+    /// A file dialog parented to the window, to ask with.
+    pub(crate) file_dialog: rfd::FileDialog,
     /// A dialog of the user's presets, open over the window.
     pub(crate) preset_dialog: Option<preset_dialogs::Dialog>,
     pub(crate) inspection: Option<inspect::Inspection>,
@@ -234,6 +238,8 @@ impl App {
             screen: Screen::default(),
             inset: Inset::default(),
             prefs: prefs::Prefs::default(),
+            picking: None,
+            file_dialog: rfd::FileDialog::new(),
             preset_dialog: None,
             inspection: None,
             prefs_theme: None,
@@ -434,7 +440,8 @@ impl App {
 
     /// Whether a dialog is open over the window.
     pub(crate) fn dialog_open(&self) -> bool {
-        self.prefs.is_open()
+        self.picking.is_some()
+            || self.prefs.is_open()
             || self.prefs.about
             || self.inspection.is_some()
             || self.preset_dialog.is_some()
@@ -504,8 +511,11 @@ impl eframe::App for App {
         }
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // file dialogs stay over the window, which they are modal for
+        self.file_dialog = rfd::FileDialog::new().set_parent(frame);
+        self.take_picked();
         self.outputs.borrow_mut().clear();
         self.follow_accent(&ctx);
         if !self.config.gui.smooth_scrolling {
@@ -535,6 +545,9 @@ impl eframe::App for App {
             self.config_path.as_deref(),
             &self.presets,
         );
+        if let Some(pick) = self.prefs.pick.take() {
+            self.pick(&ctx, pick);
+        }
         // as Settings or the theme button changes it
         if self.prefs_theme != Some(self.config.gui.theme) {
             set_theme(&ctx, self.config.gui.theme);
