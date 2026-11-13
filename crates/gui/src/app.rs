@@ -96,7 +96,8 @@ pub(crate) struct App {
     /// The window's icon on Wayland, kept while the window shows it.
     #[cfg(all(unix, not(target_os = "macos")))]
     pub(crate) _toplevel_icon: Option<toplevel_icon::ToplevelIcon>,
-    /// Files are being dragged over the window, as Wayland reports it.
+    /// Files are being dragged over the window, as egui or, on Wayland,
+    /// the window's own listener reports it.
     pub(crate) hovering: bool,
     /// Share of the main panel's height the preview takes.
     pub(crate) preview_share: f32,

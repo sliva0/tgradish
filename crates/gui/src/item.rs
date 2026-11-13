@@ -461,7 +461,8 @@ pub struct Item {
     /// The last conversion, if it failed, was stopped or found a file in
     /// the way: newer than `made`.
     pub failed: Option<Conversion>,
-    /// A finished WebM result, decoded.
+    /// The result's frames: a WebM's decoded, a picture's read, or a
+    /// `.tgs`'s as drawn when it was made.
     pub result_clip: Load<Clip>,
     pub result_thumb: Option<egui::TextureHandle>,
     /// What converting would make now, worked out each frame, as presets
@@ -515,10 +516,8 @@ impl Item {
         }
     }
 
-    /// The tags and layers of an Aseprite input, as read for the current
-    /// format.
-    /// Its tags, layers, and how long each of its frames shows, as read for
-    /// the current format.
+    /// An Aseprite input's tags, layers, and how long each of its frames
+    /// shows, as read for the current format.
     pub fn aseprite(&self) -> Option<(&[Tag], &[LayerInfo], &[f64])> {
         if self.kind != Kind::Aseprite {
             return None;
