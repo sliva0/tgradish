@@ -264,6 +264,25 @@ pub(crate) enum Recipe {
     Webp(Options),
 }
 
+impl Recipe {
+    pub(crate) fn format(&self) -> Format {
+        match self {
+            Recipe::Webm(_) => Format::Webm,
+            Recipe::Tgs(_) => Format::Tgs,
+            Recipe::Webp(_) => Format::Webp,
+        }
+    }
+
+    /// What it makes: a sticker or an emoji.
+    pub(crate) fn target(&self) -> Target {
+        match self {
+            Recipe::Webm(options) | Recipe::Webp(options) => options.target,
+            Recipe::Tgs(options) => options.target,
+        }
+        .unwrap_or_default()
+    }
+}
+
 /// `options` without the values of settings that are hidden or greyed
 /// out, as `effective`, everything a conversion gets, shows them: they are
 /// kept for when they show again, but have no say until then. What has no
@@ -426,7 +445,10 @@ impl Framing {
 pub(crate) struct Conversion {
     pub(crate) job: Job,
     pub(crate) format: Format,
-    pub(crate) choices: Choices,
+    /// The choices it is made with, which come to its recipe as it starts;
+    /// `None` for the result of an earlier run, which only its recipe
+    /// tells.
+    pub(crate) choices: Option<Choices>,
     /// What the choices came to as it started; `None` before, or where
     /// they couldn't be made into one.
     pub(crate) recipe: Option<Recipe>,
@@ -434,7 +456,12 @@ pub(crate) struct Conversion {
 
 impl Conversion {
     pub(crate) fn of(job: Job, format: Format, choices: Choices) -> Conversion {
-        Conversion { job, format, choices, recipe: None }
+        Conversion { job, format, choices: Some(choices), recipe: None }
+    }
+
+    /// The result of an earlier run, made with `recipe`.
+    pub(crate) fn earlier(job: Job, recipe: Recipe) -> Conversion {
+        Conversion { job, format: recipe.format(), choices: None, recipe: Some(recipe) }
     }
 }
 

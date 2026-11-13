@@ -68,11 +68,9 @@ struct SavedResult {
     /// The file as the window wrote it, by which it knows its own result
     /// again; `None` for one it found.
     written: Option<FileVersion>,
-    format: Format,
-    choices: Choices,
-    /// What it was made with, to tell whether it is still what converting
-    /// would make.
-    recipe: Option<Recipe>,
+    /// What it was made with, in the format it was made in, to tell
+    /// whether it is still what converting would make.
+    recipe: Recipe,
 }
 
 /// A session's files, open again.
@@ -355,6 +353,9 @@ impl Session {
             .iter()
             .map(|item| {
                 let made = item.last_result().filter(|made| made.job.output.to_str().is_some());
+                // every result has one: a conversion that has none fails
+                // as it starts
+                let made = made.and_then(|made| Some((made, made.recipe.clone()?)));
                 Saved {
                     // a pasted image is opened from its copy
                     inputs: if item.pasted_copy.is_some() {
@@ -367,15 +368,13 @@ impl Session {
                     format: item.format,
                     format_guessed: item.format_guessed,
                     choices: item.choices.clone(),
-                    result: made.map(|made| SavedResult {
+                    result: made.map(|(made, recipe)| SavedResult {
                         output: made.job.output.clone(),
                         written: written
                             .get(&made.job.output)
                             .filter(|written| written.item == item.id)
                             .map(|written| written.version),
-                        format: made.format,
-                        choices: made.choices.clone(),
-                        recipe: made.recipe.clone(),
+                        recipe,
                     }),
                 }
             })
@@ -436,9 +435,7 @@ fn restore_item(saved: Saved, path: &Path, id: u64) -> Option<Item> {
     item.choices = saved.choices;
     // read again as the window draws, as the file may have gone or changed
     item.earlier = saved.result.map(|result| {
-        let mut made = Conversion::of(Job::waiting(result.output), result.format, result.choices);
-        made.recipe = result.recipe;
-        (made, Load::Idle)
+        (Conversion::earlier(Job::waiting(result.output), result.recipe), Load::Idle)
     });
     Some(item)
 }
@@ -695,7 +692,7 @@ mod tests {
     }
 
     #[test]
-    fn names_results_as_their_formats_are_named() {
+    fn names_results_by_their_recipes_alone() {
         let mut item = Item::new(1, vec![PathBuf::from("/a.png")], false, Target::Sticker);
         let job = Job::waiting("/a.sticker.webp".into());
         let mut made = Conversion::of(job, Format::Webp, item.choices.clone());
@@ -703,6 +700,12 @@ mod tests {
         item.earlier = Some((made, Load::Idle));
         let json = session(&[item], None).to_json().unwrap();
         assert!(json.contains(r#""recipe":{"webp":{"#), "{json}");
+        // which is all it says of how it was made
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let result = value["items"][0]["result"].as_object().unwrap();
+        let mut keys: Vec<&str> = result.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["output", "recipe", "written"]);
     }
 
     #[cfg(unix)]
