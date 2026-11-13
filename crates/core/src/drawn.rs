@@ -16,9 +16,9 @@ use crate::CancelToken;
 use crate::backend::Backend;
 use crate::error::{Error, FileAction, Result};
 use crate::ffmpeg::Probe;
-use crate::options::Options;
 use crate::source::{self, Aseprite};
 use crate::tgs::DEFAULT_FPS;
+use crate::webm::Options;
 
 /// An input as ffmpeg reads it: the file itself, or pixel art drawn into a
 /// temporary PNG, which lasts as long as this does.

@@ -250,7 +250,7 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().prefs = crate::prefs::Prefs::default();
 
     // naming a preset: as a built-in one, as one that is there, wrongly
-    let mine = (&tgradish_core::options::Options::default(), &Default::default());
+    let mine = (&tgradish_core::webm::Options::default(), &Default::default());
     tgradish_core::presets::save(&presets_dir, "mine", "", mine, false).unwrap();
     harness.state_mut().presets = Presets::load(Some(&presets_dir)).unwrap();
     harness.state_mut().presets_dir = Some(presets_dir);

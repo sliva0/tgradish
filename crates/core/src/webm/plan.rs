@@ -119,8 +119,8 @@ pub fn read_from(start: f64, previous: f64) -> f64 {
 /// that still moves.
 pub fn default_fit_range(fit: Fit, fps: f64, length: f64) -> Range {
     match fit {
-        Fit::Auto | Fit::Bitrate | Fit::Off => Range { min: 8.0, max: options::HIGHEST_BITRATE },
-        Fit::Crf => Range { min: 4.0, max: f64::from(*options::CRFS.end()) },
+        Fit::Auto | Fit::Bitrate | Fit::Off => Range { min: 8.0, max: super::HIGHEST_BITRATE },
+        Fit::Crf => Range { min: 4.0, max: f64::from(*super::CRFS.end()) },
         Fit::Fps => Range { min: 1.0, max: fps.floor().max(1.0) },
         Fit::Length => Range { min: length.min(0.1), max: length },
     }
@@ -243,7 +243,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     }
 
     let spoof = o.spoof_or_default();
-    let fake_duration = o.fake_duration.unwrap_or(options::DEFAULT_FAKE_DURATION);
+    let fake_duration = o.fake_duration.unwrap_or(super::DEFAULT_FAKE_DURATION);
     if !(fake_duration > 0.0 && fake_duration <= telegram::MAX_SECONDS) {
         let reason = format!("must be more than 0 and at most {} seconds", telegram::MAX_SECONDS);
         return Err(Error::invalid("fake-duration", reason));
@@ -301,9 +301,9 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         None => played_fps(source.fps_or_default(), tempo),
     };
 
-    let crf = o.crf.unwrap_or(options::DEFAULT_CRF);
-    if !options::CRFS.contains(&crf) {
-        let (low, high) = (options::CRFS.start(), options::CRFS.end());
+    let crf = o.crf.unwrap_or(super::DEFAULT_CRF);
+    if !super::CRFS.contains(&crf) {
+        let (low, high) = (super::CRFS.start(), super::CRFS.end());
         return Err(Error::invalid("crf", format!("must be between {low} and {high}")));
     }
     let bitrate = match o.bitrate {
@@ -315,16 +315,16 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     };
 
     let fit = o.fit_or_default();
-    let attempts = o.attempts.unwrap_or(options::DEFAULT_ATTEMPTS);
-    if !(1..=options::MAX_ATTEMPTS).contains(&attempts) {
-        let reason = format!("must be between 1 and {}", options::MAX_ATTEMPTS);
+    let attempts = o.attempts.unwrap_or(super::DEFAULT_ATTEMPTS);
+    if !(1..=super::MAX_ATTEMPTS).contains(&attempts) {
+        let reason = format!("must be between 1 and {}", super::MAX_ATTEMPTS);
         return Err(Error::invalid("attempts", reason));
     }
     let lossless = o.lossless_or_default();
     if lossless && !matches!(fit, Fit::Fps | Fit::Length | Fit::Off) {
         return Err(Error::invalid("lossless", "only works with fit fps, length or off"));
     }
-    let in_effect = options::in_effect(o.clone(), o);
+    let in_effect = super::in_effect(o.clone(), o);
     let fitting = serde_json::to_value(fit).ok().and_then(|v| v.as_str().map(str::to_owned));
     let fitting = fitting.unwrap_or_default();
     for (key, asked, kept) in [
@@ -393,8 +393,9 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::options::{ExactScale, Options};
+    use crate::options::ExactScale;
     use crate::picture::{exact_sizes, sizes};
+    use crate::webm::Options;
 
     fn source(duration: f64) -> Probe {
         Probe {

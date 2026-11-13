@@ -3,10 +3,11 @@
 //! made from a video has only the frame it is made of.
 
 use eframe::egui;
-use tgradish_core::options::{DEFAULT_FAKE_DURATION, Spoof, TEMPOS};
+use tgradish_core::options::{Spoof, TEMPOS};
 use tgradish_core::presets::Format;
 use tgradish_core::telegram;
 use tgradish_core::tgs;
+use tgradish_core::webm::DEFAULT_FAKE_DURATION;
 
 use super::Context;
 use crate::item::{Item, Kind};

@@ -29,8 +29,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, FileAction, Result};
-use crate::options::{Fit, Options, Speed};
+use crate::options::{Fit, Speed};
 use crate::tgs::TgsOptions;
+use crate::webm::Options;
 
 /// The built-in presets' names, fastest first.
 pub const BUILTIN: [&str; 3] = ["fast", "balanced", "best"];

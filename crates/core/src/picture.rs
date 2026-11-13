@@ -5,8 +5,9 @@
 use crate::CancelToken;
 use crate::backend::{Backend, FramesRequest};
 use crate::error::{Error, Result};
-use crate::options::{Crop, ExactScale, Options, Resize, Scaling};
+use crate::options::{Crop, ExactScale, Resize, Scaling};
 use crate::telegram::{self, Target};
+use crate::webm::Options;
 use crate::webm::Plan;
 
 fn even(value: f64) -> u32 {

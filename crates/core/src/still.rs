@@ -16,9 +16,9 @@ use serde::Serialize;
 use crate::CancelToken;
 use crate::backend::Backend;
 use crate::error::{Error, Result};
-use crate::options::Options;
 use crate::picture;
 use crate::telegram::{self, Issue, Target};
+use crate::webm::Options;
 use crate::webm::{self, Plan, Request};
 
 /// The input with a `.sticker.webp` or `.emoji.webp` extension.

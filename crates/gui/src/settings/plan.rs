@@ -4,11 +4,12 @@
 //! nothing of how it encodes.
 
 use eframe::egui;
-use tgradish_core::options::{Crop, Options, Resize, Spoof};
+use tgradish_core::options::{Crop, Resize, Spoof};
 use tgradish_core::picture;
 use tgradish_core::presets::Format;
 use tgradish_core::telegram;
 use tgradish_core::tgs::TgsOptions;
+use tgradish_core::webm::Options;
 
 use tgradish_tgs::frames::aseprite::Direction;
 

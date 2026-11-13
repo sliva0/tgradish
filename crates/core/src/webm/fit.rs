@@ -344,8 +344,9 @@ pub fn run(plan: &Plan, encoder: &mut dyn Encoder) -> Result<Attempt> {
 mod tests {
     use super::*;
     use crate::ffmpeg::Probe;
-    use crate::options::{Options, Range};
+    use crate::options::Range;
     use crate::telegram::MAX_STICKER_BYTES as MAX_BYTES;
+    use crate::webm::Options;
     use crate::webm::{Request, plan};
 
     /// Pretends to encode: bitrate encodes overshoot their target by 3%,

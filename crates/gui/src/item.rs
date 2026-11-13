@@ -6,10 +6,11 @@ use crate::config::Config;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use tgradish_core::inputs;
-use tgradish_core::options::{Crop, Options, Resize, Scaling};
+use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::Target;
 use tgradish_core::tgs::TgsOptions;
+use tgradish_core::webm::Options;
 use tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 
 use crate::jobs::{Done, Job};
@@ -238,7 +239,7 @@ pub enum Recipe {
 /// kept for when they show again, but have no say until then. What has no
 /// say by how fitting uses it core says; the window adds its own rows'.
 pub fn shown(options: Options, effective: &Options) -> Options {
-    let mut options = tgradish_core::options::in_effect(options, effective);
+    let mut options = tgradish_core::webm::in_effect(options, effective);
     // a scale of whole multiples, which keeps the whole picture
     if effective.scaling != Some(Scaling::PixelPerfect) {
         options.exact_scale = None;
