@@ -1,5 +1,5 @@
 //! WebM video stickers and emoji: converting into them, as VP9 fitted to
-//! the size limit ([`fit`]), and what their container holds
+//! the size limit, and what their container holds
 //! ([`container`]).
 //!
 //! [`convert`] runs synchronously and reports [`Event`]s through a callback.
@@ -22,19 +22,18 @@
 
 pub mod container;
 mod events;
-pub mod fit;
+mod fit;
 mod options;
 mod plan;
 
 pub use events::{Event, Params, Rate};
+pub use fit::first_params;
 pub use options::{
     CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, DEFAULT_FAKE_DURATION, HIGHEST_BITRATE, MAX_ATTEMPTS,
     Options, in_effect,
 };
-pub use plan::{
-    Plan, default_fit_range, encoded_length, estimate_bitrate, frame_count, plan, played_fps,
-    read_from,
-};
+pub use plan::{Plan, default_fit_range, frame_count, plan, played_fps, read_from};
+pub(crate) use plan::{encoded_length, estimate_bitrate};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

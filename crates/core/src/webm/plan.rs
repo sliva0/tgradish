@@ -135,7 +135,7 @@ pub fn played_fps(input_fps: f64, tempo: f64) -> f64 {
 }
 
 /// Duration of [`frame_count`] frames, as written into the file header.
-pub fn encoded_length(length: f64, fps: f64) -> f64 {
+pub(crate) fn encoded_length(length: f64, fps: f64) -> f64 {
     frame_count(length, fps) as f64 / fps
 }
 
@@ -199,7 +199,7 @@ fn check_fit_range(
 }
 
 /// Bitrate in kbit/s that should land a bit under `limit` bytes.
-pub fn estimate_bitrate(length: f64, limit: u64) -> f64 {
+pub(crate) fn estimate_bitrate(length: f64, limit: u64) -> f64 {
     // leaves room for container overhead and encoder overshoot
     limit as f64 * 8.0 / length / 1000.0 * 0.93
 }

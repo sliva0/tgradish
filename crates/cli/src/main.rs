@@ -91,7 +91,7 @@ pub fn explain(err: tgradish_core::Error) -> anyhow::Error {
         Error::FfmpegNotFound(FfmpegMissing::NotOnPath) => {
             anyhow!("{err}: install them or pass --ffmpeg PATH")
         }
-        Error::FfmpegNotFound(FfmpegMissing::NotBuiltIn | FfmpegMissing::BuiltInIsNoProgram) => {
+        Error::FfmpegNotFound(FfmpegMissing::NotBuiltIn) => {
             anyhow!("{err}: use --ffmpeg-from system or --ffmpeg PATH")
         }
         Error::FfmpegArgsNeedProgram => anyhow!(

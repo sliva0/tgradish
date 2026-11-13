@@ -485,7 +485,8 @@ mod tests {
         let item = &harness.state().items[0];
         assert!(matches!(made_job(item).status, Status::Done(_)));
         let out = dir.path().join("out").join("clip.sticker.webp");
-        assert_eq!(webp::dimensions(&out).unwrap(), (512, 384));
+        let info = webp::inspect_file(&out).unwrap();
+        assert_eq!((info.width, info.height), (512, 384));
         assert!(item.result_clip.ready().is_some());
         harness.get_by_label_contains("Telegram should accept it");
     }

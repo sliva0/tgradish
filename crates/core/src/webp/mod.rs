@@ -10,9 +10,11 @@
 mod encode;
 mod inspect;
 
-pub use encode::{Encoding, encode};
+pub use encode::Encoding;
+#[cfg(test)]
+pub(crate) use encode::encode;
 use encode::{fit, with_xmp, xmp};
-pub use inspect::{Info, creator_tool, dimensions, inspect_file, preview};
+pub use inspect::{Info, creator_tool, inspect_file, preview};
 
 use std::path::PathBuf;
 

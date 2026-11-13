@@ -205,7 +205,7 @@ fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String
     if picture::turns_sharp(&request.options, plan.enlarges(), looks) {
         plan.scaling = Scaling::Sharp;
     }
-    let params = tgradish_core::webm::fit::first_params(&plan);
+    let params = tgradish_core::webm::first_params(&plan);
     Ok(tgradish_core::ffmpeg::commands(&plan, &params)
         .iter()
         .map(|args| {

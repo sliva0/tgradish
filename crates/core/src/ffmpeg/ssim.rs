@@ -16,7 +16,7 @@ use crate::webm::Plan;
 /// frame rate. The source drives the comparison and the attempt's frames are
 /// repeated in between, so lower frame rates lose points on frames they
 /// skip. Returns SSIM from 0 to 1, ignoring alpha.
-pub fn ssim(
+pub(crate) fn ssim(
     ffmpeg: &Ffmpeg,
     plan: &Plan,
     candidate: &Path,

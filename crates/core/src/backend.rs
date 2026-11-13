@@ -84,8 +84,8 @@ pub enum BackendInfo {
 impl Backend {
     /// Picks the backend for `choice`, or the executables at `path`.
     pub fn select(choice: FfmpegChoice, path: Option<&Path>) -> Result<Backend> {
-        if path.is_some() {
-            return Ok(Backend::Process(ffmpeg::locate(choice, path)?));
+        if let Some(path) = path {
+            return Ok(Backend::Process(Ffmpeg::at(path)?));
         }
         match choice {
             #[cfg(feature = "linked")]
@@ -94,7 +94,7 @@ impl Backend {
             FfmpegChoice::Builtin => {
                 Err(Error::FfmpegNotFound(crate::error::FfmpegMissing::NotBuiltIn))
             }
-            choice => Ok(Backend::Process(ffmpeg::locate(choice, None)?)),
+            _ => Ok(Backend::Process(Ffmpeg::on_path()?)),
         }
     }
 

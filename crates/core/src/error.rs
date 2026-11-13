@@ -141,9 +141,6 @@ pub enum FfmpegMissing {
     /// The built-in ffmpeg was asked for, which this build doesn't have.
     #[error("this tgradish build has no built-in ffmpeg")]
     NotBuiltIn,
-    /// The built-in ffmpeg was asked for as programs, which it isn't.
-    #[error("the built-in ffmpeg is not an executable")]
-    BuiltInIsNoProgram,
     /// A video was to be read, but no ffmpeg was given to read it.
     #[error("{} is a video, which ffmpeg reads", .0.display())]
     ForVideo(PathBuf),

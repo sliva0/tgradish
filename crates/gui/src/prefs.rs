@@ -39,7 +39,7 @@ pub struct Prefs {
 
 impl Prefs {
     pub fn open(&mut self) {
-        let ffmpeg = match tgradish_core::ffmpeg::locate(FfmpegChoice::System, None) {
+        let ffmpeg = match tgradish_core::ffmpeg::Ffmpeg::on_path() {
             Ok(found) => fl!("ffmpeg-found", path = found.ffmpeg.display().to_string()),
             Err(_) if cfg!(windows) => fl!("for-example", example = r"C:\ffmpeg\bin"),
             Err(_) => fl!("for-example", example = "/usr/local/bin/ffmpeg"),
