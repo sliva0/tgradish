@@ -228,6 +228,7 @@ mod tests {
         let context = Context {
             presets,
             config,
+            ffmpeg: config.ffmpeg.clone(),
             extra_args: true,
             output: None,
             config_path: None,

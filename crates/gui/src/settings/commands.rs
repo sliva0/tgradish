@@ -62,7 +62,7 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
     }
     // .tgs from pixel art needs no ffmpeg; from a video it does
     if item.format != Format::Tgs || item.kind == Kind::Video {
-        let ffmpeg = &context.config.ffmpeg;
+        let ffmpeg = &context.ffmpeg;
         let from = match ffmpeg.choice {
             FfmpegChoice::Auto => None,
             FfmpegChoice::System => Some("system"),
@@ -223,6 +223,7 @@ fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tgradish_core::config::FfmpegConfig;
 
     #[test]
     fn names_what_the_window_runs_with() {
@@ -231,11 +232,14 @@ mod tests {
 
         let presets = Presets::builtin();
         let mut config = Config::default();
-        config.ffmpeg.choice = FfmpegChoice::System;
+        config.ffmpeg.path = Some("/saved/ffmpeg".into());
         config.preset = Some("best".into());
+        // the command line that started the window chose the system's,
+        // over the one the settings name
         let context = Context {
             presets: &presets,
             config: &config,
+            ffmpeg: FfmpegConfig { choice: FfmpegChoice::System, path: None },
             extra_args: true,
             output: None,
             config_path: Some(std::path::Path::new("/elsewhere/config.toml")),
@@ -251,7 +255,7 @@ mod tests {
             ),
             "{line}"
         );
-        assert!(line.contains(" --preset best"), "{line}");
+        assert!(line.contains(" --preset best") && !line.contains("/saved"), "{line}");
 
         // .tgs needs no ffmpeg, and its preset is the format's own
         let mut art = Item::new(2, vec!["art.gif".into()], false, Target::Sticker);
@@ -277,6 +281,12 @@ mod tests {
             let read = "--tag\nidle\n--hide-layers\nsketch\n--hide-layers\nback, old";
             assert!(line.contains(read), "{format:?}: {line:?}");
         }
+
+        // a program it was given, by its path
+        let given =
+            FfmpegConfig { choice: FfmpegChoice::System, path: Some("/given/ffmpeg".into()) };
+        let line = command_line(&video, &Context { ffmpeg: given, ..plain }).join(" ");
+        assert!(line.starts_with("tgradish --ffmpeg /given/ffmpeg convert pig.mp4"), "{line}");
     }
 
     #[test]
@@ -294,6 +304,7 @@ mod tests {
         let context = Context {
             presets: &presets,
             config: &config,
+            ffmpeg: config.ffmpeg.clone(),
             extra_args: false,
             output: None,
             config_path: default_config.as_deref(),

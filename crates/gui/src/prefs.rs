@@ -57,11 +57,13 @@ impl Prefs {
     }
 }
 
-/// Shows the dialog if it is open.
+/// Shows the dialog if it is open. `ffmpeg_given` says the command line
+/// that started the window chose its ffmpeg, over the settings'.
 pub fn show(
     ctx: &egui::Context,
     prefs: &mut Prefs,
     config: &mut Config,
+    ffmpeg_given: bool,
     config_path: Option<&Path>,
     presets: &Presets,
 ) {
@@ -87,7 +89,7 @@ pub fn show(
         // the dialog fits the window, its settings scrolling within
         let room = (ctx.content_rect().height() - 150.0).max(200.0);
         egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
-            sections(ui, prefs, config, presets);
+            sections(ui, prefs, config, ffmpeg_given, presets);
         });
         ui.separator();
         ui.horizontal(|ui| {
@@ -123,8 +125,17 @@ pub fn show(
     }
 }
 
-fn sections(ui: &mut egui::Ui, prefs: &mut Prefs, config: &mut Config, presets: &Presets) {
+fn sections(
+    ui: &mut egui::Ui,
+    prefs: &mut Prefs,
+    config: &mut Config,
+    ffmpeg_given: bool,
+    presets: &Presets,
+) {
     widgets::section(ui, "ffmpeg");
+    if ffmpeg_given {
+        note(ui, fl!("ffmpeg-given"));
+    }
     let builtin = Backend::select(FfmpegChoice::Builtin, None).is_ok();
     row(ui, &fl!("ffmpeg-use"), &fl!("ffmpeg-use", "hint"), Ok(()), |ui| {
         let choices = [
@@ -159,6 +170,9 @@ fn sections(ui: &mut egui::Ui, prefs: &mut Prefs, config: &mut Config, presets: 
                 .on_hover_text(fl!("check", "hint"))
                 .clicked();
             if clicked {
+                // the settings being edited, even where the command line
+                // chose another ffmpeg for this run: Check sits beside
+                // them, and Save keeps them
                 let ffmpeg = config.ffmpeg.clone();
                 prefs.checking = Some(Task::spawn(ui.ctx(), move |cancel| {
                     Ok(check_ffmpeg(ffmpeg.choice, ffmpeg.path.as_deref(), cancel))
@@ -353,8 +367,12 @@ mod tests {
         let mut config = Config::default();
         config.ffmpeg.path = Some(dir.path().join("no-ffmpeg-here"));
         let mut harness = crate::testing::harness(config);
+        // the command line's choice is used, and said to be, but the
+        // setting is what is checked
+        harness.state_mut().ffmpeg_override = (Some(FfmpegChoice::System), None);
         harness.state_mut().prefs.open();
         harness.run_steps(2);
+        harness.get_by_label_contains("ffmpeg its command line gave");
         harness.get_by_label("Check").click_accesskit();
         harness.run_steps(2);
         // what it finds is taken in as the window draws

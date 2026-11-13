@@ -288,7 +288,7 @@ impl App {
 
     /// Which ffmpeg to use and where, as the settings and the command line
     /// say: as on the command line, a path beats a choice.
-    fn ffmpeg_settings(&self) -> (FfmpegChoice, Option<PathBuf>) {
+    pub(crate) fn ffmpeg_settings(&self) -> (FfmpegChoice, Option<PathBuf>) {
         let ffmpeg = &self.config.ffmpeg;
         match &self.ffmpeg_override {
             (choice, Some(path)) => (choice.unwrap_or(ffmpeg.choice), Some(path.clone())),
@@ -539,10 +539,12 @@ impl eframe::App for App {
                 self.files_panel(ui);
             });
         egui::CentralPanel::default().show(ui, |ui| self.main_panel(ui));
+        let ffmpeg_given = self.ffmpeg_override != (None, None);
         prefs::show(
             &ctx,
             &mut self.prefs,
             &mut self.config,
+            ffmpeg_given,
             self.config_path.as_deref(),
             &self.presets,
         );
