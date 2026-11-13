@@ -29,6 +29,7 @@ const DEFAULT_TIMESTAMP_SCALE: u64 = 1_000_000;
 
 /// What is wrong with a WebM's bytes, for reading or patching them.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum WebmError {
     #[error("malformed WebM: {0}")]
     Ebml(#[from] EbmlError),

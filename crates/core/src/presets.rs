@@ -163,6 +163,7 @@ fn builtin() -> Vec<Preset> {
 
 /// Why a preset can't be had, or saved, renamed or described as asked.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum PresetError {
     /// No preset has the name; `known` are those that do.
     #[error("unknown preset {name:?}, available: {}", known.join(", "))]

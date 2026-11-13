@@ -245,6 +245,7 @@ impl TgsOptions {
 /// line.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "event", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
+#[non_exhaustive]
 pub enum TgsEvent {
     /// The input is read: what normalising found and did.
     Started {

@@ -104,6 +104,7 @@ pub fn params(params: &Params) -> String {
         Rate::Bitrate(kbps) => format!("{} kbit/s", decimal(kbps)),
         Rate::Crf(crf) => format!("crf {crf}"),
         Rate::Lossless => "lossless".into(),
+        rate => format!("{rate:?}"),
     };
     format!("{}, {}, {rate}", fps(params.fps), seconds(params.length))
 }

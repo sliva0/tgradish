@@ -177,6 +177,8 @@ fn issue_text(issue: &telegram::Issue, target: telegram::Target) -> String {
             fl!("issue-too-many-fps", fps = format!("{fps:.2}"), limit = format!("{max:.0}"))
         }
         Issue::Animated => fl!("issue-animated"),
+        // what the window has no words of its own for, as core says it
+        issue => issue.to_string(),
     }
 }
 
@@ -544,7 +546,7 @@ fn run(
                 TgsEvent::Warning { message } => update(Box::new(move |progress| {
                     progress.warnings.push(message);
                 })),
-                TgsEvent::Finished { .. } | TgsEvent::Error { .. } => {}
+                _ => {}
             })?;
             Ok(Done {
                 output: outcome.output,

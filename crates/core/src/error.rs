@@ -11,6 +11,7 @@ use crate::presets::PresetError;
 use crate::webm::WebmError;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("ffmpeg not found: {0}")]
     FfmpegNotFound(FfmpegMissing),

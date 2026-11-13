@@ -77,6 +77,7 @@ impl Target {
 /// limit is 262144","bytes":300000,"max":262144}`.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(into = "Reported")]
+#[non_exhaustive]
 pub enum Issue {
     NotWebm {
         doc_type: String,
