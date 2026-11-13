@@ -6,9 +6,9 @@ use crate::config::Config;
 use eframe::egui::{self, RichText};
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{ExactScale, Scaling};
+use tgradish_core::picture;
 use tgradish_core::presets::Format;
 use tgradish_core::webm::Options;
-use tgradish_core::{picture, webm};
 
 use super::Context;
 use crate::item::{Item, Kind};
@@ -172,30 +172,12 @@ pub(super) fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     );
 }
 
-/// What converting the item to WebM would ask for, and plans to make.
-pub(super) fn planned(
-    item: &Item,
-    context: &Context,
-) -> Result<(webm::Request, webm::Plan), String> {
-    let video = item.video.ready().ok_or_else(|| fl!("no-ffmpeg-commands", "unread"))?;
-    let options = item.choices.webm_options(context.presets, context.config)?;
-    let request = webm::Request {
-        input: item.input(),
-        output: context.output.clone(),
-        options,
-        overwrite: true,
-        keep_temp: false,
-    };
-    let (plan, _) = webm::plan(&request, video.probe.clone()).map_err(|err| err.to_string())?;
-    Ok((request, plan))
-}
-
 fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String> {
     if matches!(item.kind, Kind::Aseprite | Kind::Frames) {
         return Err(fl!("no-ffmpeg-commands", "art"));
     }
     let video = item.video.ready().ok_or_else(|| fl!("no-ffmpeg-commands", "unread"))?;
-    let (request, mut plan) = planned(item, context)?;
+    let (request, mut plan) = super::webm::planned(item, context)?;
     // as converting decides it, guessed from the frames the window has
     // read, which are those converting reads unless the input is long
     let clip = &video.overview;
