@@ -487,16 +487,25 @@ fn cancels_running_conversion() {
         let request = Request { output: Some(output.clone()), ..Request::new(input.clone()) };
         let cancel = CancelToken::new();
 
-        let start = std::time::Instant::now();
+        // timed from the cancel, so a loaded machine slow to get that far
+        // doesn't fail it
+        let mut cancelled = None;
         let result = convert(backend, &request, &cancel.clone(), &mut |event| {
             if let Event::Progress { fraction, .. } = event
                 && fraction > 0.1
+                && cancelled.is_none()
             {
                 cancel.cancel();
+                cancelled = Some(std::time::Instant::now());
             }
         });
+        let stopping = cancelled.expect("cancelled once it got going").elapsed();
         assert!(matches!(result, Err(Error::Cancelled)), "{}: {result:?}", name(backend));
-        assert!(start.elapsed().as_secs() < 10);
+        assert!(
+            stopping.as_secs() < 10,
+            "{}: stopped {stopping:?} after the cancel",
+            name(backend)
+        );
         assert!(!output.exists());
     }
 }
