@@ -349,13 +349,13 @@ impl Part {
 
     fn show(self, ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         match (self, item.format) {
-            (Part::Aseprite, _) => aseprite(ui, item, context),
+            (Part::Aseprite, _) => aseprite(ui, item),
             (Part::Picture, _) => picture(ui, item, context),
             (Part::Time, Format::Webp) => frame(ui, item, context.in_frames),
             (Part::Time, _) => time(ui, item, context),
             (Part::Quality, Format::Webm) => webm_quality(ui, item, context),
             (Part::Quality, Format::Tgs) => tgs_quality(ui, item, context),
-            (Part::Reading, _) => reading(ui, item, context),
+            (Part::Reading, _) => reading(ui, item),
             (Part::Advanced, _) => advanced(ui, item, context),
             (Part::Quality, Format::Webp) => {}
         }
