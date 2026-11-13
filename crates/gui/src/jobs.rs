@@ -542,7 +542,7 @@ fn run(
                 output: outcome.output,
                 bytes: outcome.bytes,
                 limit: tgs::MAX_BYTES,
-                lossy: outcome.lossy,
+                lossy: outcome.changed,
                 kept: None,
                 spoofed: false,
                 json_bytes: Some(outcome.json_bytes),

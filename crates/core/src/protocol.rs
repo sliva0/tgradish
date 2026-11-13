@@ -221,7 +221,7 @@ mod tests {
                 output: "art.sticker.tgs".into(),
                 bytes: 60_000,
                 json_bytes: 300_000,
-                lossy: true,
+                changed: true,
                 steps: vec![step],
                 layers: 3,
                 rectangles: 40,
