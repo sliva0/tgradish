@@ -13,7 +13,7 @@ use tgradish_core::webp;
 use crate::app::App;
 use crate::files::THUMB;
 use crate::item::{Conversion, Item, Kind, Recipe, Show};
-use crate::jobs::{Done, Plan, Status};
+use crate::jobs::{Done, Setup, Status};
 use crate::media::{self, Art, Clip, Load, Video};
 use crate::outputs::Written;
 
@@ -215,14 +215,14 @@ impl App {
             let Some(item) = self.item(id) else { continue };
             let Some(Conversion { job, format, choices, .. }) = &item.job else { continue };
             let recipe = choices.recipe(*format, &self.presets, &self.config);
-            let plan = recipe.clone().and_then(|recipe| match recipe {
+            let setup = recipe.clone().and_then(|recipe| match recipe {
                 Recipe::Webm(options) => {
-                    backend.clone().map(|backend| Plan::Webm { options, backend })
+                    backend.clone().map(|backend| Setup::Webm { options, backend })
                 }
                 // ffmpeg, for videos
-                Recipe::Tgs(options) => Ok(Plan::Tgs { options, backend: backend.clone().ok() }),
+                Recipe::Tgs(options) => Ok(Setup::Tgs { options, backend: backend.clone().ok() }),
                 Recipe::Image(options) => {
-                    backend.clone().map(|backend| Plan::Image { options, backend })
+                    backend.clone().map(|backend| Setup::Image { options, backend })
                 }
             });
             let overwrite = self.may_replace(id, &job.output);
@@ -233,10 +233,10 @@ impl App {
             let conversion = item.job.as_mut().expect("found above");
             conversion.recipe = recipe.ok();
             let job = &mut conversion.job;
-            match plan {
-                Ok(plan) => {
+            match setup {
+                Ok(setup) => {
                     job.replaces = replaces;
-                    job.start(plan, input, overwrite, ctx);
+                    job.start(setup, input, overwrite, ctx);
                     return;
                 }
                 Err(message) => {

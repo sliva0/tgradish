@@ -22,7 +22,7 @@ use crate::l10n::fl;
 use crate::widgets;
 
 /// What a job converts with, fixed when it starts.
-pub enum Plan {
+pub enum Setup {
     Webm {
         options: Options,
         backend: Backend,
@@ -371,7 +371,7 @@ impl Job {
     }
 
     /// Starts converting on a worker thread, which repaints `ctx` as it goes.
-    pub fn start(&mut self, plan: Plan, input: Input, overwrite: bool, ctx: &egui::Context) {
+    pub fn start(&mut self, setup: Setup, input: Input, overwrite: bool, ctx: &egui::Context) {
         let (sender, receiver) = channel();
         self.messages = Some(receiver);
         self.status = Status::Running;
@@ -387,7 +387,7 @@ impl Job {
             let update =
                 |change: Box<dyn FnOnce(&mut Progress) + Send>| send(Message::Progress(change));
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                run(plan, input, output, overwrite, &cancel, &update)
+                run(setup, input, output, overwrite, &cancel, &update)
             }));
             send(match result {
                 Ok(result) => Message::Finished(result),
@@ -457,7 +457,7 @@ impl Job {
 type Update<'a> = &'a dyn Fn(Box<dyn FnOnce(&mut Progress) + Send>);
 
 fn run(
-    plan: Plan,
+    setup: Setup,
     input: Input,
     output: PathBuf,
     overwrite: bool,
@@ -472,12 +472,12 @@ fn run(
         })?;
     }
     let output = Some(output);
-    match plan {
-        Plan::Webm { options, backend } => {
+    match setup {
+        Setup::Webm { options, backend } => {
             let request = webm::Request { input, output, options, overwrite, keep_temp: false };
             convert_webm(&request, backend, cancel, update)
         }
-        Plan::Image { options, backend } => {
+        Setup::Image { options, backend } => {
             let target = options.target.unwrap_or_default();
             let request = webp::Request { input, output, options, overwrite };
             let outcome = webp::convert(&backend, &request, cancel, &mut |event| {
@@ -499,7 +499,7 @@ fn run(
                 preview,
             })
         }
-        Plan::Tgs { options, backend } => {
+        Setup::Tgs { options, backend } => {
             let exact = options.exact_or_default();
             let request = tgs::Request { input, output, options, overwrite };
             update(Box::new(move |progress| {
