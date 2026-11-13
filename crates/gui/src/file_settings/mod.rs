@@ -187,8 +187,7 @@ pub(crate) fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
             for (name, description) in own {
-                let response =
-                    widgets::choice(ui, chosen == name, name, 150.0, description.is_ok());
+                let response = widgets::choice(ui, chosen == name, name, description.is_ok());
                 let response = match description {
                     Err(_) => response.on_disabled_hover_text(fl!("preset", "broken")),
                     Ok(description) if !description.is_empty() => response.on_hover_text(fl!(

@@ -147,7 +147,8 @@ impl App {
             self.items.iter().filter(|item| !item.is_busy() && !item.result_is_current()).count();
         egui::Panel::bottom("files-footer").show(ui, |ui| {
             ui.add_space(6.0);
-            ui.horizontal(|ui| {
+            // onto a second line where longer words leave no room
+            ui.horizontal_wrapped(|ui| {
                 if ui
                     .add_enabled(
                         changed > 0,

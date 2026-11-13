@@ -74,7 +74,9 @@ impl App {
         let mut in_frames = self.config.gui.timeline_frames;
         let mut look = self.config.gui.result_preview;
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
-        egui::Panel::top("preview").exact_size(preview_height).show(ui, |ui| {
+        // the line under it is the handle's, which moves it
+        let panel = egui::Panel::top("preview").exact_size(preview_height);
+        panel.show_separator_line(false).show(ui, |ui| {
             ui.horizontal_top(|ui| {
                 // less the gap between the two, with its line
                 let room = ui.available_width() - 30.0;
@@ -114,9 +116,12 @@ impl App {
                                 ui.set_max_width(side - 12.0);
                                 ui.add_space(6.0);
                                 file_settings::make(ui, item, &context);
-                                file_settings::plan(ui, item, &context);
+                                // what converting did, where the eye is once
+                                // Convert is pressed, before the plan, which
+                                // matters most before there is a result
                                 summary(ui, item, queued);
                                 details(ui, item);
+                                file_settings::plan(ui, item, &context);
                             });
                     },
                 );
@@ -275,8 +280,11 @@ fn preview(
                 let level = if zoomed { level } else { level.weak() };
                 ui.add_sized(vec2(ZOOM_LEVEL, 18.0), egui::Label::new(level));
             }
-            if has_result && !item.result_is_current() {
-                // the mark alone where the word doesn't fit
+            let mark = widgets::text_width(ui, "⚠", 4.0);
+            if has_result && !item.result_is_current() && ui.available_width() >= mark {
+                // the mark alone where the word doesn't fit, and nothing
+                // where it doesn't either: the list and the column beside
+                // say so too
                 let text = format!("⚠ {}", fl!("outdated"));
                 let text = if ui.available_width() >= widgets::text_width(ui, &text, 4.0) {
                     text
