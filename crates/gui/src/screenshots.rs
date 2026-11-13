@@ -196,7 +196,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         steps: vec![tgradish_tgs::sticker::Step {
             reduction: tgradish_tgs::reduce::Reduction::MergeColours { distance: 0.02 },
             bytes: 110_000,
-            error: 0.01,
+            distortion: 0.01,
         }],
         ..jobs::Progress::default()
     };
