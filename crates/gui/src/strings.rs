@@ -176,18 +176,18 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
         attempts: 8,
         limit: 256 * 1024,
     });
-    let params = |rate| tgradish_core::events::Params { fps: 30.0, length: 1.0, rate };
+    let params = |rate| tgradish_core::webm::Params { fps: 30.0, length: 1.0, rate };
     running.progress.attempts = vec![
         Attempt {
             number: 1,
-            params: params(tgradish_core::events::Rate::Bitrate(2400.0)),
+            params: params(tgradish_core::webm::Rate::Bitrate(2400.0)),
             bytes: Some(300_000),
             fits: false,
             ssim: None,
         },
         Attempt {
             number: 2,
-            params: params(tgradish_core::events::Rate::Bitrate(1900.0)),
+            params: params(tgradish_core::webm::Rate::Bitrate(1900.0)),
             bytes: None,
             fits: false,
             ssim: None,

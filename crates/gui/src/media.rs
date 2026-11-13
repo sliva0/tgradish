@@ -119,7 +119,7 @@ impl Clip {
     /// a photo or video: few colours in its first frames.
     pub fn looks_like_pixel_art(&self) -> bool {
         let frames = &self.frames[..self.frames.len().min(8)];
-        tgradish_core::convert::has_few_colours(frames, self.width, None, TGS_COLOURS)
+        tgradish_core::picture::has_few_colours(frames, self.width, None, TGS_COLOURS)
     }
 }
 
@@ -130,7 +130,7 @@ fn next_id() -> u64 {
 
 /// More colours than this in the first frames is not pixel art to make a
 /// `.tgs` of. Stricter than auto scaling's
-/// [`PIXEL_ART_COLOURS`](tgradish_core::convert::PIXEL_ART_COLOURS): each
+/// [`PIXEL_ART_COLOURS`](tgradish_core::picture::PIXEL_ART_COLOURS): each
 /// colour of a `.tgs` costs bytes of its own, while sharp scaling takes any
 /// number.
 const TGS_COLOURS: usize = 128;

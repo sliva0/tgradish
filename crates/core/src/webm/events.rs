@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::convert::Plan;
+use super::Plan;
+use crate::protocol::Failure;
 use crate::telegram::Issue;
 
 /// Rate control used by one encode. Serialised tagged by `mode`, as
@@ -116,17 +117,4 @@ pub enum Event {
     /// A conversion, or the whole command, failed. Only printed by the
     /// CLI; the library returns errors instead.
     Error(Failure),
-}
-
-/// Why a conversion, or the whole command, failed: the error event of
-/// every stream `convert --json`, `watch --json` and `inspect --json`
-/// print, the same in each. Only printed by the CLI; the library returns
-/// errors instead.
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-pub struct Failure {
-    pub message: String,
-    /// The input that failed, `None` when the whole command did.
-    #[serde(serialize_with = "crate::protocol::serialize_optional_path")]
-    pub input: Option<PathBuf>,
 }

@@ -5,9 +5,8 @@
 
 use std::path::PathBuf;
 
-use crate::convert::{Plan, estimate_bitrate};
+use super::{Params, Plan, Rate, estimate_bitrate};
 use crate::error::{Error, Result};
-use crate::events::{Params, Rate};
 use crate::options::Fit;
 
 /// Stop searching once a fitting attempt uses this much of the limit.
@@ -344,10 +343,10 @@ pub fn run(plan: &Plan, encoder: &mut dyn Encoder) -> Result<Attempt> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::convert::{Request, plan};
     use crate::ffmpeg::Probe;
     use crate::options::{Options, Range};
     use crate::telegram::MAX_STICKER_BYTES as MAX_BYTES;
+    use crate::webm::{Request, plan};
 
     /// Pretends to encode: bitrate encodes overshoot their target by 3%,
     /// constant quality encodes shrink 9% per CRF step. SSIM rewards bits per

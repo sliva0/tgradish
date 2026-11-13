@@ -3,8 +3,8 @@
 //! too, so what it shows is what converting makes.
 
 use eframe::egui;
-use tgradish_core::convert;
 use tgradish_core::options::{Crop, ExactScale, Options, Resize, Scaling};
+use tgradish_core::picture;
 use tgradish_core::presets::Format;
 use tgradish_core::telegram::Target;
 
@@ -104,13 +104,13 @@ fn scalings() -> [Choice<Scaling>; 4] {
 /// Where a `crop` of the input lands in a WebM or image result made with
 /// `options`, everything the conversion gets; `None` when its exact scale
 /// can't make it.
-pub(crate) fn webm_sizes(options: &Options, crop: Crop) -> Option<convert::Sizes> {
-    convert::picture_sizes(options, (crop.width, crop.height)).ok()
+pub(crate) fn webm_sizes(options: &Options, crop: Crop) -> Option<picture::Sizes> {
+    picture::picture_sizes(options, (crop.width, crop.height)).ok()
 }
 
 /// How a WebM or image result made with `options` fills its box.
 pub(crate) fn resize_of(options: &Options) -> Resize {
-    options.resize.unwrap_or(convert::default_resize(options.target.unwrap_or_default()))
+    options.resize.unwrap_or(picture::default_resize(options.target.unwrap_or_default()))
 }
 
 /// The size an exact scale holds the crop to, for a WebM or image result
@@ -187,7 +187,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 let squares = squares();
                 // cropping or stretching, which an exact scale sets aside:
                 // shown as what is made instead, and kept until changed
-                let default = convert::default_resize(target);
+                let default = picture::default_resize(target);
                 let made = |resize: Resize| match resize {
                     Resize::Crop | Resize::Stretch if exact.is_some() => default,
                     resize => resize,
@@ -698,7 +698,7 @@ fn integer_scale(
 
 /// The whole multiples a `used` picture is scaled by, as ×3, or each way
 /// where stretching makes them differ.
-fn multiples(sizes: &convert::Sizes, used: (u32, u32)) -> String {
+fn multiples(sizes: &picture::Sizes, used: (u32, u32)) -> String {
     let across = sizes.scaled.0 / used.0.max(1);
     let down = sizes.scaled.1 / used.1.max(1);
     if across == down {
@@ -766,10 +766,10 @@ mod tests {
         assert_eq!(largest_scale(Target::Emoji, (64, 40)), ExactScale { up: 1, down: 1 });
         assert_eq!(largest_scale(Target::Sticker, (1920, 1080)), ExactScale { up: 1, down: 4 });
         // stretched, each way by its own multiple
-        let padded = convert::sizes(Target::Sticker, Resize::Pad, Scaling::PixelPerfect, (64, 40));
+        let padded = picture::sizes(Target::Sticker, Resize::Pad, Scaling::PixelPerfect, (64, 40));
         assert_eq!(multiples(&padded, (64, 40)), "×8");
         let stretched =
-            convert::sizes(Target::Sticker, Resize::Stretch, Scaling::PixelPerfect, (64, 40));
+            picture::sizes(Target::Sticker, Resize::Stretch, Scaling::PixelPerfect, (64, 40));
         assert_eq!(multiples(&stretched, (64, 40)), fl!("scale-each-way", across = 8, down = 12));
     }
 

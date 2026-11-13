@@ -8,9 +8,9 @@
 use std::ffi::OsString;
 use std::path::Path;
 
-use crate::convert::{Plan, frame_count};
-use crate::events::{Params, Rate};
 use crate::options::Scaling;
+use crate::webm::{Params, Rate};
+use crate::webm::{Plan, frame_count};
 
 /// Formats a number for ffmpeg without float noise like `0.30000000000000004`.
 fn num(value: f64) -> String {

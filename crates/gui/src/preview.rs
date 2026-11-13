@@ -6,8 +6,8 @@
 use crate::config::ResultPreview;
 use eframe::egui::{self, Color32, Rect, RichText, pos2, vec2};
 use tgradish_core::backend::Backend;
-use tgradish_core::convert;
 use tgradish_core::options::{Crop, Options, Resize, Scaling};
+use tgradish_core::picture;
 use tgradish_core::presets::Format;
 use tgradish_core::telegram;
 use tgradish_core::tgs::TgsOptions;
@@ -449,7 +449,7 @@ fn preview(
                                         predict::looks_like_art(clip, where_, start)
                                     })
                                 };
-                                if convert::turns_sharp(webm, sizes.enlarges(used), looks) {
+                                if picture::turns_sharp(webm, sizes.enlarges(used), looks) {
                                     sizes.scaling = Scaling::Sharp;
                                 }
                                 let key = inset_key((clip.id, frame, where_, sizes));

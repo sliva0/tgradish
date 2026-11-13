@@ -7,13 +7,13 @@ use std::sync::mpsc::{Receiver, channel};
 use eframe::egui;
 use tgradish_core::CancelToken;
 use tgradish_core::backend::Backend;
-use tgradish_core::convert::{Request, convert};
-use tgradish_core::events::{Event, Params};
 use tgradish_core::options::Options;
 use tgradish_core::presets::Format;
 use tgradish_core::preview::Preview;
 use tgradish_core::still;
 use tgradish_core::tgs::{self, TgsEvent, TgsOptions, TgsRequest};
+use tgradish_core::webm::{Event, Params};
+use tgradish_core::webm::{Request, convert};
 use tgradish_core::{Error, FfmpegMissing, telegram};
 use tgradish_tgs::check::{Issue, Severity};
 use tgradish_tgs::normalise::Report;
@@ -670,7 +670,7 @@ mod tests {
         // a WebM by encodes done of those it may take, and the one at work
         let plan =
             WebmPlan { width: 512, height: 512, fps: 30.0, length: 1.0, attempts: 4, limit: 1 };
-        let params = Params { fps: 30.0, length: 1.0, rate: tgradish_core::events::Rate::Crf(30) };
+        let params = Params { fps: 30.0, length: 1.0, rate: tgradish_core::webm::Rate::Crf(30) };
         let attempt = |bytes| Attempt { number: 1, params, bytes, fits: false, ssim: None };
         let mut progress = Progress {
             webm: Some(plan),

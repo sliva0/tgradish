@@ -4,10 +4,10 @@
 
 use crate::config::Config;
 use eframe::egui::{self, RichText};
-use tgradish_core::convert;
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{Options, Scaling};
 use tgradish_core::presets::Format;
+use tgradish_core::{picture, webm};
 
 use super::Context;
 use crate::item::{Item, Kind};
@@ -100,7 +100,7 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
         webm.lossless = Some(false);
     }
     if base.resize.is_some() && effective.resize.is_none() {
-        webm.resize = Some(convert::default_resize(choices.target));
+        webm.resize = Some(picture::default_resize(choices.target));
     }
     // and one it can't be told to set aside: then everything the window
     // uses goes on the command line, over a built-in preset that sets
@@ -175,10 +175,10 @@ pub(super) fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
 pub(super) fn planned(
     item: &Item,
     context: &Context,
-) -> Result<(convert::Request, convert::Plan), String> {
+) -> Result<(webm::Request, webm::Plan), String> {
     let video = item.video.ready().ok_or_else(|| fl!("no-ffmpeg-commands", "unread"))?;
     let options = item.choices.webm_options(context.presets, context.config)?;
-    let request = convert::Request {
+    let request = webm::Request {
         input: item.inputs[0].clone(),
         sequence: None,
         output: context.output.clone(),
@@ -186,7 +186,7 @@ pub(super) fn planned(
         overwrite: true,
         keep_temp: false,
     };
-    let (plan, _) = convert::plan(&request, video.probe.clone()).map_err(|err| err.to_string())?;
+    let (plan, _) = webm::plan(&request, video.probe.clone()).map_err(|err| err.to_string())?;
     Ok((request, plan))
 }
 
@@ -202,10 +202,10 @@ fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String
     let size = (video.probe.width, video.probe.height);
     let part = crate::predict::Part::of(plan.crop, size, (clip.width, clip.height));
     let looks = || crate::predict::looks_like_art(clip, part, plan.start);
-    if convert::turns_sharp(&request.options, plan.enlarges(), looks) {
+    if picture::turns_sharp(&request.options, plan.enlarges(), looks) {
         plan.scaling = Scaling::Sharp;
     }
-    let params = tgradish_core::fit::first_params(&plan);
+    let params = tgradish_core::webm::fit::first_params(&plan);
     Ok(tgradish_core::ffmpeg::commands(&plan, &params)
         .iter()
         .map(|args| {

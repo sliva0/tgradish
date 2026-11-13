@@ -12,13 +12,13 @@ use common::{backends, clip, name};
 use tgradish_core::CancelToken;
 use tgradish_core::Error;
 use tgradish_core::backend::{Backend, FramesRequest};
-use tgradish_core::convert::{Request, convert};
-use tgradish_core::events::Event;
 use tgradish_core::ffmpeg;
 use tgradish_core::mark::made_by_tgradish;
 use tgradish_core::options::{Crop, Fit, Options, Resize, Scaling, Speed};
 use tgradish_core::telegram::{self, Target};
+use tgradish_core::webm::Event;
 use tgradish_core::webm::container;
+use tgradish_core::webm::{Request, convert};
 use tgradish_corpus::Clip;
 
 fn fast(fit: Fit) -> Options {
@@ -579,7 +579,7 @@ fn cancelled_before_start_runs_nothing() {
 
 #[test]
 fn ssim_penalizes_dropped_frames() {
-    use tgradish_core::convert::plan;
+    use tgradish_core::webm::plan;
 
     let Some(backends) = backends() else { return };
     let dir = tempfile::tempdir().unwrap();
@@ -1049,7 +1049,7 @@ fn counts_time_from_where_the_video_starts() {
             let even: Vec<f64> = (0..10).map(|index| late + f64::from(index) / 10.0).collect();
             assert!(near(&starts, &even), "{name}: {starts:?}");
             // all of it, and frames 5 to 7
-            let start = tgradish_core::convert::read_from(even[5], even[4]);
+            let start = tgradish_core::webm::read_from(even[5], even[4]);
             for (part, frames) in [((None, None), 10), ((Some(start), Some(0.3)), 3)] {
                 let request = Request {
                     output: Some(dir.path().join(format!("{name}-{frames}.webm"))),
@@ -1267,7 +1267,7 @@ fn sequences_keep_every_frame_at_any_rate() {
         let probe = drawn.probe(backend, &cancel).unwrap();
         let rate = fps.unwrap_or(tgradish_core::tgs::DEFAULT_FPS);
         assert_eq!(probe.fps, Some(rate));
-        tgradish_core::convert::frame_count(probe.duration.unwrap_or_default(), rate)
+        tgradish_core::webm::frame_count(probe.duration.unwrap_or_default(), rate)
     };
     for backend in &backends {
         // rates whose frames' times round down in APNG, up, and don't divide

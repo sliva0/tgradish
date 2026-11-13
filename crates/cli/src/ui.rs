@@ -2,7 +2,7 @@
 //! stdout.
 
 use console::style;
-use tgradish_core::events::{Params, Rate};
+use tgradish_core::webm::{Params, Rate};
 
 /// A line like cargo's: `verb`, coloured and right-aligned in 12 columns,
 /// then `text`.

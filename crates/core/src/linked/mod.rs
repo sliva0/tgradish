@@ -17,12 +17,12 @@ use ffmpeg_next as ff;
 use self::source::Source;
 use crate::CancelToken;
 use crate::backend::{Pass, pass_log_file};
-use crate::convert::{Plan, frame_count};
 use crate::error::{Error, FileAction, Result};
-use crate::events::{Params, Rate};
 use crate::ffmpeg::{Capabilities, Output, Probe};
 use crate::ffmpeg::{Facts, Orientation, frames_filter, picture_filter, read_seconds};
 use crate::ffmpeg::{ssim_graph, video_filter};
+use crate::webm::{Params, Rate};
+use crate::webm::{Plan, frame_count};
 
 /// Turns an ffmpeg error into ours, saying what was being done.
 fn libav(doing: &'static str) -> impl Fn(ff::Error) -> Error {

@@ -10,7 +10,7 @@ use tgradish_core::options::{
 
 use crate::config::Config;
 use tgradish_core::presets::Presets;
-use tgradish_core::{convert, telegram};
+use tgradish_core::{telegram, webm};
 
 use super::{Context, commands};
 use crate::item::{Choices, Item};
@@ -153,7 +153,7 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
         let searched = || {
             let (fps, length) = commands::planned(item, context)
                 .map_or((30.0, telegram::MAX_SECONDS), |(_, plan)| (plan.fps, plan.length));
-            convert::default_fit_range(fit, fps, length)
+            webm::default_fit_range(fit, fps, length)
         };
         item.choices.webm.fit_range = Some(inherited.unwrap_or_else(searched));
     }

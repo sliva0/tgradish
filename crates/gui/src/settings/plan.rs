@@ -4,8 +4,8 @@
 //! nothing of how it encodes.
 
 use eframe::egui;
-use tgradish_core::convert;
 use tgradish_core::options::{Crop, Options, Resize, Spoof};
+use tgradish_core::picture;
 use tgradish_core::presets::Format;
 use tgradish_core::telegram;
 use tgradish_core::tgs::TgsOptions;
@@ -119,7 +119,7 @@ fn read(item: &Item, used: &Used, steps: &mut Vec<String>) {
 /// How a `used` picture is scaled, stretched, cut and padded into a WebM
 /// or image result.
 fn picture(options: &Options, used: (u32, u32)) -> Vec<String> {
-    let Ok(sizes) = convert::picture_sizes(options, used) else { return Vec::new() };
+    let Ok(sizes) = picture::picture_sizes(options, used) else { return Vec::new() };
     let mut steps = Vec::new();
     let scaled = sizes.scaled;
     if scaled != used {

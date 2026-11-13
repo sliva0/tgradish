@@ -10,9 +10,9 @@ use ffmpeg_next as ff;
 
 use super::{c_path, libav};
 use crate::CancelToken;
-use crate::convert::Plan;
 use crate::error::{Error, Result};
 use crate::ffmpeg::{Probe, Timing};
+use crate::webm::Plan;
 
 /// Frame rate still images are repeated at, like ffmpeg's image demuxer.
 const STILL_FPS: i32 = 25;

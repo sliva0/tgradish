@@ -130,7 +130,7 @@ pub(crate) fn frames(
 /// plan says, as straight RGBA of the plan's size.
 pub(crate) fn still(
     ffmpeg: &Ffmpeg,
-    plan: &crate::convert::Plan,
+    plan: &crate::webm::Plan,
     cancel: &CancelToken,
 ) -> crate::Result<Vec<u8>> {
     cancel.check()?;
