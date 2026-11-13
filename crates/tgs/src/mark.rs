@@ -22,10 +22,13 @@ use crate::lottie::{Animation, Item};
 /// out from the unrounded numbers, two rectangles of one top could come
 /// apart once their centres and sizes were rounded to 6 decimals, as those
 /// of art pixels a crop cut to a third do, and sort the other way round.
-type Key = [i64; 4];
+/// Wide enough that a file's numbers, which [`micro`] keeps within `i64`,
+/// can't overflow it.
+type Key = [i128; 4];
 
 fn key(centre: [i64; 2], size: [i64; 2]) -> Key {
-    [2 * centre[1] - size[1], 2 * centre[0] - size[0], size[1], size[0]]
+    let ([x, y], [width, height]) = (centre.map(i128::from), size.map(i128::from));
+    [2 * y - height, 2 * x - width, height, width]
 }
 
 /// A number the JSON holds in whole millionths. The reader's numbers have
@@ -200,6 +203,14 @@ mod tests {
                 items: vec![group(0), group(100)],
             }],
         }
+    }
+
+    #[test]
+    fn reads_rectangles_however_far_off_they_are() {
+        let rect = |x: &str| format!(r#"{{"ty":"rc","p":{{"k":[{x},{x}]}},"s":{{"k":[1,{x}]}}}}"#);
+        let far = ["1e300", "-1e20", "2", "0"].map(rect).join(",");
+        let json = format!(r#"{{"layers":[{{"shapes":[{{"ty":"gr","it":[{far}]}}]}}]}}"#);
+        assert_eq!(hidden_bits(json.as_bytes()).len(), 2);
     }
 
     #[test]
