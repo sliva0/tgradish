@@ -536,7 +536,9 @@ mod tests {
         let files = tgradish_corpus::files();
         for name in ["walker.gif", "glow.webp", "hammer_4x.gif"] {
             let bytes = &files.iter().find(|file| file.name == name).unwrap().bytes;
-            let input = tgradish_tgs::frames::decode(bytes, &Default::default(), &Default::default()).unwrap();
+            let input =
+                tgradish_tgs::frames::decode(bytes, &Default::default(), &Default::default())
+                    .unwrap();
             let (anim, _) = normalise(&input, &Options::default()).unwrap();
             let scene = tgradish_tgs::encode::runs(&anim);
             let json = lay_out(&scene, &anim, None, false).to_json(Style::default());
