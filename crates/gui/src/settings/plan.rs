@@ -15,7 +15,7 @@ use tgradish_tgs::frames::Direction;
 use super::Context;
 use crate::item::{Item, Kind};
 use crate::l10n::fl;
-use crate::widgets;
+use crate::{timeline, widgets};
 
 /// The steps, under a heading naming what the input is.
 pub fn plan(ui: &mut egui::Ui, item: &Item, context: &Context) {
@@ -164,8 +164,7 @@ fn art(options: &TgsOptions, steps: &mut Vec<String>) {
 /// is kept to Telegram's as `spoof` says.
 fn time(item: &Item, used: &Used, tempo: f64, spoof: Spoof, steps: &mut Vec<String>) {
     let Some(length) = item.input_length() else { return };
-    let start = used.start.unwrap_or(0.0).clamp(0.0, length);
-    let end = used.length.map_or(length, |used| (start + used).min(length));
+    let (start, end) = timeline::part(length, used.start, used.length);
     if start > 1e-6 || end < length - 1e-6 {
         // a range of seconds, with one unit
         let from = widgets::seconds(start).trim_end_matches(" s").to_owned();
