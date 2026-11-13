@@ -7,12 +7,10 @@ use anyhow::{Context as _, Result, bail};
 use console::style;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use tgradish_core::backend::Backend;
+use tgradish_core::input::Input;
 use tgradish_core::presets::{Format, FormatOptions, Presets};
-use tgradish_core::tgs;
-use tgradish_core::webm::Event;
-use tgradish_core::webm::Options;
-use tgradish_core::webm::{Request, convert, default_output};
-use tgradish_core::webp;
+use tgradish_core::webm::{self, Event, Options};
+use tgradish_core::{tgs, webp};
 
 use crate::Context;
 use crate::args::{ConversionArgs, ConvertArgs};
@@ -36,18 +34,17 @@ pub enum Failed {
     Folder { dir: PathBuf, error: std::io::Error },
 }
 
-/// Options of the format a command converts to.
-enum Resolved {
-    Webm { options: Options, backend: Backend },
-    Tgs { options: tgs::Options },
-    Webp { options: Options, backend: Backend },
-}
-
 /// Runs conversions with the options and output settings of one command.
 pub struct Converter<'a> {
     ctx: &'a Context,
     args: &'a ConversionArgs,
-    resolved: Resolved,
+    /// The format's options: the preset's, then `--options-json`'s, then
+    /// the flags'.
+    options: FormatOptions,
+    /// ffmpeg, found once for WebM and WebP, which need it for every
+    /// input, so that a missing one fails the command before any; `.tgs`
+    /// asks for it only for videos.
+    backend: Option<Backend>,
     /// Outputs written by this command, and their inputs, so two inputs
     /// with the same name never overwrite each other's result.
     written: RefCell<HashMap<PathBuf, PathBuf>>,
@@ -107,21 +104,19 @@ impl<'a> Converter<'a> {
             }
             Ok(options.merged(&args.options.to_options()))
         };
-        let resolved = match presets.resolve(name, format)? {
-            FormatOptions::Webm(options) => {
-                let backend = ctx.backend().map_err(crate::explain)?;
-                Resolved::Webm { options: webm(options)?, backend }
-            }
-            FormatOptions::Webp(options) => {
-                let backend = ctx.backend().map_err(crate::explain)?;
-                Resolved::Webp { options: webm(options)?, backend }
-            }
+        let options = match presets.resolve(name, format)? {
+            FormatOptions::Webm(options) => FormatOptions::Webm(webm(options)?),
+            FormatOptions::Webp(options) => FormatOptions::Webp(webm(options)?),
             FormatOptions::Tgs(mut options) => {
                 if let Some(json) = &json {
                     options = options.merged(&overlay(json, format)?);
                 }
-                Resolved::Tgs { options: options.merged(&args.options.to_tgs_options()) }
+                FormatOptions::Tgs(options.merged(&args.options.to_tgs_options()))
             }
+        };
+        let backend = match format {
+            Format::Webm | Format::Webp => Some(ctx.backend().map_err(crate::explain)?),
+            Format::Tgs => None,
         };
         if let Some(dir) = &args.output_dir {
             std::fs::create_dir_all(dir)
@@ -130,33 +125,20 @@ impl<'a> Converter<'a> {
         if ctx.global.json {
             listen_for_cancel(ctx);
         }
-        Ok(Self { ctx, args, resolved, written: Default::default() })
+        Ok(Self { ctx, args, options, backend, written: Default::default() })
     }
 
-    /// Where the result for `input` goes, unless `-o` says otherwise.
-    pub fn output_for(&self, input: &Path) -> PathBuf {
-        self.output_under(input, None)
-    }
-
-    /// Like [`Converter::output_for`], but keeps the directories between
-    /// `base` and the input when writing to `--output-dir`.
-    pub fn output_under(&self, input: &Path, base: Option<&Path>) -> PathBuf {
-        let output = match &self.resolved {
-            Resolved::Webm { options, .. } => {
-                default_output(input, options.target.unwrap_or_default())
-            }
-            Resolved::Tgs { options } => {
-                tgs::default_output(input, options.target.unwrap_or_default())
-            }
-            Resolved::Webp { options, .. } => {
-                webp::default_output(input, options.target.unwrap_or_default())
-            }
-        };
+    /// Where the result for `input` goes, unless `-o` says otherwise: as
+    /// core names it, in `--output-dir` when given, keeping the folders
+    /// between `base` and the input there.
+    pub fn output_for(&self, input: &Input, base: Option<&Path>) -> PathBuf {
+        let output = input.default_output(self.options.format(), self.options.target());
         let (Some(dir), Some(name)) = (&self.args.output_dir, output.file_name()) else {
             return output;
         };
+        let parent = input.first().parent();
         let relative =
-            base.and_then(|base| input.parent()?.strip_prefix(base).ok()).unwrap_or(Path::new(""));
+            base.and_then(|base| parent?.strip_prefix(base).ok()).unwrap_or(Path::new(""));
         dir.join(relative).join(name)
     }
 
@@ -164,29 +146,25 @@ impl<'a> Converter<'a> {
         self.args.overwrite
     }
 
-    /// Converts one input, printing events as text or JSON.
-    pub fn run(
-        &self,
-        input: &Path,
-        output: Option<PathBuf>,
-        overwrite: bool,
-    ) -> Result<(), Failed> {
-        self.run_inputs(&[input.to_path_buf()], false, output, overwrite)
+    /// The ffmpeg found for the command, or else the one it would use.
+    fn backend(&self) -> tgradish_core::Result<Backend> {
+        match &self.backend {
+            Some(backend) => Ok(backend.clone()),
+            None => self.ctx.backend(),
+        }
     }
 
-    /// Converts `inputs`: one file, or with `sequence` the frames of one
-    /// animated sticker.
-    pub fn run_inputs(
+    /// Converts `input`, printing events as text or JSON.
+    pub fn run(
         &self,
-        inputs: &[PathBuf],
-        sequence: bool,
+        input: &Input,
         output: Option<PathBuf>,
         overwrite: bool,
     ) -> Result<(), Failed> {
-        let input = &inputs[0];
-        let output = output.unwrap_or_else(|| self.output_for(input));
+        let output = output.unwrap_or_else(|| self.output_for(input, None));
         let key = std::path::absolute(&output).unwrap_or_else(|_| output.clone());
-        let input_key = std::path::absolute(input).unwrap_or_else(|_| input.to_path_buf());
+        let first = input.first();
+        let input_key = std::path::absolute(first).unwrap_or_else(|_| first.to_path_buf());
         if let Some(other) = self.written.borrow().get(&key)
             && *other != input_key
         {
@@ -198,25 +176,21 @@ impl<'a> Converter<'a> {
         }
         let cancel = &self.ctx.cancel;
         let json = self.ctx.global.json;
-        // the frames of one animation, which pixel art drawing joins
-        let frames = (sequence || inputs.len() > 1).then(|| inputs.to_vec());
-        match &self.resolved {
-            Resolved::Webm { options, backend } => {
-                let request = Request {
-                    input: input.to_path_buf(),
-                    sequence: frames.clone(),
-                    output: Some(output),
-                    options: options.clone(),
-                    overwrite,
-                    keep_temp: self.args.keep_temp,
-                };
+        let (input, output) = (input.clone(), Some(output));
+        match &self.options {
+            FormatOptions::Webm(options) => {
+                let backend = self.backend()?;
+                let options = options.clone();
+                let keep_temp = self.args.keep_temp;
+                let request = webm::Request { input, output, options, overwrite, keep_temp };
                 let outcome = if json {
-                    convert(backend, &request, cancel, &mut |event| {
+                    webm::convert(&backend, &request, cancel, &mut |event| {
                         crate::json_line(&event);
                     })
                 } else {
                     let mut printer = Printer::new(self.ctx);
-                    let result = convert(backend, &request, cancel, &mut |e| printer.event(e));
+                    let result =
+                        webm::convert(&backend, &request, cancel, &mut |e| printer.event(e));
                     printer.bar.finish();
                     result
                 }?;
@@ -236,27 +210,19 @@ impl<'a> Converter<'a> {
                     show_result(&preview);
                 }
             }
-            Resolved::Tgs { options } => {
+            FormatOptions::Tgs(options) => {
                 // only videos need ffmpeg
-                let backend = match tgs::needs_ffmpeg(inputs, sequence) {
-                    true => Some(self.ctx.backend()?),
-                    false => None,
-                };
-                let request = tgs::Request {
-                    inputs: inputs.to_vec(),
-                    sequence,
-                    output,
-                    options: options.clone(),
-                    overwrite,
-                    backend,
-                };
+                let backend = tgs::needs_ffmpeg(&input).then(|| self.backend()).transpose()?;
+                let exact = options.exact_or_default();
+                let request = tgs::Request { input, output, options: options.clone(), overwrite };
                 if json {
-                    tgs::convert(&request, cancel, &mut |event| {
+                    tgs::convert(backend.as_ref(), &request, cancel, &mut |event| {
                         crate::json_line(&event);
                     })?;
                 } else {
-                    let mut printer = TgsPrinter::new(self.ctx, options.exact_or_default());
-                    let result = tgs::convert(&request, cancel, &mut |e| printer.event(e));
+                    let mut printer = TgsPrinter::new(self.ctx, exact);
+                    let result =
+                        tgs::convert(backend.as_ref(), &request, cancel, &mut |e| printer.event(e));
                     printer.bar.finish();
                     let outcome = result?;
                     if !self.ctx.global.quiet && term::shows_pictures() {
@@ -264,20 +230,19 @@ impl<'a> Converter<'a> {
                     }
                 }
             }
-            Resolved::Webp { options, backend } => {
-                let request = Request {
-                    input: input.to_path_buf(),
-                    sequence: frames,
-                    output: Some(output),
-                    options: options.clone(),
-                    overwrite,
-                    keep_temp: false,
-                };
-                let outcome = webp::convert(backend, &request, cancel)?;
+            FormatOptions::Webp(options) => {
+                let backend = self.backend()?;
+                let request = webp::Request { input, output, options: options.clone(), overwrite };
                 if json {
-                    let event = webp::Event::Finished(outcome);
-                    crate::json_line(&event);
+                    webp::convert(&backend, &request, cancel, &mut |event| {
+                        crate::json_line(&event);
+                    })?;
                 } else {
+                    let outcome = webp::convert(&backend, &request, cancel, &mut |event| {
+                        if let webp::Event::Warning { message } = event {
+                            eprintln!("{} {message}", ui::warning_label());
+                        }
+                    })?;
                     self.print_still(&outcome);
                 }
             }
@@ -288,9 +253,6 @@ impl<'a> Converter<'a> {
 
     /// What an image came out as, with what Telegram would refuse.
     fn print_still(&self, outcome: &webp::Outcome) {
-        for warning in &outcome.warnings {
-            eprintln!("{} {warning}", ui::warning_label());
-        }
         if self.ctx.global.quiet {
             return;
         }
@@ -334,9 +296,8 @@ fn explain(err: Failed) -> anyhow::Error {
 pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
     let converter = Converter::new(ctx, &args.conversion, args.output.as_deref())?;
     if args.sequence {
-        return converter
-            .run_inputs(&args.inputs, true, args.output.clone(), converter.overwrite())
-            .map_err(explain);
+        let input = Input::Sequence(args.inputs.clone());
+        return converter.run(&input, args.output.clone(), converter.overwrite()).map_err(explain);
     }
     // keeps a pasted image on disk until it is converted
     let mut pasted_image = None;
@@ -352,25 +313,26 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
     }
 
     let mut failed = 0;
-    for input in &inputs {
+    for path in &inputs {
+        let input = Input::File(path.clone());
         // a pasted image lives in a temporary directory; its result goes to
         // the current one
         let output = match (&args.output, &pasted_image) {
             (Some(output), _) => Some(output.clone()),
             (None, Some(_)) if args.conversion.output_dir.is_none() => {
-                let name = converter.output_for(input);
+                let name = converter.output_for(&input, None);
                 Some(std::env::current_dir()?.join(name.file_name().unwrap_or_default()))
             }
             (None, _) => None,
         };
-        match converter.run(input, output, converter.overwrite()) {
+        match converter.run(&input, output, converter.overwrite()) {
             Ok(_) => {}
             Err(Failed::Core(tgradish_core::Error::Cancelled)) => {
                 return Err(tgradish_core::Error::Cancelled.into());
             }
             Err(err) => {
                 failed += 1;
-                converter.report_failure(input, err);
+                converter.report_failure(path, err);
             }
         }
     }

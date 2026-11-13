@@ -180,8 +180,7 @@ pub(super) fn planned(
     let video = item.video.ready().ok_or_else(|| fl!("no-ffmpeg-commands", "unread"))?;
     let options = item.choices.webm_options(context.presets, context.config)?;
     let request = webm::Request {
-        input: item.inputs[0].clone(),
-        sequence: None,
+        input: item.input(),
         output: context.output.clone(),
         options,
         overwrite: true,

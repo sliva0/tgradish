@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::config::Config;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
-use tgradish_core::input;
+use tgradish_core::input::{self, Input};
 use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::Target;
@@ -484,6 +484,15 @@ impl Item {
             result_clip: Load::Idle,
             result_thumb: None,
             recipe: None,
+        }
+    }
+
+    /// What converting the item converts: its file, or its files and
+    /// folders as one animation.
+    pub fn input(&self) -> Input {
+        match &self.inputs[..] {
+            [input] if !self.sequence => Input::File(input.clone()),
+            inputs => Input::Sequence(inputs.to_vec()),
         }
     }
 

@@ -8,8 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use tgradish_core::presets::Format;
-use tgradish_core::{paths, tgs, webm, webp};
+use tgradish_core::paths;
 
 use crate::app::App;
 use crate::item::Item;
@@ -59,12 +58,7 @@ impl App {
     /// for results, numbered if another file in the window has the name.
     pub(crate) fn work_out_output(&self, item: &Item) -> PathBuf {
         let dir = self.config.gui.output_dir.clone();
-        let input = &item.inputs[0];
-        let next_to_input = match item.format {
-            Format::Webm => webm::default_output(input, item.choices.target),
-            Format::Tgs => tgs::default_output(input, item.choices.target),
-            Format::Webp => webp::default_output(input, item.choices.target),
-        };
+        let next_to_input = item.input().default_output(item.format, item.choices.target);
         let name = next_to_input.file_name().unwrap_or_default();
         let first = match (&item.pasted, dir) {
             // not next to the image, which is in a temporary directory

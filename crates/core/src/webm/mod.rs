@@ -7,10 +7,10 @@
 //! [`CancelToken`]:
 //!
 //! ```no_run
-//! # use tgradish_core::{backend::Backend, webm::{convert, Request}, CancelToken};
+//! # use tgradish_core::{backend::Backend, input::Input, webm::{convert, Request}, CancelToken};
 //! let backend = Backend::select(Default::default(), None)?;
 //! let cancel = CancelToken::new();
-//! let request = Request::new("pig.mp4".into());
+//! let request = Request::new(Input::File("pig.mp4".into()));
 //! let worker = std::thread::spawn({
 //!     let cancel = cancel.clone();
 //!     move || convert(&backend, &request, &cancel, &mut |event| println!("{event:?}"))
@@ -46,21 +46,19 @@ use crate::CancelToken;
 use crate::backend::{Backend, Pass};
 use crate::error::{Error, FileAction, Result};
 use crate::ffmpeg::Output;
+use crate::input::Input;
 use crate::picture::choose_auto_scaling;
-use crate::telegram::{self, Issue, Target};
+use crate::presets::Format;
+use crate::telegram::{self, Issue};
 use container::Patch;
 use fit::{Attempt, Encoder};
 
 /// A conversion to run.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Request {
-    /// The input, or the first of a sequence's, which names the result.
-    pub input: PathBuf,
-    /// The frames of one animation in several files: image files, or
-    /// folders of them, in name order.
-    pub sequence: Option<Vec<PathBuf>>,
-    /// Defaults to the input with a `.sticker.webm` or `.emoji.webm`
-    /// extension.
+    pub input: Input,
+    /// Where the result goes: by default [`Input::default_output`], as
+    /// [`Request::output`] gives it.
     pub output: Option<PathBuf>,
     pub options: Options,
     /// Replace the output if it exists.
@@ -72,20 +70,21 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn new(input: PathBuf) -> Self {
+    pub fn new(input: Input) -> Self {
         Self {
             input,
-            sequence: None,
             output: None,
             options: Options::default(),
             overwrite: false,
             keep_temp: false,
         }
     }
-}
 
-pub fn default_output(input: &Path, target: Target) -> PathBuf {
-    crate::fsutil::beside(input, &format!("{}.webm", target.name()))
+    /// Where the result goes, as asked or by default.
+    pub fn output(&self) -> PathBuf {
+        let target = self.options.target.unwrap_or_default();
+        self.output.clone().unwrap_or_else(|| self.input.default_output(Format::Webm, target))
+    }
 }
 
 /// What converting made: all that [`Event::Finished`] says, whether or not
@@ -204,9 +203,9 @@ pub fn convert(
     cancel: &CancelToken,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Outcome> {
+    request.input.check_output(&request.output(), request.overwrite)?;
     // pixel art, drawn for ffmpeg
-    let sequence = request.sequence.as_deref();
-    let mut readable = crate::drawn::readable(&request.input, sequence, &request.options, cancel)?;
+    let mut readable = crate::drawn::readable(&request.input, &request.options, cancel)?;
     // ffmpeg reads them from the file: not kept while it does
     drop(readable.take_drawn());
     let source = readable.probe(backend, cancel)?;
@@ -217,7 +216,7 @@ pub fn convert(
         return Err(Error::FfmpegArgsNeedProgram);
     }
     // the input as given, not as drawn for ffmpeg
-    let started = Plan { input: request.input.clone(), ..plan.clone() };
+    let started = Plan { input: request.input.first().to_path_buf(), ..plan.clone() };
     on_event(Event::Started { plan: Box::new(started) });
     // after it: of several inputs' events, a warning is about the one that
     // started last

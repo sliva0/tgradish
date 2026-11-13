@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 use tgradish_core::options::{Fit, Speed};
 
-use tgradish_core::webm::Options;
-use tgradish_core::webm::{Request, convert};
+use tgradish_core::input::Input;
+use tgradish_core::webm::{Options, Request, convert};
 use tgradish_core::{CancelToken, Error, webp};
 
 #[test]
@@ -39,14 +39,19 @@ fn reads_names_that_look_like_urls_and_options() {
             // a video sticker, beside it, and the frame at a time as a picture
             let options =
                 Options { fit: Some(Fit::Off), speed: Some(Speed::Fast), ..Options::default() };
-            let request = Request { options, overwrite: true, ..Request::new(input.clone()) };
+            let request =
+                Request { options, overwrite: true, ..Request::new(Input::File(input.clone())) };
             let made = convert(backend, &request, &cancel, &mut |_| {});
             let made = made.unwrap_or_else(|err| panic!("{label}: {err}"));
             assert_eq!(made.output, input.with_extension("sticker.webm"), "{label}");
             assert!(made.output.exists(), "{label}");
             let options = Options { start: Some(0.1), ..Options::default() };
-            let request = Request { options, overwrite: true, ..Request::new(input.clone()) };
-            let made = webp::convert(backend, &request, &cancel);
+            let request = webp::Request {
+                options,
+                overwrite: true,
+                ..webp::Request::new(Input::File(input.clone()))
+            };
+            let made = webp::convert(backend, &request, &cancel, &mut |_| {});
             assert!(made.unwrap_or_else(|err| panic!("{label}: {err}")).output.exists(), "{label}");
         }
     }

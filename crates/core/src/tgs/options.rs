@@ -18,6 +18,8 @@ use crate::telegram::{self, Target};
 /// Options for `.tgs` output. Like the WebM [`Options`](crate::webm::Options),
 /// every field is optional so presets and flags can be layered.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+// `describe` titles the schema as it always has
+#[schemars(rename = "TgsOptions")]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Options {
     /// What to make. Both are square animations. Default: sticker.
@@ -251,8 +253,7 @@ impl Options {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tgs::{DEFAULT_FPS, default_output};
-    use std::path::Path;
+    use crate::tgs::DEFAULT_FPS;
 
     #[test]
     fn keeps_the_art_unless_asked() {
@@ -309,6 +310,5 @@ mod tests {
         let none = crate::options::Sheet { columns: 0, rows: 2 };
         let bad = Options { sheet: Some(none), ..Default::default() };
         assert!(bad.sheet_layout().is_err());
-        assert_eq!(default_output(Path::new("a/b.gif"), Target::Emoji), Path::new("a/b.emoji.tgs"));
     }
 }

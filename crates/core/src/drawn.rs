@@ -17,6 +17,7 @@ use crate::art::{self, Aseprite};
 use crate::backend::Backend;
 use crate::error::{Error, FileAction, Result};
 use crate::ffmpeg::Probe;
+use crate::input::Input;
 use crate::tgs::DEFAULT_FPS;
 use crate::webm::Options;
 
@@ -147,41 +148,37 @@ pub(crate) fn not_aseprite(tag: Option<&str>, chosen: &Layers) -> Option<Error> 
 }
 
 /// `input` as ffmpeg can read it: an Aseprite file drawn with the tag and
-/// layers `options` choose; with `sequence`, the frames of one animation,
-/// image files or folders of them, `fps` a second, [`DEFAULT_FPS`] unless
-/// it says; an
-/// animated WebP drawn as it is; and anything else as it is. Only Aseprite
-/// files have tags and layers.
-pub fn readable(
-    input: &Path,
-    sequence: Option<&[PathBuf]>,
-    options: &Options,
-    cancel: &CancelToken,
-) -> Result<Readable> {
+/// layers `options` choose; a sequence's frames, `fps` a second,
+/// [`DEFAULT_FPS`] unless it says; an animated WebP drawn as it is; and
+/// anything else as it is. Only Aseprite files have tags and layers.
+pub fn readable(input: &Input, options: &Options, cancel: &CancelToken) -> Result<Readable> {
+    input.refuse_folder()?;
     let layers = layers(options.show_layers.as_deref(), options.hide_layers.as_deref());
-    let aseprite = sequence.is_none() && is_aseprite(input);
+    let aseprite = matches!(input, Input::File(path) if is_aseprite(path));
     if let Some(err) = not_aseprite(options.tag.as_deref(), &layers).filter(|_| !aseprite) {
         return Err(err);
     }
-    let (animation, aseprite) = match sequence {
-        Some(frames) => (art::read_sequence(frames, options.fps, cancel)?, Aseprite::default()),
-        None if aseprite => {
-            cancel.check()?;
-            let bytes = art::read(input)?;
-            art::aseprite(&bytes, options.tag.as_deref(), &layers, &Limits::default())
-                .map_err(|err| art::unreadable(input, err))?
+    let sequence = matches!(input, Input::Sequence(_));
+    let (animation, aseprite) = match input {
+        Input::Sequence(frames) => {
+            (art::read_sequence(frames, options.fps, cancel)?, Aseprite::default())
         }
-        None if is_animated_webp(input) => {
+        Input::File(path) if aseprite => {
             cancel.check()?;
-            let bytes = art::read(input)?;
+            let bytes = art::read(path)?;
+            art::aseprite(&bytes, options.tag.as_deref(), &layers, &Limits::default())
+                .map_err(|err| art::unreadable(path, err))?
+        }
+        Input::File(path) if is_animated_webp(path) => {
+            cancel.check()?;
+            let bytes = art::read(path)?;
             let animation =
                 frames::decode(&bytes, &frames::DecodeOptions::default(), &Limits::default())
-                    .map_err(|err| art::unreadable(input, err))?;
+                    .map_err(|err| art::unreadable(path, err))?;
             (animation, Aseprite::default())
         }
-        None => {
-            let path = input.to_path_buf();
-            let aseprite = Aseprite::default();
+        Input::File(path) => {
+            let (path, aseprite) = (path.clone(), Aseprite::default());
             return Ok(Readable { path, dir: None, aseprite, drawn: None, sequence: None });
         }
     };
@@ -191,13 +188,13 @@ pub fn readable(
         .tempdir()
         .map_err(Error::io(FileAction::Create, std::env::temp_dir()))?;
     // named after the input, for ffmpeg's messages
-    let stem = input.file_stem().map_or("drawn".into(), |stem| stem.to_string_lossy());
+    let stem = input.first().file_stem().map_or("drawn".into(), |stem| stem.to_string_lossy());
     let path = dir.path().join(format!("{stem}.png"));
     // a sequence plays for as long as its frames, even only one
-    let animated = sequence.is_some() || animation.frames().len() > 1;
+    let animated = sequence || animation.frames().len() > 1;
     write_png(&path, &animation, animated)
         .map_err(|err| Error::io(FileAction::Write, &path)(std::io::Error::other(err)))?;
-    let rate = sequence.map(|_| (animation.frames().len(), options.fps.unwrap_or(DEFAULT_FPS)));
+    let rate = sequence.then(|| (animation.frames().len(), options.fps.unwrap_or(DEFAULT_FPS)));
     let drawn = Some((animation, !animated));
     Ok(Readable { path, dir: Some(dir), aseprite, drawn, sequence: rate })
 }
@@ -277,12 +274,14 @@ mod tests {
         let corpus = |name: &str| &files.iter().find(|file| file.name == name).unwrap().bytes;
         let ase = write("walker.ase", corpus("walker_2x.ase"));
         let read = |path: &Path, options: Options| {
-            readable(path, None, &options, &CancelToken::new()).map(|readable| {
-                assert!(readable.is_drawn());
-                let bytes = std::fs::read(readable.path()).unwrap();
-                frames::decode(&bytes, &frames::DecodeOptions::default(), &Limits::default())
-                    .unwrap()
-            })
+            readable(&Input::File(path.to_path_buf()), &options, &CancelToken::new()).map(
+                |readable| {
+                    assert!(readable.is_drawn());
+                    let bytes = std::fs::read(readable.path()).unwrap();
+                    frames::decode(&bytes, &frames::DecodeOptions::default(), &Limits::default())
+                        .unwrap()
+                },
+            )
         };
         // every frame, as long as each lasts
         let sprite =
@@ -308,7 +307,8 @@ mod tests {
         let mut still = tgradish_corpus::sprite("walker_2x");
         (still.frames, still.delays) = (still.frames[..1].to_vec(), vec![100]);
         let one = write("one.ase", &tgradish_corpus::encode::aseprite(&still, &[]));
-        let drawn = readable(&one, None, &Options::default(), &CancelToken::new()).unwrap();
+        let drawn =
+            readable(&Input::File(one.clone()), &Options::default(), &CancelToken::new()).unwrap();
         let bytes = std::fs::read(drawn.path()).unwrap();
         assert!(
             png::Decoder::new(std::io::Cursor::new(&bytes))
@@ -318,11 +318,12 @@ mod tests {
 
         // anything else is read as it is, and has no tags or layers
         let gif = write("walker.gif", corpus("walker_2x.gif"));
-        let as_is = readable(&gif, None, &Options::default(), &CancelToken::new()).unwrap();
+        let as_is =
+            readable(&Input::File(gif.clone()), &Options::default(), &CancelToken::new()).unwrap();
         assert!(!as_is.is_drawn() && as_is.path() == gif);
         let tagged = Options { tag: Some("idle".into()), ..Options::default() };
         assert!(matches!(
-            readable(&gif, None, &tagged, &CancelToken::new()),
+            readable(&Input::File(gif.clone()), &tagged, &CancelToken::new()),
             Err(Error::InvalidOption { option: "tag", .. })
         ));
     }
@@ -338,8 +339,8 @@ mod tests {
             std::fs::write(folder.join(format!("{}.png", index + 1)), png).unwrap();
         }
         let twelve = Options { fps: Some(12.0), ..Options::default() };
-        let sequence = [folder.clone()];
-        let drawn = readable(&folder, Some(&sequence), &twelve, &CancelToken::new()).unwrap();
+        let sequence = Input::Sequence(vec![folder.clone()]);
+        let drawn = readable(&sequence, &twelve, &CancelToken::new()).unwrap();
         let bytes = std::fs::read(drawn.path()).unwrap();
         let animation =
             frames::decode(&bytes, &frames::DecodeOptions::default(), &Limits::default()).unwrap();
@@ -357,14 +358,14 @@ mod tests {
         assert_eq!((probe.fps, probe.base_fps), (Some(12.0), Some(12.0)));
         assert_eq!(probe.duration, Some(steps.len() as f64 / 12.0));
         // one frame of a sequence lasts, as a picture wouldn't
-        let one = [folder.join("1.png")];
-        let drawn = readable(&one[0], Some(&one), &twelve, &CancelToken::new()).unwrap();
+        let one = Input::Sequence(vec![folder.join("1.png")]);
+        let drawn = readable(&one, &twelve, &CancelToken::new()).unwrap();
         let bytes = std::fs::read(drawn.path()).unwrap();
         let reader = png::Decoder::new(std::io::Cursor::new(&bytes)).read_info().unwrap();
         assert_eq!(reader.info().animation_control.map(|control| control.num_frames), Some(1));
         // the frames of a sequence have no tags
         let tagged = Options { tag: Some("idle".into()), ..twelve };
-        assert!(readable(&folder, Some(&sequence), &tagged, &CancelToken::new()).is_err());
+        assert!(readable(&sequence, &tagged, &CancelToken::new()).is_err());
     }
 
     #[test]
@@ -388,7 +389,8 @@ mod tests {
         let glow = files.iter().find(|file| file.name == "glow.webp").unwrap();
         let path = dir.path().join("glow.webp");
         std::fs::write(&path, &glow.bytes).unwrap();
-        let drawn = readable(&path, None, &Options::default(), &CancelToken::new()).unwrap();
+        let drawn =
+            readable(&Input::File(path.clone()), &Options::default(), &CancelToken::new()).unwrap();
         assert!(drawn.is_drawn());
         let decode = |bytes: &[u8]| {
             frames::decode(bytes, &frames::DecodeOptions::default(), &Limits::default())
@@ -399,7 +401,8 @@ mod tests {
         let still = dir.path().join("still.webp");
         std::fs::write(&still, crate::webp::encode(&[255, 0, 0, 255], 1, 1, None).unwrap())
             .unwrap();
-        let as_is = readable(&still, None, &Options::default(), &CancelToken::new()).unwrap();
+        let as_is = readable(&Input::File(still.clone()), &Options::default(), &CancelToken::new())
+            .unwrap();
         assert!(!as_is.is_drawn());
     }
 }

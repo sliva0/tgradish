@@ -202,7 +202,9 @@ mod tests {
     }
 
     fn plan() -> Plan {
-        crate::webm::plan(&Request::new("in.mp4".into()), probe()).unwrap().0
+        crate::webm::plan(&Request::new(crate::input::Input::File("in.mp4".into())), probe())
+            .unwrap()
+            .0
     }
 
     /// One of each event of each stream, as `convert --json` prints them.
@@ -267,7 +269,6 @@ mod tests {
                 height: 384,
                 encoding: Encoding::Lossy { quality: 80 },
                 issues: vec![Issue::WrongSize { width: 512, height: 384, side: 100, exact: true }],
-                warnings: vec!["a warning".into()],
             }),
             webp::Event::Warning { message: "a warning".into() },
             webp::Event::Error(Failure { message: "it failed".into(), input: None }),
@@ -438,7 +439,7 @@ mod tests {
             ),
             Some(r#"{"event":"error","message":"it failed","input":null}"#),
             Some(
-                r#"{"event":"finished","output":"in.sticker.webp","bytes":100000,"width":512,"height":384,"encoding":{"kind":"lossy","quality":80},"issues":[{"kind":"wrong-size","width":512,"height":384,"side":100,"exact":true,"severity":"error","message":"size is 512x384, expected 100x100"}],"warnings":["a warning"]}"#,
+                r#"{"event":"finished","output":"in.sticker.webp","bytes":100000,"width":512,"height":384,"encoding":{"kind":"lossy","quality":80},"issues":[{"kind":"wrong-size","width":512,"height":384,"side":100,"exact":true,"severity":"error","message":"size is 512x384, expected 100x100"}]}"#,
             ),
             Some(r#"{"event":"warning","message":"a warning"}"#),
             Some(r#"{"event":"error","message":"it failed","input":null}"#),

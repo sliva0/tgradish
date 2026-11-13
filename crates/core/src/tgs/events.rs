@@ -12,6 +12,8 @@ use tgradish_tgs::sticker::Step;
 /// line.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "event", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
+// `describe` titles the schema as it always has
+#[schemars(rename = "TgsEvent")]
 #[non_exhaustive]
 pub enum Event {
     /// The input is read: what normalising found and did.

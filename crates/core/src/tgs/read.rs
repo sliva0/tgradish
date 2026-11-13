@@ -1,7 +1,7 @@
 //! Reading what a `.tgs` is made of: pixel art, read by tgradish itself,
 //! or a video, read through ffmpeg and taken as pixel art.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use tgradish_tgs::frames::{self, DecodeOptions, Limits};
@@ -11,6 +11,7 @@ use crate::CancelToken;
 use crate::art::{self, Aseprite};
 use crate::backend::{Backend, FramesRequest};
 use crate::error::{Error, Result};
+use crate::input::Input;
 use crate::telegram;
 
 /// What the inputs hold, as [`convert`](super::convert) reads them.
@@ -48,22 +49,22 @@ impl Loaded {
     }
 }
 
-/// Pixel art as [`convert`](super::convert) reads it, with the tags and layers of an
-/// Aseprite file, read from the same bytes; or a video, read through
-/// `backend`. `cancel` is asked between files.
+/// Pixel art as [`convert`](super::convert) reads it, with the tags and
+/// layers of an Aseprite file, read from the same bytes; or a video, read
+/// through `backend`. `cancel` is asked between files.
 pub(super) fn load(
-    inputs: &[PathBuf],
-    sequence: bool,
-    options: &Options,
     backend: Option<&Backend>,
+    input: &Input,
+    options: &Options,
     cancel: &CancelToken,
 ) -> Result<Loaded> {
+    input.refuse_folder()?;
     let limits = Limits::default();
-    if sequence || inputs.len() > 1 {
-        return Ok(Loaded::art(art::read_sequence(inputs, options.fps, cancel)?));
-    }
-    let [input] = inputs else {
-        return Err(Error::NothingToConvert);
+    let input = match input {
+        Input::Sequence(frames) => {
+            return Ok(Loaded::art(art::read_sequence(frames, options.fps, cancel)?));
+        }
+        Input::File(path) => path,
     };
     cancel.check()?;
     if !reads_as_art(input)? {
@@ -102,11 +103,12 @@ pub(super) fn load(
     Ok(Loaded { tags, layers, durations, ..Loaded::art(animation) })
 }
 
-/// Whether converting `inputs` into a `.tgs` reads a video through ffmpeg.
-pub fn needs_ffmpeg(inputs: &[PathBuf], sequence: bool) -> bool {
-    match inputs {
-        [input] if !sequence => matches!(reads_as_art(input), Ok(false)),
-        _ => false,
+/// Whether converting `input` into a `.tgs` reads a video through ffmpeg,
+/// which [`convert`](super::convert) then needs a backend for.
+pub fn needs_ffmpeg(input: &Input) -> bool {
+    match input {
+        Input::File(path) => matches!(reads_as_art(path), Ok(false)),
+        Input::Sequence(_) => false,
     }
 }
 
@@ -237,18 +239,17 @@ pub struct Art {
     pub durations: Vec<f64>,
 }
 
-/// Reads pixel art the way [`convert`](super::convert) does, with the options that choose
-/// what is read: `tag`, the layers, `sheet`, `sheet_frames` and `fps`; or a
-/// video through `backend`, as much as a sticker can show. `cancel` is
-/// asked between files.
+/// Reads pixel art the way [`convert`](super::convert) does, with the
+/// options that choose what is read: `tag`, the layers, `sheet`,
+/// `sheet_frames` and `fps`; or a video through `backend`, as much as a
+/// sticker can show. `cancel` is asked between files.
 pub fn read_art(
-    inputs: &[PathBuf],
-    sequence: bool,
-    options: &Options,
     backend: Option<&Backend>,
+    input: &Input,
+    options: &Options,
     cancel: &CancelToken,
 ) -> Result<Art> {
-    let loaded = load(inputs, sequence, options, backend, cancel)?;
+    let loaded = load(backend, input, options, cancel)?;
     let (width, height) = (loaded.animation.width(), loaded.animation.height());
     let frames = loaded
         .animation
@@ -272,8 +273,7 @@ mod tests {
         let path = dir.path().join(&ase.name);
         std::fs::write(&path, &ase.bytes).unwrap();
         let read = |options: Options| {
-            let loaded =
-                load(std::slice::from_ref(&path), false, &options, None, &CancelToken::new());
+            let loaded = load(None, &Input::File(path.clone()), &options, &CancelToken::new());
             let loaded = loaded.unwrap();
             (loaded.animation.width(), loaded.animation.frames().len(), loaded.tags)
         };
@@ -293,8 +293,8 @@ mod tests {
         // stopped between the files of a sequence
         let cancel = CancelToken::new();
         cancel.cancel();
-        let both = [path.clone(), path.clone()];
-        let stopped = load(&both, true, &Options::default(), None, &cancel);
+        let both = Input::Sequence(vec![path.clone(), path.clone()]);
+        let stopped = load(None, &both, &Options::default(), &cancel);
         assert!(matches!(stopped, Err(Error::Cancelled)));
     }
 }

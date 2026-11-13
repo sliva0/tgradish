@@ -93,8 +93,7 @@ impl App {
                 item.art_reading = read_with;
                 item.art.reload(Art::load(
                     ctx,
-                    item.inputs.clone(),
-                    item.sequence,
+                    item.input(),
                     item.art_reading.clone(),
                     backend.as_ref().ok().cloned(),
                 ));
@@ -115,15 +114,11 @@ impl App {
                         (item.part, item.still) = (None, None);
                     }
                     item.video_drawing = drawing.clone();
-                    let (inputs, sequence) = (item.inputs.clone(), item.sequence);
+                    let input = item.input();
                     match &backend {
-                        Ok(backend) => item.video.reload(Video::load(
-                            ctx,
-                            backend.clone(),
-                            inputs,
-                            sequence,
-                            drawing,
-                        )),
+                        Ok(backend) => {
+                            item.video.reload(Video::load(ctx, backend.clone(), input, drawing))
+                        }
                         Err(message) => item.video = Load::Failed(message.clone()),
                     }
                     reading += 1;
@@ -233,7 +228,7 @@ impl App {
             let overwrite = self.may_replace(id, &job.output);
             // a result of another time, rather than this item's own
             let replaces = job.output.exists() && !self.wrote(id, &job.output);
-            let (inputs, sequence) = (item.inputs.clone(), item.sequence);
+            let input = item.input();
             let item = self.item_mut(id).expect("found above");
             let conversion = item.job.as_mut().expect("found above");
             conversion.recipe = recipe.ok();
@@ -241,7 +236,7 @@ impl App {
             match plan {
                 Ok(plan) => {
                     job.replaces = replaces;
-                    job.start(plan, inputs, sequence, overwrite, ctx);
+                    job.start(plan, input, overwrite, ctx);
                     return;
                 }
                 Err(message) => {
