@@ -170,10 +170,9 @@ impl TgsOptions {
         let (columns, rows) = text.split_once(['x', 'X']).ok_or_else(invalid)?;
         let number = |n: &str| n.trim().parse::<u32>().ok().filter(|&n| n > 0).ok_or_else(invalid);
         Ok(Some(Sheet {
-            columns: number(columns)?,
-            rows: number(rows)?,
             frames: self.sheet_frames,
             frame_duration: self.frame_duration()?,
+            ..Sheet::new(number(columns)?, number(rows)?)
         }))
     }
 
