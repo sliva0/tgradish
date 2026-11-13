@@ -32,6 +32,7 @@ pub mod inspect;
 pub mod licenses;
 #[cfg(feature = "linked")]
 mod linked;
+#[doc(hidden)]
 pub mod mark;
 pub mod options;
 pub mod paths;
