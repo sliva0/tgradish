@@ -26,8 +26,11 @@ pub struct Cli {
 
 #[derive(Debug, Args)]
 pub struct Global {
-    /// Print machine-readable JSON instead of text. `convert` prints one
-    /// event per line, see `tgradish describe`.
+    /// Print JSON Lines instead of text: one compact object per line.
+    /// `convert` and `watch` print an event a line, which `tgradish
+    /// describe` gives the schemas of, `inspect` a file a line, `preset
+    /// list` a preset a line, and the rest one line; an error is an error
+    /// event.
     #[arg(long, global = true)]
     pub json: bool,
     /// Show more output, including ffmpeg logs with -vv.
