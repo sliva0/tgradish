@@ -124,14 +124,14 @@ date. ffmpeg stays LGPL: never enable its GPL parts. Paths and commands say
 
 1. Set the version in `Cargo.toml`: `[workspace.package]`, and
    `tgradish-core` and `tgradish-gui` under `[workspace.dependencies]`,
-   which ask for it exactly; in `crates/cli/tgradish.exe.manifest`, with a
-   fourth number, 0; and `pkgver` in each `packaging/aur/*/PKGBUILD`. The
-   two libraries, `tgradish-frames` and `tgradish-tgs`, have versions of
-   their own: raise one in its manifest and under `[workspace.dependencies]`
-   when it changed since it was last published. Then refresh `Cargo.lock`
-   with `cargo update --workspace` and commit it, as release builds use
-   `--locked`. A test checks the manifest, and the release workflow the
-   PKGBUILDs.
+   which ask for it exactly; and `pkgver` in each
+   `packaging/aur/*/PKGBUILD`. The two libraries, `tgradish-frames` and
+   `tgradish-tgs`, have versions of their own: raise one in its manifest
+   and under `[workspace.dependencies]` when it changed since it was last
+   published. Then refresh `Cargo.lock` with `cargo update --workspace`
+   and commit it, as release builds use `--locked`. The release workflow
+   checks the PKGBUILDs; the Windows executable takes its version from
+   `Cargo.toml` when it is built.
 2. `cargo xtask local-release` builds every variant into
    `target/release-artifacts`, Windows with mingw-w64. `--targets` picks
    others, as `linux-musl-x86_64`, made with musl-gcc (musl-tools on

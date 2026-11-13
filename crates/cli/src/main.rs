@@ -217,12 +217,11 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    /// Windows reads the executable's version from its manifest, which
-    /// can't take it from Cargo.toml: it is written out by hand, with a
-    /// fourth number.
+    /// build.rs writes Cargo.toml's version into the manifest built into
+    /// tgradish.exe, with the fourth number Windows wants.
     #[test]
     fn windows_manifest_has_the_version() {
-        let manifest = include_str!("../tgradish.exe.manifest");
+        let manifest = include_str!(concat!(env!("OUT_DIR"), "/tgradish.versioned.manifest"));
         let version = format!(
             "name=\"tgradish\" version=\"{}.{}.{}.0\"",
             env!("CARGO_PKG_VERSION_MAJOR"),
