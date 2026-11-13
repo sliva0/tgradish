@@ -995,6 +995,8 @@ about-title = About and licences
 # Under the name and version; a link to the source code follows.
 about-summary = Telegram stickers from videos and pixel art. MIT licence;
 source-code = source code
+# Under the summary, a link to the author on Telegram.
+send-feedback = Send feedback on Telegram
 # Over the licences' notices, which are shown as they are written, in
 # English.
 about-notices = tgradish is built from other people's work too. Their licences ask for these notices to go with every copy, so the program carries them:

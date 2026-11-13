@@ -114,5 +114,10 @@ mod tests {
             browsed.iter().any(|url| url == "https://github.com/sliva0/tgradish"),
             "{browsed:?}"
         );
+        drop(browsed);
+        harness.get_by_label("Send feedback on Telegram").click_accesskit();
+        harness.run_steps(2);
+        let browsed = BROWSED.lock().unwrap();
+        assert!(browsed.iter().any(|url| url == "https://t.me/s0untitled?direct"), "{browsed:?}");
     }
 }
