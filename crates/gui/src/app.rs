@@ -722,7 +722,7 @@ mod tests {
     use tgradish_core::telegram;
 
     use super::*;
-    use crate::testing::{convert, finish, harness, pasted_image, square};
+    use crate::testing::{convert, finish, harness, has_ffmpeg, pasted_image, square};
 
     #[test]
     fn copies_pasted_images_as_they_are_pasted() {
@@ -842,6 +842,9 @@ mod tests {
 
     #[test]
     fn shows_a_result_of_last_time_as_it_was_made() {
+        if !has_ffmpeg() {
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
         let art = dir.path().join("art.png");
         square(&art, [255, 0, 0, 255]);
