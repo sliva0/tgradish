@@ -22,6 +22,7 @@ pkgbase = tgradish
 	depends = libxrender
 	depends = wayland
 	optdepends = xdg-desktop-portal: file dialogues in the window
+	options = !lto
 	source = tgradish-2.0.0.tar.gz::https://github.com/sliva0/tgradish/archive/refs/tags/v2.0.0.tar.gz
 	sha256sums = SKIP
 
