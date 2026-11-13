@@ -424,6 +424,13 @@ fn makes_image_stickers() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("--crf can't be used for webp output"), "{stderr}");
     }
+    // as is what JSON sets, which went past the flags' check before
+    let json = r#"{"crf":30,"spoof":"always"}"#;
+    let output =
+        tgradish(&["convert", input.to_str().unwrap(), "--format", "webp", "--options-json", json]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("\"crf\" in --options-json, \"spoof\" in --options-json"), "{stderr}");
 }
 
 /// serde refuses paths that aren't Unicode, which every line names with
