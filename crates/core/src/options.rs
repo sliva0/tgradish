@@ -1,4 +1,4 @@
-//! Conversion options, shared by presets, the CLI and any GUI.
+//! Conversion options, shared by presets, the command line and the window.
 //!
 //! Every field is optional so options can be layered: built-in defaults,
 //! then a preset, then command-line flags. Missing values get defaults when a

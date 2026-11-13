@@ -202,11 +202,10 @@ fn same_file(input: &Path, output: &Path) -> bool {
     }
 }
 
-/// Validates a user-given fit range. Integer ranges must contain an integer.
+/// Validates a user-given fit range, finite and in order as [`plan`]
+/// checks first, against what `fit` tunes. Integer ranges must contain an
+/// integer.
 fn check_range(range: Range, fit: Fit, length: f64) -> Result<Range> {
-    if !(range.min.is_finite() && range.max.is_finite() && range.min <= range.max) {
-        return Err(invalid(format!("fit range {range} must be MIN..MAX with MIN <= MAX")));
-    }
     let (low, high, what) = match fit {
         Fit::Crf => (f64::from(*options::CRFS.start()), f64::from(*options::CRFS.end()), "crf"),
         Fit::Fps => (1.0, telegram::MAX_FPS, "fps"),
@@ -846,9 +845,7 @@ fn encode_in(
         ..Default::default()
     };
     let mut bytes = std::fs::read(&best.path)?;
-    if changes != Patch::default() {
-        webm::patch(&mut bytes, &changes)?;
-    }
+    webm::patch(&mut bytes, &changes)?;
     // checked again here: the output may have appeared while encoding
     crate::fsutil::write_output(&plan.output, &bytes, request.overwrite)?;
 

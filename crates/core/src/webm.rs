@@ -1242,7 +1242,8 @@ mod tests {
     fn patch_file_leaves_other_files_alone() {
         let dir = tempfile::tempdir().unwrap();
         let output = dir.path().join("out.webm");
-        let bystander = dir.path().join("out.webm.tgradish-tmp");
+        // named as write_file names its own temporary files
+        let bystander = dir.path().join(".tgradish-AbCd12");
         std::fs::write(&bystander, b"keep me").unwrap();
         let input = dir.path().join("in.webm");
         std::fs::write(&input, Fixture::default().build()).unwrap();

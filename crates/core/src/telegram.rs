@@ -16,6 +16,8 @@ pub const MAX_EMOJI_BYTES: u64 = 64 * 1024;
 pub const MAX_STILL_BYTES: u64 = 512 * 1024;
 /// Longest allowed duration in seconds, as read from the file header.
 pub const MAX_SECONDS: f64 = 3.0;
+/// The rules say 30 fps, but @Stickers accepted a 60 fps sticker.
+pub const MAX_FPS: f64 = 60.0;
 
 /// Whether `seconds` is longer than [`MAX_SECONDS`]. A millisecond over
 /// still passes, so that a result cut to exactly 3 seconds isn't taken
@@ -23,8 +25,6 @@ pub const MAX_SECONDS: f64 = 3.0;
 pub fn too_long(seconds: f64) -> bool {
     seconds > MAX_SECONDS + 1e-3
 }
-/// The rules say 30 fps, but @Stickers accepted a 60 fps sticker.
-pub const MAX_FPS: f64 = 60.0;
 
 /// What kind of Telegram media to make.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
