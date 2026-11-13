@@ -702,4 +702,9 @@ fn accents(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     let name = fl!("accent-own", "chosen", colour = "#c85aa0");
     harness.get_by_label(&name).click();
     shot(&mut harness, save, "accent-picker");
+    // the strip of hues with the keyboard's focus, a step on
+    harness.get_by_label(&fl!("accent-hue")).focus();
+    harness.run_steps(2);
+    harness.key_press(egui::Key::ArrowRight);
+    shot(&mut harness, save, "accent-picker-focus");
 }

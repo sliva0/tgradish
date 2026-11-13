@@ -782,8 +782,11 @@ accent-grey = Grey
 accent-own = A colour of your own
     .chosen = A colour of your own, { $colour }
 # What screen readers call the two parts of the colour picker: a square of
-# the shades of one colour, and a strip of the colours of the rainbow.
+# the shades of one colour, and a strip of the colours of the rainbow. The
+# square's value is how saturated and how bright its shade is, from 0 to
+# 100; the arrow keys change them.
 accent-shade = Shade
+    .value = { $saturation }% saturated, { $value }% bright
 accent-hue = Hue
 # Beside a field of the colour picked, as #rrggbb.
 accent-hex = Hex

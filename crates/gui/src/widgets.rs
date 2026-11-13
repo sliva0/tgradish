@@ -659,11 +659,53 @@ pub(crate) fn swatch(
     response.on_hover_text(name)
 }
 
+/// How far an arrow key moves a [`colour_picker`]'s marks, of the whole
+/// way across, and with Shift held.
+const PICKER_STEP: f32 = 0.01;
+const PICKER_LEAP: f32 = 0.1;
+
+/// The steps asked of a part of a [`colour_picker`] this frame: by arrow
+/// keys while it has the focus, left and right, and where `upright` up
+/// and down, which it then keeps from moving the focus; and by screen
+/// readers, which ask the square for lighter or darker and the strip for
+/// the hue on or back. Each step is [`PICKER_STEP`] of the way, or
+/// [`PICKER_LEAP`] with Shift.
+fn picker_steps(ui: &egui::Ui, response: &egui::Response, upright: bool) -> egui::Vec2 {
+    use egui::Key;
+    use egui::accesskit::Action;
+    let focused = response.has_focus();
+    if focused {
+        let filter = egui::EventFilter {
+            horizontal_arrows: true,
+            vertical_arrows: upright,
+            ..Default::default()
+        };
+        // which egui takes only from a frame after the focus came, so one
+        // is drawn at once, before a key can move the focus on
+        if !ui.memory(|memory| memory.had_focus_last_frame(response.id)) {
+            ui.ctx().request_repaint();
+        }
+        ui.memory_mut(|memory| memory.set_focus_lock_filter(response.id, filter));
+    }
+    ui.input(|input| {
+        let presses = |key| if focused { input.num_presses(key) as f32 } else { 0.0 };
+        let asked = |action| input.num_accesskit_action_requests(response.id, action) as f32;
+        let asked = asked(Action::Increment) - asked(Action::Decrement);
+        let across = presses(Key::ArrowRight) - presses(Key::ArrowLeft);
+        let (across, up) = match upright {
+            true => (across, presses(Key::ArrowUp) - presses(Key::ArrowDown) + asked),
+            false => (across + asked, 0.0),
+        };
+        let step = if input.modifiers.shift { PICKER_LEAP } else { PICKER_STEP };
+        vec2(across, up) * step
+    })
+}
+
 /// A picker of opaque colours: a square of the shades of one hue, more
 /// saturated to the right and lighter to the top, and a strip of the hues
-/// under it. `names` are what screen readers call the two. True when
-/// `colour` changed.
-pub(crate) fn colour_picker(ui: &mut egui::Ui, colour: &mut Color32, names: [&str; 2]) -> bool {
+/// under it, each taken with the pointer or, with the focus, the arrow
+/// keys. True when `colour` changed.
+pub(crate) fn colour_picker(ui: &mut egui::Ui, colour: &mut Color32) -> bool {
     use egui::ecolor::HsvaGamma;
     // the hue kept while the colour is grey, which has none of its own
     let id = ui.id().with("colour-picker");
@@ -675,23 +717,55 @@ pub(crate) fn colour_picker(ui: &mut egui::Ui, colour: &mut Color32, names: [&st
     let width = 240.0;
     let enabled = ui.is_enabled();
     let outline = ui.visuals().widgets.noninteractive.bg_stroke;
-    let area = |ui: &mut egui::Ui, height: f32, name: &str| {
+    let area = |ui: &mut egui::Ui, height: f32| {
         let sense = egui::Sense::click_and_drag();
         let (rect, response) = ui.allocate_exact_size(vec2(width, height), sense);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Slider, enabled, name));
         let at = response.interact_pointer_pos().map(|at| {
             let at = (at - rect.min) / rect.size();
             vec2(at.x.clamp(0.0, 1.0), at.y.clamp(0.0, 1.0))
         });
-        (rect, at)
+        (rect, response, at)
     };
-    let (square, picked) = area(ui, 150.0, names[0]);
+    let (square, square_response, picked) = area(ui, 150.0);
     if let Some(at) = picked {
         (hsv.s, hsv.v) = (at.x, 1.0 - at.y);
     }
-    let (strip, picked) = area(ui, 16.0, names[1]);
+    let steps = picker_steps(ui, &square_response, true);
+    hsv.s = (hsv.s + steps.x).clamp(0.0, 1.0);
+    hsv.v = (hsv.v + steps.y).clamp(0.0, 1.0);
+    let (strip, strip_response, picked) = area(ui, 16.0);
     if let Some(at) = picked {
         hsv.h = at.x;
+    }
+    hsv.h = (hsv.h + picker_steps(ui, &strip_response, false).x).clamp(0.0, 1.0);
+    // read out as sliders, at what they show now
+    let percent = |value: f32| (value * 100.0).round();
+    square_response.widget_info(|| egui::WidgetInfo {
+        current_text_value: Some(fl!(
+            "accent-shade",
+            "value",
+            saturation = percent(hsv.s),
+            value = percent(hsv.v)
+        )),
+        ..egui::WidgetInfo::slider(enabled, f64::from(percent(hsv.v)), fl!("accent-shade"))
+    });
+    let hue = f64::from((hsv.h * 360.0).round());
+    strip_response.widget_info(|| egui::WidgetInfo::slider(enabled, hue, fl!("accent-hue")));
+    // their range, and the steps screen readers may ask for
+    for (response, value, most) in
+        [(&square_response, hsv.v, 100.0), (&strip_response, hsv.h, 360.0)]
+    {
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            use egui::accesskit::Action;
+            node.set_min_numeric_value(0.0);
+            node.set_max_numeric_value(most);
+            if value < 1.0 {
+                node.add_action(Action::Increment);
+            }
+            if value > 0.0 {
+                node.add_action(Action::Decrement);
+            }
+        });
     }
     // each drawn as a grid of the colours at its corners
     let grid = |rect: egui::Rect, steps: (usize, usize), at: &dyn Fn(f32, f32) -> Color32| {
@@ -715,8 +789,12 @@ pub(crate) fn colour_picker(ui: &mut egui::Ui, colour: &mut Color32, names: [&st
     let shade = |s, v| Color32::from(HsvaGamma { h: hsv.h, s, v, a: 1.0 });
     painter.add(grid(square, (16, 16), &|x, y| shade(x, 1.0 - y)));
     painter.add(grid(strip, (36, 1), &|x, _| HsvaGamma { h: x, s: 1.0, v: 1.0, a: 1.0 }.into()));
-    for rect in [square, strip] {
-        painter.rect_stroke(rect, 0.0, outline, egui::StrokeKind::Outside);
+    // the keyboard's focus outlined outside too, as the colours inside
+    // may be the accent's own
+    let focus = egui::Stroke::new(2.0, theme::mark(ui.visuals()));
+    for (rect, response) in [(square, &square_response), (strip, &strip_response)] {
+        let stroke = if response.has_focus() { focus } else { outline };
+        painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Outside);
     }
     // where the colour is, ringed in black and white, which shows on any
     let ring = |at: egui::Pos2, radius: f32| {
