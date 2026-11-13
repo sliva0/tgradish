@@ -68,6 +68,9 @@ telegram-accepts = Telegram should accept it
 
 # The application's settings file couldn't be read on start.
 settings-unreadable = The settings couldn't be read, so the defaults are used: { $error }
+# Under settings-unreadable: where the file is copied as it was, since
+# saving Settings writes over it.
+settings-kept = A copy of the file as it was is kept as { $path }
 presets-unreadable = Your presets couldn't be read, so only the built-in ones are offered: { $error }
 # Files open when the window last closed, which aren't there any more.
 files-gone = { $count ->
