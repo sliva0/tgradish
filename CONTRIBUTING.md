@@ -56,7 +56,8 @@ cargo test --workspace
 
 needs `ffmpeg` and `ffprobe` on PATH, with libvpx, and libx264 for the
 video clips of the corpus; tests that need them print "skipped" and pass
-without. `nix develop` gives everything below but cargo-about, of which
+without, unless `TGRADISH_REQUIRE_FFMPEG=1`, as CI sets, fails them
+instead. `nix develop` gives everything below but cargo-about, of which
 nixpkgs has another version than the one `cargo xtask licenses` takes.
 tgradish is built and tested for Linux and Windows; macOS is untested and
 not supported.

@@ -657,6 +657,9 @@ mod tests {
 
     #[test]
     fn shows_the_frame_paused_on_at_full_size() {
+        if !has_ffmpeg() {
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
         let video = dir.path().join("red-blue.mp4");
         // red until 0.48 s, then blue
@@ -665,10 +668,7 @@ mod tests {
             .args(["-v", "error", "-filter_complex", graph, "-pix_fmt", "yuv420p"])
             .arg(&video)
             .status();
-        if !made.is_ok_and(|status| status.success()) {
-            eprintln!("skipped: needs ffmpeg on PATH");
-            return;
-        }
+        assert!(made.expect("ffmpeg runs").success(), "ffmpeg could not make the input");
         let mut config = Config::default();
         config.ffmpeg.choice = FfmpegChoice::System;
         let mut harness = harness(config);
@@ -697,16 +697,16 @@ mod tests {
 
     #[test]
     fn shows_still_images_at_full_size() {
+        if !has_ffmpeg() {
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
         let photo = dir.path().join("photo.jpg");
         let made = std::process::Command::new("ffmpeg")
             .args(["-v", "error", "-f", "lavfi", "-i", "testsrc2=s=1280x720", "-frames:v", "1"])
             .arg(&photo)
             .status();
-        if !made.is_ok_and(|status| status.success()) {
-            eprintln!("skipped: needs ffmpeg on PATH");
-            return;
-        }
+        assert!(made.expect("ffmpeg runs").success(), "ffmpeg could not make the input");
         let mut config = Config::default();
         config.ffmpeg.choice = FfmpegChoice::System;
         let mut harness = harness(config);

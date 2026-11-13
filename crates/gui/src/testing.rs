@@ -1,6 +1,7 @@
 //! What the window's tests share: a window to drive, ways to wait for its
 //! work and to convert, and inputs to give it. Videos are made with the
-//! ffmpeg on PATH; without one, the tests that need them are skipped.
+//! ffmpeg on PATH; without one, the tests that need them are skipped, or
+//! fail where `TGRADISH_REQUIRE_FFMPEG` says it must be there.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -100,8 +101,7 @@ pub(crate) fn video_of(dir: &Path, size: &str, seconds: u32) -> Option<PathBuf> 
     // without ffmpeg the test is skipped; ffmpeg failing is a broken test
     match made {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!("skipped: needs ffmpeg on PATH");
-            None
+            tgradish_corpus::skip("needs ffmpeg on PATH")
         }
         made => {
             assert!(made.expect("ffmpeg runs").success(), "ffmpeg could not make the video");
@@ -110,13 +110,10 @@ pub(crate) fn video_of(dir: &Path, size: &str, seconds: u32) -> Option<PathBuf> 
     }
 }
 
-/// Whether ffmpeg is on PATH; tests that need it are skipped without.
+/// Whether ffmpeg and ffprobe are on PATH; tests that need them are
+/// skipped without, or fail where they are required.
 pub(crate) fn has_ffmpeg() -> bool {
-    let found = std::process::Command::new("ffmpeg").arg("-version").output().is_ok();
-    if !found {
-        eprintln!("skipped: needs ffmpeg on PATH");
-    }
-    found
+    tgradish_corpus::ffmpeg_on_path()
 }
 
 /// The corpus file `name`, written to `dir` as `as_name`.
@@ -140,8 +137,7 @@ pub(crate) fn walking_video(dir: &Path) -> Option<PathBuf> {
         .status();
     match made {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!("skipped: needs ffmpeg on PATH");
-            None
+            tgradish_corpus::skip("needs ffmpeg on PATH")
         }
         made => {
             assert!(made.expect("ffmpeg runs").success(), "ffmpeg could not make the video");

@@ -1,5 +1,6 @@
 //! Runs the built `tgradish` binary. Conversion tests skip themselves when
-//! ffmpeg is missing.
+//! ffmpeg is missing, or fail where `TGRADISH_REQUIRE_FFMPEG` says it must
+//! be there.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -24,8 +25,12 @@ fn json_lines(output: &Output) -> Vec<Value> {
 }
 
 /// A clip like phone footage, made once with ffmpeg and kept for later
-/// runs.
+/// runs, or `None` without ffmpeg to convert it with.
 fn clip(kind: Clip) -> Option<PathBuf> {
+    // a clip made by an earlier run is there without ffmpeg
+    if !tgradish_corpus::ffmpeg_on_path() {
+        return None;
+    }
     tgradish_corpus::clip(kind, Path::new(env!("CARGO_TARGET_TMPDIR")))
 }
 
@@ -212,7 +217,7 @@ fn makes_animated_stickers() {
 
 #[test]
 fn makes_video_and_image_stickers_of_sequences() {
-    if Command::new("ffmpeg").arg("-version").output().is_err() {
+    if !tgradish_corpus::ffmpeg_on_path() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
@@ -341,7 +346,7 @@ fn watch_converts_new_files() {
 
 #[test]
 fn refuses_to_merge_outputs_of_same_named_inputs() {
-    if Command::new("ffmpeg").arg("-version").output().is_err() {
+    if !tgradish_corpus::ffmpeg_on_path() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
