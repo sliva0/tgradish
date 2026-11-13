@@ -60,7 +60,7 @@ impl App {
         let dir = self.config.gui.output_dir.clone();
         let next_to_input = item.input().default_output(item.format, item.choices.target);
         let name = next_to_input.file_name().unwrap_or_default();
-        let first = match (&item.pasted, dir) {
+        let first = match (&item.paste_dir, dir) {
             // not next to the image, which is in a temporary directory
             (Some(_), dir) => dir.or_else(paths::pictures_dir).unwrap_or_default().join(name),
             (None, Some(dir)) => dir.join(name),
@@ -81,7 +81,7 @@ impl App {
         // pasted images all have one name, so tgradish having made a file
         // doesn't make it theirs to replace: only the item's own result is
         let blocked = |path: &Path| {
-            let may_replace = match item.pasted {
+            let may_replace = match item.paste_dir {
                 Some(_) => self.wrote(item.id, path),
                 None => self.may_replace(item.id, path),
             };

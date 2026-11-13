@@ -36,7 +36,7 @@ impl App {
             return;
         }
         set_theme(ui.ctx(), theme);
-        self.keep(|gui| gui.theme = theme);
+        self.save_setting(|gui| gui.theme = theme);
     }
 
     fn add_menu(&mut self, ui: &mut egui::Ui) {

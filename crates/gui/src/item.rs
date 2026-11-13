@@ -429,10 +429,10 @@ pub(crate) struct Item {
     /// One file, or the frames of one animation.
     pub(crate) inputs: Vec<PathBuf>,
     pub(crate) sequence: bool,
-    /// Where a pasted image is kept.
-    pub(crate) pasted: Option<tempfile::TempDir>,
+    /// The folder of its own a pasted image is in, which goes with the item.
+    pub(crate) paste_dir: Option<tempfile::TempDir>,
     /// The name of the pasted image's copy kept with the session.
-    pub(crate) kept: Option<String>,
+    pub(crate) pasted_copy: Option<String>,
     pub(crate) kind: Kind,
     pub(crate) format: Format,
     /// The format was not picked by the user yet, so finding pixel art may
@@ -482,8 +482,8 @@ impl Item {
             id,
             inputs,
             sequence,
-            pasted: None,
-            kept: None,
+            paste_dir: None,
+            pasted_copy: None,
             kind,
             format: kind.first_format(),
             format_guessed: kind == Kind::Image,
@@ -519,7 +519,7 @@ impl Item {
     pub(crate) fn name(&self) -> String {
         let first = self.inputs.first().and_then(|p| p.file_name());
         let first = first.map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        match (self.inputs.len(), &self.pasted) {
+        match (self.inputs.len(), &self.paste_dir) {
             (_, Some(_)) => fl!("name-pasted"),
             (1, None) if self.sequence => fl!("name-frames", name = first),
             (1, None) => first,

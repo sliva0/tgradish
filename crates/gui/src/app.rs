@@ -30,7 +30,7 @@ use crate::{accent, fallback, inspect, preset_dialogs, session, settings_dialog,
 use crate::{dnd, toplevel_icon};
 
 /// How many items keep their big frames: the selected one and the last few.
-const KEPT: usize = 3;
+const FRAMES_HELD: usize = 3;
 /// How wide the list of files starts.
 const FILES_WIDTH: f32 = 410.0;
 
@@ -90,7 +90,7 @@ pub(crate) struct App {
     pub(crate) fallbacks: fallback::Fallbacks,
     pub(crate) message: Option<String>,
     /// The clipboard was read for the Ctrl+V being held.
-    pub(crate) pasted: bool,
+    pub(crate) clipboard_read: bool,
     #[cfg(all(unix, not(target_os = "macos")))]
     pub(crate) drops: Option<dnd::Drops>,
     /// The window's icon on Wayland, kept while the window shows it.
@@ -150,10 +150,10 @@ impl App {
                 Err(err) => return self.say(fl!("session-unsaved", error = err.to_string())),
             };
             if let Some(unreadable) = loaded.unreadable {
-                let kept = unreadable.kept.display().to_string();
+                let aside = unreadable.aside.display().to_string();
                 self.say(match unreadable.files {
-                    Some(count) => fl!("files-unreadable", count = count, path = kept),
-                    None => fl!("session-unreadable", path = kept),
+                    Some(count) => fl!("files-unreadable", count = count, path = aside),
+                    None => fl!("session-unreadable", path = aside),
                 });
             }
             let restored = loaded.session.restore(store.path(), self.next_id);
@@ -181,15 +181,15 @@ impl App {
     /// Copies pasted images that have no copy yet next to the session, so
     /// they can be opened again. Where one can't be copied the session
     /// can't be kept: that is said once, as when writing it fails.
-    fn keep_pasted(&mut self) {
+    fn copy_pasted(&mut self) {
         let Some(store) = &mut self.session else { return };
         if !self.config.gui.reopen_files {
             return;
         }
-        for item in self.items.iter_mut().filter(|item| item.kept.is_none()) {
-            let Some(image) = item.pasted.as_ref().and(item.inputs.first()) else { continue };
-            match store.keep_pasted(item.id, image) {
-                Ok(name) => item.kept = Some(name),
+        for item in self.items.iter_mut().filter(|item| item.pasted_copy.is_none()) {
+            let Some(image) = item.paste_dir.as_ref().and(item.inputs.first()) else { continue };
+            match store.copy_pasted(item.id, image) {
+                Ok(name) => item.pasted_copy = Some(name),
                 Err(err) => {
                     self.message = Some(fl!("session-unsaved", error = err.to_string()));
                     self.session = None;
@@ -202,7 +202,7 @@ impl App {
     /// Keeps the open files and their settings, if they changed.
     pub(crate) fn save_session(&mut self) {
         // those pasted while the setting was on have none yet
-        self.keep_pasted();
+        self.copy_pasted();
         let Some(store) = &mut self.session else { return };
         // with the setting off, nothing is kept: an empty session
         let items: &[Item] = if self.config.gui.reopen_files { &self.items } else { &[] };
@@ -248,7 +248,7 @@ impl App {
             next_save: 0.0,
             fallbacks: fallback::Fallbacks::new(fonts()),
             message,
-            pasted: false,
+            clipboard_read: false,
             #[cfg(all(unix, not(target_os = "macos")))]
             drops: None,
             #[cfg(all(unix, not(target_os = "macos")))]
@@ -327,8 +327,8 @@ impl App {
         self.recent.retain(|&other| other != id);
         self.recent.push_front(id);
         // the oldest give their frames back
-        while self.recent.len() > KEPT {
-            let old = self.recent.pop_back().expect("longer than KEPT");
+        while self.recent.len() > FRAMES_HELD {
+            let old = self.recent.pop_back().expect("longer than FRAMES_HELD");
             if let Some(item) = self.item_mut(old) {
                 release(item);
             }
@@ -385,10 +385,10 @@ impl App {
     pub(crate) fn add_pasted(&mut self, files: Vec<PathBuf>, dir: tempfile::TempDir) {
         let mut item =
             Item::new(self.next_id, files, false, self.config.gui.target.unwrap_or_default());
-        item.pasted = Some(dir);
+        item.paste_dir = Some(dir);
         let id = self.push(item);
         self.select(id);
-        self.keep_pasted();
+        self.copy_pasted();
     }
 
     pub(crate) fn remove(&mut self, id: u64) {
@@ -421,12 +421,12 @@ impl App {
 
     /// Changes a setting of the window, and keeps that change in the config
     /// file at once, without the rest of what Settings changed.
-    pub(crate) fn keep(&mut self, change: impl Fn(&mut crate::config::GuiConfig)) {
-        self.keep_config(|config| change(&mut config.gui));
+    pub(crate) fn save_setting(&mut self, change: impl Fn(&mut crate::config::GuiConfig)) {
+        self.save_config_setting(|config| change(&mut config.gui));
     }
 
-    /// [`App::keep`] for any of the settings.
-    pub(crate) fn keep_config(&mut self, change: impl Fn(&mut Config)) {
+    /// [`App::save_setting`] for any of the settings.
+    pub(crate) fn save_config_setting(&mut self, change: impl Fn(&mut Config)) {
         change(&mut self.config);
         if let Some(path) = &self.config_path {
             let saved = Config::load(path).and_then(|mut saved| {
@@ -643,7 +643,7 @@ mod tests {
         harness.state_mut().add_pasted(files, folder);
         // there before the session is next written
         assert_eq!(std::fs::read_dir(&copies).unwrap().count(), 1);
-        assert!(harness.state().items[0].kept.is_some() && !state.exists());
+        assert!(harness.state().items[0].pasted_copy.is_some() && !state.exists());
 
         // where copies can't be made, that is said once and not tried again
         std::fs::remove_dir_all(&copies).unwrap();
@@ -654,7 +654,7 @@ mod tests {
             let app = harness.state_mut();
             let said = app.message.take().is_some_and(|said| said.contains("kept for next time"));
             assert_eq!(said, app.items.len() == 2);
-            assert!(app.session.is_none() && app.items.last().unwrap().kept.is_none());
+            assert!(app.session.is_none() && app.items.last().unwrap().pasted_copy.is_none());
         }
         harness.state_mut().save_session();
         assert_eq!(std::fs::read(&copies).unwrap(), b"in the way");
@@ -755,7 +755,7 @@ mod tests {
         app.ffmpeg_override = (None, Some(dir.path().join("no-ffmpeg-here")));
         // used, though nothing is found there
         assert!(app.backend().is_err());
-        app.keep(|gui| gui.overwrite = true);
+        app.save_setting(|gui| gui.overwrite = true);
         app.config.save(&path).unwrap();
         let saved = Config::load(&path).unwrap();
         assert!(saved.gui.overwrite && saved.ffmpeg == Config::default().ffmpeg);
