@@ -18,6 +18,13 @@ const SAVES_TO: f32 = 300.0;
 impl App {
     pub(crate) fn actions(&mut self, ui: &mut egui::Ui, id: u64) {
         let output = self.item(id).map(|item| self.output_for(item));
+        // a file there that this item didn't write, which tgradish made or
+        // the settings let any result replace
+        let replaces = output.as_ref().filter(|output| output.exists() && !self.wrote(id, output));
+        let replaces = replaces.map(|output| match self.made_by_tgradish(output) {
+            true => fl!("replaces-earlier"),
+            false => fl!("replaces-earlier", "any"),
+        });
         let queued = self.queue.iter().position(|&other| other == id);
         let presets_kept = self.presets_dir.is_some();
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
@@ -129,6 +136,9 @@ impl App {
                 let text = if fits { full } else { fl!("show-folder", "short") };
                 if output.exists() && ui.button(text).clicked() {
                     system::reveal(output);
+                }
+                if let Some(replaces) = &replaces {
+                    ui.colored_label(widgets::WARN, format!("⚠ {replaces}"));
                 }
                 ui.label(name).on_hover_ui(|ui| {
                     let plain = text_format(ui, ui.visuals().text_color());
