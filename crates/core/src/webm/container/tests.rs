@@ -5,7 +5,6 @@ use super::ebml::ids;
 use super::inspect::*;
 use super::patch::*;
 use super::*;
-use crate::Error;
 
 /// Options for the synthetic WebM files used in tests.
 struct Fixture {
@@ -402,6 +401,8 @@ fn reads_the_apps_from_the_head_alone() {
 #[cfg(unix)]
 #[test]
 fn reads_no_more_of_large_files_than_it_needs() {
+    use crate::Error;
+
     let dir = tempfile::tempdir().unwrap();
     // without blocks on the disk, as long as a long video
     let sparse = |name: &str, start: &[u8]| {
