@@ -400,6 +400,10 @@ impl Framing {
                 scaling: webm.scaling,
                 exact_scale: webm.exact_scale,
                 tempo: webm.tempo,
+                // the rate a sequence's pictures are read at, as .tgs's is,
+                // which draws its frames again; a video's is only the rate
+                // it is encoded at
+                fps: webm.fps.filter(|_| item.kind == Kind::Frames && item.format == Format::Webm),
                 ..Options::default()
             },
             tgs: tgs::Options {
@@ -728,8 +732,6 @@ mod tests {
             "fit",
             "attempts",
             "fit-range",
-            // the rate it is encoded at
-            "fps",
             "bitrate",
             "crf",
             "speed",
@@ -741,6 +743,9 @@ mod tests {
             "encoder-options",
             "ffmpeg-args",
         ];
+        // the rate a video is encoded at, and the rate a sequence's
+        // pictures are read at, which redraws them
+        let webm_sequence_framing = ["fps"];
         let tgs_framing = json!({
             "keep-canvas": true,
             "pixel-scale": 2,
@@ -775,6 +780,7 @@ mod tests {
             keys.sort();
             keys
         };
+        let webm_other = [&webm_other[..], &webm_sequence_framing].concat();
         assert_eq!(keys("webm"), decided(&webm_framing, &webm_other), "WebM's options");
         assert_eq!(keys("tgs"), decided(&tgs_framing, &tgs_other), ".tgs's options");
         // and Framing takes those that frame it, each on its own
@@ -789,6 +795,19 @@ mod tests {
             let mut changed = item();
             changed.choices.tgs = serde_json::from_value(json!({ key: value })).unwrap();
             assert_ne!(Framing::of(&changed), unchanged, ".tgs's {key}");
+        }
+        let sequence = || {
+            let mut item = Item::new(1, vec!["walk".into()], true, Target::Sticker);
+            item.format = Format::Webm;
+            item
+        };
+        for key in webm_sequence_framing {
+            let mut video = item();
+            video.choices.webm = serde_json::from_value(json!({ key: 5.0 })).unwrap();
+            assert_eq!(Framing::of(&video), unchanged, "a video's WebM {key}");
+            let mut changed = sequence();
+            changed.choices.webm = video.choices.webm.clone();
+            assert_ne!(Framing::of(&changed), Framing::of(&sequence()), "a sequence's WebM {key}");
         }
     }
 
