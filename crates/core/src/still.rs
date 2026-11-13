@@ -25,8 +25,8 @@ pub fn default_output(input: &Path, target: Target) -> PathBuf {
     crate::fsutil::beside(input, &format!("{}.webp", target.name()))
 }
 
-/// What `convert --json` prints for an image: once it is made, or why it
-/// couldn't be.
+/// What `convert --json` and `watch --json` print for images: one once it
+/// is made, or why it couldn't be.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "event", rename_all = "kebab-case")]
 #[non_exhaustive]
