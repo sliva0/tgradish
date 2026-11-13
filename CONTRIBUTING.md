@@ -124,8 +124,10 @@ the repository around it. After changing dependencies, run `cargo xtask
 licenses` with cargo-about 0.9.2, which CI uses too (`cargo install
 --locked cargo-about@0.9.2 --features cli`); it renews those copies as
 well. `cargo xtask ffmpeg` keeps `crates/core/licenses/ffmpeg` up to
-date. ffmpeg stays LGPL: never enable its GPL parts. Paths and commands say
-"licenses", prose says "licences".
+date. `.gitattributes` checks text out with LF on Windows too, so the
+notices build in and compare the same everywhere. ffmpeg stays LGPL:
+never enable its GPL parts. Paths and commands say "licenses", prose says
+"licences".
 
 ## Releasing
 

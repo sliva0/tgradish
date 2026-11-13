@@ -1,0 +1,19 @@
+# Text is checked out with LF everywhere, Windows too: the licence notices
+# are built into the binaries and compared with what xtask generates, and
+# a test or build that reads a checked-out file should see the same bytes
+# on every platform. rc.exe and the manifest read LF as well.
+* text=auto eol=lf
+
+# cargo-about copies crates' licence files as they are, and a few end their
+# lines in CRLF; `cargo xtask licenses --check` compares them byte for byte
+crates/core/licenses/THIRD-PARTY-CRATES.txt -text
+
+*.png binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.webp binary
+*.webm binary
+*.gif binary
+*.jpg binary
+*.tgs binary
