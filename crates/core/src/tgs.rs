@@ -325,8 +325,8 @@ impl Preview {
     /// What `anim` shows, `stretch`ed square as the sticker is, or not.
     fn of(anim: &tgradish_tgs::PixelAnim, stretch: bool) -> Preview {
         let grid = anim.grid();
-        let width = *grid.columns.last().unwrap_or(&0);
-        let height = *grid.rows.last().unwrap_or(&0);
+        let width = *grid.columns().last().unwrap_or(&0);
+        let height = *grid.rows().last().unwrap_or(&0);
         // input pixels per preview pixel: an art pixel, unless the canvas
         // cuts those at the sides, which then show only in part
         let unit = if grid.cut_at_sides() { 1 } else { grid.scale() };
@@ -347,7 +347,7 @@ impl Preview {
                 .map(|x| edges.partition_point(|&edge| edge <= x.min(size - 1)) - 1)
                 .collect()
         };
-        let (columns, rows) = (cells(&grid.columns, width), cells(&grid.rows, height));
+        let (columns, rows) = (cells(grid.columns(), width), cells(grid.rows(), height));
         let frames = anim
             .frames()
             .iter()

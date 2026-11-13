@@ -406,8 +406,8 @@ mod tests {
         let (red, green, blue) =
             (colour([255, 0, 0, 255]), colour([0, 255, 0, 255]), colour([0, 0, 255, 100]));
         let column =
-            |x: u32| anim.grid().columns.iter().position(|&edge| edge == x).unwrap() as u32;
-        let row = |y: u32| anim.grid().rows.iter().position(|&edge| edge == y).unwrap() as u32;
+            |x: u32| anim.grid().columns().iter().position(|&edge| edge == x).unwrap() as u32;
+        let row = |y: u32| anim.grid().rows().iter().position(|&edge| edge == y).unwrap() as u32;
         let (left, right, top, bottom) = (column(2), column(4), row(2), row(4));
         let outline = |points: &[(u32, u32)]| Shape::Path(points.to_vec());
         let outer = outline(&[(0, 0), (w, 0), (w, h), (0, h)]);

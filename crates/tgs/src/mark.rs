@@ -45,6 +45,7 @@ fn written_key(centre: [f64; 2], size: [f64; 2]) -> Key {
     key(centre.map(written), size.map(written))
 }
 
+internal! {
 /// Hides `payload` once in the order of `animation`'s rectangles, or as its
 /// first layer's name when they have no room for it. False when it has no
 /// layers either. Each copy would cost about 0.6% of a sticker's size, as
@@ -66,6 +67,7 @@ pub fn embed(animation: &mut Animation, payload: &[u8]) -> bool {
     }
     true
 }
+}
 
 /// The payload a sticker carries as its first layer's name, if it does.
 pub fn layer_name(json: &[u8]) -> Option<Vec<u8>> {
@@ -77,6 +79,7 @@ pub fn layer_name(json: &[u8]) -> Option<Vec<u8>> {
     (0..name.len()).step_by(2).map(|i| u8::from_str_radix(&name[i..i + 2], 16).ok()).collect()
 }
 
+internal! {
 /// How many bits `animation`'s rectangles can hold.
 pub fn capacity(animation: &Animation) -> usize {
     let groups = animation.layers.iter().flat_map(|layer| &layer.items);
@@ -86,6 +89,7 @@ pub fn capacity(animation: &Animation) -> usize {
             _ => None,
         })
         .sum()
+}
 }
 
 fn keys(items: &[Item]) -> Vec<Key> {

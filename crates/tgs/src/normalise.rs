@@ -73,15 +73,27 @@ pub struct PixelFrame {
     pub ticks: u32,
 }
 
-/// Where cells start, in input pixels from the top left of the crop. Holds
-/// one more entry than there are cells: the last one is the crop's size.
+/// Where cells start, in input pixels from the top left of the crop. Made
+/// by normalising, so there is always a cell at least.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Grid {
-    pub columns: Vec<u32>,
-    pub rows: Vec<u32>,
+    pub(crate) columns: Vec<u32>,
+    pub(crate) rows: Vec<u32>,
 }
 
 impl Grid {
+    /// Where each column of cells starts, from 0, and then the crop's
+    /// width: one more entry than there are columns.
+    pub fn columns(&self) -> &[u32] {
+        &self.columns
+    }
+
+    /// Where each row of cells starts, from 0, and then the crop's height:
+    /// one more entry than there are rows.
+    pub fn rows(&self) -> &[u32] {
+        &self.rows
+    }
+
     /// The largest size every cell is a multiple of: the art's pixel scale
     /// when the input is an exact upscale. Along a side of three cells or
     /// more, those at its ends don't count, since the canvas or a crop can
@@ -110,10 +122,11 @@ impl Grid {
     /// cells there are smaller than the rest.
     pub fn cut_at_sides(&self) -> bool {
         let unit = self.scale().max(1);
-        let cut = |edges: &[u32]| {
-            let (first, last) =
-                (edges[1] - edges[0], edges[edges.len() - 1] - edges[edges.len() - 2]);
-            edges.len() > 2 && (!first.is_multiple_of(unit) || !last.is_multiple_of(unit))
+        let cut = |edges: &[u32]| match edges {
+            [first, second, .., before_last, last] if edges.len() > 2 => {
+                !(second - first).is_multiple_of(unit) || !(last - before_last).is_multiple_of(unit)
+            }
+            _ => false,
         };
         cut(&self.columns) || cut(&self.rows)
     }
@@ -125,7 +138,9 @@ fn gcd(a: u32, b: u32) -> u32 {
 
 /// A normalised animation. Cells are the largest blocks of input pixels
 /// that are one colour in every frame, so the grid can be uneven; colour 0
-/// is transparent.
+/// is transparent. Made by [`normalise`], and by reductions of what it
+/// made: it has no other constructor, so that each one holds what
+/// normalising promises.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PixelAnim {
     pub(crate) width: u32,

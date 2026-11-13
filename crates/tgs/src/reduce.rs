@@ -72,7 +72,7 @@ impl Kind {
     /// to drastic; fitting weakens its last step to between two of them
     /// (see [`Reduction::between`]). `likely_scale` is the scale snapping
     /// would use, if the art has one.
-    pub fn ladder(self, likely_scale: Option<u32>) -> Vec<Reduction> {
+    pub(crate) fn ladder(self, likely_scale: Option<u32>) -> Vec<Reduction> {
         match self {
             Kind::SnapToGrid => {
                 likely_scale.map(|scale| Reduction::SnapToGrid { scale }).into_iter().collect()
@@ -117,7 +117,7 @@ pub enum Compromise {
 
 impl Compromise {
     /// Whether fitting uses `kind` before the others, as long as it helps.
-    pub fn first(self, kind: Kind) -> bool {
+    pub(crate) fn first(self, kind: Kind) -> bool {
         match self {
             Compromise::Auto => true,
             Compromise::Motion => kind.motion(),
@@ -140,7 +140,7 @@ impl Reduction {
 
     /// The same reduction at a strength between this one's and `weaker`'s
     /// (`share` 0 is `weaker`, 1 this one), for kinds that have one.
-    pub fn between(&self, weaker: Option<&Reduction>, share: f64) -> Option<Reduction> {
+    pub(crate) fn between(&self, weaker: Option<&Reduction>, share: f64) -> Option<Reduction> {
         let mix = |from: f64, to: f64| from + (to - from) * share;
         Some(match (*self, weaker.copied()) {
             (Reduction::MergeColours { distance }, weaker) => Reduction::MergeColours {

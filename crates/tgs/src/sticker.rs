@@ -44,7 +44,6 @@ pub struct Options {
     pub name: Option<String>,
     /// Hidden in the order of its rectangles (see [`crate::mark`]).
     pub mark: Option<Vec<u8>>,
-    pub style: Style,
 }
 
 impl Default for Options {
@@ -58,7 +57,6 @@ impl Default for Options {
             max_bytes: telegram::MAX_BYTES,
             name: None,
             mark: None,
-            style: Style::default(),
         }
     }
 }
@@ -179,7 +177,7 @@ fn render(
         if let Some(mark) = &options.mark {
             mark::embed(&mut lottie, mark);
         }
-        lottie.to_json(options.style)
+        lottie.to_json(Style::default())
     };
     // The smallest scene scored so far, laid out and packed: the encoder
     // keeps the smallest it scores, so this is nearly always the scene it
@@ -522,6 +520,7 @@ fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R>
     }
 }
 
+internal! {
 /// How many zopfli iterations stickers are packed with at `effort`.
 pub fn zopfli_iterations(effort: Effort) -> u64 {
     match effort {
@@ -529,6 +528,7 @@ pub fn zopfli_iterations(effort: Effort) -> u64 {
         Effort::Balanced => 15,
         Effort::Best => 40,
     }
+}
 }
 
 /// A reduced animation, its quick encode, its estimated size and its

@@ -13,7 +13,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
-tgradish-tgs = { path = "../tgs", features = ["threads"] }
+tgradish-tgs = { path = "../tgs", features = ["internals", "threads"] }
 tgradish-corpus = { path = "../corpus" }
 
 anyhow = "1.0.104"
