@@ -273,6 +273,7 @@ preset = Preset
     .hint = How hard to work on the result; your own values below go on top
     .image = A picture takes only the preset's picture settings, how it is squared and scaled: it is saved lossless where that fits, otherwise at the best quality which still fits
     .broken = This preset's file is broken
+    .missing = There is no preset "{ $name }" any more: pick another
 manage-presets = Manage…
     .hint = Rename, describe or delete your presets
 # The built-in presets, from the quickest; each says what it does for

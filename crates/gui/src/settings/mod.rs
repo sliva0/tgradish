@@ -208,10 +208,22 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         webm::follow_fit(&mut item.choices.webm, before, after);
     }
     match (builtin_description(chosen, item.format), context.presets.get(chosen)) {
+        // what is converted with it fails, and the settings show defaults
+        (_, Err(err)) => {
+            let known = names.iter().any(|(name, _)| name == chosen);
+            let why = if known {
+                fl!("preset", "broken")
+            } else {
+                fl!("preset", "missing", name = preset_label(chosen))
+            };
+            ui.colored_label(widgets::WARN, format!("⚠ {why}"));
+            if known {
+                note(ui, crate::jobs::failure(&err));
+            }
+        }
         _ if image => note(ui, pictures),
         (Some(text), Ok(preset)) if preset.path.is_none() => note(ui, text),
         (_, Ok(preset)) => note(ui, preset.description.clone()),
-        _ => {}
     }
 }
 
@@ -385,6 +397,41 @@ mod tests {
         harness.run_steps(2);
         assert_eq!(harness.state().choices.preset.as_deref(), Some("fast"));
         harness.get_by_label(&fl!("preset", "image"));
+    }
+
+    #[test]
+    fn warns_of_a_preset_that_is_gone_or_broken() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        use tgradish_core::telegram::Target;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("torn.toml"), "[webm\n").unwrap();
+        let (presets, config) = (Presets::load(Some(dir.path())).unwrap(), Config::default());
+        let context = Context {
+            presets: &presets,
+            config: &config,
+            extra_args: true,
+            output: None,
+            config_path: None,
+            presets_dir: None,
+            in_frames: false,
+        };
+        let warned = |name: &str| {
+            let mut item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
+            item.format = Format::Webm;
+            item.choices.preset = Some(name.into());
+            let mut harness =
+                Harness::new_ui_state(|ui, item: &mut Item| make(ui, item, &context), item);
+            harness.run_steps(2);
+            let missing = fl!("preset", "missing", name = name);
+            let broken = fl!("preset", "broken");
+            let shown = |text: &str| harness.query_by_label(&format!("⚠ {text}")).is_some();
+            (shown(&missing), shown(&broken))
+        };
+        assert_eq!(warned("gone"), (true, false));
+        assert_eq!(warned("torn"), (false, true));
+        assert_eq!(warned("fast"), (false, false));
     }
 
     #[test]
