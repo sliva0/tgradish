@@ -304,6 +304,7 @@ pub struct OptionArgs {
     /// Scale by exactly N (or 1/N), so input pixels line up with the
     /// result's; transparent margins fill the rest. The crop must fit: with
     /// 3, at most 170 pixels on the longer side for stickers, 33 for emoji.
+    /// --exact-scale= with nothing after sets none, over a preset's.
     #[arg(long, value_name = "N", help_heading = "Output")]
     pub exact_scale: Option<ExactScale>,
     /// Seconds to skip at the start of the input.
@@ -925,6 +926,10 @@ mod tests {
         // none, over a preset's: as options::flags writes it
         let none = Options { encoder_options: Some(Default::default()), ..Options::default() };
         assert_eq!(options::flags(&none), ["--encoder-options="]);
+        assert_eq!(parsed(options::flags(&none)).to_options(), none);
+        // and no exact scale, over a preset's
+        let none = Options { exact_scale: Some(ExactScale::NONE), ..Options::default() };
+        assert_eq!(options::flags(&none), ["--exact-scale="]);
         assert_eq!(parsed(options::flags(&none)).to_options(), none);
     }
 }

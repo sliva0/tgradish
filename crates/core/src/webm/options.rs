@@ -192,10 +192,16 @@ impl Options {
     /// Whether how pixels are scaled is left to the input: auto, with no
     /// exact scale, which places pixels itself.
     pub fn auto_scaling(&self) -> bool {
-        self.scaling_or_default() == Scaling::Auto && self.exact_scale.is_none()
+        self.scaling_or_default() == Scaling::Auto && self.exact_scale().is_none()
     }
 
-    /// Returns `self` with every value set in `overlay` replacing its own.
+    /// The exact scale to scale by, if any: not [`ExactScale::NONE`].
+    pub fn exact_scale(&self) -> Option<ExactScale> {
+        self.exact_scale.filter(|&scale| scale != ExactScale::NONE)
+    }
+
+    /// Returns `self` with every value set in `overlay` replacing its own,
+    /// [`ExactScale::NONE`] clearing an exact scale.
     /// A range to fit within belongs to the way of fitting it was written
     /// for: when `overlay` fits in another unit, as a bitrate where `self`
     /// fits a quality, and sets no range of its own, `self`'s is dropped
@@ -205,6 +211,10 @@ impl Options {
         let mut merged = self.overlaid(overlay);
         if overlay.fit.is_some_and(|fit| fit.unit() != unit) && overlay.fit_range.is_none() {
             merged.fit_range = None;
+        }
+        // no scale, over one below, leaves none
+        if merged.exact_scale == Some(ExactScale::NONE) {
+            merged.exact_scale = None;
         }
         merged
     }
