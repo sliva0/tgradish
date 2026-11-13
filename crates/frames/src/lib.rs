@@ -24,6 +24,7 @@ pub use sheet::{Sheet, sequence, split_sheet, sprite_sheet};
 pub const DEFAULT_FRAME_DURATION: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("the animation has no frames")]
     Empty,
@@ -57,6 +58,7 @@ pub enum Error {
 
 /// What decoding found too large for its [`Limits`], with its size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Oversize {
     /// `frames` frames of `width`x`height`: what all the frames decoded
     /// come to together.
@@ -72,6 +74,7 @@ pub enum Oversize {
 
 /// The one of [`Limits`] that something went past.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Limit {
     /// [`Limits::max_dimension`], in pixels.
     Dimension(u32),
@@ -98,6 +101,7 @@ fn oversize_text(what: &Oversize, limit: &Limit) -> String {
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Format {
     Gif,
     /// PNG and APNG.
@@ -145,7 +149,8 @@ impl Format {
 }
 
 /// How much decoding may take, so hostile files fail instead of
-/// exhausting memory.
+/// exhausting memory. Built as `Limits { max_bytes, ..Limits::default() }`,
+/// so that what is added later keeps its default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
     /// The largest width or height.
@@ -186,6 +191,9 @@ impl Limits {
     }
 }
 
+/// What [`decode`] reads of a file. Built as `DecodeOptions { tag,
+/// ..DecodeOptions::default() }`, so that what is added later keeps its
+/// default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DecodeOptions {
     /// Aseprite: only the frames of this tag, in its direction.

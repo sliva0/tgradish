@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use crate::{Animation, DecodeOptions, Error, Frame, Limits, Result, decode};
 
-/// How a sprite sheet is laid out: equal cells, frames row by row.
+/// How a sprite sheet is laid out: equal cells, frames row by row. Built
+/// with [`Sheet::new`], then changed field by field, so that what is added
+/// later keeps its default.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sheet {
     pub columns: u32,
@@ -16,6 +18,15 @@ pub struct Sheet {
     /// How long each frame shows; zero stands for
     /// [`DEFAULT_FRAME_DURATION`](crate::DEFAULT_FRAME_DURATION).
     pub frame_duration: Duration,
+}
+
+impl Sheet {
+    /// `columns` by `rows` cells, every one holding a frame but fully
+    /// transparent ones at the end, each shown for
+    /// [`DEFAULT_FRAME_DURATION`](crate::DEFAULT_FRAME_DURATION).
+    pub fn new(columns: u32, rows: u32) -> Sheet {
+        Sheet { columns, rows, frames: None, frame_duration: Duration::ZERO }
+    }
 }
 
 /// Splits a still image into the frames of a sprite sheet. Animated

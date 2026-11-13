@@ -27,8 +27,9 @@ use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Format, Frame, Limits, Ove
 const MAX_GROUP_DEPTH: usize = 64;
 
 /// How a tag plays its frames.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Direction {
+    #[default]
     Forward,
     Reverse,
     /// There and back: `from..=to`, then `to-1..from` without repeating the
@@ -38,8 +39,10 @@ pub enum Direction {
     PingPongReverse,
 }
 
-/// A named range of frames.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A named range of frames. Only read from files; [`Default`] gives an
+/// empty one for tests to fill in.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Tag {
     pub name: String,
     pub from: u32,
@@ -67,8 +70,10 @@ impl Tag {
 }
 
 /// A layer as Aseprite's Layers panel lists it. Reference layers, which
-/// exports leave out, aren't listed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// exports leave out, aren't listed. Only read from files; [`Default`]
+/// gives an empty one for tests to fill in.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct LayerInfo {
     pub name: String,
     /// A group, which shows or hides the layers in it.
@@ -82,7 +87,9 @@ pub struct LayerInfo {
 }
 
 /// Layers to show or hide by name, over what the file shows. A name stands
-/// for every layer of that name; one in both lists is hidden.
+/// for every layer of that name; one in both lists is hidden. Built as
+/// `Layers { hide, ..Layers::default() }`, so that what is added later
+/// keeps its default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Layers {
     pub show: Vec<String>,

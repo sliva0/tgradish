@@ -347,12 +347,11 @@ mod tests {
         use egui_kittest::Harness;
         use egui_kittest::kittest::{NodeT, Queryable};
 
-        let tag = |name: &str, from, to| Tag {
-            name: name.into(),
-            from,
-            to,
-            direction: Direction::Forward,
-            colour: [200, 80, 80, 255],
+        let tag = |name: &str, from, to| {
+            let mut tag = Tag::default();
+            (tag.name, tag.from, tag.to) = (name.into(), from, to);
+            tag.colour = [200, 80, 80, 255];
+            tag
         };
         let tags = [tag("idle", 0, 1), tag("walk", 2, 5)];
         let durations = [0.1; 8];
@@ -410,12 +409,10 @@ mod tests {
 
     #[test]
     fn names_layers_only_where_they_differ_from_the_file() {
-        let layer = |name: &str, visible| LayerInfo {
-            name: name.into(),
-            group: false,
-            level: 0,
-            visible,
-            background: false,
+        let layer = |name: &str, visible| {
+            let mut layer = LayerInfo::default();
+            (layer.name, layer.visible) = (name.into(), visible);
+            layer
         };
         let (shadow, sketch) = (layer("Shadow", true), layer("Sketch", false));
         let none = Preset::default();
