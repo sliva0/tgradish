@@ -12,7 +12,7 @@
 use std::path::Path;
 
 use eframe::egui::{self, RichText, vec2};
-use tgradish_core::options::Options;
+use tgradish_core::options::{Fit, Options};
 use tgradish_core::presets::{self, Presets};
 use tgradish_core::tgs::TgsOptions;
 
@@ -503,6 +503,15 @@ impl App {
     /// Items and the config that named the preset `from` name `to` now, or
     /// the default preset when it is gone.
     fn follow_preset(&mut self, from: &str, to: Option<&str>) {
+        // the default may fit another way than a deleted preset, so that an
+        // item's own range no longer suits it, as when another is chosen; a
+        // renamed one fits as before. The presets are read again only
+        // later, which doesn't matter: what the items name now is in them
+        let fits: Option<Vec<Fit>> = to.is_none().then(|| {
+            let fit =
+                |item: &Item| crate::settings::fit_of(&item.choices, &self.presets, &self.config);
+            self.items.iter().map(fit).collect()
+        });
         for item in &mut self.items {
             if item.choices.preset.as_deref() == Some(from) {
                 item.choices.preset = to.map(str::to_owned);
@@ -517,6 +526,12 @@ impl App {
                     }
                 }
             });
+        }
+        if let Some(fits) = fits {
+            for (item, before) in self.items.iter_mut().zip(fits) {
+                let after = crate::settings::fit_of(&item.choices, &self.presets, &self.config);
+                crate::settings::follow_fit(&mut item.choices.webm, before, after);
+            }
         }
     }
 }
@@ -648,5 +663,34 @@ mod tests {
         state.change_preset(&presets_dir, &mut managing, Change::Rename(0));
         assert!(managing.rows[0].problem.is_some());
         assert_eq!(state.presets.webm("fast").unwrap().crf, None);
+    }
+
+    #[test]
+    fn drops_a_range_the_default_fits_by_another_unit_once_a_preset_is_gone() {
+        use tgradish_core::options::Range;
+        use tgradish_core::telegram::Target;
+
+        let dir = tempfile::tempdir().unwrap();
+        let webm = Options { fit: Some(Fit::Crf), ..Options::default() };
+        presets::save(dir.path(), "by quality", "", (&webm, &TgsOptions::default()), false)
+            .unwrap();
+        let presets = Presets::load(Some(dir.path())).unwrap();
+        let mut app = crate::app::App::with(Config::default(), None, presets, None);
+        let qualities = Some(Range { min: 20.0, max: 40.0 });
+        for id in [1, 2] {
+            let mut item =
+                crate::item::Item::new(id, vec!["pig.mp4".into()], false, Target::Sticker);
+            item.choices.preset = Some("by quality".into());
+            item.choices.webm.fit_range = qualities;
+            app.items.push(item);
+        }
+        // the second fits by quality itself
+        app.items[1].choices.webm.fit = Some(Fit::Crf);
+        let mut managing = super::Managing::of(&app.presets);
+        let id = managing.rows.iter().find(|row| row.name == "by quality").unwrap().id;
+        app.change_preset(dir.path(), &mut managing, Change::Delete(id));
+        // the default fits by bitrate, which a range of qualities isn't
+        let ranges: Vec<_> = app.items.iter().map(|item| item.choices.webm.fit_range).collect();
+        assert_eq!(ranges, [None, qualities]);
     }
 }
