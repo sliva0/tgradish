@@ -259,8 +259,8 @@ fn settled(
     settled
 }
 
-/// Makes the input thumbnail and settles the guessed format once an
-/// input is read.
+/// Makes the input thumbnail, settles the guessed format and drops a crop
+/// that doesn't fit once an input is read.
 fn settle(ctx: &egui::Context, item: &mut Item) {
     if item.format_guessed
         && let Some(art) = item.art.ready()
@@ -272,6 +272,12 @@ fn settle(ctx: &egui::Context, item: &mut Item) {
             // a photo or a drawing stays a picture
             item.format = Format::Image;
         }
+    }
+    // kept from when the file was another, larger one: it can't be made
+    if let (Some(crop), Some((width, height))) = (item.choices.crop, item.input_size())
+        && !crop.fits(width, height)
+    {
+        item.choices.crop = None;
     }
     if item.input_thumb.is_none()
         && let Some(clip) = item.input_clip()
@@ -515,6 +521,32 @@ mod tests {
         let item = &harness.state().items[0];
         assert_eq!((item.input_error(), item.input_size()), (None, Some((64, 48))));
         assert!(item.input_thumb.is_some());
+    }
+
+    #[test]
+    fn drops_a_crop_the_input_has_no_room_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        let mut inputs = vec![(art, Crop { x: 10, y: 10, width: 4, height: 4 })];
+        if let Some(video) = video(dir.path(), "64x48") {
+            inputs.push((video, Crop { x: 0, y: 0, width: 64, height: 64 }));
+        }
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        for (input, outside) in inputs {
+            // as a session keeps it, for a file since replaced by a smaller one
+            for (crop, kept) in [(outside, None), (Crop::whole((4, 4)), Some(Crop::whole((4, 4))))]
+            {
+                let mut harness = harness(config.clone());
+                harness.state_mut().add(vec![input.clone()]);
+                harness.state_mut().items[0].choices.crop = Some(crop);
+                finish(&mut harness);
+                let item = &harness.state().items[0];
+                assert!(item.input_size().is_some(), "{input:?}");
+                assert_eq!(item.choices.crop, kept, "{input:?}");
+            }
+        }
     }
 
     #[test]
