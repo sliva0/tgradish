@@ -4,13 +4,13 @@
 
 use eframe::egui;
 use tgradish_core::options::{
-    CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, Fit, MAX_ATTEMPTS, Range, Speed,
+    CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, Fit, MAX_ATTEMPTS, Options, Range, Speed,
 };
 
 use tgradish_core::{convert, telegram};
 
 use super::{Context, commands};
-use crate::item::Item;
+use crate::item::{Choices, Item};
 use crate::l10n::fl;
 use crate::widgets::{
     self, Choice, Pick, chosen_hint, flag, greyed, preset_number, preset_picking, preset_segments,
@@ -36,6 +36,27 @@ fn webm_speeds() -> [Choice<Speed>; 3] {
     ]
 }
 
+/// The way of fitting the item's choices use, its own or its preset's.
+pub(super) fn fit_of(choices: &Choices, context: &Context) -> Fit {
+    let base = choices.webm_base(context.presets, context.config).unwrap_or_default();
+    choices.webm.fit.or(base.fit).unwrap_or(Fit::Auto)
+}
+
+/// What the range fitting searches counts, for `fit`.
+fn counted(fit: Fit) -> &'static str {
+    RangeBounds::of(fit).unit
+}
+
+/// Drops the item's own range to search once fitting goes from `before`
+/// to `after`, a way that counts in another unit: a range of bitrates is
+/// no range of qualities, and kept it would be cut to the ends of the new
+/// unit's, as 63 to 63. Fitting then searches its own for the new way.
+pub(super) fn follow_fit(options: &mut Options, before: Fit, after: Fit) {
+    if counted(before) != counted(after) {
+        options.fit_range = None;
+    }
+}
+
 pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     section(ui, &fl!("size-and-quality"));
     let base = item.choices.webm_base(context.presets, context.config).unwrap_or_default();
@@ -58,7 +79,9 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
         {
             options.lossless = (base.lossless == Some(true)).then_some(false);
         }
-        chosen_hint(ui, options.fit.unwrap_or(base_fit), &fits);
+        let chosen = options.fit.unwrap_or(base_fit);
+        follow_fit(options, fit, chosen);
+        chosen_hint(ui, chosen, &fits);
     });
     row(ui, &fl!("encoder"), &fl!("encoder", "hint"), Ok(()), |ui| {
         let base = base.speed.unwrap_or(Speed::Balanced);
@@ -166,6 +189,7 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
         });
         if changed && options.lossless.unwrap_or(preset) && !keeps_quality(fit) {
             options.fit = (base_fit != Fit::Fps).then_some(Fit::Fps);
+            follow_fit(options, fit, Fit::Fps);
         }
     });
     let bitrate = match fit {
@@ -246,6 +270,57 @@ mod tests {
         harness.run();
         drop(harness);
         value
+    }
+
+    #[test]
+    fn drops_a_custom_range_once_fitting_counts_another_way() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        use tgradish_core::config::Config;
+        use tgradish_core::presets::Presets;
+        use tgradish_core::telegram::Target;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("short.toml"), "[webm]\nfit = 'length'\n").unwrap();
+        let (presets, config) = (Presets::load(Some(dir.path())).unwrap(), Config::default());
+        let context = Context {
+            presets: &presets,
+            config: &config,
+            extra_args: true,
+            output: None,
+            config_path: None,
+            presets_dir: None,
+            in_frames: false,
+        };
+        let mut item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
+        item.choices.webm.fit = Some(Fit::Bitrate);
+        let bitrates = Some(Range { min: 200.0, max: 1500.0 });
+        item.choices.webm.fit_range = bitrates;
+        let mut harness = Harness::new_ui_state(
+            |ui, item: &mut Item| {
+                super::super::make(ui, item, &context);
+                webm_quality(ui, item, &context);
+            },
+            item,
+        );
+        harness.run_steps(2);
+        let range = |harness: &Harness<Item>| harness.state().choices.webm.fit_range;
+        // a way that counts bitrates too keeps it
+        harness.get_by_label(&fl!("fit-auto")).click();
+        harness.run_steps(2);
+        assert_eq!(range(&harness), bitrates);
+        // qualities don't: none of its own, rather than 63 to 63
+        harness.get_by_label(&fl!("fit-crf")).click();
+        harness.run_steps(2);
+        assert_eq!(harness.state().choices.webm.fit, Some(Fit::Crf));
+        assert_eq!(range(&harness), None);
+        // nor does a preset fitting the length, once the item's way is gone
+        harness.state_mut().choices.webm = Options { fit_range: bitrates, ..Options::default() };
+        harness.run_steps(2);
+        harness.get_by_label("short").click();
+        harness.run_steps(2);
+        assert_eq!(harness.state().choices.preset.as_deref(), Some("short"));
+        assert_eq!(range(&harness), None);
     }
 
     #[test]

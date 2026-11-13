@@ -203,7 +203,12 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             });
         }
         if chosen != current {
+            // another preset may fit another way, as the item's own range
+            // then can't say
+            let before = webm::fit_of(&item.choices, context);
             item.choices.preset = (chosen != default).then(|| chosen.to_owned());
+            let after = webm::fit_of(&item.choices, context);
+            webm::follow_fit(&mut item.choices.webm, before, after);
         }
         match (builtin_description(chosen, item.format), context.presets.get(chosen)) {
             _ if image => note(ui, nothing),
