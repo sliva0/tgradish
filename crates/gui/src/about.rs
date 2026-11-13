@@ -7,6 +7,9 @@ use eframe::egui::{self, RichText, vec2};
 use crate::l10n::fl;
 use crate::{icon, widgets};
 
+/// Where feedback goes: the author's Telegram.
+const FEEDBACK: &str = "https://t.me/s0untitled?direct";
+
 /// tgradish's version and the licences of what it is made of.
 pub(crate) fn about(ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
@@ -17,6 +20,7 @@ pub(crate) fn about(ui: &mut egui::Ui) {
                 ui.label(fl!("about-summary"));
                 widgets::link(ui, fl!("source-code"), tgradish_core::REPOSITORY);
             });
+            widgets::link(ui, fl!("send-feedback"), FEEDBACK);
         });
     });
     ui.add_space(6.0);

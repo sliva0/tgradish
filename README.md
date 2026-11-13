@@ -29,6 +29,9 @@ tgradish spoof ~/pig.webm ~/spoofed_pig.webm
 ```
 
 
+Feedback: [@s0untitled](https://t.me/s0untitled?direct) on Telegram, or open an issue.
+
+
 ## License
 
 [MIT License](LICENSE.txt)
