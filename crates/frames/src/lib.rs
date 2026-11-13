@@ -3,7 +3,26 @@
 //! sequences.
 //!
 //! Builds for `wasm32-unknown-unknown`, so everything works on bytes: no
-//! filesystem, processes or threads.
+//! filesystem, processes or threads. What decoding may allocate is bounded
+//! by [`Limits`], so hostile files fail rather than exhaust memory.
+//!
+//! ```
+//! use tgradish_frames::{DEFAULT_FRAME_DURATION, DecodeOptions, Limits, decode};
+//!
+//! // a GIF of one black pixel
+//! let gif = b"GIF89a\x01\0\x01\0\x80\0\0\0\0\0\xff\xff\xff,\0\0\0\0\x01\0\x01\0\0\x02\x02D\x01\0;";
+//! let animation = decode(gif, &DecodeOptions::default(), &Limits::default())?;
+//! assert_eq!((animation.width(), animation.height()), (1, 1));
+//! // a frame that says nothing of its time shows for the default
+//! assert_eq!(animation.duration(), DEFAULT_FRAME_DURATION);
+//! assert_eq!(animation.pixel(0, 0, 0), Some([0, 0, 0, 255]));
+//! # Ok::<(), tgradish_frames::Error>(())
+//! ```
+//!
+//! Aseprite files can be read for their tags and layers first, with
+//! [`aseprite::Sprite`]; [`DecodeOptions`] picks among them.
+
+#![warn(missing_docs)]
 
 use std::fmt;
 use std::time::Duration;
@@ -23,50 +42,145 @@ pub use sheet::{Sheet, sequence, split_sheet, sprite_sheet};
 /// and an [`Animation`] holds none.
 pub const DEFAULT_FRAME_DURATION: Duration = Duration::from_millis(100);
 
+/// Why an animation couldn't be decoded or put together.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum Error {
+    /// An animation of no frames, which [`Animation::new`] refuses.
     #[error("the animation has no frames")]
     Empty,
+    /// A width or height of 0, or a frame too large to address.
     #[error("{width}x{height} is not a usable size")]
-    BadSize { width: u32, height: u32 },
+    BadSize {
+        /// The width given.
+        width: u32,
+        /// The height given.
+        height: u32,
+    },
+    /// A frame of another size than its animation's.
     #[error("frame {index} has {len} bytes, a {width}x{height} RGBA frame has {expected}")]
-    FrameSize { index: usize, len: usize, width: u32, height: u32, expected: usize },
+    FrameSize {
+        /// Which frame, from 0.
+        index: usize,
+        /// How many bytes of RGBA it has.
+        len: usize,
+        /// The animation's width.
+        width: u32,
+        /// The animation's height.
+        height: u32,
+        /// How many bytes it should have.
+        expected: usize,
+    },
+    /// Bytes that start like no format decoded here.
     #[error("not a GIF, PNG, WebP, JPEG, BMP or Aseprite file")]
     UnknownFormat,
+    /// A file that starts like `format` but doesn't decode as one.
     #[error("couldn't decode the {format} file: {message}")]
-    Decode { format: Format, message: String },
+    Decode {
+        /// What the file starts like.
+        format: Format,
+        /// What is wrong with it, in English.
+        message: String,
+    },
+    /// An Aseprite tag asked for that the file doesn't have.
     #[error("no tag named {name:?} (tags: {})", if available.is_empty() { "none".into() } else { available.join(", ") })]
-    NoSuchTag { name: String, available: Vec<String> },
+    NoSuchTag {
+        /// The tag asked for.
+        name: String,
+        /// The tags the file has.
+        available: Vec<String>,
+    },
+    /// A tag asked for of a file that isn't an Aseprite file.
     #[error("tags only exist in Aseprite files")]
     TagWithoutAseprite,
+    /// An Aseprite layer named that the file doesn't have.
     #[error("no layer named {name:?} (layers: {})", if available.is_empty() { "none".into() } else { available.join(", ") })]
-    NoSuchLayer { name: String, available: Vec<String> },
+    NoSuchLayer {
+        /// The layer named.
+        name: String,
+        /// The layers the file has.
+        available: Vec<String>,
+    },
+    /// Layers named for a file that isn't an Aseprite file.
     #[error("layers only exist in Aseprite files")]
     LayersWithoutAseprite,
+    /// An image of a [`sequence`] of another size than the first.
     #[error("image {index} is {width}x{height}, the first one is {first_width}x{first_height}")]
-    SequenceSize { index: usize, width: u32, height: u32, first_width: u32, first_height: u32 },
+    SequenceSize {
+        /// Which image, from 0.
+        index: usize,
+        /// Its width.
+        width: u32,
+        /// Its height.
+        height: u32,
+        /// The first image's width.
+        first_width: u32,
+        /// The first image's height.
+        first_height: u32,
+    },
+    /// A sprite sheet that doesn't divide into the [`Sheet`]'s cells.
     #[error("{width}x{height} doesn't split into {columns} columns and {rows} rows")]
-    SheetGrid { width: u32, height: u32, columns: u32, rows: u32 },
+    SheetGrid {
+        /// The sheet's width.
+        width: u32,
+        /// The sheet's height.
+        height: u32,
+        /// The columns asked for.
+        columns: u32,
+        /// The rows asked for.
+        rows: u32,
+    },
+    /// More frames asked of a sprite sheet than it has cells, or none.
     #[error("the sprite sheet has {cells} cells, {frames} frames were asked for")]
-    SheetFrames { cells: u32, frames: u32 },
+    SheetFrames {
+        /// How many cells it has.
+        cells: u32,
+        /// How many frames were asked for.
+        frames: u32,
+    },
+    /// An animation given as a sprite sheet, which is one picture.
     #[error("a sprite sheet is one picture, this has {frames} frames")]
-    SheetAnimated { frames: usize },
+    SheetAnimated {
+        /// How many frames it has.
+        frames: usize,
+    },
+    /// Something past the [`Limits`] decoding was given.
     #[error("the input is too large: {}", oversize_text(what, limit))]
-    TooLarge { what: Oversize, limit: Limit },
+    TooLarge {
+        /// What was too large, with its size.
+        what: Oversize,
+        /// The limit it went past.
+        limit: Limit,
+    },
 }
 
 /// What decoding found too large for its [`Limits`], with its size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Oversize {
-    /// `frames` frames of `width`x`height`: what all the frames decoded
-    /// come to together.
-    Frames { frames: usize, width: u32, height: u32 },
-    /// A still image of `width`x`height`, decoded and copied as RGBA.
-    Image { width: u32, height: u32 },
-    /// An Aseprite file's canvas of `width`x`height`.
-    Canvas { width: u32, height: u32 },
+    /// Frames of one size: what all the frames decoded come to together.
+    Frames {
+        /// How many.
+        frames: usize,
+        /// Their width.
+        width: u32,
+        /// Their height.
+        height: u32,
+    },
+    /// A still image, decoded and copied as RGBA.
+    Image {
+        /// Its width.
+        width: u32,
+        /// Its height.
+        height: u32,
+    },
+    /// An Aseprite file's canvas.
+    Canvas {
+        /// Its width.
+        width: u32,
+        /// Its height.
+        height: u32,
+    },
     /// What decoding needs on the way, of a size not known before it is
     /// refused.
     Decoding,
@@ -98,19 +212,26 @@ fn oversize_text(what: &Oversize, limit: &Limit) -> String {
     }
 }
 
+/// What this crate's functions return.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// The kinds of file [`decode`] reads, which [`Format::detect`] tells
+/// apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Format {
+    /// GIF, still or animated.
     Gif,
     /// PNG and APNG.
     Png,
+    /// WebP, still or animated.
     WebP,
+    /// Aseprite's `.ase` and `.aseprite`.
     Aseprite,
     /// Still images, which pixel art is rarely kept as, but screenshots
     /// and photos of it are.
     Jpeg,
+    /// Still images, as Windows' Paint saves them.
     Bmp,
 }
 
@@ -223,6 +344,7 @@ pub fn decode(bytes: &[u8], options: &DecodeOptions, limits: &Limits) -> Result<
 /// One frame: straight (not premultiplied) RGBA, row by row from the top.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Frame {
+    /// 4 bytes a pixel, `width * height * 4` in all.
     pub rgba: Vec<u8>,
     /// How long it shows. In an [`Animation`] never zero.
     pub duration: Duration,
@@ -247,9 +369,10 @@ pub struct Animation {
 }
 
 impl Animation {
-    /// Frames that say they show for no time get
-    /// [`DEFAULT_FRAME_DURATION`], so what works on an animation never has
-    /// to decide what such a frame means.
+    /// Frames of `width`x`height`, which must be at least one, each with
+    /// as many bytes as RGBA of that size takes. Frames that say they show
+    /// for no time get [`DEFAULT_FRAME_DURATION`], so what works on an
+    /// animation never has to decide what such a frame means.
     pub fn new(width: u32, height: u32, mut frames: Vec<Frame>) -> Result<Animation> {
         let expected = frame_bytes(width, height)?;
         if frames.is_empty() {
@@ -268,18 +391,22 @@ impl Animation {
         Ok(Animation { width, height, frames })
     }
 
+    /// Width in pixels.
     pub fn width(&self) -> u32 {
         self.width
     }
 
+    /// Height in pixels.
     pub fn height(&self) -> u32 {
         self.height
     }
 
+    /// The frames in playing order.
     pub fn frames(&self) -> &[Frame] {
         &self.frames
     }
 
+    /// The frames in playing order, kept rather than copied.
     pub fn into_frames(self) -> Vec<Frame> {
         self.frames
     }
