@@ -973,9 +973,10 @@ mod tests {
         let state = dir.path().join("state");
         let mut app = App::with(Config::default(), None, Presets::builtin());
         app.reopen(state.join("session.json"));
-        // where its folder should be
-        std::fs::remove_dir_all(&state).unwrap();
-        std::fs::write(&state, b"in the way").unwrap();
+        // a folder in the session's place, so saving it fails; not a file
+        // in place of its folder, which can't be removed everywhere while
+        // the session's lock in it is open
+        std::fs::create_dir(state.join("session.json")).unwrap();
         app.say(Message::info("Something said before"));
         let art = dir.path().join("art.png");
         square(&art, [255, 0, 0, 255]);
