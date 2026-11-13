@@ -28,9 +28,39 @@ impl Clip {
     }
 }
 
+/// Whether tests that need ffmpeg fail without it rather than skip:
+/// `TGRADISH_REQUIRE_FFMPEG` is set, to anything but empty or 0. CI sets
+/// it, where a skipped test would pass unseen.
+pub fn ffmpeg_required() -> bool {
+    std::env::var_os("TGRADISH_REQUIRE_FFMPEG")
+        .is_some_and(|value| !value.is_empty() && value != "0")
+}
+
+/// Skips the test, which `why` says what it needs, or fails it where
+/// [`ffmpeg_required`].
+pub fn skip<T>(why: &str) -> Option<T> {
+    assert!(!ffmpeg_required(), "{why}, which TGRADISH_REQUIRE_FFMPEG says must be there");
+    eprintln!("skipped: {why}");
+    None
+}
+
+/// Whether `ffmpeg` and `ffprobe` run from PATH, or else [`skip`]s, so a
+/// test that needs them can return.
+pub fn ffmpeg_on_path() -> bool {
+    let runs = |program| Command::new(program).arg("-version").output().is_ok();
+    if runs("ffmpeg") && runs("ffprobe") {
+        return true;
+    }
+    skip::<()>("needs ffmpeg and ffprobe on PATH");
+    false
+}
+
 /// `clip`, made in `dir` unless it is there from an earlier run; `None`
-/// without an ffmpeg on PATH that has the x264 encoder. With one, failing
-/// to make the clip panics: that is a broken test, not a missing tool.
+/// without an ffmpeg on PATH that has the x264 encoder, or a failure where
+/// [`ffmpeg_required`]. With one, failing to make the clip panics: that is
+/// a broken test, not a missing tool. A clip from an earlier run is found
+/// without ffmpeg, so a test that also converts with it checks for that
+/// first.
 pub fn clip(clip: Clip, dir: &Path) -> Option<PathBuf> {
     // the name changes with how the clip is made
     let path = dir.join(format!("tgradish-{}-1.mp4", clip.name()));
@@ -38,8 +68,7 @@ pub fn clip(clip: Clip, dir: &Path) -> Option<PathBuf> {
         return Some(path);
     }
     if !has_x264() {
-        eprintln!("skipped: needs ffmpeg on PATH with the x264 encoder");
-        return None;
+        return skip("needs ffmpeg on PATH with the x264 encoder");
     }
     std::fs::create_dir_all(dir).expect("the clips' directory can be made");
     // made aside, so tests running at once never see half a clip

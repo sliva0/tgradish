@@ -13,7 +13,7 @@ pub mod encode;
 mod sprites;
 
 pub use canvas::{Canvas, Colour};
-pub use clip::{Clip, clip};
+pub use clip::{Clip, clip, ffmpeg_on_path, ffmpeg_required, skip};
 
 /// An animation, and what it stands for.
 #[derive(Debug, Clone, PartialEq, Eq)]
