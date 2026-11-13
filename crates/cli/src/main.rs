@@ -54,9 +54,19 @@ fn return_freed_memory_sooner() {
 pub struct Exit(pub u8);
 
 /// Prints `value` as one line of JSON, as `--json` prints events and
-/// each file's findings.
+/// each file's findings; or if it can't be, as a config holding a path
+/// that isn't Unicode can't, an error event saying why.
 pub fn json_line(value: &impl serde::Serialize) {
-    println!("{}", serde_json::to_string(value).expect("output serialises"));
+    match serde_json::to_string(value) {
+        Ok(line) => println!("{line}"),
+        Err(err) => {
+            let failure = tgradish_core::events::Failure {
+                message: format!("couldn't write this as JSON: {err}"),
+                input: None,
+            };
+            json_line(&tgradish_core::events::Event::Error(failure));
+        }
+    }
 }
 
 /// Prints an error as a JSON line, see `Event::Error`: the same in every

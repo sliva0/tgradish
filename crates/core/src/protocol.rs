@@ -1,6 +1,8 @@
 //! Machine-readable description of tgradish for front-ends that run the
 //! CLI, printed by `tgradish describe`.
 
+use std::path::{Path, PathBuf};
+
 use schemars::generate::SchemaSettings;
 use schemars::{JsonSchema, Schema, schema_for};
 use serde::Serialize;
@@ -57,6 +59,24 @@ pub struct PresetDescription {
     pub tgs: Option<TgsOptions>,
     /// Why the preset cannot be used, if it is broken for either format.
     pub error: Option<String>,
+}
+
+/// Serialises `path` as text, with what isn't Unicode in it replaced:
+/// serde refuses such paths, and JSON has no way of carrying them. Every
+/// path tgradish prints goes through this, through `serialize_with`.
+pub fn serialize_path<S: serde::Serializer>(path: &Path, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&path.to_string_lossy())
+}
+
+/// [`serialize_path`] for a path that may not be there.
+pub fn serialize_optional_path<S: serde::Serializer>(
+    path: &Option<PathBuf>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match path {
+        Some(path) => serializer.serialize_some(&*path.to_string_lossy()),
+        None => serializer.serialize_none(),
+    }
 }
 
 /// The JSON Schema of `T` as it is written, rather than read: of what

@@ -19,7 +19,11 @@ use crate::args::{ConfigCommand, FfmpegCommand, InspectArgs, PresetCommand, Spoo
 use crate::ui;
 
 fn print_json(value: &impl serde::Serialize) {
-    println!("{}", serde_json::to_string_pretty(value).expect("output serialises"));
+    match serde_json::to_string_pretty(value) {
+        Ok(text) => println!("{text}"),
+        // says why, as a line
+        Err(_) => crate::json_line(value),
+    }
 }
 
 pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
@@ -43,7 +47,7 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
         .with_context(|| format!("couldn't spoof {}", args.input.display()))?;
 
     if ctx.global.json {
-        print_json(&json!({ "output": output, "report": report }));
+        print_json(&json!({ "output": output.to_string_lossy(), "report": report }));
         return Ok(());
     }
     if args.duration > telegram::MAX_SECONDS {
@@ -175,6 +179,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
         if ctx.global.json {
             #[derive(serde::Serialize)]
             struct Line<'a> {
+                #[serde(serialize_with = "protocol::serialize_path")]
                 input: &'a std::path::Path,
                 #[serde(flatten)]
                 inspected: &'a Inspected,
@@ -265,7 +270,7 @@ pub fn preset(ctx: &Context, command: PresetCommand) -> Result<()> {
             }
         }
         PresetCommand::Path => match presets::user_dir() {
-            Some(dir) if ctx.global.json => print_json(&json!({ "path": dir })),
+            Some(dir) if ctx.global.json => print_json(&json!({ "path": dir.to_string_lossy() })),
             Some(dir) => println!("{}", dir.display()),
             None => bail!("no home directory found"),
         },
@@ -278,7 +283,7 @@ pub fn config(ctx: &Context, command: ConfigCommand, path: Option<PathBuf>) -> R
         ConfigCommand::Path => {
             let path = path.context("no home directory found")?;
             if ctx.global.json {
-                print_json(&json!({ "path": path, "exists": path.exists() }));
+                print_json(&json!({ "path": path.to_string_lossy(), "exists": path.exists() }));
             } else {
                 println!("{}", path.display());
             }
