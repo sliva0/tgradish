@@ -90,7 +90,7 @@ pub fn notices() -> Vec<tgradish_core::licenses::Notice> {
     use tgradish_core::licenses::{CRATES, Notice};
     let fonts = [
         (
-            "Font: Ubuntu Light and Medium, subsets",
+            "Font: Ubuntu Light and Medium derivative tgradish, subsets",
             include_str!("../assets/fonts/Ubuntu-LICENCE.txt"),
         ),
         (

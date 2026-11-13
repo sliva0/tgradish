@@ -25,13 +25,15 @@ pub(crate) fn medium_in(ctx: &egui::Context) -> egui::FontFamily {
 
 /// The window's fonts: Ubuntu Light for text, Ubuntu Medium for headings,
 /// JetBrains Mono NL for commands, and a few symbols; small subsets, see
-/// `assets/fonts`.
+/// `assets/fonts`. Ubuntu's are named "Ubuntu Light derivative tgradish"
+/// and "Ubuntu Medium derivative tgradish" within, as its licence asks of
+/// a version changed but not substantially.
 pub(crate) fn fonts() -> egui::FontDefinitions {
     use egui::{FontData, FontFamily};
     let mut fonts = egui::FontDefinitions::empty();
     for (name, bytes) in [
-        ("ubuntu", &include_bytes!("../assets/fonts/Ubuntu-Light-tgradish.ttf")[..]),
-        ("medium", &include_bytes!("../assets/fonts/Ubuntu-Medium-tgradish.ttf")[..]),
+        ("ubuntu", &include_bytes!("../assets/fonts/Ubuntu-Light-derivative-tgradish.ttf")[..]),
+        ("medium", &include_bytes!("../assets/fonts/Ubuntu-Medium-derivative-tgradish.ttf")[..]),
         ("mono", &include_bytes!("../assets/fonts/JetBrainsMonoNL-Regular-tgradish.ttf")[..]),
         ("icons", &include_bytes!("../assets/fonts/emoji-icon-font-tgradish.ttf")[..]),
     ] {
