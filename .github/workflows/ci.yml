@@ -59,6 +59,12 @@ jobs:
       - run: cargo test -p tgradish-tgs
       # the icons for menus and Windows, made from the window's
       - run: cargo xtask icons --check
+      # public docs that link to what readers of them can't see, or to
+      # nothing; the same on every system, so once
+      - run: cargo doc --workspace --no-deps
+        if: runner.os == 'Linux'
+        env:
+          RUSTDOCFLAGS: -D warnings
 
       # binaries carry the licences of their crates; they must list today's
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3

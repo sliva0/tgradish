@@ -215,8 +215,8 @@ pub(crate) fn read_file(path: &std::path::Path) -> Option<Mark> {
 /// name of `.tgs` stickers; in WebM files both apps and the signature in
 /// padding; in WebP images the tool their XMP names.
 /// Only the start of a WebM is read, and a picture or `.tgs` larger than
-/// [`MADE_BYTES`] is no sticker tgradish made, so pointing this at a long
-/// video reads little of it.
+/// 16 MiB is no sticker tgradish made, so pointing this at a long video
+/// reads little of it.
 pub fn made_by_tgradish(path: &std::path::Path) -> bool {
     let small = || crate::fsutil::read_at_most(path, MADE_BYTES).ok().flatten();
     match crate::inspect::Kind::of(path) {
