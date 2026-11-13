@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity type="win32" name="tgradish" version="2.0.0.0"/>
+  <!-- build.rs writes Cargo.toml's version in place of the noughts -->
+  <assemblyIdentity type="win32" name="tgradish" version="0.0.0.0"/>
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
       <!-- Windows 10 and 11 -->
