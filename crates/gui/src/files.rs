@@ -107,7 +107,7 @@ impl App {
         let layout = egui::Layout::right_to_left(egui::Align::Center);
         ui.allocate_ui_with_layout(header, layout, |ui| {
             if ui.button("⚙").on_hover_text(fl!("settings")).clicked() {
-                self.prefs.open();
+                self.settings_dialog.open();
             }
             self.theme_button(ui);
             if ui.button("🔬").on_hover_text(fl!("inspect")).clicked() {

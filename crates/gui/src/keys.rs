@@ -244,7 +244,7 @@ mod tests {
         let mut harness = harness(Config::default());
         harness.state_mut().add(vec![art]);
         finish(&mut harness);
-        harness.state_mut().prefs.open();
+        harness.state_mut().settings_dialog.open();
         harness.run_steps(2);
         harness.key_press(egui::Key::Delete);
         harness.run_steps(2);
@@ -252,7 +252,7 @@ mod tests {
         // Escape closes the dialog, and the window has its keys again
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
-        assert!(!harness.state().prefs.is_open());
+        assert!(!harness.state().settings_dialog.is_open());
         harness.key_press(egui::Key::Delete);
         harness.run_steps(2);
         assert!(harness.state().items.is_empty());

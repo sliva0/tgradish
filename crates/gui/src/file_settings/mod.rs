@@ -1,5 +1,5 @@
-//! The settings of one item: what to make, beside the preview, and how,
-//! under it.
+//! The settings of the file picked, each file's own: what to make,
+//! beside the preview, and how, under it.
 
 mod advanced;
 mod aseprite;

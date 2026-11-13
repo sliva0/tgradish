@@ -240,14 +240,14 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     save(&mut harness, "unreadable");
 
     // the settings, ffmpeg checked and saving tried, with no home folder
-    harness.state_mut().prefs.open();
+    harness.state_mut().settings_dialog.open();
     harness.run_steps(10);
     harness.get_by_label(&fl!("check")).click_accesskit();
     harness.run_steps(2);
     harness.get_by_label(&fl!("save")).click_accesskit();
     harness.run_steps(2);
     save(&mut harness, "settings-checked");
-    harness.state_mut().prefs = crate::prefs::Prefs::default();
+    harness.state_mut().settings_dialog = crate::settings_dialog::SettingsDialog::default();
 
     // naming a preset: as a built-in one, as one that is there, wrongly
     let mine = (&tgradish_core::webm::Options::default(), &Default::default());

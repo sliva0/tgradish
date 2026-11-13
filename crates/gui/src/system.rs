@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn opens_links() {
         let mut harness = harness(Config::default());
-        harness.state_mut().prefs.about = true;
+        harness.state_mut().settings_dialog.about = true;
         harness.run_steps(2);
         // a link, a label whose text is its name rather than its value
         let link = egui_kittest::kittest::by()

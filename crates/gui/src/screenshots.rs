@@ -22,7 +22,7 @@ use crate::app::{App, set_theme};
 use crate::item::{self, Show, Zoom};
 use crate::jobs::{self, Job, Status};
 use crate::testing::{convert, finish, square, video};
-use crate::{inspect, prefs, preset_dialogs};
+use crate::{inspect, preset_dialogs, settings_dialog};
 
 /// Renders the window to `$TGRADISH_SCREENSHOTS/*.png` for a look at
 /// the layout: `TGRADISH_SCREENSHOTS=/tmp cargo test -p tgradish-gui
@@ -179,10 +179,10 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().items.last_mut().unwrap().view.show = Show::Input;
     harness.run_steps(3);
     save(&mut harness, "tgs-input");
-    harness.state_mut().prefs.open();
+    harness.state_mut().settings_dialog.open();
     harness.run_steps(3);
     save(&mut harness, "settings");
-    harness.state_mut().prefs = prefs::Prefs::default();
+    harness.state_mut().settings_dialog = settings_dialog::SettingsDialog::default();
     let sticker = dir.path().join("out").join("dance.sticker.tgs");
     harness.state_mut().inspection = Some(inspect::Inspection::of(&sticker));
     harness.run_steps(3);
@@ -205,10 +205,10 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     item.job = Some(crate::item::Conversion::of(job, Format::Tgs, item.choices.clone()));
     harness.run_steps(3);
     save(&mut harness, "progress");
-    harness.state_mut().prefs.about = true;
+    harness.state_mut().settings_dialog.about = true;
     harness.run_steps(3);
     save(&mut harness, "about");
-    harness.state_mut().prefs.about = false;
+    harness.state_mut().settings_dialog.about = false;
     set_theme(&harness.ctx, crate::config::Theme::Light);
     let item = harness.state_mut().items.last_mut().unwrap();
     item.job = None;

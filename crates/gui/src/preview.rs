@@ -21,7 +21,7 @@ use crate::jobs::Status;
 use crate::l10n::fl;
 use crate::media::Clip;
 use crate::result::{details, summary};
-use crate::{predict, settings, theme, timeline, widgets};
+use crate::{file_settings, predict, theme, timeline, widgets};
 
 /// Width of the column beside the preview, and the least it narrows to
 /// before the preview does.
@@ -58,7 +58,7 @@ impl App {
         });
         let output = self.item(id).map(|item| self.output_for(item));
         let (choice, path) = self.ffmpeg_settings();
-        let context = settings::Context {
+        let context = file_settings::Context {
             presets: &self.presets,
             config: &self.config,
             ffmpeg: tgradish_core::config::FfmpegConfig { choice, path },
@@ -113,8 +113,8 @@ impl App {
                             .show(ui, |ui| {
                                 ui.set_max_width(side - 12.0);
                                 ui.add_space(6.0);
-                                settings::make(ui, item, &context);
-                                settings::plan(ui, item, &context);
+                                file_settings::make(ui, item, &context);
+                                file_settings::plan(ui, item, &context);
                                 summary(ui, item, queued);
                                 details(ui, item);
                             });
@@ -140,7 +140,7 @@ impl App {
         ui.painter().hline(line.x_range(), line.center().y, egui::Stroke::new(1.0, colour));
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                settings::show(ui, item, &context);
+                file_settings::show(ui, item, &context);
                 ui.add_space(12.0);
             });
         });
@@ -337,7 +337,7 @@ fn preview(
         Format::Tgs => (item.art.ready().map(|art| &art.clip), None, None),
     };
     let target = item.choices.target;
-    let resize = settings::resize_of(webm);
+    let resize = file_settings::resize_of(webm);
     let filling = (item.format != Format::Tgs && resize == Resize::Crop).then(|| {
         let (width, height) = target.box_size();
         f64::from(width) / f64::from(height)
@@ -409,8 +409,8 @@ fn preview(
                 let (input_area, room, align) =
                     inset.ease(ui.ctx(), item.id, (on, step, corner), layout);
                 ui.painter().rect_filled(rect, 0.0, theme::stage(ui.visuals().dark_mode));
-                let ratio = settings::ratio(item.view.aspect, size);
-                let exact = settings::exact_of(webm).filter(|_| item.format != Format::Tgs);
+                let ratio = file_settings::ratio(item.view.aspect, size);
+                let exact = file_settings::exact_of(webm).filter(|_| item.format != Format::Tgs);
                 // a `.tgs` square cut from the middle of what it shows
                 let kept = match item.format {
                     Format::Tgs if tgs.resize == Some(Resize::Crop) => {
@@ -441,7 +441,7 @@ fn preview(
                             // a crop that doesn't suit the exact scale yet is made to
                             // fit on the next frame
                             if let Some(mut sizes) =
-                                settings::webm_sizes(webm, crop.unwrap_or(full))
+                                file_settings::webm_sizes(webm, crop.unwrap_or(full))
                             {
                                 let start = webm.start.unwrap_or(0.0);
                                 let art_key = inset_key((clip.id, where_, start.to_bits()));
@@ -574,7 +574,7 @@ fn inset_label(item: &Item, size: (u32, u32), webm: &Options) -> Option<Option<S
     match item.format {
         Format::Webm | Format::Webp => {
             let full = Crop::whole(size);
-            let sizes = settings::webm_sizes(webm, item.choices.crop.unwrap_or(full))?;
+            let sizes = file_settings::webm_sizes(webm, item.choices.crop.unwrap_or(full))?;
             Some(Some(format!("{} × {} px", sizes.width, sizes.height)))
         }
         Format::Tgs => Some(None),

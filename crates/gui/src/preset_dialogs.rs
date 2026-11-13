@@ -507,8 +507,9 @@ impl App {
         // renamed one fits as before. The presets are read again only
         // later, which doesn't matter: what the items name now is in them
         let fits: Option<Vec<Fit>> = to.is_none().then(|| {
-            let fit =
-                |item: &Item| crate::settings::fit_of(&item.choices, &self.presets, &self.config);
+            let fit = |item: &Item| {
+                crate::file_settings::fit_of(&item.choices, &self.presets, &self.config)
+            };
             self.items.iter().map(fit).collect()
         });
         for item in &mut self.items {
@@ -529,8 +530,9 @@ impl App {
         }
         if let Some(fits) = fits {
             for (item, before) in self.items.iter_mut().zip(fits) {
-                let after = crate::settings::fit_of(&item.choices, &self.presets, &self.config);
-                crate::settings::follow_fit(&mut item.choices.webm, before, after);
+                let after =
+                    crate::file_settings::fit_of(&item.choices, &self.presets, &self.config);
+                crate::file_settings::follow_fit(&mut item.choices.webm, before, after);
             }
         }
     }
@@ -600,7 +602,7 @@ mod tests {
         );
         // what it makes, and shows, comes from the preset now
         let effective = choices.webm_options(&state.presets, &state.config).unwrap();
-        assert_eq!(crate::settings::resize_of(&effective), Resize::Crop);
+        assert_eq!(crate::file_settings::resize_of(&effective), Resize::Crop);
         let saved = state.presets.webm("by quality").unwrap();
         assert_eq!((saved.fit, saved.title), (Some(Fit::Crf), None));
         assert!(dir.path().join("presets/by quality.toml").is_file());
