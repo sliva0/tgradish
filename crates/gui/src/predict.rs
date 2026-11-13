@@ -4,8 +4,8 @@
 //! without converting.
 
 use eframe::egui;
-use tgradish_core::convert::Sizes;
 use tgradish_core::options::{Crop, Resize, Scaling};
+use tgradish_core::picture::Sizes;
 
 /// The part of a frame used, in the frame's own pixels, which may be fewer
 /// than the input's.
@@ -47,9 +47,9 @@ pub fn looks_like_art(clip: &crate::media::Clip, part: Part, start: f64) -> bool
         height: (part.height.round() as u32).max(1),
     };
     let first = clip.index_at(start);
-    let samples = tgradish_core::convert::PIXEL_ART_SAMPLES;
+    let samples = tgradish_core::picture::PIXEL_ART_SAMPLES;
     let frames = &clip.frames[first..clip.frames.len().min(first + samples)];
-    tgradish_core::convert::is_pixel_art(frames, clip.width, Some(crop))
+    tgradish_core::picture::is_pixel_art(frames, clip.width, Some(crop))
 }
 
 /// sRGB channel values in linear light.
@@ -290,7 +290,7 @@ mod tests {
     }
 
     fn sizes(scaling: Scaling) -> Sizes {
-        tgradish_core::convert::sizes(Target::Emoji, Resize::Pad, scaling, (2, 1))
+        tgradish_core::picture::sizes(Target::Emoji, Resize::Pad, scaling, (2, 1))
     }
 
     #[test]
@@ -317,7 +317,7 @@ mod tests {
         let row = vec![255, 0, 0, 255, 0, 0, 255, 255, 0, 255, 0, 255];
         let part = Part { x: 1.0, y: 0.0, width: 1.0, height: 1.0 };
         let sizes =
-            tgradish_core::convert::sizes(Target::Emoji, Resize::Pad, Scaling::Smooth, (1, 1));
+            tgradish_core::picture::sizes(Target::Emoji, Resize::Pad, Scaling::Smooth, (1, 1));
         let image = webm(&row, 3, part, &sizes);
         for x in [0, 50, 99] {
             assert_eq!(image.pixels[50 * 100 + x].to_srgba_unmultiplied(), [0, 0, 255, 255]);

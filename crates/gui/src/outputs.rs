@@ -9,7 +9,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use tgradish_core::presets::Format;
-use tgradish_core::{convert, paths, still, tgs};
+use tgradish_core::{paths, still, tgs, webm};
 
 use crate::app::App;
 use crate::item::Item;
@@ -61,7 +61,7 @@ impl App {
         let dir = self.config.gui.output_dir.clone();
         let input = &item.inputs[0];
         let next_to_input = match item.format {
-            Format::Webm => convert::default_output(input, item.choices.target),
+            Format::Webm => webm::default_output(input, item.choices.target),
             Format::Tgs => tgs::default_output(input, item.choices.target),
             Format::Webp => still::default_output(input, item.choices.target),
         };

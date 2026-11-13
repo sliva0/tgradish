@@ -12,10 +12,10 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::CancelToken;
-use crate::convert::Plan;
 use crate::error::{Error, Result};
-use crate::events::Params;
 use crate::ffmpeg::{self, Capabilities, Ffmpeg, FfmpegChoice, Output, Probe};
+use crate::webm::Params;
+use crate::webm::Plan;
 
 /// Pass of a libvpx encode. Two-pass encodes share a statistics file.
 #[derive(Debug, Clone, Copy)]

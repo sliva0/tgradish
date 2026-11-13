@@ -6,7 +6,7 @@
 use std::ops::RangeInclusive;
 
 use eframe::egui::{self, CursorIcon, PointerButton, Rect, Sense, Shape, Stroke, pos2, vec2};
-use tgradish_core::convert::read_from;
+use tgradish_core::webm::read_from;
 
 use crate::l10n::fl;
 use crate::{theme, widgets};
@@ -701,7 +701,7 @@ mod tests {
             video.set_part(part, &mut start, &mut used);
             assert_eq!(video.part(1.0, start, used), part);
             let first = start.map_or(0, |start| video.times.partition_point(|&t| t < start));
-            (first, tgradish_core::convert::frame_count(used.unwrap(), 25.0) as usize)
+            (first, tgradish_core::webm::frame_count(used.unwrap(), 25.0) as usize)
         };
         // frames 5 to 9, and 0 to 9
         assert_eq!(frames((5, 10)), (5, 5));

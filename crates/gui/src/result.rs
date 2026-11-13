@@ -204,9 +204,9 @@ fn stage_fill(progress: &jobs::Progress, stage: jobs::TgsStage) -> widgets::Fill
 /// The rate an encode runs at.
 fn rate_text(attempt: &jobs::Attempt) -> String {
     match attempt.params.rate {
-        tgradish_core::events::Rate::Bitrate(kbps) => format!("{kbps:.0} kbit/s"),
-        tgradish_core::events::Rate::Crf(crf) => fl!("rate-quality", crf = crf),
-        tgradish_core::events::Rate::Lossless => fl!("rate-lossless"),
+        tgradish_core::webm::Rate::Bitrate(kbps) => format!("{kbps:.0} kbit/s"),
+        tgradish_core::webm::Rate::Crf(crf) => fl!("rate-quality", crf = crf),
+        tgradish_core::webm::Rate::Lossless => fl!("rate-lossless"),
         rate => format!("{rate:?}"),
     }
 }
@@ -317,11 +317,11 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
                     ui.label(if kept { number.strong() } else { number });
                     ui.label(widgets::trimmed(attempt.params.fps));
                     ui.label(match attempt.params.rate {
-                        tgradish_core::events::Rate::Bitrate(kbps) => format!("{kbps:.0}"),
-                        tgradish_core::events::Rate::Crf(crf) => {
+                        tgradish_core::webm::Rate::Bitrate(kbps) => format!("{kbps:.0}"),
+                        tgradish_core::webm::Rate::Crf(crf) => {
                             fl!("rate-quality-short", crf = crf)
                         }
-                        tgradish_core::events::Rate::Lossless => fl!("rate-lossless"),
+                        tgradish_core::webm::Rate::Lossless => fl!("rate-lossless"),
                         rate => format!("{rate:?}"),
                     });
                     match attempt.bytes {
@@ -375,7 +375,7 @@ fn reduction(reduction: &tgradish_tgs::reduce::Reduction) -> String {
 
 #[cfg(test)]
 mod tests {
-    use tgradish_core::events::{Params, Rate};
+    use tgradish_core::webm::{Params, Rate};
 
     use super::*;
     use crate::jobs::{Attempt, Progress, TgsStage, WebmPlan};

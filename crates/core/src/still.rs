@@ -15,10 +15,11 @@ use serde::Serialize;
 
 use crate::CancelToken;
 use crate::backend::Backend;
-use crate::convert::{self, Plan, Request};
 use crate::error::{Error, Result};
 use crate::options::Options;
+use crate::picture;
 use crate::telegram::{self, Issue, Target};
+use crate::webm::{self, Plan, Request};
 
 /// The input with a `.sticker.webp` or `.emoji.webp` extension.
 pub fn default_output(input: &Path, target: Target) -> PathBuf {
@@ -40,7 +41,7 @@ pub enum StillEvent {
     },
     /// A conversion, or the whole command, failed. Only printed by the
     /// CLI; the library returns errors instead.
-    Error(crate::events::Failure),
+    Error(crate::protocol::Failure),
 }
 
 /// A finished image sticker or emoji.
@@ -94,7 +95,7 @@ pub fn frame_start(time: f64, starts: &[f64], fps: f64) -> f64 {
             after => (starts[after - 1], starts[after - 2]),
         }
     };
-    if start <= 0.0 { 0.0 } else { convert::read_from(start, previous) }
+    if start <= 0.0 { 0.0 } else { webm::read_from(start, previous) }
 }
 
 /// Plans the picture: its frame, a sticker's or emoji's size, and the
@@ -117,7 +118,7 @@ pub fn plan(
     let target = options.target.unwrap_or_default();
     let output = request.output.clone().unwrap_or_else(|| default_output(&request.input, target));
     let request = Request { output: Some(output), options, ..request.clone() };
-    let (mut plan, warnings) = convert::plan(&request, source)?;
+    let (mut plan, warnings) = webm::plan(&request, source)?;
     // one frame
     plan.length = 1.0 / plan.fps;
     Ok((plan, warnings))
@@ -144,7 +145,7 @@ pub fn convert(backend: &Backend, request: &Request, cancel: &CancelToken) -> Re
     };
     let (mut plan, warnings) = plan(request, source, &starts)?;
     plan.input = input.to_path_buf();
-    convert::choose_auto_scaling(backend, &mut plan, &request.options, cancel)?;
+    picture::choose_auto_scaling(backend, &mut plan, &request.options, cancel)?;
     let rgba = backend.still(&plan, cancel)?;
     cancel.check()?;
     let alpha = rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] < 255);

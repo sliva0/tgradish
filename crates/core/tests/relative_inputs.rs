@@ -6,8 +6,8 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use tgradish_core::convert::{Request, convert};
 use tgradish_core::options::{Fit, Options, Speed};
+use tgradish_core::webm::{Request, convert};
 use tgradish_core::{CancelToken, Error, still};
 
 #[test]

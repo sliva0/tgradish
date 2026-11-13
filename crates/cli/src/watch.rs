@@ -168,7 +168,7 @@ fn sleep(ctx: &Context, seconds: f64) {
 /// goes on: as a warning, which events of every format can be.
 fn warn(ctx: &Context, message: String) {
     if ctx.global.json {
-        crate::json_line(&tgradish_core::events::Event::Warning { message });
+        crate::json_line(&tgradish_core::webm::Event::Warning { message });
     } else {
         eprintln!("{} {message}", ui::warning_label());
     }

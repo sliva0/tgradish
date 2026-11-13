@@ -9,8 +9,8 @@ use std::process::Command;
 use super::args::{input_args, ssim_graph};
 use super::{Ffmpeg, Output, run};
 use crate::CancelToken;
-use crate::convert::Plan;
 use crate::error::{Error, Result};
+use crate::webm::Plan;
 
 /// Compares an encoded attempt at `fps` with the source at the planned
 /// frame rate. The source drives the comparison and the attempt's frames are

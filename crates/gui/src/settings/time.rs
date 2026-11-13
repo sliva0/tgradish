@@ -99,12 +99,12 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             // as converting chooses it, and more would repeat the input's
             // frames
             let (average, base) = input_fps.unwrap_or_default();
-            let chosen = average.map(|fps| tgradish_core::convert::played_fps(fps, tempo));
+            let chosen = average.map(|fps| tgradish_core::webm::played_fps(fps, tempo));
             let peak = match (average, base) {
                 (Some(average), Some(base)) => Some(average.max(base)),
                 (average, base) => average.or(base),
             };
-            let most = peak.map(|fps| tgradish_core::convert::played_fps(fps, tempo));
+            let most = peak.map(|fps| tgradish_core::webm::played_fps(fps, tempo));
             if item.kind == Kind::Frames {
                 // how fast its frames play, which the result's follows
                 row(ui, &fl!("frame-rate"), &fl!("frame-rate", "sequence"), Ok(()), |ui| {

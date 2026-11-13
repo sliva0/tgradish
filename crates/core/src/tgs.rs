@@ -304,7 +304,7 @@ pub enum TgsEvent {
     },
     /// A conversion, or the whole command, failed. Only printed by the
     /// CLI; the library returns errors instead.
-    Error(crate::events::Failure),
+    Error(crate::protocol::Failure),
 }
 
 /// `NAME.sticker.tgs` or `NAME.emoji.tgs` next to the input.

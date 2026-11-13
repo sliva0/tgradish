@@ -22,10 +22,10 @@ use schemars::{JsonSchema, Schema, schema_for};
 use serde::Serialize;
 
 use crate::config::Config;
-use crate::events::Event;
 use crate::options::Options;
 use crate::presets::{Format, Presets};
 use crate::tgs::{TgsEvent, TgsOptions};
+use crate::webm::Event;
 
 /// The version of the protocol: of the description, the events, what
 /// `--json` prints and the flags front-ends use. It goes up with a change
@@ -75,6 +75,19 @@ pub struct PresetDescription {
     pub tgs: Option<TgsOptions>,
     /// Why the preset cannot be used, if it is broken for either format.
     pub error: Option<String>,
+}
+
+/// Why a conversion, or the whole command, failed: the error event of
+/// every stream `convert --json`, `watch --json` and `inspect --json`
+/// print, the same in each. Only printed by the CLI; the library returns
+/// errors instead.
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub struct Failure {
+    pub message: String,
+    /// The input that failed, `None` when the whole command did.
+    #[serde(serialize_with = "crate::protocol::serialize_optional_path")]
+    pub input: Option<PathBuf>,
 }
 
 /// Serialises `path` as text, with what isn't Unicode in it replaced:
@@ -163,12 +176,13 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
 mod tests {
     use serde_json::{Value, json};
 
+    use super::Failure;
     use super::*;
-    use crate::convert::{Plan, Request};
-    use crate::events::{Failure, Params, Rate};
     use crate::ffmpeg::Probe;
     use crate::still::{Encoding, Outcome, StillEvent};
     use crate::telegram::Issue;
+    use crate::webm::{Params, Rate};
+    use crate::webm::{Plan, Request};
 
     fn probe() -> Probe {
         Probe {
@@ -188,7 +202,7 @@ mod tests {
     }
 
     fn plan() -> Plan {
-        crate::convert::plan(&Request::new("in.mp4".into()), probe()).unwrap().0
+        crate::webm::plan(&Request::new("in.mp4".into()), probe()).unwrap().0
     }
 
     /// One of each event of each stream, as `convert --json` prints them.
