@@ -438,8 +438,9 @@ fn load(
             source::aseprite(&bytes, tag.as_deref(), &chosen, &limits)
         }
         _ => {
-            let options = DecodeOptions { tag, layers: chosen, limits };
-            frames::decode(&bytes, &options).map(|animation| (animation, Aseprite::default()))
+            let options = DecodeOptions { tag, layers: chosen };
+            frames::decode(&bytes, &options, &limits)
+                .map(|animation| (animation, Aseprite::default()))
         }
     };
     let (animation, aseprite) = match sheet {

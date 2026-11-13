@@ -33,7 +33,7 @@ pub(crate) fn aseprite(
     layers: &Layers,
     limits: &Limits,
 ) -> frames::Result<(Animation, Aseprite)> {
-    let sprite = Sprite::read_with(bytes, limits)?;
+    let sprite = Sprite::read(bytes, limits)?;
     let animation = sprite.animation(tag, layers)?;
     let durations = sprite.durations().iter().map(Duration::as_secs_f64).collect();
     Ok((animation, Aseprite { tags: sprite.tags().to_vec(), layers: sprite.layers(), durations }))

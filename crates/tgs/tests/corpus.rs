@@ -2,7 +2,7 @@
 //! which stands for the cases real art has.
 
 use tgradish_corpus::File;
-use tgradish_tgs::frames::{Animation, DecodeOptions, decode};
+use tgradish_tgs::frames::{Animation, DecodeOptions, Limits, decode};
 use tgradish_tgs::normalise::{Options, Report, normalise};
 
 fn corpus() -> Vec<File> {
@@ -10,7 +10,7 @@ fn corpus() -> Vec<File> {
 }
 
 fn input(file: &File) -> Animation {
-    decode(&file.bytes, &DecodeOptions::default())
+    decode(&file.bytes, &DecodeOptions::default(), &Limits::default())
         .unwrap_or_else(|err| panic!("{}: {err}", file.name))
 }
 

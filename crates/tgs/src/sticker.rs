@@ -861,7 +861,9 @@ mod tests {
     #[test]
     fn stops_inside_an_encode() {
         let walker = tgradish_corpus::files().into_iter().find(|f| f.name == "walker.gif").unwrap();
-        let input = tgradish_frames::decode(&walker.bytes, &Default::default()).unwrap();
+        let input =
+            tgradish_frames::decode(&walker.bytes, &Default::default(), &Default::default())
+                .unwrap();
         let (anim, _) = normalise(&input, &normalise::Options::default()).unwrap();
         // between colours, whatever the effort
         let best = Settings { effort: Effort::Best, ..Settings::default() };
@@ -890,7 +892,9 @@ mod tests {
         let canvas = normalise::Options { keep_canvas: true, ..Default::default() };
         let forced = normalise::Options { pixel_scale: Some(2), ..Default::default() };
         for file in tgradish_corpus::files() {
-            let input = tgradish_frames::decode(&file.bytes, &Default::default()).unwrap();
+            let input =
+                tgradish_frames::decode(&file.bytes, &Default::default(), &Default::default())
+                    .unwrap();
             for options in [&normalise::Options::default(), &crop, &canvas, &forced] {
                 let (anim, report) = normalise(&input, options).unwrap();
                 let again = normalise_likely_scale(&anim);
