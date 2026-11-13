@@ -479,4 +479,46 @@ mod tests {
         assert_eq!(harness.state().items[0].choices.webm.exact_scale, None);
         harness.get(by().value("×2"));
     }
+
+    #[test]
+    fn keeps_long_preset_and_tag_names_whole_at_the_narrowest() {
+        use egui_kittest::kittest::Queryable;
+        use tgradish_core::tgs;
+        use tgradish_core::webm::Options;
+
+        let dir = tempfile::tempdir().unwrap();
+        let presets_dir = dir.path().join("presets");
+        let long = "my stickers for the whole family summer holiday";
+        let mine = (&Options::default(), &tgs::Options::default());
+        tgradish_core::presets::save(&presets_dir, long, "", mine, false).unwrap();
+        // an Aseprite file of tags with long names
+        let walker = tgradish_corpus::sprite("walker_2x");
+        let tag = "walking all the way across the screen and back again";
+        let tags = [("idle", 0, 1), (tag, 1, 7)];
+        let ase = dir.path().join("walker.ase");
+        std::fs::write(&ase, tgradish_corpus::encode::aseprite_with(&walker, &tags, &[])).unwrap();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([crate::MIN_WIDTH, 1800.0])
+            .build_eframe(|cc| {
+                let app = crate::app::App::with(Config::default(), None, Presets::builtin());
+                app.style(&cc.egui_ctx);
+                app
+            });
+        harness.state_mut().presets = Presets::load(Some(&presets_dir)).unwrap();
+        harness.state_mut().add(vec![ase]);
+        crate::testing::finish(&mut harness);
+        harness.run_steps(3);
+        for name in [long, tag] {
+            let chip = harness.get_by_label(name).rect();
+            let natural = harness.ctx.fonts_mut(|fonts| {
+                let font = egui::FontId::proportional(14.0);
+                fonts.layout_no_wrap(name.to_owned(), font, egui::Color32::WHITE).size().x
+            });
+            // on more lines, or as wide as its words on one
+            let wrapped = chip.height() > crate::theme::CONTROL + 1.0;
+            assert!(wrapped || chip.width() >= natural, "{name} cut short in {chip:?}");
+            // within the window
+            assert!(chip.right() <= crate::MIN_WIDTH, "{name} beyond the window: {chip:?}");
+        }
+    }
 }
