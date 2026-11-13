@@ -14,7 +14,7 @@ use crate::{theme, widgets};
 
 /// The one texture the preview draws, and which frame it holds.
 #[derive(Default)]
-pub struct Screen {
+pub(crate) struct Screen {
     texture: Option<egui::TextureHandle>,
     /// Clip, frame and whether it is drawn sharp.
     shows: Option<(u64, usize, bool)>,
@@ -23,7 +23,7 @@ pub struct Screen {
 impl Screen {
     /// The clip whose frame is shown.
     #[cfg(test)]
-    pub fn showing(&self) -> Option<u64> {
+    pub(crate) fn showing(&self) -> Option<u64> {
         self.shows.map(|(clip, ..)| clip)
     }
 
@@ -51,27 +51,27 @@ impl Screen {
 
 /// A frame to show, and the size of what it shows in input pixels: the
 /// clip may hold smaller frames.
-pub struct Picture<'a> {
-    pub clip: &'a Clip,
-    pub frame: usize,
-    pub size: (u32, u32),
+pub(crate) struct Picture<'a> {
+    pub(crate) clip: &'a Clip,
+    pub(crate) frame: usize,
+    pub(crate) size: (u32, u32),
     /// Shown in the middle of a square canvas, as `.tgs` stickers are.
-    pub square: bool,
+    pub(crate) square: bool,
 }
 
 /// The crop being edited, with the width to height ratio it keeps.
-pub struct Cropping<'a> {
-    pub crop: &'a mut Option<Crop>,
-    pub ratio: Option<f64>,
+pub(crate) struct Cropping<'a> {
+    pub(crate) crop: &'a mut Option<Crop>,
+    pub(crate) ratio: Option<f64>,
     /// What of the crop the result keeps, cutting off the rest.
-    pub kept: Option<Kept>,
+    pub(crate) kept: Option<Kept>,
     /// The size an exact scale holds the crop to.
-    pub exact: Option<Exact>,
+    pub(crate) exact: Option<Exact>,
 }
 
 /// What of a crop a result keeps.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Kept {
+pub(crate) enum Kept {
     /// Its middle, filling a box of this width to height ratio.
     Ratio(f64),
     /// This part of the picture, in input pixels: left, top, right and
@@ -81,7 +81,7 @@ pub enum Kept {
 
 /// Which edge of a crop stays put when its size changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Keep {
+pub(crate) enum Keep {
     Start,
     End,
     Middle,
@@ -91,29 +91,29 @@ pub enum Keep {
 /// pixels, the most the scale fits into the result, and its sides whole
 /// blocks of `step` pixels, which shrinking averages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Exact {
-    pub long: u32,
-    pub step: u32,
+pub(crate) struct Exact {
+    pub(crate) long: u32,
+    pub(crate) step: u32,
 }
 
 impl Exact {
     /// The crop `scale` takes for `target`, if a pixel at that scale isn't
     /// larger than the result.
-    pub fn of(scale: ExactScale, target: Target) -> Option<Exact> {
+    pub(crate) fn of(scale: ExactScale, target: Target) -> Option<Exact> {
         let (width, height) = target.box_size();
         let long = scale.most_input(width.max(height));
         (long > 0).then_some(Exact { long, step: scale.down })
     }
 
     /// Whether a `size` picture has a whole block.
-    pub fn fits(self, size: (u32, u32)) -> bool {
+    pub(crate) fn fits(self, size: (u32, u32)) -> bool {
         size.0.min(size.1) >= self.step
     }
 
     /// `crop` held to this size within a `size` picture: no larger than the
     /// scale takes, in whole blocks, and as `ratio` says; `keep` says which
     /// edges stay put, across and down.
-    pub fn fit(
+    pub(crate) fn fit(
         self,
         crop: Crop,
         keep: (Keep, Keep),
@@ -201,7 +201,7 @@ const SHARP_FROM: f32 = 2.0;
 /// dragging changes. The picture fits `fit_in`, a part of `rect`, and
 /// zooms from there, over the rest of `rect`: nothing moves when zooming
 /// starts or ends.
-pub fn show(
+pub(crate) fn show(
     ui: &mut egui::Ui,
     screen: &mut Screen,
     (rect, fit_in): (Rect, Rect),

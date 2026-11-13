@@ -7,7 +7,7 @@ use tgradish_core::webm::read_from;
 /// How a cut between frames is written, so converting keeps the frames
 /// meant, whatever rounding does to the number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Cut {
+pub(crate) enum Cut {
     /// ffmpeg keeps frames from the first that starts at or after a cut,
     /// and counts them over the length: a cut is a hair before the frame
     /// it starts, and the length is the frames'.
@@ -19,15 +19,15 @@ pub enum Cut {
 
 /// Where an input's frames start, then where the last one ends.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Frames {
-    pub times: Vec<f64>,
-    pub cut: Cut,
+pub(crate) struct Frames {
+    pub(crate) times: Vec<f64>,
+    pub(crate) cut: Cut,
 }
 
 impl Frames {
     /// Frames starting at `starts`, in order, over `length`: the first
     /// shows from the beginning, and none starts at the end.
-    pub fn starting(starts: &[f64], length: f64, cut: Cut) -> Option<Frames> {
+    pub(crate) fn starting(starts: &[f64], length: f64, cut: Cut) -> Option<Frames> {
         if starts.is_empty() || !(length > 0.0 && length.is_finite()) {
             return None;
         }
@@ -41,7 +41,7 @@ impl Frames {
 
     /// Frames of `1 / fps` seconds over `length`, the last one cut short;
     /// a tenth of a frame or less over the last is taken for rounding.
-    pub fn even(length: f64, fps: f64, cut: Cut) -> Option<Frames> {
+    pub(crate) fn even(length: f64, fps: f64, cut: Cut) -> Option<Frames> {
         if !(fps > 0.0 && length > 0.0) {
             return None;
         }
@@ -51,12 +51,12 @@ impl Frames {
         Some(Frames { times, cut })
     }
 
-    pub fn count(&self) -> usize {
+    pub(crate) fn count(&self) -> usize {
         self.times.len() - 1
     }
 
     /// The frame shown at `time`.
-    pub fn at(&self, time: f64) -> usize {
+    pub(crate) fn at(&self, time: f64) -> usize {
         self.times
             .partition_point(|&start| start <= time + 1e-9)
             .saturating_sub(1)
@@ -65,7 +65,7 @@ impl Frames {
 
     /// The boundary between frames nearest `time`: 0 is before the first,
     /// [`Frames::count`] after the last.
-    pub fn nearest(&self, time: f64) -> usize {
+    pub(crate) fn nearest(&self, time: f64) -> usize {
         let after = self.times.partition_point(|&boundary| boundary < time);
         match after {
             0 => 0,
@@ -77,7 +77,12 @@ impl Frames {
 
     /// The used part as boundaries: its first frame and the one after its
     /// last.
-    pub fn part(&self, length: f64, start: Option<f64>, used: Option<f64>) -> (usize, usize) {
+    pub(crate) fn part(
+        &self,
+        length: f64,
+        start: Option<f64>,
+        used: Option<f64>,
+    ) -> (usize, usize) {
         let (from, to) = part(length, start, used);
         let first = self.nearest(from).min(self.count() - 1);
         (first, self.nearest(to).max(first + 1))
@@ -85,7 +90,7 @@ impl Frames {
 
     /// Uses the frames from `first` up to `after`, writing the cuts into
     /// `start` and `used` as the item stores them.
-    pub fn set_part(
+    pub(crate) fn set_part(
         &self,
         (first, after): (usize, usize),
         start: &mut Option<f64>,

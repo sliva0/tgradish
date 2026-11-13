@@ -19,7 +19,7 @@ use i18n_embed::unic_langid::LanguageIdentifier;
 struct Files;
 
 /// The messages, in English until `choose` picks another language.
-pub static LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
+pub(crate) static LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
     let loader = fluent_language_loader!();
     loader.load_fallback_language(&Files).expect("English is built in");
     settle(&loader, false);
@@ -51,7 +51,7 @@ const VARIABLE: &str = "TGRADISH_LANG";
 
 /// The languages there are translations for, English first, each with
 /// what it calls itself.
-pub fn languages() -> &'static [(LanguageIdentifier, String)] {
+pub(crate) fn languages() -> &'static [(LanguageIdentifier, String)] {
     static LANGUAGES: LazyLock<Vec<(LanguageIdentifier, String)>> = LazyLock::new(|| {
         let languages = LOADER.available_languages(&Files).unwrap_or_default();
         languages
@@ -72,7 +72,7 @@ pub fn languages() -> &'static [(LanguageIdentifier, String)] {
 
 /// Shows the window in `language`, as a tag, or in the system's when
 /// `None`, as far as there are translations. `TGRADISH_LANG` comes first.
-pub fn choose(language: Option<&str>) {
+pub(crate) fn choose(language: Option<&str>) {
     let variable = std::env::var(VARIABLE).ok().filter(|tag| !tag.is_empty());
     let pseudo = variable.as_deref() == Some("pseudo");
     let asked: Vec<LanguageIdentifier> = match variable.as_deref().filter(|_| !pseudo).or(language)
@@ -117,15 +117,15 @@ fn pseudo_text(text: &str) -> Cow<'_, str> {
 /// of where each message is shown.
 #[cfg(not(test))]
 #[inline(always)]
-pub fn seen(_id: &'static str, text: String) -> String {
+pub(crate) fn seen(_id: &'static str, text: String) -> String {
     text
 }
 
 #[cfg(test)]
-pub use record::seen;
+pub(crate) use record::seen;
 
 #[cfg(test)]
-pub mod record {
+pub(crate) mod record {
     use std::cell::RefCell;
     use std::collections::BTreeSet;
     use std::sync::Mutex;
@@ -144,7 +144,7 @@ pub mod record {
     static REMEMBER: AtomicBool = AtomicBool::new(false);
 
     /// `text`, noted for `id` if recording.
-    pub fn seen(id: &'static str, text: String) -> String {
+    pub(crate) fn seen(id: &'static str, text: String) -> String {
         SEEN.with_borrow_mut(|seen| {
             if let Some(seen) = seen {
                 seen.push((id, text.clone()));
@@ -160,23 +160,23 @@ pub mod record {
     }
 
     /// Starts noting every message given, on any thread, for `everything`.
-    pub fn remember() {
+    pub(crate) fn remember() {
         REMEMBER.store(true, Ordering::Relaxed);
     }
 
     /// The messages given since `remember`, from the `from`th on.
-    pub fn since(from: usize) -> Vec<(&'static str, String)> {
+    pub(crate) fn since(from: usize) -> Vec<(&'static str, String)> {
         EVER.lock().unwrap().0.get(from..).map(<[_]>::to_vec).unwrap_or_default()
     }
 
     /// Starts noting the messages shown on this thread, forgetting those
     /// noted before.
-    pub fn start() {
+    pub(crate) fn start() {
         SEEN.set(Some(Vec::new()));
     }
 
     /// The messages shown since `start` or the last `take`.
-    pub fn take() -> Vec<(&'static str, String)> {
+    pub(crate) fn take() -> Vec<(&'static str, String)> {
         SEEN.with_borrow_mut(|seen| seen.as_mut().map(std::mem::take).unwrap_or_default())
     }
 }

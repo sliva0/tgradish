@@ -23,7 +23,7 @@ use wayland_protocols::xdg::toplevel_icon::v1::client::xdg_toplevel_icon_v1::Xdg
 use winit::platform::wayland::WindowExtWayland;
 
 /// The icon and the pixels it is made of, which must outlive it.
-pub struct ToplevelIcon {
+pub(crate) struct ToplevelIcon {
     _icon: XdgToplevelIconV1,
     _buffers: Vec<WlBuffer>,
     _pool: WlShmPool,
@@ -34,7 +34,7 @@ pub struct ToplevelIcon {
 
 /// Sets the icon of `window` when it is on Wayland and the compositor has
 /// the protocol.
-pub fn set(window: &winit::window::Window) -> Option<ToplevelIcon> {
+pub(crate) fn set(window: &winit::window::Window) -> Option<ToplevelIcon> {
     let toplevel = window.xdg_toplevel()?;
     let RawDisplayHandle::Wayland(display) = window.display_handle().ok()?.as_raw() else {
         return None;

@@ -10,17 +10,17 @@ use tgradish_core::picture::Sizes;
 /// The part of a frame used, in the frame's own pixels, which may be fewer
 /// than the input's.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Part {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
+pub(crate) struct Part {
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) width: f64,
+    pub(crate) height: f64,
 }
 
 impl Part {
     /// `crop`, in input pixels of an `input` sized picture, on a frame of
     /// `frame` pixels.
-    pub fn of(crop: Option<Crop>, input: (u32, u32), frame: (u32, u32)) -> Part {
+    pub(crate) fn of(crop: Option<Crop>, input: (u32, u32), frame: (u32, u32)) -> Part {
         let crop = crop.unwrap_or(Crop::whole(input));
         let (sx, sy) = (
             f64::from(frame.0) / f64::from(input.0.max(1)),
@@ -39,7 +39,7 @@ impl Part {
 /// when scaling is automatic: by as many frames as they look at, from
 /// `start` seconds on. The clip may have fewer frames a second than the
 /// conversion reads, so this can see a little further in.
-pub fn looks_like_art(clip: &crate::media::Clip, part: Part, start: f64) -> bool {
+pub(crate) fn looks_like_art(clip: &crate::media::Clip, part: Part, start: f64) -> bool {
     let crop = Crop {
         x: part.x as u32,
         y: part.y as u32,
@@ -85,7 +85,7 @@ fn area(from: f64, to: f64, size: usize) -> (usize, Vec<f32>) {
 
 /// `sizes` as small as fit `most` pixels along the longer side, the same
 /// shape, for a picture of the result shown smaller than it is.
-pub fn within(sizes: &Sizes, most: usize) -> Sizes {
+pub(crate) fn within(sizes: &Sizes, most: usize) -> Sizes {
     let longer = sizes.width.max(sizes.height).max(1) as f64;
     let factor = (most as f64 / longer).min(1.0);
     if factor >= 1.0 {
@@ -103,7 +103,7 @@ pub fn within(sizes: &Sizes, most: usize) -> Sizes {
 /// The WebM result of `frame` (`width` pixels wide, straight RGBA):
 /// `part` scaled to `sizes.scaled` the way `sizes.scaling` does, cropped
 /// or padded around the middle to the result's size.
-pub fn webm(frame: &[u8], width: u32, part: Part, sizes: &Sizes) -> egui::ColorImage {
+pub(crate) fn webm(frame: &[u8], width: u32, part: Part, sizes: &Sizes) -> egui::ColorImage {
     let height = (frame.len() / 4) as u32 / width.max(1);
     let (out_w, out_h) = (sizes.width as usize, sizes.height as usize);
     let (sw, sh) = (sizes.scaled.0 as f64, sizes.scaled.1 as f64);
@@ -200,7 +200,12 @@ pub fn webm(frame: &[u8], width: u32, part: Part, sizes: &Sizes) -> egui::ColorI
 /// Left, top, right and bottom of what a `.tgs` result shows of `frames`:
 /// `part`, cut to what is visible in any frame unless `keep_canvas`. Looks
 /// at every pixel of every frame, so the caller keeps it.
-pub fn tgs_bounds(frames: &[Vec<u8>], width: u32, part: Part, keep_canvas: bool) -> [usize; 4] {
+pub(crate) fn tgs_bounds(
+    frames: &[Vec<u8>],
+    width: u32,
+    part: Part,
+    keep_canvas: bool,
+) -> [usize; 4] {
     let height = (frames[0].len() / 4) as u32 / width.max(1);
     // a crop may lie outside the picture until it is fixed
     let (width_px, height_px) = (width as usize, height as usize);
@@ -226,7 +231,7 @@ pub fn tgs_bounds(frames: &[Vec<u8>], width: u32, part: Part, keep_canvas: bool)
 }
 
 /// The middle square of `bounds`, as converting cuts a `.tgs` square.
-pub fn middle_square([x0, y0, x1, y1]: [usize; 4]) -> [usize; 4] {
+pub(crate) fn middle_square([x0, y0, x1, y1]: [usize; 4]) -> [usize; 4] {
     let square =
         tgradish_core::tgradish_tgs::normalise::middle_square((x1 - x0) as u32, (y1 - y0) as u32);
     let (x, y) = (x0 + square.x as usize, y0 + square.y as usize);
@@ -237,7 +242,7 @@ pub fn middle_square([x0, y0, x1, y1]: [usize; 4]) -> [usize; 4] {
 /// it made square as `resize` says, padded, cropped or stretched, as the
 /// conversion does, shown on a smaller canvas of `side`. Shapes have no
 /// pixels of their own, so the scale needn't be whole.
-pub fn tgs(
+pub(crate) fn tgs(
     rgba: &[u8],
     width: u32,
     [mut x0, mut y0, mut x1, mut y1]: [usize; 4],

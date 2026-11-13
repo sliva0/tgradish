@@ -12,20 +12,20 @@ use crate::l10n::fl;
 use crate::{theme, widgets};
 
 /// What the timeline changes.
-pub struct Timeline<'a> {
+pub(crate) struct Timeline<'a> {
     /// Length of the input, in seconds.
-    pub length: f64,
-    pub start: &'a mut Option<f64>,
+    pub(crate) length: f64,
+    pub(crate) start: &'a mut Option<f64>,
     /// Length used from the start; the rest of the input when `None`.
-    pub used: &'a mut Option<f64>,
-    pub time: &'a mut f64,
-    pub playing: &'a mut bool,
+    pub(crate) used: &'a mut Option<f64>,
+    pub(crate) time: &'a mut f64,
+    pub(crate) playing: &'a mut bool,
     /// Telegram's length limit, marked from the start.
-    pub limit: f64,
+    pub(crate) limit: f64,
     /// The input's frames, which cuts land between, when they are known.
-    pub frames: Option<&'a Frames>,
+    pub(crate) frames: Option<&'a Frames>,
     /// Numbers count frames rather than seconds.
-    pub in_frames: &'a mut bool,
+    pub(crate) in_frames: &'a mut bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -106,7 +106,7 @@ fn unit(ui: &mut egui::Ui, in_frames: &mut bool, known: bool) {
 }
 
 /// Shows the timeline.
-pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
+pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
     let Timeline { length, start, used, time, playing, limit, frames, in_frames } = timeline;
     // one frame used has nothing to play
     let still = frames.is_some_and(|frames| {
@@ -348,7 +348,7 @@ fn bar(
 }
 
 /// Plays a result: a play button and a bar to seek in it.
-pub fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &mut bool) {
+pub(crate) fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &mut bool) {
     let length = length.max(1e-6);
     ui.horizontal(|ui| {
         play_button(ui, playing);
@@ -386,7 +386,7 @@ pub fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &mut bool
 /// number or time, and a bar to click or drag along, the frame lit on it
 /// for as long as it shows. `frame` is where the picked frame starts, as
 /// the picture is made of it.
-pub fn frame_picker(
+pub(crate) fn frame_picker(
     ui: &mut egui::Ui,
     frames: &Frames,
     frame: &mut Option<f64>,

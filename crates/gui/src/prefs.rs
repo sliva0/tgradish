@@ -16,10 +16,10 @@ use crate::settings;
 use crate::widgets::{self, note, row, segments};
 
 #[derive(Default)]
-pub struct Prefs {
+pub(crate) struct Prefs {
     open: bool,
     /// Whether the window of tgradish's version and licences is open.
-    pub about: bool,
+    pub(crate) about: bool,
     /// What checking ffmpeg found: whether it is ready, and what to say.
     ffmpeg_status: Option<(bool, String)>,
     /// Checking ffmpeg, which runs it, on a thread of its own: stopped if
@@ -31,14 +31,14 @@ pub struct Prefs {
     /// ffmpeg on PATH, and a folder results could go to.
     placeholders: (String, String),
     /// A file dialog asked for, which the window opens.
-    pub pick: Option<crate::files::Pick>,
+    pub(crate) pick: Option<crate::files::Pick>,
     /// Results are to go in a folder not chosen yet: kept here, as the
     /// settings never hold a folder without a name.
     folder_unchosen: bool,
 }
 
 impl Prefs {
-    pub fn open(&mut self) {
+    pub(crate) fn open(&mut self) {
         let ffmpeg = match tgradish_core::ffmpeg::Ffmpeg::on_path() {
             Ok(found) => fl!("ffmpeg-found", path = found.ffmpeg.display().to_string()),
             Err(_) if cfg!(windows) => fl!("for-example", example = r"C:\ffmpeg\bin"),
@@ -55,14 +55,14 @@ impl Prefs {
         };
     }
 
-    pub fn is_open(&self) -> bool {
+    pub(crate) fn is_open(&self) -> bool {
         self.open
     }
 }
 
 /// Shows the dialog if it is open. `ffmpeg_given` says the command line
 /// that started the window chose its ffmpeg, over the settings'.
-pub fn show(
+pub(crate) fn show(
     ctx: &egui::Context,
     prefs: &mut Prefs,
     config: &mut Config,

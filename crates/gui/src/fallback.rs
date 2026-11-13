@@ -35,7 +35,7 @@ pub(crate) fn characters(bytes: &[u8], index: u32) -> Vec<char> {
         .unwrap_or_default()
 }
 
-pub struct Fallbacks {
+pub(crate) struct Fallbacks {
     fonts: egui::FontDefinitions,
     /// Characters some font has. egui's own check says no for characters
     /// of the font that also draws its replacement box, so it is kept here.
@@ -55,7 +55,7 @@ fn block(c: char) -> u32 {
 
 /// Characters that only shape others and draw nothing themselves: zero
 /// width spaces and joiners, direction marks, variation selectors, tags.
-pub fn formatting(c: char) -> bool {
+pub(crate) fn formatting(c: char) -> bool {
     matches!(
         c as u32,
         0x00AD
@@ -73,7 +73,7 @@ pub fn formatting(c: char) -> bool {
 
 impl Fallbacks {
     /// Falls back from `fonts`, the window's own.
-    pub fn new(fonts: egui::FontDefinitions) -> Fallbacks {
+    pub(crate) fn new(fonts: egui::FontDefinitions) -> Fallbacks {
         let covered =
             fonts.font_data.values().flat_map(|data| characters(&data.font, data.index)).collect();
         Fallbacks {
@@ -87,13 +87,17 @@ impl Fallbacks {
     }
 
     /// Whether no font has `c`, the system's looked through.
-    pub fn missing(&self, c: char) -> bool {
+    pub(crate) fn missing(&self, c: char) -> bool {
         self.asked.contains(&c) && !self.searching.contains(&block(c)) && !self.covered.contains(&c)
     }
 
     /// Looks for fonts for the characters of `texts` the window can't show,
     /// and adds those found by now.
-    pub fn check<'a>(&mut self, ctx: &egui::Context, texts: impl IntoIterator<Item = &'a str>) {
+    pub(crate) fn check<'a>(
+        &mut self,
+        ctx: &egui::Context,
+        texts: impl IntoIterator<Item = &'a str>,
+    ) {
         let mut added = false;
         let mut done = Vec::new();
         self.pending.retain(|(block, receiver)| match receiver.try_recv() {

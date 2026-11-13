@@ -4,36 +4,36 @@
 
 use std::ffi::{CStr, c_char, c_int, c_void};
 
-pub type Connection = c_void;
-pub type Message = c_void;
+pub(crate) type Connection = c_void;
+pub(crate) type Message = c_void;
 
 /// libdbus's DBusError and DBusMessageIter, which callers allocate: opaque
 /// here, and larger than libdbus's own on any machine, as aligned.
 #[repr(C)]
-pub struct Error(pub [u64; 8]);
+pub(crate) struct Error(pub(crate) [u64; 8]);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct Iter(pub [u64; 16]);
+pub(crate) struct Iter(pub(crate) [u64; 16]);
 
-pub const SESSION: c_int = 0;
-pub const STRING: c_int = b's' as c_int;
-pub const ARRAY: c_int = b'a' as c_int;
-pub const VARIANT: c_int = b'v' as c_int;
-pub const STRUCT: c_int = b'r' as c_int;
-pub const DOUBLE: c_int = b'd' as c_int;
+pub(crate) const SESSION: c_int = 0;
+pub(crate) const STRING: c_int = b's' as c_int;
+pub(crate) const ARRAY: c_int = b'a' as c_int;
+pub(crate) const VARIANT: c_int = b'v' as c_int;
+pub(crate) const STRUCT: c_int = b'r' as c_int;
+pub(crate) const DOUBLE: c_int = b'd' as c_int;
 
 macro_rules! functions {
     ($($(#[$only:meta])? $name:ident: fn($($arg:ty),*) $(-> $ret:ty)?;)*) => {
         /// The functions of libdbus used here; those only tests use are
         /// looked for only in tests, so a libdbus without them still does.
-        pub struct Dbus {
+        pub(crate) struct Dbus {
             $($(#[$only])? pub $name: unsafe extern "C" fn($($arg),*) $(-> $ret)?,)*
             _library: libloading::Library,
         }
 
         impl Dbus {
-            pub fn load() -> Option<Dbus> {
+            pub(crate) fn load() -> Option<Dbus> {
                 // SAFETY: what libdbus runs as it loads only sets up its own
                 // state, and each function has the type its header declares
                 unsafe {
@@ -82,7 +82,7 @@ functions! {
 /// Asks the file manager to show the file at `uri` selected in its folder,
 /// through org.freedesktop.FileManager1, which Dolphin, Nautilus, Nemo,
 /// Caja and Thunar answer. False where none does. Waits for its answer.
-pub fn show_items(uri: &CStr) -> bool {
+pub(crate) fn show_items(uri: &CStr) -> bool {
     let Some(dbus) = Dbus::load() else { return false };
     // SAFETY: the connection and the messages stay valid until they are
     // unreferenced, and the strings appended outlive the call

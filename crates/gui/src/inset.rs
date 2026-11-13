@@ -13,7 +13,7 @@ use crate::widgets;
 /// The small picture of what the result will look like, beside the input
 /// or over its corner.
 #[derive(Default)]
-pub struct Inset {
+pub(crate) struct Inset {
     texture: Option<egui::TextureHandle>,
     /// What the texture shows, whether it is drawn sharp, and the most
     /// pixels along a side it was made with.
@@ -34,16 +34,16 @@ pub struct Inset {
 
 /// What the layout of the input and the small picture is made of: whether
 /// the small picture shows, its size and its corner.
-pub type Arrangement = (bool, usize, Corner);
+pub(crate) type Arrangement = (bool, usize, Corner);
 
 /// Where things go in the preview: the area the input fits, the small
 /// picture's room, and where in it the small picture is, from 0 to 1
 /// across and down, which its corner says.
-pub type Layout = (Rect, Rect, Vec2);
+pub(crate) type Layout = (Rect, Rect, Vec2);
 
 /// What the small picture's controls asked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InsetChange {
+pub(crate) enum InsetChange {
     Size(usize),
     Corner(Corner),
 }
@@ -54,7 +54,7 @@ const EASING: f64 = 0.15;
 impl Inset {
     /// Whether the part of a clip `key` names looks like pixel art, worked
     /// out by `find` when the key changes rather than every frame.
-    pub fn looks_like_art(&mut self, key: u64, find: impl FnOnce() -> bool) -> bool {
+    pub(crate) fn looks_like_art(&mut self, key: u64, find: impl FnOnce() -> bool) -> bool {
         match self.art {
             Some((seen, art)) if seen == key => art,
             _ => self.art.insert((key, find())).1,
@@ -63,7 +63,7 @@ impl Inset {
 
     /// What a `.tgs` result shows of the clip `key` names, worked out by
     /// `find` when the key changes rather than every frame.
-    pub fn tgs_bounds(&mut self, key: u64, find: impl FnOnce() -> [usize; 4]) -> [usize; 4] {
+    pub(crate) fn tgs_bounds(&mut self, key: u64, find: impl FnOnce() -> [usize; 4]) -> [usize; 4] {
         match self.bounds {
             Some((seen, bounds)) if seen == key => bounds,
             _ => self.bounds.insert((key, find())).1,
@@ -74,7 +74,7 @@ impl Inset {
     /// picture's room, and its place in that as its corner says, eased in
     /// from what was drawn before when what it is made of changed or the
     /// small picture was let go of, rather than with the window's size.
-    pub fn ease(
+    pub(crate) fn ease(
         &mut self,
         ctx: &egui::Context,
         item: u64,
@@ -115,7 +115,7 @@ impl Inset {
     }
 
     /// Whether the small picture is still easing out of sight.
-    pub fn leaving(&self) -> bool {
+    pub(crate) fn leaving(&self) -> bool {
         self.motion.is_some() && self.drawn.is_some_and(|(_, (on, ..), _)| !on)
     }
 
@@ -128,7 +128,7 @@ impl Inset {
     /// dragging it or its label to another corner of `view` than its
     /// `corner` moves it there.
     #[allow(clippy::too_many_arguments)]
-    pub fn show(
+    pub(crate) fn show(
         &mut self,
         ui: &mut egui::Ui,
         (view, room, align): (Rect, Rect, Vec2),
@@ -309,9 +309,9 @@ fn lerp(from: Rect, to: Rect, t: f32) -> Rect {
 }
 
 /// The font of the label over the result's small picture.
-pub const INSET_LABEL: egui::FontId = egui::FontId::proportional(12.0);
+pub(crate) const INSET_LABEL: egui::FontId = egui::FontId::proportional(12.0);
 /// The sizes of the small picture, as shares of the view's shorter side.
-pub const INSET_SIZES: [f32; 5] = [0.20, 0.27, 0.34, 0.42, 0.50];
+pub(crate) const INSET_SIZES: [f32; 5] = [0.20, 0.27, 0.34, 0.42, 0.50];
 /// The side of a button that changes its size.
 const SIZE_BUTTON: f32 = 24.0;
 /// The width the two of them take after the label's text.
@@ -330,7 +330,7 @@ const LEAST_SHARE: f32 = 0.75;
 
 /// The size of the label over the small picture, for `text` of that size,
 /// the grip before it and the buttons after it.
-pub fn label_box(text: Vec2) -> Vec2 {
+pub(crate) fn label_box(text: Vec2) -> Vec2 {
     vec2(GRIP + text.x + 6.0 + SIZE_BUTTONS, text.y.max(SIZE_BUTTON))
 }
 
@@ -347,7 +347,7 @@ pub fn label_box(text: Vec2) -> Vec2 {
 /// The room is a square, whatever shape the result has, so changing the
 /// crop never moves the input it is changed on. Returns the input's area
 /// and the small picture's room.
-pub fn split(
+pub(crate) fn split(
     view: Rect,
     input: (u32, u32),
     label: Vec2,

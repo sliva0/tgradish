@@ -2,6 +2,10 @@
 //! preview to crop and trim it, and its result. It converts with
 //! `tgradish-core` directly, like the CLI.
 
+// What the crate offers is what this file exports; everything else is
+// the window's own, which the lint keeps from being marked public.
+#![warn(unreachable_pub)]
+
 mod about;
 mod accent;
 mod actions;

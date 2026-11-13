@@ -20,7 +20,7 @@ use crate::media::{Art, Clip, Load, Video};
 
 /// What kind of input an item is, which limits what it can become.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Kind {
+pub(crate) enum Kind {
     /// Videos and photos, which only ffmpeg reads: any format, `.tgs` from
     /// the frames ffmpeg reads.
     Video,
@@ -35,7 +35,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub fn of(inputs: &[PathBuf], sequence: bool) -> Kind {
+    pub(crate) fn of(inputs: &[PathBuf], sequence: bool) -> Kind {
         match inputs {
             [input] if !sequence && !input.is_dir() => {
                 let extension = input::extension(input);
@@ -53,7 +53,7 @@ impl Kind {
 
     /// The format to start with; images switch to `.tgs` once they turn
     /// out to be pixel art.
-    pub fn first_format(self) -> Format {
+    pub(crate) fn first_format(self) -> Format {
         match self {
             Kind::Aseprite | Kind::Frames => Format::Tgs,
             Kind::Video | Kind::Image => Format::Webm,
@@ -66,28 +66,28 @@ impl Kind {
 /// every format. Kept with the session as they are.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct Choices {
+pub(crate) struct Choices {
     /// `None` for the default preset of the format.
-    pub preset: Option<String>,
-    pub target: Target,
+    pub(crate) preset: Option<String>,
+    pub(crate) target: Target,
     /// An Aseprite tag, and layers shown and hidden over what the file
     /// shows.
-    pub tag: Option<String>,
-    pub show_layers: Option<Vec<String>>,
-    pub hide_layers: Option<Vec<String>>,
-    pub crop: Option<Crop>,
-    pub start: Option<f64>,
-    pub length: Option<f64>,
+    pub(crate) tag: Option<String>,
+    pub(crate) show_layers: Option<Vec<String>>,
+    pub(crate) hide_layers: Option<Vec<String>>,
+    pub(crate) crop: Option<Crop>,
+    pub(crate) start: Option<f64>,
+    pub(crate) length: Option<f64>,
     /// Seconds into the input of the frame an image sticker is made of.
-    pub frame: Option<f64>,
+    pub(crate) frame: Option<f64>,
     /// Values set over the preset's, for WebM and `.tgs` results; images
     /// take WebM's.
-    pub webm: Options,
-    pub tgs: tgs::Options,
+    pub(crate) webm: Options,
+    pub(crate) tgs: tgs::Options,
 }
 
 impl Choices {
-    pub fn new(target: Target) -> Choices {
+    pub(crate) fn new(target: Target) -> Choices {
         Choices {
             preset: None,
             target,
@@ -103,22 +103,26 @@ impl Choices {
         }
     }
 
-    pub fn preset_name<'a>(&'a self, format: Format, config: &'a Config) -> &'a str {
+    pub(crate) fn preset_name<'a>(&'a self, format: Format, config: &'a Config) -> &'a str {
         self.preset.as_deref().unwrap_or_else(|| config.preset_for(format))
     }
 
     /// The preset's WebM options, which values not set fall back to.
-    pub fn webm_base(&self, presets: &Presets, config: &Config) -> Result<Options, String> {
+    pub(crate) fn webm_base(&self, presets: &Presets, config: &Config) -> Result<Options, String> {
         presets.webm(self.preset_name(Format::Webm, config)).map_err(|err| err.to_string())
     }
 
-    pub fn tgs_base(&self, presets: &Presets, config: &Config) -> Result<tgs::Options, String> {
+    pub(crate) fn tgs_base(
+        &self,
+        presets: &Presets,
+        config: &Config,
+    ) -> Result<tgs::Options, String> {
         presets.tgs(self.preset_name(Format::Tgs, config)).map_err(|err| err.to_string())
     }
 
     /// The choices every format shares, as WebM options: what is made,
     /// and what of the input is read and used.
-    pub fn shared_webm(&self) -> Options {
+    pub(crate) fn shared_webm(&self) -> Options {
         Options {
             target: Some(self.target),
             tag: self.tag.clone(),
@@ -132,7 +136,7 @@ impl Choices {
     }
 
     /// The same, as `.tgs` options.
-    pub fn shared_tgs(&self) -> tgs::Options {
+    pub(crate) fn shared_tgs(&self) -> tgs::Options {
         tgs::Options {
             target: Some(self.target),
             tag: self.tag.clone(),
@@ -147,30 +151,46 @@ impl Choices {
 
     /// The preset's WebM options with the item's over them, those of
     /// hidden settings too.
-    pub fn webm_merged(&self, presets: &Presets, config: &Config) -> Result<Options, String> {
+    pub(crate) fn webm_merged(
+        &self,
+        presets: &Presets,
+        config: &Config,
+    ) -> Result<Options, String> {
         Ok(self.webm_base(presets, config)?.merged(&self.webm).merged(&self.shared_webm()))
     }
 
     /// Everything a WebM conversion gets.
-    pub fn webm_options(&self, presets: &Presets, config: &Config) -> Result<Options, String> {
+    pub(crate) fn webm_options(
+        &self,
+        presets: &Presets,
+        config: &Config,
+    ) -> Result<Options, String> {
         let merged = self.webm_merged(presets, config)?;
         Ok(shown(merged.clone(), &merged))
     }
 
     /// Everything an image conversion gets: WebM's options a still picture
     /// has, and the frame for its start.
-    pub fn image_options(&self, presets: &Presets, config: &Config) -> Result<Options, String> {
+    pub(crate) fn image_options(
+        &self,
+        presets: &Presets,
+        config: &Config,
+    ) -> Result<Options, String> {
         let options = self.webm_options(presets, config)?;
         Ok(Options { start: self.frame, ..tgradish_core::webp::picture_options(&options) })
     }
 
     /// Everything a `.tgs` conversion gets.
-    pub fn tgs_options(&self, presets: &Presets, config: &Config) -> Result<tgs::Options, String> {
+    pub(crate) fn tgs_options(
+        &self,
+        presets: &Presets,
+        config: &Config,
+    ) -> Result<tgs::Options, String> {
         Ok(self.tgs_base(presets, config)?.merged(&self.tgs).merged(&self.shared_tgs()))
     }
 
     /// Everything a conversion to `format` gets.
-    pub fn recipe(
+    pub(crate) fn recipe(
         &self,
         format: Format,
         presets: &Presets,
@@ -185,7 +205,7 @@ impl Choices {
 
     /// The options that change what pixel art is read as, the preset's
     /// included.
-    pub fn reading(&self, presets: &Presets, config: &Config) -> tgs::Options {
+    pub(crate) fn reading(&self, presets: &Presets, config: &Config) -> tgs::Options {
         // a broken preset still leaves the item's own
         let own = || self.tgs.clone().merged(&self.shared_tgs());
         let options = self.tgs_options(presets, config).unwrap_or_else(|_| own());
@@ -204,7 +224,7 @@ impl Choices {
     /// `format`, the preset's included: an Aseprite file's tag and layers,
     /// and how fast a sequence's frames play, which pictures leave at the
     /// default, as making one does.
-    pub fn drawing(&self, format: Format, presets: &Presets, config: &Config) -> Options {
+    pub(crate) fn drawing(&self, format: Format, presets: &Presets, config: &Config) -> Options {
         let shared = || Options {
             tag: self.tag.clone(),
             show_layers: self.show_layers.clone(),
@@ -228,7 +248,7 @@ impl Choices {
 /// whatever else of the choices differs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum Recipe {
+pub(crate) enum Recipe {
     Webm(Options),
     Tgs(tgs::Options),
     Image(Options),
@@ -238,7 +258,7 @@ pub enum Recipe {
 /// out, as `effective`, everything a conversion gets, shows them: they are
 /// kept for when they show again, but have no say until then. What has no
 /// say by how fitting uses it core says; the window adds its own rows'.
-pub fn shown(options: Options, effective: &Options) -> Options {
+pub(crate) fn shown(options: Options, effective: &Options) -> Options {
     let mut options = tgradish_core::webm::in_effect(options, effective);
     // a scale of whole multiples, which keeps the whole picture
     if effective.scaling != Some(Scaling::PixelPerfect) {
@@ -252,18 +272,18 @@ pub fn shown(options: Options, effective: &Options) -> Options {
 }
 
 /// An Aseprite file's tags, layers and frame durations.
-pub type AsepriteSeen = (Vec<Tag>, Vec<LayerInfo>, Vec<f64>);
+pub(crate) type AsepriteSeen = (Vec<Tag>, Vec<LayerInfo>, Vec<f64>);
 
 /// Which picture the preview shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Show {
+pub(crate) enum Show {
     Input,
     Result,
 }
 
 /// Shapes the crop is kept to while dragging it.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Aspect {
+pub(crate) enum Aspect {
     Free,
     /// The input's own.
     Input,
@@ -273,14 +293,14 @@ pub enum Aspect {
 
 /// How close a picture is looked at.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Zoom {
+pub(crate) struct Zoom {
     /// 1 shows all of the picture.
-    pub level: f32,
+    pub(crate) level: f32,
     /// The picture point in the middle of the view, from 0 to 1.
-    pub centre: egui::Vec2,
+    pub(crate) centre: egui::Vec2,
     /// The view and the part of it the picture fits, as last shown: zoomed
     /// in, the picture stays where it is when only that part changes.
-    pub anchor: Option<(egui::Rect, egui::Rect)>,
+    pub(crate) anchor: Option<(egui::Rect, egui::Rect)>,
 }
 
 impl Default for Zoom {
@@ -291,27 +311,27 @@ impl Default for Zoom {
 
 /// How the preview of an item is looked at: not part of the conversion.
 #[derive(Debug, Clone)]
-pub struct View {
-    pub show: Show,
-    pub aspect: Aspect,
+pub(crate) struct View {
+    pub(crate) show: Show,
+    pub(crate) aspect: Aspect,
     /// Seconds into the input.
-    pub time: f64,
+    pub(crate) time: f64,
     /// Seconds into the result.
-    pub result_time: f64,
-    pub playing: bool,
-    pub input_zoom: Zoom,
-    pub result_zoom: Zoom,
+    pub(crate) result_time: f64,
+    pub(crate) playing: bool,
+    pub(crate) input_zoom: Zoom,
+    pub(crate) result_zoom: Zoom,
     /// The small picture of what the result will look like, beside the
     /// input.
-    pub inset: bool,
+    pub(crate) inset: bool,
     /// What the framing was when last shown, to show the input when it
     /// changes.
-    pub framing: Option<Framing>,
+    pub(crate) framing: Option<Framing>,
 }
 
 impl View {
     /// The zoom of the picture shown.
-    pub fn zoom_mut(&mut self) -> &mut Zoom {
+    pub(crate) fn zoom_mut(&mut self) -> &mut Zoom {
         match self.show {
             Show::Input => &mut self.input_zoom,
             Show::Result => &mut self.result_zoom,
@@ -340,7 +360,7 @@ impl Default for View {
 /// preview turns back to it. A new setting of that kind belongs here, or
 /// changing it leaves the old result in view.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Framing {
+pub(crate) struct Framing {
     format: Format,
     target: Target,
     tag: Option<String>,
@@ -354,7 +374,7 @@ pub struct Framing {
 }
 
 impl Framing {
-    pub fn of(item: &Item) -> Framing {
+    pub(crate) fn of(item: &Item) -> Framing {
         let (webm, tgs) = (&item.choices.webm, &item.choices.tgs);
         Framing {
             format: item.format,
@@ -389,74 +409,74 @@ impl Framing {
 /// A conversion of an item: the job and what it is made from. As
 /// [`Item::job`] it waits or runs; as [`Item::made`] its status is always
 /// [`crate::jobs::Status::Done`]; as [`Item::failed`], never.
-pub struct Conversion {
-    pub job: Job,
-    pub format: Format,
-    pub choices: Choices,
+pub(crate) struct Conversion {
+    pub(crate) job: Job,
+    pub(crate) format: Format,
+    pub(crate) choices: Choices,
     /// What the choices came to as it started; `None` before, or where
     /// they couldn't be made into one.
-    pub recipe: Option<Recipe>,
+    pub(crate) recipe: Option<Recipe>,
 }
 
 impl Conversion {
-    pub fn of(job: Job, format: Format, choices: Choices) -> Conversion {
+    pub(crate) fn of(job: Job, format: Format, choices: Choices) -> Conversion {
         Conversion { job, format, choices, recipe: None }
     }
 }
 
-pub struct Item {
-    pub id: u64,
+pub(crate) struct Item {
+    pub(crate) id: u64,
     /// One file, or the frames of one animation.
-    pub inputs: Vec<PathBuf>,
-    pub sequence: bool,
+    pub(crate) inputs: Vec<PathBuf>,
+    pub(crate) sequence: bool,
     /// Where a pasted image is kept.
-    pub pasted: Option<tempfile::TempDir>,
+    pub(crate) pasted: Option<tempfile::TempDir>,
     /// The name of the pasted image's copy kept with the session.
-    pub kept: Option<String>,
-    pub kind: Kind,
-    pub format: Format,
+    pub(crate) kept: Option<String>,
+    pub(crate) kind: Kind,
+    pub(crate) format: Format,
     /// The format was not picked by the user yet, so finding pixel art may
     /// change it.
-    pub format_guessed: bool,
-    pub choices: Choices,
-    pub view: View,
+    pub(crate) format_guessed: bool,
+    pub(crate) choices: Choices,
+    pub(crate) view: View,
     /// The input read by ffmpeg, for WebM and pictures, with how an
     /// Aseprite file was drawn for it.
-    pub video: Load<Video>,
-    pub video_drawing: Options,
+    pub(crate) video: Load<Video>,
+    pub(crate) video_drawing: Options,
     /// The part of the video that is played: where it starts and how long.
-    pub part: Option<((f64, f64), Load<Clip>)>,
+    pub(crate) part: Option<((f64, f64), Load<Clip>)>,
     /// The frame shown while paused, at the input's full size, and its
     /// time: sharp enough to crop by.
-    pub still: Option<(f64, Load<Clip>)>,
+    pub(crate) still: Option<(f64, Load<Clip>)>,
     /// The input read as pixel art, for `.tgs`, with what it was read with.
-    pub art: Load<Art>,
-    pub art_reading: tgs::Options,
+    pub(crate) art: Load<Art>,
+    pub(crate) art_reading: tgs::Options,
     /// An Aseprite file's tags and layers as last read, shown while it is
     /// read again, so nothing under them moves.
-    pub aseprite_seen: Option<std::rc::Rc<AsepriteSeen>>,
-    pub input_thumb: Option<egui::TextureHandle>,
+    pub(crate) aseprite_seen: Option<std::rc::Rc<AsepriteSeen>>,
+    pub(crate) input_thumb: Option<egui::TextureHandle>,
     /// The conversion waiting or running.
-    pub job: Option<Conversion>,
+    pub(crate) job: Option<Conversion>,
     /// The last conversion that made a sticker.
-    pub made: Option<Conversion>,
+    pub(crate) made: Option<Conversion>,
     /// The last result of an earlier run, read again before it counts as
     /// made: what it is, as it may have changed, or whether it is there.
-    pub earlier: Option<(Conversion, Load<Done>)>,
+    pub(crate) earlier: Option<(Conversion, Load<Done>)>,
     /// The last conversion, if it failed, was stopped or found a file in
     /// the way: newer than `made`.
-    pub failed: Option<Conversion>,
+    pub(crate) failed: Option<Conversion>,
     /// The result's frames: a WebM's decoded, a picture's read, or a
     /// `.tgs`'s as drawn when it was made.
-    pub result_clip: Load<Clip>,
-    pub result_thumb: Option<egui::TextureHandle>,
+    pub(crate) result_clip: Load<Clip>,
+    pub(crate) result_thumb: Option<egui::TextureHandle>,
     /// What converting would make now, worked out each frame, as presets
     /// and the default ones may change too; `None` where it can't.
-    pub recipe: Option<Recipe>,
+    pub(crate) recipe: Option<Recipe>,
 }
 
 impl Item {
-    pub fn new(id: u64, inputs: Vec<PathBuf>, sequence: bool, target: Target) -> Item {
+    pub(crate) fn new(id: u64, inputs: Vec<PathBuf>, sequence: bool, target: Target) -> Item {
         let kind = Kind::of(&inputs, sequence);
         Item {
             id,
@@ -489,14 +509,14 @@ impl Item {
 
     /// What converting the item converts: its file, or its files and
     /// folders as one animation.
-    pub fn input(&self) -> Input {
+    pub(crate) fn input(&self) -> Input {
         match &self.inputs[..] {
             [input] if !self.sequence => Input::File(input.clone()),
             inputs => Input::Sequence(inputs.to_vec()),
         }
     }
 
-    pub fn name(&self) -> String {
+    pub(crate) fn name(&self) -> String {
         let first = self.inputs.first().and_then(|p| p.file_name());
         let first = first.map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         match (self.inputs.len(), &self.pasted) {
@@ -512,7 +532,7 @@ impl Item {
 
     /// An Aseprite input's tags, layers, and how long each of its frames
     /// shows, as read for the current format.
-    pub fn aseprite(&self) -> Option<(&[Tag], &[LayerInfo], &[f64])> {
+    pub(crate) fn aseprite(&self) -> Option<(&[Tag], &[LayerInfo], &[f64])> {
         if self.kind != Kind::Aseprite {
             return None;
         }
@@ -529,7 +549,7 @@ impl Item {
     }
 
     /// Whether the input is being read for the current format.
-    pub fn input_reading(&self) -> bool {
+    pub(crate) fn input_reading(&self) -> bool {
         match self.format {
             Format::Webm | Format::Webp => self.video.is_loading(),
             Format::Tgs => self.art.is_loading(),
@@ -537,7 +557,7 @@ impl Item {
     }
 
     /// The input as it is shown for the current format.
-    pub fn input_clip(&self) -> Option<&Clip> {
+    pub(crate) fn input_clip(&self) -> Option<&Clip> {
         match self.format {
             Format::Webm | Format::Webp => self.video.ready().map(|video| &video.overview),
             Format::Tgs => self.art.ready().map(|art| &art.clip),
@@ -545,7 +565,7 @@ impl Item {
     }
 
     /// Size of the input picture.
-    pub fn input_size(&self) -> Option<(u32, u32)> {
+    pub(crate) fn input_size(&self) -> Option<(u32, u32)> {
         match self.format {
             Format::Webm | Format::Webp => {
                 self.video.ready().map(|v| (v.probe.width, v.probe.height))
@@ -555,7 +575,7 @@ impl Item {
     }
 
     /// Length of the input in seconds, `None` for still images.
-    pub fn input_length(&self) -> Option<f64> {
+    pub(crate) fn input_length(&self) -> Option<f64> {
         match self.format {
             Format::Webm | Format::Webp => self.video.ready().and_then(|video| {
                 (!video.probe.still_image).then_some(video.probe.duration).flatten()
@@ -569,7 +589,7 @@ impl Item {
     /// Where the input's frames start, which cuts land between: a video's
     /// as its packets time them, or else at its frame rate, and art's as
     /// it times them.
-    pub fn input_frames(&self) -> Option<std::sync::Arc<Frames>> {
+    pub(crate) fn input_frames(&self) -> Option<std::sync::Arc<Frames>> {
         match self.format {
             Format::Webm | Format::Webp => self.video.ready()?.frames.clone(),
             Format::Tgs => self.art.ready()?.frames.clone(),
@@ -577,7 +597,7 @@ impl Item {
     }
 
     /// Why the input can't be shown, if reading it failed.
-    pub fn input_error(&self) -> Option<&str> {
+    pub(crate) fn input_error(&self) -> Option<&str> {
         let load = match self.format {
             Format::Webm | Format::Webp => match &self.video {
                 Load::Failed(message) => Some(message),
@@ -592,7 +612,7 @@ impl Item {
     }
 
     /// The range of the input that is used, in seconds.
-    pub fn range(&self) -> Option<(f64, f64)> {
+    pub(crate) fn range(&self) -> Option<(f64, f64)> {
         let length = self.input_length()?;
         Some(cuts::part(length, self.choices.start, self.choices.length))
     }
@@ -600,7 +620,7 @@ impl Item {
     /// How many times as fast as the input the result plays: the tempo
     /// set, the item's or its preset's, or for `.tgs` as fast as fits the
     /// used part into 3 seconds.
-    pub fn tempo(&self, presets: &Presets, config: &Config) -> f64 {
+    pub(crate) fn tempo(&self, presets: &Presets, config: &Config) -> f64 {
         // a broken preset still leaves the defaults
         match self.format {
             Format::Webm => {
@@ -615,16 +635,16 @@ impl Item {
     }
 
     /// Whether the last sticker is what converting would make now.
-    pub fn result_is_current(&self) -> bool {
+    pub(crate) fn result_is_current(&self) -> bool {
         self.made.as_ref().is_some_and(|made| made.recipe.is_some() && made.recipe == self.recipe)
     }
 
     /// The last result, or the one of an earlier run while that is read.
-    pub fn last_result(&self) -> Option<&Conversion> {
+    pub(crate) fn last_result(&self) -> Option<&Conversion> {
         self.made.as_ref().or(self.earlier.as_ref().map(|(earlier, _)| earlier))
     }
 
-    pub fn is_busy(&self) -> bool {
+    pub(crate) fn is_busy(&self) -> bool {
         self.job.is_some()
     }
 }

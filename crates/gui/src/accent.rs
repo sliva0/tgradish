@@ -7,13 +7,13 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui::{self, Color32};
 
-pub struct Accent {
+pub(crate) struct Accent {
     colour: Arc<Mutex<Option<Color32>>>,
 }
 
 impl Accent {
     /// Starts reading the accent; `ctx` repaints when it arrives or changes.
-    pub fn watch(ctx: &egui::Context) -> Accent {
+    pub(crate) fn watch(ctx: &egui::Context) -> Accent {
         let colour = Arc::new(Mutex::new(None));
         let shared = colour.clone();
         let ctx = ctx.clone();
@@ -29,7 +29,7 @@ impl Accent {
         Accent { colour }
     }
 
-    pub fn get(&self) -> Option<Color32> {
+    pub(crate) fn get(&self) -> Option<Color32> {
         *self.colour.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
@@ -57,7 +57,7 @@ mod portal {
 
     /// Reads the accent, then follows the portal's changes to it, on a
     /// connection of its own, until the session bus goes away.
-    pub fn follow(set: impl Fn(Option<Color32>)) {
+    pub(super) fn follow(set: impl Fn(Option<Color32>)) {
         let Some(dbus) = Dbus::load() else { return };
         // SAFETY: the connection, and each message until it is unreferenced,
         // stay valid, and only this thread uses them

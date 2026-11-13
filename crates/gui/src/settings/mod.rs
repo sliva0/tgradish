@@ -31,31 +31,31 @@ use time::{frame, time};
 use webm::webm_quality;
 
 pub(crate) use picture::{exact_of, ratio, resize_of, webm_sizes};
-pub use plan::plan;
+pub(crate) use plan::plan;
 pub(crate) use webm::{fit_of, follow_fit};
 
 /// What the settings depend on besides the item.
-pub struct Context<'a> {
-    pub presets: &'a Presets,
-    pub config: &'a Config,
+pub(crate) struct Context<'a> {
+    pub(crate) presets: &'a Presets,
+    pub(crate) config: &'a Config,
     /// The ffmpeg the window runs with: the config's, unless the command
     /// line that started it gave another.
-    pub ffmpeg: FfmpegConfig,
+    pub(crate) ffmpeg: FfmpegConfig,
     /// ffmpeg is a separate program, so raw arguments can be passed.
-    pub ffmpeg_args: bool,
+    pub(crate) ffmpeg_args: bool,
     /// Where the result goes.
-    pub output: Option<std::path::PathBuf>,
+    pub(crate) output: Option<std::path::PathBuf>,
     /// The config file the window reads and saves.
-    pub config_path: Option<&'a std::path::Path>,
+    pub(crate) config_path: Option<&'a std::path::Path>,
     /// Where presets are saved, if anywhere.
-    pub presets_dir: Option<&'a std::path::Path>,
+    pub(crate) presets_dir: Option<&'a std::path::Path>,
     /// The timeline counts frames rather than seconds, and so do the
     /// settings of the part used.
-    pub in_frames: bool,
+    pub(crate) in_frames: bool,
 }
 
 /// The built-in presets in the order of their speed, then the user's own.
-pub fn preset_names(presets: &Presets) -> Vec<(String, Result<String, String>)> {
+pub(crate) fn preset_names(presets: &Presets) -> Vec<(String, Result<String, String>)> {
     let mut names: Vec<(String, Result<String, String>)> = presets
         .iter()
         .map(|(name, preset)| {
@@ -71,7 +71,7 @@ pub fn preset_names(presets: &Presets) -> Vec<(String, Result<String, String>)> 
 /// What a built-in preset does for `format`. Core's own descriptions
 /// speak of every format at once, for the command line; the window shows
 /// only what the preset does for what is being made.
-pub fn builtin_description(name: &str, format: Format) -> Option<String> {
+pub(crate) fn builtin_description(name: &str, format: Format) -> Option<String> {
     Some(match (name, format) {
         ("fast", Format::Webm) => fl!("preset-fast", "webm"),
         ("balanced", Format::Webm) => fl!("preset-balanced", "webm"),
@@ -85,7 +85,7 @@ pub fn builtin_description(name: &str, format: Format) -> Option<String> {
 
 /// What a preset is called: the built-in ones in the window's language,
 /// the user's own as they named them.
-pub fn preset_label(name: &str) -> String {
+pub(crate) fn preset_label(name: &str) -> String {
     match name {
         "fast" => fl!("preset-fast"),
         "balanced" => fl!("preset-balanced"),
@@ -96,7 +96,7 @@ pub fn preset_label(name: &str) -> String {
 
 /// What to make: format, target and preset. Narrow, for beside the
 /// preview.
-pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
+pub(crate) fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     ui.label(RichText::new(fl!("make")).strong().size(15.5));
     ui.add_space(4.0);
     let formats = [
@@ -230,7 +230,7 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
 }
 
 /// Stickers or emoji, for picking which a file becomes.
-pub fn targets() -> [Choice<Target>; 2] {
+pub(crate) fn targets() -> [Choice<Target>; 2] {
     [
         (Target::Sticker, fl!("target-sticker"), String::new()),
         (Target::Emoji, fl!("target-emoji"), String::new()),
@@ -244,7 +244,7 @@ const GUTTER: f32 = 24.0;
 
 /// Shows the settings under the preview: what goes in, how it looks and
 /// plays, and then the file that comes out, beside it where there is room.
-pub fn show(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
+pub(crate) fn show(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let parts = Part::of(item);
     if ui.available_width() >= TWO_COLUMNS {
         columns(ui, item, context, &parts);

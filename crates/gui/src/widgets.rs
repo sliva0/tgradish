@@ -7,17 +7,17 @@ use crate::l10n::fl;
 use crate::theme;
 
 /// Colours that say how things are: Breeze's, the same in either theme.
-pub const GOOD: Color32 = theme::POSITIVE;
-pub const WARN: Color32 = theme::NEUTRAL;
-pub const BAD: Color32 = theme::NEGATIVE;
+pub(crate) const GOOD: Color32 = theme::POSITIVE;
+pub(crate) const WARN: Color32 = theme::NEUTRAL;
+pub(crate) const BAD: Color32 = theme::NEGATIVE;
 
-pub fn kib(bytes: u64) -> String {
+pub(crate) fn kib(bytes: u64) -> String {
     format!("{:.1} KiB", bytes as f64 / 1024.0)
 }
 
 /// Seconds as `1:02.50` or `2.50 s`, to the hundredth: rounded first, so
 /// 119.996 is `2:00.00`, not `1:60.00`.
-pub fn seconds(value: f64) -> String {
+pub(crate) fn seconds(value: f64) -> String {
     let hundredths = (value * 100.0).round();
     if hundredths >= 6000.0 {
         let hundredths = hundredths as u64;
@@ -30,7 +30,7 @@ pub fn seconds(value: f64) -> String {
 
 /// Seconds typed as [`seconds`] writes them, `1:02.50` or `2.50 s`, or as
 /// a number alone.
-pub fn parse_seconds(text: &str) -> Option<f64> {
+pub(crate) fn parse_seconds(text: &str) -> Option<f64> {
     let text = text.trim();
     let text = text.strip_suffix('s').unwrap_or(text).trim();
     let value = match text.split_once(':') {
@@ -46,12 +46,12 @@ pub fn parse_seconds(text: &str) -> Option<f64> {
 
 /// A heading over a group of settings, apart from the group before by a
 /// line, unless it is the first of its column.
-pub fn section(ui: &mut egui::Ui, title: &str) {
+pub(crate) fn section(ui: &mut egui::Ui, title: &str) {
     section_with(ui, title, |_| {});
 }
 
 /// A [`section`] with more beside its title, as `beside` adds.
-pub fn section_with(ui: &mut egui::Ui, title: &str, beside: impl FnOnce(&mut egui::Ui)) {
+pub(crate) fn section_with(ui: &mut egui::Ui, title: &str, beside: impl FnOnce(&mut egui::Ui)) {
     // nothing above it yet
     if ui.min_rect().height() >= 1.0 {
         ui.add_space(14.0);
@@ -73,12 +73,12 @@ pub fn section_with(ui: &mut egui::Ui, title: &str, beside: impl FnOnce(&mut egu
 }
 
 /// A number with as few decimals as it needs, at most two: 60, 29.97.
-pub fn trimmed(value: f64) -> String {
+pub(crate) fn trimmed(value: f64) -> String {
     trimmed_to(value, 2)
 }
 
 /// A number with as few decimals as it needs, at most `decimals`.
-pub fn trimmed_to(value: f64, decimals: usize) -> String {
+pub(crate) fn trimmed_to(value: f64, decimals: usize) -> String {
     let text = format!("{value:.decimals$}");
     if text.contains('.') {
         text.trim_end_matches('0').trim_end_matches('.').to_owned()
@@ -88,7 +88,7 @@ pub fn trimmed_to(value: f64, decimals: usize) -> String {
 }
 
 /// How wide `text` is in buttons' font, plus `padding`.
-pub fn text_width(ui: &egui::Ui, text: &str, padding: f32) -> f32 {
+pub(crate) fn text_width(ui: &egui::Ui, text: &str, padding: f32) -> f32 {
     let galley = egui::WidgetText::from(text).into_galley(
         ui,
         Some(egui::TextWrapMode::Extend),
@@ -101,7 +101,7 @@ pub fn text_width(ui: &egui::Ui, text: &str, padding: f32) -> f32 {
 /// Number fields added by `add` as wide as `digits` digits and `suffix`
 /// take, so that they keep their width as the number changes, typed or
 /// dragged: Ubuntu's digits are all as wide as each other.
-pub fn steady_numbers<R>(
+pub(crate) fn steady_numbers<R>(
     ui: &mut egui::Ui,
     digits: usize,
     suffix: &str,
@@ -118,7 +118,7 @@ pub fn steady_numbers<R>(
 
 /// A link to `url`, which takes a click as a link, rather than starting a
 /// selection as text does.
-pub fn link(
+pub(crate) fn link(
     ui: &mut egui::Ui,
     text: impl Into<egui::WidgetText>,
     url: impl ToString,
@@ -131,12 +131,12 @@ pub fn link(
 }
 
 /// Weaker text explaining something.
-pub fn note(ui: &mut egui::Ui, text: impl Into<String>) {
+pub(crate) fn note(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(RichText::new(text.into()).weak().size(12.5));
 }
 
 /// The label column of a grid, explained on hover.
-pub fn label(ui: &mut egui::Ui, text: &str, hint: &str) {
+pub(crate) fn label(ui: &mut egui::Ui, text: &str, hint: &str) {
     let label = ui.label(text);
     if !hint.is_empty() {
         label.on_hover_text(hint);
@@ -144,12 +144,12 @@ pub fn label(ui: &mut egui::Ui, text: &str, hint: &str) {
 }
 
 /// Width of the labels before settings.
-pub const LABELS: f32 = 150.0;
+pub(crate) const LABELS: f32 = 150.0;
 
 /// A setting: its label, explained on hover, and its controls beside it,
 /// both from the top. Unless `allowed`, all of it is greyed out, and the
 /// label's hover says why.
-pub fn row<R>(
+pub(crate) fn row<R>(
     ui: &mut egui::Ui,
     text: &str,
     hint: &str,
@@ -186,11 +186,11 @@ pub fn row<R>(
 }
 
 /// One choice of a [`segments`] row: its value, label and explanation.
-pub type Choice<T> = (T, String, String);
+pub(crate) type Choice<T> = (T, String, String);
 
 /// Whether a choice of [`segments`] can be picked.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Pick {
+pub(crate) enum Pick {
     Yes,
     /// Greyed out, as this says why.
     No(String),
@@ -201,7 +201,7 @@ pub enum Pick {
 
 /// Options side by side as one control, the chosen one lit. `enabled`
 /// says which can be picked, with why not. True when changed.
-pub fn segments<T: PartialEq + Copy>(
+pub(crate) fn segments<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     value: &mut T,
     choices: &[Choice<T>],
@@ -214,7 +214,7 @@ pub fn segments<T: PartialEq + Copy>(
 }
 
 /// [`segments`], each one picked as `pick` says.
-pub fn picking<T: PartialEq + Copy>(
+pub(crate) fn picking<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     value: &mut T,
     choices: &[Choice<T>],
@@ -261,7 +261,7 @@ pub fn picking<T: PartialEq + Copy>(
 
 /// One of several choices, on a button of its own styled as a
 /// [`segments`] option, its text cut short past `max_width`.
-pub fn choice(
+pub(crate) fn choice(
     ui: &mut egui::Ui,
     selected: bool,
     text: &str,
@@ -283,7 +283,7 @@ pub fn choice(
 }
 
 /// [`segments`] for a value a preset may set.
-pub fn preset_segments<T: PartialEq + Copy>(
+pub(crate) fn preset_segments<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     value: &mut Option<T>,
     base: T,
@@ -293,7 +293,7 @@ pub fn preset_segments<T: PartialEq + Copy>(
 }
 
 /// [`preset_segments`], each one picked as `pick` says.
-pub fn preset_picking<T: PartialEq + Copy>(
+pub(crate) fn preset_picking<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     value: &mut Option<T>,
     base: T,
@@ -318,7 +318,11 @@ pub fn preset_picking<T: PartialEq + Copy>(
 /// `contents` looking greyed out while `greyed`, yet live: for settings
 /// another rules out, which picking them changes. Hovered, they look as
 /// any other, which tells them from those greyed out for good.
-pub fn greyed<R>(ui: &mut egui::Ui, greyed: bool, contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+pub(crate) fn greyed<R>(
+    ui: &mut egui::Ui,
+    greyed: bool,
+    contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
     ui.scope(|ui| {
         if greyed {
             let weak = ui.visuals().weak_text_color();
@@ -332,7 +336,7 @@ pub fn greyed<R>(ui: &mut egui::Ui, greyed: bool, contents: impl FnOnce(&mut egu
 }
 
 /// The explanation of the chosen option, under a row of them.
-pub fn chosen_hint<T: PartialEq + Copy>(ui: &mut egui::Ui, value: T, choices: &[Choice<T>]) {
+pub(crate) fn chosen_hint<T: PartialEq + Copy>(ui: &mut egui::Ui, value: T, choices: &[Choice<T>]) {
     if let Some((_, _, hint)) = choices.iter().find(|(option, ..)| *option == value)
         && !hint.is_empty()
     {
@@ -341,19 +345,19 @@ pub fn chosen_hint<T: PartialEq + Copy>(ui: &mut egui::Ui, value: T, choices: &[
 }
 
 /// The small button that goes back to the preset's value.
-pub fn reset(ui: &mut egui::Ui) -> bool {
+pub(crate) fn reset(ui: &mut egui::Ui) -> bool {
     reset_to(ui, &fl!("back-to-preset"))
 }
 
 /// A small button back to what `hint` says.
-pub fn reset_to(ui: &mut egui::Ui, hint: &str) -> bool {
+pub(crate) fn reset_to(ui: &mut egui::Ui, hint: &str) -> bool {
     ui.add(egui::Button::new(RichText::new("⟲").size(13.0)).small().frame(false))
         .on_hover_text(hint)
         .clicked()
 }
 
 /// A checkbox for a flag a preset may set.
-pub fn flag(
+pub(crate) fn flag(
     ui: &mut egui::Ui,
     value: &mut Option<bool>,
     base: bool,
@@ -382,7 +386,7 @@ pub fn flag(
 /// out while automatic. It shows `shown` then, the automatic value if it
 /// is known, and a newly set number starts from it, or from `start`.
 /// `automatic` is the label of its segment, and what it means on hover.
-pub fn auto_number<T: egui::emath::Numeric>(
+pub(crate) fn auto_number<T: egui::emath::Numeric>(
     ui: &mut egui::Ui,
     value: &mut Option<T>,
     automatic: (&str, &str),
@@ -425,7 +429,7 @@ pub fn auto_number<T: egui::emath::Numeric>(
 /// one, that is what the automatic choice stands for: it is named the
 /// preset's and shows the preset's value, which a number of the user's own
 /// starts from. Without one, the choice is `automatic`, showing `shown`.
-pub fn preset_number<T: egui::emath::Numeric>(
+pub(crate) fn preset_number<T: egui::emath::Numeric>(
     ui: &mut egui::Ui,
     value: &mut Option<T>,
     preset: Option<T>,
@@ -444,12 +448,12 @@ pub fn preset_number<T: egui::emath::Numeric>(
 }
 
 /// The label of a choice that stands for the preset's value, and its hint.
-pub fn from_preset() -> (String, String) {
+pub(crate) fn from_preset() -> (String, String) {
     (fl!("from-preset"), fl!("from-preset", "hint"))
 }
 
 /// How much of a limit something uses: a bar, red when over.
-pub fn gauge(ui: &mut egui::Ui, used: u64, limit: u64, text: String) {
+pub(crate) fn gauge(ui: &mut egui::Ui, used: u64, limit: u64, text: String) {
     let share = used as f32 / limit.max(1) as f32;
     let colour = if share > 1.0 { BAD } else { GOOD };
     bar(ui, Fill::Share(share), &text, colour.gamma_multiply(0.55));
@@ -457,7 +461,7 @@ pub fn gauge(ui: &mut egui::Ui, used: u64, limit: u64, text: String) {
 
 /// How far a [`bar`] got.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Fill {
+pub(crate) enum Fill {
     /// This share of it, done.
     Share(f32),
     /// This share, still at work: a band moves over it, so a share that
@@ -469,19 +473,25 @@ pub enum Fill {
 
 impl Fill {
     /// At work: this share, or unknown without one.
-    pub fn working(share: Option<f32>) -> Fill {
+    pub(crate) fn working(share: Option<f32>) -> Fill {
         share.map_or(Fill::Unknown, Fill::Working)
     }
 }
 
 /// A bar filled as `fill` says, `text` over it.
-pub fn bar(ui: &mut egui::Ui, fill: Fill, text: &str, colour: Color32) {
+pub(crate) fn bar(ui: &mut egui::Ui, fill: Fill, text: &str, colour: Color32) {
     let width = ui.available_width().min(380.0);
     bar_sized(ui, egui::vec2(width, 22.0), fill, text, colour);
 }
 
 /// A [`bar`] of `size`.
-pub fn bar_sized(ui: &mut egui::Ui, size: egui::Vec2, fill: Fill, text: &str, colour: Color32) {
+pub(crate) fn bar_sized(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    fill: Fill,
+    text: &str,
+    colour: Color32,
+) {
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let rounding = (size.y / 2.0).min(4.0);
     let painter = ui.painter_at(rect);
@@ -519,7 +529,7 @@ pub fn bar_sized(ui: &mut egui::Ui, size: egui::Vec2, fill: Fill, text: &str, co
 }
 
 /// Telegram's problems with a result, or that it has none.
-pub fn problems(ui: &mut egui::Ui, problems: &[Problem]) {
+pub(crate) fn problems(ui: &mut egui::Ui, problems: &[Problem]) {
     if problems.is_empty() {
         ui.colored_label(GOOD, format!("✔ {}", fl!("telegram-accepts")));
     }
@@ -530,7 +540,7 @@ pub fn problems(ui: &mut egui::Ui, problems: &[Problem]) {
 }
 
 /// Draws a checkerboard, so transparency shows.
-pub fn checkerboard(painter: &egui::Painter, rect: egui::Rect, square: f32) {
+pub(crate) fn checkerboard(painter: &egui::Painter, rect: egui::Rect, square: f32) {
     let (light, dark) = if painter.ctx().global_style().visuals.dark_mode {
         (Color32::from_gray(92), Color32::from_gray(72))
     } else {
