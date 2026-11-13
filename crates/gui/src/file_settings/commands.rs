@@ -145,7 +145,7 @@ pub(super) fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 if cfg!(windows) { fl!("commands-powershell") } else { fl!("commands-posix") },
             );
             code(ui, &shell_line(&command_line(item, context)));
-            if item.pasted.is_some() {
+            if item.paste_dir.is_some() {
                 note(ui, fl!("pasted-temporary"));
             }
             if item.format != Format::Webm {

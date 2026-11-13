@@ -47,7 +47,9 @@ struct Saved {
     inputs: Vec<PathBuf>,
     sequence: bool,
     /// A pasted image: its copy's name in the session's folder.
-    pasted: Option<String>,
+    // the session file's key for it since its first version
+    #[serde(rename = "pasted")]
+    pasted_copy: Option<String>,
     format: Format,
     format_guessed: bool,
     choices: Choices,
@@ -106,7 +108,7 @@ pub(crate) struct Unreadable {
     /// be read.
     pub(crate) files: Option<usize>,
     /// Where the file is kept as it was.
-    pub(crate) kept: PathBuf,
+    pub(crate) aside: PathBuf,
 }
 
 /// A window's session file: where it is, what the window last wrote there,
@@ -153,24 +155,24 @@ impl Store {
         };
         let Some((session, unread)) = parse(&text) else {
             std::fs::rename(&self.path, self.aside())?;
-            let unreadable = Unreadable { files: None, kept: self.aside() };
+            let unreadable = Unreadable { files: None, aside: self.aside() };
             return Ok(Loaded { session: Session::default(), unreadable: Some(unreadable) });
         };
         let unreadable = if unread > 0 {
             std::fs::copy(&self.path, self.aside())?;
-            Some(Unreadable { files: Some(unread), kept: self.aside() })
+            Some(Unreadable { files: Some(unread), aside: self.aside() })
         } else {
             None
         };
         self.written = session.to_json().unwrap_or_default();
-        self.copies = session.items.iter().filter_map(|item| item.pasted.clone()).collect();
+        self.copies = session.items.iter().filter_map(|item| item.pasted_copy.clone()).collect();
         Ok(Loaded { session, unreadable })
     }
 
     /// Copies the pasted image of item `id` next to the session file, so
     /// the window can open it again, and gives the copy's name, which no
     /// other has had.
-    pub(crate) fn keep_pasted(&mut self, id: u64, image: &Path) -> std::io::Result<String> {
+    pub(crate) fn copy_pasted(&mut self, id: u64, image: &Path) -> std::io::Result<String> {
         let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
         let extension = image.extension().and_then(|e| e.to_str()).unwrap_or("png");
         let name = format!("{time:x}-{id}.{extension}");
@@ -196,7 +198,7 @@ impl Store {
         std::fs::rename(&partial, &self.path)?;
         self.written = json;
         let named: HashSet<String> =
-            session.items.iter().filter_map(|item| item.pasted.clone()).collect();
+            session.items.iter().filter_map(|item| item.pasted_copy.clone()).collect();
         // copies nobody names are left over, unless a session set aside
         // may name them: then only this window's own go
         let all = !self.aside().exists();
@@ -260,7 +262,7 @@ fn parse(text: &str) -> Option<(Session, usize)> {
 /// copied.
 fn keeps(item: &Item) -> bool {
     item.inputs.iter().all(|input| input.to_str().is_some())
-        && (item.pasted.is_none() || item.kept.is_some())
+        && (item.paste_dir.is_none() || item.pasted_copy.is_some())
 }
 
 impl Session {
@@ -278,9 +280,13 @@ impl Session {
                 let made = item.last_result().filter(|made| made.job.output.to_str().is_some());
                 Saved {
                     // a pasted image is opened from its copy
-                    inputs: if item.kept.is_some() { Vec::new() } else { item.inputs.clone() },
+                    inputs: if item.pasted_copy.is_some() {
+                        Vec::new()
+                    } else {
+                        item.inputs.clone()
+                    },
                     sequence: item.sequence,
-                    pasted: item.kept.clone(),
+                    pasted_copy: item.pasted_copy.clone(),
                     format: item.format,
                     format_guessed: item.format_guessed,
                     choices: item.choices.clone(),
@@ -330,7 +336,7 @@ impl Session {
 }
 
 fn restore_item(saved: Saved, path: &Path, id: u64) -> Option<Item> {
-    let (inputs, pasted) = match &saved.pasted {
+    let (inputs, pasted) = match &saved.pasted_copy {
         Some(name) if !plain_name(name) => return None,
         // a pasted image goes back into a folder of its own, under the
         // name it was pasted with, which its result is named after
@@ -346,8 +352,8 @@ fn restore_item(saved: Saved, path: &Path, id: u64) -> Option<Item> {
         return None;
     }
     let mut item = Item::new(id, inputs, saved.sequence, saved.choices.target);
-    item.pasted = pasted;
-    item.kept = saved.pasted;
+    item.paste_dir = pasted;
+    item.pasted_copy = saved.pasted_copy;
     item.format = saved.format;
     item.format_guessed = saved.format_guessed;
     item.choices = saved.choices;
@@ -371,7 +377,7 @@ mod tests {
         let image = dir.path().join(PASTED_IMAGE_NAME);
         std::fs::write(&image, bytes).unwrap();
         let mut item = Item::new(id, vec![image], false, Target::Sticker);
-        item.pasted = Some(dir);
+        item.paste_dir = Some(dir);
         item
     }
 
@@ -384,8 +390,8 @@ mod tests {
     fn again(items: &mut [Item], path: &Path) -> Vec<Item> {
         let mut store = Store::open(path.to_path_buf()).unwrap();
         store.read().unwrap();
-        for item in items.iter_mut().filter(|item| item.kept.is_none()) {
-            item.kept = Some(store.keep_pasted(item.id, &item.inputs[0]).unwrap());
+        for item in items.iter_mut().filter(|item| item.pasted_copy.is_none()) {
+            item.pasted_copy = Some(store.copy_pasted(item.id, &item.inputs[0]).unwrap());
         }
         store.save(&session(items, None)).unwrap();
         drop(store);
@@ -445,17 +451,17 @@ mod tests {
             let loaded = store.read().unwrap();
             let unreadable = loaded.unreadable.expect("unreadable");
             assert!(loaded.session.items.is_empty() && unreadable.files.is_none());
-            assert_eq!(std::fs::read_to_string(&unreadable.kept).unwrap(), text);
+            assert_eq!(std::fs::read_to_string(&unreadable.aside).unwrap(), text);
             // the window goes on with a session of its own, whose copies
             // come and go, and leaves the other's alone
             let mut items = [pasted(1, b"one")];
-            items[0].kept = Some(store.keep_pasted(1, &items[0].inputs[0]).unwrap());
+            items[0].pasted_copy = Some(store.copy_pasted(1, &items[0].inputs[0]).unwrap());
             store.save(&session(&items, None)).unwrap();
             assert_eq!(copies(&path), 2);
             store.save(&session(&[], None)).unwrap();
             assert_eq!(copies(&path), 1);
             assert_eq!(std::fs::read(pasted_dir(&path).join("19a0-3.png")).unwrap(), b"pasted");
-            assert_eq!(std::fs::read_to_string(&unreadable.kept).unwrap(), text);
+            assert_eq!(std::fs::read_to_string(&unreadable.aside).unwrap(), text);
         }
     }
 
@@ -466,7 +472,7 @@ mod tests {
         let mut store = Store::open(path.clone()).unwrap();
         let mut items = [pasted(1, b"one"), pasted(2, b"two")];
         for item in &mut items {
-            item.kept = Some(store.keep_pasted(item.id, &item.inputs[0]).unwrap());
+            item.pasted_copy = Some(store.copy_pasted(item.id, &item.inputs[0]).unwrap());
             item.choices.webm.crf = Some(20);
         }
         store.save(&session(&items, Some(2))).unwrap();
@@ -481,7 +487,7 @@ mod tests {
         let loaded = store.read().unwrap();
         let unreadable = loaded.unreadable.expect("unreadable");
         assert_eq!(unreadable.files, Some(1));
-        assert_eq!(std::fs::read_to_string(&unreadable.kept).unwrap(), newer);
+        assert_eq!(std::fs::read_to_string(&unreadable.aside).unwrap(), newer);
         // the other is there, and still the one selected
         let restored = loaded.session.restore(&path, 7);
         assert_eq!(contents(&restored.items), [b"two".to_vec()]);
@@ -498,7 +504,7 @@ mod tests {
         let outside = dir.path().join("precious.txt");
         std::fs::write(&outside, b"keep").unwrap();
         let mut one = pasted(1, b"one");
-        one.kept = Some(outside.to_str().unwrap().to_owned());
+        one.pasted_copy = Some(outside.to_str().unwrap().to_owned());
         let restored = session(&[one], None).restore(&path, 1);
         assert!(restored.items.is_empty() && restored.gone == 1);
         assert_eq!(std::fs::read(&outside).unwrap(), b"keep");

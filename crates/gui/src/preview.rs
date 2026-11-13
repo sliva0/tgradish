@@ -145,10 +145,10 @@ impl App {
             });
         });
         if in_frames != self.config.gui.timeline_frames {
-            self.keep(|gui| gui.timeline_frames = in_frames);
+            self.save_setting(|gui| gui.timeline_frames = in_frames);
         }
         if look != self.config.gui.result_preview {
-            self.keep(|gui| gui.result_preview = look);
+            self.save_setting(|gui| gui.result_preview = look);
         }
     }
 }
@@ -222,7 +222,7 @@ fn preview(
         });
         let show_folder = |ui: &mut egui::Ui| {
             let input = ui
-                .add_enabled(item.pasted.is_none(), egui::Button::new(fl!("folder-input")))
+                .add_enabled(item.paste_dir.is_none(), egui::Button::new(fl!("folder-input")))
                 .on_hover_text(item.inputs[0].display().to_string())
                 .on_disabled_hover_text(fl!("folder-input", "pasted"));
             if input.clicked() {

@@ -473,7 +473,7 @@ impl App {
                             }
                         }
                         let (webm, tgs) = deleted.defaults;
-                        self.keep_config(|config| {
+                        self.save_config_setting(|config| {
                             if webm {
                                 config.preset = name.clone();
                             }
@@ -519,7 +519,7 @@ impl App {
         }
         let names = |name: &Option<String>| name.as_deref() == Some(from);
         if names(&self.config.preset) || names(&self.config.tgs_preset) {
-            self.keep_config(|config| {
+            self.save_config_setting(|config| {
                 let config: &mut tgradish_core::config::Config = config;
                 for name in [&mut config.preset, &mut config.tgs_preset] {
                     if name.as_deref() == Some(from) {

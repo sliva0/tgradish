@@ -48,7 +48,7 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
         // the encode kept, which fitting may have made at a lower
         // frame rate or shorter than planned
         let progress = &made.job.progress;
-        let kept = progress.attempts.iter().find(|attempt| Some(attempt.number) == done.kept);
+        let kept = progress.attempts.iter().find(|attempt| Some(attempt.number) == done.attempt);
         let (fps, length) =
             kept.map_or((plan.fps, plan.length), |kept| (kept.params.fps, kept.params.length));
         let (width, height, fps) = (plan.width, plan.height, format!("{fps:.2}"));
@@ -311,7 +311,7 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
                 }
                 ui.end_row();
                 for attempt in &progress.attempts {
-                    let kept = done.kept == Some(attempt.number);
+                    let kept = done.attempt == Some(attempt.number);
                     ui.label(if kept { "✔" } else { "" });
                     let number = RichText::new(attempt.number.to_string());
                     ui.label(if kept { number.strong() } else { number });

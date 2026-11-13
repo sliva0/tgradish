@@ -56,7 +56,7 @@ impl App {
         // typing into a text field is just typing, and keys pressed in a
         // dialog are for it, not the window behind
         if ctx.memory(|memory| memory.focused().is_some()) || self.dialog_open() {
-            self.pasted = false;
+            self.clipboard_read = false;
             return;
         }
         if space
@@ -101,13 +101,13 @@ impl App {
         // pasted when Ctrl+V is let go
         if text_pasted {
             self.paste();
-            self.pasted = true;
+            self.clipboard_read = true;
         }
         if let Some(command) = v_released {
-            if command && !self.pasted {
+            if command && !self.clipboard_read {
                 self.paste();
             }
-            self.pasted = false;
+            self.clipboard_read = false;
         }
     }
 }
