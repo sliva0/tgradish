@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tgradish_core::clipboard::PASTED_IMAGE_NAME;
 use tgradish_core::presets::Format;
 
-use crate::item::{Choices, Conversion, Item};
+use crate::item::{Choices, Conversion, Item, Recipe};
 use crate::jobs::{Done, Job, Status};
 use crate::outputs::{FileVersion, Written};
 
@@ -63,6 +63,9 @@ struct SavedResult {
     written: Option<FileVersion>,
     format: Format,
     choices: Choices,
+    /// What it was made with, to tell whether it is still what converting
+    /// would make.
+    recipe: Option<Recipe>,
 }
 
 /// A session's files, open again.
@@ -288,6 +291,7 @@ impl Session {
                             .map(|written| written.version),
                         format: made.format,
                         choices: made.choices.clone(),
+                        recipe: made.recipe.clone(),
                     }),
                 }
             })
@@ -350,7 +354,9 @@ fn restore_item(saved: Saved, path: &Path, id: u64) -> Option<Item> {
         let done = Done::of_file(&result.output, result.format, result.choices.target)?;
         let mut job = Job::waiting(result.output);
         job.status = Status::Done(Box::new(done));
-        Some(Conversion::of(job, result.format, result.choices))
+        let mut made = Conversion::of(job, result.format, result.choices);
+        made.recipe = result.recipe;
+        Some(made)
     });
     Some(item)
 }

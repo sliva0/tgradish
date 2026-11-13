@@ -12,7 +12,7 @@ use tgradish_core::still;
 
 use crate::app::App;
 use crate::files::THUMB;
-use crate::item::{Conversion, Item, Kind, Show};
+use crate::item::{Conversion, Item, Kind, Recipe, Show};
 use crate::jobs::{Plan, Status};
 use crate::media::{self, Art, Clip, Load, Video};
 use crate::outputs::Written;
@@ -38,6 +38,7 @@ impl App {
             })
             .count();
         for item in &mut self.items {
+            item.recipe = item.choices.recipe(item.format, &self.presets, &self.config).ok();
             let is_selected = selected == Some(item.id);
             let kept = is_selected || self.recent.contains(&item.id);
             let finished = item.video.poll() | item.art.poll();
@@ -211,29 +212,26 @@ impl App {
         }
         while let Some(id) = self.queue.pop_front() {
             let Some(item) = self.item(id) else { continue };
-            let Some(Conversion { job, format, choices }) = &item.job else { continue };
-            let plan = match format {
-                Format::Webm => {
-                    choices.webm_options(&self.presets, &self.config).and_then(|options| {
-                        backend.clone().map(|backend| Plan::Webm { options, backend })
-                    })
+            let Some(Conversion { job, format, choices, .. }) = &item.job else { continue };
+            let recipe = choices.recipe(*format, &self.presets, &self.config);
+            let plan = recipe.clone().and_then(|recipe| match recipe {
+                Recipe::Webm(options) => {
+                    backend.clone().map(|backend| Plan::Webm { options, backend })
                 }
-                Format::Tgs => choices.tgs_options(&self.presets, &self.config).map(|options| {
-                    // ffmpeg, for videos
-                    Plan::Tgs { options, backend: backend.clone().ok() }
-                }),
-                Format::Image => {
-                    choices.image_options(&self.presets, &self.config).and_then(|options| {
-                        backend.clone().map(|backend| Plan::Image { options, backend })
-                    })
+                // ffmpeg, for videos
+                Recipe::Tgs(options) => Ok(Plan::Tgs { options, backend: backend.clone().ok() }),
+                Recipe::Image(options) => {
+                    backend.clone().map(|backend| Plan::Image { options, backend })
                 }
-            };
+            });
             let overwrite = self.may_replace(id, &job.output);
             // a result of another time, rather than this item's own
             let replaces = job.output.exists() && !self.wrote(id, &job.output);
             let (inputs, sequence) = (item.inputs.clone(), item.sequence);
             let item = self.item_mut(id).expect("found above");
-            let job = &mut item.job.as_mut().expect("found above").job;
+            let conversion = item.job.as_mut().expect("found above");
+            conversion.recipe = recipe.ok();
+            let job = &mut conversion.job;
             match plan {
                 Ok(plan) => {
                     job.replaces = replaces;
@@ -352,6 +350,7 @@ fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backe
 mod tests {
     use std::time::Duration;
 
+    use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
     use tgradish_core::config::Config;
     use tgradish_core::ffmpeg::FfmpegChoice;
@@ -403,6 +402,36 @@ mod tests {
         finish(&mut harness);
         assert!(dir.path().join("out").join("frames.emoji.tgs").exists());
         assert!(harness.state().items[0].result_is_current());
+    }
+
+    #[test]
+    fn tells_a_result_old_by_what_converting_would_make() {
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        let mut harness = harness(Config::default());
+        harness.state_mut().add(vec![art]);
+        finish(&mut harness);
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let current = |harness: &mut Harness<App>| {
+            harness.run_steps(2);
+            harness.state().items[0].result_is_current()
+        };
+        assert!(current(&mut harness));
+        // what only other formats are made with changes nothing
+        harness.state_mut().items[0].choices.frame = Some(1.0);
+        harness.state_mut().items[0].choices.webm.crf = Some(20);
+        assert!(current(&mut harness));
+        // nor does naming the preset it was made with
+        harness.state_mut().items[0].choices.preset = Some(Format::Tgs.default_preset().into());
+        assert!(current(&mut harness));
+        // but another default preset does, where the item has none of its own
+        harness.state_mut().config.tgs_preset = Some("fast".into());
+        assert!(current(&mut harness));
+        harness.state_mut().items[0].choices.preset = None;
+        assert!(!current(&mut harness));
     }
 
     #[test]
