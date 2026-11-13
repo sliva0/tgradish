@@ -60,12 +60,13 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         .with_render_options(filtering)
         .wgpu()
         .build_eframe(move |cc| {
-            let app = App::with(config.clone(), None, Presets::builtin(), None);
+            let app = App::with(config.clone(), None, Presets::builtin());
             app.style(&cc.egui_ctx);
             app
         });
     harness.run_steps(3);
     save(&mut harness, "empty");
+    banners(&mut harness, &mut save, dir.path());
     if let Some(video) = video(dir.path(), "640x360") {
         harness.state_mut().add(vec![video]);
         finish(&mut harness);
@@ -334,12 +335,81 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         .with_render_options(filtering)
         .wgpu()
         .build_eframe(|cc| {
-            let app = App::with(Config::default(), None, Presets::builtin(), None);
+            let app = App::with(Config::default(), None, Presets::builtin());
             app.style(&cc.egui_ctx);
             app
         });
     harness.run_steps(3);
     save(&mut harness, "scaled");
+}
+
+/// The banner of messages over the bottom of the window: a settings file
+/// of an older version that can't be read, its details folded and open,
+/// in the light theme, the dark one and the narrowest window; a line of
+/// information; three messages; and one said three times.
+fn banners(
+    harness: &mut Harness<App>,
+    save: &mut impl FnMut(&mut Harness<App>, &str),
+    dir: &std::path::Path,
+) {
+    use crate::banner::Message;
+    use crate::config::Theme;
+    use crate::l10n::fl;
+    // the error of such a file, said of one where settings are kept
+    let old = dir.join("config.toml");
+    std::fs::write(&old, "[ffmpeg]\nuse = \"auto\"\n").unwrap();
+    let Err(tgradish_core::Error::Config { message, .. }) = Config::load(&old) else {
+        panic!("an old settings file read")
+    };
+    let home = std::env::home_dir().unwrap_or_else(|| dir.to_path_buf());
+    let path = home.join(".config").join("tgradish").join("config.toml");
+    let err = tgradish_core::Error::Config { path: path.clone(), message };
+    let unreadable = crate::app::settings_unreadable(fl!("setting-unsaved", "unreadable"), &err);
+    let show = |harness: &mut Harness<App>, messages: &[Message]| {
+        harness.state_mut().banner = Default::default();
+        for message in messages {
+            harness.state_mut().say(message.clone());
+        }
+        harness.run_steps(3);
+    };
+    let details = |harness: &mut Harness<App>| {
+        harness.get_by_label(&fl!("details")).click();
+        // the pointer away from what it would hover
+        harness.event(egui::Event::PointerGone);
+        harness.run_steps(3);
+    };
+    set_theme(&harness.ctx, Theme::Light);
+    show(harness, std::slice::from_ref(&unreadable));
+    save(harness, "banner-config");
+    details(harness);
+    save(harness, "banner-config-details");
+    show(harness, &[Message::info(fl!("files-gone", count = 2))]);
+    save(harness, "banner-info");
+    let state = home.join(".local").join("state").join("tgradish").join("session.json");
+    let unsaved = Message::warning(fl!("session-unsaved"))
+        .file(state)
+        .detail("Permission denied (os error 13)");
+    let gone = Message::info(fl!("files-gone", count = 1));
+    show(harness, &[unreadable.clone(), unsaved, gone]);
+    save(harness, "banner-stacked");
+    let pasted = Message::warning(fl!("paste-failed"))
+        .detail("The clipboard holds neither files nor an image");
+    show(harness, &[pasted.clone(), pasted.clone(), pasted]);
+    save(harness, "banner-repeated");
+    set_theme(&harness.ctx, Theme::Dark);
+    show(harness, std::slice::from_ref(&unreadable));
+    save(harness, "banner-config-dark");
+    details(harness);
+    save(harness, "banner-config-dark-details");
+    set_theme(&harness.ctx, Theme::Light);
+    harness.set_size(egui::vec2(crate::MIN_WIDTH, 640.0));
+    show(harness, std::slice::from_ref(&unreadable));
+    details(harness);
+    save(harness, "banner-narrow");
+    harness.set_size(egui::vec2(1280.0, 820.0));
+    harness.state_mut().banner = Default::default();
+    set_theme(&harness.ctx, harness.state().config.gui.theme);
+    harness.run_steps(3);
 }
 
 /// The window at work, for the README: `TGRADISH_SCREENSHOTS` says
@@ -376,7 +446,7 @@ fn readme_screenshot() {
         .with_render_options(filtering)
         .wgpu()
         .build_eframe(move |cc| {
-            let app = App::with(config.clone(), None, Presets::builtin(), None);
+            let app = App::with(config.clone(), None, Presets::builtin());
             app.style(&cc.egui_ctx);
             app
         });
