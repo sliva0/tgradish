@@ -33,8 +33,11 @@ pub enum Fit {
 /// ..Options::default() }`, so that what is added later keeps its default.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Options {
+    /// How the animation is read as pixel art.
     pub normalise: normalise::Options,
+    /// How hard the encoder looks for a small sticker.
     pub effort: Effort,
+    /// Whether the art may change to fit.
     pub fit: Fit,
     /// The reductions fitting may use.
     pub reductions: Vec<Kind>,
@@ -69,6 +72,7 @@ impl Default for Options {
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Step {
+    /// The reduction, at the strength applied.
     #[serde(flatten)]
     pub reduction: Reduction,
     /// The estimated size after it, in bytes.
@@ -92,33 +96,47 @@ impl Step {
 #[serde(tag = "stage", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum Progress {
+    /// The animation is read as pixel art.
     Normalised {
+        /// What normalising found and did.
         report: Box<Report>,
     },
     /// The lossless result, estimated, is too large.
     TooLarge {
+        /// The estimate, in bytes.
         bytes: usize,
     },
+    /// Fitting applied a reduction.
     Reduced {
+        /// Which, and what it came to.
         step: Step,
     },
+    /// The result is being packed, the longest step at best effort.
     Packing,
 }
 
+/// A finished sticker, and what went into it.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Sticker {
+    /// The `.tgs` file's bytes.
     #[serde(skip)]
     pub tgs: Vec<u8>,
+    /// How many there are.
     pub bytes: usize,
+    /// Size of the Lottie JSON inside.
     pub json_bytes: usize,
+    /// What normalising found and did.
     pub report: Report,
     /// Reductions applied, in order; empty when lossless.
     pub steps: Vec<Step>,
+    /// Lottie layers.
     pub layers: usize,
+    /// Paint groups in all layers, each a colour.
     pub groups: usize,
+    /// Rectangles in all groups.
     pub rectangles: usize,
     /// Problems the finished sticker has, from [`check::check`].
     pub issues: Vec<Issue>,

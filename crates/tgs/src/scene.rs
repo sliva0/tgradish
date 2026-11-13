@@ -14,10 +14,12 @@
 #[cfg(any(test, feature = "internals"))]
 use crate::normalise::PixelAnim;
 
+/// A whole animation as paint groups in layers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Scene {
-    /// Size in cells.
+    /// Width in cells.
     pub width: u32,
+    /// Height in cells.
     pub height: u32,
     /// Length in 60 fps frames.
     pub ticks: u32,
@@ -25,10 +27,12 @@ pub struct Scene {
     pub layers: Vec<Layer>,
 }
 
+/// Groups shown together for a range of frames.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Layer {
     /// Shown for frames `from..to`.
     pub from: u32,
+    /// See `from`.
     pub to: u32,
     /// Spans of frames within those where the layer is hidden after all,
     /// in order.
@@ -51,8 +55,11 @@ pub enum FillRule {
 /// Shapes filled together as one path with one palette colour.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Group {
+    /// An index into the animation's palette.
     pub colour: u16,
+    /// How its shapes fill.
     pub rule: FillRule,
+    /// What it fills.
     pub shapes: Vec<Shape>,
     /// Spans of frames the group is shown in, in order, while its layer is;
     /// empty for all of them.
@@ -64,7 +71,16 @@ pub struct Group {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Shape {
     /// A rectangle of cells.
-    Rect { x: u32, y: u32, width: u32, height: u32 },
+    Rect {
+        /// Its left column.
+        x: u32,
+        /// Its top row.
+        y: u32,
+        /// Its width in cells.
+        width: u32,
+        /// Its height in cells.
+        height: u32,
+    },
     // never made by the painter, whose scenes are all of this crate's
     // without `internals`
     #[cfg_attr(not(feature = "internals"), allow(dead_code))]
@@ -78,7 +94,9 @@ pub enum Shape {
 /// A cell of a rasterised scene.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Paint {
+    /// Nothing drawn.
     Clear,
+    /// One palette colour, opaque or over nothing.
     Colour(u16),
     /// A translucent colour over another colour. Renderers blend these and
     /// round differently, so [`Scene::compare`] counts every blend as wrong,
@@ -93,15 +111,32 @@ pub enum Paint {
 pub enum Mismatch {
     /// The scene is of another size or length: `(width, height, ticks)`
     /// of each.
-    Size { expected: (u32, u32, u32), got: (u32, u32, u32) },
+    Size {
+        /// The animation's.
+        expected: (u32, u32, u32),
+        /// The scene's.
+        got: (u32, u32, u32),
+    },
     /// The first cell that shows something else.
-    Cell { tick: u32, x: u32, y: u32, expected: u16, got: Paint },
+    Cell {
+        /// The 60 fps frame.
+        tick: u32,
+        /// The cell's column.
+        x: u32,
+        /// The cell's row.
+        y: u32,
+        /// The palette colour the animation shows there.
+        expected: u16,
+        /// What the scene paints there.
+        got: Paint,
+    },
 }
 
 #[cfg(any(test, feature = "internals"))]
 /// A pair of neighbouring cells that breaks the seam invariant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seam {
+    /// The 60 fps frame, the first of those it is broken in.
     pub tick: u32,
     /// The cell where the lower group's colour should also be painted.
     pub cell: (u32, u32),

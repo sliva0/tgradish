@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use crate::limits::{MAX_RAW_JSON, TLOTTIE, telegram};
 
+/// What a Lottie document holds, as far as Telegram's limits go.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -18,30 +19,44 @@ use crate::limits::{MAX_RAW_JSON, TLOTTIE, telegram};
 pub struct Stats {
     /// The animation's name (`nm`).
     pub name: Option<String>,
+    /// The canvas's width (`w`).
     pub width: f64,
+    /// The canvas's height (`h`).
     pub height: f64,
+    /// Frames a second (`fr`).
     pub fps: f64,
     /// `op - ip`.
     pub frames: f64,
+    /// Size of the Lottie JSON.
     pub json_bytes: usize,
     /// Size of the `.tgs`, when checking one.
     pub tgs_bytes: Option<usize>,
     /// All layers, including those of precomps.
     pub layers: usize,
+    /// Shape layers that paint something.
     pub painted_shape_layers: usize,
     /// In all layers, counted like `max_shapes_per_layer`.
     pub shapes: usize,
+    /// Most shapes in one layer, counted as tlottie counts them: groups,
+    /// their fills and transforms, and what they draw.
     pub max_shapes_per_layer: usize,
+    /// Most fills and strokes in one layer.
     pub max_paints_per_layer: usize,
+    /// Most geometry items (rectangles, paths) that paints in one layer
+    /// draw.
     pub max_paint_sources_per_layer: usize,
+    /// Most vertices of one path, or of one of its tangents.
     pub max_path_points: usize,
     /// Path vertices one fill or stroke paints: those of the paths before
     /// it in its group, nested groups included.
     pub max_paint_points: usize,
+    /// The farthest from 0 a path's point is.
     pub max_path_coordinate: f64,
     /// Paths with an empty tangent (`[]`), as pixelart2tgs 1.x wrote them.
     pub empty_tangent_paths: usize,
+    /// Most keyframes of one property.
     pub max_keyframes: usize,
+    /// Assets, such as precomps and images.
     pub assets: usize,
     /// Layers once precomps are expanded where they are used.
     pub expanded_layers: usize,
@@ -56,6 +71,7 @@ pub struct Stats {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+/// How bad an [`Issue`] is.
 #[non_exhaustive]
 pub enum Severity {
     /// Telegram refuses the sticker, or some client can't play it.
@@ -68,11 +84,15 @@ pub enum Severity {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+/// Something about a sticker Telegram, or one of its apps, would have a
+/// problem with.
 #[non_exhaustive]
 pub struct Issue {
+    /// Whether it is refused or only frowned on.
     pub severity: Severity,
     /// What was checked, for front-ends to tell issues apart by.
     pub kind: IssueKind,
+    /// What is wrong, in English, with the numbers involved.
     pub message: String,
 }
 
@@ -136,7 +156,12 @@ pub enum CheckError {
     /// It nests deeper than Telegram's renderer reads, so deep that
     /// reading it could exhaust the stack.
     #[error("the JSON nests {depth} levels deep; Telegram's renderer reads up to {limit}")]
-    TooDeep { depth: usize, limit: usize },
+    TooDeep {
+        /// How deep it nests.
+        depth: usize,
+        /// How deep the renderer reads.
+        limit: usize,
+    },
     /// It isn't JSON, as serde_json says.
     #[error("{0}")]
     Json(String),
