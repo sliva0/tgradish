@@ -94,16 +94,23 @@ fn run(cli: Cli) -> Result<()> {
     };
 
     let cancel = CancelToken::new();
-    ctrlc::set_handler({
-        let cancel = cancel.clone();
-        move || {
-            if cancel.is_cancelled() {
-                // second Ctrl-C: stop waiting for cleanup
-                std::process::exit(130);
+    // the window never reads the token, so Ctrl-C there ends it as usual
+    #[cfg(feature = "gui")]
+    let window = matches!(cli.command, Command::Gui);
+    #[cfg(not(feature = "gui"))]
+    let window = false;
+    if !window {
+        ctrlc::set_handler({
+            let cancel = cancel.clone();
+            move || {
+                if cancel.is_cancelled() {
+                    // second Ctrl-C: stop waiting for cleanup
+                    std::process::exit(130);
+                }
+                cancel.cancel();
             }
-            cancel.cancel();
-        }
-    })?;
+        })?;
+    }
 
     let ctx = Context { global: cli.global, config, cancel };
     match cli.command {
