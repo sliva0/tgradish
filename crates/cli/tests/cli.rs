@@ -964,6 +964,57 @@ fn with_presets(dir: &std::path::Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
+/// `--exact-scale=`, and nothing for it in `--options-json`, clear a
+/// preset's exact scale, as a preset extending it can, and none of them
+/// is ever printed as a scale.
+#[cfg(target_os = "linux")]
+#[test]
+fn clears_a_presets_exact_scale() {
+    if !tgradish_corpus::ffmpeg_on_path() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let presets = dir.path().join("tgradish").join("presets");
+    std::fs::create_dir_all(&presets).unwrap();
+    // a third of 4 pixels is no whole pixel, so the scale is refused
+    std::fs::write(presets.join("third.toml"), "[webm]\nexact-scale = '1/3'\n").unwrap();
+    let cleared = "extends = 'third'\n[webm]\nexact-scale = ''\n";
+    std::fs::write(presets.join("cleared.toml"), cleared).unwrap();
+    let input = dir.path().join("square.png");
+    square_png(&input, [255, 0, 0, 255]);
+    let convert = |preset: &str, more: &[&str]| {
+        let mut args = vec!["--ffmpeg-from", "system", "convert", input.to_str().unwrap()];
+        args.extend(["--format", "webp", "--preset", preset, "-y"]);
+        args.extend(more);
+        with_presets(dir.path(), &args)
+    };
+    let refused = convert("third", &[]);
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(!refused.status.success() && stderr.contains("multiples of 3"), "{stderr}");
+    let json = r#"{"exact-scale":""}"#;
+    for (preset, more) in
+        [("third", &["--exact-scale="][..]), ("third", &["--options-json", json]), ("cleared", &[])]
+    {
+        let made = convert(preset, more);
+        assert!(
+            made.status.success(),
+            "{preset} {more:?}: {}",
+            String::from_utf8_lossy(&made.stderr)
+        );
+    }
+    let shown = with_presets(dir.path(), &["--json", "preset", "show", "cleared"]);
+    let shown: Value = serde_json::from_slice(&shown.stdout).unwrap();
+    assert!(shown["webm"].get("exact-scale").is_none(), "{shown}");
+    let described = with_presets(dir.path(), &["describe"]);
+    let described: Value = serde_json::from_slice(&described.stdout).unwrap();
+    let preset = |name: &str| {
+        let presets = described["presets"].as_array().unwrap();
+        presets.iter().find(|preset| preset["name"] == name).unwrap()["webm"].clone()
+    };
+    assert_eq!(preset("third")["exact-scale"], "1/3");
+    assert!(preset("cleared").get("exact-scale").is_none(), "{}", preset("cleared"));
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn shows_a_preset_as_a_file_could_hold_it() {
