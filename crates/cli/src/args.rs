@@ -260,11 +260,12 @@ pub struct OptionArgs {
     /// libvpx-vp9 option for tuning; repeat for more. For example
     /// tune-content=screen (flat graphics), aq-mode=2, sharpness=4,
     /// arnr-strength=3, g=60 (keyframe interval) or qmax=50. `ffmpeg -h
-    /// encoder=libvpx-vp9` lists them all.
+    /// encoder=libvpx-vp9` lists them all. These replace the preset's;
+    /// --encoder-options= with nothing after sets none.
     #[arg(long = "encoder-options", visible_alias = "encoder-option",
           value_name = "NAME=VALUE", value_parser = parse_option_pair,
           help_heading = "Encoding")]
-    pub encoder_options: Vec<(String, String)>,
+    pub encoder_options: Vec<Option<(String, String)>>,
     /// Raw ffmpeg output arguments, split like a shell would. Only with
     /// ffmpeg as a separate program (--ffmpeg-from system or --ffmpeg PATH).
     #[arg(long, value_name = "ARGS", allow_hyphen_values = true, help_heading = "Encoding")]
@@ -441,7 +442,7 @@ impl OptionArgs {
             title: self.title.clone(),
             watermark: self.watermark,
             encoder_options: (!self.encoder_options.is_empty())
-                .then(|| self.encoder_options.iter().cloned().collect()),
+                .then(|| self.encoder_options.iter().flatten().cloned().collect()),
             ffmpeg_args: self.ffmpeg_args.clone().map(|words| words.0),
         }
     }
@@ -464,9 +465,13 @@ impl std::str::FromStr for ShellWords {
     }
 }
 
-fn parse_option_pair(text: &str) -> Result<(String, String), String> {
+/// `NAME=VALUE`, or nothing, which says there are none.
+fn parse_option_pair(text: &str) -> Result<Option<(String, String)>, String> {
+    if text.is_empty() {
+        return Ok(None);
+    }
     let (name, value) = text.split_once('=').ok_or("expected NAME=VALUE")?;
-    Ok((name.trim().to_string(), value.to_string()))
+    Ok(Some((name.trim().to_string(), value.to_string())))
 }
 
 /// Mirrors a core enum as a clap value enum.
@@ -802,5 +807,9 @@ mod tests {
         assert_eq!(options["arnr-strength"], "3");
         let bad = ["tgradish", "convert", "a", "--encoder-options", "no-equals"];
         assert!(Cli::try_parse_from(bad).is_err());
+        // none, over a preset's: as options::flags writes it
+        let none = Options { encoder_options: Some(Default::default()), ..Options::default() };
+        assert_eq!(options::flags(&none), ["--encoder-options="]);
+        assert_eq!(parsed(options::flags(&none)).to_options(), none);
     }
 }

@@ -615,6 +615,8 @@ pub fn flags(options: &impl Serialize) -> Vec<String> {
                     flags.push(set(&range));
                 }
             }
+            // none, over a preset's
+            ("encoder-options", Value::Object(pairs)) if pairs.is_empty() => flags.push(set(&"")),
             ("encoder-options", Value::Object(pairs)) => {
                 for (key, value) in pairs {
                     let value = value.as_str().map_or_else(|| value.to_string(), str::to_owned);
