@@ -231,7 +231,7 @@ const LOSSLESS_EFFORT: i32 = 6;
 
 /// How a picture was made to fit the size limit.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
-#[serde(tag = "encoding", rename_all = "kebab-case")]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Encoding {
     Lossless,
     /// Lossy at this quality, from 0 to 100, as lossless didn't fit.
