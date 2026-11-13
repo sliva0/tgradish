@@ -10,6 +10,7 @@ use tgradish_tgs::frames::{Direction, LayerInfo, Tag};
 use super::Context;
 use crate::item::{Choices, Item};
 use crate::l10n::fl;
+use crate::timeline::{Cut, Frames};
 use crate::widgets::{self, row, section, section_with};
 
 /// Indent of each level of groups in the list of layers.
@@ -104,10 +105,22 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     }
 }
 
+/// The frames of an Aseprite file that shows each for `durations`, as the
+/// timeline cuts them for `format`: drawn for ffmpeg, as a video's.
+fn frames_of(durations: &[f64], format: Format) -> Option<Frames> {
+    let mut times = vec![0.0];
+    for duration in durations {
+        times.push(times.last().unwrap() + duration);
+    }
+    let cut = if format == Format::Tgs { Cut::Art } else { Cut::Video };
+    (times.len() >= 2).then_some(Frames { times, cut })
+}
+
 /// The tags to pick, as buttons of their colours. One played forward
 /// sets where the input starts and ends, or for a picture, the frame it
-/// is; one that plays backwards, or there and back, is read in its own
-/// order, which a cut can't do.
+/// is, as the timeline writes them; one that plays backwards, or there and
+/// back, is read in its own order, which a cut can't do. With a preset's
+/// tag, which a cut would be counted in, every tag is read by name.
 fn tag_row(
     ui: &mut egui::Ui,
     choices: &mut Choices,
@@ -116,32 +129,25 @@ fn tag_row(
     durations: &[f64],
     format: Format,
 ) {
-    // where each frame starts, then where the last ends
-    let mut starts = vec![0.0];
-    for duration in durations {
-        starts.push(starts.last().unwrap() + duration);
-    }
-    let total = *starts.last().unwrap();
+    let Some(frames) = frames_of(durations, format) else { return };
+    let total = frames.times[frames.count()];
+    let count = frames.count();
+    // as boundaries: its first frame and the one after its last
     let span = |tag: &Tag| {
-        let at = |frame: usize| starts.get(frame).copied().unwrap_or(total);
-        (at(tag.from as usize), at(tag.to as usize + 1))
+        let from = (tag.from as usize).min(count - 1);
+        (from, (tag.to as usize + 1).clamp(from + 1, count))
     };
     let read = choices.tag.clone().or(preset.tag.clone());
     let picture = format == Format::Image;
     // the part used, which a tag played forward sets
-    let start = choices.start.unwrap_or(0.0);
-    let end = choices.length.map_or(total, |length| start + length);
-    let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
-    let whole = read.is_none() && (picture || (near(start, 0.0) && near(end, total)));
-    let picked = |tag: &Tag| match tag.direction {
-        Direction::Forward if read.is_none() => {
-            let (from, to) = span(tag);
-            match picture {
-                true => choices.frame.is_some_and(|frame| frame >= from - 1e-6 && frame < to),
-                false => near(start, from) && near(end, to),
-            }
-        }
-        _ => read.as_deref() == Some(tag.name.as_str()),
+    let used = frames.part(total, choices.start, choices.length);
+    let shown = frames.at(choices.frame.unwrap_or(0.0));
+    let by_name = |tag: &Tag| tag.direction != Direction::Forward || preset.tag.is_some();
+    let whole = read.is_none() && (picture || used == (0, count));
+    let picked = |tag: &Tag| match by_name(tag) || read.is_some() {
+        false if picture => (span(tag).0..span(tag).1).contains(&shown),
+        false => used == span(tag),
+        true => read.as_deref() == Some(tag.name.as_str()),
     };
     let picks: Vec<bool> = tags.iter().map(picked).collect();
     ui.horizontal_wrapped(|ui| {
@@ -156,27 +162,27 @@ fn tag_row(
             (choices.start, choices.length) = (None, None);
         }
         for (tag, &picked) in tags.iter().zip(&picks) {
-            let (from, to) = span(tag);
+            let (from, after) = span(tag);
             if !tag_button(ui, tag, picked).clicked() {
                 continue;
             }
-            match tag.direction {
-                // as where the input starts and ends, or its frame
-                Direction::Forward if picked && !picture => {
-                    (choices.start, choices.length) = (None, None)
-                }
-                Direction::Forward => {
-                    choices.tag = None;
-                    match picture {
-                        true => choices.frame = Some(from),
-                        false => (choices.start, choices.length) = (Some(from), Some(to - from)),
-                    }
-                }
+            match by_name(tag) {
                 // read in its order, the whole of which is used
-                _ if picked => choices.tag = None,
-                _ => {
+                true if picked => choices.tag = None,
+                true => {
                     choices.tag = Some(tag.name.clone());
                     (choices.start, choices.length) = (None, None);
+                }
+                // as where the input starts and ends, or its frame
+                false if picked && !picture => (choices.start, choices.length) = (None, None),
+                false => {
+                    choices.tag = None;
+                    match picture {
+                        true => choices.frame = (from > 0).then_some(frames.times[from]),
+                        false => {
+                            frames.set_part((from, after), &mut choices.start, &mut choices.length)
+                        }
+                    }
                 }
             }
         }
@@ -335,6 +341,72 @@ fn set(choices: &mut Choices, preset: &Preset, layer: &LayerInfo, on: bool) {
 mod tests {
     use super::*;
     use tgradish_core::telegram::Target;
+
+    #[test]
+    fn cuts_tags_as_the_timeline_does() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::{NodeT, Queryable};
+
+        let tag = |name: &str, from, to| Tag {
+            name: name.into(),
+            from,
+            to,
+            direction: Direction::Forward,
+            colour: [200, 80, 80, 255],
+        };
+        let tags = [tag("idle", 0, 1), tag("walk", 2, 5)];
+        let durations = [0.1; 8];
+        let run = |choices: Choices, preset: Preset, format: Format| {
+            let tags = tags.to_vec();
+            let mut harness = Harness::new_ui_state(
+                move |ui, choices: &mut Choices| {
+                    tag_row(ui, choices, &preset, &tags, &durations, format);
+                },
+                choices,
+            );
+            harness.run_steps(2);
+            harness
+        };
+        // egui says a button is picked as toggled
+        let picked = |harness: &Harness<Choices>, name: &str| {
+            let toggled = harness.get_by_label(name).accesskit_node().toggled();
+            toggled == Some(egui::accesskit::Toggled::True)
+        };
+        for format in [Format::Webm, Format::Tgs] {
+            // written as the timeline writes the frames, so converting keeps
+            // them, and still picked once the timeline writes them again
+            let mut harness = run(Choices::new(Target::Sticker), Preset::default(), format);
+            harness.get_by_label("walk").click();
+            harness.run_steps(2);
+            let frames = frames_of(&durations, format).unwrap();
+            let (mut start, mut length) = (None, None);
+            frames.set_part((2, 6), &mut start, &mut length);
+            let choices = harness.state();
+            assert_eq!((choices.start, choices.length), (start, length), "{format:?}");
+            assert_eq!(frames.part(0.8, start, length), (2, 6));
+            assert!(picked(&harness, "walk") && !picked(&harness, "idle"));
+        }
+        // a preset's tag: another forward tag is read by name, not cut from
+        // the preset's tag's frames
+        let preset = Preset { tag: Some("idle".into()), ..Preset::default() };
+        let mut harness = run(Choices::new(Target::Sticker), preset, Format::Webm);
+        assert!(picked(&harness, "idle"));
+        harness.get_by_label("walk").click();
+        harness.run_steps(2);
+        let choices = harness.state();
+        assert_eq!(
+            (choices.tag.as_deref(), choices.start, choices.length),
+            (Some("walk"), None, None)
+        );
+        assert!(picked(&harness, "walk") && !picked(&harness, "idle"));
+        // a picture's frame starts where the picker puts it
+        let mut harness = run(Choices::new(Target::Sticker), Preset::default(), Format::Image);
+        harness.get_by_label("walk").click();
+        harness.run_steps(2);
+        let frames = frames_of(&durations, Format::Image).unwrap();
+        assert_eq!(harness.state().frame, Some(frames.times[2]));
+        assert!(picked(&harness, "walk"));
+    }
 
     #[test]
     fn names_layers_only_where_they_differ_from_the_file() {

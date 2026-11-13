@@ -644,8 +644,9 @@ mod tests {
         let item = &harness.state().items[0];
         assert!(!item.input_reading());
         let (start, length) = (item.choices.start, item.choices.length.unwrap_or_default());
-        assert_eq!((item.choices.tag.as_deref(), start), (None, Some(0.0)));
-        assert!((length - 0.2).abs() < 1e-9, "{length}");
+        // as the timeline cuts pixel art: from the start, a hair inside
+        assert_eq!((item.choices.tag.as_deref(), start), (None, None));
+        assert!((length - 0.2).abs() < 1e-5, "{length}");
         // picked again, all of it
         harness.get_by_label("idle").click();
         harness.run_steps(2);
