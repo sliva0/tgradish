@@ -34,6 +34,9 @@
 //!
 //! Errors are an [`Error`], which says what is wrong without naming flags.
 
+// what only core uses says so, which keeps it out of the API
+#![warn(unreachable_pub)]
+
 mod art;
 pub mod backend;
 mod cancel;
