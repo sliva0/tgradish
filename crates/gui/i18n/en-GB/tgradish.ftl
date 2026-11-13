@@ -145,11 +145,13 @@ stopping = Stopping…
 cancel-waiting = Cancel
 next-to-convert = Next to convert
 waiting-for = Waiting for { $ahead } more
+# The bar's Convert button once there is a result. The hovers of the button
+# either way: made with the settings as they are now, or again with the same.
 convert-again = Convert again
+    .changed = Make it with current settings
+    .hint = Make it again with the same settings
 # The keys that convert the file picked, shown on its Convert button.
 convert-keys = Ctrl+Enter
-convert-hint = Make it with current settings
-convert-again-hint = Make it again with the same settings
 -save-settings = Save current settings as preset
 save-preset = { -save-settings }…
     .hint = Keep them as a preset of your own, for any file to start from

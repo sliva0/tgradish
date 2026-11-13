@@ -66,8 +66,11 @@ impl App {
                     let button = egui::Button::new(RichText::new(text).strong().size(15.0))
                         .min_size(vec2(140.0, 32.0))
                         .shortcut_text(fl!("convert-keys"));
-                    let hint =
-                        if current { fl!("convert-again-hint") } else { fl!("convert-hint") };
+                    let hint = if current {
+                        fl!("convert-again", "hint")
+                    } else {
+                        fl!("convert-again", "changed")
+                    };
                     if ui.add(button).on_hover_text(hint).clicked() {
                         convert = true;
                     }
