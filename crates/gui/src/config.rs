@@ -59,10 +59,27 @@ impl Config {
 
     /// Writes the settings to `path`, with what the window doesn't know of
     /// in `[gui]` kept as it was read.
-    pub(crate) fn save(&self, path: &Path) -> tgradish_core::Result<()> {
+    pub(crate) fn save(&mut self, path: &Path) -> tgradish_core::Result<()> {
+        self.forget_overridden();
         let mut core = self.core.clone();
         self.gui.write(&mut core.gui);
         core.save(path)
+    }
+
+    /// Forgets each value of `[gui]` this version couldn't read whose
+    /// setting is no longer what that value was read as, so that changing
+    /// the setting back writes what was chosen rather than bringing the
+    /// value back. The window does this at every frame, as Settings
+    /// changes them without saving.
+    pub(crate) fn forget_overridden(&mut self) {
+        // most files have none, which costs nothing to tell
+        if !KEYS.iter().any(|key| self.core.gui.contains_key(*key)) {
+            return;
+        }
+        let chosen = toml::Table::try_from(&self.gui).expect("the window's settings are a table");
+        let unread = GuiConfig::read(&self.core.gui);
+        let unread = toml::Table::try_from(&unread).expect("the window's settings are a table");
+        self.core.gui.retain(|key, _| !KEYS.contains(&key) || chosen.get(key) == unread.get(key));
     }
 }
 
@@ -149,18 +166,15 @@ impl GuiConfig {
     }
 
     /// Writes the settings into `table`, keeping what else it holds: a
-    /// value of a setting this version couldn't read stays while the
-    /// setting is still what that value read as.
+    /// value of a setting this version couldn't read stays, as one is
+    /// there only while its setting is still what it read as
+    /// ([`Config::forget_overridden`]).
     fn write(&self, table: &mut toml::Table) {
         let written = toml::Table::try_from(self).expect("the window's settings are a table");
-        let unread = GuiConfig::read(table);
-        let unread = toml::Table::try_from(&unread).expect("the window's settings are a table");
         for key in KEYS {
-            if table.contains_key(key) && written.get(key) == unread.get(key) {
-                continue;
-            }
-            table.remove(key);
-            if let Some(value) = written.get(key) {
+            if !table.contains_key(key)
+                && let Some(value) = written.get(key)
+            {
                 table.insert(key.to_owned(), value.clone());
             }
         }
@@ -313,6 +327,34 @@ mod tests {
             saved()
         );
         assert!(saved().contains("language = 7"), "{}", saved());
+        // and changed back to what those values read as: they are gone for
+        // good, whether one setting or the whole of them is saved
+        app.save_setting(|gui| gui.theme = Theme::System);
+        app.save_setting(|gui| gui.result_preview.corner = Corner::TopLeft);
+        let chosen = ["theme = \"system\"", "size = 3", "corner = \"top-left\""];
+        for chosen in chosen {
+            assert!(saved().contains(chosen), "{chosen} in {}", saved());
+        }
+        app.config.save(&path).unwrap();
+        for chosen in chosen {
+            assert!(saved().contains(chosen), "{chosen} in {}", saved());
+        }
+    }
+
+    #[test]
+    fn forgets_values_it_cannot_read_once_settings_changes_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[gui]\ntheme = 'high-contrast'\n").unwrap();
+        let mut harness = crate::testing::harness(Config::load(&path).unwrap());
+        // changed and changed back in Settings, then saved
+        harness.state_mut().config.gui.theme = Theme::Dark;
+        harness.step();
+        harness.state_mut().config.gui.theme = Theme::System;
+        harness.step();
+        harness.state_mut().config.save(&path).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("theme = \"system\""), "{saved}");
     }
 
     #[test]
