@@ -12,7 +12,7 @@ use crate::layout::{self, lay_out};
 use crate::limits::{MAX_RAW_JSON, telegram};
 use crate::lottie::Style;
 use crate::normalise::{self, PixelAnim, Report, normalise};
-use crate::reduce::{Compromise, Kind, Reduction, error};
+use crate::reduce::{Compromise, Kind, Reduction, distortion};
 use crate::scene::Scene;
 use crate::{Result, file, mark};
 
@@ -70,8 +70,8 @@ pub struct Step {
     /// The estimated size after it, in bytes.
     pub bytes: usize,
     /// How much the animation differs from the lossless one after it (see
-    /// [`crate::reduce::error`]).
-    pub error: f64,
+    /// [`crate::reduce::distortion`]).
+    pub distortion: f64,
 }
 
 /// Progress, for front-ends to show.
@@ -152,8 +152,9 @@ const RETARGET: f64 = 0.96;
 /// search of all of it can take minutes.
 const CALIBRATE_WITHIN: f64 = 2.0;
 
-/// Asked between steps: when it says yes, making a sticker stops. It may
-/// be asked from several threads at once.
+/// Asked between steps of the work: when it says yes, the work stops, as
+/// [`make`] and the painter do. It may be asked from several threads at
+/// once.
 pub type Cancelled<'a> = &'a (dyn Fn() -> bool + Sync);
 
 /// An animation encoded and laid out: its scene, its Lottie JSON, and
@@ -620,7 +621,7 @@ fn fit(
                 .unwrap_or(ladder.len())
         })
         .collect();
-    let mut error_now = steps.last().map_or(0.0, |step| step.error);
+    let mut distortion_now = steps.last().map_or(0.0, |step| step.distortion);
     // the state before the last step, to weaken it
     let mut before_last: Option<(PixelAnim, usize)> = None;
 
@@ -649,8 +650,8 @@ fn fit(
             if candidate == current || candidate_size >= size {
                 return Ok(None);
             }
-            let candidate_error = error(original, &candidate);
-            Ok(Some((candidate, candidate_quick, candidate_size, candidate_error)))
+            let candidate_distortion = distortion(original, &candidate);
+            Ok(Some((candidate, candidate_quick, candidate_size, candidate_distortion)))
         });
         // (value, kind, candidate)
         let mut best: Option<(f64, usize, Candidate)> = None;
@@ -660,12 +661,12 @@ fn fit(
                 next[k] += 1;
                 continue;
             };
-            let value = (size - candidate.2) as f64 / (candidate.3 - error_now).max(1e-9);
+            let value = (size - candidate.2) as f64 / (candidate.3 - distortion_now).max(1e-9);
             if best.as_ref().is_none_or(|b| value > b.0) {
                 best = Some((value, k, candidate));
             }
         }
-        let Some((_, k, (candidate, candidate_quick, candidate_size, candidate_error))) = best
+        let Some((_, k, (candidate, candidate_quick, candidate_size, candidate_distortion))) = best
         else {
             continue;
         };
@@ -673,14 +674,14 @@ fn fit(
         current = candidate;
         quick_now = candidate_quick;
         size = candidate_size;
-        error_now = candidate_error;
+        distortion_now = candidate_distortion;
         // near the target now: sizes measured against the real encoder
         // decide how much further to go
         if calibration.is_none() {
             *calibration = measure(&current, quick_now)?;
             size = size_of(quick_now, factor(calibration));
         }
-        let step = Step { reduction: ladders[k][next[k]], bytes: size, error: error_now };
+        let step = Step { reduction: ladders[k][next[k]], bytes: size, distortion: distortion_now };
         progress(Progress::Reduced { step: step.clone() });
         steps.push(step);
         next[k] += 1;
@@ -708,9 +709,9 @@ fn fit(
                 size_of(quick(&candidate, options, cancelled)?, factor(calibration));
             if candidate_size <= target {
                 high = share;
-                let candidate_error = error(original, &candidate);
+                let candidate_distortion = distortion(original, &candidate);
                 *steps.last_mut().unwrap() =
-                    Step { reduction, bytes: candidate_size, error: candidate_error };
+                    Step { reduction, bytes: candidate_size, distortion: candidate_distortion };
                 current = candidate;
             } else {
                 low = share;

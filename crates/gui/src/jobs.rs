@@ -627,7 +627,7 @@ mod tests {
 
     fn step(bytes: usize) -> Step {
         let reduction = tgradish_tgs::reduce::Reduction::Despeckle;
-        Step { reduction, bytes, error: 0.0 }
+        Step { reduction, bytes, distortion: 0.0 }
     }
 
     #[test]

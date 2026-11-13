@@ -275,7 +275,7 @@ fn distance(a: [u8; 4], b: [u8; 4]) -> f64 {
 /// pixel looks at every 60 fps frame, averaged. Colours differ by their
 /// OKLab distance where both show, plus the difference in opacity (1
 /// between transparent and opaque).
-pub fn error(original: &PixelAnim, reduced: &PixelAnim) -> f64 {
+pub fn distortion(original: &PixelAnim, reduced: &PixelAnim) -> f64 {
     // the edges of both grids together; each piece is in one cell of each
     let overlay = |a: &[u32], b: &[u32]| {
         let mut edges: Vec<u32> = a.iter().chain(b).copied().collect();
@@ -603,11 +603,11 @@ mod tests {
         assert!(distance(RED, NEAR_RED) < 0.02);
         assert!(distance(RED, BLUE) > 0.3);
         let a = anim(2, 1, &[(&[RED, BLUE], 100), (&[RED, BLUE], 100)]);
-        assert_eq!(error(&a, &a), 0.0);
+        assert_eq!(distortion(&a, &a), 0.0);
         // half the area changes for half the time: a quarter of the
         // distance, on average
         let b = anim(2, 1, &[(&[RED, BLUE], 100), (&[RED, RED], 100)]);
-        assert!((error(&a, &b) - distance(BLUE, RED) / 4.0).abs() < 1e-9);
+        assert!((distortion(&a, &b) - distance(BLUE, RED) / 4.0).abs() < 1e-9);
     }
 
     #[test]
@@ -619,7 +619,7 @@ mod tests {
         assert_eq!(merged.rgba(0), [RED, RED, BLUE].concat());
         // and then the two red columns are one cell
         assert_eq!(merged.width(), 2);
-        assert!(error(&a, &merged) > 0.0);
+        assert!(distortion(&a, &merged) > 0.0);
 
         // a third of the area changed: merging at a third keeps the first
         let frames = Reduction::MergeFrames { changed: 0.34 }.apply(&a).unwrap();
@@ -657,7 +657,7 @@ mod tests {
         let half = Reduction::Downscale { factor: 0.5 }.apply(&board).unwrap();
         assert_eq!(half.grid().columns, [0, 2, 4]);
         assert_eq!(half.rgba(0)[..4], RED);
-        assert!(error(&board, &half) > 0.0);
+        assert!(distortion(&board, &half) > 0.0);
         assert_eq!(half.ticks(), board.ticks());
 
         // 3x art, its first art pixel cut to 2 input pixels: halving joins
@@ -805,6 +805,6 @@ mod tests {
         let off = anim(4, 4, &[(&pixels, 100)]);
         let snapped = Reduction::SnapToGrid { scale: 2 }.apply(&off).unwrap();
         assert_eq!(snapped.grid().scale(), 2);
-        assert!(error(&off, &snapped) > 0.0);
+        assert!(distortion(&off, &snapped) > 0.0);
     }
 }

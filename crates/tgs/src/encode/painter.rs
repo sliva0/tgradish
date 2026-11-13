@@ -37,6 +37,7 @@ use super::mask::Mask;
 use crate::limits::{TLOTTIE, telegram};
 use crate::normalise::PixelAnim;
 use crate::scene::{FillRule, Group, Layer, Scene, Shape};
+use crate::sticker::Cancelled;
 
 /// Estimated cost of a rectangle and of a group, in the same units: a
 /// group's fill and wrapping take about one and a half rectangles' bytes.
@@ -188,7 +189,7 @@ fn core_neighbours(cell: (u32, u32), mask: &Mask) -> impl Iterator<Item = (u32, 
 struct Painter<'a> {
     anim: &'a PixelAnim,
     /// Asked between colours: when it says yes, encoding stops.
-    stop: &'a dyn Fn() -> bool,
+    cancelled: Cancelled<'a>,
     /// Cells of each colour in each frame: `cells[frame][colour]`.
     cells: Vec<Vec<Vec<u32>>>,
     lifetimes: bool,
@@ -198,7 +199,7 @@ struct Painter<'a> {
 }
 
 impl<'a> Painter<'a> {
-    fn new(anim: &'a PixelAnim, settings: &Settings, stop: &'a dyn Fn() -> bool) -> Painter<'a> {
+    fn new(anim: &'a PixelAnim, settings: &Settings, cancelled: Cancelled<'a>) -> Painter<'a> {
         let mut cells = Vec::with_capacity(anim.frames().len());
         for frame in anim.frames() {
             let mut by_colour = vec![Vec::new(); anim.palette().len()];
@@ -209,7 +210,7 @@ impl<'a> Painter<'a> {
         }
         Painter {
             anim,
-            stop,
+            cancelled,
             cells,
             lifetimes: settings.lifetimes,
             split: settings.split,
@@ -636,7 +637,7 @@ impl<'a> Painter<'a> {
         let mut best = vec![(0usize, 0usize); 1 << n];
         for set in 1..1usize << n {
             // any order will do: encoding it stops at once
-            if (self.stop)() {
+            if (self.cancelled)() {
                 return colours.to_vec();
             }
             best[set] = (0..n)
@@ -679,7 +680,7 @@ impl<'a> Painter<'a> {
         let mut at_bottom = Vec::with_capacity(colours.len());
         for &colour in colours {
             // any order will do: encoding it stops at once
-            if (self.stop)() {
+            if (self.cancelled)() {
                 return colours.to_vec();
             }
             let later: Vec<Mask> = everything
@@ -720,7 +721,7 @@ impl<'a> Painter<'a> {
         while !remaining.is_empty() {
             for &i in &remaining {
                 if costs[i].is_none() {
-                    if (self.stop)() {
+                    if (self.cancelled)() {
                         return colours.to_vec();
                     }
                     costs[i] = Some(self.cost_of(colours[i], &later));
@@ -767,7 +768,7 @@ impl<'a> Painter<'a> {
         let mut later = vec![self.empty(); self.frames()];
         let mut pieces = Vec::new();
         for (rank, &colour) in order.iter().enumerate().rev() {
-            if (self.stop)() {
+            if (self.cancelled)() {
                 return Err(EncodeError::Cancelled);
             }
             for (place, piece) in self.pieces(colour, &later, true)? {
@@ -786,15 +787,16 @@ impl<'a> Painter<'a> {
 
 /// Encodes `anim`. [`Effort::Best`] compares candidates by `score`
 /// (smaller is better), typically the compressed size of their Lottie;
-/// without one it works like [`Effort::Balanced`]. `stop` is asked between
-/// colours; when it says yes, this ends with [`EncodeError::Cancelled`].
+/// without one it works like [`Effort::Balanced`]. `cancelled` is asked
+/// between colours; when it says yes, this ends with
+/// [`EncodeError::Cancelled`].
 pub fn painter(
     anim: &PixelAnim,
     settings: &Settings,
     score: Option<&dyn Fn(&Scene) -> usize>,
-    stop: &dyn Fn() -> bool,
+    cancelled: Cancelled,
 ) -> Result<Scene, EncodeError> {
-    let mut painter = Painter::new(anim, settings, stop);
+    let mut painter = Painter::new(anim, settings, cancelled);
     if settings.lifetimes {
         match painter.search(settings.effort, score) {
             // a layer per frame stays within the limit for up to 180
@@ -881,7 +883,7 @@ impl Painter<'_> {
                 if tries >= BEST_TRIES {
                     break;
                 }
-                if (self.stop)() {
+                if (self.cancelled)() {
                     return Err(EncodeError::Cancelled);
                 }
                 tries += 1;
