@@ -184,11 +184,7 @@ fn run(cli: Cli) -> Result<()> {
 
     let cancel = CancelToken::new();
     // the window never reads the token, so Ctrl-C there ends it as usual
-    #[cfg(feature = "gui")]
-    let window = matches!(cli.command, Command::Gui);
-    #[cfg(not(feature = "gui"))]
-    let window = false;
-    if !window {
+    if !cli.command.is_window() {
         ctrlc::set_handler({
             let cancel = cancel.clone();
             move || {
@@ -286,11 +282,7 @@ fn main() -> ExitCode {
     }
     let cli = Cli::parse();
     term::init(cli.global.colour, cli.global.json);
-    #[cfg(feature = "gui")]
-    let window = matches!(cli.command, Command::Gui);
-    #[cfg(not(feature = "gui"))]
-    let window = false;
-    if !window {
+    if !cli.command.is_window() {
         tgradish_core::mark::set_client(tgradish_core::mark::Client::Cli);
     }
     let json = cli.global.json;
