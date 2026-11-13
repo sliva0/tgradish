@@ -114,6 +114,7 @@ impl App {
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
                                 ui.set_max_width(side - 12.0);
+                                widgets::settings_spacing(ui);
                                 ui.add_space(6.0);
                                 file_settings::make(ui, item, &context);
                                 // what converting did, where the eye is once
@@ -145,6 +146,7 @@ impl App {
         ui.painter().hline(line.x_range(), line.center().y, egui::Stroke::new(1.0, colour));
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                widgets::settings_spacing(ui);
                 file_settings::show(ui, item, &context);
                 ui.add_space(12.0);
             });

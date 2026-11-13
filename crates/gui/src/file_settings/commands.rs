@@ -3,7 +3,7 @@
 //! ffmpeg ones it runs, quoted for the shell of the system at hand.
 
 use crate::config::Config;
-use eframe::egui::{self, RichText};
+use eframe::egui;
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{ExactScale, Scaling};
 use tgradish_core::picture;
@@ -13,7 +13,7 @@ use tgradish_core::webm::Options;
 use super::Context;
 use crate::item::{Item, Kind};
 use crate::l10n::fl;
-use crate::widgets::note;
+use crate::widgets::{self, note};
 
 /// Text in a monospace box that can be selected and copied.
 fn code(ui: &mut egui::Ui, text: &str) {
@@ -136,40 +136,33 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
 /// The `tgradish` command that makes the same result, and for WebM the
 /// ffmpeg commands that encode it.
 pub(super) fn commands(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
-    ui.add_space(10.0);
-    egui::CollapsingHeader::new(RichText::new(fl!("commands")).strong()).id_salt("commands").show(
-        ui,
-        |ui| {
-            note(
-                ui,
-                if cfg!(windows) { fl!("commands-powershell") } else { fl!("commands-posix") },
-            );
-            code(ui, &shell_line(&command_line(item, context)));
-            if item.paste_dir.is_some() {
-                note(ui, fl!("pasted-temporary"));
-            }
-            if item.format != Format::Webm {
-                return;
-            }
-            ui.add_space(6.0);
-            match ffmpeg_commands(item, context) {
-                Ok(lines) => {
-                    note(
-                        ui,
-                        if context.ffmpeg_args {
-                            fl!("ffmpeg-commands")
-                        } else {
-                            fl!("ffmpeg-commands", "builtin")
-                        },
-                    );
-                    for line in lines {
-                        code(ui, &line);
-                    }
+    widgets::folding_section(ui, &fl!("commands"), "commands", |ui| {
+        note(ui, if cfg!(windows) { fl!("commands-powershell") } else { fl!("commands-posix") });
+        code(ui, &shell_line(&command_line(item, context)));
+        if item.paste_dir.is_some() {
+            note(ui, fl!("pasted-temporary"));
+        }
+        if item.format != Format::Webm {
+            return;
+        }
+        ui.add_space(6.0);
+        match ffmpeg_commands(item, context) {
+            Ok(lines) => {
+                note(
+                    ui,
+                    if context.ffmpeg_args {
+                        fl!("ffmpeg-commands")
+                    } else {
+                        fl!("ffmpeg-commands", "builtin")
+                    },
+                );
+                for line in lines {
+                    code(ui, &line);
                 }
-                Err(why) => note(ui, fl!("no-ffmpeg-commands", why = why)),
             }
-        },
-    );
+            Err(why) => note(ui, fl!("no-ffmpeg-commands", why = why)),
+        }
+    });
 }
 
 fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String> {

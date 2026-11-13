@@ -50,6 +50,33 @@ pub(crate) fn medium(ui: &egui::Ui, text: impl Into<String>, size: f32) -> RichT
     RichText::new(text).family(crate::fonts::medium_in(ui.ctx())).size(size).strong()
 }
 
+// Settings are spaced on one scale, of what shows between things: a
+// caption 4 points under its control, 8 between the controls of a setting,
+// 12 between settings, and a section's line 16 under what is above it and
+// 12 over its heading, which is 8 over what it heads. The spaces below
+// differ from those, as text has room of its own over and under it.
+
+/// Space between the things of a setting.
+const WITHIN: f32 = 8.0;
+/// Space added after a setting, to the next.
+const AFTER_ROW: f32 = 4.0;
+/// Space before a caption, and how much less room it takes under it than
+/// its lines leave, which is room under the text for nothing.
+const BEFORE_HINT: f32 = -4.0;
+const HINT_TRIM: f32 = 1.0;
+/// Space before a section's line, after it, and after its heading.
+const BEFORE_RULE: f32 = 4.0;
+const AFTER_RULE: f32 = -5.0;
+const AFTER_HEADING: f32 = -8.0;
+/// How wide a caption gets, so a long one wraps into a block rather than
+/// a long line.
+const HINT_WIDTH: f32 = 460.0;
+
+/// Spaces what `ui` holds as settings are spaced.
+pub(crate) fn settings_spacing(ui: &mut egui::Ui) {
+    ui.spacing_mut().item_spacing.y = WITHIN;
+}
+
 /// A heading over a group of settings, apart from the group before by a
 /// line, unless it is the first of its column.
 pub(crate) fn section(ui: &mut egui::Ui, title: &str) {
@@ -58,24 +85,47 @@ pub(crate) fn section(ui: &mut egui::Ui, title: &str) {
 
 /// A [`section`] with more beside its title, as `beside` adds.
 pub(crate) fn section_with(ui: &mut egui::Ui, title: &str, beside: impl FnOnce(&mut egui::Ui)) {
-    // nothing above it yet
-    if ui.min_rect().height() >= 1.0 {
-        ui.add_space(14.0);
-        let (line, _) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-        ui.painter().hline(
-            line.x_range(),
-            line.center().y,
-            ui.visuals().widgets.noninteractive.bg_stroke,
-        );
-        ui.add_space(4.0);
-    }
-    ui.add_space(4.0);
+    section_rule(ui);
     ui.horizontal(|ui| {
         ui.label(medium(ui, title, HEADING));
         beside(ui);
     });
-    ui.add_space(4.0);
+    ui.add_space(AFTER_HEADING);
+}
+
+/// The line over a section, apart from the group before, unless it is the
+/// first of its column; then nothing.
+pub(crate) fn section_rule(ui: &mut egui::Ui) {
+    // nothing above it yet
+    if ui.min_rect().height() < 1.0 {
+        return;
+    }
+    ui.add_space(BEFORE_RULE);
+    let (line, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+    ui.painter().hline(
+        line.x_range(),
+        line.center().y,
+        ui.visuals().widgets.noninteractive.bg_stroke,
+    );
+    ui.add_space(AFTER_RULE);
+}
+
+/// A section that folds away, headed as the others are, its triangle
+/// before its heading.
+pub(crate) fn folding_section<R>(
+    ui: &mut egui::Ui,
+    title: &str,
+    id: &str,
+    contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> Option<R> {
+    section_rule(ui);
+    let heading = medium(ui, title, HEADING);
+    let folding = egui::CollapsingHeader::new(heading).id_salt(id).show(ui, |ui| {
+        ui.add_space(AFTER_HEADING);
+        contents(ui)
+    });
+    folding.body_returned
 }
 
 /// A number with as few decimals as it needs, at most two: 60, 29.97.
@@ -136,9 +186,47 @@ pub(crate) fn link(
     response
 }
 
-/// Weaker text explaining something.
+/// Weaker text explaining something. It stays as readable where what it
+/// explains is greyed out, as it often says why.
 pub(crate) fn note(ui: &mut egui::Ui, text: impl Into<String>) {
-    ui.label(RichText::new(text.into()).weak().size(12.5));
+    let text = RichText::new(text.into()).weak().size(12.5);
+    if ui.is_enabled() {
+        ui.label(text);
+        return;
+    }
+    weak_text(ui, text, ui.available_width(), 0.0);
+}
+
+/// `text` laid out within `width` and drawn as weak text, without the
+/// greying of what is around it, taking `trim` less room under it than
+/// its lines leave.
+fn weak_text(ui: &mut egui::Ui, text: RichText, width: f32, trim: f32) -> egui::Response {
+    let weak = ui.visuals().weak_text_color();
+    let galley = egui::WidgetText::from(text).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Wrap),
+        width,
+        egui::TextStyle::Body,
+    );
+    let size = (galley.size() - vec2(0.0, trim)).max(egui::Vec2::ZERO);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+    // read out as a label is
+    let enabled = ui.is_enabled();
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, enabled, galley.text()));
+    let mut painter = ui.painter().clone();
+    painter.set_opacity(1.0);
+    painter.galley(rect.min, galley, weak);
+    response
+}
+
+/// A [`note`] that is a control's caption: close under it, and no wider
+/// than reads well.
+pub(crate) fn hint(ui: &mut egui::Ui, text: impl Into<String>) {
+    ui.add_space(BEFORE_HINT);
+    let text = RichText::new(text.into()).weak().size(12.5);
+    let width = ui.available_width().min(HINT_WIDTH);
+    weak_text(ui, text, width, HINT_TRIM);
 }
 
 /// The label column of a grid, explained on hover.
@@ -164,6 +252,14 @@ pub(crate) fn primary(
     .inner
 }
 
+/// A field of one line, as high as a button beside it, its text in its
+/// middle.
+pub(crate) fn text_field(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> {
+    egui::TextEdit::singleline(text)
+        .min_size(vec2(0.0, theme::CONTROL))
+        .vertical_align(egui::Align::Center)
+}
+
 /// Width of the labels before settings.
 pub(crate) const LABELS: f32 = 150.0;
 
@@ -177,33 +273,36 @@ pub(crate) fn row<R>(
     allowed: Result<(), &str>,
     contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
-    ui.add_enabled_ui(allowed.is_ok(), |ui| {
-        ui.horizontal_top(|ui| {
-            // as high as the first line of controls, the text in its middle
-            let line = ui.spacing().interact_size.y;
-            let layout = egui::Layout::top_down(egui::Align::Min);
-            let label = ui
-                .allocate_ui_with_layout(vec2(LABELS, line), layout, |ui| {
-                    ui.set_width(LABELS);
-                    let text_height = ui.text_style_height(&egui::TextStyle::Body);
-                    ui.add_space(((line - text_height) / 2.0).floor().max(0.0));
-                    ui.add(egui::Label::new(text).wrap())
-                })
-                .inner;
-            match allowed {
-                Err(why) => {
-                    label.on_disabled_hover_text(why);
+    let inner = ui
+        .add_enabled_ui(allowed.is_ok(), |ui| {
+            ui.horizontal_top(|ui| {
+                // as high as the first line of controls, the text in its middle
+                let line = ui.spacing().interact_size.y;
+                let layout = egui::Layout::top_down(egui::Align::Min);
+                let label = ui
+                    .allocate_ui_with_layout(vec2(LABELS, line), layout, |ui| {
+                        ui.set_width(LABELS);
+                        let text_height = ui.text_style_height(&egui::TextStyle::Body);
+                        ui.add_space(((line - text_height) / 2.0).floor().max(0.0));
+                        ui.add(egui::Label::new(text).wrap())
+                    })
+                    .inner;
+                match allowed {
+                    Err(why) => {
+                        label.on_disabled_hover_text(why);
+                    }
+                    Ok(()) if !hint.is_empty() => {
+                        label.on_hover_text(hint);
+                    }
+                    Ok(()) => {}
                 }
-                Ok(()) if !hint.is_empty() => {
-                    label.on_hover_text(hint);
-                }
-                Ok(()) => {}
-            }
-            ui.vertical(contents).inner
+                ui.vertical(contents).inner
+            })
+            .inner
         })
-        .inner
-    })
-    .inner
+        .inner;
+    ui.add_space(AFTER_ROW);
+    inner
 }
 
 /// One choice of a [`segments`] row: its value, label and explanation.
@@ -478,7 +577,7 @@ pub(crate) fn chosen_hint<T: PartialEq + Copy>(ui: &mut egui::Ui, value: T, choi
     if let Some((_, _, hint)) = choices.iter().find(|(option, ..)| *option == value)
         && !hint.is_empty()
     {
-        note(ui, hint.as_str());
+        self::hint(ui, hint.as_str());
     }
 }
 
@@ -565,13 +664,44 @@ pub(crate) fn auto_number<T: egui::emath::Numeric>(
         if !set && shown.is_none() {
             field = field.custom_formatter(|_, _| "—".to_owned()).prefix("").suffix("");
         }
-        let response = ui.add_enabled(set, field).on_disabled_hover_text(fl!("custom", "hint"));
+        let response = number_field(ui, set, field).on_disabled_hover_text(fl!("custom", "hint"));
         if live && response.changed() {
             *value = Some(number);
             changed = true;
         }
     });
     changed
+}
+
+/// A number field, where `set`; else the value it stands for as weak text
+/// in its place, which can't be typed into, so a box means it can.
+pub(crate) fn number_field(
+    ui: &mut egui::Ui,
+    set: bool,
+    field: egui::DragValue<'_>,
+) -> egui::Response {
+    if set {
+        return ui.add(field);
+    }
+    ui.scope(|ui| {
+        let visuals = ui.visuals_mut();
+        visuals.override_text_color = visuals.weak_text_color;
+        let widgets = &mut visuals.widgets;
+        for state in [
+            &mut widgets.noninteractive,
+            &mut widgets.inactive,
+            &mut widgets.hovered,
+            &mut widgets.active,
+        ] {
+            state.bg_stroke = egui::Stroke::NONE;
+            (state.bg_fill, state.weak_bg_fill) = (Color32::TRANSPARENT, Color32::TRANSPARENT);
+        }
+        // as weak as text, rather than greyed out further, unless all
+        // around it is greyed out too
+        visuals.disabled_alpha = 1.0;
+        ui.add_enabled(false, field)
+    })
+    .inner
 }
 
 /// An [`auto_number`] for a value a preset may set. While the preset sets

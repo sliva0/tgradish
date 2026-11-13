@@ -269,7 +269,7 @@ impl App {
                 ui,
                 |ui| {
                     ui.label(fl!("preset-name"));
-                    let field = egui::TextEdit::singleline(&mut saving.name)
+                    let field = widgets::text_field(&mut saving.name)
                         .hint_text(fl!("preset-name", "placeholder"))
                         .desired_width(270.0);
                     let field = ui.add(field);
@@ -283,7 +283,7 @@ impl App {
                     }
                     ui.end_row();
                     ui.label(fl!("preset-description"));
-                    let field = egui::TextEdit::singleline(&mut saving.description)
+                    let field = widgets::text_field(&mut saving.description)
                         .hint_text(fl!("preset-description", "placeholder"))
                         .desired_width(270.0);
                     ui.add(field);
@@ -367,8 +367,7 @@ impl App {
                     for row in &mut managing.rows {
                         // sized, as a grid keeps a column as narrow as its header
                         let line = ui.spacing().interact_size.y;
-                        let name = egui::TextEdit::singleline(&mut row.typed_name)
-                            .vertical_align(egui::Align::Center);
+                        let name = widgets::text_field(&mut row.typed_name);
                         if ui.add_sized(vec2(170.0, line), name).lost_focus()
                             && row.typed_name.trim_end() != row.name
                         {
@@ -380,9 +379,8 @@ impl App {
                                     .on_hover_text(why);
                             }
                             None => {
-                                let field = egui::TextEdit::singleline(&mut row.typed_description)
-                                    .hint_text(fl!("preset-description", "none"))
-                                    .vertical_align(egui::Align::Center);
+                                let field = widgets::text_field(&mut row.typed_description)
+                                    .hint_text(fl!("preset-description", "none"));
                                 if ui.add_sized(vec2(300.0, line), field).lost_focus()
                                     && row.typed_description.trim() != row.description
                                 {

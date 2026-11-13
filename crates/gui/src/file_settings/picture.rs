@@ -244,7 +244,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 if flag(ui, &mut auto, !base, &text, &hint) {
                     item.choices.tgs.keep_canvas = auto.map(|auto| !auto);
                 }
-                note(ui, fl!("auto-crop", "after"));
+                widgets::hint(ui, fl!("auto-crop", "after"));
             });
             // what the last conversion found, if it looked for it: neither
             // the item nor its preset said
@@ -661,11 +661,11 @@ fn integer_scale(
         return;
     }
     if !integer {
-        note(ui, fl!("scale-unused"));
+        widgets::hint(ui, fl!("scale-unused"));
         return;
     }
     let Some(sizes) = webm_sizes(effective, crop) else {
-        note(ui, fl!("scale-unsuited"));
+        widgets::hint(ui, fl!("scale-unsuited"));
         return;
     };
     let makes = |scale: String| {
@@ -684,7 +684,7 @@ fn integer_scale(
             fl!("scale-makes", scale = scale, width = width, height = height)
         }
     };
-    note(
+    widgets::hint(
         ui,
         match scale {
             Some(scale) => makes(scale_text(scale)),

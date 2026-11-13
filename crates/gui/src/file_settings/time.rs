@@ -12,9 +12,7 @@ use tgradish_core::webm::DEFAULT_FAKE_DURATION;
 use super::Context;
 use crate::item::{Item, Kind};
 use crate::l10n::fl;
-use crate::widgets::{
-    self, Choice, chosen_hint, note, preset_number, preset_segments, row, section,
-};
+use crate::widgets::{self, Choice, chosen_hint, preset_number, preset_segments, row, section};
 use crate::{cuts, timeline};
 
 fn spoofs() -> [Choice<Spoof>; 3] {
@@ -81,7 +79,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             // .tgs results, and honest WebM ones, last 3 seconds at most
             let cut = tgs || spoof == Spoof::Never;
             match played {
-                Some(played) if cut && telegram::too_long(played) => note(
+                Some(played) if cut && telegram::too_long(played) => widgets::hint(
                     ui,
                     fl!(
                         "plays-cut",
@@ -89,7 +87,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                         used = widgets::seconds(used.unwrap_or_default())
                     ),
                 ),
-                Some(played) => note(ui, fl!("plays", played = widgets::seconds(played))),
+                Some(played) => widgets::hint(ui, fl!("plays", played = widgets::seconds(played))),
                 None => {}
             }
         });
@@ -139,7 +137,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                     && telegram::too_long(played)
                 {
                     let played = widgets::seconds(played);
-                    note(ui, fl!("plays-spoofed", played = played));
+                    widgets::hint(ui, fl!("plays-spoofed", played = played));
                 }
             });
             let honest = options.spoof.or(webm_base.spoof) == Some(Spoof::Never);
@@ -239,7 +237,7 @@ fn used_part(ui: &mut egui::Ui, item: &mut Item, length: f64, in_frames: bool) {
         }
     });
     if let Some(counted) = counted {
-        note(ui, counted);
+        widgets::hint(ui, counted);
     }
 }
 
@@ -258,7 +256,7 @@ pub(super) fn frame(ui: &mut egui::Ui, item: &mut Item, in_frames: bool) {
             item.choices.frame = (index > 0).then_some(frames.times[index]);
         }
         let index = frames.at(item.choices.frame.unwrap_or(0.0));
-        note(
+        widgets::hint(
             ui,
             if in_frames {
                 fl!(

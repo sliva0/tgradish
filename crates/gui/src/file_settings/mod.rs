@@ -112,7 +112,7 @@ pub(crate) fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     }
     segments(ui, &mut item.choices.target, &targets(), |_| Ok(()));
     // .tgs animations are vectors: square, but of no size in pixels
-    note(
+    widgets::hint(
         ui,
         match (item.format, item.choices.target) {
             (Format::Webm, Target::Sticker) => fl!("needs-webm-sticker"),
@@ -225,9 +225,9 @@ pub(crate) fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 note(ui, crate::jobs::failure(&err));
             }
         }
-        _ if image => note(ui, pictures),
-        (Some(text), Ok(preset)) if preset.path.is_none() => note(ui, text),
-        (_, Ok(preset)) => note(ui, preset.description.clone()),
+        _ if image => widgets::hint(ui, pictures),
+        (Some(text), Ok(preset)) if preset.path.is_none() => widgets::hint(ui, text),
+        (_, Ok(preset)) => widgets::hint(ui, preset.description.clone()),
     }
 }
 
