@@ -238,7 +238,7 @@ impl App {
                 }
                 // ffmpeg, for videos
                 Recipe::Tgs(options) => Ok(Setup::Tgs { options, backend: backend.clone().ok() }),
-                Recipe::Image(options) => {
+                Recipe::Webp(options) => {
                     backend.clone().map(|backend| Setup::Image { options, backend })
                 }
             });
