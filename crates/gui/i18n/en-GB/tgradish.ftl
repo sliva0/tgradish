@@ -368,6 +368,8 @@ scale-unsuited = The crop doesn't suit this scale yet
 # has transparent margins, the size of the whole result.
 scale-makes = { $scale } makes the crop { $width } × { $height } px
 scale-makes-padded = { $scale } makes the crop { $width } × { $height } px; transparent margins fill the rest of the { $box_width } × { $box_height }
+# The scale of the messages above where stretching makes it differ each way.
+scale-each-way = ×{ $across } across and ×{ $down } down
 scale-shrinks = The crop is larger than the result, so it shrinks with sharp pixels: a fixed scale like ×1/2 shrinks it by whole blocks
 margins = Margins
     .hint = Edge rows and columns that are transparent in all input frames
@@ -624,6 +626,8 @@ plan-faster = Sped up by a factor of { $factor }
 plan-slower = Slowed down by a factor of { $factor }
 plan-cut-3-s = Cut at 3 s of { $played }
 plan-spoofed = Duration spoofed, so all { $played } plays
+# "Always spoof", where the result is short enough not to need it.
+plan-spoofed-anyway = Duration spoofed, though { $played } is short enough
 plan-saved = Saved as { $name }
 
 
