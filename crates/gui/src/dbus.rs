@@ -24,22 +24,25 @@ pub const STRUCT: c_int = b'r' as c_int;
 pub const DOUBLE: c_int = b'd' as c_int;
 
 macro_rules! functions {
-    ($($name:ident: fn($($arg:ty),*) $(-> $ret:ty)?;)*) => {
-        /// The functions of libdbus used here, some only to test with.
-        #[cfg_attr(not(test), allow(dead_code))]
+    ($($(#[$only:meta])? $name:ident: fn($($arg:ty),*) $(-> $ret:ty)?;)*) => {
+        /// The functions of libdbus used here; those only tests use are
+        /// looked for only in tests, so a libdbus without them still does.
         pub struct Dbus {
-            $(pub $name: unsafe extern "C" fn($($arg),*) $(-> $ret)?,)*
+            $($(#[$only])? pub $name: unsafe extern "C" fn($($arg),*) $(-> $ret)?,)*
             _library: libloading::Library,
         }
 
         impl Dbus {
             pub fn load() -> Option<Dbus> {
-                // SAFETY: loading libdbus runs no code of its own, and each
-                // function has the type its header declares
+                // SAFETY: what libdbus runs as it loads only sets up its own
+                // state, and each function has the type its header declares
                 unsafe {
                     let library = libloading::Library::new("libdbus-1.so.3").ok()?;
-                    $(let $name = *library.get(concat!(stringify!($name), "\0").as_bytes()).ok()?;)*
-                    Some(Dbus { $($name,)* _library: library })
+                    $(
+                        $(#[$only])?
+                        let $name = *library.get(concat!(stringify!($name), "\0").as_bytes()).ok()?;
+                    )*
+                    Some(Dbus { $($(#[$only])? $name,)* _library: library })
                 }
             }
         }
@@ -69,6 +72,7 @@ functions! {
     dbus_message_iter_get_basic: fn(*mut Iter, *mut c_void);
     dbus_message_iter_next: fn(*mut Iter) -> u32;
     dbus_message_iter_recurse: fn(*mut Iter, *mut Iter);
+    #[cfg(test)]
     dbus_message_new_signal: fn(*const c_char, *const c_char, *const c_char) -> *mut Message;
     dbus_message_iter_open_container: fn(*mut Iter, c_int, *const c_char, *mut Iter) -> u32;
     dbus_message_iter_close_container: fn(*mut Iter, *mut Iter) -> u32;

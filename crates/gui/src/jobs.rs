@@ -240,7 +240,9 @@ pub struct Done {
     pub json_bytes: Option<u64>,
     pub shapes: Option<(usize, usize)>,
     pub problems: Vec<Problem>,
-    /// `.tgs` results' frames; WebM ones are decoded from the file.
+    /// The frames of `.tgs` results, as drawn while making them, and of
+    /// pictures, until the window takes them; WebM ones are decoded from
+    /// the file.
     pub preview: Option<Preview>,
 }
 

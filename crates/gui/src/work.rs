@@ -173,7 +173,6 @@ impl App {
         for item in &mut self.items {
             if let Some(Conversion { job, .. }) = &mut item.job
                 && (job.poll() || job.is_finished())
-                && !job.is_waiting()
             {
                 finished.push(item.id);
             }
@@ -181,15 +180,21 @@ impl App {
         for id in finished {
             let selected = self.selected == Some(id);
             let item = self.item_mut(id).expect("just found");
-            let made = item.job.take().expect("just found");
-            let Status::Done(done) = &made.job.status else {
+            let mut made = item.job.take().expect("just found");
+            let format = made.format;
+            let Status::Done(done) = &mut made.job.status else {
                 item.failed = Some(made);
                 continue;
             };
             let output = done.output.clone();
             item.result_thumb = None;
-            item.result_clip = match &done.preview {
-                Some(preview) => Load::Ready(Clip::from_preview(preview.clone(), true)),
+            // a picture is read from its file again; a .tgs can't be
+            let preview = match format {
+                Format::Image => done.preview.take(),
+                Format::Webm | Format::Tgs => done.preview.clone(),
+            };
+            item.result_clip = match preview {
+                Some(preview) => Load::Ready(Clip::from_preview(preview, true)),
                 None => Load::Idle,
             };
             if selected {
