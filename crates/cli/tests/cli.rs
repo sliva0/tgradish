@@ -172,6 +172,48 @@ fn converts_with_json_events() {
     assert_eq!(info["issues"], Value::Array(vec![]));
 }
 
+/// Closing stdout mid-conversion stops it as cancelling does, leaving no
+/// temporary files and no ffmpeg behind, and only then exits as SIGPIPE
+/// would have it.
+#[cfg(target_os = "linux")]
+#[test]
+fn stops_cleanly_when_stdout_closes() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+
+    let Some(input) = clip(Clip::Square) else { return };
+    let dir = tempfile::tempdir().unwrap();
+    // the conversion's own temporary directory, to look in after
+    let temp = dir.path().join("tmp");
+    std::fs::create_dir(&temp).unwrap();
+    let out = dir.path().join("out.webm");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
+        .args(["--ffmpeg-from", "system", "--json", "convert", input.to_str().unwrap(), "-o"])
+        .arg(&out)
+        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TMPDIR", &temp)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // read until ffmpeg is encoding, then stop reading, as head would
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let encoding = lines.by_ref().map_while(Result::ok).any(|line| line.contains("progress"));
+    assert!(encoding, "never encoded");
+    drop(lines);
+    let status = child.wait().unwrap();
+    assert_eq!(status.code(), Some(141));
+    let left: Vec<_> = std::fs::read_dir(&temp).unwrap().map(|e| e.unwrap().path()).collect();
+    assert!(left.is_empty(), "left behind: {left:?}");
+    // ffmpeg is told where its pass log goes, in the temporary directory
+    let temp = temp.to_str().unwrap();
+    for process in std::fs::read_dir("/proc").unwrap().filter_map(Result::ok) {
+        let Ok(command) = std::fs::read(process.path().join("cmdline")) else { continue };
+        let command = String::from_utf8_lossy(&command);
+        assert!(!command.contains(temp), "still running: {command}");
+    }
+    assert!(!out.exists());
+}
+
 #[test]
 fn cancels_from_stdin() {
     use std::io::{BufRead, BufReader, Write};
