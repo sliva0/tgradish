@@ -383,7 +383,9 @@ pub(crate) fn shareable_tgs(options: &TgsOptions) -> TgsOptions {
 }
 
 /// Writes a preset named `name` into `dir`, said to be `description`, of
-/// what [`shareable`] keeps of `webm` and `tgs`, and returns its file.
+/// `webm` and `tgs` without what only makes sense for one file, as what to
+/// make, its crop, time, tag, layers and title, and a sprite sheet's
+/// layout; and returns its file.
 /// One there already is replaced only with `replace`.
 pub fn save(
     dir: &Path,

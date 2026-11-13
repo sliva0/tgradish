@@ -244,7 +244,10 @@ impl Backend {
         naming(still, &plan.input, &read.input)
     }
 
-    /// See [`ffmpeg::ssim`].
+    /// Compares an encoded attempt at `fps` with the source at the planned
+    /// frame rate. The source drives the comparison and the attempt's
+    /// frames are repeated in between, so lower frame rates lose points on
+    /// frames they skip. Returns SSIM from 0 to 1, ignoring alpha.
     pub fn ssim(
         &self,
         plan: &Plan,

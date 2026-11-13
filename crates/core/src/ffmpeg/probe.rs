@@ -31,7 +31,8 @@ pub struct Probe {
     pub duration: Option<f64>,
     /// Where the video starts, in seconds after the file's start, which
     /// other streams can start before. Times into the video, as cuts and
-    /// [`frame_starts`] give them, count from here.
+    /// [`Backend::frame_starts`](crate::backend::Backend::frame_starts)
+    /// give them, count from here.
     pub start: f64,
     pub alpha: bool,
     pub still_image: bool,
