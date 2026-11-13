@@ -203,7 +203,10 @@ impl Preset {
     /// The preset in `text`, a preset file at `path`, named `name`.
     fn read(name: &str, path: &Path, text: &str) -> std::result::Result<Preset, PresetError> {
         let place = path.display().to_string();
-        let broken = |err: &dyn std::fmt::Display| PresetError::Broken(format!("{place}: {err}"));
+        // TOML's errors end in a line break, which a message shouldn't
+        let broken = |err: &dyn std::fmt::Display| {
+            PresetError::Broken(format!("{place}: {}", err.to_string().trim_end()))
+        };
         let file: PresetFile = toml::from_str(text).map_err(|err| broken(&err))?;
         for (table, options) in [("webm", &file.webm), ("tgs", &file.tgs)] {
             if let Some(key) = options.keys().find(|key| PER_FILE.contains(&key.as_str())) {
@@ -290,7 +293,7 @@ pub enum PresetError {
     Extended(String),
     /// A preset's file sets an option of one file, one of [`PER_FILE`],
     /// as `key` names it in its table, `webm.crop`; `place` is the file.
-    #[error("{place}: {key} is one file's to choose, which a preset says nothing of")]
+    #[error("broken preset {place}: {key} is one file's to choose, which a preset says nothing of")]
     PerFile { place: String, key: String },
 }
 
@@ -755,6 +758,7 @@ mod tests {
         // what one file has is no preset's to say
         write(dir.path(), "emoji", "[webm]\ntarget = 'emoji'\n");
         write(dir.path(), "sheet", "[tgs]\nspeed = 'fast'\nsheet = '4x1'\n");
+        write(dir.path(), "unreadable", "[webm\n");
         std::fs::write(dir.path().join("notes.txt"), "ignored").unwrap();
 
         let presets = Presets::load(Some(dir.path())).unwrap();
@@ -785,6 +789,11 @@ mod tests {
         // crf isn't a .tgs option
         assert!(presets.tgs("wrong").unwrap_err().to_string().contains("crf"));
         assert!(presets.get("old").is_err());
-        assert_eq!(presets.iter().count(), 12);
+        // a file's own faults say it is broken, and end where the message does
+        for name in ["broken", "wrong", "emoji", "sheet", "unreadable"] {
+            let err = presets.get(name).unwrap_err().to_string();
+            assert!(err.starts_with("broken preset ") && err.trim_end() == err, "{err:?}");
+        }
+        assert_eq!(presets.iter().count(), 13);
     }
 }
