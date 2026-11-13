@@ -225,6 +225,61 @@ impl std::fmt::Display for Crop {
     }
 }
 
+/// How a sprite sheet is laid out: `columns` by `rows` equal cells, its
+/// frames row by row. Written `COLUMNSxROWS`, as `4x2`, the `x` either
+/// case and spaces around the numbers allowed; reading it, as from a
+/// file, refuses anything else, a side of 0 included.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct Sheet {
+    pub columns: u32,
+    pub rows: u32,
+}
+
+impl std::str::FromStr for Sheet {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let invalid = || format!("{s:?} is not COLUMNSxROWS, for example 4x2");
+        let (columns, rows) = s.split_once(['x', 'X']).ok_or_else(invalid)?;
+        let number = |n: &str| n.trim().parse::<u32>().ok().filter(|&n| n > 0).ok_or_else(invalid);
+        Ok(Sheet { columns: number(columns)?, rows: number(rows)? })
+    }
+}
+
+impl std::fmt::Display for Sheet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}x{}", self.columns, self.rows)
+    }
+}
+
+impl TryFrom<String> for Sheet {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl From<Sheet> for String {
+    fn from(value: Sheet) -> String {
+        value.to_string()
+    }
+}
+
+impl JsonSchema for Sheet {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Sheet".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "pattern": r"^\s*[0-9]*[1-9][0-9]*\s*[xX]\s*[0-9]*[1-9][0-9]*\s*$",
+            "description": "COLUMNSxROWS equal cells, frames row by row"
+        })
+    }
+}
+
 /// A scale that lines input pixels up with the result's: a whole number of
 /// result pixels for each input pixel (`2`), or the other way round
 /// (`1/2`). Written as `N`, `1/N` or a decimal like `0.5`; reading it, as
@@ -716,6 +771,23 @@ mod tests {
         }
         let half: ExactScale = "1/2".parse().unwrap();
         assert!(half.is_valid() && half.apply(4) == Some(2) && half.most_input(512) == 1024);
+    }
+
+    #[test]
+    fn parses_sheets() {
+        let sheet = Sheet { columns: 4, rows: 2 };
+        for text in ["4x2", "4X2", " 4 x 2 ", "04x2"] {
+            assert_eq!(text.parse(), Ok(sheet), "{text}");
+        }
+        assert_eq!(sheet.to_string(), "4x2");
+        for text in ["4 by 2", "0x2", "4x0", "4x", "x2", "4x2x1", "-1x2"] {
+            assert!(text.parse::<Sheet>().is_err(), "{text}");
+        }
+        // as a file has it, refused there too
+        let read = |text: &str| serde_json::from_value::<Sheet>(serde_json::json!(text));
+        assert_eq!(read("2X3").unwrap(), Sheet { columns: 2, rows: 3 });
+        assert!(read("foo").is_err());
+        assert_eq!(serde_json::to_value(sheet).unwrap(), "4x2");
     }
 
     #[test]

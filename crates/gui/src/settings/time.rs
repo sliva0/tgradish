@@ -32,7 +32,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     // what the preset sets, which the item's own values go over
     let webm_base = item.choices.webm_base(context.presets, context.config).unwrap_or_default();
     let tgs_base = item.choices.tgs_base(context.presets, context.config).unwrap_or_default();
-    let sheet = item.choices.tgs.sheet.is_some() || tgs_base.sheet.is_some();
+    let sheet = item.choices.tgs.sheet.is_some();
     let sequence = tgs && (item.sequence || sheet);
     if !animated && !sequence {
         return;

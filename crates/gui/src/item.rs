@@ -391,7 +391,7 @@ impl Framing {
                 keep_canvas: tgs.keep_canvas,
                 pixel_scale: tgs.pixel_scale,
                 resize: tgs.resize,
-                sheet: tgs.sheet.clone(),
+                sheet: tgs.sheet,
                 sheet_frames: tgs.sheet_frames,
                 fps: tgs.fps,
                 tempo: tgs.tempo,
@@ -678,9 +678,9 @@ mod tests {
         let presets = Presets::load(Some(dir.path())).unwrap();
         let mut choices = Choices::new(Target::Sticker);
         choices.preset = Some("slow".into());
-        choices.tgs.sheet = Some("4x1".into());
+        choices.tgs.sheet = "4x1".parse().ok();
         let reading = choices.reading(&presets, &Config::default());
-        assert_eq!((reading.sheet.as_deref(), reading.fps), (Some("4x1"), Some(2.0)));
+        assert_eq!((reading.sheet, reading.fps), ("4x1".parse().ok(), Some(2.0)));
     }
 
     #[test]

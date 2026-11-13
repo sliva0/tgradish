@@ -562,7 +562,6 @@ reading-art = Reading the pixel art
 sprite-sheet = Sprite sheet
     .hint = Frames laid out in a grid of equal cells, row by row
 read-as-sheet = Read as a sprite sheet
-    .preset = The preset reads it as one
 # The sprite sheet's columns × rows.
 sheet-cells = Cells
 sheet-frames = Frames
