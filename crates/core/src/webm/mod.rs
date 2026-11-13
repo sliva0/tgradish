@@ -23,9 +23,14 @@
 pub mod container;
 mod events;
 pub mod fit;
+mod options;
 mod plan;
 
 pub use events::{Event, Params, Rate};
+pub use options::{
+    CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, DEFAULT_FAKE_DURATION, HIGHEST_BITRATE, MAX_ATTEMPTS,
+    Options, in_effect,
+};
 pub use plan::{
     Plan, default_fit_range, encoded_length, estimate_bitrate, frame_count, plan, played_fps,
     read_from,
@@ -41,7 +46,6 @@ use crate::CancelToken;
 use crate::backend::{Backend, Pass};
 use crate::error::{Error, FileAction, Result};
 use crate::ffmpeg::Output;
-use crate::options::Options;
 use crate::picture::choose_auto_scaling;
 use crate::telegram::{self, Issue, Target};
 use container::Patch;

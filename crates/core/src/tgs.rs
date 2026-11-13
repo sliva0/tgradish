@@ -32,7 +32,7 @@ pub const DEFAULT_FPS: f64 = 12.0;
 /// Largest `.tgs` Telegram accepts, in bytes.
 pub const MAX_BYTES: u64 = tgradish_tgs::limits::telegram::MAX_BYTES as u64;
 
-/// Options for `.tgs` output. Like the WebM [`Options`](crate::options::Options),
+/// Options for `.tgs` output. Like the WebM [`Options`](crate::webm::Options),
 /// every field is optional so presets and flags can be layered.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]

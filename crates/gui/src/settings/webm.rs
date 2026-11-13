@@ -3,9 +3,9 @@
 //! for some ways of fitting, so the rest is greyed out rather than hidden.
 
 use eframe::egui;
-use tgradish_core::options::{
-    CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, Fit, FitUnit, HIGHEST_BITRATE, MAX_ATTEMPTS, Options,
-    Range, Speed,
+use tgradish_core::options::{Fit, FitUnit, Range, Speed};
+use tgradish_core::webm::{
+    CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, HIGHEST_BITRATE, MAX_ATTEMPTS, Options,
 };
 
 use crate::config::Config;

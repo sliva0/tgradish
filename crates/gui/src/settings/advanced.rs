@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use eframe::egui::{self, RichText};
-use tgradish_core::options::Options;
+use tgradish_core::webm::Options;
 
 use super::Context;
 use crate::item::Item;

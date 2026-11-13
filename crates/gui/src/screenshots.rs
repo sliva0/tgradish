@@ -13,9 +13,10 @@ use eframe::egui;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use tgradish_core::ffmpeg::FfmpegChoice;
-use tgradish_core::options::{Crop, Fit, Options, Scaling};
+use tgradish_core::options::{Crop, Fit, Scaling};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::tgs::TgsOptions;
+use tgradish_core::webm::Options;
 
 use crate::app::{App, set_theme};
 use crate::item::{self, Show, Zoom};

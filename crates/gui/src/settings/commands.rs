@@ -5,8 +5,9 @@
 use crate::config::Config;
 use eframe::egui::{self, RichText};
 use tgradish_core::ffmpeg::FfmpegChoice;
-use tgradish_core::options::{Options, Scaling};
+use tgradish_core::options::Scaling;
 use tgradish_core::presets::Format;
+use tgradish_core::webm::Options;
 use tgradish_core::{picture, webm};
 
 use super::Context;

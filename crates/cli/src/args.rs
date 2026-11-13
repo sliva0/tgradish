@@ -2,10 +2,11 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use tgradish_core::ffmpeg::FfmpegChoice;
-use tgradish_core::options::{self, Crop, ExactScale, Options, Range};
+use tgradish_core::options::{self, Crop, ExactScale, Range};
 use tgradish_core::presets::Format;
 use tgradish_core::telegram::Target;
 use tgradish_core::tgs::{self, TgsOptions};
+use tgradish_core::webm::{self, Options};
 
 pub use crate::term::ColorChoice;
 
@@ -507,7 +508,7 @@ pub struct SpoofArgs {
     /// Duration to encode into the metadata, as convert's --fake-duration.
     /// [default: a short one Telegram accepts]
     #[arg(short = 'd', long, value_name = "SECONDS",
-          default_value_t = options::DEFAULT_FAKE_DURATION, hide_default_value = true)]
+          default_value_t = webm::DEFAULT_FAKE_DURATION, hide_default_value = true)]
     pub fake_duration: f64,
     /// Title to store in the file.
     #[arg(long)]

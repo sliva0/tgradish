@@ -6,11 +6,12 @@
 use crate::config::ResultPreview;
 use eframe::egui::{self, Color32, Rect, RichText, pos2, vec2};
 use tgradish_core::backend::Backend;
-use tgradish_core::options::{Crop, Options, Resize, Scaling};
+use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::picture;
 use tgradish_core::presets::Format;
 use tgradish_core::telegram;
 use tgradish_core::tgs::TgsOptions;
+use tgradish_core::webm::Options;
 
 use crate::app::App;
 use crate::canvas::{self, Cropping, Kept, Picture, Screen};

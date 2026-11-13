@@ -22,10 +22,10 @@ use schemars::{JsonSchema, Schema, schema_for};
 use serde::Serialize;
 
 use crate::config::Config;
-use crate::options::Options;
 use crate::presets::{Format, Presets};
 use crate::tgs::{TgsEvent, TgsOptions};
 use crate::webm::Event;
+use crate::webm::Options;
 
 /// The version of the protocol: of the description, the events, what
 /// `--json` prints and the flags front-ends use. It goes up with a change

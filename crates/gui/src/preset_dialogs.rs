@@ -12,9 +12,10 @@
 use std::path::Path;
 
 use eframe::egui::{self, RichText, vec2};
-use tgradish_core::options::{Fit, Options};
+use tgradish_core::options::Fit;
 use tgradish_core::presets::{self, Presets};
 use tgradish_core::tgs::TgsOptions;
+use tgradish_core::webm::Options;
 
 use crate::app::App;
 use crate::item::Item;
@@ -554,9 +555,10 @@ fn take_up(item: &mut Item, name: &str) {
 mod tests {
     use crate::config::Config;
     use egui_kittest::kittest::Queryable;
-    use tgradish_core::options::{Fit, Options, Resize};
+    use tgradish_core::options::{Fit, Resize};
     use tgradish_core::presets::{self, Format, Presets};
     use tgradish_core::tgs::TgsOptions;
+    use tgradish_core::webm::Options;
 
     use super::{Change, Dialog};
     use crate::testing::{finish, harness, square};

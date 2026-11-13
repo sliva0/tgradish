@@ -3,10 +3,11 @@
 //! too, so what it shows is what converting makes.
 
 use eframe::egui;
-use tgradish_core::options::{Crop, ExactScale, Options, Resize, Scaling};
+use tgradish_core::options::{Crop, ExactScale, Resize, Scaling};
 use tgradish_core::picture;
 use tgradish_core::presets::Format;
 use tgradish_core::telegram::Target;
+use tgradish_core::webm::Options;
 
 use super::Context;
 use crate::canvas::{Exact, Keep};

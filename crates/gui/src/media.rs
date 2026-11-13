@@ -11,9 +11,9 @@ use tgradish_core::CancelToken;
 use tgradish_core::backend::{Backend, Frames, FramesRequest};
 use tgradish_core::drawn::{self, Readable};
 use tgradish_core::ffmpeg::Probe;
-use tgradish_core::options::Options;
 use tgradish_core::preview::Preview;
 use tgradish_core::tgs::{self, TgsOptions};
+use tgradish_core::webm::Options;
 use tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 
 use crate::jobs::failure;
