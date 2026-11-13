@@ -5,11 +5,11 @@ use std::path::PathBuf;
 use crate::config::Config;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
-use tgradish_core::inputs;
+use tgradish_core::input;
 use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::Target;
-use tgradish_core::tgs::TgsOptions;
+use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 use tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 
@@ -38,10 +38,10 @@ impl Kind {
     pub fn of(inputs: &[PathBuf], sequence: bool) -> Kind {
         match inputs {
             [input] if !sequence && !input.is_dir() => {
-                let extension = inputs::extension(input);
-                if inputs::ASEPRITE.contains(&extension.as_str()) {
+                let extension = input::extension(input);
+                if input::ASEPRITE.contains(&extension.as_str()) {
                     Kind::Aseprite
-                } else if inputs::IMAGES.contains(&extension.as_str()) {
+                } else if input::IMAGES.contains(&extension.as_str()) {
                     Kind::Image
                 } else {
                     Kind::Video
@@ -83,7 +83,7 @@ pub struct Choices {
     /// Values set over the preset's, for WebM and `.tgs` results; images
     /// take WebM's.
     pub webm: Options,
-    pub tgs: TgsOptions,
+    pub tgs: tgs::Options,
 }
 
 impl Choices {
@@ -99,7 +99,7 @@ impl Choices {
             length: None,
             frame: None,
             webm: Options::default(),
-            tgs: TgsOptions::default(),
+            tgs: tgs::Options::default(),
         }
     }
 
@@ -112,7 +112,7 @@ impl Choices {
         presets.webm(self.preset_name(Format::Webm, config)).map_err(|err| err.to_string())
     }
 
-    pub fn tgs_base(&self, presets: &Presets, config: &Config) -> Result<TgsOptions, String> {
+    pub fn tgs_base(&self, presets: &Presets, config: &Config) -> Result<tgs::Options, String> {
         presets.tgs(self.preset_name(Format::Tgs, config)).map_err(|err| err.to_string())
     }
 
@@ -132,8 +132,8 @@ impl Choices {
     }
 
     /// The same, as `.tgs` options.
-    pub fn shared_tgs(&self) -> TgsOptions {
-        TgsOptions {
+    pub fn shared_tgs(&self) -> tgs::Options {
+        tgs::Options {
             target: Some(self.target),
             tag: self.tag.clone(),
             show_layers: self.show_layers.clone(),
@@ -141,7 +141,7 @@ impl Choices {
             crop: self.crop,
             start: self.start,
             length: self.length,
-            ..TgsOptions::default()
+            ..tgs::Options::default()
         }
     }
 
@@ -165,7 +165,7 @@ impl Choices {
     }
 
     /// Everything a `.tgs` conversion gets.
-    pub fn tgs_options(&self, presets: &Presets, config: &Config) -> Result<TgsOptions, String> {
+    pub fn tgs_options(&self, presets: &Presets, config: &Config) -> Result<tgs::Options, String> {
         Ok(self.tgs_base(presets, config)?.merged(&self.tgs).merged(&self.shared_tgs()))
     }
 
@@ -185,18 +185,18 @@ impl Choices {
 
     /// The options that change what pixel art is read as, the preset's
     /// included.
-    pub fn reading(&self, presets: &Presets, config: &Config) -> TgsOptions {
+    pub fn reading(&self, presets: &Presets, config: &Config) -> tgs::Options {
         // a broken preset still leaves the item's own
         let own = || self.tgs.clone().merged(&self.shared_tgs());
         let options = self.tgs_options(presets, config).unwrap_or_else(|_| own());
-        TgsOptions {
+        tgs::Options {
             tag: options.tag,
             show_layers: options.show_layers,
             hide_layers: options.hide_layers,
             sheet: options.sheet,
             sheet_frames: options.sheet_frames,
             fps: options.fps,
-            ..TgsOptions::default()
+            ..tgs::Options::default()
         }
     }
 
@@ -230,7 +230,7 @@ impl Choices {
 #[serde(rename_all = "kebab-case")]
 pub enum Recipe {
     Webm(Options),
-    Tgs(TgsOptions),
+    Tgs(tgs::Options),
     Image(Options),
 }
 
@@ -350,7 +350,7 @@ pub struct Framing {
     length: Option<f64>,
     frame: Option<f64>,
     webm: Options,
-    tgs: TgsOptions,
+    tgs: tgs::Options,
 }
 
 impl Framing {
@@ -372,7 +372,7 @@ impl Framing {
                 tempo: webm.tempo,
                 ..Options::default()
             },
-            tgs: TgsOptions {
+            tgs: tgs::Options {
                 keep_canvas: tgs.keep_canvas,
                 pixel_scale: tgs.pixel_scale,
                 resize: tgs.resize,
@@ -380,7 +380,7 @@ impl Framing {
                 sheet_frames: tgs.sheet_frames,
                 fps: tgs.fps,
                 tempo: tgs.tempo,
-                ..TgsOptions::default()
+                ..tgs::Options::default()
             },
         }
     }
@@ -431,7 +431,7 @@ pub struct Item {
     pub still: Option<(f64, Load<Clip>)>,
     /// The input read as pixel art, for `.tgs`, with what it was read with.
     pub art: Load<Art>,
-    pub art_reading: TgsOptions,
+    pub art_reading: tgs::Options,
     /// An Aseprite file's tags and layers as last read, shown while it is
     /// read again, so nothing under them moves.
     pub aseprite_seen: Option<std::rc::Rc<AsepriteSeen>>,
@@ -474,7 +474,7 @@ impl Item {
             part: None,
             still: None,
             art: Load::Idle,
-            art_reading: TgsOptions::default(),
+            art_reading: tgs::Options::default(),
             aseprite_seen: None,
             input_thumb: None,
             job: None,

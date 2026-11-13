@@ -15,7 +15,7 @@ use egui_kittest::kittest::Queryable;
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{Crop, Fit, Scaling};
 use tgradish_core::presets::{Format, Presets};
-use tgradish_core::tgs::TgsOptions;
+use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 
 use crate::app::{App, set_theme};
@@ -137,7 +137,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         // and manage them
         let presets_dir = dir.path().join("presets");
         let quick = Options { fit: Some(Fit::Bitrate), ..Options::default() };
-        let mine = (&quick, &TgsOptions::default());
+        let mine = (&quick, &tgs::Options::default());
         tgradish_core::presets::save(&presets_dir, "my stickers", "Quick", mine, false).unwrap();
         let state = harness.state_mut();
         state.presets = Presets::load(Some(&presets_dir)).unwrap();

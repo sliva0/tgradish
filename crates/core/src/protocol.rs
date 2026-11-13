@@ -23,7 +23,7 @@ use serde::Serialize;
 
 use crate::config::Config;
 use crate::presets::{Format, Presets};
-use crate::tgs::{TgsEvent, TgsOptions};
+use crate::tgs;
 use crate::webm::Event;
 use crate::webm::Options;
 
@@ -72,7 +72,7 @@ pub struct PresetDescription {
     /// extends applied; `None` if broken.
     pub webm: Option<Options>,
     /// The same for `.tgs` results.
-    pub tgs: Option<TgsOptions>,
+    pub tgs: Option<tgs::Options>,
     /// Why the preset cannot be used, if it is broken for either format.
     pub error: Option<String>,
 }
@@ -154,8 +154,8 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
                 description: "Animated sticker, from pixel art",
                 output_extension: Format::Tgs.extension(),
                 default_preset: default_preset(Format::Tgs),
-                options: schema_for!(TgsOptions),
-                events: printed::<TgsEvent>(),
+                options: schema_for!(tgs::Options),
+                events: printed::<tgs::Event>(),
             },
             FormatDescription {
                 format: Format::Webp,
@@ -165,7 +165,7 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
                 output_extension: Format::Webp.extension(),
                 default_preset: default_preset(Format::Webp),
                 options: schema_for!(Options),
-                events: printed::<crate::webp::StillEvent>(),
+                events: printed::<crate::webp::Event>(),
             },
         ],
         presets,
@@ -182,7 +182,7 @@ mod tests {
     use crate::telegram::Issue;
     use crate::webm::{Params, Rate};
     use crate::webm::{Plan, Request};
-    use crate::webp::{Encoding, Outcome, StillEvent};
+    use crate::webp::{self, Encoding, Outcome};
 
     fn probe() -> Probe {
         Probe {
@@ -241,12 +241,12 @@ mod tests {
         let report = tgradish_tgs::normalise(&animation, &Default::default()).unwrap().1;
         let step = tgradish_tgs::sticker::Step::new(crate::tgs::Reduction::Despeckle, 60_000, 0.01);
         let tgs = [
-            TgsEvent::Started { input: "art.gif".into(), report: Box::new(report) },
-            TgsEvent::TooLarge { bytes: 70_000 },
-            TgsEvent::Reduced { step: step.clone() },
-            TgsEvent::Packing,
-            TgsEvent::Warning { message: "a warning".into() },
-            TgsEvent::Finished {
+            tgs::Event::Started { input: "art.gif".into(), report: Box::new(report) },
+            tgs::Event::TooLarge { bytes: 70_000 },
+            tgs::Event::Reduced { step: step.clone() },
+            tgs::Event::Packing,
+            tgs::Event::Warning { message: "a warning".into() },
+            tgs::Event::Finished {
                 output: "art.sticker.tgs".into(),
                 bytes: 60_000,
                 json_bytes: 300_000,
@@ -256,11 +256,11 @@ mod tests {
                 rectangles: 40,
                 issues: Vec::new(),
             },
-            TgsEvent::Error(Failure { message: "it failed".into(), input: None }),
+            tgs::Event::Error(Failure { message: "it failed".into(), input: None }),
         ]
         .map(|event| serde_json::to_value(event).unwrap());
         let still = [
-            StillEvent::Finished(Outcome {
+            webp::Event::Finished(Outcome {
                 output: "in.sticker.webp".into(),
                 bytes: 100_000,
                 width: 512,
@@ -269,8 +269,8 @@ mod tests {
                 issues: vec![Issue::WrongSize { width: 512, height: 384, side: 100, exact: true }],
                 warnings: vec!["a warning".into()],
             }),
-            StillEvent::Warning { message: "a warning".into() },
-            StillEvent::Error(Failure { message: "it failed".into(), input: None }),
+            webp::Event::Warning { message: "a warning".into() },
+            webp::Event::Error(Failure { message: "it failed".into(), input: None }),
         ]
         .map(|event| serde_json::to_value(event).unwrap());
         webm.into_iter().chain(tgs).chain(still).collect()

@@ -5,7 +5,7 @@
 // ffmpeg-next, so a few raw pointers are needed
 #![allow(unsafe_code)]
 
-mod source;
+mod reader;
 
 use std::ffi::{CStr, CString};
 use std::path::Path;
@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use ff::{Dictionary, Packet, Rational, codec, filter, format, frame};
 use ffmpeg_next as ff;
 
-use self::source::Source;
+use self::reader::Reader;
 use crate::CancelToken;
 use crate::backend::{Pass, pass_log_file};
 use crate::error::{Error, FileAction, Result};
@@ -129,7 +129,7 @@ fn ratio(value: Rational) -> Option<f64> {
 
 pub(crate) fn probe(input: &Path, cancel: &CancelToken) -> Result<Probe> {
     init()?;
-    let source = Source::open_file(input, None, cancel)?;
+    let source = Reader::open_file(input, None, cancel)?;
     let (context, stream, decoder) = (source.input(), source.stream(), source.decoder());
     // like ffprobe: the stream's aspect ratio wins over the codec's
     // SAFETY: reading a plain field of the open stream
@@ -173,14 +173,14 @@ pub(crate) fn probe(input: &Path, cancel: &CancelToken) -> Result<Probe> {
         timing: None,
     };
     if facts.untimed() {
-        facts.timing = Source::open_file(input, None, cancel)?.timing()?;
+        facts.timing = Reader::open_file(input, None, cancel)?.timing()?;
     }
     facts.probe(input)
 }
 
 pub(crate) fn frame_starts(input: &Path, cancel: &CancelToken) -> Result<Vec<f64>> {
     init()?;
-    Source::open_file(input, None, cancel)?.frame_starts()
+    Reader::open_file(input, None, cancel)?.frame_starts()
 }
 
 /// A filter graph from `buffer` sources named after `inputs` to a
@@ -205,7 +205,7 @@ fn filter_graph(inputs: &[(&str, String)], spec: &str) -> Result<filter::Graph> 
 /// A source read through a filter graph from `[in]` to `[out]`, one
 /// filtered frame at a time.
 struct Filtered {
-    source: Source,
+    source: Reader,
     graph: filter::Graph,
     /// The next decoded frame, not yet given to the filters.
     next: frame::Video,
@@ -215,7 +215,7 @@ struct Filtered {
 impl Filtered {
     /// `source` through `spec`, or `None` when it has no frames: the
     /// filters' input takes its format from the first.
-    fn new(mut source: Source, spec: &str) -> Result<Option<Filtered>> {
+    fn new(mut source: Reader, spec: &str) -> Result<Option<Filtered>> {
         let mut next = frame::Video::empty();
         if !source.next(&mut next)? {
             return Ok(None);
@@ -469,7 +469,7 @@ pub(crate) fn encode(
     cancel.check()?;
     let total = frame_count(params.length, params.fps);
     let read = read_seconds(total, params.fps);
-    let source = Source::open(plan, read, cancel)?;
+    let source = Reader::open(plan, read, cancel)?;
     let pix_fmt = if plan.alpha { "yuva420p" } else { "yuv420p" };
     let chain = video_filter(plan, params.fps, params.length, pix_fmt);
     let spec = format!("[in]{}{chain}[out]", plan.source.orientation.filters());
@@ -508,7 +508,7 @@ pub(crate) fn frames(
 ) -> Result<Vec<Vec<u8>>> {
     init()?;
     let read = read_seconds(count as u64, fps);
-    let source = Source::open_window(input, probe, start, read, cancel)?;
+    let source = Reader::open_window(input, probe, start, read, cancel)?;
     let chain = frames_filter(probe.still_image || count == 1, fps, (width, height));
     let spec = format!("[in]{}{chain},format=rgba[out]", probe.orientation.filters());
     let Some(mut filtered) = Filtered::new(source, &spec)? else { return Ok(Vec::new()) };
@@ -525,7 +525,7 @@ pub(crate) fn still(plan: &Plan, cancel: &CancelToken) -> Result<Vec<u8>> {
     init()?;
     cancel.check()?;
     let length = 1.0 / plan.fps;
-    let source = Source::open(plan, 2.0 * length, cancel)?;
+    let source = Reader::open(plan, 2.0 * length, cancel)?;
     let no_frame = || Error::NoFrame { path: plan.input.clone(), at: plan.start };
     // the first frame from the start, as it is: resampling to a frame rate
     // can skip a short one
@@ -545,8 +545,8 @@ pub(crate) fn ssim(plan: &Plan, candidate: &Path, fps: f64, cancel: &CancelToken
     init()?;
     let frames = frame_count(plan.length, plan.fps);
     let mut sources = [
-        Source::open(plan, read_seconds(frames, plan.fps), cancel)?,
-        Source::open_file(candidate, None, cancel)?,
+        Reader::open(plan, read_seconds(frames, plan.fps), cancel)?,
+        Reader::open_file(candidate, None, cancel)?,
     ];
     let mut next = [frame::Video::empty(), frame::Video::empty()];
     let mut open = [false; 2];

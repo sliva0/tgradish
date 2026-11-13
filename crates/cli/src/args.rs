@@ -5,10 +5,10 @@ use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{self, Crop, ExactScale, Range};
 use tgradish_core::presets::Format;
 use tgradish_core::telegram::Target;
-use tgradish_core::tgs::{self, TgsOptions};
+use tgradish_core::tgs;
 use tgradish_core::webm::{self, Options};
 
-pub use crate::term::ColorChoice;
+pub use crate::term::ColourChoice;
 
 const TGS: &str = "Animated stickers (TGS)";
 const ASEPRITE: &str = "Aseprite files";
@@ -58,10 +58,10 @@ pub struct Global {
         alias = "color",
         global = true,
         value_enum,
-        default_value_t = ColorChoice::Auto,
+        default_value_t = ColourChoice::Auto,
         value_name = "WHEN"
     )]
-    pub color: ColorChoice,
+    pub colour: ColourChoice,
 }
 
 /// [`FfmpegChoice`] for clap.
@@ -186,7 +186,7 @@ pub struct ConversionArgs {
     pub options: OptionArgs,
 }
 
-/// One flag per [`Options`] and [`TgsOptions`] field, with the same name.
+/// One flag per [`Options`] and [`tgs::Options`] field, with the same name.
 #[derive(Debug, Args)]
 pub struct OptionArgs {
     /// What to make. [default: sticker]
@@ -358,8 +358,8 @@ impl OptionArgs {
         named
     }
 
-    pub fn to_tgs_options(&self) -> TgsOptions {
-        TgsOptions {
+    pub fn to_tgs_options(&self) -> tgs::Options {
+        tgs::Options {
             target: self.target.map(Into::into),
             start: self.start,
             length: self.length,
@@ -592,7 +592,7 @@ mod tests {
     #[test]
     fn every_option_has_a_flag() {
         let cli = Cli::command();
-        for schema in [schemars::schema_for!(Options), schemars::schema_for!(TgsOptions)] {
+        for schema in [schemars::schema_for!(Options), schemars::schema_for!(tgs::Options)] {
             let schema = serde_json::to_value(schema).unwrap();
             let properties = schema["properties"].as_object().unwrap();
             for command in ["convert", "watch"] {
@@ -741,7 +741,7 @@ mod tests {
             ffmpeg_args: Some(vec!["-x".into(), "a b".into()]),
         };
         assert_eq!(parsed(options::flags(&webm)).to_options(), webm);
-        let tgs = TgsOptions {
+        let tgs = tgs::Options {
             target: Some(Target::Emoji),
             start: Some(0.5),
             length: Some(1.5),

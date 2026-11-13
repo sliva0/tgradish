@@ -10,7 +10,7 @@ use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::picture;
 use tgradish_core::presets::Format;
 use tgradish_core::telegram;
-use tgradish_core::tgs::TgsOptions;
+use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 
 use crate::app::App;
@@ -161,7 +161,7 @@ fn preview(
     inset: &mut Inset,
     item: &mut Item,
     (tempo, in_frames): (f64, &mut bool),
-    (webm, tgs): (&Options, &TgsOptions),
+    (webm, tgs): (&Options, &tgs::Options),
     look: &mut ResultPreview,
 ) {
     let has_result = item.result_clip.ready().is_some();
@@ -548,7 +548,12 @@ fn preview(
 
 /// What of `clip` a `.tgs` result shows, before it is made square: the
 /// `part` used, cut to what is visible unless it keeps the canvas.
-fn tgs_bounds(inset: &mut Inset, clip: &Clip, part: predict::Part, tgs: &TgsOptions) -> [usize; 4] {
+fn tgs_bounds(
+    inset: &mut Inset,
+    clip: &Clip,
+    part: predict::Part,
+    tgs: &tgs::Options,
+) -> [usize; 4] {
     let keep = tgs.keep_canvas_or_default();
     // only the frames the cut keeps, every one it overlaps, as normalising
     // reads them

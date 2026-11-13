@@ -9,7 +9,7 @@ use tgradish_core::CancelToken;
 use tgradish_core::backend::Backend;
 use tgradish_core::presets::Format;
 use tgradish_core::preview::Preview;
-use tgradish_core::tgs::{self, TgsEvent, TgsOptions, TgsRequest};
+use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 use tgradish_core::webm::{Event, Params};
 use tgradish_core::webm::{Request, convert};
@@ -29,7 +29,7 @@ pub enum Plan {
         backend: Backend,
     },
     Tgs {
-        options: TgsOptions,
+        options: tgs::Options,
         /// ffmpeg, which reads videos.
         backend: Option<Backend>,
     },
@@ -523,28 +523,28 @@ fn run(
         }
         Plan::Tgs { options, backend } => {
             let exact = options.exact_or_default();
-            let request = TgsRequest { inputs, sequence, output, options, overwrite, backend };
+            let request = tgs::Request { inputs, sequence, output, options, overwrite, backend };
             update(Box::new(move |progress| {
                 progress.tgs = Some(TgsStage::Reading);
                 progress.tgs_exact = exact;
             }));
             let outcome = tgs::convert(&request, cancel, &mut |event| match event {
-                TgsEvent::Started { report, .. } => update(Box::new(move |progress| {
+                tgs::Event::Started { report, .. } => update(Box::new(move |progress| {
                     progress.report = Some(report);
                     progress.tgs = Some(TgsStage::Drawing);
                 })),
-                TgsEvent::TooLarge { bytes } => update(Box::new(move |progress| {
+                tgs::Event::TooLarge { bytes } => update(Box::new(move |progress| {
                     progress.unchanged_bytes = Some(bytes as usize);
                     progress.tgs = Some(TgsStage::Fitting);
                 })),
-                TgsEvent::Reduced { step } => update(Box::new(move |progress| {
+                tgs::Event::Reduced { step } => update(Box::new(move |progress| {
                     progress.steps.push(step);
                     progress.tgs = Some(TgsStage::Fitting);
                 })),
-                TgsEvent::Packing => update(Box::new(|progress| {
+                tgs::Event::Packing => update(Box::new(|progress| {
                     progress.tgs = Some(TgsStage::Compressing);
                 })),
-                TgsEvent::Warning { message } => update(Box::new(move |progress| {
+                tgs::Event::Warning { message } => update(Box::new(move |progress| {
                     progress.warnings.push(message);
                 })),
                 _ => {}

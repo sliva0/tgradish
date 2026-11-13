@@ -579,7 +579,7 @@ fn cancelled_before_start_runs_nothing() {
 }
 
 #[test]
-fn ssim_penalizes_dropped_frames() {
+fn ssim_penalises_dropped_frames() {
     use tgradish_core::webm::plan;
 
     let Some(backends) = backends() else { return };
@@ -807,7 +807,7 @@ fn passes_encoder_options() {
 /// not replace without asking.
 #[test]
 fn tells_its_own_stickers_from_look_alikes() {
-    use tgradish_core::tgs::{self, TgsOptions, TgsRequest};
+    use tgradish_core::tgs;
     use tgradish_core::webp;
     let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     let backend = &backends[0];
@@ -858,11 +858,11 @@ fn tells_its_own_stickers_from_look_alikes() {
     assert!(!made_by_tgradish(&path("png.webp")));
 
     // .tgs: unmarked, named by another, and gzip that isn't one
-    let request = TgsRequest {
+    let request = tgs::Request {
         inputs: vec![walker],
         sequence: false,
         output: path("unmarked.tgs"),
-        options: TgsOptions { watermark: Some(false), ..TgsOptions::default() },
+        options: tgs::Options { watermark: Some(false), ..tgs::Options::default() },
         overwrite: false,
         backend: None,
     };
@@ -1180,7 +1180,7 @@ fn walking_video(dir: &Path, loops: u32) -> PathBuf {
 
 #[test]
 fn makes_tgs_stickers_from_videos() {
-    use tgradish_core::tgs::{self, TgsOptions, TgsRequest};
+    use tgradish_core::tgs;
     let Some(backends) = backends() else { return };
     let dir = tempfile::tempdir().unwrap();
     let (once, long) = (walking_video(dir.path(), 1), walking_video(dir.path(), 5));
@@ -1194,7 +1194,7 @@ fn makes_tgs_stickers_from_videos() {
         .status()
         .unwrap();
     let raw = made.success().then_some(raw);
-    let request = |input: &Path, output: String, options, backend| TgsRequest {
+    let request = |input: &Path, output: String, options, backend| tgs::Request {
         inputs: vec![input.to_path_buf()],
         sequence: false,
         output: dir.path().join(output),
@@ -1202,53 +1202,53 @@ fn makes_tgs_stickers_from_videos() {
         overwrite: true,
         backend,
     };
-    let sticker = |request: TgsRequest| tgs::convert(&request, &CancelToken::new(), &mut |_| {});
+    let sticker = |request: tgs::Request| tgs::convert(&request, &CancelToken::new(), &mut |_| {});
     // what the video should come to: the GIF it was made of
     let gif = dir.path().join("walker.gif");
-    let direct = sticker(request(&gif, "gif.tgs".into(), TgsOptions::default(), None)).unwrap();
+    let direct = sticker(request(&gif, "gif.tgs".into(), tgs::Options::default(), None)).unwrap();
     for backend in &backends {
         let name = name(backend);
         let video = |input: &Path, options| {
             let output = format!("{name}-{}.tgs", input.file_stem().unwrap().display());
             sticker(request(input, output, options, Some(backend.clone())))
         };
-        let made = video(&once, TgsOptions::default()).unwrap();
+        let made = video(&once, tgs::Options::default()).unwrap();
         assert!(made.issues.is_empty() && !made.changed, "{name}: {:?}", made.issues);
         assert!(made_by_tgradish(&made.output), "{name}");
         assert!(made.preview == direct.preview, "{name}: not the same as the GIF");
         // the third walk, read from where it starts
-        let third = TgsOptions { start: Some(1.6), length: Some(0.8), ..TgsOptions::default() };
+        let third = tgs::Options { start: Some(1.6), length: Some(0.8), ..tgs::Options::default() };
         let made = video(&long, third).unwrap();
         assert!(made.preview == direct.preview, "{name}: not the same as the GIF");
         // at its own pace, what plays past 3 seconds is cut, and said
-        let own_pace = TgsOptions { tempo: Some(1.0), ..TgsOptions::default() };
+        let own_pace = tgs::Options { tempo: Some(1.0), ..tgs::Options::default() };
         assert!(video(&long, own_pace).unwrap().changed, "{name}");
         // all of it, played faster
-        let made = video(&long, TgsOptions::default()).unwrap();
+        let made = video(&long, tgs::Options::default()).unwrap();
         assert!(made.issues.is_empty() && !made.changed, "{name}: {:?}", made.issues);
         // a cut between frames, as long as asked: 9 sixtieths
-        let cut = TgsOptions { length: Some(0.15), ..TgsOptions::default() };
+        let cut = tgs::Options { length: Some(0.15), ..tgs::Options::default() };
         let made = video(&once, cut).unwrap();
         let ticks: u32 = made.preview.frames.iter().map(|(_, ticks)| ticks).sum();
         assert_eq!(ticks, 9, "{name}");
-        let none = TgsOptions { length: Some(0.0), ..TgsOptions::default() };
+        let none = tgs::Options { length: Some(0.0), ..tgs::Options::default() };
         assert!(video(&once, none).is_err(), "{name}");
         // half of a frame of a second
         let slow = dir.path().join("slow.mkv");
         let out = slow.to_str().unwrap();
         make(&["-f", "lavfi", "-i", "color=red:s=16x16:r=1:d=2", "-c:v", "ffv1", out]);
-        let half = TgsOptions { length: Some(0.5), ..TgsOptions::default() };
+        let half = tgs::Options { length: Some(0.5), ..tgs::Options::default() };
         let made = video(&slow, half).unwrap();
         let ticks: u32 = made.preview.frames.iter().map(|(_, ticks)| ticks).sum();
         assert_eq!(ticks, 30, "{name}");
         // a stream that doesn't say how long it is, nor when frames start
         if let Some(raw) = &raw {
-            let made = video(raw, TgsOptions::default()).unwrap();
+            let made = video(raw, tgs::Options::default()).unwrap();
             assert!(made.preview.frames.len() > 1, "{name}: read as a still");
         }
     }
     // without ffmpeg, there is nothing to read a video with
-    let none = sticker(request(&once, "none.tgs".into(), TgsOptions::default(), None));
+    let none = sticker(request(&once, "none.tgs".into(), tgs::Options::default(), None));
     assert!(matches!(none, Err(Error::FfmpegNotFound(_))));
 }
 

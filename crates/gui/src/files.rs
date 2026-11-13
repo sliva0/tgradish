@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use eframe::egui::{self, Color32, FontId, RichText, vec2};
 use tgradish_core::presets::Format;
-use tgradish_core::{inputs, telegram};
+use tgradish_core::{input, telegram};
 
 use crate::app::{App, set_theme};
 use crate::fonts::{drawable, missing_note, text_format};
@@ -69,7 +69,7 @@ impl App {
                 Pick::Files => dialog.pick_files().map(Picked::Files),
                 Pick::Folder => dialog.pick_folder().map(Picked::Folder),
                 Pick::Frames => dialog
-                    .add_filter(images, &[inputs::IMAGES, inputs::ASEPRITE].concat())
+                    .add_filter(images, &[input::IMAGES, input::ASEPRITE].concat())
                     .pick_files()
                     .map(Picked::Frames),
                 // read here too, as large files take a moment

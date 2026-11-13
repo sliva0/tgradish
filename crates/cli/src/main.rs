@@ -230,12 +230,12 @@ fn main() -> ExitCode {
     // `tgradish` alone, in a terminal: what it does, and that a window opens
     // too
     if std::env::args_os().len() == 1 {
-        term::init(args::ColorChoice::Auto, false);
+        term::init(args::ColourChoice::Auto, false);
         ui::introduce();
         return ExitCode::SUCCESS;
     }
     let cli = Cli::parse();
-    term::init(cli.global.color, cli.global.json);
+    term::init(cli.global.colour, cli.global.json);
     #[cfg(feature = "gui")]
     let window = matches!(cli.command, Command::Gui);
     #[cfg(not(feature = "gui"))]

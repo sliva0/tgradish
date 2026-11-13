@@ -58,7 +58,7 @@ impl Decoding {
     }
 }
 
-pub(super) struct Source {
+pub(super) struct Reader {
     decoding: Decoding,
     time_base: Rational,
     /// Timestamp where the wanted window starts, in `time_base` units: the
@@ -117,13 +117,13 @@ fn to_units(seconds: f64, time_base: Rational) -> i64 {
     (seconds * f64::from(time_base.denominator()) / f64::from(time_base.numerator())).round() as i64
 }
 
-impl Source {
+impl Reader {
     /// Opens a file and its first video stream, like ffmpeg's `-map 0:v:0`.
     pub(super) fn open_file(
         path: &Path,
         decoder: Option<&str>,
         cancel: &CancelToken,
-    ) -> Result<Source> {
+    ) -> Result<Reader> {
         cancel.check()?;
         // the interrupt callback below cannot stop an open() or read() that
         // blocks in the OS, as on a FIFO without a writer
@@ -167,7 +167,7 @@ impl Source {
         let file_start = unsafe { (*input.as_ptr()).start_time };
         let file_start = if file_start == ff::ffi::AV_NOPTS_VALUE { 0 } else { file_start };
         let start = file_start.rescale(Rational::new(1, ff::ffi::AV_TIME_BASE), time_base);
-        Ok(Source {
+        Ok(Reader {
             decoding: Decoding {
                 input,
                 stream: index,
@@ -187,7 +187,7 @@ impl Source {
 
     /// Opens the planned input, limited to what plays for `read` seconds
     /// of the result after the start.
-    pub(super) fn open(plan: &Plan, read: f64, cancel: &CancelToken) -> Result<Source> {
+    pub(super) fn open(plan: &Plan, read: f64, cancel: &CancelToken) -> Result<Reader> {
         Self::open_window(&plan.input, &plan.source, plan.start, read * plan.tempo, cancel)
     }
 
@@ -199,7 +199,7 @@ impl Source {
         start: f64,
         read: f64,
         cancel: &CancelToken,
-    ) -> Result<Source> {
+    ) -> Result<Reader> {
         let mut source = Self::open_file(path, probe.decoder.as_deref(), cancel)?;
         if probe.still_image {
             source.still = Some((None, 0));
@@ -271,7 +271,7 @@ impl Source {
         self.decoding.input.stream(self.decoding.stream).expect("opened from this input")
     }
 
-    /// Time base of the frames returned by [`Source::next`].
+    /// Time base of the frames returned by [`Reader::next`].
     pub(super) fn time_base(&self) -> Rational {
         if self.still.is_some() { Rational::new(1, STILL_FPS) } else { self.time_base }
     }

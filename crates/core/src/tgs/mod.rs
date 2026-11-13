@@ -10,13 +10,13 @@ mod options;
 mod preview;
 mod read;
 
-pub use events::TgsEvent;
+pub use events::Event;
 #[cfg(test)]
 pub(crate) use inspect::read_json;
 pub use inspect::{inspect_file, is_sticker};
-pub use options::TgsOptions;
+pub use options::Options;
 use read::load;
-pub use read::{Source, needs_ffmpeg, read_source};
+pub use read::{Art, needs_ffmpeg, read_art};
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -28,10 +28,10 @@ pub use tgradish_tgs::reduce::{Compromise, Kind, Reduction};
 use tgradish_tgs::sticker::{self, Progress, Step};
 
 use crate::CancelToken;
+use crate::art;
 use crate::backend::Backend;
 use crate::error::{Error, Result};
 use crate::preview::Preview;
-use crate::source;
 use crate::telegram::Target;
 
 /// Frame rate of still images, sprite sheets and image sequences unless
@@ -46,28 +46,28 @@ pub fn default_output(input: &Path, target: Target) -> PathBuf {
     crate::fsutil::beside(input, &format!("{}.tgs", target.name()))
 }
 
-pub struct TgsRequest {
+pub struct Request {
     /// One animation, image or video, or with `sequence` the frames of one
     /// animation (image files, or directories of them).
     pub inputs: Vec<PathBuf>,
     pub sequence: bool,
     pub output: PathBuf,
-    pub options: TgsOptions,
+    pub options: Options,
     pub overwrite: bool,
     /// ffmpeg, which reads videos; pixel art doesn't need it.
     pub backend: Option<Backend>,
 }
 
-/// What converting made: all that [`TgsEvent::Finished`] says, whether or
+/// What converting made: all that [`Event::Finished`] says, whether or
 /// not events were followed, and a preview.
 #[derive(Debug, Clone)]
-pub struct TgsOutcome {
+pub struct Outcome {
     pub output: PathBuf,
     pub bytes: u64,
     /// Size of the Lottie JSON inside.
     pub json_bytes: u64,
     /// Whether anything visible was given up to fit, see
-    /// [`TgsEvent::Finished`].
+    /// [`Event::Finished`].
     pub changed: bool,
     /// Reductions fitting applied, in order.
     pub steps: Vec<Step>,
@@ -81,10 +81,10 @@ pub struct TgsOutcome {
 
 /// Fails when the output is one of the inputs, even through another path
 /// or a link.
-fn refuse_overwriting_inputs(request: &TgsRequest) -> Result<()> {
+fn refuse_overwriting_inputs(request: &Request) -> Result<()> {
     let Ok(output) = request.output.canonicalize() else { return Ok(()) };
     let inputs = if request.sequence || request.inputs.len() > 1 {
-        source::sequence_files(&request.inputs)?
+        art::sequence_files(&request.inputs)?
     } else {
         request.inputs.clone()
     };
@@ -98,10 +98,10 @@ fn refuse_overwriting_inputs(request: &TgsRequest) -> Result<()> {
 
 /// Converts pixel art into a `.tgs` sticker.
 pub fn convert(
-    request: &TgsRequest,
+    request: &Request,
     cancel: &CancelToken,
-    on_event: &mut dyn FnMut(TgsEvent),
-) -> Result<TgsOutcome> {
+    on_event: &mut dyn FnMut(Event),
+) -> Result<Outcome> {
     if request.output.exists() && !request.overwrite {
         return Err(Error::OutputExists(request.output.clone()));
     }
@@ -128,14 +128,14 @@ pub fn convert(
             Progress::Normalised { report } => {
                 let found = report.warnings.iter().map(|w| w.to_string());
                 let warnings: Vec<String> = loaded.warnings.iter().cloned().chain(found).collect();
-                on_event(TgsEvent::Started { input: input.clone(), report });
+                on_event(Event::Started { input: input.clone(), report });
                 for message in warnings {
-                    on_event(TgsEvent::Warning { message });
+                    on_event(Event::Warning { message });
                 }
             }
-            Progress::TooLarge { bytes } => on_event(TgsEvent::TooLarge { bytes: bytes as u64 }),
-            Progress::Reduced { step } => on_event(TgsEvent::Reduced { step }),
-            Progress::Packing => on_event(TgsEvent::Packing),
+            Progress::TooLarge { bytes } => on_event(Event::TooLarge { bytes: bytes as u64 }),
+            Progress::Reduced { step } => on_event(Event::Reduced { step }),
+            Progress::Packing => on_event(Event::Packing),
             // what core has no event for yet isn't said
             _ => {}
         },
@@ -151,7 +151,7 @@ pub fn convert(
         return Err(Error::Cancelled);
     }
     crate::fsutil::write_output(&request.output, &sticker.tgs, request.overwrite)?;
-    let outcome = TgsOutcome {
+    let outcome = Outcome {
         output: request.output.clone(),
         bytes: sticker.bytes as u64,
         json_bytes: sticker.json_bytes as u64,
@@ -160,12 +160,12 @@ pub fn convert(
         layers: sticker.layers,
         rectangles: sticker.rectangles,
         issues: sticker.issues,
-        preview: Preview::of(
+        preview: preview::draw(
             &sticker.anim,
             settings.normalise.square == normalise::Square::Stretch,
         ),
     };
-    on_event(TgsEvent::Finished {
+    on_event(Event::Finished {
         output: outcome.output.clone(),
         bytes: outcome.bytes,
         json_bytes: outcome.json_bytes,
@@ -188,11 +188,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("art.png");
         std::fs::write(&input, b"not even a png").unwrap();
-        let request = |output: PathBuf| TgsRequest {
+        let request = |output: PathBuf| Request {
             inputs: vec![dir.path().to_path_buf()],
             sequence: true,
             output,
-            options: TgsOptions::default(),
+            options: Options::default(),
             overwrite: true,
             backend: None,
         };
@@ -212,8 +212,8 @@ mod tests {
         let input = dir.path().join("walker.gif");
         std::fs::write(&input, &walker.bytes).unwrap();
         let make = |resize| {
-            let options = TgsOptions { resize: Some(resize), ..TgsOptions::default() };
-            let request = TgsRequest {
+            let options = Options { resize: Some(resize), ..Options::default() };
+            let request = Request {
                 inputs: vec![input.clone()],
                 sequence: false,
                 output: dir.path().join(format!("{resize:?}.tgs")),

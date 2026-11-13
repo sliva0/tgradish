@@ -14,7 +14,7 @@ use std::path::Path;
 use eframe::egui::{self, RichText, vec2};
 use tgradish_core::options::Fit;
 use tgradish_core::presets::{self, Presets};
-use tgradish_core::tgs::TgsOptions;
+use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 
 use crate::app::App;
@@ -431,7 +431,7 @@ impl App {
                 let Some(index) = row(id) else { return };
                 let row = &mut managing.rows[index];
                 let description = row.typed_description.trim().to_owned();
-                match presets::describe(&file(&row.name), &description) {
+                match presets::set_description(&file(&row.name), &description) {
                     Ok(()) => (row.description, row.problem) = (description, None),
                     Err(err) => row.problem = Some(failure(&err)),
                 }
@@ -543,11 +543,11 @@ fn take_up(item: &mut Item, name: &str) {
     choices.preset = Some(name.to_owned());
     choices.webm = Options { title: choices.webm.title.take(), ..Options::default() };
     let tgs = &mut choices.tgs;
-    *tgs = TgsOptions {
+    *tgs = tgs::Options {
         title: tgs.title.take(),
         sheet: tgs.sheet.take(),
         sheet_frames: tgs.sheet_frames.take(),
-        ..TgsOptions::default()
+        ..tgs::Options::default()
     };
 }
 
@@ -557,7 +557,7 @@ mod tests {
     use egui_kittest::kittest::Queryable;
     use tgradish_core::options::{Fit, Resize};
     use tgradish_core::presets::{self, Format, Presets};
-    use tgradish_core::tgs::TgsOptions;
+    use tgradish_core::tgs;
     use tgradish_core::webm::Options;
 
     use super::{Change, Dialog};
@@ -611,7 +611,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let presets_dir = dir.path().join("presets");
         let webm = Options { crf: Some(20), ..Options::default() };
-        presets::save(&presets_dir, "mine", "", (&webm, &TgsOptions::default()), false).unwrap();
+        presets::save(&presets_dir, "mine", "", (&webm, &tgs::Options::default()), false).unwrap();
         let art = dir.path().join("art.png");
         square(&art, [255, 0, 0, 255]);
         let config =
@@ -672,7 +672,7 @@ mod tests {
     fn keeps_a_preset_another_extends() {
         let dir = tempfile::tempdir().unwrap();
         let webm = Options { crf: Some(20), ..Options::default() };
-        presets::save(dir.path(), "base", "", (&webm, &TgsOptions::default()), false).unwrap();
+        presets::save(dir.path(), "base", "", (&webm, &tgs::Options::default()), false).unwrap();
         std::fs::write(dir.path().join("child.toml"), "extends = 'base'\n").unwrap();
         let presets = Presets::load(Some(dir.path())).unwrap();
         let mut app = crate::app::App::with(Config::default(), None, presets, None);
@@ -702,7 +702,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let webm = Options { fit: Some(Fit::Crf), ..Options::default() };
-        presets::save(dir.path(), "by quality", "", (&webm, &TgsOptions::default()), false)
+        presets::save(dir.path(), "by quality", "", (&webm, &tgs::Options::default()), false)
             .unwrap();
         let presets = Presets::load(Some(dir.path())).unwrap();
         let mut app = crate::app::App::with(Config::default(), None, presets, None);

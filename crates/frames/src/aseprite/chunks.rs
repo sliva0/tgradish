@@ -237,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_indexed_and_grayscale() {
+    fn reads_indexed_and_greyscale() {
         // index 0 is transparent except on the background layer
         let indexed = |background: bool| {
             file(

@@ -13,7 +13,7 @@ use tgradish_tgs::sticker::Step;
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "event", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
-pub enum TgsEvent {
+pub enum Event {
     /// The input is read: what normalising found and did.
     Started {
         #[serde(serialize_with = "crate::protocol::serialize_path")]

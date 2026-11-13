@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 use clap::ValueEnum;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum ColorChoice {
+pub enum ColourChoice {
     Auto,
     Always,
     Never,
@@ -43,26 +43,26 @@ fn env(name: &str) -> Option<String> {
 }
 
 /// Finds out what the terminal does. Plain text when `plain`, as for JSON.
-pub fn init(color: ColorChoice, plain: bool) {
-    let colors = match color {
+pub fn init(colour: ColourChoice, plain: bool) {
+    let colours = match colour {
         _ if plain => false,
-        ColorChoice::Always => true,
-        ColorChoice::Never => false,
-        ColorChoice::Auto if env("NO_COLOR").is_some() => false,
-        ColorChoice::Auto if env("CLICOLOR_FORCE").is_some_and(|v| v != "0") => true,
-        ColorChoice::Auto => console::colors_enabled_stderr() && console::colors_enabled(),
+        ColourChoice::Always => true,
+        ColourChoice::Never => false,
+        ColourChoice::Auto if env("NO_COLOR").is_some() => false,
+        ColourChoice::Auto if env("CLICOLOR_FORCE").is_some_and(|v| v != "0") => true,
+        ColourChoice::Auto => console::colors_enabled_stderr() && console::colors_enabled(),
     };
-    console::set_colors_enabled(colors);
-    console::set_colors_enabled_stderr(colors);
-    let features = if plain || color == ColorChoice::Never || !std::io::stderr().is_terminal() {
+    console::set_colors_enabled(colours);
+    console::set_colors_enabled_stderr(colours);
+    let features = if plain || colour == ColourChoice::Never || !std::io::stderr().is_terminal() {
         Features::default()
     } else {
-        detect(colors)
+        detect(colours)
     };
     let _ = FEATURES.set(features);
 }
 
-fn detect(colors: bool) -> Features {
+fn detect(colours: bool) -> Features {
     let term = env("TERM").unwrap_or_default();
     if term == "dumb" {
         return Features::default();
@@ -77,7 +77,7 @@ fn detect(colors: bool) -> Features {
     let links = match env("FORCE_HYPERLINK") {
         Some(force) => force != "0",
         None => {
-            colors
+            colours
                 && (kitty
                     || ghostty
                     || wezterm
