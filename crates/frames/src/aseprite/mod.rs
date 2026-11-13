@@ -602,7 +602,10 @@ impl Sprite {
         let mut open: Vec<usize> = Vec::new();
         for index in 0..self.layers.len() {
             let level = usize::from(self.layers[index].level);
-            if level > open.len() || level > MAX_GROUP_DEPTH {
+            if level > MAX_GROUP_DEPTH {
+                return Err(error(format!("groups are nested more than {MAX_GROUP_DEPTH} deep")));
+            }
+            if level > open.len() {
                 return Err(error("a layer is nested deeper than its group"));
             }
             open.truncate(level);
@@ -1683,7 +1686,11 @@ mod tests {
         for level in 1..=MAX_GROUP_DEPTH as u16 + 1 {
             deep.push(layer(1, 1, level, 0, 255));
         }
-        assert!(decode(&file(1, 1, 32, 1, &[deep])).is_err());
+        let refused = decode(&file(1, 1, 32, 1, &[deep]));
+        assert!(
+            matches!(&refused, Err(Error::Decode { message, .. }) if message.contains("64 deep")),
+            "{refused:?}"
+        );
     }
 
     /// The tileset layers made by [`layer`] use: two 1x1 tiles (red,
