@@ -129,94 +129,90 @@ pub fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         ui.colored_label(widgets::WARN, format!("⚠ {}", fl!("not-pixel-art")));
     }
 
-    // presets say how to encode videos and animations; a picture has
-    // nothing to choose there
+    // presets say how to encode videos and animations; a picture takes
+    // only how they square and scale it
     ui.add_space(8.0);
     let image = item.format == Format::Image;
-    let nothing = fl!("preset", "image");
-    ui.add_enabled_ui(!image, |ui| {
-        let users =
-            context.presets.iter().any(|(_, preset)| preset.is_err() || preset.is_ok_and(is_users));
-        ui.horizontal(|ui| {
-            ui.label(fl!("preset"))
-                .on_hover_text(fl!("preset", "hint"))
-                .on_disabled_hover_text(nothing.as_str());
-            // where the user's own are renamed or deleted, once there are any
-            if users && context.presets_dir.is_some() {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let manage = egui::Button::new(RichText::new(fl!("manage-presets")).small())
-                        .frame(false);
-                    if ui.add(manage).on_hover_text(fl!("manage-presets", "hint")).clicked() {
-                        preset_dialogs::ask(ui.ctx(), Ask::Manage);
-                    }
-                });
-            }
-        });
-        let current = item.choices.preset_name(item.format, context.config).to_owned();
-        let default = context.config.preset_for(item.format).to_owned();
-        let names = preset_names(context.presets);
-        let mut chosen = current.as_str();
-        // the built-in three side by side, none lit while one of the
-        // user's is chosen
-        let speeds: Vec<Choice<&str>> = names
-            .iter()
-            .filter(|(name, _)| BUILTIN.contains(&name.as_str()))
-            .map(|(name, description)| {
-                // the built-in one's words for what is being made, or
-                // those of the user's file standing in for it
-                let builtin = context.presets.get(name).is_ok_and(|preset| preset.path.is_none());
-                let description = match builtin.then(|| builtin_description(name, item.format)) {
-                    Some(Some(text)) => text,
-                    _ => description.as_deref().unwrap_or("").to_owned(),
-                };
-                (name.as_str(), preset_label(name), description)
-            })
-            .collect();
-        // a file of the user's may stand in for one, and be broken
-        let broken = |name: &str| {
-            names.iter().any(|(other, description)| other == name && description.is_err())
-        };
-        segments(ui, &mut chosen, &speeds, |name| {
-            if broken(name) { Err(fl!("preset", "broken")) } else { Ok(()) }
-        });
-        // the user's own under them, a button each
-        let own: Vec<_> =
-            names.iter().filter(|(name, _)| !BUILTIN.contains(&name.as_str())).collect();
-        if !own.is_empty() {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-                for (name, description) in own {
-                    let response =
-                        widgets::choice(ui, chosen == name, name, 150.0, description.is_ok());
-                    let response =
-                        match description {
-                            Err(_) => response.on_disabled_hover_text(fl!("preset", "broken")),
-                            Ok(description) if !description.is_empty() => response.on_hover_text(
-                                fl!("preset-described", name = name, description = description),
-                            ),
-                            Ok(_) => response.on_hover_text(name),
-                        };
-                    if response.clicked() {
-                        chosen = name;
-                    }
+    let pictures = fl!("preset", "image");
+    let users =
+        context.presets.iter().any(|(_, preset)| preset.is_err() || preset.is_ok_and(is_users));
+    ui.horizontal(|ui| {
+        ui.label(fl!("preset")).on_hover_text(fl!("preset", "hint"));
+        // where the user's own are renamed or deleted, once there are any
+        if users && context.presets_dir.is_some() {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let manage =
+                    egui::Button::new(RichText::new(fl!("manage-presets")).small()).frame(false);
+                if ui.add(manage).on_hover_text(fl!("manage-presets", "hint")).clicked() {
+                    preset_dialogs::ask(ui.ctx(), Ask::Manage);
                 }
             });
         }
-        if chosen != current {
-            // another preset may fit another way, as the item's own range
-            // then can't say
-            let before = webm::fit_of(&item.choices, context);
-            item.choices.preset = (chosen != default).then(|| chosen.to_owned());
-            let after = webm::fit_of(&item.choices, context);
-            webm::follow_fit(&mut item.choices.webm, before, after);
-        }
-        match (builtin_description(chosen, item.format), context.presets.get(chosen)) {
-            _ if image => note(ui, nothing),
-            (Some(text), Ok(preset)) if preset.path.is_none() => note(ui, text),
-            (_, Ok(preset)) => note(ui, preset.description.clone()),
-            _ => {}
-        }
     });
+    let current = item.choices.preset_name(item.format, context.config).to_owned();
+    let default = context.config.preset_for(item.format).to_owned();
+    let names = preset_names(context.presets);
+    let mut chosen = current.as_str();
+    // the built-in three side by side, none lit while one of the
+    // user's is chosen
+    let speeds: Vec<Choice<&str>> = names
+        .iter()
+        .filter(|(name, _)| BUILTIN.contains(&name.as_str()))
+        .map(|(name, description)| {
+            // the built-in one's words for what is being made, or
+            // those of the user's file standing in for it
+            let builtin = context.presets.get(name).is_ok_and(|preset| preset.path.is_none());
+            let description = match builtin.then(|| builtin_description(name, item.format)) {
+                Some(Some(text)) => text,
+                Some(None) if image => pictures.clone(),
+                _ => description.as_deref().unwrap_or("").to_owned(),
+            };
+            (name.as_str(), preset_label(name), description)
+        })
+        .collect();
+    // a file of the user's may stand in for one, and be broken
+    let broken =
+        |name: &str| names.iter().any(|(other, description)| other == name && description.is_err());
+    segments(ui, &mut chosen, &speeds, |name| {
+        if broken(name) { Err(fl!("preset", "broken")) } else { Ok(()) }
+    });
+    // the user's own under them, a button each
+    let own: Vec<_> = names.iter().filter(|(name, _)| !BUILTIN.contains(&name.as_str())).collect();
+    if !own.is_empty() {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+            for (name, description) in own {
+                let response =
+                    widgets::choice(ui, chosen == name, name, 150.0, description.is_ok());
+                let response = match description {
+                    Err(_) => response.on_disabled_hover_text(fl!("preset", "broken")),
+                    Ok(description) if !description.is_empty() => response.on_hover_text(fl!(
+                        "preset-described",
+                        name = name,
+                        description = description
+                    )),
+                    Ok(_) => response.on_hover_text(name),
+                };
+                if response.clicked() {
+                    chosen = name;
+                }
+            }
+        });
+    }
+    if chosen != current {
+        // another preset may fit another way, as the item's own range
+        // then can't say
+        let before = webm::fit_of(&item.choices, context);
+        item.choices.preset = (chosen != default).then(|| chosen.to_owned());
+        let after = webm::fit_of(&item.choices, context);
+        webm::follow_fit(&mut item.choices.webm, before, after);
+    }
+    match (builtin_description(chosen, item.format), context.presets.get(chosen)) {
+        _ if image => note(ui, pictures),
+        (Some(text), Ok(preset)) if preset.path.is_none() => note(ui, text),
+        (_, Ok(preset)) => note(ui, preset.description.clone()),
+        _ => {}
+    }
 }
 
 /// Stickers or emoji, for picking which a file becomes.
@@ -361,6 +357,34 @@ mod tests {
         let names: Vec<String> =
             preset_names(&Presets::builtin()).into_iter().map(|(name, _)| name).collect();
         assert_eq!(names, ["fast", "balanced", "best"]);
+    }
+
+    #[test]
+    fn takes_a_preset_for_a_picture() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        use tgradish_core::telegram::Target;
+
+        let (presets, config) = (Presets::builtin(), Config::default());
+        let context = Context {
+            presets: &presets,
+            config: &config,
+            extra_args: true,
+            output: None,
+            config_path: None,
+            presets_dir: None,
+            in_frames: false,
+        };
+        let mut item = Item::new(1, vec!["photo.png".into()], false, Target::Sticker);
+        item.format = Format::Image;
+        let mut harness =
+            Harness::new_ui_state(|ui, item: &mut Item| make(ui, item, &context), item);
+        harness.run_steps(2);
+        // its picture settings apply, so it can be picked
+        harness.get_by_label(&fl!("preset-fast")).click();
+        harness.run_steps(2);
+        assert_eq!(harness.state().choices.preset.as_deref(), Some("fast"));
+        harness.get_by_label(&fl!("preset", "image"));
     }
 
     #[test]
