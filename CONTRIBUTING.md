@@ -117,7 +117,7 @@ translation in place.
 ## Licences
 
 tgradish is MIT. Every binary carries every notice it needs
-(`crates/core/build.rs`), which `tgradish licences` prints and About in the
+(`crates/core/build.rs`), which `tgradish licenses` prints and About in the
 window shows. The notices are in `crates/core/licenses`, and every published
 crate has its own copy of `LICENSE.txt`, since a crate is packaged without
 the repository around it. After changing dependencies, run `cargo xtask
