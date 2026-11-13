@@ -68,7 +68,7 @@ tgradish convert walk.ase -f tgs --tag idle --hide-layers sketch
 
 ## Scripting
 
-Switches a preset can set come in pairs, as `--exact` and `--no-exact`. `--json` prints JSON Lines, and `tgradish describe` gives the schemas of the events `convert` and `watch` print. The exit status is 0 when done, 1 when something failed, 2 when the command line was wrong, 3 when everything was made but Telegram would refuse a result, and 130 when cancelled.
+Switches a preset can set come in pairs, as `--exact` and `--no-exact`. `--json` prints JSON Lines, and `tgradish describe` gives the schemas of the events `convert` and `watch` print. The exit status is 0 when done, 1 when something failed, 2 when the command line was wrong, 3 when everything was made but Telegram would refuse a result, and 130 when `convert` is cancelled; a cancelled `watch` ends with 0.
 
 
 ## Contributing
