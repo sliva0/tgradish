@@ -67,9 +67,11 @@ fn inspect_help() -> String {
 const TGS: &str = "Animated stickers (TGS)";
 const ASEPRITE: &str = "Aseprite files";
 
-/// Converts videos into Telegram video stickers and emoji, with the ability
-/// to bypass the 3 second limit, pictures and frames into image stickers,
-/// and pixel art into animated stickers.
+/// Telegram video, image and animated stickers and emoji from videos,
+/// pictures and pixel art.
+///
+/// Video stickers can run past Telegram's 3 seconds by spoofing the
+/// duration they say they last.
 #[derive(Debug, Parser)]
 #[command(version, max_term_width = 100, styles = crate::ui::help_styles(),
           after_help = top_help())]
@@ -697,6 +699,14 @@ mod tests {
     #[test]
     fn cli_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    /// The help's first line is what the manifests and packages say
+    /// tgradish is, which xtask holds them to.
+    #[test]
+    fn says_what_tgradish_is_as_its_manifest_does() {
+        let about = Cli::command().get_about().unwrap().to_string();
+        assert_eq!(about, env!("CARGO_PKG_DESCRIPTION"));
     }
 
     /// Every help page, as `--help` prints it, into
