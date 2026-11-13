@@ -246,7 +246,7 @@ impl TgsOptions {
 /// Progress of a `.tgs` conversion, printed by `convert --json` one per
 /// line.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
-#[serde(tag = "event", rename_all = "snake_case")]
+#[serde(tag = "event", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 pub enum TgsEvent {
     /// The input is read: what normalising found and did.
     Started { input: PathBuf, report: Box<Report> },
