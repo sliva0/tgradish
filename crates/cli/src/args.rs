@@ -11,16 +11,58 @@ use tgradish_core::webm::{self, Options};
 
 pub use crate::term::ColourChoice;
 
-/// The exit statuses, as the help pages list them.
-const EXIT_STATUS: &str = "\
-Exit status:
-  0    Done.
+/// The help pages' sections after the options, each under its heading,
+/// which [`sections`] adds; each line indented as clap indents options.
+const EXAMPLES: &str =
+    "  tgradish convert clip.mp4                 a video sticker, clip.sticker.webm
+  tgradish convert clip.mp4 --target emoji  an emoji, clip.emoji.webm
+  tgradish convert walk.ase -f tgs          an animated sticker, walk.sticker.tgs
+  tgradish convert photo.jpg -f webp        an image sticker, photo.sticker.webp
+  tgradish watch ~/Videos -O ~/Stickers     each new video or picture as it comes
+  tgradish inspect clip.sticker.webm        what Telegram would say of it";
+
+const CONVERT_EXAMPLES: &str =
+    "  tgradish convert clip.mp4 -s 2 -t 5          5 seconds from 0:02, spoofed to pass
+  tgradish convert frames/ --sequence -f tgs   the pictures in frames/ as one sticker
+  tgradish convert *.gif -O stickers -y        each into stickers/, replacing results";
+
+const ENVIRONMENT: &str = "  TGRADISH_CONFIG  The config file, as --config names it.
+  TGRADISH_FFMPEG  The ffmpeg to use, as --ffmpeg names it, when neither --ffmpeg
+                   nor --ffmpeg-from is given; over the config file's.
+  TGRADISH_LANG    The window's language, as de, over the system's.
+  NO_COLOR         No colours, with --colour auto.
+  CLICOLOR_FORCE   Colours even where the terminal isn't one, with --colour auto.
+  FORCE_HYPERLINK  1 links file names, 0 doesn't, whatever the terminal.";
+
+const EXIT_STATUS: &str = "  0    Done.
   1    Something failed. With several inputs, this beats 3.
   2    The command line was wrong.
   3    Everything was made or read, but Telegram would refuse a result or
        an inspected file: as a .tgs that --exact keeps too large, WebM
        with --fit off over the limit, or a picture of the wrong size.
   130  Cancelled, by Ctrl-C or with --cancel-on-stdin.";
+
+/// `sections` under their headings, styled as clap styles its own.
+fn sections(sections: &[(&str, &str)]) -> String {
+    let style = *crate::ui::help_styles().get_header();
+    let texts: Vec<String> = sections
+        .iter()
+        .map(|(heading, text)| format!("{style}{heading}:{style:#}\n{text}"))
+        .collect();
+    texts.join("\n\n")
+}
+
+fn top_help() -> String {
+    sections(&[("Examples", EXAMPLES), ("Environment", ENVIRONMENT), ("Exit status", EXIT_STATUS)])
+}
+
+fn convert_help() -> String {
+    sections(&[("Examples", CONVERT_EXAMPLES), ("Exit status", EXIT_STATUS)])
+}
+
+fn inspect_help() -> String {
+    sections(&[("Exit status", EXIT_STATUS)])
+}
 
 const TGS: &str = "Animated stickers (TGS)";
 const ASEPRITE: &str = "Aseprite files";
@@ -30,11 +72,11 @@ const ASEPRITE: &str = "Aseprite files";
 /// and pixel art into animated stickers.
 #[derive(Debug, Parser)]
 #[command(version, max_term_width = 100, styles = crate::ui::help_styles(),
-          after_help = EXIT_STATUS)]
+          after_help = top_help())]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
-    #[command(flatten)]
+    #[command(flatten, next_help_heading = "Global options")]
     pub global: Global,
 }
 
@@ -102,7 +144,7 @@ impl From<FfmpegFrom> for FfmpegChoice {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Convert videos or images into stickers or emoji.
-    #[command(after_help = EXIT_STATUS)]
+    #[command(after_help = convert_help())]
     Convert(ConvertArgs),
     /// Convert every video or image that appears in a directory.
     Watch(WatchArgs),
@@ -110,7 +152,7 @@ pub enum Command {
     Spoof(SpoofArgs),
     /// Show properties of WebM, WebP and TGS files and check them against
     /// Telegram's limits.
-    #[command(after_help = EXIT_STATUS)]
+    #[command(after_help = inspect_help())]
     Inspect(InspectArgs),
     /// Print a JSON description of options, presets and events for
     /// front-ends.
@@ -162,9 +204,19 @@ pub struct ConvertArgs {
     #[arg(short, long, value_name = "FILE", conflicts_with = "output_dir")]
     pub output: Option<PathBuf>,
     /// Join the inputs (images, or directories of them) into one animation,
-    /// in name order with numbers counted as numbers.
+    /// in name order with numbers counted as numbers. Unless -o names it,
+    /// the result is named after the first input: walk/ makes
+    /// walk.sticker.webm beside the folder, walk/1.png walk/2.png makes
+    /// walk/1.sticker.webm.
     #[arg(long, conflicts_with = "clipboard")]
     pub sequence: bool,
+    /// What to make: webm (video sticker or emoji: VP9 in WebM, from any
+    /// video or picture), tgs (animated sticker or emoji: TGS, meant for
+    /// pixel art, or a video of it) or webp (image sticker or emoji, from
+    /// any picture or the frame at --start; image works too).
+    /// [default: by the -o file's extension, then webm]
+    #[arg(short, long, value_enum)]
+    pub format: Option<FormatArg>,
     #[command(flatten)]
     pub conversion: ConversionArgs,
 }
@@ -182,6 +234,13 @@ pub struct WatchArgs {
     /// Seconds between looks at the directory.
     #[arg(long, value_name = "SECONDS", default_value_t = 1.0)]
     pub interval: f64,
+    /// What to make: webm (video sticker or emoji: VP9 in WebM, from any
+    /// video or picture), tgs (animated sticker or emoji: TGS, meant for
+    /// pixel art, or a video of it) or webp (image sticker or emoji, from
+    /// any picture or the frame at --start; image works too).
+    /// [default: webm]
+    #[arg(short, long, value_enum)]
+    pub format: Option<FormatArg>,
     #[command(flatten)]
     pub conversion: ConversionArgs,
 }
@@ -189,13 +248,6 @@ pub struct WatchArgs {
 /// Flags shared by `convert` and `watch`.
 #[derive(Debug, Args)]
 pub struct ConversionArgs {
-    /// What to make: webm (video sticker or emoji: VP9 in WebM, from any
-    /// video or picture), tgs (animated sticker or emoji: TGS, meant for
-    /// pixel art, or a video of it) or webp (image sticker or emoji, from
-    /// any picture or the frame at --start; image works too).
-    /// [default: by the output's extension, then webm]
-    #[arg(short, long, value_enum)]
-    pub format: Option<FormatArg>,
     /// Directory for results. Default: next to each input, as
     /// NAME.sticker.webm, NAME.emoji.webm or the same with .tgs or .webp.
     #[arg(short = 'O', long, value_name = "DIR")]
@@ -228,7 +280,11 @@ pub struct ConversionArgs {
 /// One flag per [`Options`] and [`tgs::Options`] field, with the same name.
 #[derive(Debug, Args)]
 pub struct OptionArgs {
-    /// What to make. [default: sticker]
+    /// Sticker or emoji, which sets the size and the size limit: a sticker
+    /// is 512 pixels on its longer side, within 256 KiB as WebM; an emoji
+    /// is 100x100, within 64 KiB as WebM. Pictures have 512 KiB either
+    /// way, and TGS are 512x512 within 64 KiB either way. [default:
+    /// sticker]
     #[arg(long, value_enum, help_heading = "Output")]
     pub target: Option<TargetArg>,
     /// The part of the input to use, in its pixels: WIDTHxHEIGHT+X+Y from
@@ -727,7 +783,7 @@ mod tests {
     fn reads_f_as_the_format() {
         let cli = Cli::parse_from(["tgradish", "convert", "a.png", "-f", "tgs"]);
         let Command::Convert(args) = cli.command else { panic!() };
-        assert!(matches!(args.conversion.format, Some(FormatArg::Tgs)));
+        assert!(matches!(args.format, Some(FormatArg::Tgs)));
         assert!(Cli::try_parse_from(["tgradish", "convert", "a.png", "-f", "crf"]).is_err());
         let help = Cli::command().find_subcommand_mut("convert").unwrap().render_help();
         assert!(help.to_string().contains("-o, --output <FILE>"), "{help}");

@@ -14,7 +14,7 @@ use tgradish_core::webm::{self, Event, Options};
 use tgradish_core::{tgs, webp};
 
 use crate::Context;
-use crate::args::{ConversionArgs, ConvertArgs};
+use crate::args::{ConversionArgs, ConvertArgs, FormatArg};
 use crate::{term, ui};
 
 /// Why converting one input failed.
@@ -77,8 +77,8 @@ fn overlay<T: serde::de::DeserializeOwned>(
 
 /// The format a command converts to: `--format`, or else the extension of
 /// `output` (the `-o` file), or else WebM.
-fn format_of(args: &ConversionArgs, output: Option<&Path>) -> Format {
-    match (args.format, output.and_then(Format::of_path)) {
+fn format_of(format: Option<FormatArg>, output: Option<&Path>) -> Format {
+    match (format, output.and_then(Format::of_path)) {
         (Some(format), _) => format.into(),
         (None, Some(format)) => format,
         (None, None) => Format::default(),
@@ -115,10 +115,16 @@ fn check_output(output: &Path, format: Format) -> Result<()> {
 }
 
 impl<'a> Converter<'a> {
-    /// `output` is the `-o` file, which can choose the format.
-    pub fn new(ctx: &'a Context, args: &'a ConversionArgs, output: Option<&Path>) -> Result<Self> {
+    /// `format` is `--format`, and `output` the `-o` file, which can
+    /// choose the format instead.
+    pub fn new(
+        ctx: &'a Context,
+        args: &'a ConversionArgs,
+        format: Option<FormatArg>,
+        output: Option<&Path>,
+    ) -> Result<Self> {
         let presets = Presets::load_user()?;
-        let format = format_of(args, output);
+        let format = format_of(format, output);
         if let Some(output) = output {
             check_output(output, format)?;
         }
@@ -343,7 +349,7 @@ fn explain(err: Failed) -> anyhow::Error {
 }
 
 pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
-    let converter = Converter::new(ctx, &args.conversion, args.output.as_deref())?;
+    let converter = Converter::new(ctx, &args.conversion, args.format, args.output.as_deref())?;
     if args.sequence {
         let input = Input::Sequence(args.inputs.clone());
         let verdict = converter.run(&input, args.output.clone(), converter.overwrite());

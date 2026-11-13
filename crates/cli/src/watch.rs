@@ -196,7 +196,7 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
     }
     std::fs::read_dir(&args.dir)
         .with_context(|| format!("couldn't read {}", args.dir.display()))?;
-    let converter = Converter::new(ctx, &args.conversion, None)?;
+    let converter = Converter::new(ctx, &args.conversion, args.format, None)?;
     let output_for =
         |path: &Path| converter.output_for(&Input::File(path.to_path_buf()), Some(&args.dir));
 
