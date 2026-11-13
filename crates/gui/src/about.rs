@@ -85,7 +85,10 @@ pub(crate) fn about(ui: &mut egui::Ui) {
 pub fn notices() -> Vec<tgradish_core::licenses::Notice> {
     use tgradish_core::licenses::{CRATES, Notice};
     let fonts = [
-        ("Font: Ubuntu Light, a subset", include_str!("../assets/fonts/Ubuntu-LICENCE.txt")),
+        (
+            "Font: Ubuntu Light and Medium, subsets",
+            include_str!("../assets/fonts/Ubuntu-LICENCE.txt"),
+        ),
         (
             "Font: JetBrains Mono NL, a subset",
             include_str!("../assets/fonts/JetBrainsMono-OFL.txt"),

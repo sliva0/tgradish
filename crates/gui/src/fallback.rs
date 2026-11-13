@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
-use eframe::egui::{self, FontData, FontFamily};
+use eframe::egui::{self, FontData};
 use skrifa::MetadataProvider;
 
 /// A font found for some characters.
@@ -111,8 +111,9 @@ impl Fallbacks {
                     let mut data = FontData::from_owned(found.bytes);
                     data.index = found.index;
                     self.fonts.font_data.insert(name.clone(), Arc::new(data));
-                    for family in [FontFamily::Proportional, FontFamily::Monospace] {
-                        self.fonts.families.entry(family).or_default().push(name.clone());
+                    // every family, headings' too
+                    for fonts in self.fonts.families.values_mut() {
+                        fonts.push(name.clone());
                     }
                     added = true;
                 }

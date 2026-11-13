@@ -8,13 +8,30 @@ use crate::app::App;
 use crate::fallback;
 use crate::l10n::fl;
 
-/// The window's fonts: Ubuntu Light for text, JetBrains Mono NL for
-/// commands, and a few symbols; small subsets, see `assets/fonts`.
+/// The family of headings and of what stands out: Ubuntu Medium.
+pub(crate) fn medium() -> egui::FontFamily {
+    egui::FontFamily::Name("medium".into())
+}
+
+/// [`medium`] where `ctx` has the window's fonts, else the body's: tests
+/// draw parts of the window without them.
+pub(crate) fn medium_in(ctx: &egui::Context) -> egui::FontFamily {
+    let medium = medium();
+    match ctx.fonts(|fonts| fonts.definitions().families.contains_key(&medium)) {
+        true => medium,
+        false => egui::FontFamily::Proportional,
+    }
+}
+
+/// The window's fonts: Ubuntu Light for text, Ubuntu Medium for headings,
+/// JetBrains Mono NL for commands, and a few symbols; small subsets, see
+/// `assets/fonts`.
 pub(crate) fn fonts() -> egui::FontDefinitions {
     use egui::{FontData, FontFamily};
     let mut fonts = egui::FontDefinitions::empty();
     for (name, bytes) in [
         ("ubuntu", &include_bytes!("../assets/fonts/Ubuntu-Light-tgradish.ttf")[..]),
+        ("medium", &include_bytes!("../assets/fonts/Ubuntu-Medium-tgradish.ttf")[..]),
         ("mono", &include_bytes!("../assets/fonts/JetBrainsMonoNL-Regular-tgradish.ttf")[..]),
         ("icons", &include_bytes!("../assets/fonts/emoji-icon-font-tgradish.ttf")[..]),
     ] {
@@ -27,6 +44,8 @@ pub(crate) fn fonts() -> egui::FontDefinitions {
     fonts
         .families
         .insert(FontFamily::Monospace, vec!["mono".into(), "icons".into(), "ubuntu".into()]);
+    let medium = ["medium", "icons", "ubuntu", "mono"];
+    fonts.families.insert(self::medium(), medium.into_iter().map(Into::into).collect());
     fonts
 }
 

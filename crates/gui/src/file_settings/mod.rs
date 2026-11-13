@@ -98,7 +98,7 @@ pub(crate) fn preset_label(name: &str) -> String {
 /// What to make: format, target and preset. Narrow, for beside the
 /// preview.
 pub(crate) fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
-    ui.label(RichText::new(fl!("make")).strong().size(15.5));
+    ui.label(widgets::medium(ui, fl!("make"), widgets::HEADING));
     ui.add_space(4.0);
     let formats = [
         (Format::Webm, fl!("format-video"), fl!("format-video", "hint")),
@@ -140,7 +140,9 @@ pub(crate) fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let users =
         context.presets.iter().any(|(_, preset)| preset.is_err() || preset.is_ok_and(is_users));
     ui.horizontal(|ui| {
-        ui.label(fl!("preset")).on_hover_text(fl!("preset", "hint"));
+        let size = egui::TextStyle::Body.resolve(ui.style()).size;
+        let preset = widgets::medium(ui, fl!("preset"), size);
+        ui.label(preset).on_hover_text(fl!("preset", "hint"));
         // where the user's own are renamed or deleted, once there are any
         if users && context.presets_dir.is_some() {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
