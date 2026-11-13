@@ -191,9 +191,6 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
     if !args.dir.is_dir() {
         bail!("{} is not a directory", args.dir.display());
     }
-    if !(args.interval > 0.0 && args.interval.is_finite()) {
-        bail!("--interval must be more than 0");
-    }
     std::fs::read_dir(&args.dir)
         .with_context(|| format!("couldn't read {}", args.dir.display()))?;
     let converter = Converter::new(ctx, &args.conversion, args.format, None)?;
