@@ -19,11 +19,11 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
         widgets::section(ui, &fl!("last-conversion"));
         match &failed.job.status {
             Status::Failed(message) => {
-                ui.colored_label(widgets::BAD, message);
+                ui.colored_label(theme::bad(ui.visuals()), message);
             }
             Status::Exists(path) => {
                 let path = path.display().to_string();
-                ui.colored_label(widgets::WARN, fl!("path-in-the-way", path = path));
+                ui.colored_label(theme::warn(ui.visuals()), fl!("path-in-the-way", path = path));
             }
             Status::Cancelled => widgets::note(ui, fl!("stopped-early")),
             Status::Done(_) | Status::Waiting | Status::Running => {}
@@ -73,7 +73,7 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
         widgets::note(ui, fl!("changed-to-fit"));
     }
     if made.job.replaces {
-        ui.colored_label(widgets::WARN, format!("⚠ {}", fl!("replaced-earlier")));
+        ui.colored_label(theme::warn(ui.visuals()), format!("⚠ {}", fl!("replaced-earlier")));
     }
 }
 
@@ -93,7 +93,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     }
     let progress = &job.progress;
     let running = running_colour(ui);
-    let done = widgets::GOOD.gamma_multiply(0.45);
+    let done = theme::POSITIVE.gamma_multiply(0.45);
     if let Some(stage) = progress.tgs {
         use jobs::TgsStage;
         // too large, and never to be changed: packed quickly, in red
@@ -102,7 +102,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
             use widgets::Fill;
             let (fill, colour) = match each.cmp(&stage) {
                 std::cmp::Ordering::Less if hopeless && each == TgsStage::Fitting => {
-                    (Fill::Share(1.0), widgets::BAD.gamma_multiply(0.45))
+                    (Fill::Share(1.0), theme::NEGATIVE.gamma_multiply(0.45))
                 }
                 std::cmp::Ordering::Less => (Fill::Share(1.0), done),
                 std::cmp::Ordering::Equal => (stage_fill(progress, stage), running),
@@ -137,7 +137,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
                         rate = rate,
                         size = size
                     );
-                    (text, widgets::BAD.gamma_multiply(0.45))
+                    (text, theme::NEGATIVE.gamma_multiply(0.45))
                 };
                 widgets::bar(ui, widgets::Fill::Share(1.0), &text, colour);
             }
@@ -326,7 +326,11 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
                     });
                     match attempt.bytes {
                         Some(bytes) => {
-                            let colour = if attempt.fits { widgets::GOOD } else { widgets::BAD };
+                            let colour = if attempt.fits {
+                                theme::good(ui.visuals())
+                            } else {
+                                theme::bad(ui.visuals())
+                            };
                             ui.colored_label(colour, share(bytes, done.limit))
                                 .on_hover_text(widgets::kib(bytes))
                         }
@@ -342,7 +346,7 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
         });
     }
     for warning in &progress.warnings {
-        ui.colored_label(widgets::WARN, format!("⚠ {warning}"));
+        ui.colored_label(theme::warn(ui.visuals()), format!("⚠ {warning}"));
     }
 }
 

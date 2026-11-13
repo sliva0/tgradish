@@ -10,7 +10,6 @@ use eframe::egui::{self, Color32, Sense, TextStyle, vec2};
 
 use crate::l10n::fl;
 use crate::theme;
-use crate::widgets;
 
 /// How a message reads: a warning says something didn't work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -547,7 +546,9 @@ fn text(ui: &mut egui::Ui, said: &mut Said, column: f32, now: f64, row: &mut Row
             if let Some((flash, until)) = &said.flash
                 && now <= *until
             {
-                ui.label(egui::RichText::new(format!("✔ {flash}")).color(widgets::GOOD));
+                ui.label(
+                    egui::RichText::new(format!("✔ {flash}")).color(theme::good(ui.visuals())),
+                );
             }
         });
     }
@@ -662,8 +663,8 @@ fn paint_icon(ui: &egui::Ui, severity: Severity, rect: egui::Rect) {
             let right = egui::pos2(centre.x + side * 0.55, centre.y + side * 0.45);
             painter.add(egui::Shape::convex_polygon(
                 vec![top, right, left],
-                widgets::WARN,
-                egui::Stroke::new(1.5, widgets::WARN),
+                theme::NEUTRAL,
+                egui::Stroke::new(1.5, theme::NEUTRAL),
             ));
             painter.line_segment(
                 [

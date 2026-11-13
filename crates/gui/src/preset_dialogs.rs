@@ -22,7 +22,7 @@ use crate::banner::{Action, Message, Subject};
 use crate::item::Item;
 use crate::jobs::failure;
 use crate::l10n::fl;
-use crate::widgets;
+use crate::{theme, widgets};
 
 /// A dialog the settings ask the window for.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -294,7 +294,7 @@ impl App {
                 widgets::note(ui, fl!("preset-exists"));
             }
             if let Some(problem) = &saving.problem {
-                ui.colored_label(widgets::BAD, problem);
+                ui.colored_label(theme::bad(ui.visuals()), problem);
             }
             ui.add_space(4.0);
             ui.separator();
@@ -376,7 +376,7 @@ impl App {
                         }
                         match &row.broken {
                             Some(why) => {
-                                ui.colored_label(widgets::BAD, fl!("preset-broken"))
+                                ui.colored_label(theme::bad(ui.visuals()), fl!("preset-broken"))
                                     .on_hover_text(why);
                             }
                             None => {
@@ -398,7 +398,7 @@ impl App {
                         }
                         ui.end_row();
                         if let Some(problem) = &row.problem {
-                            ui.colored_label(widgets::BAD, problem);
+                            ui.colored_label(theme::bad(ui.visuals()), problem);
                             ui.end_row();
                         }
                     }

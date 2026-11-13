@@ -311,14 +311,15 @@ fn row(
     let (rect, response) = ui.allocate_exact_size(vec2(width, THUMB + 12.0), egui::Sense::click());
     let visuals = ui.visuals();
     // as Breeze marks items: the accent let through, more for the
-    // selected one, which is outlined in it too
+    // selected one, which is outlined in it too, yet little enough that
+    // the row's small coloured text still reads
     let accent = theme::accent(visuals);
     if selected {
-        ui.painter().rect_filled(rect, 6.0, visuals.selection.bg_fill);
+        ui.painter().rect_filled(rect, 6.0, theme::tint(accent, theme::ROW_SELECTED));
         let outline = egui::Stroke::new(1.0, accent);
         ui.painter().rect_stroke(rect, 6.0, outline, egui::StrokeKind::Inside);
     } else if response.hovered() {
-        ui.painter().rect_filled(rect, 6.0, theme::tint(accent, 0.15));
+        ui.painter().rect_filled(rect, 6.0, theme::tint(accent, theme::ROW_HOVERED));
     }
     let inner = rect.shrink2(vec2(6.0, 6.0));
     let input = egui::Rect::from_min_size(inner.min, vec2(THUMB, THUMB));
@@ -341,7 +342,7 @@ fn row(
             let badge =
                 egui::Rect::from_min_size(result.right_top() - vec2(20.0, 0.0), vec2(20.0, 20.0));
             let button = egui::Button::new(RichText::new("⟳").size(13.0).color(Color32::BLACK))
-                .fill(widgets::WARN)
+                .fill(theme::NEUTRAL)
                 .corner_radius(4.0);
             // placed, so the rows below don't move
             if ui.place(badge, button).on_hover_text(fl!("row-convert-again")).clicked() {
@@ -453,7 +454,7 @@ fn thumb(
                 egui::Align2::CENTER_CENTER,
                 "✖",
                 egui::FontId::proportional(16.0),
-                widgets::BAD,
+                theme::bad(ui.visuals()),
             );
         }
         None => {}
@@ -483,7 +484,8 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
         (None, Some(made)) => match &made.job.status {
             Status::Done(done) => {
                 let refused = done.problems.iter().any(|p| p.refused);
-                let colour = if refused { widgets::BAD } else { widgets::GOOD };
+                let colour =
+                    if refused { theme::bad(ui.visuals()) } else { theme::good(ui.visuals()) };
                 let mark = if refused { "✖" } else { "✔" };
                 let size = widgets::kib(done.bytes);
                 let size =
@@ -491,10 +493,13 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
                 ui.colored_label(colour, small(format!("{mark} {size}")));
             }
             Status::Failed(_) => {
-                ui.colored_label(widgets::BAD, small(format!("✖ {}", fl!("row-failed"))));
+                ui.colored_label(
+                    theme::bad(ui.visuals()),
+                    small(format!("✖ {}", fl!("row-failed"))),
+                );
             }
             Status::Exists(_) => {
-                ui.colored_label(widgets::WARN, small(fl!("row-exists")));
+                ui.colored_label(theme::warn(ui.visuals()), small(fl!("row-exists")));
             }
             Status::Cancelled => {
                 ui.label(small(fl!("row-stopped")).weak());

@@ -650,7 +650,8 @@ fn integer_scale(
                 chosen = Some(step_scale(step));
             }
         });
-        if preset.is_some() && item.choices.webm.exact_scale.is_some() && widgets::reset(ui) {
+        let own = preset.is_some() && item.choices.webm.exact_scale.is_some();
+        if widgets::reset(ui, own) {
             chosen = preset;
         }
     });

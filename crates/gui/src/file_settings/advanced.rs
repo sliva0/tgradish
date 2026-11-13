@@ -125,7 +125,7 @@ fn encoder_rows(
         if ui.small_button(fl!("add-option")).clicked() {
             rows.pairs.push((String::new(), String::new()));
         }
-        if preset.is_some() && options.encoder_options.is_some() && widgets::reset(ui) {
+        if widgets::reset(ui, preset.is_some() && options.encoder_options.is_some()) {
             options.encoder_options = None;
             rows = Rows::of(preset);
         }
@@ -176,7 +176,7 @@ fn arguments(ui: &mut egui::Ui, id: u64, options: &mut Options, preset: &Option<
                     .desired_width(300.0),
             );
             let own = preset.is_some() && options.ffmpeg_args.is_some();
-            (edit, own && widgets::reset(ui))
+            (edit, widgets::reset(ui, own))
         })
         .inner;
     let read = shlex::split(&text);

@@ -233,9 +233,8 @@ fn used_part(ui: &mut egui::Ui, item: &mut Item, length: f64, in_frames: bool) {
                 }
             }
         }
-        if (choices.start.is_some() || choices.length.is_some())
-            && widgets::reset_to(ui, &fl!("all-of-input"))
-        {
+        let cut = choices.start.is_some() || choices.length.is_some();
+        if widgets::reset_to(ui, cut, &fl!("all-of-input")) {
             (choices.start, choices.length) = (None, None);
         }
     });
