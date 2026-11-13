@@ -325,6 +325,8 @@ fn exits_3_when_telegram_would_refuse_a_result() {
     ]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert_eq!(tgradish(&["inspect", webp.to_str().unwrap()]).status.code(), Some(0));
+    let inspected = tgradish(&["--json", "inspect", webp.to_str().unwrap()]);
+    assert_eq!(json_lines(&inspected)[0]["format"], "webp");
     let as_emoji = tgradish(&["inspect", webp.to_str().unwrap(), "--target", "emoji"]);
     assert_eq!(as_emoji.status.code(), Some(3));
 }

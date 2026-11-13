@@ -21,7 +21,7 @@ use crate::{tgs, webp};
 #[non_exhaustive]
 pub enum Inspected {
     /// A WebP picture, judged as `target`.
-    Image { target: Target, info: webp::Info, issues: Vec<telegram::Issue> },
+    Webp { target: Target, info: webp::Info, issues: Vec<telegram::Issue> },
     /// A `.tgs`, whose limits are the same for stickers and emoji.
     Tgs { info: Box<check::Stats>, issues: Vec<check::Issue> },
     /// A WebM video, judged as `target`.
@@ -33,7 +33,7 @@ impl Inspected {
     /// and of a `.tgs` those it refuses rather than frowns on.
     pub fn refused(&self) -> bool {
         match self {
-            Inspected::Image { issues, .. } | Inspected::Webm { issues, .. } => !issues.is_empty(),
+            Inspected::Webp { issues, .. } | Inspected::Webm { issues, .. } => !issues.is_empty(),
             Inspected::Tgs { issues, .. } => {
                 issues.iter().any(|issue| issue.severity == check::Severity::Error)
             }
@@ -49,7 +49,7 @@ pub fn inspect(path: &Path, target: Option<Target>) -> Result<Inspected> {
             let info = webp::inspect_file(path)?;
             let target = target.unwrap_or_else(|| info.target());
             let issues = info.issues(target);
-            Inspected::Image { target, info, issues }
+            Inspected::Webp { target, info, issues }
         }
         FileKind::Tgs => {
             let (info, issues) = tgs::inspect_file(path)?;

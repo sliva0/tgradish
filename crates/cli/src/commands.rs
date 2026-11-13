@@ -197,7 +197,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
             outln!();
         }
         match &inspected {
-            Inspected::Image { target, info, issues } => print_image(path, info, *target, issues),
+            Inspected::Webp { target, info, issues } => print_image(path, info, *target, issues),
             Inspected::Tgs { info, issues } => print_sticker(path, info, issues),
             Inspected::Webm { target, info, issues } => print_info(path, info, *target, issues),
             // a kind core has that this command line doesn't word yet
