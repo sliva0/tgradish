@@ -573,7 +573,7 @@ impl TgsPrinter {
             }
             tgs::Event::TooLarge { bytes } if !self.quiet && self.exact => {
                 self.bar.line(format!(
-                    "{} about {} as it is, too large; --exact=false lets fitting change the art",
+                    "{} about {} as it is, too large; --no-exact lets fitting change the art",
                     ui::warning_label(),
                     ui::size_within(bytes, tgs::MAX_BYTES)
                 ));

@@ -254,11 +254,12 @@ pub struct OptionArgs {
     /// [default: balanced], and comes out larger for TGS [default: best].
     #[arg(long, value_enum, help_heading = "Encoding")]
     pub speed: Option<SpeedArg>,
-    /// Lossless encoding, only small for tiny or still pictures. [default:
-    /// false]
-    #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
-          default_missing_value = "true", help_heading = "Encoding")]
-    pub lossless: Option<bool>,
+    /// Lossless encoding, only small for tiny or still pictures;
+    /// --no-lossless turns a preset's off. [default: off]
+    #[arg(long, overrides_with = "no_lossless", help_heading = "Encoding")]
+    pub lossless: bool,
+    #[arg(long, overrides_with = "lossless", hide = true)]
+    pub no_lossless: bool,
     /// libvpx-vp9 option for tuning; repeat for more. For example
     /// tune-content=screen (flat graphics), aq-mode=2, sharpness=4,
     /// arnr-strength=3, g=60 (keyframe interval) or qmax=50. `ffmpeg -h
@@ -285,17 +286,19 @@ pub struct OptionArgs {
     #[arg(long, help_heading = "Metadata")]
     pub title: Option<String>,
     /// Mark the file as made by tgradish in its metadata, which for TGS is
-    /// the sticker's Lottie name. [default: true]
-    #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
-          default_missing_value = "true", help_heading = "Metadata")]
-    pub watermark: Option<bool>,
+    /// the sticker's Lottie name; --no-watermark leaves it out. [default:
+    /// on]
+    #[arg(long, overrides_with = "no_watermark", help_heading = "Metadata")]
+    pub watermark: bool,
+    #[arg(long, overrides_with = "watermark", hide = true)]
+    pub no_watermark: bool,
 
     /// Never change the pixel art to make it fit, but report a sticker
-    /// that is too large; --exact=false lets fitting change it. [default:
-    /// true]
-    #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
-          default_missing_value = "true", help_heading = TGS)]
-    pub exact: Option<bool>,
+    /// that is too large; --no-exact lets fitting change it. [default: on]
+    #[arg(long, overrides_with = "no_exact", help_heading = TGS)]
+    pub exact: bool,
+    #[arg(long, overrides_with = "exact", hide = true)]
+    pub no_exact: bool,
     /// Reductions that may make a sticker fit, comma-separated. [default:
     /// all]
     #[arg(long, value_enum, value_delimiter = ',', help_heading = TGS)]
@@ -305,10 +308,12 @@ pub struct OptionArgs {
     /// changes the pixel art least. [default: auto]
     #[arg(long, value_enum, help_heading = TGS)]
     pub compromise: Option<CompromiseArg>,
-    /// Keep the input's canvas instead of cropping to the visible pixels.
-    #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
-          default_missing_value = "true", help_heading = TGS)]
-    pub keep_canvas: Option<bool>,
+    /// Keep the input's canvas instead of cropping to the visible pixels;
+    /// --no-keep-canvas crops over a preset that keeps it. [default: off]
+    #[arg(long, overrides_with = "no_keep_canvas", help_heading = TGS)]
+    pub keep_canvas: bool,
+    #[arg(long, overrides_with = "keep_canvas", hide = true)]
+    pub no_keep_canvas: bool,
     /// Size of one art pixel in input pixels; pixels off its grid move onto
     /// it. [default: detected]
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..),
@@ -366,13 +371,13 @@ impl OptionArgs {
             length: self.length,
             tempo: self.tempo,
             speed: self.speed.map(Into::into),
-            exact: self.exact,
+            exact: switch(self.exact, self.no_exact),
             reductions: (!self.reductions.is_empty())
                 .then(|| self.reductions.iter().map(|&kind| kind.into()).collect()),
             compromise: self.compromise.map(Into::into),
             crop: self.crop,
             resize: self.resize.map(Into::into),
-            keep_canvas: self.keep_canvas,
+            keep_canvas: switch(self.keep_canvas, self.no_keep_canvas),
             pixel_scale: self.pixel_scale,
             tag: self.tag.clone(),
             show_layers: names(&self.show_layers),
@@ -381,7 +386,7 @@ impl OptionArgs {
             sheet_frames: self.sheet_frames,
             fps: self.fps,
             title: self.title.clone(),
-            watermark: self.watermark,
+            watermark: switch(self.watermark, self.no_watermark),
         }
     }
 
@@ -405,15 +410,25 @@ impl OptionArgs {
             bitrate: self.bitrate,
             crf: self.crf,
             speed: self.speed.map(Into::into),
-            lossless: self.lossless,
+            lossless: switch(self.lossless, self.no_lossless),
             spoof: self.spoof.map(Into::into),
             fake_duration: self.fake_duration,
             title: self.title.clone(),
-            watermark: self.watermark,
+            watermark: switch(self.watermark, self.no_watermark),
             encoder_options: (!self.encoder_options.is_empty())
                 .then(|| self.encoder_options.iter().flatten().cloned().collect()),
             ffmpeg_args: self.ffmpeg_args.clone().map(|words| words.0),
         }
+    }
+}
+
+/// What a `--x` / `--no-x` pair says: on, off, or nothing, when neither
+/// was given. The later of the two wins, as clap clears the other.
+fn switch(on: bool, off: bool) -> Option<bool> {
+    match (on, off) {
+        (true, _) => Some(true),
+        (_, true) => Some(false),
+        _ => None,
     }
 }
 
@@ -514,10 +529,12 @@ pub struct SpoofArgs {
     /// Title to store in the file.
     #[arg(long)]
     pub title: Option<String>,
-    /// Mark the file as modified by tgradish.
-    #[arg(long, value_name = "BOOL", num_args = 0..=1, require_equals = true,
-          default_value_t = true, default_missing_value = "true")]
+    /// Mark the file as modified by tgradish; --no-watermark leaves it as
+    /// it is. [default: on]
+    #[arg(long, overrides_with = "no_watermark")]
     pub watermark: bool,
+    #[arg(long, overrides_with = "watermark", hide = true)]
+    pub no_watermark: bool,
 }
 
 #[derive(Debug, Args)]
@@ -663,7 +680,7 @@ mod tests {
         for format in [Format::Webm, Format::Webp] {
             assert_eq!(options("--exact").unused(format, None), ["--exact"]);
         }
-        assert_eq!(options("--exact=false").to_tgs_options().exact, Some(false));
+        assert_eq!(options("--no-exact").to_tgs_options().exact, Some(false));
     }
 
     #[test]
@@ -678,13 +695,28 @@ mod tests {
 
     #[test]
     fn parses_bool_flags() {
-        let cli =
-            Cli::parse_from(["tgradish", "convert", "a.mp4", "--lossless", "--watermark=false"]);
-        let Command::Convert(args) = cli.command else { panic!() };
-        let options = &args.conversion.options;
-        assert_eq!(options.lossless, Some(true));
-        assert_eq!(options.watermark, Some(false));
-        assert_eq!(options.to_options().title, None);
+        let options = |flags: &[&str]| {
+            let args = ["tgradish", "convert", "a.mp4"].iter().chain(flags);
+            let Command::Convert(args) = Cli::parse_from(args).command else { panic!() };
+            args.conversion.options.to_options()
+        };
+        let set = options(&["--lossless", "--no-watermark"]);
+        assert_eq!((set.lossless, set.watermark, set.title), (Some(true), Some(false), None));
+        assert_eq!(options(&[]).watermark, None, "neither leaves it to the preset");
+        // the later of a pair wins
+        assert_eq!(options(&["--no-watermark", "--watermark"]).watermark, Some(true));
+        assert_eq!(options(&["--lossless", "--no-lossless"]).lossless, Some(false));
+        // a value isn't taken: `--watermark false` used to make false an input
+        for flag in ["--watermark=false", "--lossless=true", "--exact=false"] {
+            assert!(Cli::try_parse_from(["tgradish", "convert", "a.mp4", flag]).is_err(), "{flag}");
+        }
+        let spoof = |flags: &[&str]| {
+            let args = ["tgradish", "spoof", "a.webm"].iter().chain(flags);
+            let Command::Spoof(args) = Cli::parse_from(args).command else { panic!() };
+            args.watermark || !args.no_watermark
+        };
+        assert!(spoof(&[]) && !spoof(&["--no-watermark"]));
+        assert!(spoof(&["--no-watermark", "--watermark"]));
     }
 
     #[test]

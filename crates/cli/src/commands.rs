@@ -33,11 +33,12 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
     if !args.in_place && !args.overwrite && output != args.input && output.exists() {
         bail!("{} already exists, use --overwrite to replace it", output.display());
     }
+    let watermark = !args.no_watermark;
     let changes = Patch {
         duration: Some(args.fake_duration),
         title: args.title.clone(),
-        muxing_app: args.watermark.then(|| TOOL_ID.to_string()),
-        signature: args.watermark.then(tgradish_core::signature),
+        muxing_app: watermark.then(|| TOOL_ID.to_string()),
+        signature: watermark.then(tgradish_core::signature),
         ..Default::default()
     };
     let replace = args.overwrite || output == args.input;
