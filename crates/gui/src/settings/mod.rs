@@ -341,7 +341,7 @@ impl Part {
         match (self, item.format) {
             (Part::Aseprite, _) => aseprite(ui, item, context),
             (Part::Picture, _) => picture(ui, item, context),
-            (Part::Time, Format::Image) => frame(ui, item),
+            (Part::Time, Format::Image) => frame(ui, item, context.in_frames),
             (Part::Time, _) => time(ui, item, context),
             (Part::Quality, Format::Webm) => webm_quality(ui, item, context),
             (Part::Quality, Format::Tgs) => tgs_quality(ui, item, context),

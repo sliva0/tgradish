@@ -176,6 +176,26 @@ pub(crate) fn boundary_field<'a>(
     }
 }
 
+/// A field of one of `frames`, by its `index`: its number from 1, or where
+/// it starts in seconds. A time typed picks the frame shown then.
+pub(crate) fn frame_field<'a>(
+    index: &'a mut usize,
+    frames: &'a Frames,
+    in_frames: bool,
+) -> egui::DragValue<'a> {
+    let last = frames.count() - 1;
+    let field = egui::DragValue::new(index).range(0..=last).speed(0.1);
+    if in_frames {
+        field
+            .custom_formatter(|n, _| format!("{}", n + 1.0))
+            .custom_parser(|text| text.trim().parse::<f64>().ok().map(|n| n.round() - 1.0))
+    } else {
+        field
+            .custom_formatter(move |n, _| widgets::seconds(frames.times[(n as usize).min(last)]))
+            .custom_parser(move |text| Some(frames.at(widgets::parse_seconds(text)?) as f64))
+    }
+}
+
 /// How wide frames are on the bar, at least, for where they meet to be
 /// marked.
 const MARKED_FRAME: f32 = 6.0;
@@ -509,7 +529,7 @@ pub fn frame_picker(
         if step(ui, "⏵", index < last, fl!("frame-after"), fl!("frame-after", "last")) {
             picked = Some(index + 1);
         }
-        let field = boundary_field(&mut index, 0..=last, frames, *in_frames, false);
+        let field = frame_field(&mut index, frames, *in_frames);
         if ui.add_sized(vec2(72.0, 24.0), field).on_hover_text(fl!("frame-picked")).changed() {
             picked = Some(index);
         }
@@ -639,6 +659,36 @@ mod tests {
         );
         plain.run_steps(2);
         plain.get(egui_kittest::kittest::by().role(Role::SpinButton).value("1:02.50"));
+    }
+
+    #[test]
+    fn picks_the_frame_shown_at_a_time_typed() {
+        use egui::accesskit::Role;
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        let frames = Frames::even(1.0, 25.0, Cut::Video).unwrap();
+        let typed = |in_frames: bool, text: &str| {
+            let mut harness = Harness::new_ui_state(
+                |ui, index: &mut usize| {
+                    ui.add(frame_field(index, &frames, in_frames));
+                },
+                0,
+            );
+            widgets::test_fonts(&harness);
+            harness.run_steps(2);
+            harness.get_by_role(Role::SpinButton).focus();
+            harness.run_steps(2);
+            harness.event(egui::Event::Text(text.into()));
+            harness.key_press(egui::Key::Enter);
+            harness.run_steps(2);
+            *harness.state()
+        };
+        // 0.07 s is within the second frame, which starts at 0.04
+        assert_eq!(frames.at(0.07), 1);
+        assert_eq!(typed(false, "0.07"), 1);
+        // counted from 1
+        assert_eq!(typed(true, "3"), 2);
     }
 
     #[test]

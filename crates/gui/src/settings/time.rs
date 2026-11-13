@@ -246,22 +246,35 @@ fn used_part(ui: &mut egui::Ui, item: &mut Item, length: f64, in_frames: bool) {
     }
 }
 
-/// Which frame of a video an image sticker is made of.
-pub(super) fn frame(ui: &mut egui::Ui, item: &mut Item) {
+/// Which frame of a video an image sticker is made of, as the timeline
+/// counts: by its number, or where it starts, with the other under it.
+pub(super) fn frame(ui: &mut egui::Ui, item: &mut Item, in_frames: bool) {
     let Some(length) = item.input_length() else { return };
     section(ui, &fl!("frame"));
     row(ui, &fl!("frame-at"), &fl!("frame-at", "hint"), Ok(()), |ui| {
         let Some(frames) = item.input_frames() else { return };
-        let mut at = item.choices.frame.unwrap_or(0.0);
-        let field = egui::DragValue::new(&mut at).range(0.0..=length).speed(0.01).max_decimals(3);
-        if ui.add(field.suffix(" s")).changed() {
+        let mut index = frames.at(item.choices.frame.unwrap_or(0.0));
+        let size = egui::vec2(72.0, ui.spacing().interact_size.y);
+        let field = timeline::frame_field(&mut index, &frames, in_frames);
+        if ui.add_sized(size, field).changed() {
             // where its frame starts, as the picture is made of it
-            let index = frames.at(at);
             item.choices.frame = (index > 0).then_some(frames.times[index]);
         }
         let index = frames.at(item.choices.frame.unwrap_or(0.0));
-        let (number, count) = (index + 1, frames.count());
-        note(ui, fl!("part-frame", number = number, count = count));
+        note(
+            ui,
+            if in_frames {
+                fl!(
+                    "part-seconds",
+                    from = widgets::seconds(frames.times[index]),
+                    to = widgets::seconds(frames.times[index + 1]),
+                    length = widgets::seconds(length)
+                )
+            } else {
+                let (number, count) = (index + 1, frames.count());
+                fl!("part-frame", number = number, count = count)
+            },
+        );
     });
 }
 
