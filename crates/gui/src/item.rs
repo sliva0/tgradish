@@ -213,41 +213,35 @@ impl Choices {
         })
     }
 
-    /// The options that change what pixel art is read as, the preset's
-    /// included.
+    /// The options that change what pixel art is read as: the item's
+    /// tag, layers and sheet, which are of its file alone, and the rate
+    /// its frames play at, the preset's included.
     pub(crate) fn reading(&self, presets: &Presets, config: &Config) -> tgs::Options {
         // a broken preset still leaves the item's own
-        let own = || self.tgs.clone().merged(&self.shared_tgs());
-        let options = self.tgs_options(presets, config).unwrap_or_else(|_| own());
+        let fps = self.tgs_options(presets, config).map_or(self.tgs.fps, |options| options.fps);
         tgs::Options {
-            tag: options.tag,
-            show_layers: options.show_layers,
-            hide_layers: options.hide_layers,
-            sheet: options.sheet,
-            sheet_frames: options.sheet_frames,
-            fps: options.fps,
+            tag: self.tag.clone(),
+            show_layers: self.show_layers.clone(),
+            hide_layers: self.hide_layers.clone(),
+            sheet: self.tgs.sheet,
+            sheet_frames: self.tgs.sheet_frames,
+            fps,
             ..tgs::Options::default()
         }
     }
 
     /// The options that change how pixel art is drawn for ffmpeg for
-    /// `format`, the preset's included: an Aseprite file's tag and layers,
-    /// and how fast a sequence's frames play, which pictures leave at the
-    /// default, as making one does.
+    /// `format`: the item's tag and layers, which are of its file alone,
+    /// and how fast a sequence's frames play, the preset's included, which
+    /// pictures leave at the default, as making one does.
     pub(crate) fn drawing(&self, format: Format, presets: &Presets, config: &Config) -> Options {
-        let shared = || Options {
+        // a broken preset still leaves the item's own
+        let fps = self.webm_merged(presets, config).map_or(self.webm.fps, |options| options.fps);
+        Options {
             tag: self.tag.clone(),
             show_layers: self.show_layers.clone(),
             hide_layers: self.hide_layers.clone(),
-            fps: self.webm.fps,
-            ..Options::default()
-        };
-        let options = self.webm_merged(presets, config).unwrap_or_else(|_| shared());
-        Options {
-            tag: options.tag,
-            show_layers: options.show_layers,
-            hide_layers: options.hide_layers,
-            fps: options.fps.filter(|_| format == Format::Webm),
+            fps: fps.filter(|_| format == Format::Webm),
             ..Options::default()
         }
     }
@@ -876,6 +870,31 @@ mod tests {
         choices.tgs.sheet = "4x1".parse().ok();
         let reading = choices.reading(&presets, &Config::default());
         assert_eq!((reading.sheet, reading.fps), ("4x1".parse().ok(), Some(2.0)));
+    }
+
+    #[test]
+    fn draws_art_with_the_items_tag_at_the_presets_frame_rate() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("slow.toml"), "[webm]\nfps = 2.0\n").unwrap();
+        let presets = Presets::load(Some(dir.path())).unwrap();
+        let mut choices = Choices::new(Target::Sticker);
+        choices.preset = Some("slow".into());
+        choices.tag = Some("walk".into());
+        choices.hide_layers = Some(vec!["sketch".into()]);
+        let config = Config::default();
+        let drawing = choices.drawing(Format::Webm, &presets, &config);
+        assert_eq!(drawing.tag.as_deref(), Some("walk"));
+        assert_eq!(
+            (drawing.hide_layers.as_deref(), drawing.fps),
+            (Some(&["sketch".into()][..]), Some(2.0))
+        );
+        // a picture is made of one frame, at no rate
+        assert_eq!(choices.drawing(Format::Webp, &presets, &config).fps, None);
+        // and a broken preset leaves the item's own
+        choices.preset = Some("no such preset".into());
+        choices.webm.fps = Some(5.0);
+        let drawing = choices.drawing(Format::Webm, &presets, &config);
+        assert_eq!((drawing.tag.as_deref(), drawing.fps), (Some("walk"), Some(5.0)));
     }
 
     #[test]
