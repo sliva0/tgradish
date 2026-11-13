@@ -242,7 +242,8 @@ impl<'a> Converter<'a> {
                         crate::json_line(&event);
                     })?;
                 } else {
-                    let mut printer = TgsPrinter::new(self.ctx);
+                    let mut printer =
+                        TgsPrinter::new(self.ctx, options.exact.unwrap_or(tgs::EXACT));
                     let result = tgs::convert(&request, cancel, &mut |e| printer.event(e));
                     printer.bar.finish();
                     let outcome = result?;
@@ -539,13 +540,16 @@ impl Printer {
 struct TgsPrinter {
     quiet: bool,
     bar: Bar,
-    /// The lossless size, to show how much fitting has taken off.
-    lossless: Option<u64>,
+    /// Whether the art is kept exactly as it is, so a sticker too large
+    /// isn't fitted.
+    exact: bool,
+    /// The size unchanged, to show how much fitting has taken off.
+    unchanged: Option<u64>,
 }
 
 impl TgsPrinter {
-    fn new(ctx: &Context) -> Self {
-        Self { quiet: ctx.global.quiet, bar: Bar::default(), lossless: None }
+    fn new(ctx: &Context, exact: bool) -> Self {
+        Self { quiet: ctx.global.quiet, bar: Bar::default(), exact, unchanged: None }
     }
 
     fn spinner(&mut self, verb: &str, message: String) {
@@ -593,14 +597,18 @@ impl TgsPrinter {
                 term::progress(Some(0.1));
                 self.spinner("Converting", "to vector".into());
             }
+            TgsEvent::TooLarge { bytes } if !self.quiet && self.exact => {
+                self.bar.line(format!(
+                    "{} about {} as it is, too large; --exact=false lets fitting change the art",
+                    ui::warning_label(),
+                    ui::size_within(bytes, tgs::MAX_BYTES)
+                ));
+            }
             TgsEvent::TooLarge { bytes } if !self.quiet => {
-                self.lossless = Some(bytes);
+                self.unchanged = Some(bytes);
                 self.bar.line(ui::status(
                     "Fitting",
-                    format!(
-                        "about {} losslessly, too large",
-                        ui::size_within(bytes, tgs::MAX_BYTES)
-                    ),
+                    format!("about {} as it is, too large", ui::size_within(bytes, tgs::MAX_BYTES)),
                 ));
                 term::progress(Some(0.3));
                 self.spinner("Fitting", "into 64 KiB".into());
@@ -615,10 +623,10 @@ impl TgsPrinter {
                     ),
                 ));
                 // how much of the excess is gone, on a log scale
-                if let Some(lossless) = self.lossless {
-                    let (lossless, now) = (lossless as f64, step.bytes as f64);
+                if let Some(unchanged) = self.unchanged {
+                    let (unchanged, now) = (unchanged as f64, step.bytes as f64);
                     let target = tgs::MAX_BYTES as f64;
-                    let gone = ((lossless / now).ln() / (lossless / target).ln()).clamp(0.0, 1.0);
+                    let gone = ((unchanged / now).ln() / (unchanged / target).ln()).clamp(0.0, 1.0);
                     term::progress(Some(0.3 + 0.5 * gone));
                 }
             }
@@ -631,15 +639,15 @@ impl TgsPrinter {
             }
             TgsEvent::Finished { output, bytes, changed, steps, issues, .. } => {
                 self.bar.finish();
-                let lossy = if changed && !steps.is_empty() {
+                let changed = if changed && !steps.is_empty() {
                     format!(", {}", style("changed to fit").yellow())
                 } else if changed {
-                    ", lossy".to_string()
+                    ", changed".to_string()
                 } else {
-                    ", lossless".to_string()
+                    ", exact".to_string()
                 };
                 println!(
-                    "{} {}{lossy}",
+                    "{} {}{changed}",
                     ui::status("Finished", term::link_out(style(output.display()).bold(), &output)),
                     ui::size_within(bytes, tgs::MAX_BYTES),
                 );

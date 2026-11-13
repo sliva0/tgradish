@@ -29,9 +29,9 @@ use crate::telegram::{self, Target};
 /// `fps` says otherwise.
 pub const DEFAULT_FPS: f64 = 12.0;
 
-/// Whether the art is kept as it is unless asked otherwise: changing it to
-/// fit is the user's to choose.
-pub const LOSSLESS: bool = true;
+/// Whether the art is kept exactly as it is unless asked otherwise:
+/// changing it to fit is the user's to choose.
+pub const EXACT: bool = true;
 
 /// Largest `.tgs` Telegram accepts, in bytes.
 pub const MAX_BYTES: u64 = tgradish_tgs::limits::telegram::MAX_BYTES as u64;
@@ -63,11 +63,11 @@ pub struct TgsOptions {
     /// Default: best.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speed: Option<Speed>,
-    /// Never change the pixel art to make it fit; a sticker that is too large is
-    /// reported instead. Set it to false to let fitting change it.
+    /// Never change the pixel art to make it fit; a sticker that is too
+    /// large is reported instead. Set it to false to let fitting change it.
     /// Default: true.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub lossless: Option<bool>,
+    pub exact: Option<bool>,
     /// Reductions fitting may use, least visible first. Default: all.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reductions: Option<Vec<Kind>>,
@@ -144,7 +144,7 @@ impl TgsOptions {
             length,
             tempo,
             speed,
-            lossless,
+            exact,
             reductions,
             compromise,
             crop,
@@ -231,7 +231,7 @@ impl TgsOptions {
                 Speed::Balanced => Effort::Balanced,
                 Speed::Best => Effort::Best,
             },
-            fit: if self.lossless.unwrap_or(LOSSLESS) { Fit::Lossless } else { Fit::Auto },
+            fit: if self.exact.unwrap_or(EXACT) { Fit::Exact } else { Fit::Auto },
             reductions: self.reductions.clone().unwrap_or_else(|| Kind::ALL.to_vec()),
             compromise: self.compromise.unwrap_or_default(),
             name,
@@ -253,8 +253,8 @@ pub enum TgsEvent {
         input: PathBuf,
         report: Box<Report>,
     },
-    /// Losslessly, the sticker would come to about this many bytes, more
-    /// than fits; fitting starts.
+    /// Unchanged, the sticker would come to about this many bytes, more
+    /// than fits; fitting starts, unless `exact` keeps the art as it is.
     TooLarge { bytes: u64 },
     /// Fitting applied a reduction.
     Reduced { step: Step },
@@ -884,8 +884,8 @@ mod tests {
 
     #[test]
     fn keeps_the_art_unless_asked() {
-        let fit = |lossless| TgsOptions { lossless, ..TgsOptions::default() }.sticker_options();
-        assert_eq!(fit(None).unwrap().fit, Fit::Lossless);
+        let fit = |exact| TgsOptions { exact, ..TgsOptions::default() }.sticker_options();
+        assert_eq!(fit(None).unwrap().fit, Fit::Exact);
         assert_eq!(fit(Some(false)).unwrap().fit, Fit::Auto);
     }
 
@@ -898,14 +898,14 @@ mod tests {
     #[test]
     fn layers_options() {
         let preset = TgsOptions { speed: Some(Speed::Fast), fps: Some(5.0), ..Default::default() };
-        let flags = TgsOptions { fps: Some(12.0), lossless: Some(true), ..Default::default() };
+        let flags = TgsOptions { fps: Some(12.0), exact: Some(true), ..Default::default() };
         let merged = preset.merged(&flags);
         assert_eq!(
-            (merged.speed, merged.fps, merged.lossless),
+            (merged.speed, merged.fps, merged.exact),
             (Some(Speed::Fast), Some(12.0), Some(true))
         );
         let settings = merged.sticker_options().unwrap();
-        assert_eq!((settings.effort, settings.fit), (Effort::Fast, Fit::Lossless));
+        assert_eq!((settings.effort, settings.fit), (Effort::Fast, Fit::Exact));
         let sheet = TgsOptions { sheet: Some("4x2".into()), ..Default::default() };
         let layout = sheet.sheet_layout().unwrap().unwrap();
         assert_eq!(

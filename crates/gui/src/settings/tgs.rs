@@ -52,12 +52,12 @@ pub(super) fn tgs_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context)
     });
     row(ui, &fl!("too-large"), &fl!("too-large", "hint"), Ok(()), |ui| {
         let text = fl!("never-change");
-        flag(ui, &mut options.lossless, base.lossless.unwrap_or(tgs::LOSSLESS), &text, "");
+        flag(ui, &mut options.exact, base.exact.unwrap_or(tgs::EXACT), &text, "");
     });
 
-    let lossless = options.lossless.or(base.lossless).unwrap_or(tgs::LOSSLESS);
+    let exact = options.exact.or(base.exact).unwrap_or(tgs::EXACT);
     let never = fl!("never-change", "set");
-    let changes = if lossless { Err(never.as_str()) } else { Ok(()) };
+    let changes = if exact { Err(never.as_str()) } else { Ok(()) };
     row(ui, &fl!("give-up"), &fl!("give-up", "hint"), changes, |ui| {
         let compromises = compromises();
         let base = base.compromise.unwrap_or_default();

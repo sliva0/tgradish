@@ -192,7 +192,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     job.status = Status::Running;
     job.progress = jobs::Progress {
         tgs: Some(jobs::TgsStage::Fitting),
-        lossless_bytes: Some(200_000),
+        unchanged_bytes: Some(200_000),
         steps: vec![tgradish_tgs::sticker::Step::new(
             tgradish_tgs::reduce::Reduction::MergeColours { distance: 0.02 },
             110_000,

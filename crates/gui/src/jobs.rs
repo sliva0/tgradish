@@ -83,27 +83,28 @@ pub struct Progress {
     pub attempts: Vec<Attempt>,
     /// What reading the pixel art found.
     pub report: Option<Box<Report>>,
-    /// The lossless `.tgs` size estimate, when that was too large.
-    pub lossless_bytes: Option<usize>,
+    /// The `.tgs` size estimate with the art unchanged, when that was too
+    /// large.
+    pub unchanged_bytes: Option<usize>,
     pub steps: Vec<Step>,
     pub warnings: Vec<String>,
     /// For `.tgs`: what it is doing.
     pub tgs: Option<TgsStage>,
     /// For `.tgs`: the art is never changed to fit.
-    pub tgs_lossless: bool,
+    pub tgs_exact: bool,
 }
 
 impl Progress {
     /// How far fitting a `.tgs` got: the size taken off so far, against
     /// what has to go, on a log scale, as reductions save shares.
     pub fn tgs_fitting(&self) -> Option<f32> {
-        let lossless = self.lossless_bytes? as f64;
-        let now = self.steps.last().map_or(lossless, |step| step.bytes as f64);
+        let unchanged = self.unchanged_bytes? as f64;
+        let now = self.steps.last().map_or(unchanged, |step| step.bytes as f64);
         let target = tgs::MAX_BYTES as f64;
-        if lossless <= target {
+        if unchanged <= target {
             return Some(1.0);
         }
-        Some(((lossless / now).ln() / (lossless / target).ln()).clamp(0.0, 1.0) as f32)
+        Some(((unchanged / now).ln() / (unchanged / target).ln()).clamp(0.0, 1.0) as f32)
     }
 
     /// How far the whole conversion got, roughly.
@@ -521,11 +522,11 @@ fn run(
             })
         }
         Plan::Tgs { options, backend } => {
-            let lossless = options.lossless.unwrap_or(tgs::LOSSLESS);
+            let exact = options.exact.unwrap_or(tgs::EXACT);
             let request = TgsRequest { inputs, sequence, output, options, overwrite, backend };
             update(Box::new(move |progress| {
                 progress.tgs = Some(TgsStage::Reading);
-                progress.tgs_lossless = lossless;
+                progress.tgs_exact = exact;
             }));
             let outcome = tgs::convert(&request, cancel, &mut |event| match event {
                 TgsEvent::Started { report, .. } => update(Box::new(move |progress| {
@@ -533,7 +534,7 @@ fn run(
                     progress.tgs = Some(TgsStage::Drawing);
                 })),
                 TgsEvent::TooLarge { bytes } => update(Box::new(move |progress| {
-                    progress.lossless_bytes = Some(bytes as usize);
+                    progress.unchanged_bytes = Some(bytes as usize);
                     progress.tgs = Some(TgsStage::Fitting);
                 })),
                 TgsEvent::Reduced { step } => update(Box::new(move |progress| {
@@ -645,10 +646,10 @@ mod tests {
         let limit = tgs::MAX_BYTES as usize;
         assert_eq!(Progress::default().tgs_fitting(), None);
         // small enough from the start
-        let fits = Progress { lossless_bytes: Some(limit), ..Progress::default() };
+        let fits = Progress { unchanged_bytes: Some(limit), ..Progress::default() };
         assert_eq!(fits.tgs_fitting(), Some(1.0));
         // four times too large: halved is half way, as reductions save shares
-        let mut progress = Progress { lossless_bytes: Some(4 * limit), ..Progress::default() };
+        let mut progress = Progress { unchanged_bytes: Some(4 * limit), ..Progress::default() };
         assert_eq!(progress.tgs_fitting(), Some(0.0));
         progress.steps.push(step(2 * limit));
         assert!((progress.tgs_fitting().unwrap() - 0.5).abs() < 1e-6);

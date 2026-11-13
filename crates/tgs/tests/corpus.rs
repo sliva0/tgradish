@@ -121,7 +121,7 @@ fn fits_large_animations() {
     assert!(small.fits() && small.steps.is_empty(), "{:?}", small.issues);
 
     let big = tiled(&input, 2, 2);
-    let lossless = StickerOptions { fit: Fit::Lossless, ..StickerOptions::default() };
+    let lossless = StickerOptions { fit: Fit::Exact, ..StickerOptions::default() };
     let too_large = make(&big, &lossless, &mut |_| {}, &|| false).unwrap();
     assert!(!too_large.fits() && too_large.steps.is_empty());
     assert!(too_large.bytes > 65536, "{}", too_large.bytes);
