@@ -620,3 +620,79 @@ fn webm(
         preview: None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn step(bytes: usize) -> Step {
+        let reduction = tgradish_tgs::reduce::Reduction::Despeckle;
+        Step { reduction, bytes, error: 0.0 }
+    }
+
+    #[test]
+    fn measures_fitting_a_tgs_on_a_log_scale() {
+        let limit = tgs::MAX_BYTES as usize;
+        assert_eq!(Progress::default().tgs_fitting(), None);
+        // small enough from the start
+        let fits = Progress { lossless_bytes: Some(limit), ..Progress::default() };
+        assert_eq!(fits.tgs_fitting(), Some(1.0));
+        // four times too large: halved is half way, as reductions save shares
+        let mut progress = Progress { lossless_bytes: Some(4 * limit), ..Progress::default() };
+        assert_eq!(progress.tgs_fitting(), Some(0.0));
+        progress.steps.push(step(2 * limit));
+        assert!((progress.tgs_fitting().unwrap() - 0.5).abs() < 1e-6);
+        // and never past the end, nor back before the start
+        progress.steps.push(step(limit / 2));
+        assert_eq!(progress.tgs_fitting(), Some(1.0));
+        progress.steps.push(step(8 * limit));
+        assert_eq!(progress.tgs_fitting(), Some(0.0));
+    }
+
+    #[test]
+    fn says_roughly_how_far_a_conversion_got() {
+        assert_eq!(Progress::default().overall(), None);
+        let stage = |stage| Progress { tgs: Some(stage), ..Progress::default() }.overall();
+        assert_eq!(stage(TgsStage::Reading), Some(0.03));
+        assert_eq!(stage(TgsStage::Fitting), Some(0.3));
+        assert_eq!(stage(TgsStage::Compressing), Some(0.85));
+        // a WebM by encodes done of those it may take, and the one at work
+        let plan =
+            WebmPlan { width: 512, height: 512, fps: 30.0, length: 1.0, attempts: 4, limit: 1 };
+        let params = Params { fps: 30.0, length: 1.0, rate: tgradish_core::events::Rate::Crf(30) };
+        let attempt = |bytes| Attempt { number: 1, params, bytes, fits: false, ssim: None };
+        let mut progress = Progress {
+            webm: Some(plan),
+            attempts: vec![attempt(Some(10)), attempt(None)],
+            fraction: Some(0.5),
+            ..Progress::default()
+        };
+        assert_eq!(progress.overall(), Some(0.375));
+        // more than were planned don't go past the end
+        progress.attempts = vec![attempt(Some(10)); 6];
+        assert_eq!(progress.overall(), Some(1.0));
+    }
+
+    #[test]
+    fn gives_sizes_in_bytes_where_kib_would_read_the_same() {
+        assert_eq!(sizes(1024, 262_144), ("1.0 KiB".into(), "256.0 KiB".into()));
+        assert_eq!(sizes(65_537, 65_536), ("65537 B".into(), "65536 B".into()));
+    }
+
+    #[test]
+    fn words_failures_as_the_window_does() {
+        let invalid = Error::InvalidOptions("crf must be at most 63".into());
+        assert_eq!(failure(&invalid), "Crf must be at most 63");
+        assert_eq!(failure(&Error::InvalidOptions(String::new())), "");
+        let missing = failure(&Error::FfmpegNotFound("not on PATH".into()));
+        assert_eq!(missing, fl!("ffmpeg-not-found", details = "not on PATH"));
+        let unreadable =
+            Error::Probe { path: PathBuf::from("/some/where/clip.mp4"), message: "broken".into() };
+        assert_eq!(
+            failure(&unreadable),
+            fl!("unreadable-file", name = "clip.mp4", details = "broken")
+        );
+        // what the window has no words of its own for, as tgradish-core says
+        assert_eq!(failure(&Error::Cancelled), Error::Cancelled.to_string());
+    }
+}
