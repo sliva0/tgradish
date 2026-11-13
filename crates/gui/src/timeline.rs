@@ -172,10 +172,7 @@ pub(crate) fn boundary_field<'a>(
         let last = frames.count();
         field
             .custom_formatter(move |n, _| widgets::seconds(frames.times[(n as usize).min(last)]))
-            .custom_parser(move |text| {
-                let seconds: f64 = text.trim().trim_end_matches('s').trim().parse().ok()?;
-                Some(frames.nearest(seconds) as f64)
-            })
+            .custom_parser(move |text| Some(frames.nearest(widgets::parse_seconds(text)?) as f64))
     }
 }
 
@@ -269,9 +266,14 @@ pub fn show(ui: &mut egui::Ui, timeline: Timeline) {
     });
 }
 
-/// A field of a time in the input, in seconds.
+/// A field of a time in the input, written as [`widgets::seconds`] writes
+/// times, and read back so.
 pub(crate) fn seconds(value: &mut f64, length: f64) -> egui::DragValue<'_> {
-    egui::DragValue::new(value).range(0.0..=length).speed(0.01).max_decimals(2).suffix(" s")
+    egui::DragValue::new(value)
+        .range(0.0..=length)
+        .speed(0.01)
+        .custom_formatter(|value, _| widgets::seconds(value))
+        .custom_parser(widgets::parse_seconds)
 }
 
 /// What the pointer is over, as the numbers count.
@@ -601,6 +603,42 @@ mod tests {
         let uneven = Frames::starting(&[0.02, 0.1, 0.2, 0.7], 0.8, Cut::Video).unwrap();
         assert_eq!(uneven.times, [0.0, 0.1, 0.2, 0.7, 0.8]);
         assert_eq!((uneven.at(0.65), uneven.at(0.7)), (2, 3));
+    }
+
+    #[test]
+    fn takes_times_typed_as_they_are_shown() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        // two frames a second over a minute and a half
+        let frames = Frames::even(90.0, 2.0, Cut::Video).unwrap();
+        let mut harness = Harness::new_ui_state(
+            |ui, boundary: &mut usize| {
+                ui.add(boundary_field(boundary, 0..=frames.count(), &frames, false, false));
+            },
+            125,
+        );
+        widgets::test_fonts(&harness);
+        harness.run_steps(2);
+        use egui::accesskit::Role;
+        let spin = egui_kittest::kittest::by().role(Role::SpinButton).value("1:02.50");
+        harness.get(spin).focus();
+        harness.run_steps(2);
+        // editing starts from the text shown, all of it selected: typed over
+        harness.event(egui::Event::Text("1:10".into()));
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        assert_eq!(*harness.state(), 140);
+        // and fields of times without frames write them alike
+        let mut plain = Harness::new_ui_state(
+            |ui, time: &mut f64| {
+                ui.add(seconds(time, 90.0));
+            },
+            62.5,
+        );
+        plain.run_steps(2);
+        plain.get(egui_kittest::kittest::by().role(Role::SpinButton).value("1:02.50"));
     }
 
     #[test]
