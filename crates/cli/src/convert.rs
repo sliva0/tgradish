@@ -527,7 +527,7 @@ impl Printer {
             Event::Finished { output, bytes, params, spoofed, issues, .. } => {
                 self.bar.finish();
                 let spoofed = if spoofed { ", duration spoofed" } else { "" };
-                println!(
+                outln!(
                     "{} {}, {}{spoofed}",
                     ui::status("Finished", term::link_out(style(output.display()).bold(), &output)),
                     ui::size_within(bytes, self.limit),
@@ -652,7 +652,7 @@ impl TgsPrinter {
                 } else {
                     ", exact".to_string()
                 };
-                println!(
+                outln!(
                     "{} {}{changed}",
                     ui::status("Finished", term::link_out(style(output.display()).bold(), &output)),
                     ui::size_within(bytes, tgs::MAX_BYTES),

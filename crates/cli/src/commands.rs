@@ -64,7 +64,7 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
         eprintln!("{} some DURATION tags had no room for the new value", ui::warning_label());
     }
     let old = report.old_duration.map_or("unknown".into(), ui::seconds);
-    println!(
+    outln!(
         "{}",
         ui::status(
             "Spoofed",
@@ -84,16 +84,16 @@ fn print_image(
     target: Target,
     issues: &[telegram::Issue],
 ) {
-    println!("{}", style(term::link_out(path.display(), path)).bold());
-    println!("{}", ui::field("size", ui::size_within(info.bytes, telegram::MAX_STILL_BYTES)));
+    outln!("{}", style(term::link_out(path.display(), path)).bold());
+    outln!("{}", ui::field("size", ui::size_within(info.bytes, telegram::MAX_STILL_BYTES)));
     let kind = if info.lossy { "lossy" } else { "lossless" };
     let alpha = if info.alpha { ", transparent" } else { "" };
-    println!(
+    outln!(
         "{}",
         ui::field("picture", format!("WebP {}x{}, {kind}{alpha}", info.width, info.height))
     );
     if let Some(tool) = &info.made_with {
-        println!("{}", ui::field("made", format!("with {tool}")));
+        outln!("{}", ui::field("made", format!("with {tool}")));
     }
     print_verdict(issues, target);
 }
@@ -102,19 +102,19 @@ fn print_image(
 fn print_verdict(issues: &[telegram::Issue], target: Target) {
     if issues.is_empty() {
         let accepted = format!("{} as {}", style("✔ accepts it").green(), target.name());
-        println!("{}", ui::field("telegram", accepted));
+        outln!("{}", ui::field("telegram", accepted));
     } else {
         let refused = format!("{} as {}:", style("✖ refuses it").red(), target.name());
-        println!("{}", ui::field("telegram", refused));
+        outln!("{}", ui::field("telegram", refused));
         for issue in issues {
-            println!("              {} {issue}", style("-").red());
+            outln!("              {} {issue}", style("-").red());
         }
     }
 }
 
 fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
-    println!("{}", style(term::link_out(path.display(), path)).bold());
-    println!("{}", ui::field("size", ui::size_within(info.file_size, target.max_bytes())));
+    outln!("{}", style(term::link_out(path.display(), path)).bold());
+    outln!("{}", ui::field("size", ui::size_within(info.file_size, target.max_bytes())));
     let video = match &info.video {
         Some(video) => {
             let fps = info.fps().map(ui::fps).unwrap_or_else(|| "unknown fps".into());
@@ -129,30 +129,30 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
         }
         None => "none".to_owned(),
     };
-    println!("{}", ui::field("video", video));
+    outln!("{}", ui::field("video", video));
     if info.audio_tracks > 0 {
-        println!("{}", ui::field("audio", ui::count(info.audio_tracks, "track")));
+        outln!("{}", ui::field("audio", ui::count(info.audio_tracks, "track")));
     }
     let header = info.header_duration.map_or("none".into(), ui::seconds);
     let content = info.content_duration.map_or("unknown".into(), ui::seconds);
     let spoofed = if info.spoofed() { " (spoofed)" } else { "" };
     let duration = format!("{header} in metadata, {content} of video{spoofed}");
-    println!("{}", ui::field("duration", duration));
+    outln!("{}", ui::field("duration", duration));
     if let Some(title) = &info.title {
-        println!("{}", ui::field("title", title));
+        outln!("{}", ui::field("title", title));
     }
     let apps: Vec<_> = [("written by", &info.writing_app), ("muxed by", &info.muxing_app)]
         .into_iter()
         .filter_map(|(label, app)| app.as_ref().map(|app| format!("{label} {app}")))
         .collect();
     if !apps.is_empty() {
-        println!("{}", ui::field("made", apps.join(", ")));
+        outln!("{}", ui::field("made", apps.join(", ")));
     }
     if let Some(signature) = &info.signature {
-        println!("{}", ui::field("signature", signature));
+        outln!("{}", ui::field("signature", signature));
     }
     if info.truncated {
-        println!("  {}", style("the file is truncated").red());
+        outln!("  {}", style("the file is truncated").red());
     }
 
     print_verdict(&telegram::check(info, target), target);
@@ -191,14 +191,14 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
             continue;
         }
         if i > 0 {
-            println!();
+            outln!();
         }
         match &inspected {
             Inspected::Image { target, info, issues } => print_image(path, info, *target, issues),
             Inspected::Tgs { info, issues } => print_sticker(path, info, issues),
             Inspected::Webm { target, info, .. } => print_info(path, info, *target),
             // a kind core has that this command line doesn't word yet
-            _ => println!("{}: shown with --json", path.display()),
+            _ => outln!("{}: shown with --json", path.display()),
         }
     }
     if failed > 0 {
@@ -222,11 +222,11 @@ pub fn licenses() {
     let notices = tgradish_core::licenses::notices();
     for (index, notice) in notices.iter().enumerate() {
         if index > 0 {
-            println!();
+            outln!();
         }
-        println!("{}", style(&notice.title).bold());
-        println!("{}\n", "=".repeat(notice.title.chars().count()));
-        println!("{}", notice.text.trim_end());
+        outln!("{}", style(&notice.title).bold());
+        outln!("{}\n", "=".repeat(notice.title.chars().count()));
+        outln!("{}", notice.text.trim_end());
     }
 }
 
@@ -289,10 +289,10 @@ pub fn preset(ctx: &Context, command: PresetCommand) -> Result<()> {
                             .path
                             .as_ref()
                             .map_or("built-in".to_string(), |p| p.display().to_string());
-                        println!("{}{default}  {}", style(name).bold(), preset.description);
-                        println!("    {}", style(origin).dim());
+                        outln!("{}{default}  {}", style(name).bold(), preset.description);
+                        outln!("    {}", style(origin).dim());
                     }
-                    Err(err) => println!("{}  {} {err}", style(name).bold(), ui::error_label()),
+                    Err(err) => outln!("{}  {} {err}", style(name).bold(), ui::error_label()),
                 }
             }
         }
@@ -303,14 +303,14 @@ pub fn preset(ctx: &Context, command: PresetCommand) -> Result<()> {
             if ctx.global.json {
                 crate::json_line(&file);
             } else {
-                print!("{}", toml::to_string(&file)?);
+                out!("{}", toml::to_string(&file)?);
             }
         }
         PresetCommand::Path => match presets::user_dir() {
             Some(dir) if ctx.global.json => {
                 crate::json_line(&json!({ "path": dir.to_string_lossy() }))
             }
-            Some(dir) => println!("{}", dir.display()),
+            Some(dir) => outln!("{}", dir.display()),
             None => bail!("no home directory found"),
         },
     }
@@ -326,7 +326,7 @@ pub fn config(ctx: &Context, command: ConfigCommand, path: Option<PathBuf>) -> R
                     &json!({ "path": path.to_string_lossy(), "exists": path.exists() }),
                 );
             } else {
-                println!("{}", path.display());
+                outln!("{}", path.display());
             }
         }
         ConfigCommand::Show if ctx.global.json => crate::json_line(&ctx.config),
@@ -334,7 +334,7 @@ pub fn config(ctx: &Context, command: ConfigCommand, path: Option<PathBuf>) -> R
             if ctx.config == Config::default() {
                 eprintln!("# no config file, using defaults");
             }
-            print!("{}", toml::to_string(&ctx.config)?);
+            out!("{}", toml::to_string(&ctx.config)?);
         }
     }
     Ok(())
@@ -353,16 +353,16 @@ pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
             } else {
                 match backend.info() {
                     BackendInfo::Process { ffmpeg } => {
-                        println!("ffmpeg   {}", ffmpeg.ffmpeg.display());
-                        println!("ffprobe  {}", ffmpeg.ffprobe.display());
-                        println!("source   {}", ui::name(&ffmpeg.source));
+                        outln!("ffmpeg   {}", ffmpeg.ffmpeg.display());
+                        outln!("ffprobe  {}", ffmpeg.ffprobe.display());
+                        outln!("source   {}", ui::name(&ffmpeg.source));
                     }
-                    BackendInfo::Builtin => println!("ffmpeg   built into tgradish"),
-                    other => println!("ffmpeg   {other:?}"),
+                    BackendInfo::Builtin => outln!("ffmpeg   built into tgradish"),
+                    other => outln!("ffmpeg   {other:?}"),
                 }
-                println!("version  {}", caps.version);
+                outln!("version  {}", caps.version);
                 let vp9 = if caps.libvpx_vp9 { style("yes").green() } else { style("no").red() };
-                println!("libvpx-vp9 encoder  {vp9}");
+                outln!("libvpx-vp9 encoder  {vp9}");
                 if !caps.libvpx_vp9 {
                     bail!("this ffmpeg can't encode VP9 with libvpx, stickers need it");
                 }
@@ -373,9 +373,9 @@ pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
 }
 
 fn print_sticker(path: &std::path::Path, stats: &check::Stats, issues: &[check::Issue]) {
-    println!("{}", style(term::link_out(path.display(), path)).bold());
+    outln!("{}", style(term::link_out(path.display(), path)).bold());
     if let Some(name) = &stats.name {
-        println!("{}", ui::field("name", name));
+        outln!("{}", ui::field("name", name));
     }
     let size = match stats.tgs_bytes {
         Some(bytes) => {
@@ -384,7 +384,7 @@ fn print_sticker(path: &std::path::Path, stats: &check::Stats, issues: &[check::
         }
         None => format!("{} of JSON", ui::kib(stats.json_bytes as u64)),
     };
-    println!("{}", ui::field("size", size));
+    outln!("{}", ui::field("size", size));
     let animation = format!(
         "{}x{}, {} fps, {} ({})",
         stats.width,
@@ -393,7 +393,7 @@ fn print_sticker(path: &std::path::Path, stats: &check::Stats, issues: &[check::
         ui::count(stats.frames, "frame"),
         ui::seconds(stats.frames / stats.fps.max(1.0)),
     );
-    println!("{}", ui::field("animation", animation));
+    outln!("{}", ui::field("animation", animation));
     let cost = limits::telegram::cost(stats.shapes, stats.layers);
     let drawing = format!(
         "{}, up to {} and {} in one; cost {cost} of {}",
@@ -402,19 +402,19 @@ fn print_sticker(path: &std::path::Path, stats: &check::Stats, issues: &[check::
         ui::count(stats.max_paints_per_layer, "fill"),
         limits::telegram::MAX_COST
     );
-    println!("{}", ui::field("drawing", drawing));
+    outln!("{}", ui::field("drawing", drawing));
     if !stats.features.is_empty() {
         let features: Vec<&str> = stats.features.iter().copied().collect();
-        println!("{}", ui::field("uses", features.join(", ")));
+        outln!("{}", ui::field("uses", features.join(", ")));
     }
     if issues.is_empty() {
-        println!("{}", ui::field("telegram", style("✔ accepts it").green()));
+        outln!("{}", ui::field("telegram", style("✔ accepts it").green()));
     }
     for issue in issues {
         let label = match issue.severity {
             check::Severity::Error => ui::error_label(),
             _ => ui::warning_label(),
         };
-        println!("  {label} {}", issue.message);
+        outln!("  {label} {}", issue.message);
     }
 }
