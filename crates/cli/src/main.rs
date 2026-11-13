@@ -307,14 +307,9 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let cli = Cli::parse();
-    if cli.command.is_window() && cli.global.json {
+    if let Some(misused) = cli.misused() {
         use clap::CommandFactory;
-        Cli::command()
-            .error(
-                clap::error::ErrorKind::ArgumentConflict,
-                "--json can't be used with gui: the window prints nothing to read",
-            )
-            .exit();
+        Cli::command().error(clap::error::ErrorKind::ArgumentConflict, misused).exit();
     }
     term::init(cli.global.colour, cli.global.json);
     if !cli.command.is_window() {

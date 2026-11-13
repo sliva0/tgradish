@@ -125,6 +125,10 @@ fn reports_errors_as_json() {
 fn rejects_bad_flags() {
     let output = tgradish(&["convert", "a.mp4", "--crf", "64"]);
     assert_eq!(output.status.code(), Some(2));
+    // switches take no value, which is no input either
+    let output = tgradish(&["convert", "a.png", "--watermark", "false"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("switches take no value"));
     // the window prints nothing to read
     if cfg!(feature = "gui") {
         let output = tgradish(&["--json", "gui"]);
