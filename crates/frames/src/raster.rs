@@ -10,21 +10,26 @@ use image::codecs::gif::GifDecoder;
 use image::codecs::jpeg::JpegDecoder;
 use image::codecs::png::PngDecoder;
 use image::codecs::webp::WebPDecoder;
+use image::error::LimitErrorKind;
 use image::{AnimationDecoder, DynamicImage, Frames, ImageDecoder, ImageError};
 
-use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Format, Frame, Limits, Result};
+use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Format, Frame, Limits, Oversize, Result};
 
 /// The `image` crate's errors as ours: a codec stopped by its limits says
 /// the input is too large, anything else that it doesn't decode.
-fn image_error(format: Format) -> impl Fn(ImageError) -> Error + Copy {
+fn image_error(format: Format, limits: &Limits) -> impl Fn(ImageError) -> Error + Copy {
+    let limits = *limits;
     move |err| match err {
-        ImageError::Limits(err) => Error::TooLarge(err.to_string()),
+        ImageError::Limits(err) => match err.kind() {
+            LimitErrorKind::DimensionError => limits.dimension(Oversize::Decoding),
+            _ => limits.bytes(Oversize::Decoding),
+        },
         err => Error::Decode { format, message: err.to_string() },
     }
 }
 
 pub(crate) fn decode(bytes: &[u8], format: Format, limits: &Limits) -> Result<Animation> {
-    let error = image_error(format);
+    let error = image_error(format, limits);
     // the codecs check sizes against these before they allocate
     let mut codec_limits = image::Limits::default();
     codec_limits.max_image_width = Some(limits.max_dimension);
@@ -85,7 +90,7 @@ fn collect(
     let mut size = None;
     let mut out = Vec::new();
     for frame in frames {
-        let frame = frame.map_err(image_error(format))?;
+        let frame = frame.map_err(image_error(format, limits))?;
         let duration = delay(Duration::from(frame.delay()));
         let buffer = frame.into_buffer();
         let (width, height) = *size.get_or_insert(buffer.dimensions());
@@ -109,9 +114,9 @@ fn still(mut decoder: impl ImageDecoder, format: Format, limits: &Limits) -> Res
     limits.check(width, height, 1)?;
     let rgba = (u64::from(width) * u64::from(height)).saturating_mul(4);
     if decoder.total_bytes().saturating_add(rgba) > limits.max_bytes as u64 {
-        return Err(Error::TooLarge(format!("a {width}x{height} image")));
+        return Err(limits.bytes(Oversize::Image { width, height }));
     }
-    let error = image_error(format);
+    let error = image_error(format, limits);
     // photos are often stored sideways, with the way up in their metadata
     let orientation = decoder.orientation().map_err(error)?;
     let mut image = DynamicImage::from_decoder(decoder).map_err(error)?;

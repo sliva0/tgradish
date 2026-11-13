@@ -51,8 +51,48 @@ pub enum Error {
     SheetFrames { cells: u32, frames: u32 },
     #[error("a sprite sheet is one picture, this has {frames} frames")]
     SheetAnimated { frames: usize },
-    #[error("the input is too large: {0}")]
-    TooLarge(String),
+    #[error("the input is too large: {}", oversize_text(what, limit))]
+    TooLarge { what: Oversize, limit: Limit },
+}
+
+/// What decoding found too large for its [`Limits`], with its size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Oversize {
+    /// `frames` frames of `width`x`height`: what all the frames decoded
+    /// come to together.
+    Frames { frames: usize, width: u32, height: u32 },
+    /// A still image of `width`x`height`, decoded and copied as RGBA.
+    Image { width: u32, height: u32 },
+    /// An Aseprite file's canvas of `width`x`height`.
+    Canvas { width: u32, height: u32 },
+    /// What decoding needs on the way, of a size not known before it is
+    /// refused.
+    Decoding,
+}
+
+/// The one of [`Limits`] that something went past.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Limit {
+    /// [`Limits::max_dimension`], in pixels.
+    Dimension(u32),
+    /// [`Limits::max_bytes`].
+    Bytes(usize),
+}
+
+fn oversize_text(what: &Oversize, limit: &Limit) -> String {
+    match (what, limit) {
+        (Oversize::Frames { frames, width, height }, _) => {
+            format!("{frames} frames of {width}x{height}")
+        }
+        (Oversize::Image { width, height }, _) => format!("a {width}x{height} image"),
+        (Oversize::Canvas { width, height }, _) => format!("the canvas is {width}x{height}"),
+        (Oversize::Decoding, Limit::Bytes(bytes)) => {
+            format!("decoding needs more than {bytes} bytes")
+        }
+        (Oversize::Decoding, Limit::Dimension(pixels)) => {
+            format!("a side is longer than {pixels} pixels")
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -125,12 +165,24 @@ impl Limits {
     /// Fails when `frames` frames of `width`x`height` don't fit.
     pub(crate) fn check(&self, width: u32, height: u32, frames: usize) -> Result<()> {
         let bytes = frame_bytes(width, height)?;
-        if width.max(height) > self.max_dimension
-            || bytes.checked_mul(frames).is_none_or(|total| total > self.max_bytes)
-        {
-            return Err(Error::TooLarge(format!("{frames} frames of {width}x{height}")));
+        let what = Oversize::Frames { frames, width, height };
+        if width.max(height) > self.max_dimension {
+            return Err(self.dimension(what));
+        }
+        if bytes.checked_mul(frames).is_none_or(|total| total > self.max_bytes) {
+            return Err(self.bytes(what));
         }
         Ok(())
+    }
+
+    /// `what` is wider or higher than these limits allow.
+    pub(crate) fn dimension(&self, what: Oversize) -> Error {
+        Error::TooLarge { what, limit: Limit::Dimension(self.max_dimension) }
+    }
+
+    /// `what` takes more bytes than these limits allow.
+    pub(crate) fn bytes(&self, what: Oversize) -> Error {
+        Error::TooLarge { what, limit: Limit::Bytes(self.max_bytes) }
     }
 }
 

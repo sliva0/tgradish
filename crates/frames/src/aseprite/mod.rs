@@ -20,7 +20,7 @@ use blend::Colour;
 /// A blend mode: the backdrop, what is drawn over it, and its opacity.
 type Mode = fn(Colour, Colour, u8) -> Colour;
 
-use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Format, Frame, Limits, Result};
+use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Format, Frame, Limits, Oversize, Result};
 
 /// Groups nested deeper than this are refused; Aseprite's interface makes
 /// nothing close, and rendering recurses once per level.
@@ -176,7 +176,7 @@ fn inflate(data: &[u8], size: usize) -> Result<Vec<u8>> {
 }
 
 fn too_large(limits: &Limits) -> Error {
-    Error::TooLarge(format!("decoding needs more than {} bytes", limits.max_bytes))
+    limits.bytes(Oversize::Decoding)
 }
 
 /// Bytes for the product of `factors`, within the limits.
@@ -408,7 +408,7 @@ impl Sprite {
             return Err(error(format!("the canvas is {width}x{height}")));
         }
         if width.max(height) > limits.max_dimension {
-            return Err(Error::TooLarge(format!("the canvas is {width}x{height}")));
+            return Err(limits.dimension(Oversize::Canvas { width, height }));
         }
 
         let mut sprite = Sprite {
@@ -1767,11 +1767,11 @@ mod tests {
     fn keeps_within_limits() {
         let big = file(5000, 5000, 32, 1, &[vec![layer(1, 0, 0, 0, 255)]]);
         let small = Limits { max_dimension: 4096, max_bytes: 1 << 20 };
-        assert!(matches!(Sprite::read(&big, &small), Err(Error::TooLarge(_))));
+        assert!(matches!(Sprite::read(&big, &small), Err(Error::TooLarge { .. })));
         let roomy = Limits { max_dimension: 8192, max_bytes: 1 << 20 };
         // the canvas is fine, 100 MB of frames aren't
         let sprite = Sprite::read(&big, &roomy).unwrap();
-        assert!(matches!(sprite.animation(None, &Layers::default()), Err(Error::TooLarge(_))));
+        assert!(matches!(sprite.animation(None, &Layers::default()), Err(Error::TooLarge { .. })));
         // nor is a cel that claims to be huge
         let cel = file(
             1,
@@ -1780,7 +1780,7 @@ mod tests {
             1,
             &[vec![layer(1, 0, 0, 0, 255), image_cel(0, (0, 0), (60000, 60000), &RED, false)]],
         );
-        assert!(matches!(Sprite::read(&cel, &roomy), Err(Error::TooLarge(_))));
+        assert!(matches!(Sprite::read(&cel, &roomy), Err(Error::TooLarge { .. })));
     }
 
     #[test]
@@ -1793,8 +1793,8 @@ mod tests {
         let draw = |max_bytes| {
             Sprite::read(&bytes, &limits(max_bytes))?.animation(None, &Layers::default())
         };
-        assert!(matches!(Sprite::read(&bytes, &limits(63)), Err(Error::TooLarge(_))));
-        assert!(matches!(draw(191), Err(Error::TooLarge(_))));
+        assert!(matches!(Sprite::read(&bytes, &limits(63)), Err(Error::TooLarge { .. })));
+        assert!(matches!(draw(191), Err(Error::TooLarge { .. })));
         assert_eq!(draw(192).unwrap().frames().len(), 1);
 
         // 100 tiles of a byte each in the file are 400 bytes as they are
@@ -1802,7 +1802,7 @@ mod tests {
         // the tileset's 12 bytes of pixels
         let tiles =
             file(1, 1, 32, 1, &[vec![layer(1, 2, 0, 0, 255), tileset(), tilemap(8, &[1; 100])]]);
-        assert!(matches!(Sprite::read(&tiles, &limits(511)), Err(Error::TooLarge(_))));
+        assert!(matches!(Sprite::read(&tiles, &limits(511)), Err(Error::TooLarge { .. })));
         let sprite = Sprite::read(&tiles, &limits(512)).unwrap();
         assert_eq!(sprite.spent, 412);
     }
