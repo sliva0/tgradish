@@ -221,37 +221,76 @@ impl Options {
 }
 
 /// `options` without the values that have no say in a conversion that
-/// gets `effective`, all it is given, by how fitting uses them: the tries
-/// and range of fitting that is off; a quality, or lossless encoding,
-/// where a bitrate or the quality itself is fitted; a bitrate where a
-/// quality is kept, or where fitting finds its own from the start; a
-/// quality beside lossless encoding, or beside a bitrate that encoding
-/// once goes by; and the duration spoofing writes
-/// where it never spoofs. Planning warns of a quality or bitrate given
-/// where it has no say, and refuses lossless encoding there; front-ends
-/// set such values aside.
+/// gets `effective`, all it is given, as [`set_aside`] gives them.
+/// Planning warns of a quality or bitrate given where it has no say, and
+/// refuses lossless encoding there; front-ends set such values aside.
 pub fn in_effect(mut options: Options, effective: &Options) -> Options {
+    for (key, _) in set_aside(&options, effective) {
+        match key {
+            "attempts" => options.attempts = None,
+            "fit-range" => options.fit_range = None,
+            "crf" => options.crf = None,
+            "lossless" => options.lossless = None,
+            "bitrate" => options.bitrate = None,
+            "fake-duration" => options.fake_duration = None,
+            _ => unreachable!("set_aside gives no {key}"),
+        }
+    }
+    options
+}
+
+/// The keys of the values set in `options` that have no say in a
+/// conversion that gets `effective`, each with why, as a clause naming
+/// options by their keys, as "fit is off": the tries and range of fitting
+/// that is off; a quality, or lossless encoding, where a bitrate or the
+/// quality itself is fitted; a bitrate where a quality is kept, or where
+/// fitting finds its own from the start; a quality beside lossless
+/// encoding, or beside a bitrate that encoding once goes by; and the
+/// duration spoofing writes where it never spoofs.
+pub fn set_aside(options: &Options, effective: &Options) -> Vec<(&'static str, String)> {
     let fit = effective.fit_or_default();
+    let fit_is = || {
+        let name = serde_json::to_value(fit).ok().and_then(|v| v.as_str().map(str::to_owned));
+        format!("fit is {}", name.unwrap_or_default())
+    };
     let constant_quality = matches!(fit, Fit::Fps | Fit::Length | Fit::Off);
     let lossless = constant_quality && effective.lossless_or_default();
+    let mut aside = Vec::new();
     if fit == Fit::Off {
-        (options.attempts, options.fit_range) = (None, None);
+        aside.extend(options.attempts.map(|_| ("attempts", fit_is())));
+        aside.extend(options.fit_range.map(|_| ("fit-range", fit_is())));
     }
-    if !constant_quality {
-        (options.crf, options.lossless) = (None, None);
+    let crf = if !constant_quality {
+        Some(fit_is())
+    } else if lossless {
+        Some("lossless is on".to_owned())
+    } else if fit == Fit::Off && effective.bitrate.is_some() {
+        Some("bitrate is set".to_owned())
+    } else {
+        None
+    };
+    if let (Some(_), Some(why)) = (options.crf, &crf) {
+        aside.push(("crf", why.clone()));
+    }
+    if let (Some(_), false) = (options.lossless, constant_quality) {
+        aside.push(("lossless", fit_is()));
     }
     // fitting a bitrate starts from the one given; the others don't
     // encode by one, but off does
-    if !matches!(fit, Fit::Bitrate | Fit::Off) || lossless {
-        options.bitrate = None;
+    let bitrate = if !matches!(fit, Fit::Bitrate | Fit::Off) {
+        Some(fit_is())
+    } else if lossless {
+        Some("lossless is on".to_owned())
+    } else {
+        None
+    };
+    if let (Some(_), Some(why)) = (options.bitrate, bitrate) {
+        aside.push(("bitrate", why));
     }
-    if lossless || (fit == Fit::Off && effective.bitrate.is_some()) {
-        options.crf = None;
+    if options.fake_duration.is_some() && effective.spoof == Some(Spoof::Never) {
+        aside.push(("fake-duration", "spoof is never".to_owned()));
     }
-    if effective.spoof == Some(Spoof::Never) {
-        options.fake_duration = None;
-    }
-    options
+    aside
 }
 
 /// The highest bitrate worth asking for, in kbit/s, far past what any
@@ -322,6 +361,27 @@ mod tests {
             Options { lossless: Some(true), spoof: Some(Spoof::Never), ..Options::default() };
         let effective = Options { fit: Some(Fit::Off), ..all.clone().merged(&lossless) };
         assert_eq!(set_keys(&in_effect(all.clone(), &effective)), ["lossless"]);
+    }
+
+    #[test]
+    fn says_why_each_value_is_set_aside() {
+        let why = |options: Options, key: &str| {
+            let aside = set_aside(&options, &options);
+            aside.into_iter().find(|(set, _)| *set == key).map(|(_, why)| why)
+        };
+        let crf = Options { crf: Some(20), ..Options::default() };
+        let fit = |fit| Options { fit: Some(fit), ..crf.clone() };
+        assert_eq!(why(fit(Fit::Bitrate), "crf").as_deref(), Some("fit is bitrate"));
+        assert_eq!(why(fit(Fit::Fps), "crf"), None);
+        let lossless = Options { lossless: Some(true), ..fit(Fit::Fps) };
+        assert_eq!(why(lossless, "crf").as_deref(), Some("lossless is on"));
+        let bitrate = Options { bitrate: Some(300.0), ..fit(Fit::Off) };
+        assert_eq!(why(bitrate.clone(), "crf").as_deref(), Some("bitrate is set"));
+        assert_eq!(why(bitrate, "bitrate"), None);
+        let bitrate = Options { bitrate: Some(300.0), lossless: Some(true), ..fit(Fit::Off) };
+        assert_eq!(why(bitrate, "bitrate").as_deref(), Some("lossless is on"));
+        let bitrate = Options { bitrate: Some(300.0), ..fit(Fit::Length) };
+        assert_eq!(why(bitrate, "bitrate").as_deref(), Some("fit is length"));
     }
 
     #[test]
