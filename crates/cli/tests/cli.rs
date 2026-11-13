@@ -788,8 +788,8 @@ impl Watching {
 
 #[cfg(unix)]
 fn named(event: &Value, kind: &str, name: &str) -> bool {
-    let input = event["input"].as_str().or(event["output"].as_str()).unwrap_or_default();
-    event["event"] == kind && input.ends_with(name)
+    let named = |key: &str| event[key].as_str().is_some_and(|path| path.ends_with(name));
+    event["event"] == kind && (named("input") || named("output"))
 }
 
 /// What watching converts: new files and links to them; never its own
