@@ -239,6 +239,7 @@ mod tests {
                 issues: vec![Issue::WrongSize { width: 512, height: 384, side: 100, exact: true }],
                 warnings: vec!["a warning".into()],
             }),
+            StillEvent::Warning { message: "a warning".into() },
             StillEvent::Error(Failure { message: "it failed".into(), input: None }),
         ]
         .map(|event| serde_json::to_value(event).unwrap());
