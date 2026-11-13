@@ -810,6 +810,36 @@ pub fn convert(
     made
 }
 
+/// Applies `changes` to the encoded `bytes`, or as many of them as there is
+/// room for: what extra ffmpeg arguments make can leave too little beside
+/// the header for tgradish's name, and with no duration there, for a
+/// spoofed one. Those are left out, each with a warning, rather than the
+/// encode lost. Returns the changes made.
+fn patch_what_fits(
+    bytes: &mut [u8],
+    mut changes: Patch,
+    on_event: &mut dyn FnMut(Event),
+) -> Result<Patch> {
+    loop {
+        // on an error, `bytes` are as they were
+        let err = match webm::patch(bytes, &changes) {
+            Ok(_) => return Ok(changes),
+            Err(err) => err,
+        };
+        let left_out = if changes.muxing_app.is_some() || changes.signature.is_some() {
+            (changes.muxing_app, changes.signature) = (None, None);
+            "tgradish's name"
+        } else if changes.duration.is_some() {
+            changes.duration = None;
+            "the spoofed duration"
+        } else {
+            return Err(err.into());
+        };
+        let message = format!("written without {left_out} in its metadata: {err}");
+        on_event(Event::Warning { message });
+    }
+}
+
 /// What a warning that a failed conversion's intermediate files are kept
 /// starts with; their directory follows.
 const KEPT_IN: &str = "intermediate files are kept in ";
@@ -834,10 +864,10 @@ fn encode_in(
     };
     let best = fit::run(&plan, &mut encoder)?;
     cancel.check()?;
-    let spoofed = plan.spoofs(encoded_length(best.params.length, best.params.fps));
+    let spoofs = plan.spoofs(encoded_length(best.params.length, best.params.fps));
 
     let changes = Patch {
-        duration: spoofed.then_some(plan.fake_duration),
+        duration: spoofs.then_some(plan.fake_duration),
         muxing_app: plan.watermark.then(|| crate::TOOL_ID.to_string()),
         signature: plan.watermark.then(crate::signature),
         // the hidden mark, which no option leaves out
@@ -845,7 +875,7 @@ fn encode_in(
         ..Default::default()
     };
     let mut bytes = std::fs::read(&best.path)?;
-    webm::patch(&mut bytes, &changes)?;
+    let spoofed = patch_what_fits(&mut bytes, changes, on_event)?.duration.is_some();
     // checked again here: the output may have appeared while encoding
     crate::fsutil::write_output(&plan.output, &bytes, request.overwrite)?;
 
@@ -1128,6 +1158,60 @@ mod tests {
         // nor a picture with no width, or frames cut short
         assert!(has_few_colours(&frames, 0, Some(Crop::whole((4, 2))), 0));
         assert!(has_few_colours(&[vec![1, 0, 0, 255, 2, 0]], 4, None, 0));
+    }
+
+    /// A WebM header with no room beside Info, as the arguments it is
+    /// given can make ffmpeg write, with a Duration or not.
+    fn cramped_webm(duration: bool) -> Vec<u8> {
+        use crate::ebml::build::*;
+        use crate::ebml::ids;
+        let mut info = vec![uint(ids::TIMESTAMP_SCALE, 1_000_000), el(ids::MUXING_APP, b"Lavf")];
+        if duration {
+            info.push(f64_el(ids::DURATION, 4000.0));
+        }
+        let track = el(
+            ids::TRACK_ENTRY,
+            &concat(&[
+                uint(ids::TRACK_NUMBER, 1),
+                uint(ids::TRACK_TYPE, 1),
+                el(ids::TRACK_UID, &0x8000_0000_0000_0001u64.to_be_bytes()),
+            ]),
+        );
+        let segment = concat(&[el(ids::INFO, &concat(&info)), el(ids::TRACKS, &track)]);
+        concat(&[el(ids::EBML, &el(ids::DOC_TYPE, b"webm")), el(ids::SEGMENT, &segment)])
+    }
+
+    #[test]
+    fn patches_what_there_is_room_for() {
+        let mark = crate::mark::Mark::current().to_u64();
+        let changes = Patch {
+            duration: Some(0.5),
+            muxing_app: Some(crate::TOOL_ID.into()),
+            signature: Some(crate::signature()),
+            track_uid: Some(mark),
+            ..Default::default()
+        };
+        for duration in [true, false] {
+            let mut bytes = cramped_webm(duration);
+            let mut warnings = Vec::new();
+            let made = patch_what_fits(&mut bytes, changes.clone(), &mut |event| {
+                if let Event::Warning { message } = event {
+                    warnings.push(message);
+                }
+            });
+            let made = made.unwrap();
+            let info = webm::inspect(&bytes).unwrap();
+            // the mark always fits; the name never does here
+            assert_eq!(info.video.unwrap().uid, Some(mark));
+            assert_eq!((info.muxing_app.as_deref(), made.muxing_app), (Some("Lavf"), None));
+            // a duration there is written over, one that isn't needs room
+            assert_eq!(made.duration.is_some(), duration);
+            assert_eq!(info.header_duration, duration.then_some(0.5));
+            assert_eq!(warnings.len(), if duration { 1 } else { 2 }, "{warnings:?}");
+        }
+        // what isn't WebM still fails
+        let made = patch_what_fits(&mut [0; 16], changes, &mut |_| {});
+        assert!(matches!(made, Err(Error::Webm(_))));
     }
 
     #[test]
