@@ -83,7 +83,7 @@ pub(crate) fn frame_field<'a>(
 /// marked.
 const MARKED_FRAME: f32 = 6.0;
 
-/// Width of [`unit`]'s two buttons.
+/// Width of [`unit()`]'s two buttons.
 const UNIT: f32 = 122.0;
 
 /// Whether the numbers count frames or seconds, which `known` frames
