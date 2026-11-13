@@ -21,6 +21,7 @@ use schemars::generate::SchemaSettings;
 use schemars::{JsonSchema, Schema, schema_for};
 use serde::Serialize;
 
+use crate::config::Config;
 use crate::events::Event;
 use crate::options::Options;
 use crate::presets::{Format, Presets};
@@ -100,9 +101,8 @@ fn printed<T: JsonSchema>() -> Schema {
     SchemaSettings::default().for_serialize().into_generator().into_root_schema_for::<T>()
 }
 
-/// `default_presets` are the presets used when none is given, for WebM and
-/// `.tgs`.
-pub fn describe(presets: &Presets, default_presets: [&str; 2]) -> Description {
+/// `config` says which preset each format uses when none is given.
+pub fn describe(presets: &Presets, config: &Config) -> Description {
     let presets = presets
         .iter()
         .map(|(name, preset)| {
@@ -121,7 +121,7 @@ pub fn describe(presets: &Presets, default_presets: [&str; 2]) -> Description {
             }
         })
         .collect();
-    let [webm, tgs] = default_presets;
+    let default_preset = |format: Format| config.preset_for(format).to_owned();
     Description {
         protocol: PROTOCOL_VERSION,
         tool: "tgradish",
@@ -132,7 +132,7 @@ pub fn describe(presets: &Presets, default_presets: [&str; 2]) -> Description {
                 format: Format::Webm,
                 description: "Video sticker or emoji, from any video or image",
                 output_extension: Format::Webm.extension(),
-                default_preset: webm.to_string(),
+                default_preset: default_preset(Format::Webm),
                 options: schema_for!(Options),
                 events: printed::<Event>(),
             },
@@ -140,7 +140,7 @@ pub fn describe(presets: &Presets, default_presets: [&str; 2]) -> Description {
                 format: Format::Tgs,
                 description: "Animated sticker, from pixel art",
                 output_extension: Format::Tgs.extension(),
-                default_preset: tgs.to_string(),
+                default_preset: default_preset(Format::Tgs),
                 options: schema_for!(TgsOptions),
                 events: printed::<TgsEvent>(),
             },
@@ -150,7 +150,7 @@ pub fn describe(presets: &Presets, default_presets: [&str; 2]) -> Description {
                               WebM's options where a still picture has them, start being \
                               the frame's time",
                 output_extension: Format::Webp.extension(),
-                default_preset: webm.to_string(),
+                default_preset: default_preset(Format::Webp),
                 options: schema_for!(Options),
                 events: printed::<crate::still::StillEvent>(),
             },
@@ -362,7 +362,7 @@ mod tests {
 
     #[test]
     fn names_everything_in_kebab_case() {
-        let description = describe(&Presets::builtin(), ["balanced", "best"]);
+        let description = describe(&Presets::builtin(), &Config::default());
         let description = serde_json::to_value(&description).unwrap();
         let mut names = Vec::new();
         for format in description["formats"].as_array().unwrap() {
