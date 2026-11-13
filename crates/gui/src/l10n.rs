@@ -229,7 +229,7 @@ mod tests {
     }
 
     /// What `pattern` holds: its text, the arguments it takes, and the
-    /// messages and terms it puts in.
+    /// messages and terms it puts in, as `id` or `id.attribute`.
     #[derive(Default)]
     struct Parts {
         text: String,
@@ -251,8 +251,11 @@ mod tests {
             ast::InlineExpression::VariableReference { id } => {
                 into.arguments.insert(id.name.clone());
             }
-            ast::InlineExpression::MessageReference { id, .. } => {
-                into.references.insert(id.name.clone());
+            ast::InlineExpression::MessageReference { id, attribute } => {
+                into.references.insert(match attribute {
+                    Some(attribute) => format!("{}.{}", id.name, attribute.name),
+                    None => id.name.clone(),
+                });
             }
             ast::InlineExpression::TermReference { id, .. } => {
                 into.references.insert(format!("-{}", id.name));
@@ -322,26 +325,170 @@ mod tests {
         }
     }
 
-    /// Every message English has is shown somewhere: named by `fl!` in
-    /// the window's code, or put in another message.
+    /// Where a comment, string or character starting at `at` in `code`
+    /// ends, if one does.
+    fn literal_end(code: &str, at: usize) -> Option<usize> {
+        let rest = &code[at..];
+        let after = |pattern: &str, from: usize| rest[from..].find(pattern).map(|end| end + from);
+        if rest.starts_with("//") {
+            return Some(at + after("\n", 0).unwrap_or(rest.len()));
+        }
+        if rest.starts_with("/*") {
+            return Some(at + after("*/", 2).map_or(rest.len(), |end| end + 2));
+        }
+        // a prefix, as of `r"…"` or `b"…"`, rather than a name's end
+        let prefixed = !code[..at].ends_with(|c: char| c.is_alphanumeric() || c == '_');
+        let raw = rest.strip_prefix("br").or(rest.strip_prefix('r')).filter(|_| prefixed);
+        if let Some(hashes) = raw {
+            let count = hashes.len() - hashes.trim_start_matches('#').len();
+            if hashes[count..].starts_with('"') {
+                let close = format!("\"{}", "#".repeat(count));
+                let open = rest.len() - hashes.len() + count + 1;
+                return Some(at + after(&close, open).map_or(rest.len(), |end| end + close.len()));
+            }
+        }
+        let start = match rest.as_bytes() {
+            [b'"', ..] => Some(1),
+            [b'b', b'"', ..] if prefixed => Some(2),
+            _ => None,
+        };
+        if let Some(start) = start {
+            let mut chars = rest[start..].char_indices();
+            while let Some((index, c)) = chars.next() {
+                match c {
+                    '\\' => {
+                        chars.next();
+                    }
+                    '"' => return Some(at + start + index + 1),
+                    _ => {}
+                }
+            }
+            return Some(code.len());
+        }
+        // a character, not a lifetime
+        let mut chars = rest.strip_prefix('\'')?.chars();
+        match chars.next()? {
+            '\\' => after("'", 3).map(|end| at + end + 1),
+            c => (chars.next() == Some('\'')).then(|| at + 2 + c.len_utf8()),
+        }
+    }
+
+    /// `code` without its comments, and without what is built only for
+    /// tests: each item, field or statement marked `#[cfg(test)]`.
+    fn without_tests(code: &str) -> String {
+        const MARK: &str = "#[cfg(test)]";
+        let mut kept = String::new();
+        let (mut at, mut from, mut depth, mut skipping) = (0, 0, 0usize, false);
+        while at < code.len() {
+            if let Some(end) = literal_end(code, at) {
+                let comment = code[at..].starts_with("//") || code[at..].starts_with("/*");
+                if comment && !skipping {
+                    kept.push_str(&code[from..at]);
+                    from = end;
+                }
+                at = end;
+                continue;
+            }
+            if !skipping && code[at..].starts_with(MARK) {
+                kept.push_str(&code[from..at]);
+                (skipping, depth) = (true, 0);
+                at += MARK.len();
+                continue;
+            }
+            let c = code[at..].chars().next().unwrap();
+            at += c.len_utf8();
+            if !skipping {
+                continue;
+            }
+            match c {
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                _ => {}
+            }
+            // an item ends with its block, a field with its comma, and
+            // anything else with its semicolon
+            if depth == 0 && matches!(c, '}' | ';' | ',') {
+                (skipping, from) = (false, at);
+            }
+        }
+        if !skipping {
+            kept.push_str(&code[from..]);
+        }
+        kept
+    }
+
+    /// What `fl!` asks for in `code`, as `id` or `id.attribute`.
+    fn asked_for(code: &str) -> Vec<String> {
+        let literal = |rest: &str| -> Option<String> {
+            let rest = rest.trim_start().strip_prefix('"')?;
+            Some(rest[..rest.find('"')?].to_owned())
+        };
+        let mut asked = Vec::new();
+        for call in code.split("fl!(").skip(1) {
+            let Some(id) = literal(call) else { continue };
+            let rest = call.trim_start()[id.len() + 2..].trim_start();
+            match rest.strip_prefix(',').and_then(literal) {
+                Some(attribute) => asked.push(format!("{id}.{attribute}")),
+                None => asked.push(id),
+            }
+        }
+        asked
+    }
+
+    #[test]
+    fn tells_test_code_and_what_is_asked_for() {
+        let code = r##"
+            fn shown() -> String { fl!("shown") + &fl!("also", "hint") }
+            // fl!("commented")
+            #[cfg(test)]
+            fn a_test() { let x = "}"; let y = '{'; let z = r#"{"#; fl!("tested"); }
+            struct Fields {
+                #[cfg(test)]
+                field: fn(*const u8) -> Vec<u8>,
+                kept: &'static str,
+            }
+            #[cfg(test)]
+            mod more;
+            const AFTER: &str = fl!("after", count = 2);
+            #[cfg(test)]
+            mod tests { #[test] fn it() { fl!("in-tests"); } }
+        "##;
+        let code = without_tests(code);
+        assert!(code.contains("kept: &'static str") && !code.contains("field"), "{code}");
+        assert_eq!(asked_for(&code), ["shown", "also.hint", "after"]);
+    }
+
+    /// Every message English has, and each of its attributes, is shown
+    /// somewhere: asked for by `fl!` in the window's code, other than its
+    /// tests', or put in another message. `fl!` itself fails to build for
+    /// a message or attribute English doesn't have.
     #[test]
     fn every_english_message_is_used() {
         let mut used = BTreeSet::new();
         let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        // modules built only for tests, as lib.rs names them
+        let lib = std::fs::read_to_string(source.join("lib.rs")).unwrap();
+        let test_modules: Vec<String> = lib
+            .split("#[cfg(test)]")
+            .skip(1)
+            .filter_map(|rest| {
+                let rest = rest.trim_start();
+                let rest = rest.strip_prefix("pub(crate) ").unwrap_or(rest);
+                let name = rest.strip_prefix("mod ")?.split(';').next()?;
+                Some(format!("{name}.rs"))
+            })
+            .collect();
+        assert!(test_modules.contains(&"testing.rs".to_owned()), "{test_modules:?}");
         let mut stack = vec![source];
         while let Some(dir) = stack.pop() {
             for entry in std::fs::read_dir(dir).unwrap() {
                 let path = entry.unwrap().path();
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
                 if path.is_dir() {
                     stack.push(path);
-                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                } else if name.ends_with(".rs") && !test_modules.contains(&name) {
                     let code = std::fs::read_to_string(&path).unwrap();
-                    for call in code.split("fl!(").skip(1) {
-                        let named = call.trim_start().strip_prefix('"');
-                        used.extend(
-                            named.and_then(|rest| rest.split('"').next()).map(str::to_owned),
-                        );
-                    }
+                    used.extend(asked_for(&without_tests(&code)));
                 }
             }
         }
@@ -351,14 +498,11 @@ mod tests {
             parts(pattern, &mut found);
             used.extend(found.references);
         }
-        let unused: Vec<String> = resource
-            .body
-            .iter()
-            .filter_map(|entry| match entry {
-                ast::Entry::Message(message) => Some(message.id.name.clone()),
-                ast::Entry::Term(term) => Some(format!("-{}", term.id.name)),
-                _ => None,
-            })
+        let unused: Vec<String> = patterns(&resource)
+            .into_iter()
+            .map(|(id, _)| id)
+            // a term's attributes are for its own selectors
+            .filter(|id| !(id.starts_with('-') && id.contains('.')))
             .filter(|id| !used.contains(id) && id != "language-name")
             .collect();
         assert!(unused.is_empty(), "never shown: {unused:?}");
@@ -411,7 +555,8 @@ mod tests {
             for (id, pattern) in patterns(&resource) {
                 let mut found = Parts::default();
                 parts(pattern, &mut found);
-                let lacking: Vec<_> = found.references.difference(&had).collect();
+                let messages = found.references.iter().map(|id| id.split('.').next().unwrap());
+                let lacking: Vec<_> = messages.filter(|id| !had.contains(*id)).collect();
                 assert!(lacking.is_empty(), "{tag}'s {id} puts in {lacking:?}, which it lacks");
             }
         }
