@@ -18,7 +18,9 @@
 //! ```
 //!
 //! Either table can be left out. A user preset with the name of a built-in
-//! one replaces it.
+//! one replaces it. A preset says how to convert, never what: the options
+//! of one file, [`PER_FILE`], are refused in one, and left out of one
+//! saved.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -108,6 +110,25 @@ impl FormatOptions {
     }
 }
 
+/// The options that say something of one file only: what to make, the
+/// part of it to use and its time, its tag and layers, its title, and how a
+/// sprite sheet is laid out. A preset says how to convert any file, so it
+/// holds none of them: they are refused in one's file, and left out of
+/// one saved. The size of the art's pixels isn't among them, as files from
+/// one place often share it.
+pub const PER_FILE: [&str; 10] = [
+    "target",
+    "tag",
+    "show-layers",
+    "hide-layers",
+    "crop",
+    "start",
+    "length",
+    "title",
+    "sheet",
+    "sheet-frames",
+];
+
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 struct PresetFile {
@@ -122,15 +143,37 @@ pub struct Preset {
     pub name: String,
     pub description: String,
     pub extends: Option<String>,
-    /// Options for WebM results set by this preset itself, without the
-    /// presets it extends, as written in the file.
-    #[schemars(with = "BTreeMap<String, serde_json::Value>")]
-    pub webm: toml::Table,
+    /// Options for WebM and image results set by this preset itself,
+    /// without the presets it extends: those its file sets.
+    pub webm: Options,
     /// The same for `.tgs` results.
-    #[schemars(with = "BTreeMap<String, serde_json::Value>")]
-    pub tgs: toml::Table,
+    pub tgs: TgsOptions,
     /// File the preset was loaded from, `None` for built-in presets.
     pub path: Option<PathBuf>,
+}
+
+impl Preset {
+    /// The preset in `text`, a preset file at `path`, named `name`.
+    fn read(name: &str, path: &Path, text: &str) -> std::result::Result<Preset, PresetError> {
+        let place = path.display().to_string();
+        let broken = |err: &dyn std::fmt::Display| PresetError::Broken(format!("{place}: {err}"));
+        let file: PresetFile = toml::from_str(text).map_err(|err| broken(&err))?;
+        for (table, options) in [("webm", &file.webm), ("tgs", &file.tgs)] {
+            if let Some(key) = options.keys().find(|key| PER_FILE.contains(&key.as_str())) {
+                return Err(PresetError::PerFile { place, key: format!("{table}.{key}") });
+            }
+        }
+        let webm = file.webm.try_into().map_err(|err| broken(&format_args!("[webm]: {err}")))?;
+        let tgs = file.tgs.try_into().map_err(|err| broken(&format_args!("[tgs]: {err}")))?;
+        Ok(Preset {
+            name: name.to_owned(),
+            description: file.description,
+            extends: file.extends,
+            webm,
+            tgs,
+            path: Some(path.to_path_buf()),
+        })
+    }
 }
 
 fn table(options: &impl Serialize) -> toml::Table {
@@ -142,8 +185,8 @@ fn builtin() -> Vec<Preset> {
         name: name.into(),
         description: description.into(),
         extends: None,
-        webm: table(&webm),
-        tgs: table(&tgs),
+        webm,
+        tgs,
         path: None,
     };
     let speed = |speed| TgsOptions { speed: Some(speed), ..Default::default() };
@@ -197,16 +240,20 @@ pub enum PresetError {
     /// Renaming it would break the preset named, which extends it.
     #[error("{0:?} extends it: rename it there first")]
     Extended(String),
+    /// A preset's file sets an option of one file, one of [`PER_FILE`],
+    /// as `key` names it in its table, `webm.crop`; `place` is the file.
+    #[error("{place}: {key} is one file's to choose, which a preset says nothing of")]
+    PerFile { place: String, key: String },
 }
 
 /// All presets, by name. Broken preset files are kept as errors so that
 /// one bad file does not break the others.
 #[derive(Debug, Clone)]
 pub struct Presets {
-    entries: BTreeMap<String, std::result::Result<Preset, String>>,
+    entries: BTreeMap<String, std::result::Result<Preset, PresetError>>,
     /// Each preset's options with what it extends applied, worked out
     /// once as presets load: the window asks for them many times a frame,
-    /// and each would otherwise parse the TOML of the whole chain again.
+    /// and each would otherwise merge the whole chain again.
     resolved: BTreeMap<String, Resolved>,
 }
 
@@ -235,14 +282,8 @@ impl Presets {
             .entries
             .keys()
             .map(|name| {
-                let webm =
-                    self.fold(name, |preset| &preset.webm, Options::default(), Options::merged);
-                let tgs = self.fold(
-                    name,
-                    |preset| &preset.tgs,
-                    TgsOptions::default(),
-                    TgsOptions::merged,
-                );
+                let webm = self.fold(name, |preset| &preset.webm, Options::merged);
+                let tgs = self.fold(name, |preset| &preset.tgs, TgsOptions::merged);
                 let resolved = Resolved { webm: webm.map_err(message), tgs: tgs.map_err(message) };
                 (name.clone(), resolved)
             })
@@ -261,18 +302,10 @@ impl Presets {
                 continue;
             }
             let Some(name) = path.file_stem().and_then(|s| s.to_str()) else { continue };
-            let loaded = std::fs::read_to_string(&path)
-                .map_err(|err| err.to_string())
-                .and_then(|text| toml::from_str::<PresetFile>(&text).map_err(|err| err.to_string()))
-                .map(|file| Preset {
-                    name: name.to_string(),
-                    description: file.description,
-                    extends: file.extends,
-                    webm: file.webm,
-                    tgs: file.tgs,
-                    path: Some(path.clone()),
-                })
-                .map_err(|err| format!("{}: {err}", path.display()));
+            let loaded = match std::fs::read_to_string(&path) {
+                Ok(text) => Preset::read(name, &path, &text),
+                Err(err) => Err(PresetError::Broken(format!("{}: {err}", path.display()))),
+            };
             presets.entries.insert(name.to_string(), loaded);
         }
         Ok(presets.resolved())
@@ -283,17 +316,15 @@ impl Presets {
         Self::load(user_dir().as_deref())
     }
 
-    /// Every preset, with an error message for the ones that failed to load.
-    pub fn iter(&self) -> impl Iterator<Item = (&str, std::result::Result<&Preset, &str>)> {
-        self.entries
-            .iter()
-            .map(|(name, entry)| (name.as_str(), entry.as_ref().map_err(|e| e.as_str())))
+    /// Every preset, with why for the ones that failed to load.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, std::result::Result<&Preset, &PresetError>)> {
+        self.entries.iter().map(|(name, entry)| (name.as_str(), entry.as_ref()))
     }
 
     pub fn get(&self, name: &str) -> Result<&Preset> {
         match self.entries.get(name) {
             Some(Ok(preset)) => Ok(preset),
-            Some(Err(message)) => Err(PresetError::Broken(message.clone()).into()),
+            Some(Err(err)) => Err(err.clone().into()),
             None => {
                 let known = self.entries.keys().cloned().collect();
                 Err(PresetError::Unknown { name: name.to_owned(), known }.into())
@@ -339,21 +370,16 @@ impl Presets {
         }
     }
 
-    fn fold<T: serde::de::DeserializeOwned>(
+    /// The options `options` takes from each preset of `name`'s chain,
+    /// merged from the base up.
+    fn fold<T: Default>(
         &self,
         name: &str,
-        table: fn(&Preset) -> &toml::Table,
-        empty: T,
+        options: fn(&Preset) -> &T,
         merged: fn(T, &T) -> T,
     ) -> Result<T> {
-        self.chain(name)?.iter().rev().try_fold(empty, |acc, preset| {
-            let options: T = table(preset).clone().try_into().map_err(|err| {
-                let place =
-                    preset.path.as_ref().map_or(preset.name.clone(), |p| p.display().to_string());
-                PresetError::Broken(format!("{place}: {err}"))
-            })?;
-            Ok(merged(acc, &options))
-        })
+        let chain = self.chain(name)?;
+        Ok(chain.iter().rev().fold(T::default(), |acc, preset| merged(acc, options(preset))))
     }
 }
 
@@ -378,47 +404,17 @@ pub fn check_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// The options of `options` a preset keeps: none that only make sense for
-/// one file, as what to make, its crop, its time, its tag and layers, its
-/// title.
-pub(crate) fn shareable(options: &Options) -> Options {
-    Options {
-        target: None,
-        tag: None,
-        show_layers: None,
-        hide_layers: None,
-        crop: None,
-        start: None,
-        length: None,
-        title: None,
-        ..options.clone()
-    }
-}
-
-/// [`shareable`] for `.tgs` options, which also leave out a sprite sheet's
-/// layout; the size of the art's pixels stays, as files from one place
-/// often share it.
-pub(crate) fn shareable_tgs(options: &TgsOptions) -> TgsOptions {
-    TgsOptions {
-        target: None,
-        tag: None,
-        show_layers: None,
-        hide_layers: None,
-        crop: None,
-        start: None,
-        length: None,
-        title: None,
-        sheet: None,
-        sheet_frames: None,
-        ..options.clone()
-    }
+/// The options of `options` a preset keeps: all but [`PER_FILE`].
+pub fn shareable<T: Serialize + serde::de::DeserializeOwned>(options: &T) -> T {
+    let mut table = table(options);
+    table.retain(|key, _| !PER_FILE.contains(&key));
+    table.try_into().expect("options read back with fewer set")
 }
 
 /// Writes a preset named `name` into `dir`, said to be `description`, of
-/// `webm` and `tgs` without what only makes sense for one file, as what to
-/// make, its crop, time, tag, layers and title, and a sprite sheet's
-/// layout; and returns its file.
-/// One there already is replaced only with `replace`.
+/// `webm` and `tgs` without what only makes sense for one file
+/// ([`PER_FILE`]), and returns its file. One there already is replaced
+/// only with `replace`.
 pub fn save(
     dir: &Path,
     name: &str,
@@ -432,7 +428,7 @@ pub fn save(
         file.insert("description".into(), description.into());
     }
     file.insert("webm".into(), table(&shareable(webm)).into());
-    file.insert("tgs".into(), table(&shareable_tgs(tgs)).into());
+    file.insert("tgs".into(), table(&shareable(tgs)).into());
     let text = toml::to_string(&file).map_err(|err| PresetError::Broken(err.to_string()))?;
     std::fs::create_dir_all(dir).map_err(Error::io(FileAction::Create, dir))?;
     let path = dir.join(format!("{name}.toml"));
@@ -515,7 +511,6 @@ pub fn restore(dir: &Path, name: &str, text: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::telegram::Target;
 
     #[test]
     fn renames_describes_and_removes_presets() {
@@ -597,7 +592,11 @@ mod tests {
         let presets = Presets::load(Some(dir.path())).unwrap();
         assert_eq!(presets.get("my small").unwrap().description, "Small ones");
         assert_eq!(presets.webm("my small").unwrap(), shareable(&webm));
-        assert_eq!(presets.tgs("my small").unwrap(), shareable_tgs(&tgs));
+        assert_eq!(presets.tgs("my small").unwrap(), shareable(&tgs));
+        // none of one file's options are kept
+        let preset = presets.get("my small").unwrap();
+        assert_eq!((preset.webm.crop, preset.webm.title.as_deref()), (None, None));
+        assert_eq!((preset.tgs.sheet.as_ref(), preset.webm.crf), (None, Some(28)));
         assert_eq!(presets.tgs("my small").unwrap().pixel_scale, Some(2));
         // there already, replaced only when asked
         let again = save(dir.path(), "my small", "", (&webm, &tgs), false);
@@ -644,7 +643,7 @@ mod tests {
         write(
             dir.path(),
             "tiny",
-            "description = 'tiny emoji'\nextends = 'fast'\n[webm]\ntarget = 'emoji'\nfps = 10.0\n",
+            "description = 'tiny ones'\nextends = 'fast'\n[webm]\nfps = 10.0\n",
         );
         write(dir.path(), "balanced", "[webm]\ncrf = 20\n");
         write(dir.path(), "broken", "[webm]\nfsp = 10\n");
@@ -653,14 +652,14 @@ mod tests {
         write(dir.path(), "pixels", "extends = 'best'\n[tgs]\nkeep-canvas = true\n");
         write(dir.path(), "wrong", "[tgs]\ncrf = 20\n");
         write(dir.path(), "old", "format = 'tgs'\n[options]\nspeed = 'fast'\n");
+        // what one file has is no preset's to say
+        write(dir.path(), "emoji", "[webm]\ntarget = 'emoji'\n");
+        write(dir.path(), "sheet", "[tgs]\nspeed = 'fast'\nsheet = '4x1'\n");
         std::fs::write(dir.path().join("notes.txt"), "ignored").unwrap();
 
         let presets = Presets::load(Some(dir.path())).unwrap();
         let tiny = presets.webm("tiny").unwrap();
-        assert_eq!(
-            (tiny.target, tiny.fps, tiny.speed),
-            (Some(Target::Emoji), Some(10.0), Some(Speed::Fast))
-        );
+        assert_eq!((tiny.fps, tiny.speed), (Some(10.0), Some(Speed::Fast)));
         // only WebM options were set, the rest comes from the base
         assert_eq!(presets.tgs("tiny").unwrap().speed, Some(Speed::Fast));
         // the user file replaced the built-in preset
@@ -673,12 +672,19 @@ mod tests {
 
         let broken = presets.webm("broken").unwrap_err().to_string();
         assert!(broken.contains("broken.toml") && broken.contains("fsp"), "{broken}");
-        // broken for one format only
-        assert!(presets.tgs("broken").is_ok());
+        // a file broken in one table is broken as a whole
+        assert!(presets.tgs("broken").is_err());
+        for (name, key) in [("emoji", "webm.target"), ("sheet", "tgs.sheet")] {
+            let err = presets.get(name).unwrap_err();
+            assert!(
+                matches!(&err, Error::Preset(PresetError::PerFile { key: named, .. }) if named == key),
+                "{err}"
+            );
+        }
         assert!(presets.webm("loop-a").unwrap_err().to_string().contains("extends itself"));
         // crf isn't a .tgs option
         assert!(presets.tgs("wrong").unwrap_err().to_string().contains("crf"));
         assert!(presets.get("old").is_err());
-        assert_eq!(presets.iter().count(), 10);
+        assert_eq!(presets.iter().count(), 12);
     }
 }
