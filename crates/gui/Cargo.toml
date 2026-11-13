@@ -11,6 +11,8 @@ homepage.workspace = true
 readme = "README.md"
 keywords = ["telegram", "sticker", "emoji", "egui", "pixel-art"]
 categories = ["multimedia::video", "multimedia::images"]
+# the art of the README's screenshot, which only a test reads
+exclude = ["/readme-art"]
 
 [dependencies]
 tgradish-core = { workspace = true, features = ["clipboard"] }
