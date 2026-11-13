@@ -146,14 +146,15 @@ impl App {
                     None => fl!("session-unreadable", path = kept),
                 });
             }
-            let (items, selected, gone) = loaded.session.restore(store.path(), self.next_id);
-            self.next_id += items.len() as u64;
-            self.items = items;
-            if let Some(id) = selected.or(self.items.last().map(|item| item.id)) {
+            let restored = loaded.session.restore(store.path(), self.next_id);
+            self.next_id += restored.items.len() as u64;
+            self.items = restored.items;
+            self.written.extend(restored.written);
+            if let Some(id) = restored.selected.or(self.items.last().map(|item| item.id)) {
                 self.select(id);
             }
-            if gone > 0 {
-                self.say(fl!("files-gone", count = gone));
+            if restored.gone > 0 {
+                self.say(fl!("files-gone", count = restored.gone));
             }
         }
         self.session = Some(store);
@@ -195,7 +196,8 @@ impl App {
         let Some(store) = &mut self.session else { return };
         // with the setting off, nothing is kept: an empty session
         let items: &[Item] = if self.config.gui.forget_files { &[] } else { &self.items };
-        if let Err(err) = store.save(&session::Session::of(items, self.selected)) {
+        let session = session::Session::of(items, self.selected, &self.written);
+        if let Err(err) = store.save(&session) {
             self.message = Some(fl!("session-unsaved", error = err.to_string()));
             // once is enough
             self.session = None;
@@ -620,6 +622,41 @@ mod tests {
         let mut third = harness(Config::default());
         third.state_mut().reopen(state);
         assert_eq!(third.state().items.len(), 1);
+    }
+
+    #[test]
+    fn makes_a_pasted_image_again_where_it_made_it_last_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state").join("session.json");
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let output = dir.path().join("out").join("clipboard.sticker.tgs");
+        let mut first = harness(config.clone());
+        first.state_mut().reopen(state.clone());
+        let (files, folder) = pasted_image();
+        first.state_mut().add_pasted(files, folder);
+        finish(&mut first);
+        convert(&first);
+        first.run_steps(2);
+        finish(&mut first);
+        assert_eq!(crate::testing::made_job(&first.state().items[0]).output, output);
+        first.state_mut().save_session();
+        drop(first);
+
+        // the next window names the result the same, and knows the file
+        // there for the image's own
+        let mut second = harness(config);
+        second.state_mut().reopen(state);
+        finish(&mut second);
+        let app = second.state();
+        assert_eq!(app.work_out_output(&app.items[0]), output);
+        second.state_mut().items[0].choices.tgs.keep_canvas = Some(true);
+        second.run_steps(2);
+        convert(&second);
+        second.run_steps(2);
+        finish(&mut second);
+        assert_eq!(crate::testing::made_job(&second.state().items[0]).output, output);
+        assert_eq!(std::fs::read_dir(dir.path().join("out")).unwrap().count(), 1);
     }
 
     #[test]

@@ -4,6 +4,9 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
 
 use tgradish_core::presets::Format;
 use tgradish_core::{convert, paths, still, tgs};
@@ -11,23 +14,35 @@ use tgradish_core::{convert, paths, still, tgs};
 use crate::app::App;
 use crate::item::Item;
 
-/// A result this window wrote: for which item, and the file as written,
-/// so a file put there since isn't taken for it.
+/// A file's size and modification time, which change when it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct FileVersion {
+    bytes: u64,
+    /// Since 1970, as files are dated.
+    modified: Option<Duration>,
+}
+
+impl FileVersion {
+    /// The file at `path` as it is now, if there is one.
+    pub(crate) fn of(path: &Path) -> Option<FileVersion> {
+        let metadata = std::fs::metadata(path).ok()?;
+        let modified = metadata.modified().ok().and_then(|at| at.duration_since(UNIX_EPOCH).ok());
+        Some(FileVersion { bytes: metadata.len(), modified })
+    }
+}
+
+/// A result this window wrote, now or in an earlier run: for which item,
+/// and the file as written, so a file put there since isn't taken for it.
 pub(crate) struct Written {
-    item: u64,
-    len: u64,
-    modified: Option<std::time::SystemTime>,
+    pub(crate) item: u64,
+    pub(crate) version: FileVersion,
 }
 
 impl Written {
     pub(crate) fn of(item: u64, path: &Path) -> Option<Written> {
-        let metadata = std::fs::metadata(path).ok()?;
-        Some(Written { item, len: metadata.len(), modified: metadata.modified().ok() })
+        Some(Written { item, version: FileVersion::of(path)? })
     }
 }
-
-/// A file's size and modification time, which change when it is written.
-pub(crate) type FileVersion = (u64, Option<std::time::SystemTime>);
 
 impl App {
     /// Where an item's result goes, as worked out this frame.
@@ -87,21 +102,18 @@ impl App {
         self.config.gui.overwrite || self.wrote(item, path) || self.made_by_tgradish(path)
     }
 
+    /// Whether the item wrote the file at `path`, and nobody changed it
+    /// since.
     pub(crate) fn wrote(&self, item: u64, path: &Path) -> bool {
         self.written.get(path).is_some_and(|written| {
-            Written::of(item, path).is_some_and(|now| {
-                now.item == written.item
-                    && now.len == written.len
-                    && now.modified == written.modified
-            })
+            written.item == item && FileVersion::of(path) == Some(written.version)
         })
     }
 
     /// Whether tgradish made the file at `path`, by the marks it shows:
     /// read once for each version of the file.
     fn made_by_tgradish(&self, path: &Path) -> bool {
-        let Ok(metadata) = std::fs::metadata(path) else { return false };
-        let version = (metadata.len(), metadata.modified().ok());
+        let Some(version) = FileVersion::of(path) else { return false };
         let mut known = self.made_by_tgradish.borrow_mut();
         match known.get(path) {
             Some(&(seen, made)) if seen == version => made,
