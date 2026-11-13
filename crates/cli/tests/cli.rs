@@ -557,6 +557,61 @@ fn status_without_vp9_is_one_document() {
     assert_eq!(status["capabilities"]["version"], "ffmpeg version fake");
 }
 
+/// Which ffmpeg is used: either flag, which can't be given together, over
+/// TGRADISH_FFMPEG, over the config file.
+#[cfg(unix)]
+#[test]
+fn ranks_where_ffmpeg_comes_from() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["ffmpeg", "ffprobe"] {
+        let path = dir.path().join(name);
+        std::fs::write(&path, "#!/bin/sh\necho 'ffmpeg version fake'\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let config = dir.path().join("config.toml");
+    std::fs::write(&config, format!("[ffmpeg]\npath = {:?}\n", dir.path().join("nowhere")))
+        .unwrap();
+    let status = |env: Option<&Path>, args: &[&str]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_tgradish"));
+        command.args(["--json", "--config", config.to_str().unwrap()]).args(args);
+        command.args(["ffmpeg", "status"]);
+        if let Some(env) = env {
+            command.env("TGRADISH_FFMPEG", env);
+        }
+        let output = command.output().unwrap();
+        let line = json_lines(&output).pop().unwrap();
+        (output.status.code(), line)
+    };
+    let used = |line: &Value| line["ffmpeg"]["ffmpeg"].as_str().unwrap_or("").to_owned();
+    let fake = dir.path().join("ffmpeg");
+    let fake = fake.to_str().unwrap();
+    // the variable over the config file
+    let (_, line) = status(Some(dir.path()), &[]);
+    assert_eq!(used(&line), fake, "{line}");
+    // the config's path alone, which isn't there
+    let (code, line) = status(None, &[]);
+    assert_eq!((code, line["event"].as_str()), (Some(1), Some("error")), "{line}");
+    if tgradish_corpus::ffmpeg_on_path() {
+        // a flag over the variable
+        let (code, line) = status(Some(dir.path()), &["--ffmpeg-from", "system"]);
+        assert_eq!(code, Some(0), "{line}");
+        assert_ne!(used(&line), fake, "{line}");
+    }
+    let (_, line) =
+        status(Some(Path::new("/nowhere")), &["--ffmpeg", dir.path().to_str().unwrap()]);
+    assert_eq!(used(&line), fake, "{line}");
+    let both = tgradish(&["--ffmpeg", "/x", "--ffmpeg-from", "system", "ffmpeg", "status"]);
+    assert_eq!(both.status.code(), Some(2));
+    // `ffmpeg` alone is its status
+    let alone = Command::new(env!("CARGO_BIN_EXE_tgradish"))
+        .args(["--json", "--ffmpeg", dir.path().to_str().unwrap(), "ffmpeg"])
+        .output()
+        .unwrap();
+    assert_eq!(json_lines(&alone)[0]["capabilities"]["version"], "ffmpeg version fake");
+}
+
 #[cfg(unix)]
 #[test]
 fn watch_converts_new_files() {

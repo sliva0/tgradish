@@ -28,9 +28,11 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::Parser;
+use std::path::PathBuf;
 use tgradish_core::CancelToken;
 use tgradish_core::backend::Backend;
 use tgradish_core::config::Config;
+use tgradish_core::ffmpeg::FfmpegChoice;
 
 use crate::args::{Cli, Command, Global};
 
@@ -163,15 +165,37 @@ pub struct Context {
     pub cancel: CancelToken,
 }
 
+/// The ffmpeg given over the config file's, as the window takes it too: by
+/// `--ffmpeg` or `--ffmpeg-from`, which can't be given together, or else
+/// a path in `TGRADISH_FFMPEG`, which either flag beats.
+fn ffmpeg_given(
+    path: Option<&std::path::Path>,
+    from: Option<args::FfmpegFrom>,
+) -> (Option<FfmpegChoice>, Option<PathBuf>) {
+    match (path, from) {
+        (Some(path), _) => (None, Some(path.to_path_buf())),
+        (None, Some(from)) => (Some(from.into()), None),
+        (None, None) => {
+            let env = std::env::var_os("TGRADISH_FFMPEG").filter(|path| !path.is_empty());
+            (None, env.map(PathBuf::from))
+        }
+    }
+}
+
 impl Context {
+    /// [`ffmpeg_given`] by this command line.
+    fn ffmpeg_given(&self) -> (Option<FfmpegChoice>, Option<PathBuf>) {
+        ffmpeg_given(self.global.ffmpeg.as_deref(), self.global.ffmpeg_from)
+    }
+
     pub fn backend(&self) -> tgradish_core::Result<Backend> {
-        // an explicit choice on the command line beats a path in the config
-        let (choice, path) = match (self.global.ffmpeg_from, &self.global.ffmpeg) {
-            (_, Some(path)) => (self.config.ffmpeg.choice, Some(path)),
-            (Some(choice), None) => (choice.into(), None),
-            (None, None) => (self.config.ffmpeg.choice, self.config.ffmpeg.path.as_ref()),
-        };
-        Backend::select(choice, path.map(|p| p.as_path()))
+        let config = &self.config.ffmpeg;
+        match self.ffmpeg_given() {
+            (_, Some(path)) => Backend::select(config.choice, Some(&path)),
+            // a choice given beats a path in the config
+            (Some(choice), None) => Backend::select(choice, None),
+            (None, None) => Backend::select(config.choice, config.path.as_deref()),
+        }
     }
 }
 
@@ -206,18 +230,19 @@ fn run(cli: Cli) -> Result<()> {
         Command::Describe => commands::describe(&ctx),
         Command::Preset(command) => commands::preset(&ctx, command),
         Command::Config(command) => commands::config(&ctx, command, config_path),
-        Command::Ffmpeg(command) => commands::ffmpeg(&ctx, command),
+        Command::Ffmpeg { command } => {
+            commands::ffmpeg(&ctx, command.unwrap_or(args::FfmpegCommand::Status))
+        }
         Command::Licenses => {
             commands::licenses(&ctx);
             Ok(())
         }
         #[cfg(feature = "gui")]
-        Command::Gui => tgradish_gui::run(
-            tgradish_gui::Launch::default()
-                .config_path(config_path)
-                .ffmpeg(ctx.global.ffmpeg_from.map(Into::into), ctx.global.ffmpeg.clone()),
-        )
-        .map_err(|err| anyhow::anyhow!("{err}")),
+        Command::Gui => {
+            let (choice, path) = ctx.ffmpeg_given();
+            let launch = tgradish_gui::Launch::default().config_path(config_path);
+            tgradish_gui::run(launch.ffmpeg(choice, path)).map_err(|err| anyhow::anyhow!("{err}"))
+        }
     }
 }
 
@@ -264,7 +289,8 @@ fn main() -> ExitCode {
     return_freed_memory_sooner();
     #[cfg(feature = "gui")]
     if started_outside_a_terminal() {
-        return match tgradish_gui::run(tgradish_gui::Launch::default()) {
+        let (choice, path) = ffmpeg_given(None, None);
+        return match tgradish_gui::run(tgradish_gui::Launch::default().ffmpeg(choice, path)) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 // there is no terminal to print to
