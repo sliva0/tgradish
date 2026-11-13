@@ -921,6 +921,22 @@ fn names_files_whose_names_are_not_unicode() {
     assert!(named(&lines[0]["input"]), "{}", lines[0]);
     let finished = lines.last().unwrap();
     assert!(finished["output"].as_str().unwrap().ends_with("caf\u{fffd}.sticker.tgs"));
+    // and as text, which shows the name as it can
+    let output = Command::new(env!("CARGO_BIN_EXE_tgradish"))
+        .args(["convert", "--format", "tgs", "-y"])
+        .arg(&input)
+        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("caf\u{fffd}.sticker.tgs"), "{stdout}");
+    let inspected = Command::new(env!("CARGO_BIN_EXE_tgradish"))
+        .arg("inspect")
+        .arg(input.with_file_name(std::ffi::OsStr::from_bytes(b"caf\xe9.sticker.tgs")))
+        .output()
+        .unwrap();
+    assert!(inspected.status.success(), "{}", String::from_utf8_lossy(&inspected.stderr));
     // as is an error about the file
     let missing = dir.path().join(std::ffi::OsStr::from_bytes(b"gone\xe9.png"));
     let output = Command::new(env!("CARGO_BIN_EXE_tgradish"))
@@ -978,4 +994,142 @@ fn shows_a_preset_as_a_file_could_hold_it() {
     let listed = console::strip_ansi_codes(&String::from_utf8_lossy(&listed.stdout)).into_owned();
     assert!(listed.contains("balanced (default for webm and webp)"), "{listed}");
     assert!(listed.contains("best (default for tgs)"), "{listed}");
+}
+
+/// A one-second WebM of a red square, made by tgradish, or `None` without
+/// ffmpeg.
+fn small_webm(dir: &Path) -> Option<PathBuf> {
+    if !tgradish_corpus::ffmpeg_on_path() {
+        return None;
+    }
+    let png = dir.join("square.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let webm = dir.join("square.webm");
+    let made = tgradish(&[
+        "--ffmpeg-from",
+        "system",
+        "convert",
+        png.to_str().unwrap(),
+        "-o",
+        webm.to_str().unwrap(),
+        "--length",
+        "1",
+        "--preset",
+        "fast",
+    ]);
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    Some(webm)
+}
+
+/// What `inspect --json` finds in the WebM at `path`.
+fn webm_info(path: &Path) -> Value {
+    json_lines(&tgradish(&["--json", "inspect", path.to_str().unwrap()])).remove(0)["info"].take()
+}
+
+#[test]
+fn spoofs_durations() {
+    let dir = tempfile::tempdir().unwrap();
+    let Some(webm) = small_webm(dir.path()) else { return };
+    let input = webm.to_str().unwrap();
+    // beside the input, by default
+    let spoofed = dir.path().join("square.spoofed.webm");
+    let output = tgradish(&["spoof", input, "-d", "0.5"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Spoofed"));
+    assert_eq!(webm_info(&spoofed)["header-duration"], 0.5);
+    assert_eq!(webm_info(&webm)["header-duration"], 1.0, "the input is left alone");
+    // not over what is there, unless asked
+    let again = tgradish(&["spoof", input]);
+    assert_eq!(again.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&again.stderr).contains("already exists, use --overwrite"));
+    assert!(tgradish(&["spoof", input, "-y", "-d", "0.25"]).status.success());
+    assert_eq!(webm_info(&spoofed)["header-duration"], 0.25);
+    // into the input itself, by -o or -i
+    let copy = dir.path().join("copy.webm");
+    std::fs::copy(&webm, &copy).unwrap();
+    let copy = copy.to_str().unwrap();
+    assert!(tgradish(&["spoof", copy, "-o", copy, "-d", "0.75"]).status.success());
+    assert_eq!(webm_info(Path::new(copy))["header-duration"], 0.75);
+    assert!(tgradish(&["spoof", copy, "-i", "--title", "pig"]).status.success());
+    // with the short duration spoofing writes unless told
+    let info = webm_info(Path::new(copy));
+    let duration = info["header-duration"].as_f64().unwrap();
+    assert!(duration < 0.75 && info["title"] == "pig", "{info}");
+    // as JSON, one line
+    let output = tgradish(&["--json", "spoof", input, "-y"]);
+    let lines = json_lines(&output);
+    assert_eq!(lines.len(), 1);
+    assert!(lines[0]["output"].as_str().unwrap().ends_with("square.spoofed.webm"));
+    assert_eq!(lines[0]["report"]["old-duration"], 1.0);
+    // a duration Telegram refuses is written, and refused
+    let output = tgradish(&["spoof", input, "-y", "-d", "5"]);
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Telegram will still refuse it"));
+}
+
+#[test]
+fn shows_presets_and_the_config() {
+    // a preset as a file would hold it
+    let shown = tgradish(&["preset", "show", "fast"]);
+    assert!(shown.status.success());
+    let file: toml::Table = toml::from_str(&String::from_utf8(shown.stdout).unwrap()).unwrap();
+    assert_eq!(file["webm"]["speed"].as_str(), Some("fast"));
+    assert_eq!(file["tgs"]["speed"].as_str(), Some("fast"));
+    assert_eq!(tgradish(&["preset", "show", "nope"]).status.code(), Some(1));
+    // each preset, a line of JSON each
+    let listed = json_lines(&tgradish(&["--json", "preset", "list"]));
+    let names: Vec<&str> = listed.iter().map(|p| p["name"].as_str().unwrap()).collect();
+    for name in ["fast", "balanced", "best"] {
+        assert!(names.contains(&name), "{names:?}");
+    }
+    let listed = tgradish(&["preset", "list"]);
+    let text = console::strip_ansi_codes(&String::from_utf8_lossy(&listed.stdout)).into_owned();
+    assert!(text.contains("fast  ") && text.contains("built-in"), "{text}");
+
+    // no config file: the defaults, which say so
+    let shown = tgradish(&["config", "show"]);
+    assert!(shown.status.success());
+    assert!(String::from_utf8_lossy(&shown.stderr).contains("no config file"));
+    let defaults: toml::Table = toml::from_str(&String::from_utf8(shown.stdout).unwrap()).unwrap();
+    // and one that says something
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config.toml");
+    std::fs::write(&config, "preset = 'fast'\n").unwrap();
+    let config = config.to_str().unwrap();
+    let shown = tgradish(&["--config", config, "config", "show"]);
+    let read: toml::Table = toml::from_str(&String::from_utf8(shown.stdout).unwrap()).unwrap();
+    assert_eq!(read["preset"].as_str(), Some("fast"));
+    assert_ne!(read, defaults);
+    let json = json_lines(&tgradish(&["--json", "--config", config, "config", "show"]));
+    assert_eq!(json[0]["preset"], "fast");
+    let path = json_lines(&tgradish(&["--json", "--config", config, "config", "path"]));
+    assert_eq!((path[0]["path"].as_str(), path[0]["exists"].as_bool()), (Some(config), Some(true)));
+}
+
+/// Ctrl-C in a text conversion ends it with 130 and leaves no result.
+#[cfg(unix)]
+#[test]
+fn cancels_text_conversions_with_130() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+
+    let Some(input) = clip(Clip::Tall) else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("out.webm");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
+        .args(["--ffmpeg-from", "system", "convert", input.to_str().unwrap()])
+        .args(["-o", out.to_str().unwrap()])
+        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let mut text = String::new();
+    while stderr.read_line(&mut text).unwrap() > 0 && !text.contains("Planned") {}
+    Command::new("kill").args(["-INT", &child.id().to_string()]).status().unwrap();
+    std::io::Read::read_to_string(&mut stderr, &mut text).unwrap();
+    let status = child.wait().unwrap();
+    assert_eq!(status.code(), Some(130), "{text}");
+    assert!(text.contains("cancelled"), "{text}");
+    assert!(!out.exists());
 }
