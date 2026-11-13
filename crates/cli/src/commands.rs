@@ -18,14 +18,6 @@ use crate::Context;
 use crate::args::{ConfigCommand, FfmpegCommand, InspectArgs, PresetCommand, SpoofArgs};
 use crate::ui;
 
-fn print_json(value: &impl serde::Serialize) {
-    match serde_json::to_string_pretty(value) {
-        Ok(text) => println!("{text}"),
-        // says why, as a line
-        Err(_) => crate::json_line(value),
-    }
-}
-
 pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
     let output = match (&args.output, args.in_place) {
         (_, true) => args.input.clone(),
@@ -47,7 +39,7 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
         .with_context(|| format!("couldn't spoof {}", args.input.display()))?;
 
     if ctx.global.json {
-        print_json(&json!({ "output": output.to_string_lossy(), "report": report }));
+        crate::json_line(&json!({ "output": output.to_string_lossy(), "report": report }));
         return Ok(());
     }
     if args.duration > telegram::MAX_SECONDS {
@@ -229,7 +221,7 @@ fn default_presets(ctx: &Context) -> [&str; 2] {
 
 pub fn describe(ctx: &Context) -> Result<()> {
     let presets = Presets::load_user()?;
-    print_json(&protocol::describe(&presets, default_presets(ctx)));
+    crate::json_line(&protocol::describe(&presets, default_presets(ctx)));
     Ok(())
 }
 
@@ -237,7 +229,9 @@ pub fn preset(ctx: &Context, command: PresetCommand) -> Result<()> {
     let presets = Presets::load_user()?;
     match command {
         PresetCommand::List if ctx.global.json => {
-            print_json(&protocol::describe(&presets, default_presets(ctx)).presets);
+            for preset in protocol::describe(&presets, default_presets(ctx)).presets {
+                crate::json_line(&preset);
+            }
         }
         PresetCommand::List => {
             let [webm, tgs] = default_presets(ctx);
@@ -264,13 +258,15 @@ pub fn preset(ctx: &Context, command: PresetCommand) -> Result<()> {
         PresetCommand::Show { name } => {
             let (webm, tgs) = (presets.webm(&name)?, presets.tgs(&name)?);
             if ctx.global.json {
-                print_json(&json!({ "webm": webm, "tgs": tgs }));
+                crate::json_line(&json!({ "webm": webm, "tgs": tgs }));
             } else {
                 println!("[webm]\n{}\n[tgs]\n{}", toml::to_string(&webm)?, toml::to_string(&tgs)?);
             }
         }
         PresetCommand::Path => match presets::user_dir() {
-            Some(dir) if ctx.global.json => print_json(&json!({ "path": dir.to_string_lossy() })),
+            Some(dir) if ctx.global.json => {
+                crate::json_line(&json!({ "path": dir.to_string_lossy() }))
+            }
             Some(dir) => println!("{}", dir.display()),
             None => bail!("no home directory found"),
         },
@@ -283,12 +279,14 @@ pub fn config(ctx: &Context, command: ConfigCommand, path: Option<PathBuf>) -> R
         ConfigCommand::Path => {
             let path = path.context("no home directory found")?;
             if ctx.global.json {
-                print_json(&json!({ "path": path.to_string_lossy(), "exists": path.exists() }));
+                crate::json_line(
+                    &json!({ "path": path.to_string_lossy(), "exists": path.exists() }),
+                );
             } else {
                 println!("{}", path.display());
             }
         }
-        ConfigCommand::Show if ctx.global.json => print_json(&ctx.config),
+        ConfigCommand::Show if ctx.global.json => crate::json_line(&ctx.config),
         ConfigCommand::Show => {
             if ctx.config == Config::default() {
                 eprintln!("# no config file, using defaults");
@@ -305,7 +303,7 @@ pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
             let backend = ctx.backend()?;
             let caps = backend.capabilities(&ctx.cancel)?;
             if ctx.global.json {
-                print_json(&json!({ "ffmpeg": backend.info(), "capabilities": caps }));
+                crate::json_line(&json!({ "ffmpeg": backend.info(), "capabilities": caps }));
                 if !caps.libvpx_vp9 {
                     return Err(crate::Exit(1).into());
                 }
