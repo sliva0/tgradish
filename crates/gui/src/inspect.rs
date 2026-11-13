@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use eframe::egui;
 use tgradish_core::inspect::{self, Inspected};
 use tgradish_core::telegram::{self, Target};
+use tgradish_core::tgradish_tgs::check::Stats;
+use tgradish_core::tgradish_tgs::limits::{self, telegram as server};
 use tgradish_core::webm::container::WebmInfo;
 use tgradish_core::webp;
-use tgradish_tgs::check::Stats;
-use tgradish_tgs::limits::{self, telegram as server};
 
 use crate::app::App;
 use crate::fonts::drawable_in;

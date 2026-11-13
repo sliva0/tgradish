@@ -9,9 +9,9 @@ use tgradish_core::input::{self, Input};
 use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::Target;
+use tgradish_core::tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 use tgradish_core::tgs;
 use tgradish_core::webm::Options;
-use tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 
 use crate::jobs::{Done, Job};
 use crate::l10n::fl;

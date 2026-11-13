@@ -11,7 +11,7 @@ use tgradish_core::telegram;
 use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 
-use tgradish_tgs::frames::aseprite::Direction;
+use tgradish_core::tgradish_tgs::frames::aseprite::Direction;
 
 use super::Context;
 use crate::item::{Item, Kind};

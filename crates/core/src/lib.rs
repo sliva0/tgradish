@@ -44,6 +44,10 @@ pub mod webp;
 
 pub use cancel::CancelToken;
 pub use error::{Error, FfmpegMissing, FileAction, Result};
+/// `tgradish-tgs`, which makes `.tgs` stickers of pixel art, with the pixel
+/// art reader under it as `tgradish_tgs::frames`: every type of theirs
+/// this crate's API names is reached through it.
+pub use tgradish_tgs;
 
 /// Name and version, used in watermarks.
 pub const TOOL_ID: &str = concat!("tgradish ", env!("CARGO_PKG_VERSION"));

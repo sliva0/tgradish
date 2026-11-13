@@ -10,13 +10,13 @@ use tgradish_core::backend::Backend;
 use tgradish_core::input::Input;
 use tgradish_core::presets::Format;
 use tgradish_core::preview::Preview;
+use tgradish_core::tgradish_tgs::check::{Issue, Severity};
+use tgradish_core::tgradish_tgs::normalise::Report;
+use tgradish_core::tgradish_tgs::sticker::Step;
 use tgradish_core::tgs;
 use tgradish_core::webm::{self, Event, Options, Params};
 use tgradish_core::webp;
 use tgradish_core::{Error, FfmpegMissing, telegram};
-use tgradish_tgs::check::{Issue, Severity};
-use tgradish_tgs::normalise::Report;
-use tgradish_tgs::sticker::Step;
 
 use crate::l10n::fl;
 use crate::widgets;
@@ -616,7 +616,7 @@ mod tests {
     use super::*;
 
     fn step(bytes: usize) -> Step {
-        let reduction = tgradish_tgs::reduce::Reduction::Despeckle;
+        let reduction = tgradish_core::tgradish_tgs::reduce::Reduction::Despeckle;
         Step::new(reduction, bytes, 0.0)
     }
 

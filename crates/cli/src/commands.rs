@@ -8,6 +8,7 @@ use tgradish_core::config::Config;
 use tgradish_core::inspect::{self, Inspected};
 use tgradish_core::presets::{self, Format, Presets};
 use tgradish_core::telegram::{self, Target};
+use tgradish_core::tgradish_tgs::{check, limits};
 use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 use tgradish_core::webm::container::{self, Patch, WebmInfo};
@@ -363,7 +364,7 @@ pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
     Ok(())
 }
 
-fn print_sticker(path: &std::path::Path, stats: &tgs::Stats, issues: &[tgs::Issue]) {
+fn print_sticker(path: &std::path::Path, stats: &check::Stats, issues: &[check::Issue]) {
     println!("{}", style(term::link_out(path.display(), path)).bold());
     if let Some(name) = &stats.name {
         println!("{}", ui::field("name", name));
@@ -385,13 +386,13 @@ fn print_sticker(path: &std::path::Path, stats: &tgs::Stats, issues: &[tgs::Issu
         ui::seconds(stats.frames / stats.fps.max(1.0)),
     );
     println!("{}", ui::field("animation", animation));
-    let cost = tgs::limits::telegram::cost(stats.shapes, stats.layers);
+    let cost = limits::telegram::cost(stats.shapes, stats.layers);
     let drawing = format!(
         "{}, up to {} and {} in one; cost {cost} of {}",
         ui::count(stats.layers, "layer"),
         ui::count(stats.max_shapes_per_layer, "shape"),
         ui::count(stats.max_paints_per_layer, "fill"),
-        tgs::limits::telegram::MAX_COST
+        limits::telegram::MAX_COST
     );
     println!("{}", ui::field("drawing", drawing));
     if !stats.features.is_empty() {
@@ -403,7 +404,7 @@ fn print_sticker(path: &std::path::Path, stats: &tgs::Stats, issues: &[tgs::Issu
     }
     for issue in issues {
         let label = match issue.severity {
-            tgs::Severity::Error => ui::error_label(),
+            check::Severity::Error => ui::error_label(),
             _ => ui::warning_label(),
         };
         println!("  {label} {}", issue.message);

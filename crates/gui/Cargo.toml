@@ -14,7 +14,6 @@ categories = ["multimedia::video", "multimedia::images"]
 
 [dependencies]
 tgradish-core = { workspace = true, features = ["clipboard"] }
-tgradish-tgs.workspace = true
 
 eframe.workspace = true
 i18n-embed.workspace = true

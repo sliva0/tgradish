@@ -627,7 +627,7 @@ impl TgsPrinter {
                 );
                 for issue in issues {
                     let label = match issue.severity {
-                        tgradish_core::tgs::Severity::Error => ui::error_label(),
+                        tgradish_core::tgradish_tgs::check::Severity::Error => ui::error_label(),
                         _ => ui::warning_label(),
                     };
                     eprintln!("{label} {}", issue.message);
@@ -644,8 +644,8 @@ fn show_result(preview: &tgradish_core::preview::Preview) {
     term::picture(rgba, preview.width, preview.height, 8);
 }
 
-fn reduction_text(reduction: &tgradish_core::tgs::Reduction) -> String {
-    use tgradish_core::tgs::Reduction;
+fn reduction_text(reduction: &tgradish_core::tgradish_tgs::reduce::Reduction) -> String {
+    use tgradish_core::tgradish_tgs::reduce::Reduction;
     match *reduction {
         Reduction::SnapToGrid { scale } => format!("snapped to the {scale}x pixel grid"),
         Reduction::MergeColours { distance } => format!("merged colours closer than {distance:.3}"),

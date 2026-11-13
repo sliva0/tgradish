@@ -21,10 +21,8 @@ pub use read::{Art, needs_ffmpeg, read_art};
 use std::path::PathBuf;
 use std::time::Duration;
 
-pub use tgradish_tgs::check::{Issue, Severity, Stats};
-pub use tgradish_tgs::limits;
+use tgradish_tgs::check::Issue;
 use tgradish_tgs::normalise;
-pub use tgradish_tgs::reduce::{Compromise, Kind, Reduction};
 use tgradish_tgs::sticker::{self, Progress, Step};
 
 use crate::CancelToken;
