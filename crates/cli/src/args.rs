@@ -131,6 +131,18 @@ pub enum Command {
     Gui,
 }
 
+impl Command {
+    /// Whether it opens the window, which takes Ctrl-C as any program
+    /// does and marks what it makes as its own.
+    pub fn is_window(&self) -> bool {
+        #[cfg(feature = "gui")]
+        if matches!(self, Command::Gui) {
+            return true;
+        }
+        false
+    }
+}
+
 #[derive(Debug, Args)]
 pub struct ConvertArgs {
     /// Videos or images to convert.

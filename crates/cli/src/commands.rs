@@ -115,7 +115,7 @@ fn print_verdict(issues: &[telegram::Issue], target: Target) {
     }
 }
 
-fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
+fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target, issues: &[telegram::Issue]) {
     outln!("{}", style(term::link_out(path.display(), path)).bold());
     outln!("{}", ui::field("size", ui::size_within(info.file_size, target.max_bytes())));
     let video = match &info.video {
@@ -158,7 +158,7 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
         outln!("  {}", style("the file is truncated").red());
     }
 
-    print_verdict(&telegram::check(info, target), target);
+    print_verdict(issues, target);
 }
 
 /// Says a file couldn't be inspected, and goes on to the rest.
@@ -199,7 +199,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
         match &inspected {
             Inspected::Image { target, info, issues } => print_image(path, info, *target, issues),
             Inspected::Tgs { info, issues } => print_sticker(path, info, issues),
-            Inspected::Webm { target, info, .. } => print_info(path, info, *target),
+            Inspected::Webm { target, info, issues } => print_info(path, info, *target, issues),
             // a kind core has that this command line doesn't word yet
             _ => outln!("{}: shown with --json", path.display()),
         }
