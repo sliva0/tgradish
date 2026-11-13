@@ -781,7 +781,8 @@ mod tests {
         let webp = options.unused(Format::Webp, None);
         assert!(!webp.iter().any(|flag| flag.contains("layer") || flag == "--tag"), "{webp:?}");
         // what JSON sets is held to the same
-        let json = serde_json::json!({ "crf": 30, "spoof": "always", "crop": "8x8" });
+        let crop = serde_json::json!({ "x": 0, "y": 0, "width": 8, "height": 8 });
+        let json = serde_json::json!({ "crf": 30, "spoof": "always", "crop": crop });
         let none = Cli::parse_from(["tgradish", "convert", "a.png"]);
         let Command::Convert(none) = none.command else { panic!() };
         assert_eq!(
