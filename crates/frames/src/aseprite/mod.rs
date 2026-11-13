@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use blend::Colour;
 use chunks::{read_layer, read_old_palette, read_palette, read_tags, read_user_colour};
-use read::{Reader, budget, error, spend};
+use read::{Reader, budget, error, kept, spend};
 
 use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Frame, Limits, Oversize, Result};
 
@@ -208,8 +208,9 @@ pub struct Sprite {
     tags: Vec<Tag>,
     tilesets: Vec<Tileset>,
     limits: Limits,
-    /// Bytes of pixels, tiles and palettes it holds. The frames drawn from
-    /// it are held beside them, so the limit is for both together.
+    /// Bytes it holds: pixels, tiles and palettes, and what it keeps of
+    /// its layers, cels, tags and frames. The frames drawn from it are held
+    /// beside them, so the limit is for both together.
     spent: usize,
 }
 
@@ -252,6 +253,10 @@ impl Sprite {
             return Err(limits.dimension(Oversize::Canvas { width, height }));
         }
 
+        // what the sprite keeps of each frame, before room is made for them
+        let mut spent = 0;
+        let frame_cost = kept::<(Duration, Vec<Cel>)>(1) + kept::<usize>(1);
+        spend(&mut spent, frame_cost.saturating_mul(frame_count.into()), limits)?;
         let mut sprite = Sprite {
             width,
             height,
@@ -278,8 +283,6 @@ impl Sprite {
         // only indexed colour has a use for one
         let colours = if depth == Depth::Indexed { colours } else { 0 };
         let mut palette: Vec<Colour> = vec![[0, 0, 0, 255]; colours];
-        // bytes of pixels decoded so far
-        let mut spent = 0;
         for _ in 0..frame_count {
             let length = file.u32()? as usize;
             if file.u16()? != 0xf1fa {
@@ -315,10 +318,20 @@ impl Sprite {
                         read_old_palette(&mut chunk, kind == 0x000b, &mut palette)?;
                         changed = true;
                     }
-                    0x2004 => sprite.layers.push(read_layer(&mut chunk)?),
-                    0x2005 => cels.push(sprite.read_cel(&mut chunk, &mut spent)?),
+                    0x2004 => {
+                        // the layer, its name, which the chunk holds, and
+                        // where it is among its group's
+                        let linking = kept::<Vec<usize>>(1) + kept::<usize>(2);
+                        let cost = kept::<Layer>(1) + chunk.left() + linking;
+                        spend(&mut spent, cost, limits)?;
+                        sprite.layers.push(read_layer(&mut chunk)?);
+                    }
+                    0x2005 => {
+                        spend(&mut spent, kept::<Cel>(1), limits)?;
+                        cels.push(sprite.read_cel(&mut chunk, &mut spent)?);
+                    }
                     0x2018 => {
-                        sprite.tags = read_tags(&mut chunk)?;
+                        sprite.tags = read_tags(&mut chunk, &mut spent, limits)?;
                         tag_data = Some(0);
                     }
                     0x2020 if let Some(index) = next_tag => {
@@ -335,6 +348,7 @@ impl Sprite {
                         changed = true;
                     }
                     0x2023 => {
+                        spend(&mut spent, kept::<Tileset>(1), limits)?;
                         let tileset = sprite.read_tileset(&mut chunk, &mut spent)?;
                         sprite.tilesets.push(tileset);
                     }
@@ -353,7 +367,7 @@ impl Sprite {
             cels.dedup_by_key(|cel| cel.layer);
             sprite.frames.push((duration, cels));
             if changed {
-                spend(&mut spent, palette.len() * 4, limits)?;
+                spend(&mut spent, kept::<Vec<Colour>>(1) + kept::<Colour>(palette.len()), limits)?;
                 sprite.palettes.push(palette.clone());
             }
             sprite.frame_palettes.push(sprite.palettes.len() - 1);

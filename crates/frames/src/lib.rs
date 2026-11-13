@@ -277,7 +277,8 @@ pub struct Limits {
     /// The largest width or height.
     pub max_dimension: u32,
     /// The most bytes of pixels: all decoded frames together, and what the
-    /// decoders need on the way.
+    /// decoders need on the way, as what an Aseprite file says of its
+    /// layers, cels and tags.
     pub max_bytes: usize,
 }
 
