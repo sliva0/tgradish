@@ -467,3 +467,50 @@ fn names_files_whose_names_are_not_unicode() {
     let lines = json_lines(&output);
     assert!(lines[0]["input"].as_str().unwrap().ends_with("gone\u{fffd}.png"), "{}", lines[0]);
 }
+
+/// `tgradish` with the user's presets in `dir`'s `tgradish/presets`.
+#[cfg(target_os = "linux")]
+fn with_presets(dir: &std::path::Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_tgradish"))
+        .args(args)
+        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("XDG_CONFIG_HOME", dir)
+        .output()
+        .unwrap()
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn shows_a_preset_as_a_file_could_hold_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let presets = dir.path().join("tgradish").join("presets");
+    std::fs::create_dir_all(&presets).unwrap();
+    let preset = "description = 'Mine'\nextends = 'fast'\n\
+                  [webm]\nfit = 'crf'\nfit-range = { min = 20, max = 40 }\n\
+                  encoder-options = { aq-mode = '2' }\n";
+    std::fs::write(presets.join("mine.toml"), preset).unwrap();
+    let shown = with_presets(dir.path(), &["preset", "show", "mine"]);
+    assert!(shown.status.success(), "{}", String::from_utf8_lossy(&shown.stderr));
+    let text = String::from_utf8(shown.stdout).unwrap();
+    assert!(
+        text.contains("description = \"Mine\"") && text.contains("extends = \"fast\""),
+        "{text}"
+    );
+    // pasted into a file, it is the same preset
+    std::fs::write(presets.join("copy.toml"), &text).unwrap();
+    let json = |name: &str| {
+        let shown = with_presets(dir.path(), &["--json", "preset", "show", name]);
+        let mut value: Value = serde_json::from_slice(&shown.stdout).unwrap();
+        value.as_object_mut().unwrap().remove("description");
+        value
+    };
+    assert_eq!(json("copy"), json("mine"));
+    assert_eq!(json("mine")["webm"]["fit-range"]["max"], 40.0);
+    assert_eq!(json("mine")["webm"]["speed"], "fast");
+
+    // each preset says which formats it is the default for
+    let listed = with_presets(dir.path(), &["preset", "list"]);
+    let listed = console::strip_ansi_codes(&String::from_utf8_lossy(&listed.stdout)).into_owned();
+    assert!(listed.contains("balanced (default for webm and webp)"), "{listed}");
+    assert!(listed.contains("best (default for tgs)"), "{listed}");
+}

@@ -6,8 +6,10 @@ use serde_json::json;
 use tgradish_core::backend::BackendInfo;
 use tgradish_core::config::Config;
 use tgradish_core::inspect::{self, Inspected};
+use tgradish_core::options::Options;
 use tgradish_core::presets::{self, Format, Presets};
 use tgradish_core::telegram::{self, Target};
+use tgradish_core::tgs::TgsOptions;
 use tgradish_core::webm::{self, Patch, WebmInfo};
 use tgradish_core::{TOOL_ID, protocol};
 use tgradish_core::{still, tgs};
@@ -216,34 +218,55 @@ pub fn licenses() {
     }
 }
 
-/// The presets used when none is given, for WebM and `.tgs`.
-fn default_presets(ctx: &Context) -> [&str; 2] {
-    [ctx.config.preset_for(Format::Webm), ctx.config.preset_for(Format::Tgs)]
-}
-
 pub fn describe(ctx: &Context) -> Result<()> {
     let presets = Presets::load_user()?;
-    crate::json_line(&protocol::describe(&presets, default_presets(ctx)));
+    crate::json_line(&protocol::describe(&presets, &ctx.config));
     Ok(())
+}
+
+/// What `name` is the default preset for, as `preset list` says it: of
+/// every format, or the ones named.
+fn default_for(ctx: &Context, name: &str) -> String {
+    const FORMATS: [Format; 3] = [Format::Webm, Format::Tgs, Format::Webp];
+    let formats: Vec<&str> = FORMATS
+        .into_iter()
+        .filter(|&format| ctx.config.preset_for(format) == name)
+        .map(Format::name)
+        .collect();
+    match formats.as_slice() {
+        [] => String::new(),
+        all if all.len() == FORMATS.len() => " (default)".into(),
+        [one] => format!(" (default for {one})"),
+        [some @ .., last] => format!(" (default for {} and {last})", some.join(", ")),
+    }
+}
+
+/// `preset`, its options with everything it extends applied, as a preset
+/// file could hold it.
+fn preset_file(preset: &presets::Preset, webm: &Options, tgs: &TgsOptions) -> Result<toml::Table> {
+    let mut file = toml::Table::new();
+    if !preset.description.is_empty() {
+        file.insert("description".into(), preset.description.clone().into());
+    }
+    if let Some(base) = &preset.extends {
+        file.insert("extends".into(), base.clone().into());
+    }
+    file.insert("webm".into(), toml::Table::try_from(webm)?.into());
+    file.insert("tgs".into(), toml::Table::try_from(tgs)?.into());
+    Ok(file)
 }
 
 pub fn preset(ctx: &Context, command: PresetCommand) -> Result<()> {
     let presets = Presets::load_user()?;
     match command {
         PresetCommand::List if ctx.global.json => {
-            for preset in protocol::describe(&presets, default_presets(ctx)).presets {
+            for preset in protocol::describe(&presets, &ctx.config).presets {
                 crate::json_line(&preset);
             }
         }
         PresetCommand::List => {
-            let [webm, tgs] = default_presets(ctx);
             for (name, preset) in presets.iter() {
-                let default = match (name == webm, name == tgs) {
-                    (true, true) => " (default)",
-                    (true, false) => " (default for webm)",
-                    (false, true) => " (default for tgs)",
-                    (false, false) => "",
-                };
+                let default = default_for(ctx, name);
                 match preset {
                     Ok(preset) => {
                         let origin = preset
@@ -258,11 +281,13 @@ pub fn preset(ctx: &Context, command: PresetCommand) -> Result<()> {
             }
         }
         PresetCommand::Show { name } => {
+            let preset = presets.get(&name)?;
             let (webm, tgs) = (presets.webm(&name)?, presets.tgs(&name)?);
+            let file = preset_file(preset, &webm, &tgs)?;
             if ctx.global.json {
-                crate::json_line(&json!({ "webm": webm, "tgs": tgs }));
+                crate::json_line(&file);
             } else {
-                println!("[webm]\n{}\n[tgs]\n{}", toml::to_string(&webm)?, toml::to_string(&tgs)?);
+                print!("{}", toml::to_string(&file)?);
             }
         }
         PresetCommand::Path => match presets::user_dir() {
