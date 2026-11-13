@@ -373,6 +373,43 @@ fn reports_results_on_stdout() {
     }
 }
 
+/// `-o` names a file of the format made, which is checked before any work.
+#[test]
+fn refuses_outputs_that_cant_hold_the_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("dot.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let png = png.to_str().unwrap();
+    let outdir = dir.path().join("outdir");
+    std::fs::create_dir(&outdir).unwrap();
+    let refused = |args: &[&str], why: &str| {
+        let output = tgradish(args);
+        assert_eq!(output.status.code(), Some(1), "{args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(why), "{args:?}: {stderr}");
+        assert!(!stderr.contains("Converting"), "{args:?}: {stderr}");
+    };
+    let outdir = outdir.to_str().unwrap();
+    for overwrite in [&[][..], &["-y"]] {
+        let mut args = vec!["convert", png, "--format", "tgs", "-o", outdir];
+        args.extend(overwrite);
+        refused(&args, "is a directory: -o names the result's file, -O/--output-dir");
+    }
+    let mp4 = dir.path().join("x.mp4");
+    refused(&["convert", png, "-o", mp4.to_str().unwrap()], "doesn't end in .webm");
+    let tgs = dir.path().join("x.tgs");
+    refused(
+        &["convert", png, "--format", "webm", "-o", tgs.to_str().unwrap()],
+        "is a .tgs file, but this converts to webm",
+    );
+    assert!(!mp4.exists() && !tgs.exists());
+    // the extension still picks the format, in any case
+    let upper = dir.path().join("x.TGS");
+    let made = tgradish(&["convert", png, "-o", upper.to_str().unwrap()]);
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    refused(&["spoof", upper.to_str().unwrap(), "-o", outdir], "is a directory");
+}
+
 #[test]
 fn makes_animated_stickers() {
     let dir = tempfile::tempdir().unwrap();

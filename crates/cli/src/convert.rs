@@ -85,17 +85,42 @@ fn format_of(args: &ConversionArgs, output: Option<&Path>) -> Format {
     }
 }
 
+/// Refuses an `-o` that can't hold the result, before any work: a
+/// directory, or a name whose extension isn't the format's, which would
+/// make a file that says it is something else.
+fn check_output(output: &Path, format: Format) -> Result<()> {
+    if output.is_dir() {
+        bail!(
+            "{} is a directory: -o names the result's file, -O/--output-dir a directory for \
+             results",
+            output.display()
+        );
+    }
+    match Format::of_path(output) {
+        Some(asked) if asked == format => Ok(()),
+        Some(asked) => bail!(
+            "{} is a .{} file, but this converts to {}: end it .{} or drop --format",
+            output.display(),
+            asked.extension(),
+            format.name(),
+            format.extension()
+        ),
+        None => bail!(
+            "{} doesn't end in .{}, as {} output does; .tgs and .webp ask for those formats",
+            output.display(),
+            format.extension(),
+            format.name()
+        ),
+    }
+}
+
 impl<'a> Converter<'a> {
     /// `output` is the `-o` file, which can choose the format.
     pub fn new(ctx: &'a Context, args: &'a ConversionArgs, output: Option<&Path>) -> Result<Self> {
         let presets = Presets::load_user()?;
         let format = format_of(args, output);
-        if let Some(asked) = output.and_then(Format::of_path).filter(|&f| f != format) {
-            bail!(
-                "the output is a .{} file, but this converts to {}",
-                asked.extension(),
-                format.name()
-            );
+        if let Some(output) = output {
+            check_output(output, format)?;
         }
         let invalid_json = || format!("invalid --options-json for {} output", format.name());
         let json = match &args.options_json {

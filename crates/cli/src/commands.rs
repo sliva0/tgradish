@@ -30,6 +30,9 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
         (Some(output), false) => output.clone(),
         (None, false) => args.input.with_extension(&SPOOFED[1..]),
     };
+    if output.is_dir() {
+        bail!("{} is a directory: -o names the spoofed file", output.display());
+    }
     if !args.in_place && !args.overwrite && output != args.input && output.exists() {
         bail!("{} already exists, use --overwrite to replace it", output.display());
     }
