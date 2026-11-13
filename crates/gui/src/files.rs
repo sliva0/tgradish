@@ -399,8 +399,9 @@ fn thumb(
 
 fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
     let small = |text: String| RichText::new(text).small();
-    match (&item.job, item.failed.as_ref().or(item.made.as_ref())) {
-        (Some((job, ..)), _) if job.is_running() => {
+    let job = item.job.as_ref().map(|conversion| &conversion.job);
+    match (job, item.failed.as_ref().or(item.made.as_ref())) {
+        (Some(job), _) if job.is_running() => {
             ui.add_space(3.0);
             let size = vec2(ui.available_width(), 6.0);
             let colour = theme::accent(ui.visuals());

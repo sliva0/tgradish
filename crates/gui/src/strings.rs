@@ -59,7 +59,7 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     use tgradish_core::presets::{Format, Presets};
     use tgradish_core::telegram::Target;
 
-    use crate::item::Made;
+    use crate::item::Conversion;
     use crate::jobs::{Attempt, Job, Status, WebmPlan, failure};
     use crate::l10n::fl;
     use crate::testing::{convert, finish, square, video, video_of};
@@ -195,15 +195,15 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     ];
     running.progress.fraction = Some(0.4);
     let item = &mut harness.state_mut().items[2];
-    item.job = Some((running, Format::Webm, item.choices.clone()));
+    item.job = Some(Conversion::of(running, Format::Webm, item.choices.clone()));
     let item = &mut harness.state_mut().items[0];
-    item.job =
-        Some((Job::waiting(dir.path().join("waiting.webm")), Format::Webm, item.choices.clone()));
+    let waiting = Job::waiting(dir.path().join("waiting.webm"));
+    item.job = Some(Conversion::of(waiting, Format::Webm, item.choices.clone()));
     let waiting = id(&harness, 0);
     harness.state_mut().queue.push_back(waiting);
     let item = &mut harness.state_mut().items[1];
-    item.job =
-        Some((Job::waiting(dir.path().join("later.png")), Format::Image, item.choices.clone()));
+    let later = Job::waiting(dir.path().join("later.png"));
+    item.job = Some(Conversion::of(later, Format::Image, item.choices.clone()));
     let later = id(&harness, 1);
     harness.state_mut().queue.push_back(later);
     select(&mut harness, 2);
@@ -229,7 +229,7 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     ] {
         let item = &mut harness.state_mut().items[2];
         let choices = item.choices.clone();
-        item.failed = Some(Made { job: ended(status), format: Format::Webm, choices });
+        item.failed = Some(Conversion::of(ended(status), Format::Webm, choices));
         select(&mut harness, 2);
         save(&mut harness, name);
     }

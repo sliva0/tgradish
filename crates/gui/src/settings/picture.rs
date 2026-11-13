@@ -247,7 +247,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             });
             // what the last conversion found, if it looked for it: neither
             // the item nor its preset said
-            let looked = |made: &&crate::item::Made| {
+            let looked = |made: &&crate::item::Conversion| {
                 let preset = made.choices.tgs_base(presets, config);
                 made.format == Format::Tgs
                     && made.choices.tgs.pixel_scale.is_none()

@@ -12,7 +12,7 @@ use tgradish_core::still;
 
 use crate::app::App;
 use crate::files::THUMB;
-use crate::item::{Item, Kind, Made, Show};
+use crate::item::{Conversion, Item, Kind, Show};
 use crate::jobs::{Plan, Status};
 use crate::media::{self, Art, Clip, Load, Video};
 use crate::outputs::Written;
@@ -169,7 +169,7 @@ impl App {
         // finished jobs become results
         let mut finished = Vec::new();
         for item in &mut self.items {
-            if let Some((job, ..)) = &mut item.job
+            if let Some(Conversion { job, .. }) = &mut item.job
                 && (job.poll() || job.is_finished())
                 && !job.is_waiting()
             {
@@ -179,8 +179,7 @@ impl App {
         for id in finished {
             let selected = self.selected == Some(id);
             let item = self.item_mut(id).expect("just found");
-            let (job, format, choices) = item.job.take().expect("just found");
-            let made = Made { job, format, choices };
+            let made = item.job.take().expect("just found");
             let Status::Done(done) = &made.job.status else {
                 item.failed = Some(made);
                 continue;
@@ -203,13 +202,16 @@ impl App {
                 self.written.insert(output, written);
             }
         }
-        if self.items.iter().any(|item| item.job.as_ref().is_some_and(|(job, ..)| job.is_running()))
+        if self
+            .items
+            .iter()
+            .any(|item| item.job.as_ref().is_some_and(|conversion| conversion.job.is_running()))
         {
             return;
         }
         while let Some(id) = self.queue.pop_front() {
             let Some(item) = self.item(id) else { continue };
-            let Some((job, format, choices)) = &item.job else { continue };
+            let Some(Conversion { job, format, choices }) = &item.job else { continue };
             let plan = match format {
                 Format::Webm => {
                     choices.webm_options(&self.presets, &self.config).and_then(|options| {
@@ -231,7 +233,7 @@ impl App {
             let replaces = job.output.exists() && !self.wrote(id, &job.output);
             let (inputs, sequence) = (item.inputs.clone(), item.sequence);
             let item = self.item_mut(id).expect("found above");
-            let (job, ..) = item.job.as_mut().expect("found above");
+            let job = &mut item.job.as_mut().expect("found above").job;
             match plan {
                 Ok(plan) => {
                     job.replaces = replaces;
@@ -326,7 +328,7 @@ fn texture_options(clip: &Clip) -> egui::TextureOptions {
 }
 
 fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backend, String>) {
-    let Some(Made { job, format, .. }) = &item.made else { return };
+    let Some(Conversion { job, format, .. }) = &item.made else { return };
     let Status::Done(done) = &job.status else { return };
     item.result_clip = match (format, backend) {
         (Format::Webm, Ok(backend)) => {

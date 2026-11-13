@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tgradish_core::clipboard::PASTED_IMAGE_NAME;
 use tgradish_core::presets::Format;
 
-use crate::item::{Choices, Item, Made};
+use crate::item::{Choices, Conversion, Item};
 use crate::jobs::{Done, Job, Status};
 use crate::outputs::{FileVersion, Written};
 
@@ -350,7 +350,7 @@ fn restore_item(saved: Saved, path: &Path, id: u64) -> Option<Item> {
         let done = Done::of_file(&result.output, result.format, result.choices.target)?;
         let mut job = Job::waiting(result.output);
         job.status = Status::Done(Box::new(done));
-        Some(Made { job, format: result.format, choices: result.choices })
+        Some(Conversion::of(job, result.format, result.choices))
     });
     Some(item)
 }

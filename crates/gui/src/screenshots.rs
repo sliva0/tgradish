@@ -201,7 +201,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         ..jobs::Progress::default()
     };
     let item = harness.state_mut().items.last_mut().unwrap();
-    item.job = Some((job, Format::Tgs, item.choices.clone()));
+    item.job = Some(crate::item::Conversion::of(job, Format::Tgs, item.choices.clone()));
     harness.run_steps(3);
     save(&mut harness, "progress");
     harness.state_mut().prefs.about = true;
@@ -320,7 +320,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         ..jobs::Progress::default()
     };
     let item = harness.state_mut().items.last_mut().unwrap();
-    item.job = Some((job, Format::Webm, item.choices.clone()));
+    item.job = Some(crate::item::Conversion::of(job, Format::Webm, item.choices.clone()));
     harness.run_steps(3);
     save(&mut harness, "narrow-converting");
     harness.set_size(egui::vec2(1280.0, 820.0));

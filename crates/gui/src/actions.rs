@@ -25,10 +25,10 @@ impl App {
         let mut replace = None;
         // the room goes to the progress, and the column beside the preview
         // already names the file
-        let converting = item.job.as_ref().is_some_and(|(job, ..)| job.is_running());
+        let converting = item.job.as_ref().is_some_and(|conversion| conversion.job.is_running());
         ui.horizontal(|ui| {
-            match &item.job {
-                Some((job, ..)) if job.is_running() => {
+            match item.job.as_ref().map(|conversion| &conversion.job) {
+                Some(job) if job.is_running() => {
                     // until the conversion gets to its next check
                     let stopping = job.is_stopping();
                     let text = if stopping { fl!("stopping") } else { fl!("stop") };
@@ -39,7 +39,7 @@ impl App {
                     let size = vec2(ui.available_width(), 32.0);
                     crate::result::step_bar(ui, job, size);
                 }
-                Some((job, ..)) => {
+                Some(job) => {
                     if ui
                         .add(egui::Button::new(fl!("cancel-waiting")).min_size(vec2(140.0, 32.0)))
                         .clicked()
