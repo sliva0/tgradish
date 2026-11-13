@@ -183,8 +183,12 @@ struct Build {
     target: Target,
     asm: bool,
     jobs: String,
-    /// Downloads and extracted sources.
+    /// Downloaded archives, which every target shares.
     sources: PathBuf,
+    /// The archives extracted and built for this target, much larger than
+    /// they are, so kept apart: the release workflow caches the archives
+    /// alone.
+    build: PathBuf,
     /// Install prefix for the libraries.
     prefix: PathBuf,
 }
@@ -221,7 +225,7 @@ pub fn download(source: &Source, dir: &Path) -> Result<PathBuf> {
 impl Build {
     /// Where `source` is extracted and built for this target.
     fn source_dir(&self, source: &Source) -> PathBuf {
-        self.sources.join(format!("{}-{}-{}", source.name, source.version, self.target.triple()))
+        self.build.join(format!("{}-{}", source.name, source.version))
     }
 
     /// Downloads, verifies and extracts `source`. Returns the source directory.
@@ -535,9 +539,11 @@ pub fn ffmpeg_for(target: Target, asm: bool) -> Result<()> {
         asm,
         jobs: std::thread::available_parallelism().map_or(4, |n| n.get()).to_string(),
         sources: workspace_root().join("target/ffmpeg/sources"),
+        build: workspace_root().join("target/ffmpeg").join(format!("build-{}", target.triple())),
         prefix: ffmpeg_prefix(target),
     };
     std::fs::create_dir_all(&build.sources)?;
+    std::fs::create_dir_all(&build.build)?;
     if build.prefix.exists() {
         std::fs::remove_dir_all(&build.prefix)?;
     }

@@ -140,6 +140,8 @@ jobs:
         with:
           key: ${{ matrix.triple }}-${{ hashFiles('xtask/src/ffmpeg.rs') }}
 
+      # the archives of ffmpeg and its libraries alone: they are built in
+      # target/ffmpeg/build-<triple>
       - uses: actions/cache@v6
         with:
           path: target/ffmpeg/sources

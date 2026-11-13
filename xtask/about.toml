@@ -13,8 +13,6 @@ accepted = [
     "BSL-1.0",
     "Unicode-3.0",
     "MPL-2.0",
-    "OFL-1.1",
-    "Ubuntu-font-1.0",
     # ffmpeg-next, with ffmpeg linked in
     "WTFPL",
 ]

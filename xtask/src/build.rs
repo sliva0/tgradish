@@ -9,7 +9,7 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result, bail, ensure};
 
 use crate::ffmpeg::{c_flags, ffmpeg_prefix};
-use crate::{MUSL_GCC, Target, cargo, output, run, workspace_root};
+use crate::{MUSL_GCC, Target, cargo, output, run, rustc, workspace_root};
 
 /// The `build` task: [`build`] as its arguments ask.
 pub fn build_release(args: &[String]) -> Result<()> {
@@ -110,7 +110,7 @@ pub fn build(target: Target, system_ffmpeg: bool) -> Result<()> {
 /// dynamically, and Ubuntu has none built for musl; found here first, this
 /// links in its place, so musl builds need no libgcc where they run either.
 fn static_unwinder(root: &Path, target: Target) -> Result<PathBuf> {
-    let libdir = output(Command::new("rustc").current_dir(root).args([
+    let libdir = output(rustc().current_dir(root).args([
         "--print",
         "target-libdir",
         "--target",
