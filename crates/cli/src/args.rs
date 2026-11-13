@@ -183,6 +183,11 @@ pub struct ConversionArgs {
     /// statistics of WebM output, which alone has any.
     #[arg(long)]
     pub keep_temp: bool,
+    /// Stop, as Ctrl-C does, when a line reading `cancel` comes on stdin:
+    /// for front-ends, which can't always send Ctrl-C. Without it stdin is
+    /// left alone, for a script's loop to read.
+    #[arg(long)]
+    pub cancel_on_stdin: bool,
     #[command(flatten)]
     pub options: OptionArgs,
 }

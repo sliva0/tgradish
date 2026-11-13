@@ -122,7 +122,7 @@ impl<'a> Converter<'a> {
             std::fs::create_dir_all(dir)
                 .with_context(|| format!("couldn't create {}", dir.display()))?;
         }
-        if ctx.global.json {
+        if args.cancel_on_stdin {
             listen_for_cancel(ctx);
         }
         Ok(Self { ctx, args, options, backend, written: Default::default() })
@@ -346,9 +346,11 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
     Ok(())
 }
 
-/// Cancels when a front-end writes `cancel` to stdin. Sending Ctrl-C to a
-/// child process is awkward on Windows. End of input is ignored, so running
-/// without stdin is fine.
+/// Cancels when a front-end writes `cancel` to stdin, with
+/// `--cancel-on-stdin`: sending Ctrl-C to a child process is awkward on
+/// Windows. Only when asked, as a script reading its own stdin in a loop
+/// would lose what this read. End of input is ignored, so running without
+/// stdin is fine.
 fn listen_for_cancel(ctx: &Context) {
     let cancel = ctx.cancel.clone();
     std::thread::spawn(move || {
