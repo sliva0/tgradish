@@ -391,4 +391,60 @@ mod tests {
         let wrong: Vec<_> = names.iter().filter(|name| !kebab(name)).collect();
         assert!(wrong.is_empty(), "not kebab-case: {wrong:?}");
     }
+
+    #[test]
+    fn prints_each_event_as_front_ends_read_it() {
+        // the shapes the README and front-ends follow; a start's plan and
+        // report are pinned by their keys, below
+        let expected = [
+            None,
+            Some(
+                r#"{"event":"attempt-started","attempt":1,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"bitrate","kbps":500.0}}}"#,
+            ),
+            Some(r#"{"event":"progress","attempt":1,"pass":1,"passes":2,"fraction":0.5}"#),
+            Some(
+                r#"{"event":"attempt-finished","attempt":1,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"bitrate","kbps":500.0}},"bytes":300000,"fits":false}"#,
+            ),
+            Some(r#"{"event":"scored","attempt":1,"ssim":0.95}"#),
+            Some(r#"{"event":"warning","message":"a warning"}"#),
+            Some(r#"{"event":"log","line":"a line"}"#),
+            Some(
+                r#"{"event":"finished","output":"in.sticker.webm","bytes":250000,"attempt":2,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"crf","crf":32}},"spoofed":false,"issues":[{"kind":"too-big","bytes":300000,"max":262144,"severity":"error","message":"file is 300000 bytes, limit is 262144"}],"temp-dir":"/tmp/tgradish-x"}"#,
+            ),
+            Some(r#"{"event":"error","message":"it failed","input":"in.mp4"}"#),
+            None,
+            Some(r#"{"event":"too-large","bytes":70000}"#),
+            Some(
+                r#"{"event":"reduced","step":{"reduction":"despeckle","bytes":60000,"distortion":0.01}}"#,
+            ),
+            Some(r#"{"event":"packing"}"#),
+            Some(r#"{"event":"warning","message":"a warning"}"#),
+            Some(
+                r#"{"event":"finished","output":"art.sticker.tgs","bytes":60000,"json-bytes":300000,"changed":true,"steps":[{"reduction":"despeckle","bytes":60000,"distortion":0.01}],"layers":3,"rectangles":40,"issues":[]}"#,
+            ),
+            Some(r#"{"event":"error","message":"it failed","input":null}"#),
+            Some(
+                r#"{"event":"finished","output":"in.sticker.webp","bytes":100000,"width":512,"height":384,"encoding":{"kind":"lossy","quality":80},"issues":[{"kind":"wrong-size","width":512,"height":384,"side":100,"exact":true,"severity":"error","message":"size is 512x384, expected 100x100"}],"warnings":["a warning"]}"#,
+            ),
+            Some(r#"{"event":"warning","message":"a warning"}"#),
+            Some(r#"{"event":"error","message":"it failed","input":null}"#),
+        ];
+        let samples = samples();
+        assert_eq!(samples.len(), expected.len());
+        for (sample, expected) in samples.iter().zip(expected) {
+            match expected {
+                Some(line) => assert_eq!(serde_json::to_string(sample).unwrap(), line),
+                None => assert_eq!(sample["event"], "started"),
+            }
+        }
+        let keys =
+            |value: &Value| -> Vec<String> { value.as_object().unwrap().keys().cloned().collect() };
+        assert_eq!(keys(&samples[0]), ["event", "plan"]);
+        for key in ["input", "output", "source", "target", "scaled-width", "fit-range", "watermark"]
+        {
+            assert!(samples[0]["plan"].get(key).is_some(), "{key}");
+        }
+        let tgs = samples.iter().filter(|sample| sample["event"] == "started").nth(1).unwrap();
+        assert_eq!(keys(tgs), ["event", "input", "report"]);
+    }
 }
