@@ -61,6 +61,7 @@ pub(crate) struct Managing {
     deleted: Vec<Deleted>,
 }
 
+#[derive(Debug, Clone)]
 struct Row {
     /// Which row it is, as rows come and go.
     id: u64,
@@ -132,29 +133,29 @@ enum Change {
     Undo(u64),
 }
 
-/// What is wrong with `name` as a preset's, as tgradish-core checks it.
-fn name_problem(name: &str) -> Option<String> {
-    presets::check_name(name).err()?;
-    let most = presets::LONGEST_NAME;
-    let long = name.trim().is_empty() || name.starts_with(' ') || name.chars().count() > most;
-    Some(if long { fl!("preset-name-length", most = most) } else { fl!("preset-name-characters") })
+/// What keeps a preset from being named, renamed or deleted as asked, in
+/// the window's words.
+fn problem(err: &tgradish_core::Error) -> String {
+    use tgradish_core::Error;
+    use tgradish_core::presets::PresetError;
+    match err {
+        Error::Preset(PresetError::NameLength) => {
+            fl!("preset-name-length", most = presets::LONGEST_NAME)
+        }
+        Error::Preset(PresetError::NameCharacters) => fl!("preset-name-characters"),
+        Error::Preset(PresetError::NameTaken(name)) => {
+            fl!("preset-name-taken", name = name.as_str())
+        }
+        Error::Preset(PresetError::Extended(other)) => {
+            fl!("preset-extended", other = other.as_str())
+        }
+        err => failure(err),
+    }
 }
 
-/// What keeps the preset `from` from being renamed `to`, as far as the
-/// window can tell before trying.
-fn rename_problem(from: &str, to: &str, presets: &Presets) -> Option<String> {
-    if let Some(problem) = name_problem(to) {
-        return Some(problem);
-    }
-    if to != from && presets.iter().any(|(name, _)| name == to) {
-        return Some(fl!("preset-name-taken", name = to));
-    }
-    // one another preset extends would break
-    let other = presets
-        .iter()
-        .filter_map(|(_, preset)| preset.ok())
-        .find(|preset| preset.extends.as_deref() == Some(from))?;
-    Some(fl!("preset-extended", other = other.name.as_str()))
+/// What is wrong with `name` as a preset's, as tgradish-core checks it.
+fn name_problem(name: &str) -> Option<String> {
+    presets::check_name(name).err().map(|err| problem(&err))
 }
 
 /// A dialog's title, with a cross in the corner, level with it, that
@@ -416,17 +417,13 @@ impl App {
                 let Some(index) = row(id) else { return };
                 let row = &mut managing.rows[index];
                 let to = row.typed_name.trim_end().to_owned();
-                if let Some(problem) = rename_problem(&row.name, &to, &self.presets) {
-                    row.problem = Some(problem);
-                    return;
-                }
                 match presets::rename(dir, &row.name, &to, &self.presets) {
                     Ok(_) => {
                         let from = std::mem::replace(&mut row.name, to.clone());
                         row.problem = None;
                         self.follow_preset(&from, Some(&to));
                     }
-                    Err(err) => row.problem = Some(failure(&err)),
+                    Err(err) => row.problem = Some(problem(&err)),
                 }
             }
             Change::Describe(id) => {
@@ -440,7 +437,7 @@ impl App {
             }
             Change::Delete(id) => {
                 let Some(index) = row(id) else { return };
-                match presets::remove(&file(&managing.rows[index].name)) {
+                match presets::remove(dir, &managing.rows[index].name, &self.presets) {
                     Ok(text) => {
                         let name = managing.rows.remove(index).name;
                         let items = self
@@ -456,7 +453,7 @@ impl App {
                         self.follow_preset(&name, None);
                         managing.deleted.push(Deleted { id, name, text, items, defaults });
                     }
-                    Err(err) => managing.rows[index].problem = Some(failure(&err)),
+                    Err(err) => managing.rows[index].problem = Some(problem(&err)),
                 }
             }
             Change::Undo(id) => {
@@ -667,6 +664,33 @@ mod tests {
         state.change_preset(&presets_dir, &mut managing, Change::Rename(0));
         assert!(managing.rows[0].problem.is_some());
         assert_eq!(state.presets.webm("fast").unwrap().crf, None);
+    }
+
+    #[test]
+    fn keeps_a_preset_another_extends() {
+        let dir = tempfile::tempdir().unwrap();
+        let webm = Options { crf: Some(20), ..Options::default() };
+        presets::save(dir.path(), "base", "", (&webm, &TgsOptions::default()), false).unwrap();
+        std::fs::write(dir.path().join("child.toml"), "extends = 'base'\n").unwrap();
+        let presets = Presets::load(Some(dir.path())).unwrap();
+        let mut app = crate::app::App::with(Config::default(), None, presets, None);
+        app.presets_dir = Some(dir.path().to_path_buf());
+        let mut managing = super::Managing::of(&app.presets);
+        let id = managing.rows.iter().find(|row| row.name == "base").unwrap().id;
+        // neither renamed nor deleted, and said why in the window's words
+        let said = crate::l10n::fl!("preset-extended", other = "child");
+        let row = |managing: &super::Managing| {
+            managing.rows.iter().find(|row| row.id == id).cloned().unwrap()
+        };
+        managing.rows.iter_mut().find(|row| row.id == id).unwrap().typed_name = "other".into();
+        app.change_preset(dir.path(), &mut managing, Change::Rename(id));
+        assert_eq!(
+            (row(&managing).name, row(&managing).problem),
+            ("base".into(), Some(said.clone()))
+        );
+        app.change_preset(dir.path(), &mut managing, Change::Delete(id));
+        assert_eq!(row(&managing).problem, Some(said));
+        assert!(app.presets.get("base").is_ok() && dir.path().join("base.toml").exists());
     }
 
     #[test]

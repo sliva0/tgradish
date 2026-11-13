@@ -237,8 +237,9 @@ pub enum PresetError {
     /// Another preset, built in or not, has the name.
     #[error("another preset is named {0:?}")]
     NameTaken(String),
-    /// Renaming it would break the preset named, which extends it.
-    #[error("{0:?} extends it: rename it there first")]
+    /// Renaming or deleting it would break the preset named, which
+    /// extends it.
+    #[error("{0:?} extends it: change that first")]
     Extended(String),
     /// A preset's file sets an option of one file, one of [`PER_FILE`],
     /// as `key` names it in its table, `webm.crop`; `place` is the file.
@@ -381,6 +382,14 @@ impl Presets {
         let chain = self.chain(name)?;
         Ok(chain.iter().rev().fold(T::default(), |acc, preset| merged(acc, options(preset))))
     }
+
+    /// The user's preset another extends, which renaming or deleting
+    /// `name` would break.
+    fn extending(&self, name: &str) -> Option<&Preset> {
+        self.iter()
+            .filter_map(|(_, preset)| preset.ok())
+            .find(|preset| preset.extends.as_deref() == Some(name))
+    }
 }
 
 /// Directory with user preset files.
@@ -436,21 +445,32 @@ pub fn save(
     Ok(path)
 }
 
-/// Renames the preset `from` in `dir` to `to`, a name no other preset
-/// has, built in or not. One another preset extends keeps its name, as
-/// that one would break.
-pub fn rename(dir: &Path, from: &str, to: &str, presets: &Presets) -> Result<PathBuf> {
+/// Whether the preset `from` can be renamed `to`: a name no other preset
+/// has, built in or not, for one no other preset extends, as that one
+/// would break.
+pub fn check_rename(from: &str, to: &str, presets: &Presets) -> Result<()> {
     check_name(to)?;
     if to != from && presets.iter().any(|(name, _)| name == to) {
         return Err(PresetError::NameTaken(to.to_owned()).into());
     }
-    let extending = presets
-        .iter()
-        .filter_map(|(_, preset)| preset.ok())
-        .find(|preset| preset.extends.as_deref() == Some(from));
-    if let Some(other) = extending {
+    if let Some(other) = presets.extending(from) {
         return Err(PresetError::Extended(other.name.clone()).into());
     }
+    Ok(())
+}
+
+/// Whether the preset `name` can be deleted: not while another extends
+/// it, which would break.
+pub fn check_remove(name: &str, presets: &Presets) -> Result<()> {
+    match presets.extending(name) {
+        Some(other) => Err(PresetError::Extended(other.name.clone()).into()),
+        None => Ok(()),
+    }
+}
+
+/// Renames the preset `from` in `dir` to `to`, as [`check_rename`] allows.
+pub fn rename(dir: &Path, from: &str, to: &str, presets: &Presets) -> Result<PathBuf> {
+    check_rename(from, to, presets)?;
     let (old, new) = (dir.join(format!("{from}.toml")), dir.join(format!("{to}.toml")));
     // a name changed only in case names the same file where case doesn't
     // matter; where it does, the other file is another preset's
@@ -491,9 +511,11 @@ pub fn describe(path: &Path, description: &str) -> Result<()> {
     crate::fsutil::write_output(path, text.as_bytes(), true)
 }
 
-/// Deletes the preset at `path`, and returns what it held, which
-/// [`restore`] puts back.
-pub fn remove(path: &Path) -> Result<String> {
+/// Deletes the preset `name` in `dir`, as [`check_remove`] allows, and
+/// returns what it held, which [`restore`] puts back.
+pub fn remove(dir: &Path, name: &str, presets: &Presets) -> Result<String> {
+    check_remove(name, presets)?;
+    let path = &dir.join(format!("{name}.toml"));
     let text = std::fs::read_to_string(path).map_err(Error::io(FileAction::Read, path))?;
     std::fs::remove_file(path).map_err(Error::io(FileAction::Remove, path))?;
     Ok(text)
@@ -537,7 +559,7 @@ mod tests {
         assert_eq!(load().webm("tiny").unwrap().crf, Some(28));
 
         // gone, and back as it was
-        let text = remove(&path).unwrap();
+        let text = remove(dir.path(), "tiny", &load()).unwrap();
         assert!(load().get("tiny").is_err());
         restore(dir.path(), "tiny", &text).unwrap();
         assert_eq!(load().webm("tiny").unwrap().crf, Some(28));
@@ -559,13 +581,21 @@ mod tests {
                 let other = std::fs::read_to_string(&capital).unwrap();
                 assert!(rename(dir.path(), "tiny", "Tiny", &load()).is_err());
                 assert_eq!(std::fs::read_to_string(&capital).unwrap(), other);
-                remove(&capital).unwrap();
+                std::fs::remove_file(&capital).unwrap();
             }
         }
 
-        // one another extends keeps its name
+        // one another extends keeps its name, and stays
         write(dir.path(), "child", "extends = 'tiny'\n");
-        assert!(rename(dir.path(), "tiny", "small", &load()).is_err());
+        let extended = |result: Result<()>| match result {
+            Err(Error::Preset(PresetError::Extended(other))) => other == "child",
+            _ => false,
+        };
+        assert!(extended(rename(dir.path(), "tiny", "small", &load()).map(|_| ())));
+        assert!(extended(remove(dir.path(), "tiny", &load()).map(|_| ())));
+        assert!(load().get("tiny").is_ok());
+        remove(dir.path(), "child", &load()).unwrap();
+        remove(dir.path(), "tiny", &load()).unwrap();
     }
 
     #[test]
