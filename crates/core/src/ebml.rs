@@ -76,6 +76,7 @@ const MAX_SIZE_LEN: usize = 8;
 
 /// Where EBML, which WebM is written in, stops making sense.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum EbmlError {
     #[error("unexpected end of data at byte {0}")]
     Truncated(usize),

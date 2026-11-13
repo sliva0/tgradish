@@ -29,6 +29,7 @@ pub fn default_output(input: &Path, target: Target) -> PathBuf {
 /// couldn't be.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "event", rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum StillEvent {
     Finished(Outcome),
     /// Something worth knowing about more than one picture, as `watch`
@@ -233,6 +234,7 @@ const LOSSLESS_EFFORT: i32 = 6;
 /// How a picture was made to fit the size limit.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Encoding {
     Lossless,
     /// Lossy at this quality, from 0 to 100, as lossless didn't fit.

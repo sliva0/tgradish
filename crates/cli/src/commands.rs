@@ -186,6 +186,8 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
             Inspected::Image { target, info, issues } => print_image(path, info, *target, issues),
             Inspected::Tgs { info, issues } => print_sticker(path, info, issues),
             Inspected::Webm { target, info, .. } => print_info(path, info, *target),
+            // a kind core has that this command line doesn't word yet
+            _ => println!("{}: shown with --json", path.display()),
         }
     }
     if failed > 0 {
@@ -315,6 +317,7 @@ pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
                         println!("source   {}", ui::name(&ffmpeg.source));
                     }
                     BackendInfo::Builtin => println!("ffmpeg   built into tgradish"),
+                    other => println!("ffmpeg   {other:?}"),
                 }
                 println!("version  {}", caps.version);
                 let vp9 = if caps.libvpx_vp9 { style("yes").green() } else { style("no").red() };

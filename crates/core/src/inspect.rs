@@ -13,6 +13,7 @@ use crate::{still, tgs};
 
 /// The kinds of sticker file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Kind {
     /// A WebP picture, by its extension.
     Image,
@@ -39,6 +40,7 @@ impl Kind {
 /// of it, as `issues`, tagged by its `format`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "format", rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Inspected {
     /// A WebP picture, judged as `target`.
     Image { target: Target, info: still::Info, issues: Vec<telegram::Issue> },

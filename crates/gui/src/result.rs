@@ -207,6 +207,7 @@ fn rate_text(attempt: &jobs::Attempt) -> String {
         tgradish_core::events::Rate::Bitrate(kbps) => format!("{kbps:.0} kbit/s"),
         tgradish_core::events::Rate::Crf(crf) => fl!("rate-quality", crf = crf),
         tgradish_core::events::Rate::Lossless => fl!("rate-lossless"),
+        rate => format!("{rate:?}"),
     }
 }
 
@@ -321,6 +322,7 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
                             fl!("rate-quality-short", crf = crf)
                         }
                         tgradish_core::events::Rate::Lossless => fl!("rate-lossless"),
+                        rate => format!("{rate:?}"),
                     });
                     match attempt.bytes {
                         Some(bytes) => {

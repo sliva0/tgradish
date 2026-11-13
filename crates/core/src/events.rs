@@ -15,6 +15,7 @@ use crate::telegram::Issue;
 /// `{"mode":"lossless"}`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
 #[serde(into = "RateMode")]
+#[non_exhaustive]
 pub enum Rate {
     /// Two-pass average bitrate, in kbit/s.
     Bitrate(f64),
@@ -62,6 +63,7 @@ pub struct Params {
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "event", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
+#[non_exhaustive]
 pub enum Event {
     /// The conversion is planned and about to start encoding: the first
     /// event of every conversion.

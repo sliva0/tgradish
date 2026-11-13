@@ -816,6 +816,8 @@ inspect-webm-emoji = A video emoji
 inspect-image-sticker = An image sticker
 inspect-image-emoji = An image emoji
 inspect-tgs = A vector animation, { $width } × { $height } at { $fps } fps
+# A kind of sticker this version of the window can't show yet.
+inspect-unknown = A kind of sticker this window can't show
 inspect-size = Size
     .hint = Telegram refuses larger files
     .tgs = Telegram refuses larger stickers
