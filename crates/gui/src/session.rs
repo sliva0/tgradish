@@ -254,12 +254,19 @@ impl Store {
         let named: HashSet<String> =
             session.items.iter().filter_map(|item| item.pasted_copy.clone()).collect();
         // copies nobody names are left over, unless a session set aside
-        // may name them: then only this window's own go
-        let all = self.set_aside_sessions().is_empty();
+        // may name them: then only this window's own go, and of those not
+        // the ones a session set aside names, as one read in part does
+        // the copies of the files this window took from it
+        let aside = self.set_aside_sessions();
+        let mut kept = HashSet::new();
+        for path in &aside {
+            kept.extend(std::fs::read(path).map(|bytes| copies_named(&bytes)).unwrap_or_default());
+        }
         if let Ok(entries) = std::fs::read_dir(pasted_dir(&self.path)) {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
-                if !named.contains(&name) && (all || self.copies.contains(&name)) {
+                let mine = aside.is_empty() || self.copies.contains(&name);
+                if !named.contains(&name) && !kept.contains(&name) && mine {
                     let _ = std::fs::remove_file(entry.path());
                 }
             }
@@ -289,6 +296,17 @@ fn lock(path: &Path) -> Result<Option<std::fs::File>, Held> {
         Err(std::fs::TryLockError::WouldBlock) => Err(Held),
         Err(std::fs::TryLockError::Error(_)) => Ok(None),
     }
+}
+
+/// The copies of pasted images a session file names, of any version that
+/// names them as this one does.
+fn copies_named(bytes: &[u8]) -> HashSet<String> {
+    let Ok(session) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return HashSet::new();
+    };
+    let items = session.get("items").and_then(serde_json::Value::as_array);
+    let named = items.into_iter().flatten().filter_map(|item| item.get("pasted")?.as_str());
+    named.map(str::to_owned).collect()
 }
 
 /// The session `text` holds and how many of its items couldn't be read, or
@@ -573,6 +591,37 @@ mod tests {
         let kept: Vec<String> =
             asides.iter().map(|aside| std::fs::read_to_string(aside).unwrap()).collect();
         assert_eq!(kept, texts);
+    }
+
+    #[test]
+    fn keeps_the_copies_a_session_set_aside_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let mut store = Store::open(path.clone()).unwrap();
+        let mut items = [pasted(1, b"one"), pasted(2, b"two")];
+        for item in &mut items {
+            item.pasted_copy = Some(store.copy_pasted(item.id, &item.inputs[0]).unwrap());
+        }
+        items[0].choices.webm.crf = Some(20);
+        store.save(&session(&items, None)).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, text.replacen(r#""webm":{"#, r#""webm":{"made-up":1,"#, 1)).unwrap();
+        drop(store);
+
+        // the second is taken back, then removed
+        let mut store = Store::open(path.clone()).unwrap();
+        let loaded = store.read().unwrap();
+        let aside = loaded.unreadable.expect("unreadable").aside;
+        assert_eq!(loaded.session.restore(&path, 1).items.len(), 1);
+        store.save(&session(&[], None)).unwrap();
+        // the session set aside still names it
+        assert_eq!(copies(&path), 2);
+        // until it is gone
+        std::fs::remove_file(aside).unwrap();
+        let mut three = pasted(3, b"three");
+        three.pasted_copy = Some(store.copy_pasted(3, &three.inputs[0]).unwrap());
+        store.save(&session(&[three], None)).unwrap();
+        assert_eq!(copies(&path), 1);
     }
 
     #[test]
