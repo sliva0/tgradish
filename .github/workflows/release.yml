@@ -427,14 +427,13 @@ jobs:
           # Windows paths and an output that already exists
           "$bin" convert still.webm -o out.webm --preset fast && exit 1 || true
 
-  # drafts the release, on a tag. Every other run does all of it but that
-  # last step, so a tag isn't the first time the steps before it run
-  publish:
+  # gathers what the release holds: every build, and ffmpeg's sources. It
+  # runs every time, so a tag isn't the first time it does, and so only
+  # reads, as on a pull request it runs the pull request's code
+  assemble:
     needs: [build, test-linux, test-musl, test-packages, test-aur, test-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v5
       - uses: actions/cache@v6
@@ -450,14 +449,39 @@ jobs:
           merge-multiple: true
 
       # fails without the archive of ffmpeg's sources
-      - name: List what the release holds
-        run: ls -l artifacts target/ffmpeg/ffmpeg-*-sources.tar
+      - name: Put ffmpeg's sources beside the builds
+        run: |
+          cp target/ffmpeg/ffmpeg-*-sources.tar artifacts/
+          ls -l artifacts
+
+      # archives already, which compressing again only slows
+      - uses: actions/upload-artifact@v7
+        with:
+          name: draft
+          path: artifacts/*
+          compression-level: 0
+          if-no-files-found: error
+
+  # drafts the release from what assemble gathered, on a tag pushed: the
+  # one job that may write to the repository, which runs none of its code
+  publish:
+    needs: assemble
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: draft
+          path: artifacts
 
       - name: Draft the release
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: >
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag
           --title "tgradish $GITHUB_REF_NAME" --generate-notes
-          artifacts/* target/ffmpeg/ffmpeg-*-sources.tar
+          artifacts/*
