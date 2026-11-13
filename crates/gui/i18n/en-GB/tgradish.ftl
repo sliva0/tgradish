@@ -390,7 +390,8 @@ part-to = to
 part-first = Its first frame
 part-last = Its last frame
 all-of-input = All of the input
-# Under the used part, in the count the fields don't use.
+# Under the used part, or the frame a picture is made of, in the count the
+# fields don't use.
 part-seconds = { $from } to { $to } of { $length }
 part-frame = Frame { $number } of { $count }
 part-frames = Frames { $first } to { $last } of { $count }
