@@ -8,7 +8,7 @@
 //! Groups are read in the order they are written. Pairs of equal
 //! rectangles hold nothing.
 //!
-//! Stickers with too few rectangles for a copy carry the payload as the
+//! Stickers with too few rectangles for it carry the payload as the
 //! first layer's name (`ln`) instead, in hex: a few bytes more, and a
 //! name like any other.
 
@@ -45,26 +45,18 @@ fn written_key(centre: [f64; 2], size: [f64; 2]) -> Key {
     key(centre.map(written), size.map(written))
 }
 
-/// How many copies of a payload [`embed`] writes at most: each costs
-/// about 0.6% of a sticker's size, as swapped pairs break up repeats.
-const COPIES: usize = 1;
-
-/// Hides `payload` in the order of `animation`'s rectangles, or as its first
-/// layer's name when they have no room for it. False when it has no layers
-/// either.
+/// Hides `payload` once in the order of `animation`'s rectangles, or as its
+/// first layer's name when they have no room for it. False when it has no
+/// layers either. Each copy would cost about 0.6% of a sticker's size, as
+/// swapped pairs break up repeats, so there is only the one.
 pub fn embed(animation: &mut Animation, payload: &[u8]) -> bool {
-    let room = capacity(animation);
-    let copies = (room / (payload.len() * 8).max(1)).min(COPIES);
-    if copies == 0 {
+    if capacity(animation) < payload.len() * 8 {
         let Some(first) = animation.layers.first_mut() else { return false };
         first.id = Some(payload.iter().map(|byte| format!("{byte:02x}")).collect());
         return true;
     }
-    let bits: Vec<bool> = std::iter::repeat_n(payload, copies)
-        .flatten()
-        .flat_map(|&byte| (0..8).rev().map(move |bit| byte >> bit & 1 == 1))
-        .collect();
-    let mut bits = bits.into_iter();
+    let mut bits =
+        payload.iter().flat_map(|&byte| (0..8).rev().map(move |bit| byte >> bit & 1 == 1));
     for layer in &mut animation.layers {
         for item in &mut layer.items {
             if let Item::Group(items) = item {
