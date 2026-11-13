@@ -152,10 +152,10 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target) {
     print_verdict(&telegram::check(info, target), target);
 }
 
-/// Says a file of several couldn't be inspected, and goes on to the rest.
+/// Says a file couldn't be inspected, and goes on to the rest.
 fn print_failure(ctx: &Context, path: &std::path::Path, err: &impl std::fmt::Display) {
     if ctx.global.json {
-        crate::json_line(&json!({ "file": path, "error": err.to_string() }));
+        crate::print_json_error(&anyhow::anyhow!("{err}"), Some(path));
     } else {
         eprintln!("{} {}: {err}", ui::error_label(), path.display());
     }
@@ -166,21 +166,20 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
     for (i, path) in args.files.iter().enumerate() {
         let inspected = match inspect::inspect(path, args.target.map(Into::into)) {
             Ok(inspected) => inspected,
-            Err(err) if args.files.len() > 1 => {
+            Err(err) => {
                 failed += 1;
                 print_failure(ctx, path, &err);
                 continue;
             }
-            Err(err) => return Err(err).with_context(|| format!("{}", path.display())),
         };
         if ctx.global.json {
             #[derive(serde::Serialize)]
             struct Line<'a> {
-                file: &'a std::path::Path,
+                input: &'a std::path::Path,
                 #[serde(flatten)]
                 inspected: &'a Inspected,
             }
-            crate::json_line(&Line { file: path, inspected: &inspected });
+            crate::json_line(&Line { input: path, inspected: &inspected });
             continue;
         }
         if i > 0 {
@@ -193,7 +192,8 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
         }
     }
     if failed > 0 {
-        if ctx.global.json {
+        // each failure was already reported with its input
+        if ctx.global.json || args.files.len() == 1 {
             return Err(crate::Exit(1).into());
         }
         bail!("{failed} of {} couldn't be read", ui::count(args.files.len(), "file"));

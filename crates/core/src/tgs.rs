@@ -274,10 +274,9 @@ pub enum TgsEvent {
         /// Problems Telegram would still have with the result.
         issues: Vec<Issue>,
     },
-    /// A conversion failed. Never sent by the library, which returns
-    /// errors: the CLI prints them as [`crate::events::Event::Error`], the
-    /// same as this, which is here so this stream's schema has it.
-    Error { message: String, input: Option<PathBuf> },
+    /// A conversion, or the whole command, failed. Only printed by the
+    /// CLI; the library returns errors instead.
+    Error(crate::events::Failure),
 }
 
 /// `NAME.sticker.tgs` or `NAME.emoji.tgs` next to the input.

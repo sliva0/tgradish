@@ -130,7 +130,7 @@ mod tests {
 
     use super::*;
     use crate::convert::{Plan, Request};
-    use crate::events::{Params, Rate};
+    use crate::events::{Failure, Params, Rate};
     use crate::ffmpeg::Probe;
     use crate::still::{Encoding, Outcome, StillEvent};
     use crate::telegram::Issue;
@@ -176,7 +176,7 @@ mod tests {
                 spoofed: false,
                 issues: vec![too_big.clone()],
             },
-            Event::Error { message: "it failed".into(), input: Some("in.mp4".into()) },
+            Event::Error(Failure { message: "it failed".into(), input: Some("in.mp4".into()) }),
         ]
         .map(|event| serde_json::to_value(event).unwrap());
         let animation = tgradish_tgs::frames::Animation::new(
@@ -206,7 +206,7 @@ mod tests {
                 rectangles: 40,
                 issues: Vec::new(),
             },
-            TgsEvent::Error { message: "it failed".into(), input: None },
+            TgsEvent::Error(Failure { message: "it failed".into(), input: None }),
         ]
         .map(|event| serde_json::to_value(event).unwrap());
         let still = [
@@ -219,7 +219,7 @@ mod tests {
                 issues: vec![Issue::WrongSize { width: 512, height: 384, side: 100, exact: true }],
                 warnings: vec!["a warning".into()],
             }),
-            StillEvent::Error { message: "it failed".into(), input: None },
+            StillEvent::Error(Failure { message: "it failed".into(), input: None }),
         ]
         .map(|event| serde_json::to_value(event).unwrap());
         webm.into_iter().chain(tgs).chain(still).collect()
