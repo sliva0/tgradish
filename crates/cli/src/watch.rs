@@ -76,14 +76,17 @@ impl Scan {
         // entries can disappear while listing, they are simply skipped
         for entry in entries.flatten() {
             let path = entry.path();
-            // does not follow symlinks, so links cannot make loops
+            // links to directories aren't followed, so they can't make
+            // loops; a link to a file is taken as the file
             let Ok(file_type) = entry.file_type() else { continue };
+            let file = file_type.is_file()
+                || file_type.is_symlink() && std::fs::metadata(&path).is_ok_and(|m| m.is_file());
             if file_type.is_dir() {
                 let hidden = path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
                 if recursive && !hidden {
                     self.visit(&path, recursive);
                 }
-            } else if file_type.is_file()
+            } else if file
                 && is_input(&path)
                 && let Some(stamp) = current_stamp(&path)
             {
@@ -155,6 +158,15 @@ fn worth_retrying(err: &Failed) -> bool {
     }
 }
 
+/// Says watching stopped: stopping is the only way out of it, so it ends
+/// the command as done.
+fn stopped(ctx: &Context) -> Result<()> {
+    if !ctx.global.json {
+        eprintln!("{}", crate::ui::status("Stopped", "watching"));
+    }
+    Ok(())
+}
+
 /// Sleeps for `seconds`, waking up early when cancelled.
 fn sleep(ctx: &Context, seconds: f64) {
     let until = Instant::now() + Duration::from_secs_f64(seconds);
@@ -173,6 +185,8 @@ fn warn(ctx: &Context, message: String) {
     }
 }
 
+/// Watches until stopped, by Ctrl-C or `--cancel-on-stdin`, which ends it
+/// as done, whether it was waiting or converting then.
 pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
     if !args.dir.is_dir() {
         bail!("{} is not a directory", args.dir.display());
@@ -207,10 +221,7 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
     loop {
         sleep(ctx, args.interval);
         if ctx.cancel.is_cancelled() {
-            if !ctx.global.json {
-                eprintln!("{}", crate::ui::status("Stopped", "watching"));
-            }
-            return Ok(());
+            return stopped(ctx);
         }
 
         let scan = Scan::run(&args.dir, args.recursive);
@@ -246,9 +257,8 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
                     ours.insert(path.clone());
                     failures.remove(&path);
                 }
-                Err(Failed::Core(tgradish_core::Error::Cancelled)) => {
-                    return Err(tgradish_core::Error::Cancelled.into());
-                }
+                // stopped while converting, which leaves nothing behind
+                Err(Failed::Core(tgradish_core::Error::Cancelled)) => return stopped(ctx),
                 Err(err) if worth_retrying(&err) && !changed_meanwhile => {
                     let failed = failures.entry(path.clone()).or_insert(Failures {
                         stamp,
@@ -279,6 +289,24 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A link to a file is watched as the file, and a link to a
+    /// directory isn't followed.
+    #[cfg(unix)]
+    #[test]
+    fn follows_links_to_files_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let clip = elsewhere.path().join("clip.mp4");
+        std::fs::write(&clip, b"a video").unwrap();
+        std::fs::write(elsewhere.path().join("inside.mp4"), b"another").unwrap();
+        std::os::unix::fs::symlink(&clip, dir.path().join("linked.mp4")).unwrap();
+        std::os::unix::fs::symlink(elsewhere.path(), dir.path().join("folder")).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("gone"), dir.path().join("broken.mp4")).unwrap();
+        let scan = Scan::run(dir.path(), true);
+        let found: Vec<_> = scan.files.keys().collect();
+        assert_eq!(found, [&dir.path().join("linked.mp4")]);
+    }
 
     #[test]
     fn recognises_inputs() {
