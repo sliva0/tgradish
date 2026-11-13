@@ -1,6 +1,6 @@
 //! Packs the licence notices of what tgradish is built from, compressed,
 //! so a binary on its own carries them; `licenses` reads them back for
-//! `tgradish licences`. The texts are in this crate, since a published
+//! `tgradish licenses`. The texts are in this crate, since a published
 //! crate is built without the repository around it: tgradish's own beside
 //! this file, and in `licenses/` the Rust crates' from `cargo xtask
 //! licenses`, ffmpeg's from `cargo xtask ffmpeg`, and libwebp's from the

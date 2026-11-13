@@ -65,8 +65,11 @@ fn describes_protocol() {
 
 #[test]
 fn carries_licences() {
-    let output = tgradish(&["licences"]);
+    let output = tgradish(&["licenses"]);
     assert!(output.status.success());
+    // prose says licences, and the command takes it too
+    let alias = tgradish(&["licences"]);
+    assert!(alias.status.success() && alias.stdout == output.stdout);
     let text = String::from_utf8_lossy(&output.stdout);
     for title in ["tgradish", "Font: Ubuntu Light, a subset", "libwebp: licence", "Rust crates"] {
         assert!(text.lines().any(|line| line == title), "no {title:?}");

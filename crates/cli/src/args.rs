@@ -108,8 +108,8 @@ pub enum Command {
     Ffmpeg(FfmpegCommand),
     /// Print the licences of tgradish and of what it is built from, which
     /// every copy carries.
-    #[command(alias = "licenses")]
-    Licences,
+    #[command(alias = "licences")]
+    Licenses,
     /// Open the tgradish window. It also opens when tgradish is started
     /// without arguments outside a terminal.
     #[cfg(feature = "gui")]
