@@ -5,7 +5,10 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-# where releases are, which the notice of ffmpeg's sources says
+# the packages' maintainer and home page, and where releases are, which
+# the notice of ffmpeg's sources says
+authors.workspace = true
+homepage.workspace = true
 repository.workspace = true
 publish = false
 

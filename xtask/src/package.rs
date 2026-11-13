@@ -331,6 +331,14 @@ fn linux_packages(
             entry.file_name().to_string_lossy()
         ));
     }
+    // Debian looks for a package's licences in its copyright file, and
+    // nowhere else
+    let copyright = stage.parent().unwrap().join(format!("copyright-{}", target.triple()));
+    std::fs::write(&copyright, debian_copyright(stage)?)?;
+    contents.push(format!(
+        "  - src: {}\n    dst: /usr/share/doc/tgradish/copyright\n    packager: deb",
+        quoted(&copyright)
+    ));
     contents.sort();
     let list = |names: Vec<String>| {
         names.iter().map(|name| format!("\n      - {name:?}")).collect::<String>()
@@ -366,18 +374,24 @@ fn linux_packages(
          release: \"1\"\n\
          section: graphics\n\
          priority: optional\n\
-         maintainer: \"sliva0 <sliva0mk@gmail.com>\"\n\
+         maintainer: {maintainer:?}\n\
          description: |-\n  \
            {SUMMARY}\n  \
            Makes video (WebM) and image (WebP) stickers and custom emoji from any\n  \
            video or picture, and animated (TGS) stickers from pixel art, fitted to\n  \
            Telegram's limits. It has ffmpeg built in.\n\
-         homepage: \"https://github.com/sliva0/tgradish\"\n\
+         homepage: {homepage:?}\n\
          license: \"MIT AND LGPL-2.1-or-later AND BSD-3-Clause AND BSD-2-Clause AND Zlib\"\n\
          contents:\n{contents}\n\
          overrides:\n  \
-           deb:\n    depends:{debs}\n    recommends:\n      - xdg-desktop-portal\n  \
-           rpm:\n    depends:{rpms}\n    recommends:\n      - xdg-desktop-portal\n",
+           deb:\n    depends:{debs}\n    recommends:\n      - xdg-desktop-portal\n    \
+           suggests:\n      - ffmpeg\n  \
+           rpm:\n    depends:{rpms}\n    recommends:\n      - xdg-desktop-portal\n    \
+           suggests:\n      - ffmpeg\n",
+        // the workspace's, which xtask shares; the first author keeps the
+        // packages
+        maintainer = env!("CARGO_PKG_AUTHORS").split(':').next().unwrap_or_default(),
+        homepage = env!("CARGO_PKG_HOMEPAGE"),
         contents = contents.join("\n"),
         debs = list(debs),
         rpms = list(rpms),
@@ -399,6 +413,17 @@ fn linux_packages(
             .arg(path))?;
     }
     Ok(packages.into_iter().map(|(_, path)| path).collect())
+}
+
+/// The .deb's `copyright`: the staged release's THIRD-PARTY.txt, with its
+/// paths where the package installs them, and tgradish's licence.
+fn debian_copyright(stage: &Path) -> Result<String> {
+    let licence = std::fs::read_to_string(stage.join("LICENSE.txt"))?;
+    let third_party = std::fs::read_to_string(stage.join("THIRD-PARTY.txt"))?
+        .replace("see LICENSE.txt", "below")
+        .replace("licenses/", "/usr/share/licenses/tgradish/")
+        .replace("THIRD-PARTY-CRATES.txt", "/usr/share/doc/tgradish/THIRD-PARTY-CRATES.txt");
+    Ok(format!("tgradish\n{}\n\n{third_party}\n{licence}", env!("CARGO_PKG_HOMEPAGE")))
 }
 
 /// What a musl build may be linked to: musl alone, by the name musl-gcc
@@ -467,6 +492,28 @@ fn needed_glibc(exe: &Path) -> Result<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debian_copyright_names_where_the_package_puts_things() {
+        let stage = workspace_root().join("target/xtask-tests/copyright");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::write(stage.join("LICENSE.txt"), "MIT License\n").unwrap();
+        std::fs::write(
+            stage.join("THIRD-PARTY.txt"),
+            "tgradish is MIT licensed, see LICENSE.txt.\n\nTheir licences are in licenses/. \
+             See licenses/libwebp-COPYING.\n\nThe crates are in THIRD-PARTY-CRATES.txt.\n",
+        )
+        .unwrap();
+        let copyright = debian_copyright(&stage).unwrap();
+        assert!(copyright.contains("MIT licensed, below."), "{copyright}");
+        assert!(copyright.contains("are in /usr/share/licenses/tgradish/."), "{copyright}");
+        assert!(copyright.contains(" /usr/share/licenses/tgradish/libwebp-COPYING"), "{copyright}");
+        assert!(
+            copyright.contains(" /usr/share/doc/tgradish/THIRD-PARTY-CRATES.txt"),
+            "{copyright}"
+        );
+        assert!(copyright.ends_with("MIT License\n"), "{copyright}");
+    }
 
     /// What tgradish is said to be is written out wherever a format wants
     /// it, and had drifted into five wordings.

@@ -286,7 +286,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # the oldest supported and the newest of each family, roughly
+          # the oldest supported and the newest of each family, roughly;
+          # AlmaLinux 8 has glibc 2.28, the oldest the packages are for
+          - { target: linux-x86_64, runner: ubuntu-24.04, image: "almalinux:8" }
           - { target: linux-x86_64, runner: ubuntu-24.04, image: "ubuntu:22.04" }
           - { target: linux-x86_64, runner: ubuntu-24.04, image: "ubuntu:24.04" }
           - { target: linux-x86_64, runner: ubuntu-24.04, image: "fedora:latest" }
