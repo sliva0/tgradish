@@ -8,7 +8,8 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
-use crate::normalise::{Edges, Grid, PixelAnim, PixelFrame, assemble, grid_starts, snap_to};
+use crate::grid::{Edges, Grid, grid_starts, snap_to};
+use crate::normalise::{PixelAnim, PixelFrame, assemble};
 use crate::{Error, Result};
 
 /// One reduction at one strength. [`Reduction::apply`] refuses strengths
