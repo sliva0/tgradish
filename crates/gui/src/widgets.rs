@@ -129,6 +129,50 @@ pub(crate) fn folding_section<R>(
     folding.body_returned
 }
 
+// Numbers that change as something is dragged, as what follows from it
+// does, or as something plays or works, have a fixed number of decimals
+// for their kind, so that they keep their width: speeds ×1.50, seconds
+// 2.50 s, frame rates 29.97 fps. Ubuntu's digits are all as wide as each
+// other, and it has no kerning between them, so a number keeps its width
+// while its digits change; only a number of other digits, past 9.99 or
+// 99.99, is wider, which fields and lines of text that hold one leave room
+// for, as [`steady_width`] and [`steady_hint`] do. Typed and finished
+// values, as the result's, are [`trimmed`], which reads better.
+
+/// The decimals of a speed, of a frame rate, and of seconds.
+pub(crate) const SPEED_DECIMALS: usize = 2;
+pub(crate) const FPS_DECIMALS: usize = 2;
+
+/// `value` with `decimals` decimals, however many it needs.
+pub(crate) fn fixed(value: f64, decimals: usize) -> String {
+    format!("{value:.decimals$}")
+}
+
+/// A speed, as a factor, without its ×: 1.50.
+pub(crate) fn speed(value: f64) -> String {
+    fixed(value, SPEED_DECIMALS)
+}
+
+/// A frame rate, without its unit: 29.97, 30.00.
+pub(crate) fn fps(value: f64) -> String {
+    fixed(value, FPS_DECIMALS)
+}
+
+/// `text` with each digit a 0: as wide as any number of as many digits.
+pub(crate) fn zeros(text: &str) -> String {
+    text.chars().map(|c| if c.is_ascii_digit() { '0' } else { c }).collect()
+}
+
+/// The widest [`seconds`] writes a time from 0 to `most` seconds, as
+/// either form it writes them in: `00.00 s` and `0:00.00`.
+pub(crate) fn widest_seconds(most: f64) -> Vec<String> {
+    let mut widest = vec![zeros(&seconds(most.clamp(0.0, 59.99)))];
+    if most >= 59.995 {
+        widest.push(zeros(&seconds(most)));
+    }
+    widest
+}
+
 /// A number with as few decimals as it needs, at most two: 60, 29.97.
 pub(crate) fn trimmed(value: f64) -> String {
     trimmed_to(value, 2)
@@ -164,10 +208,22 @@ pub(crate) fn steady_numbers<R>(
     suffix: &str,
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
+    steady_width(ui, &("0".repeat(digits) + suffix), add)
+}
+
+/// Number fields added by `add` as wide as `widest`, the widest text they
+/// may show, at the least, so that they keep their width, and what comes
+/// after them its place, as the number changes, typed or dragged.
+pub(crate) fn steady_width<R>(
+    ui: &mut egui::Ui,
+    widest: &str,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
     ui.scope(|ui| {
-        let text = "0".repeat(digits) + suffix;
+        // a point more, as glyphs placed on whole pixels may come out a
+        // little wider than measured
         ui.spacing_mut().interact_size.x =
-            text_width(ui, &text, 2.0 * ui.spacing().button_padding.x);
+            text_width(ui, widest, 2.0 * ui.spacing().button_padding.x).ceil() + 1.0;
         add(ui)
     })
     .inner
@@ -228,6 +284,96 @@ pub(crate) fn hint(ui: &mut egui::Ui, text: impl Into<String>) {
     let text = RichText::new(text.into()).weak().size(12.5);
     let width = ui.available_width().min(HINT_WIDTH);
     weak_text(ui, text, width, HINT_TRIM);
+}
+
+/// A [`hint`] holding a number that changes, as something is dragged or
+/// plays: its lines break where they would with the widest number it may
+/// hold, which `widest` says, the hint written with each of the widest
+/// numbers of the forms the number may take. So the lines stay as they are
+/// as the number changes, rather than a word going to the next line and
+/// back as its digits come and go.
+pub(crate) fn steady_hint(ui: &mut egui::Ui, text: impl Into<String>, widest: &[String]) {
+    ui.add_space(BEFORE_HINT);
+    let width = ui.available_width().min(HINT_WIDTH);
+    let text = steady_text(ui, text.into(), widest, width);
+    weak_text(ui, RichText::new(text).weak().size(12.5), width, HINT_TRIM);
+}
+
+/// `text` as [`steady_hint`] lays it out `width` wide: with its lines
+/// broken where the widest of `widest` breaks, laid out a little narrower,
+/// as kerning by the digits' neighbours may make another number a little
+/// wider.
+fn steady_text(ui: &egui::Ui, text: String, widest: &[String], width: f32) -> String {
+    let lay_out = |text: &str| {
+        egui::WidgetText::from(RichText::new(text).weak().size(12.5)).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Wrap),
+            width - 3.0,
+            egui::TextStyle::Body,
+        )
+    };
+    let widest = widest
+        .iter()
+        .map(|widest| lay_out(widest))
+        .max_by(|a, b| a.size().x.total_cmp(&b.size().x));
+    match widest {
+        Some(widest) => broken_as(&text, widest.text(), &breaks(&widest)),
+        None => text,
+    }
+}
+
+/// Where `galley`'s lines that wrap end, in characters from its start.
+fn breaks(galley: &egui::Galley) -> Vec<usize> {
+    let mut at = 0;
+    let mut breaks = Vec::new();
+    let rows = galley.rows.len();
+    for (index, row) in galley.rows.iter().enumerate() {
+        at += row.char_count_including_newline().0;
+        if index + 1 < rows && !row.ends_with_newline {
+            breaks.push(at);
+        }
+    }
+    breaks
+}
+
+/// `text`, which is `like` with other digits in a part of it, broken onto
+/// lines where `like` breaks at `breaks`: the same place in the part they
+/// share before and after where they differ, and after that part where a
+/// break falls within it.
+fn broken_as(text: &str, like: &str, breaks: &[usize]) -> String {
+    let (ours, theirs): (Vec<char>, Vec<char>) = (text.chars().collect(), like.chars().collect());
+    let before = ours.iter().zip(&theirs).take_while(|(a, b)| a == b).count();
+    let shorter = ours.len().min(theirs.len()) - before;
+    let after =
+        ours.iter().rev().zip(theirs.iter().rev()).take_while(|(a, b)| a == b).count().min(shorter);
+    let mut at: Vec<usize> = breaks
+        .iter()
+        .map(|&at| {
+            if at <= before {
+                at
+            } else if at >= theirs.len() - after {
+                ours.len() - (theirs.len() - at)
+            } else {
+                ours.len() - after
+            }
+        })
+        .collect();
+    at.dedup();
+    let mut broken = String::with_capacity(text.len() + at.len());
+    for (index, c) in ours.iter().enumerate() {
+        if at.contains(&index) && index > 0 {
+            // the space the line ended with goes, as wrapping drops it
+            if broken.ends_with(' ') {
+                broken.pop();
+            }
+            broken.push('\n');
+            if *c == ' ' {
+                continue;
+            }
+        }
+        broken.push(*c);
+    }
+    broken
 }
 
 /// The label column of a grid, explained on hover.
@@ -1256,6 +1402,61 @@ mod tests {
         // shown as it is, not clamped to the range
         use egui_kittest::kittest::Queryable;
         harness.get(egui_kittest::kittest::by().value("20"));
+    }
+
+    #[test]
+    fn breaks_lines_where_the_widest_number_would() {
+        let like = "Plays all 00.00 s: Telegram is told";
+        // broken after "all" and after "s:" in the widest
+        let breaks = [10, 19];
+        let text = "Plays all 9.55 s: Telegram is told";
+        assert_eq!(broken_as(text, like, &breaks), "Plays all\n9.55 s:\nTelegram is told");
+        // within the number itself: after it
+        assert_eq!(broken_as("a 1.5 b", "a 00.00 b", &[4]), "a 1.5\nb");
+        // and the widest itself as it is
+        assert_eq!(broken_as(like, like, &breaks), "Plays all\n00.00 s:\nTelegram is told");
+        assert_eq!(fixed(2.0, 2), "2.00");
+        assert_eq!((speed(1.5), fps(29.97)), ("1.50".to_owned(), "29.97".to_owned()));
+        assert_eq!(widest_seconds(14.55), ["00.00 s"]);
+        assert_eq!(widest_seconds(145.5), ["00.00 s", "0:00.00"]);
+    }
+
+    #[test]
+    fn keeps_a_hint_on_its_lines_as_its_number_changes() {
+        type State = (bool, bool);
+        // at each width, the hint of each time in its lines: their number,
+        // and the line the time is on
+        let show = |ui: &mut egui::Ui, (steady, plain): &mut State| {
+            let widest = widest_seconds(145.5);
+            let hint = |time: &str| format!("Plays all {time}: Telegram is told it is shorter");
+            let widest: Vec<String> = widest.iter().map(|most| hint(most)).collect();
+            for width in 120..320 {
+                let lines = |text: String| {
+                    let galley = egui::WidgetText::from(RichText::new(text).weak().size(12.5))
+                        .into_galley(
+                            ui,
+                            Some(egui::TextWrapMode::Wrap),
+                            width as f32,
+                            egui::TextStyle::Body,
+                        );
+                    let on = galley.rows.iter().position(|row| row.text().contains("told"));
+                    (galley.rows.len(), on)
+                };
+                let times = [0.5, 9.99, 14.55, 145.5].map(|time| hint(&seconds(time)));
+                let kept =
+                    times.clone().map(|text| lines(steady_text(ui, text, &widest, width as f32)));
+                *steady &= kept.iter().all(|each| *each == kept[0]);
+                let wrapped = times.map(lines);
+                *plain &= wrapped.iter().all(|each| *each == wrapped[0]);
+            }
+        };
+        let mut harness = egui_kittest::Harness::new_ui_state(show, (true, true));
+        test_fonts(&harness);
+        harness.run_steps(2);
+        let (steady, plain) = *harness.state();
+        // as wrapped plainly, a time of more digits moves words to the
+        // next line at some width; never so here
+        assert!(steady && !plain, "steady {steady}, plain {plain}");
     }
 
     #[test]

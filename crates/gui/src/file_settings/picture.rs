@@ -588,10 +588,14 @@ fn aspect_ratio(
                     .max_decimals(3)
                     .custom_formatter(|n, _| widgets::trimmed_to(n, 3))
             }
-            let across = ui.add(side(&mut width)).on_hover_text(fl!("width"));
+            // as wide as a side of three digits and three decimals, as
+            // dragging makes them, so what follows stays put
+            let (across, down) = widgets::steady_width(ui, "000.000", |ui| {
+                let across = ui.add(side(&mut width)).on_hover_text(fl!("width"));
+                ui.label(":");
+                (across, ui.add(side(&mut height)).on_hover_text(fl!("height")))
+            });
             typed |= across.on_disabled_hover_text(pick.as_str()).changed();
-            ui.label(":");
-            let down = ui.add(side(&mut height)).on_hover_text(fl!("height"));
             typed |= down.on_disabled_hover_text(pick.as_str()).changed();
             if item.format == Format::Tgs {
                 return;
@@ -685,15 +689,23 @@ fn integer_scale(
             if ui.small_button("−").on_hover_text(fl!("smaller")).clicked() {
                 step -= 1;
             }
-            ui.add(
-                egui::DragValue::new(&mut step)
-                    .range(lowest..=highest)
-                    .speed(0.05)
-                    .custom_formatter(|n, _| scale_text(step_scale(n as i64)))
-                    .custom_parser(|text| parse_scale(text).map(|s| scale_step(s) as f64))
-                    // a scale kept for integer scaling shows as it is
-                    .clamp_existing_to_range(integer),
-            )
+            // as wide as the widest scale, so + stays under the pointer
+            let widest = [lowest, highest, step]
+                .map(|step| widgets::zeros(&scale_text(step_scale(step))))
+                .into_iter()
+                .max_by_key(|text| text.chars().count())
+                .unwrap_or_default();
+            widgets::steady_width(ui, &widest, |ui| {
+                ui.add(
+                    egui::DragValue::new(&mut step)
+                        .range(lowest..=highest)
+                        .speed(0.05)
+                        .custom_formatter(|n, _| scale_text(step_scale(n as i64)))
+                        .custom_parser(|text| parse_scale(text).map(|s| scale_step(s) as f64))
+                        // a scale kept for integer scaling shows as it is
+                        .clamp_existing_to_range(integer),
+                )
+            })
             .on_hover_text(fl!("scale-field"))
             .on_disabled_hover_text(fl!("scale-field", "pick"));
             if ui.small_button("+").on_hover_text(fl!("larger")).clicked() {

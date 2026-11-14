@@ -115,9 +115,12 @@ pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item) {
         ui.add_enabled_ui(sheet, |ui| {
             ui.horizontal(|ui| {
                 ui.label(fl!("sheet-cells"));
-                let a = ui.add(egui::DragValue::new(&mut columns).range(1..=256));
-                ui.label("×");
-                let b = ui.add(egui::DragValue::new(&mut rows).range(1..=256));
+                // as wide as any count, so what follows stays put
+                let (a, b) = widgets::steady_numbers(ui, 3, "", |ui| {
+                    let a = ui.add(egui::DragValue::new(&mut columns).range(1..=256));
+                    ui.label("×");
+                    (a, ui.add(egui::DragValue::new(&mut rows).range(1..=256)))
+                });
                 if sheet && (a.changed() || b.changed()) {
                     options.sheet = Some(Sheet { columns, rows });
                 }

@@ -463,7 +463,7 @@ mod tests {
         // the frame rate and the bitrate are the preset's, and say so
         let by = egui_kittest::kittest::by;
         assert_eq!(harness.query_all_by_label(&fl!("from-preset")).count(), 2);
-        harness.get(by().value("24 fps"));
+        harness.get(by().value("24.00 fps"));
         harness.get(by().value("300 kbit/s"));
         // and so is the scale, which "Largest that fits" can't take away
         harness.get(by().value("×2"));
