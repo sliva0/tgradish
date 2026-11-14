@@ -52,8 +52,10 @@ pub enum Scaling {
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Fit {
-    /// Try a few frame rates, fit the bitrate for each and keep the one that
-    /// looks most like the input (by SSIM). Slowest, best looking.
+    /// Fit the bitrate, and where nothing fits or the best that does looks
+    /// poor in a way more bits for each frame could mend, try lower frame
+    /// rates too and keep what looks most like the input (by SSIM).
+    /// Slowest, best looking.
     Auto,
     /// Fit the bitrate at the configured frame rate.
     Bitrate,

@@ -14,7 +14,7 @@ use tgradish_core::tgradish_tgs::check::{Issue, Severity};
 use tgradish_core::tgradish_tgs::normalise::Report;
 use tgradish_core::tgradish_tgs::sticker::Step;
 use tgradish_core::tgs;
-use tgradish_core::webm::{self, Event, Options, Params};
+use tgradish_core::webm::{self, Decision, Event, Options, Params};
 use tgradish_core::webp;
 use tgradish_core::{Error, FfmpegMissing, telegram};
 
@@ -80,6 +80,9 @@ pub(crate) struct Progress {
     pub(crate) fraction: Option<f32>,
     pub(crate) webm: Option<WebmPlan>,
     pub(crate) attempts: Vec<Attempt>,
+    /// Why fitting a WebM stopped where it did, or tried a lower frame
+    /// rate or not.
+    pub(crate) decisions: Vec<Decision>,
     /// What reading the pixel art found.
     pub(crate) report: Option<Box<Report>>,
     /// The `.tgs` size estimate with the art unchanged, when that was too
@@ -612,6 +615,9 @@ fn convert_webm(
                 entry.ssim = Some(ssim);
             }
         })),
+        Event::Decided { decision, .. } => {
+            update(Box::new(move |progress| progress.decisions.push(decision)))
+        }
         Event::Warning { message } => {
             update(Box::new(move |progress| progress.warnings.push(message)))
         }

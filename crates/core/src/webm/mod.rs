@@ -26,7 +26,7 @@ mod fit;
 mod options;
 mod plan;
 
-pub use events::{Event, Params, Rate};
+pub use events::{Decision, Event, Params, Rate};
 pub use fit::first_params;
 pub use options::{
     CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, DEFAULT_FAKE_DURATION, HIGHEST_BITRATE, MAX_ATTEMPTS,
@@ -202,6 +202,10 @@ impl Encoder for BackendEncoder<'_> {
         })?;
         on_event(Event::Scored { attempt: attempt.number, ssim });
         Ok(ssim)
+    }
+
+    fn decided(&mut self, decision: Decision) {
+        (self.on_event)(Event::Decided { decision, message: decision.to_string() });
     }
 }
 

@@ -292,8 +292,8 @@ fn builtin() -> Vec<Preset> {
         ),
         preset(
             "balanced",
-            "WebM tries a few frame rates and keeps the one that looks best. TGS is between fast \
-             and best",
+            "WebM fits the bitrate, and tries lower frame rates where they could look better. \
+             TGS is between fast and best",
             Options { fit: Some(Fit::Auto), speed: Some(Speed::Balanced), ..Default::default() },
             speed(Speed::Balanced),
         ),

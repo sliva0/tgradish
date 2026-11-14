@@ -277,7 +277,7 @@ mod tests {
     use super::*;
     use crate::ffmpeg::Probe;
     use crate::telegram::Issue;
-    use crate::webm::{Params, Rate};
+    use crate::webm::{Decision, Params, Rate};
     use crate::webm::{Plan, Request};
     use crate::webp::{self, Encoding, Outcome};
 
@@ -314,6 +314,10 @@ mod tests {
             Event::Progress { attempt: 1, pass: 1, passes: 2, fraction: 0.5 },
             Event::AttemptFinished { attempt: 1, params, bytes: 300_000, fits: false },
             Event::Scored { attempt: 1, ssim: 0.95 },
+            {
+                let decision = Decision::InBand { attempt: 1, share: 0.99, least: 0.96 };
+                Event::Decided { decision, message: decision.to_string() }
+            },
             Event::Warning { message: "a warning".into() },
             Event::Log { line: "a line".into() },
             Event::Finished {
@@ -572,6 +576,9 @@ mod tests {
                 r#"{"event":"attempt-finished","attempt":1,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"bitrate","kbps":500.0}},"bytes":300000,"fits":false}"#,
             ),
             Some(r#"{"event":"scored","attempt":1,"ssim":0.95}"#),
+            Some(
+                r#"{"event":"decided","decision":{"reason":"in-band","attempt":1,"share":0.99,"least":0.96},"message":"stopped: attempt 1 uses 99.0% of the limit, at least the 96.0% aimed for"}"#,
+            ),
             Some(r#"{"event":"warning","message":"a warning"}"#),
             Some(r#"{"event":"log","line":"a line"}"#),
             Some(

@@ -378,6 +378,9 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
             });
         });
     }
+    for decision in &progress.decisions {
+        widgets::note(ui, decision_text(decision));
+    }
     for warning in &progress.warnings {
         ui.colored_label(theme::warn(ui.visuals()), format!("⚠ {warning}"));
     }
@@ -385,7 +388,70 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
 
 /// `bytes` as a share of `limit`, as the attempts' sizes show.
 fn share(bytes: u64, limit: u64) -> String {
-    format!("{:.1}%", bytes as f64 / limit.max(1) as f64 * 100.0)
+    percent(bytes as f64 / limit.max(1) as f64)
+}
+
+/// A share, or SSIM, from 0 to 1, as the table shows it.
+fn percent(share: f64) -> String {
+    format!("{:.1}%", share * 100.0)
+}
+
+/// Why fitting stopped where it did, or tried a lower frame rate or not,
+/// in the window's words.
+fn decision_text(decision: &tgradish_core::webm::Decision) -> String {
+    use tgradish_core::webm::Decision;
+    let fps = widgets::trimmed;
+    match *decision {
+        Decision::InBand { attempt, share, least } => {
+            fl!("decided-in-band", number = attempt, share = percent(share), least = percent(least))
+        }
+        Decision::AlikeEnough { attempt, ssim } => {
+            fl!("decided-alike-enough", number = attempt, alike = percent(ssim))
+        }
+        Decision::AlikeUnchanged { attempt, than, ssim } => {
+            fl!("decided-alike-unchanged", number = attempt, than = than, alike = percent(ssim))
+        }
+        Decision::LittleToGain { attempt, share, predicted } => fl!(
+            "decided-little-to-gain",
+            number = attempt,
+            share = percent(share),
+            predicted = percent(predicted)
+        ),
+        Decision::TooLargeAtLeast { predicted } => {
+            fl!("decided-too-large-at-least", predicted = percent(predicted))
+        }
+        Decision::NothingLeft => fl!("decided-nothing-left"),
+        Decision::OutOfAttempts { attempts } => fl!("decided-out-of-attempts", count = attempts),
+        Decision::KeepsFrameRate { attempt, fps: rate, ssim } => fl!(
+            "decided-keeps-frame-rate",
+            number = attempt,
+            fps = fps(rate),
+            alike = percent(ssim)
+        ),
+        Decision::FrameRateWontHelp { fps: rate } => {
+            fl!("decided-frame-rate-wont-help", fps = fps(rate))
+        }
+        Decision::LowersFrameRateToFit { from, fps: rate } => {
+            fl!("decided-lowers-to-fit", fps = fps(rate), from = fps(from))
+        }
+        Decision::LowersFrameRateForLooks { from, fps: rate, attempt, ssim } => fl!(
+            "decided-lowers-for-looks",
+            fps = fps(rate),
+            from = fps(from),
+            number = attempt,
+            alike = percent(ssim)
+        ),
+        Decision::LowerLooksNoBetter { fps: rate, ssim, kept, kept_fps, kept_ssim } => fl!(
+            "decided-lower-no-better",
+            fps = fps(rate),
+            alike = percent(ssim),
+            kept = kept,
+            kept_fps = fps(kept_fps),
+            kept_alike = percent(kept_ssim)
+        ),
+        // one added to core since, which the window has no words for
+        decision => decision.to_string(),
+    }
 }
 
 fn reduction(reduction: &tgradish_core::tgradish_tgs::reduce::Reduction) -> String {
@@ -425,6 +491,16 @@ mod tests {
 
     fn plan(attempts: u32) -> WebmPlan {
         WebmPlan { width: 512, height: 512, fps: 30.0, length: 1.0, attempts, limit: 262_144 }
+    }
+
+    #[test]
+    fn says_why_fitting_stopped_in_the_tables_terms() {
+        use tgradish_core::webm::Decision;
+        let stopped = decision_text(&Decision::InBand { attempt: 2, share: 0.99, least: 0.96 });
+        assert_eq!(stopped, fl!("decided-in-band", number = 2, share = "99.0%", least = "96.0%"));
+        let kept = Decision::KeepsFrameRate { attempt: 2, fps: 29.97, ssim: 0.967 };
+        let kept = decision_text(&kept);
+        assert!(kept.contains("29.97") && kept.contains("96.7%"), "{kept}");
     }
 
     #[test]

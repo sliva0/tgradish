@@ -405,7 +405,7 @@ preset-fast = Fast
     .webm = Fits only the bitrate, with the fast encoder: takes seconds, but blurrier
     .tgs = Takes under a second, a few percent larger
 preset-balanced = Balanced
-    .webm = Tries a few frame rates and keeps the one that looks best
+    .webm = Fits the bitrate, and tries lower frame rates where they could look better
     .tgs = Between fast and best
 preset-best = Best
     .webm = Like balanced, with the slowest encoder: takes minutes for long videos
@@ -575,7 +575,7 @@ fitting = Getting under the limit
     .hint = What tgradish changes to land just under the file size limit
     .lossless = Lossless encoding keeps no bitrate or quality to fit: picking this unticks "{ lossless-encoding }"
 fit-auto = Best looking
-    .hint = Tries a few frame rates, fits the bitrate for each and keeps the one most like the input
+    .hint = Fits the bitrate, and where nothing fits or fewer frames, each with more bits, could look better, tries lower frame rates and keeps what looks most like the input
 fit-bitrate = Bitrate
     .hint = Fits the bitrate at the chosen frame rate
 fit-crf = Quality
@@ -996,6 +996,24 @@ column-alike = alike
     .hint = How like the input it looks (SSIM)
 # A quality, short, in the table's rate column.
 rate-quality-short = q { $crf }
+# Under the table: why fitting stopped where it did, or tried a lower
+# frame rate or not. Shares are of the file size limit, as the table's
+# sizes; "looks … like the input" is the table's alike.
+decided-in-band = Stopped: encode { $number } uses { $share } of the limit, at least the { $least } aimed for
+decided-alike-enough = Stopped: encode { $number } already looks { $alike } like the input, so more bits would only make it larger
+decided-alike-unchanged = Stopped: encode { $number } looks { $alike } like the input, hardly more than encode { $than } with fewer bits
+decided-little-to-gain = Stopped: encode { $number } uses { $share } of the limit, and another would use only about { $predicted }
+decided-too-large-at-least = Stopped: even the least of the range would use about { $predicted } of the limit
+decided-nothing-left = Stopped: no setting is left worth trying
+decided-out-of-attempts = { $count ->
+    [one] Stopped: the { $count } encode allowed is made
+   *[other] Stopped: all { $count } encodes allowed are made
+}
+decided-keeps-frame-rate = Not trying a lower frame rate: encode { $number } at { $fps } fps already looks { $alike } like the input
+decided-frame-rate-wont-help = Not trying a lower frame rate: at { $fps } fps, how like the input it looks hardly changed with the bitrate, so more bits a frame wouldn't help
+decided-lowers-to-fit = Trying { $fps } fps: nothing fit at { $from } fps
+decided-lowers-for-looks = Trying { $fps } fps: encode { $number } at { $from } fps looks only { $alike } like the input
+decided-lower-no-better = Stopped: { $fps } fps looks { $alike } like the input, no more than encode { $kept } at { $kept_fps } fps with { $kept_alike }
 # Telegram's problems with a WebM or image result.
 issue-not-webm = Its container is { $container }, not WebM
 issue-no-video = It has no video track
