@@ -438,9 +438,12 @@ fn listen_for_cancel(ctx: &Context) {
 /// before, as setting its message would draw it over that one.
 fn progress_bar(verb: &str, length: Option<u64>) -> ProgressBar {
     let bar = ProgressBar::with_draw_target(length, ProgressDrawTarget::hidden());
+    // the message last and wide, so that indicatif cuts it to the
+    // terminal's width: a line longer than that wraps, and each redraw
+    // would leave its first part behind
     let template = match length {
-        Some(_) => "{prefix:>12.green.bold} {msg} {bar:30.green/dim} {percent:>3}%",
-        None => "{prefix:>12.green.bold} {spinner:.green} {msg}",
+        Some(_) => "{prefix:>12.green.bold} {bar:20.green/dim} {percent:>3}% {wide_msg}",
+        None => "{prefix:>12.green.bold} {spinner:.green} {wide_msg}",
     };
     bar.set_style(
         ProgressStyle::with_template(template)
