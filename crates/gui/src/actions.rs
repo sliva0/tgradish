@@ -50,16 +50,16 @@ impl App {
         });
         let queued = self.queue.iter().position(|&other| other == id);
         let presets_kept = self.presets_dir.is_some();
-        let probes = &self.probes;
-        let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
-        // the result made, there still, which can be copied as a file, and
-        // whether it is where the next goes, made as it would be made now
-        let made = item.made.as_ref().and_then(|made| match &made.job.status {
-            Status::Done(done) => Some(done.output.clone()).filter(|output| probes.exists(output)),
+        // the result made, there still as this item wrote it, not put in
+        // its place since, which can be copied as a file, and whether it is
+        // where the next goes, made as it would be made now
+        let made = self.item(id).and_then(|item| match &item.made.as_ref()?.job.status {
+            Status::Done(done) => Some(done.output.clone()).filter(|output| self.wrote(id, output)),
             _ => None,
         });
         // the one the bar names, not one of another format made before
         let made = made.filter(|made| Some(made) == output.as_ref());
+        let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
         let saved = item.result_is_current() && made.is_some();
         let mut convert = false;
         let mut replace = None;
@@ -729,6 +729,35 @@ mod tests {
         );
         // nor one of it to copy
         assert!(harness.query_by_label(&format!("✔ {}", fl!("copy-result", "done"))).is_none());
+    }
+
+    #[test]
+    fn takes_a_file_put_in_place_of_a_result_for_another() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = with_art(dir.path(), 2);
+        let folder = format!("{}{}", dir.path().join("out").display(), std::path::MAIN_SEPARATOR);
+        let saved = fl!("result-saved-to", folder = folder.as_str());
+        harness.get_by_label_contains("Convert all").click();
+        harness.run_steps(2);
+        finish(&mut harness);
+        let id = harness.state().items[0].id;
+        harness.state_mut().select(id);
+        harness.run_steps(2);
+        harness.get_by_label(&saved);
+        // another result of tgradish's in its place, as another window
+        // may put there, as like it as can be but for when it was written
+        let output = made_job(&harness.state().items[0]).output.clone();
+        let other = made_job(&harness.state().items[1]).output.clone();
+        std::fs::copy(&other, &output).unwrap();
+        let file = std::fs::File::options().write(true).open(&output).unwrap();
+        file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1 << 30)).unwrap();
+        drop(file);
+        harness.state().probes.forget();
+        harness.run_steps(2);
+        // not this item's result, to copy or say it is saved: one it replaces
+        assert!(harness.query_by_label(&saved).is_none());
+        assert!(harness.query_by_label(&fl!("copy-result")).is_none());
+        harness.get_by_label_contains(&fl!("replaces-earlier"));
     }
 
     #[test]
