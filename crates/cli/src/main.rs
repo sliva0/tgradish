@@ -272,10 +272,74 @@ fn ffmpeg_given(
     }
 }
 
+/// Who named the ffmpeg in use, by a path to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FfmpegNamed {
+    /// `--ffmpeg`.
+    Flag,
+    /// `TGRADISH_FFMPEG`.
+    Env,
+    /// The config file's `[ffmpeg] path`.
+    Config,
+}
+
 impl Context {
     /// [`ffmpeg_given`] by this command line.
     fn ffmpeg_given(&self) -> (Option<FfmpegChoice>, Option<PathBuf>) {
         ffmpeg_given(self.global.ffmpeg.as_deref(), self.global.ffmpeg_from)
+    }
+
+    /// The path to ffmpeg, or its folder, that [`Context::backend`] uses,
+    /// and who gave it; none where it looks on PATH or uses its own.
+    pub fn ffmpeg_path(&self) -> Option<(PathBuf, FfmpegNamed)> {
+        match self.ffmpeg_given() {
+            (_, Some(path)) if self.global.ffmpeg.is_some() => Some((path, FfmpegNamed::Flag)),
+            (_, Some(path)) => Some((path, FfmpegNamed::Env)),
+            (Some(_), None) => None,
+            (None, None) => Some((self.config.ffmpeg.path.clone()?, FfmpegNamed::Config)),
+        }
+    }
+
+    /// Where `named` is, in words: `--ffmpeg`, `TGRADISH_FFMPEG`, or the
+    /// config file's `[ffmpeg] path`.
+    pub fn ffmpeg_named_by(&self, named: FfmpegNamed) -> String {
+        match named {
+            FfmpegNamed::Flag => "--ffmpeg".into(),
+            FfmpegNamed::Env => "TGRADISH_FFMPEG".into(),
+            FfmpegNamed::Config => match &self.config_file {
+                Some(file) => format!("{} [ffmpeg] path", file.path.display()),
+                None => "the config's [ffmpeg] path".into(),
+            },
+        }
+    }
+
+    /// [`explain`], and for an ffmpeg a path gave that isn't there, which
+    /// path it was, and who gave it.
+    pub fn explain(&self, err: tgradish_core::Error) -> anyhow::Error {
+        use tgradish_core::{Error, FfmpegMissing};
+        let Some((given, named)) = self.ffmpeg_path() else { return explain(err) };
+        let fix = match named {
+            FfmpegNamed::Env => "unset it or point it at ffmpeg or its folder",
+            FfmpegNamed::Flag | FfmpegNamed::Config => "point it at ffmpeg or its folder",
+        };
+        let from = self.ffmpeg_named_by(named);
+        let given_text = given.display();
+        match err {
+            Error::FfmpegNotFound(FfmpegMissing::NoProgram(_)) if given.is_dir() => {
+                anyhow::anyhow!(
+                    "ffmpeg not found: {given_text}, from {from}, has no ffmpeg in it: {fix}"
+                )
+            }
+            Error::FfmpegNotFound(FfmpegMissing::NoProgram(_)) => {
+                anyhow::anyhow!("ffmpeg not found: {given_text}, from {from}, doesn't exist: {fix}")
+            }
+            Error::FfmpegNotFound(FfmpegMissing::NoFfprobe(ffprobe)) => anyhow::anyhow!(
+                "ffmpeg not found: {given_text}, from {from}, has no ffprobe beside it, as {}: \
+                 {fix}",
+                ffprobe.display()
+            ),
+            err => explain(err),
+        }
     }
 
     pub fn backend(&self) -> tgradish_core::Result<Backend> {

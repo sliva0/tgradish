@@ -218,7 +218,7 @@ impl<'a> Converter<'a> {
             }
         };
         let backend = match format {
-            Format::Webm | Format::Webp => Some(ctx.backend().map_err(crate::explain)?),
+            Format::Webm | Format::Webp => Some(ctx.backend().map_err(|err| ctx.explain(err))?),
             Format::Tgs => None,
         };
         if let Some(dir) = &args.output_dir {
@@ -391,20 +391,15 @@ impl<'a> Converter<'a> {
 
     /// Reports a failed conversion of one of several inputs.
     pub fn report_failure(&self, input: &Path, err: Failed) {
-        let err = explain(err);
+        let err = match err {
+            Failed::Core(err) => self.ctx.explain(err),
+            err => err.into(),
+        };
         if self.ctx.global.json {
             crate::print_json_error(&err, Some(input));
         } else {
             eprintln!("{}", ui::status_bad("Failed", ui::about(input, &format!("{err:#}"))));
         }
-    }
-}
-
-/// Adds hints to errors where the CLI knows what to do about them.
-fn explain(err: Failed) -> anyhow::Error {
-    match err {
-        Failed::Core(err) => crate::explain(err),
-        err => err.into(),
     }
 }
 

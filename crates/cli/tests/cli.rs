@@ -842,9 +842,27 @@ fn ranks_where_ffmpeg_comes_from() {
     // the variable over the config file
     let (_, line) = status(Some(dir.path()), &[]);
     assert_eq!(used(&line), fake, "{line}");
-    // the config's path alone, which isn't there
+    // the config's path alone, which isn't there, and says where it came
+    // from, as each place does
     let (code, line) = status(None, &[]);
     assert_eq!((code, line["event"].as_str()), (Some(1), Some("error")), "{line}");
+    let nowhere = dir.path().join("nowhere");
+    let said = format!(
+        "ffmpeg not found: {}, from {} [ffmpeg] path, doesn't exist: point it at ffmpeg or its \
+         folder",
+        nowhere.display(),
+        config.display()
+    );
+    assert_eq!(line["message"], said);
+    let (_, line) = status(Some(&nowhere), &[]);
+    let said = format!(
+        "ffmpeg not found: {}, from TGRADISH_FFMPEG, doesn't exist: unset it or point it at \
+         ffmpeg or its folder",
+        nowhere.display()
+    );
+    assert_eq!(line["message"], said);
+    let (_, line) = status(None, &["--ffmpeg", nowhere.to_str().unwrap()]);
+    assert!(line["message"].as_str().unwrap().contains(", from --ffmpeg, doesn't exist"), "{line}");
     if tgradish_corpus::ffmpeg_on_path() {
         // a flag over the variable
         let (code, line) = status(Some(dir.path()), &["--ffmpeg-from", "system"]);

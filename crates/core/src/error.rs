@@ -162,7 +162,7 @@ impl std::fmt::Display for FileAction {
 #[non_exhaustive]
 pub enum FfmpegMissing {
     /// There is no ffmpeg, or ffprobe, where a path said.
-    #[error("{} does not exist", .0.display())]
+    #[error("{} doesn't exist", .0.display())]
     NoProgram(PathBuf),
     /// There is no ffprobe beside the ffmpeg a path gave.
     #[error("ffprobe is missing, expected it at {}", .0.display())]
