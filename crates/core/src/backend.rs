@@ -60,6 +60,7 @@ fn naming<T>(result: Result<T>, given: &Path, read: &Path) -> Result<T> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Backend {
     /// ffmpeg and ffprobe executables.
     Process(Ffmpeg),
