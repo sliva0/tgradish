@@ -186,7 +186,7 @@ mod tests {
         let frame = Frame { rgba: rgba.collect(), duration: Duration::from_millis(100) };
         let input = Frames::new(8, 1, vec![frame]).unwrap();
         let options = Options { keep_canvas: true, ..Options::default() };
-        let (anim, _) = normalise(&input, &options).unwrap();
+        let (anim, _) = normalise(input.clone(), &options).unwrap();
         let json = lay_out(&scene, &anim, None, false).to_json(Style::default());
         let (stats, _) = check(json.as_bytes(), None).unwrap();
         assert_eq!(cost(&scene), crate::limits::telegram::cost(stats.shapes, stats.layers));

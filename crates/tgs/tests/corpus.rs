@@ -38,7 +38,7 @@ fn expected_frames(input: &Animation, report: &Report) -> Vec<Vec<u8>> {
 fn normalises_losslessly() {
     for file in corpus() {
         let input = input(&file);
-        let (anim, report) = normalise(&input, &Options::default()).unwrap();
+        let (anim, report) = normalise(input.clone(), &Options::default()).unwrap();
         assert!(report.ticks <= 180 && report.ticks > 0, "{}", file.name);
         if report.tempo == 1.0 && report.dropped_frames == 0 {
             let actual: Vec<Vec<u8>> = (0..anim.frames().len()).map(|i| anim.rgba(i)).collect();
@@ -52,7 +52,7 @@ fn detects_pixel_scales() {
     // exact upscales, one cut through an art pixel, and art mostly on a
     // grid with some pixels off it
     for file in corpus() {
-        let (_, report) = normalise(&input(&file), &Options::default()).unwrap();
+        let (_, report) = normalise(input(&file), &Options::default()).unwrap();
         let likely = report.likely_scale.map(|likely| likely.scale);
         let sprite = &file.sprite;
         assert_eq!((report.scale, likely), (sprite.scale, sprite.likely_scale), "{}", file.name);
@@ -117,17 +117,17 @@ fn fits_large_animations() {
     // much of it changes every frame
     let file = corpus().into_iter().find(|file| file.sprite.name == "dance").unwrap();
     let input = input(&file);
-    let small = make(&input, &StickerOptions::default(), &mut |_| {}, &|| false).unwrap();
+    let small = make(input.clone(), &StickerOptions::default(), &mut |_| {}, &|| false).unwrap();
     assert!(small.fits() && small.steps.is_empty(), "{:?}", small.issues);
 
     let big = tiled(&input, 2, 2);
     let lossless = StickerOptions { fit: Fit::Exact, ..StickerOptions::default() };
-    let too_large = make(&big, &lossless, &mut |_| {}, &|| false).unwrap();
+    let too_large = make(big.clone(), &lossless, &mut |_| {}, &|| false).unwrap();
     assert!(!too_large.fits() && too_large.steps.is_empty());
     assert!(too_large.bytes > 65536, "{}", too_large.bytes);
 
     let started = std::time::Instant::now();
-    let fitted = make(&big, &StickerOptions::default(), &mut |_| {}, &|| false).unwrap();
+    let fitted = make(big.clone(), &StickerOptions::default(), &mut |_| {}, &|| false).unwrap();
     eprintln!(
         "{} bytes in {:?}, from {} lossless: {:?}",
         fitted.bytes,
@@ -148,7 +148,7 @@ fn fits_close_to_the_limit() {
     let file = corpus().into_iter().find(|file| file.sprite.name == "dance").unwrap();
     for max_bytes in [14_500, 9_000] {
         let options = StickerOptions { max_bytes, ..StickerOptions::default() };
-        let made = make(&input(&file), &options, &mut |_| {}, &|| false).unwrap();
+        let made = make(input(&file), &options, &mut |_| {}, &|| false).unwrap();
         eprintln!("{max_bytes}: {} bytes, {:?}", made.bytes, made.steps);
         assert!(made.bytes <= max_bytes, "{} bytes", made.bytes);
         assert!(made.bytes as f64 > max_bytes as f64 * 0.9, "{} bytes", made.bytes);

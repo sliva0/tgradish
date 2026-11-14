@@ -238,9 +238,10 @@ fn share_of_limits(scene: &Scene, json: &str) -> f64 {
     )
 }
 
-/// Makes a sticker of `animation`, reporting `progress`. `cancelled` is
-/// asked between steps, and while encoding between colours; when it says
-/// yes, this stops with [`Error::Cancelled`](crate::Error::Cancelled).
+/// Makes a sticker of `animation`, which it lets go once it is read as
+/// pixel art, reporting `progress`. `cancelled` is asked between steps,
+/// and while encoding between colours; when it says yes, this stops with
+/// [`Error::Cancelled`](crate::Error::Cancelled).
 ///
 /// With the `threads` feature, fitting tries each round's candidates in
 /// threads of their own, and zopfli packs in one, which has two effects
@@ -257,7 +258,7 @@ fn share_of_limits(scene: &Scene, json: &str) -> f64 {
 ///
 /// On wasm, which has no threads to start, the feature does nothing.
 pub fn make(
-    animation: &Animation,
+    animation: Animation,
     options: &Options,
     progress: &mut dyn FnMut(Progress),
     cancelled: Cancelled,
@@ -515,11 +516,11 @@ mod tests {
         let input = noise();
         let lossless = Options { fit: Fit::Exact, effort: Effort::Fast, ..Options::default() };
         let started = std::time::Instant::now();
-        let kept = make(&input, &lossless, &mut |_| {}, &|| false).unwrap();
+        let kept = make(input.clone(), &lossless, &mut |_| {}, &|| false).unwrap();
         let once = started.elapsed();
         let options = Options { fit: Fit::Auto, reductions: Vec::new(), ..lossless };
         let started = std::time::Instant::now();
-        let fitted = make(&input, &options, &mut |_| {}, &|| false).unwrap();
+        let fitted = make(input.clone(), &options, &mut |_| {}, &|| false).unwrap();
         let took = started.elapsed();
         assert!(fitted.tgs == kept.tgs && fitted.steps.is_empty());
         assert!(took < once * 4 + Duration::from_secs(1), "{took:?} against {once:?}");
@@ -532,7 +533,7 @@ mod tests {
         let options = Options { fit: Fit::Exact, effort: Effort::Fast, ..Options::default() };
         let mut too_large = None;
         let made = make(
-            &input,
+            input.clone(),
             &options,
             &mut |event| {
                 if let Progress::TooLarge { bytes } = event {
@@ -567,7 +568,7 @@ mod tests {
             .collect();
         let input = Animation::new(48, 48, frames).unwrap();
         let lossless = Options { fit: Fit::Exact, effort: Effort::Fast, ..Options::default() };
-        let made = make(&input, &lossless, &mut |_| {}, &|| false).unwrap();
+        let made = make(input.clone(), &lossless, &mut |_| {}, &|| false).unwrap();
         let json = file::unpack(&made.tgs).unwrap();
         let gzip = file::pack_quick(&json).len();
         assert!((made.bytes as f64) < gzip as f64 * 0.85, "{} of {gzip}", made.bytes);
@@ -576,7 +577,7 @@ mod tests {
             let options = Options { fit, max_bytes: made.bytes, ..lossless.clone() };
             let mut too_large = false;
             let mut progress = |event| too_large |= matches!(event, Progress::TooLarge { .. });
-            let again = make(&input, &options, &mut progress, &|| false).unwrap();
+            let again = make(input.clone(), &options, &mut progress, &|| false).unwrap();
             assert_eq!((again.bytes, again.steps.len(), too_large), (made.bytes, 0, false));
         }
     }
@@ -587,7 +588,7 @@ mod tests {
         let input =
             tgradish_frames::decode(&walker.bytes, &Default::default(), &Default::default())
                 .unwrap();
-        let (anim, _) = normalise(&input, &normalise::Options::default()).unwrap();
+        let (anim, _) = normalise(input.clone(), &normalise::Options::default()).unwrap();
         // between colours, whatever the effort
         let best = Settings { effort: Effort::Best, ..Settings::default() };
         let stopped = painter(&anim, &best, None, &|| true);
@@ -595,7 +596,7 @@ mod tests {
         // and making a sticker ends there too, after a few questions
         let asked = std::sync::atomic::AtomicUsize::new(0);
         let cancelled = || asked.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 3;
-        let made = make(&input, &Options::default(), &mut |_| {}, &cancelled);
+        let made = make(input.clone(), &Options::default(), &mut |_| {}, &cancelled);
         assert!(matches!(made, Err(crate::Error::Cancelled)), "{:?}", made.map(|s| s.bytes));
         // stopped while packing, with nothing left to encode: no sticker
         let packing = std::sync::atomic::AtomicBool::new(false);
@@ -605,7 +606,7 @@ mod tests {
                 packing.store(true, std::sync::atomic::Ordering::Relaxed);
             }
         };
-        let made = make(&input, &Options::default(), &mut progress, &stopped_packing);
+        let made = make(input.clone(), &Options::default(), &mut progress, &stopped_packing);
         assert!(matches!(made, Err(crate::Error::Cancelled)), "{:?}", made.map(|s| s.bytes));
     }
 
@@ -619,7 +620,7 @@ mod tests {
                 tgradish_frames::decode(&file.bytes, &Default::default(), &Default::default())
                     .unwrap();
             for options in [&normalise::Options::default(), &crop, &canvas, &forced] {
-                let (anim, report) = normalise(&input, options).unwrap();
+                let (anim, report) = normalise(input.clone(), options).unwrap();
                 let again = normalise_likely_scale(&anim);
                 assert_eq!(likely_scale(&anim, &report, options), again, "{}", file.name);
             }
@@ -634,7 +635,7 @@ mod tests {
             vec![Frame { rgba: vec![255; 16], duration: Duration::from_millis(100) }],
         )
         .unwrap();
-        let (anim, _) = normalise(&input, &normalise::Options::default()).unwrap();
+        let (anim, _) = normalise(input.clone(), &normalise::Options::default()).unwrap();
         let named = |bytes: usize| Options { name: Some("x".repeat(bytes)), ..Options::default() };
         let small = estimate(&anim, &named(0), 1.0).unwrap();
         assert!(small < 1000, "{small}");
@@ -667,7 +668,7 @@ mod tests {
             .collect();
         let input = Animation::new(SIDE, SIDE, frames).unwrap();
         let normalise_options = normalise::Options { keep_canvas: true, ..Default::default() };
-        let (anim, _) = normalise(&input, &normalise_options).unwrap();
+        let (anim, _) = normalise(input.clone(), &normalise_options).unwrap();
         let lossless = estimate(&anim, &Options::default(), 1.0).unwrap();
         let fitted = |compromise: Compromise| {
             let options = Options { compromise, ..Options::default() };
@@ -720,7 +721,7 @@ mod tests {
             .collect();
         let input = Animation::new(SIDE, SIDE, frames).unwrap();
         let normalise_options = normalise::Options { keep_canvas: true, ..Default::default() };
-        let (anim, _) = normalise(&input, &normalise_options).unwrap();
+        let (anim, _) = normalise(input.clone(), &normalise_options).unwrap();
         let options = Options::default();
         let quick = Settings { effort: Effort::Fast, ..Settings::default() };
         let Rendered { scene, json, .. } = render(&anim, &quick, &options, &|| false).unwrap();

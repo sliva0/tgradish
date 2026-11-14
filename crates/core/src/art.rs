@@ -135,21 +135,22 @@ fn natural_order(a: &Path, b: &Path) -> std::cmp::Ordering {
 }
 
 /// The frames of one animation in several files, `inputs`: image files,
-/// or folders of them, in name order, `fps` a second. Each file is read
-/// and decoded before the next, so only one is held at once, and `cancel`
-/// is asked between them. A file that doesn't read is named in the error.
+/// or folders of them, in name order, `fps` a second, within `limits`.
+/// Each file is read and decoded before the next, so only one is held at
+/// once, and `cancel` is asked between them. A file that doesn't read is
+/// named in the error.
 pub(crate) fn read_sequence(
     inputs: &[PathBuf],
     fps: Option<f64>,
+    limits: &Limits,
     cancel: &CancelToken,
 ) -> Result<Animation> {
     let files = sequence_files(inputs)?;
-    let limits = Limits::default();
     let stop = || cancel.is_cancelled();
-    let mut sequence = frames::Sequence::new(frame_duration(fps)?, &limits).cancelled_by(&stop);
+    let mut sequence = frames::Sequence::new(frame_duration(fps)?, limits).cancelled_by(&stop);
     for file in &files {
         cancel.check()?;
-        let bytes = read(file, most_bytes(&limits))?;
+        let bytes = read(file, most_bytes(limits))?;
         sequence.push(&bytes).map_err(|err| undecodable(file, err))?;
     }
     cancel.check()?;
@@ -215,7 +216,7 @@ mod tests {
         let walker = tgradish_corpus::sprite("walker_2x");
         std::fs::write(&files[0], tgradish_corpus::encode::png(&walker.frames[0])).unwrap();
         std::fs::write(&files[1], b"not a png").unwrap();
-        let err = read_sequence(&files, None, &CancelToken::new()).unwrap_err();
+        let err = read_sequence(&files, None, &Limits::default(), &CancelToken::new()).unwrap_err();
         assert!(matches!(err, Error::Unreadable { path, .. } if path == files[1]));
     }
 }

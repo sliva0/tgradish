@@ -10,7 +10,7 @@ use tgradish_tgs::frames::{DecodeOptions, Limits, decode};
 use tgradish_tgs::{Options, make};
 
 let animation = decode(&bytes, &DecodeOptions::default(), &Limits::default())?;
-let sticker = make(&animation, &Options::default(), &mut |_progress| {}, &|| false)?;
+let sticker = make(animation, &Options::default(), &mut |_progress| {}, &|| false)?;
 std::fs::write("art.tgs", &sticker.tgs)?;
 ```
 

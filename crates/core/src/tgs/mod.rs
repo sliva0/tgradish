@@ -120,7 +120,7 @@ pub fn convert(
     }
     let input = request.input.first().to_path_buf();
     let sticker = sticker::make(
-        &loaded.animation,
+        loaded.animation,
         &settings,
         &mut |progress| match progress {
             // what reading the art found worth saying, after it

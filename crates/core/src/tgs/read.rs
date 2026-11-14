@@ -49,6 +49,15 @@ impl Loaded {
     }
 }
 
+/// What pixel art or a video read for a `.tgs` may take: half of
+/// [`Limits::default`], since making the sticker holds as much again
+/// beside it, as normalising's palette-indexed copy and fitting's
+/// candidates.
+fn limits() -> Limits {
+    let all = Limits::default();
+    Limits { max_bytes: all.max_bytes / 2, ..all }
+}
+
 /// Pixel art as [`convert`](super::convert) reads it, with the tags and
 /// layers of an Aseprite file, read from the same bytes; or a video, read
 /// through `backend`. `cancel` is asked between files.
@@ -59,10 +68,10 @@ pub(super) fn load(
     cancel: &CancelToken,
 ) -> Result<Loaded> {
     input.refuse_folder()?;
-    let limits = Limits::default();
+    let limits = limits();
     let input = match input {
         Input::Sequence(frames) => {
-            return Ok(Loaded::art(art::read_sequence(frames, options.fps, cancel)?));
+            return Ok(Loaded::art(art::read_sequence(frames, options.fps, &limits, cancel)?));
         }
         Input::File(path) => path,
     };
@@ -138,14 +147,12 @@ fn read_video(
     }
     let probe = backend.probe(input, cancel)?;
     let unreadable = |message: String| Error::Unreadable { path: input.to_path_buf(), message };
-    let limits = Limits::default();
+    let limits = limits();
     let frame_bytes = (probe.width as usize)
         .checked_mul(probe.height as usize)
         .and_then(|pixels| pixels.checked_mul(4))
         .filter(|_| probe.width.max(probe.height) <= limits.max_dimension);
-    // half the budget: normalising holds a copy of the frames it keeps
-    // beside them
-    let fit = frame_bytes.map_or(0, |bytes| limits.max_bytes / 2 / bytes.max(1));
+    let fit = frame_bytes.map_or(0, |bytes| limits.max_bytes / bytes.max(1));
     if fit == 0 {
         let (width, height) = (probe.width, probe.height);
         return Err(unreadable(format!("its frames, {width}x{height}, are too large to read")));
@@ -292,5 +299,34 @@ mod tests {
         let both = Input::Sequence(vec![path.clone(), path.clone()]);
         let stopped = load(None, &both, &Options::default(), &cancel);
         assert!(matches!(stopped, Err(Error::Cancelled)));
+    }
+
+    #[test]
+    fn reads_art_in_half_the_memory_of_other_uses() {
+        // two empty frames of 8192x8192: 768 MiB drawn with a canvas,
+        // within the whole budget but not its half, and refused before
+        // anything is drawn
+        let mut ase = vec![0u8; 128];
+        ase[4..6].copy_from_slice(&0xa5e0u16.to_le_bytes());
+        ase[6..8].copy_from_slice(&2u16.to_le_bytes());
+        ase[8..10].copy_from_slice(&8192u16.to_le_bytes());
+        ase[10..12].copy_from_slice(&8192u16.to_le_bytes());
+        ase[12..14].copy_from_slice(&32u16.to_le_bytes());
+        for _ in 0..2 {
+            ase.extend(16u32.to_le_bytes());
+            ase.extend(0xf1fau16.to_le_bytes());
+            ase.extend([0; 2]);
+            ase.extend(100u16.to_le_bytes());
+            ase.extend([0; 6]);
+        }
+        let len = ase.len() as u32;
+        ase[0..4].copy_from_slice(&len.to_le_bytes());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.ase");
+        std::fs::write(&path, &ase).unwrap();
+        let input = Input::File(path);
+        let refused = load(None, &input, &Options::default(), &CancelToken::new()).err().unwrap();
+        let half = (Limits::default().max_bytes / 2).to_string();
+        assert!(refused.to_string().contains(&half), "{refused}");
     }
 }

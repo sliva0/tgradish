@@ -291,7 +291,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let report = tgradish_tgs::normalise(&animation, &Default::default()).unwrap().1;
+        let report = tgradish_tgs::normalise(animation.clone(), &Default::default()).unwrap().1;
         let step = tgradish_tgs::sticker::Step::new(
             tgradish_tgs::reduce::Reduction::Despeckle,
             60_000,

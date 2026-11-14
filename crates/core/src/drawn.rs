@@ -144,9 +144,10 @@ pub fn readable(input: &Input, options: &Options, cancel: &CancelToken) -> Resul
     let sequence = matches!(input, Input::Sequence(_));
     let stop = || cancel.is_cancelled();
     let (animation, aseprite) = match input {
-        Input::Sequence(frames) => {
-            (art::read_sequence(frames, options.fps, cancel)?, Aseprite::default())
-        }
+        Input::Sequence(frames) => (
+            art::read_sequence(frames, options.fps, &Limits::default(), cancel)?,
+            Aseprite::default(),
+        ),
         Input::File(path) if aseprite => {
             cancel.check()?;
             let bytes = art::read(path, art::most_bytes(&Limits::default()))?;

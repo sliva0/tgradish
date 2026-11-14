@@ -54,7 +54,7 @@ fn read_lottie(path: &Path) -> Result<Vec<u8>> {
 fn load(path: &Path) -> Result<(PixelAnim, Report)> {
     let animation = decode(&read(path)?, &DecodeOptions::default(), &Default::default())
         .with_context(|| format!("{}", path.display()))?;
-    normalise(&animation, &Options::default()).with_context(|| format!("{}", path.display()))
+    normalise(animation, &Options::default()).with_context(|| format!("{}", path.display()))
 }
 
 /// `anim` as Lottie JSON, from the encoder or the `runs` baseline.

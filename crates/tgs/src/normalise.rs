@@ -156,7 +156,9 @@ impl PixelAnim {
     }
 
     /// A frame as packed pixels (see [`pack`]) at the input's resolution,
-    /// cropped: [`PixelAnim::rgba`] without the bytes in between.
+    /// cropped: [`PixelAnim::rgba`] without the bytes in between. What
+    /// reductions once worked on, which tests compare them with.
+    #[cfg(test)]
     pub(crate) fn packed(&self, frame: usize) -> Vec<u32> {
         let (columns, rows) = (&self.grid.columns, &self.grid.rows);
         let width = *columns.last().unwrap() as usize;
@@ -368,8 +370,10 @@ fn timing(durations: &[u64], start: u64, end: u64, tempo: Option<f64>) -> Result
 
 /// Reads `animation` as pixel art, as `options` say: cells of the largest
 /// blocks of input pixels that are one colour in every frame, a palette,
-/// and frames on Telegram's 60 fps grid; and what was done on the way.
-pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim, Report)> {
+/// and frames on Telegram's 60 fps grid; and what was done on the way. It
+/// takes the animation to let each frame go once it is read, which keeps
+/// what it holds at once to about the input's size.
+pub fn normalise(animation: Animation, options: &Options) -> Result<(PixelAnim, Report)> {
     let durations: Vec<u64> =
         animation.frames().iter().map(|frame| nanos(frame.duration)).collect();
     let input_length =
@@ -397,7 +401,11 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
     // frames within what is used, joined while identical
     let mut timed: Vec<(Vec<u32>, u32)> = Vec::new();
     let mut merged_frames = 0;
-    for (frame, (shown, ticks)) in animation.frames().iter().zip(shown.into_iter().zip(ticks)) {
+    let input_frames = animation.frames().len();
+    // each frame goes once it is packed, so the input and its packed copy
+    // are never held whole together
+    let frames = animation.into_frames().into_iter();
+    for (frame, (shown, ticks)) in frames.zip(shown.into_iter().zip(ticks)) {
         // outside the part that is used: an `Animation` has no frames that
         // show for no time
         if shown == 0 {
@@ -480,7 +488,7 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
     // cut square before the colours are gathered: those cut off don't count
     if options.square == Square::Crop && crop.width != crop.height {
         let square = middle_square(crop.width, crop.height);
-        pixels = pixels.iter().map(|frame| cut(frame, crop.width, square)).collect();
+        pixels = pixels.into_iter().map(|frame| cut(&frame, crop.width, square)).collect();
         crop = Rect { x: crop.x + square.x, y: crop.y + square.y, ..square };
         edges = Edges::count(&pixels, crop.width, crop.height);
     }
@@ -498,7 +506,7 @@ pub fn normalise(animation: &Animation, options: &Options) -> Result<(PixelAnim,
     let report = Report {
         input_width,
         input_height,
-        input_frames: animation.frames().len(),
+        input_frames,
         input_length: input_length as f64 / NANOS as f64,
         crop: Rect { x: area.x + crop.x, y: area.y + crop.y, ..crop },
         width,
@@ -526,16 +534,27 @@ pub(crate) fn assemble(
     width: u32,
     edges: &Edges,
 ) -> Result<PixelAnim> {
+    let ticks = &ticks[..ticks.len().min(pixels.len())];
+    assemble_with(ticks, edges, |frame, x, y| pixels[frame][(y * width + x) as usize])
+}
+
+/// [`assemble`] of frames whose packed pixels `pixel(frame, x, y)` gives,
+/// one for each of `ticks`.
+pub(crate) fn assemble_with(
+    ticks: &[u32],
+    edges: &Edges,
+    pixel: impl Fn(usize, u32, u32) -> u32,
+) -> Result<PixelAnim> {
     let grid = edges.grid();
     let (cells_wide, cells_high) = (grid.columns.len() as u32 - 1, grid.rows.len() as u32 - 1);
     let mut palette = vec![[0; 4]];
     let mut index = HashMap::from([(0u32, 0u16)]);
-    let mut frames = Vec::with_capacity(pixels.len());
-    for (pixels, &ticks) in pixels.iter().zip(ticks) {
+    let mut frames = Vec::with_capacity(ticks.len());
+    for (frame, &ticks) in ticks.iter().enumerate() {
         let mut cells = Vec::with_capacity(cells_wide as usize * cells_high as usize);
         for &y in &grid.rows[..cells_high as usize] {
             for &x in &grid.columns[..cells_wide as usize] {
-                let colour = pixels[(y * width + x) as usize];
+                let colour = pixel(frame, x, y);
                 let entry = match index.get(&colour) {
                     Some(&entry) => entry,
                     None => {
@@ -671,7 +690,7 @@ mod tests {
                 _ => CLEAR,
             }
         });
-        let (anim, report) = normalise(&input, &Options::default()).unwrap();
+        let (anim, report) = normalise(input.clone(), &Options::default()).unwrap();
         assert_eq!(report.crop, Rect { x: 4, y: 5, width: 15, height: 12 });
         assert_eq!((anim.width(), anim.height(), report.scale), (5, 4, 3));
         assert_eq!(report.likely_scale, None);
@@ -679,7 +698,7 @@ mod tests {
         assert_lossless(&input, &anim, &report);
 
         let (anim, report) =
-            normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap();
+            normalise(input.clone(), &Options { keep_canvas: true, ..Options::default() }).unwrap();
         assert_eq!(report.crop, Rect { x: 0, y: 0, width: 30, height: 20 });
         // the transparent margins become cells of their own
         assert_eq!((anim.width(), anim.height(), report.scale), (7, 6, 3));
@@ -687,14 +706,15 @@ mod tests {
 
         // cropped square in the middle: the art pixels at its sides cut
         let square = Options { square: Square::Crop, ..Options::default() };
-        let (anim, report) = normalise(&input, &square).unwrap();
+        let (anim, report) = normalise(input.clone(), &square).unwrap();
         assert_eq!(report.crop, Rect { x: 5, y: 5, width: 12, height: 12 });
         assert_eq!(anim.grid().columns, [0, 2, 5, 8, 11, 12]);
         assert_eq!((anim.width(), anim.height(), report.scale), (5, 4, 3));
         assert_lossless(&input, &anim, &report);
         // stretching and padding leave it as it is
         for square in [Square::Pad, Square::Stretch] {
-            let (_, report) = normalise(&input, &Options { square, ..Options::default() }).unwrap();
+            let (_, report) =
+                normalise(input.clone(), &Options { square, ..Options::default() }).unwrap();
             assert_eq!(report.crop, Rect { x: 4, y: 5, width: 15, height: 12 });
         }
     }
@@ -709,17 +729,18 @@ mod tests {
             }
         });
         let crop = Some(Rect { x: 2, y: 3, width: 8, height: 8 });
-        let (anim, report) = normalise(&input, &Options { crop, ..Options::default() }).unwrap();
+        let (anim, report) =
+            normalise(input.clone(), &Options { crop, ..Options::default() }).unwrap();
         assert_eq!(report.crop, Rect { x: 4, y: 5, width: 6, height: 6 });
         assert_eq!((anim.width(), anim.height(), report.scale), (2, 2, 3));
         assert_lossless(&input, &anim, &report);
 
         let options = Options { crop, keep_canvas: true, ..Options::default() };
-        let (_, report) = normalise(&input, &options).unwrap();
+        let (_, report) = normalise(input.clone(), &options).unwrap();
         assert_eq!(Some(report.crop), crop);
         let outside = Some(Rect { x: 25, y: 0, width: 8, height: 8 });
         let options = Options { crop: outside, ..Options::default() };
-        assert!(matches!(normalise(&input, &options), Err(Error::CropOutside { .. })));
+        assert!(matches!(normalise(input.clone(), &options), Err(Error::CropOutside { .. })));
     }
 
     #[test]
@@ -729,7 +750,7 @@ mod tests {
         let input = animation(13, 11, &[ms(100)], |frame, x, y| {
             art(frame, (x + left) / 3, (y + above) / 3)
         });
-        let (anim, report) = normalise(&input, &Options::default()).unwrap();
+        let (anim, report) = normalise(input.clone(), &Options::default()).unwrap();
         assert_eq!((anim.width(), anim.height(), report.scale), (5, 4, 3));
         assert_eq!(anim.grid().columns, [0, 1, 4, 7, 10, 13]);
         assert_eq!(report.likely_scale, None);
@@ -743,7 +764,7 @@ mod tests {
         let input = animation(10, 3, &[ms(100)], |frame, x, y| {
             art(frame, art_index(&columns, x).unwrap(), art_index(&rows, y).unwrap())
         });
-        let (anim, report) = normalise(&input, &Options::default()).unwrap();
+        let (anim, report) = normalise(input.clone(), &Options::default()).unwrap();
         assert_eq!((anim.width(), anim.height(), report.scale), (4, 2, 1));
         assert_eq!(anim.grid(), &Grid { columns: columns.to_vec(), rows: rows.to_vec() });
         assert_lossless(&input, &anim, &report);
@@ -755,7 +776,7 @@ mod tests {
         let input = animation(24, 24, &[ms(100), ms(100)], |frame, x, y| {
             if (frame, x, y) == (1, 7, 9) { [1, 2, 3, 255] } else { art(frame, x / 2, y / 2) }
         });
-        let (anim, report) = normalise(&input, &Options::default()).unwrap();
+        let (anim, report) = normalise(input.clone(), &Options::default()).unwrap();
         assert_eq!(report.scale, 1);
         let likely = report.likely_scale.unwrap();
         assert_eq!(likely.scale, 2);
@@ -763,12 +784,12 @@ mod tests {
         assert_lossless(&input, &anim, &report);
 
         let forced = Options { pixel_scale: Some(2), ..Options::default() };
-        let (anim, report) = normalise(&input, &forced).unwrap();
+        let (anim, report) = normalise(input.clone(), &forced).unwrap();
         assert_eq!((anim.width(), anim.height(), report.scale), (12, 12, 2));
         assert_eq!(report.snapped_pixels, 1);
         assert_eq!(report.likely_scale, None);
         assert_eq!(
-            normalise(&input, &Options { pixel_scale: Some(0), ..forced }),
+            normalise(input.clone(), &Options { pixel_scale: Some(0), ..forced }),
             Err(Error::ZeroScale)
         );
     }
@@ -776,7 +797,7 @@ mod tests {
     #[test]
     fn snaps_to_60_fps() {
         let frames: Vec<_> = (0..7).map(|i| (art(i, 0, 0), ms(70))).collect();
-        let (anim, report) = normalise(&flat(&frames), &Options::default()).unwrap();
+        let (anim, report) = normalise(flat(&frames), &Options::default()).unwrap();
         let ticks: Vec<u32> = anim.frames().iter().map(|frame| frame.ticks).collect();
         // starts rounded from 0, 4.2, 8.4, 12.6, ... 29.4
         assert_eq!(ticks, [4, 4, 5, 4, 4, 4, 4]);
@@ -792,7 +813,7 @@ mod tests {
             (RED, ms(100)),
             (BLUE, ms(100)),
         ]);
-        let (anim, report) = normalise(&input, &Options::default()).unwrap();
+        let (anim, report) = normalise(input.clone(), &Options::default()).unwrap();
         let frames: Vec<_> = anim
             .frames()
             .iter()
@@ -802,34 +823,34 @@ mod tests {
         assert_eq!((report.merged_frames, report.dropped_frames), (2, 1));
 
         // a frame too short for 60 fps alone still shows
-        let (anim, _) = normalise(&flat(&[(RED, ms(5))]), &Options::default()).unwrap();
+        let (anim, _) = normalise(flat(&[(RED, ms(5))]), &Options::default()).unwrap();
         assert_eq!(anim.ticks(), 1);
     }
 
     #[test]
     fn speeds_up_or_trims_long_inputs() {
         let input = flat(&[(RED, ms(1500)), (GREEN, ms(1500)), (BLUE, ms(1500)), (RED, ms(1500))]);
-        let (anim, report) = normalise(&input, &Options::default()).unwrap();
+        let (anim, report) = normalise(input.clone(), &Options::default()).unwrap();
         assert!(anim.frames().iter().all(|frame| frame.ticks == 45));
         assert_eq!((report.ticks, report.tempo, report.trimmed), (180, 2.0, false));
 
         let trim = Options { tempo: Some(1.0), ..Options::default() };
-        let (anim, report) = normalise(&input, &trim).unwrap();
+        let (anim, report) = normalise(input.clone(), &trim).unwrap();
         assert!(anim.frames().iter().all(|frame| frame.ticks == 90));
         assert_eq!((anim.frames().len(), report.trimmed, report.tempo), (2, true, 1.0));
 
         // faster than it needs, or slower and cut
         let fast = Options { tempo: Some(3.0), ..Options::default() };
-        let (anim, report) = normalise(&input, &fast).unwrap();
+        let (anim, report) = normalise(input.clone(), &fast).unwrap();
         assert!(anim.frames().iter().all(|frame| frame.ticks == 30));
         assert_eq!((report.ticks, report.trimmed), (120, false));
         let slow = Options { tempo: Some(0.5), ..Options::default() };
-        let (anim, report) = normalise(&input, &slow).unwrap();
+        let (anim, report) = normalise(input.clone(), &slow).unwrap();
         let ticks: Vec<u32> = anim.frames().iter().map(|frame| frame.ticks).collect();
         assert_eq!((ticks, report.trimmed), (vec![180], true));
         for tempo in [0.0, 1e-7, 11.0, 1e300, f64::NAN] {
             let wrong = Options { tempo: Some(tempo), ..Options::default() };
-            assert!(matches!(normalise(&input, &wrong), Err(Error::Tempo(_))), "{tempo}");
+            assert!(matches!(normalise(input.clone(), &wrong), Err(Error::Tempo(_))), "{tempo}");
         }
     }
 
@@ -838,12 +859,12 @@ mod tests {
         // an animation shows them for the default 100 ms, so none goes
         // missing without being counted as dropped
         let input = flat(&[(RED, ms(0)), (GREEN, ms(50)), (BLUE, ms(0))]);
-        let (anim, report) = normalise(&input, &Options::default()).unwrap();
+        let (anim, report) = normalise(input.clone(), &Options::default()).unwrap();
         let ticks: Vec<u32> = anim.frames().iter().map(|frame| frame.ticks).collect();
         assert_eq!((ticks, report.dropped_frames, report.input_length), (vec![6, 3, 6], 0, 0.25));
         // nor is one where every frame does past its end at its start
         let input = flat(&[(RED, ms(0)), (BLUE, ms(0))]);
-        let (anim, report) = normalise(&input, &Options::default()).unwrap();
+        let (anim, report) = normalise(input.clone(), &Options::default()).unwrap();
         assert_eq!((anim.frames().len(), report.ticks), (2, 12));
     }
 
@@ -891,7 +912,7 @@ mod tests {
         // and the 0.3 of a frame it called a cut
         assert_eq!(ticks(30_050, 10.0), (180, false));
         let slow = Options { tempo: Some(0.5), ..Options::default() };
-        let (anim, report) = normalise(&flat(&[(RED, ms(1505))]), &slow).unwrap();
+        let (anim, report) = normalise(flat(&[(RED, ms(1505))]), &slow).unwrap();
         assert_eq!((anim.ticks(), report.ticks, report.trimmed), (180, 180, true));
     }
 
@@ -932,10 +953,10 @@ mod tests {
             assert_eq!((long.ticks, long.trimmed), (vec![180, 0], tempo.is_some()), "{tempo:?}");
         }
         let endless = flat(&[(RED, Duration::MAX), (BLUE, Duration::MAX)]);
-        let (anim, report) = normalise(&endless, &Options::default()).unwrap();
+        let (anim, report) = normalise(endless.clone(), &Options::default()).unwrap();
         assert_eq!((anim.ticks(), report.frames, report.trimmed), (180, 1, false));
         let late = Options { start: Duration::MAX, ..Options::default() };
-        assert!(matches!(normalise(&endless, &late), Err(Error::StartPastEnd { .. })));
+        assert!(matches!(normalise(endless.clone(), &late), Err(Error::StartPastEnd { .. })));
     }
 
     #[test]
@@ -946,7 +967,7 @@ mod tests {
             (0..180).map(|i| (if i % 2 == 0 { RED } else { BLUE }, tick)).collect();
         for tempo in [None, Some(1.0)] {
             let options = Options { tempo, ..Options::default() };
-            let (anim, report) = normalise(&flat(&frames), &options).unwrap();
+            let (anim, report) = normalise(flat(&frames), &options).unwrap();
             assert_eq!((report.ticks, report.tempo, report.trimmed), (180, 1.0, false));
             assert_eq!(anim.frames().len(), 180);
         }
@@ -956,14 +977,14 @@ mod tests {
     fn uses_a_window() {
         let input = flat(&[(RED, ms(1500)), (GREEN, ms(1500)), (BLUE, ms(1500))]);
         let window = Options { start: ms(1200), length: Some(ms(600)), ..Options::default() };
-        let (anim, _) = normalise(&input, &window).unwrap();
+        let (anim, _) = normalise(input.clone(), &window).unwrap();
         let ticks: Vec<_> = anim.frames().iter().map(|frame| frame.ticks).collect();
         assert_eq!(ticks, [18, 18]);
 
         let late = Options { start: ms(4500), ..Options::default() };
-        assert!(matches!(normalise(&input, &late), Err(Error::StartPastEnd { .. })));
+        assert!(matches!(normalise(input.clone(), &late), Err(Error::StartPastEnd { .. })));
         let empty = Options { length: Some(Duration::ZERO), ..Options::default() };
-        assert_eq!(normalise(&input, &empty), Err(Error::ZeroLength));
+        assert_eq!(normalise(input.clone(), &empty), Err(Error::ZeroLength));
     }
 
     #[test]
@@ -972,31 +993,31 @@ mod tests {
         let input =
             animation(4, 1, &[ms(100)], |_, x, _| [RED, half, CLEAR, [9, 9, 9, 0]][x as usize]);
         let (anim, report) =
-            normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap();
+            normalise(input.clone(), &Options { keep_canvas: true, ..Options::default() }).unwrap();
         assert_eq!(report.colours, 2);
         assert_eq!(anim.palette(), [CLEAR, RED, half]);
         // both transparent pixels are one cell
         assert_eq!(anim.width(), 3);
 
         let invisible = animation(2, 2, &[ms(100)], |_, x, _| [x as u8, 0, 0, 0]);
-        assert_eq!(normalise(&invisible, &Options::default()), Err(Error::Invisible));
+        assert_eq!(normalise(invisible.clone(), &Options::default()), Err(Error::Invisible));
         // whether or not its canvas is kept
         let canvas = Options { keep_canvas: true, ..Options::default() };
-        assert_eq!(normalise(&invisible, &canvas), Err(Error::Invisible));
+        assert_eq!(normalise(invisible.clone(), &canvas), Err(Error::Invisible));
         // and so is a part of the input with nothing in it
         let corner = animation(4, 4, &[ms(100)], |_, x, y| if x + y == 0 { RED } else { CLEAR });
         let crop = Some(Rect { x: 2, y: 2, width: 2, height: 2 });
         for keep_canvas in [false, true] {
             let empty = Options { crop, keep_canvas, ..Options::default() };
-            assert_eq!(normalise(&corner, &empty), Err(Error::Invisible), "{keep_canvas}");
+            assert_eq!(normalise(corner.clone(), &empty), Err(Error::Invisible), "{keep_canvas}");
         }
-        assert_eq!(normalise(&corner, &canvas).unwrap().1.crop.width, 4);
+        assert_eq!(normalise(corner.clone(), &canvas).unwrap().1.crop.width, 4);
     }
 
     #[test]
     fn warns_about_many_colours() {
         let input = animation(300, 1, &[ms(100)], |_, x, _| [x as u8, (x >> 8) as u8, 0, 255]);
-        let (_, report) = normalise(&input, &Options::default()).unwrap();
+        let (_, report) = normalise(input.clone(), &Options::default()).unwrap();
         assert_eq!(report.warnings, [Warning::ManyColours { colours: 300 }]);
     }
 
@@ -1008,7 +1029,7 @@ mod tests {
             i => [i as u8, (i >> 8) as u8, 0, 255],
         });
         let canvas = Options { keep_canvas: true, ..Options::default() };
-        let (anim, report) = normalise(&input, &canvas).unwrap();
+        let (anim, report) = normalise(input.clone(), &canvas).unwrap();
         assert_eq!(report.colours, 65535);
         assert_eq!(crate::encode::runs(&anim).compare(&anim), None);
         let fast = crate::encode::Settings {
@@ -1024,12 +1045,12 @@ mod tests {
         // a forced scale far past the art
         let dot = animation(1, 1, &[ms(100)], |_, _, _| RED);
         let huge = Options { pixel_scale: Some(u32::MAX), ..Options::default() };
-        assert_eq!(normalise(&dot, &huge).unwrap().1.width, 1);
+        assert_eq!(normalise(dot.clone(), &huge).unwrap().1.width, 1);
 
         // snapping one cell of 65536 different pixels stays quick
         let started = std::time::Instant::now();
         let whole = Options { pixel_scale: Some(256), ..canvas };
-        let (anim, report) = normalise(&input, &whole).unwrap();
+        let (anim, report) = normalise(input.clone(), &whole).unwrap();
         assert!(started.elapsed() < Duration::from_secs(2));
         assert_eq!((anim.width(), report.snapped_pixels), (1, 65535));
     }

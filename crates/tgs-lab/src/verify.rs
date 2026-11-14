@@ -373,7 +373,7 @@ mod tests {
             .collect();
         let frame = Frame { rgba, duration: Duration::from_millis(100) };
         let input = Animation::new(6, 6, vec![frame]).unwrap();
-        normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0
+        normalise(input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0
     }
 
     fn render_and_compare(anim: &PixelAnim, groups: Vec<Group>) -> usize {
@@ -473,7 +473,7 @@ mod tests {
             .collect();
         let frame = Frame { rgba, duration: Duration::from_millis(100) };
         let input = Animation::new(12, 12, vec![frame]).unwrap();
-        normalise(&input, &Options::default()).unwrap().0
+        normalise(input, &Options::default()).unwrap().0
     }
 
     fn seams_of(anim: &PixelAnim, scene: &Scene) -> Vec<(&'static str, Seams)> {
@@ -539,7 +539,7 @@ mod tests {
             let input =
                 tgradish_tgs::frames::decode(bytes, &Default::default(), &Default::default())
                     .unwrap();
-            let (anim, _) = normalise(&input, &Options::default()).unwrap();
+            let (anim, _) = normalise(input, &Options::default()).unwrap();
             let scene = tgradish_tgs::encode::runs(&anim);
             let json = lay_out(&scene, &anim, None, false).to_json(Style::default());
             for (renderer, mut instance) in Renderer::all(json.as_bytes()).unwrap() {
@@ -556,7 +556,7 @@ mod tests {
         let misses = |rgba: [u8; 4], to: u32| {
             let frame = Frame { rgba: rgba.to_vec(), duration: Duration::from_millis(100) };
             let input = Animation::new(1, 1, vec![frame]).unwrap();
-            let anim = normalise(&input, &Options::default()).unwrap().0;
+            let anim = normalise(input, &Options::default()).unwrap().0;
             assert_eq!(anim.ticks(), 6);
             let scene = Scene {
                 width: 1,
