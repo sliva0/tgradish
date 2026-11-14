@@ -99,8 +99,10 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
         // word for it beside
         ui.horizontal(|ui| {
             let (value, default) = (&mut options.attempts, DEFAULT_ATTEMPTS);
-            preset_number(ui, value, base.attempts, defaults, Some(default), default, |value| {
-                value.range(1..=MAX_ATTEMPTS)
+            widgets::steady_numbers(ui, MAX_ATTEMPTS.to_string().len(), "", |ui| {
+                preset_number(ui, value, base.attempts, defaults, Some(default), default, |value| {
+                    value.range(1..=MAX_ATTEMPTS)
+                })
             });
             let count = options.attempts.or(base.attempts).unwrap_or(default);
             ui.label(fl!("attempts-times", count = count));
@@ -134,13 +136,20 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
             let mut shown = known.unwrap_or(Range { min: 0.0, max: 0.0 });
             let pick = fl!("custom", "hint");
             let (min, max) = (&mut shown.min, &mut shown.max);
+            // each as wide as its unit's widest, so "to" and the other
+            // stay put as one is dragged
+            let widest = bounds.widest();
             let field = bounds.field(min, known.is_some(), set.is_some());
-            let low = widgets::number_field(ui, set.is_some(), field)
-                .on_disabled_hover_text(pick.as_str());
+            let low = widgets::steady_width(ui, &widest, |ui| {
+                widgets::number_field(ui, set.is_some(), field)
+            })
+            .on_disabled_hover_text(pick.as_str());
             ui.label(fl!("range-to"));
             let field = bounds.field(max, known.is_some(), set.is_some());
-            let high = widgets::number_field(ui, set.is_some(), field)
-                .on_disabled_hover_text(pick.as_str());
+            let high = widgets::steady_width(ui, &widest, |ui| {
+                widgets::number_field(ui, set.is_some(), field)
+            })
+            .on_disabled_hover_text(pick.as_str());
             if set.is_some() && (low.changed() || high.changed()) {
                 shown.max = shown.max.max(shown.min);
                 options.fit_range = Some(shown);
@@ -173,8 +182,10 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
             let defaults = (fl!("crf-default"), fl!("crf-default", "hint"));
             let defaults = (defaults.0.as_str(), defaults.1.as_str());
             let (value, default) = (&mut options.crf, DEFAULT_CRF);
-            preset_number(ui, value, base.crf, defaults, Some(default), default, |value| {
-                value.range(CRFS)
+            widgets::steady_numbers(ui, 2, "", |ui| {
+                preset_number(ui, value, base.crf, defaults, Some(default), default, |value| {
+                    value.range(CRFS)
+                })
             });
         },
     );
@@ -205,8 +216,11 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
     row(ui, &fl!("bitrate"), &fl!("bitrate", "hint"), allowed, |ui| {
         let automatic = (fl!("bitrate-auto"), fl!("bitrate-auto", "hint"));
         let automatic = (automatic.0.as_str(), automatic.1.as_str());
-        preset_number(ui, &mut options.bitrate, base.bitrate, automatic, None, 600.0, |value| {
-            value.range(1.0..=HIGHEST_BITRATE).speed(5.0).max_decimals(0).suffix(" kbit/s")
+        let digits = HIGHEST_BITRATE.to_string().len();
+        widgets::steady_numbers(ui, digits, " kbit/s", |ui| {
+            preset_number(ui, &mut options.bitrate, base.bitrate, automatic, None, 600.0, |value| {
+                value.range(1.0..=HIGHEST_BITRATE).speed(5.0).max_decimals(0).suffix(" kbit/s")
+            })
         });
     });
 }
@@ -236,10 +250,16 @@ impl RangeBounds {
         Self { range, takes, decimals, speed, unit }
     }
 
+    /// The widest text a field of an end shows.
+    fn widest(&self) -> String {
+        let most = widgets::fixed(*self.range.end(), self.decimals);
+        widgets::zeros(&most) + self.unit
+    }
+
     /// A field of one end, shown as "—" unless it is `known`, as fitting
-    /// chooses the range then; whole numbers without a decimal point. Only
-    /// a `live` one, the user's own, is brought into what planning takes:
-    /// a preset's shows as it is.
+    /// chooses the range then; whole numbers without a decimal point, and
+    /// seconds to the hundredth. Only a `live` one, the user's own, is
+    /// brought into what planning takes: a preset's shows as it is.
     fn field<'a>(&self, value: &'a mut f64, known: bool, live: bool) -> egui::DragValue<'a> {
         let refused = live && !self.takes.contains(value);
         let field = egui::DragValue::new(value)
@@ -248,7 +268,10 @@ impl RangeBounds {
             .speed(self.speed)
             .max_decimals(self.decimals);
         if known {
-            field.suffix(self.unit).custom_formatter(|value, _| widgets::trimmed(value))
+            let decimals = self.decimals;
+            field
+                .suffix(self.unit)
+                .custom_formatter(move |value, _| widgets::fixed(value, decimals))
         } else {
             field.custom_formatter(|_, _| "—".to_owned())
         }

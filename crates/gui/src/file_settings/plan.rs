@@ -173,9 +173,10 @@ fn time(item: &Item, used: &Used, tempo: f64, spoof: Spoof, steps: &mut Vec<Stri
         steps.push(fl!("plan-cut", from = from, to = to, length = of));
     }
     if tempo > 1.0 + 1e-9 {
-        steps.push(fl!("plan-faster", factor = widgets::trimmed(tempo)));
+        // as its field writes it, which changes as it is dragged
+        steps.push(fl!("plan-faster", factor = widgets::speed(tempo)));
     } else if tempo < 1.0 - 1e-9 {
-        steps.push(fl!("plan-slower", factor = widgets::trimmed(1.0 / tempo)));
+        steps.push(fl!("plan-slower", factor = widgets::speed(1.0 / tempo)));
     }
     steps.extend(length_step((end - start) / tempo, spoof));
 }
