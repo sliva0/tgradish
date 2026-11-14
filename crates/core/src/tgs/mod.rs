@@ -107,7 +107,7 @@ pub fn convert(
         };
         if width != height {
             let reason = format!(
-                "contain keeps the shape of the part used, {width}x{height}, and TGS stickers \
+                "contain keeps the shape of the part used, {width}×{height}, and TGS stickers \
                  are square: crop it to a square, or use pad, crop or stretch"
             );
             return Err(Error::invalid("resize", reason));

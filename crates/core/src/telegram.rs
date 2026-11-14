@@ -73,8 +73,8 @@ impl Target {
 ///
 /// Serialised as every issue tgradish reports is, `.tgs` ones too: by its
 /// `kind`, with its `severity` and `message`, beside what it found, as
-/// `{"kind":"too-big","severity":"error","message":"file is 300000 bytes,
-/// limit is 262144","bytes":300000,"max":262144}`.
+/// `{"kind":"too-big","severity":"error","message":"293.0 KiB, over the
+/// 256 KiB limit","bytes":300000,"max":262144}`.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(into = "Reported")]
 #[non_exhaustive]
@@ -181,13 +181,16 @@ impl std::fmt::Display for Issue {
             Issue::NotVp9 { codec_id } => write!(f, "codec is {codec_id}, not VP9"),
             Issue::HasAudio => write!(f, "has an audio track"),
             Issue::WrongSize { width, height, side, exact: true } => {
-                write!(f, "size is {width}x{height}, expected {side}x{side}")
+                write!(f, "size is {width}×{height}, expected {side}×{side}")
             }
             Issue::WrongSize { width, height, side, exact: false } => write!(
                 f,
-                "size is {width}x{height}, expected one side {side} px, the other at most {side} px"
+                "size is {width}×{height}, expected one side {side} px, the other at most {side} px"
             ),
-            Issue::TooBig { bytes, max } => write!(f, "file is {bytes} bytes, limit is {max}"),
+            Issue::TooBig { bytes, max } => {
+                let kib = |bytes: u64| bytes as f64 / 1024.0;
+                write!(f, "{:.1} KiB, over the {} KiB limit", kib(*bytes), kib(*max))
+            }
             Issue::TooLong { seconds, max } => {
                 write!(f, "metadata duration is {seconds:.3} s, limit is {max} s")
             }
@@ -321,7 +324,7 @@ mod tests {
     #[test]
     fn reports_issues_as_tgs_ones_are() {
         let issue = serde_json::to_value(Issue::TooBig { bytes: 300_000, max: 262_144 }).unwrap();
-        let message = "file is 300000 bytes, limit is 262144";
+        let message = "293.0 KiB, over the 256 KiB limit";
         let expected = serde_json::json!({
             "kind": "too-big", "severity": "error", "message": message,
             "bytes": 300_000, "max": 262_144,

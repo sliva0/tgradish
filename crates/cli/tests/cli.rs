@@ -601,6 +601,11 @@ fn reports_results_on_stdout() {
             assert_eq!(stdout.lines().count(), 1, "{format}: {stdout}");
             let stderr = String::from_utf8_lossy(&output.stderr);
             assert!(!quiet || stderr.is_empty(), "{format}: {stderr}");
+            // every format starts alike, saying what goes where
+            let start = stderr.lines().next().unwrap_or_default();
+            let said = start.contains("Converting")
+                && start.contains(&format!("→ {}", dir.path().join(&line).display()));
+            assert!(quiet || said, "{format}: {stderr}");
         }
     }
 }
@@ -661,7 +666,7 @@ fn keeps_only_a_square_tgs_as_it_is() {
     let refused = convert("4x3+0+0");
     assert_eq!(refused.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&refused.stderr);
-    assert!(stderr.contains("contain keeps the shape of the part used, 4x3"), "{stderr}");
+    assert!(stderr.contains("contain keeps the shape of the part used, 4×3"), "{stderr}");
 }
 
 #[test]
@@ -1158,7 +1163,12 @@ fn makes_image_stickers() {
         "1",
     ]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let event: Value = serde_json::from_slice(&output.stdout).unwrap();
+    // started, as every format's conversion is, then finished
+    let events = json_lines(&output);
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["event"], "started");
+    assert_eq!(events[0]["output"].as_str(), out.to_str());
+    let event = &events[1];
     assert_eq!(event["event"], "finished");
     assert_eq!((event["width"].as_u64(), event["height"].as_u64()), (Some(512), Some(512)));
     assert_eq!(event["encoding"]["kind"], "lossless");

@@ -216,7 +216,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         let (width, height) = target.box_size();
         let name = target.name();
         let reason = format!(
-            "contain can't make {name}, exactly {width}x{height}: use pad, crop or stretch"
+            "contain can't make {name}, exactly {width}×{height}: use pad, crop or stretch"
         );
         return Err(Error::invalid("resize", reason));
     }

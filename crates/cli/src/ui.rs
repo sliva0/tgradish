@@ -45,7 +45,9 @@ pub fn introduce(to_stderr: bool) {
     use clap::CommandFactory;
     let window = cfg!(feature = "gui");
     if window {
-        let line = "─".repeat(66);
+        // as wide as the note, or the terminal where that is narrower
+        let width = console::Term::stderr().size_checked().map_or(66, |(_, columns)| columns);
+        let line = "─".repeat(usize::from(width).min(66));
         eprintln!("{}", style(&line).cyan());
         eprintln!(
             "  {} {} {}",

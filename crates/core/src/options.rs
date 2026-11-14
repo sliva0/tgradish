@@ -196,7 +196,7 @@ impl Crop {
         if self.fits(width, height) {
             Ok(())
         } else {
-            let reason = format!("{self} is not within the {width}x{height} input");
+            let reason = format!("{self} is not within the {width}×{height} input");
             Err(crate::Error::invalid("crop", reason))
         }
     }

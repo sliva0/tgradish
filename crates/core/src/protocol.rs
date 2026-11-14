@@ -343,6 +343,7 @@ mod tests {
         ]
         .map(|event| serde_json::to_value(event).unwrap());
         let still = [
+            webp::Event::Started { input: "in.png".into(), output: "in.sticker.webp".into() },
             webp::Event::Finished(Outcome {
                 input: "in.png".into(),
                 output: "in.sticker.webp".into(),
@@ -552,7 +553,7 @@ mod tests {
             Some(r#"{"event":"warning","message":"a warning"}"#),
             Some(r#"{"event":"log","line":"a line"}"#),
             Some(
-                r#"{"event":"finished","input":"in.mp4","output":"in.sticker.webm","bytes":250000,"attempt":2,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"crf","crf":32}},"spoofed":false,"issues":[{"kind":"too-big","bytes":300000,"max":262144,"severity":"error","message":"file is 300000 bytes, limit is 262144"}],"temp-dir":"/tmp/tgradish-x"}"#,
+                r#"{"event":"finished","input":"in.mp4","output":"in.sticker.webm","bytes":250000,"attempt":2,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"crf","crf":32}},"spoofed":false,"issues":[{"kind":"too-big","bytes":300000,"max":262144,"severity":"error","message":"293.0 KiB, over the 256 KiB limit"}],"temp-dir":"/tmp/tgradish-x"}"#,
             ),
             Some(r#"{"event":"error","message":"it failed","input":"in.mp4"}"#),
             None,
@@ -566,8 +567,9 @@ mod tests {
                 r#"{"event":"finished","input":"art.gif","output":"art.sticker.tgs","bytes":60000,"json-bytes":300000,"changed":true,"steps":[{"reduction":"despeckle","bytes":60000,"distortion":0.01}],"layers":3,"rectangles":40,"issues":[]}"#,
             ),
             Some(r#"{"event":"error","message":"it failed","input":null}"#),
+            Some(r#"{"event":"started","input":"in.png","output":"in.sticker.webp"}"#),
             Some(
-                r#"{"event":"finished","input":"in.png","output":"in.sticker.webp","bytes":100000,"width":512,"height":384,"encoding":{"kind":"lossy","quality":80},"issues":[{"kind":"wrong-size","width":512,"height":384,"side":100,"exact":true,"severity":"error","message":"size is 512x384, expected 100x100"}]}"#,
+                r#"{"event":"finished","input":"in.png","output":"in.sticker.webp","bytes":100000,"width":512,"height":384,"encoding":{"kind":"lossy","quality":80},"issues":[{"kind":"wrong-size","width":512,"height":384,"side":100,"exact":true,"severity":"error","message":"size is 512×384, expected 100×100"}]}"#,
             ),
             Some(r#"{"event":"warning","message":"a warning"}"#),
             Some(r#"{"event":"error","message":"it failed","input":null}"#),

@@ -329,7 +329,8 @@ impl<'a> Converter<'a> {
                         crate::json_line(&event);
                     })?
                 } else {
-                    let mut printer = TgsPrinter::new(self.ctx, exact);
+                    let output = request.output();
+                    let mut printer = TgsPrinter::new(self.ctx, exact, output);
                     let result =
                         tgs::convert(backend.as_ref(), &request, cancel, &mut |e| printer.event(e));
                     printer.bar.finish();
@@ -349,11 +350,17 @@ impl<'a> Converter<'a> {
                         crate::json_line(&event);
                     })?
                 } else {
-                    let outcome = webp::convert(&backend, &request, cancel, &mut |event| {
-                        if let webp::Event::Warning { message } = event {
-                            eprintln!("{} {message}", ui::warning_label());
-                        }
-                    })?;
+                    let quiet = self.ctx.global.quiet;
+                    let outcome =
+                        webp::convert(&backend, &request, cancel, &mut |event| match event {
+                            webp::Event::Started { input, output } if !quiet => {
+                                eprintln!("{}", converting(&input, &output));
+                            }
+                            webp::Event::Warning { message } => {
+                                eprintln!("{} {message}", ui::warning_label());
+                            }
+                            _ => {}
+                        })?;
                     self.print_still(&outcome);
                     outcome
                 };
@@ -369,7 +376,7 @@ impl<'a> Converter<'a> {
     fn print_still(&self, outcome: &webp::Outcome) {
         let output = term::link_out(style(outcome.output.display()).bold(), &outcome.output);
         let mut line = format!(
-            "{output} {}, {}x{}",
+            "{output} {}, {}×{}",
             ui::size_within(outcome.bytes, tgradish_core::telegram::MAX_STILL_BYTES),
             outcome.width,
             outcome.height
@@ -574,14 +581,7 @@ impl Printer {
         }
         match event {
             Event::Started { plan } if !self.quiet => {
-                self.bar.line(ui::status(
-                    "Converting",
-                    format!(
-                        "{} → {}",
-                        term::link(plan.input.display(), &plan.input),
-                        term::link(style(plan.output.display()).bold(), &plan.output)
-                    ),
-                ));
+                self.bar.line(converting(&plan.input, &plan.output));
                 let spoof = if plan.spoofs(plan.length) { ", spoofed" } else { "" };
                 self.bar.line(ui::status(
                     "Planned",
@@ -648,9 +648,19 @@ impl Printer {
     }
 }
 
+/// The line that starts every conversion, whatever it makes: `input` →
+/// `output`.
+fn converting(input: &Path, output: &Path) -> String {
+    let input = term::link(input.display(), input);
+    let output = term::link(style(output.display()).bold(), output);
+    ui::status("Converting", format!("{input} → {output}"))
+}
+
 /// Shows `.tgs` conversion events as text.
 struct TgsPrinter {
     quiet: bool,
+    /// Where the result goes.
+    output: PathBuf,
     bar: Bar,
     /// Whether the art is kept exactly as it is, so a sticker too large
     /// isn't fitted.
@@ -660,8 +670,9 @@ struct TgsPrinter {
 }
 
 impl TgsPrinter {
-    fn new(ctx: &Context, exact: bool) -> Self {
-        Self { quiet: ctx.global.quiet, bar: Bar::default(), exact, unchanged: None }
+    fn new(ctx: &Context, exact: bool, output: PathBuf) -> Self {
+        let quiet = ctx.global.quiet;
+        Self { quiet, output, bar: Bar::default(), exact, unchanged: None }
     }
 
     fn spinner(&mut self, verb: &str, message: String) {
@@ -676,13 +687,13 @@ impl TgsPrinter {
     fn event(&mut self, event: tgs::Event) {
         match event {
             tgs::Event::Started { input, report } if !self.quiet => {
-                self.bar.line(ui::status("Converting", term::link(input.display(), &input)));
+                self.bar.line(converting(&input, &self.output));
                 let scale = match report.scale {
                     1 => String::new(),
                     scale => format!(" at {scale}x"),
                 };
                 let mut line = format!(
-                    "{}x{} cells{scale}, {}, {}, {}",
+                    "{}×{} cells{scale}, {}, {}, {}",
                     report.width,
                     report.height,
                     ui::count(report.colours, "colour"),

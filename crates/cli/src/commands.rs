@@ -126,7 +126,7 @@ fn print_image(
     let alpha = if info.alpha { ", transparent" } else { "" };
     outln!(
         "{}",
-        ui::field("picture", format!("WebP {}x{}, {kind}{alpha}", info.width, info.height))
+        ui::field("picture", format!("WebP {}×{}, {kind}{alpha}", info.width, info.height))
     );
     if let Some(tool) = &info.made_with {
         outln!("{}", ui::field("made", format!("with {tool}")));
@@ -156,8 +156,8 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target, issues: &
             let fps = info.fps().map(ui::fps).unwrap_or_else(|| "unknown fps".into());
             let alpha = if video.alpha { ", transparent" } else { "" };
             format!(
-                "{} {}x{}, {fps}, {}{alpha}",
-                video.codec_id,
+                "{} {}×{}, {fps}, {}{alpha}",
+                codec_name(&video.codec_id),
                 video.width,
                 video.height,
                 ui::count(info.video_frames, "frame")
@@ -450,6 +450,11 @@ pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
     Ok(())
 }
 
+/// A codec as people name it: `VP9` for Matroska's `V_VP9`.
+fn codec_name(id: &str) -> &str {
+    id.strip_prefix("V_").or_else(|| id.strip_prefix("A_")).unwrap_or(id)
+}
+
 /// A line of `ffmpeg`'s status, its key coloured and the values lined up.
 fn fact(key: &str, value: impl std::fmt::Display) -> String {
     format!("{} {value}", style(format!("{key:<9}")).cyan())
@@ -478,7 +483,7 @@ fn print_sticker(path: &std::path::Path, stats: &check::Stats, issues: &[check::
     };
     outln!("{}", ui::field("size", size));
     let animation = format!(
-        "{}x{}, {} fps, {} ({})",
+        "{}×{}, {} fps, {} ({})",
         stats.width,
         stats.height,
         stats.fps,

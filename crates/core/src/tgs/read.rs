@@ -149,7 +149,7 @@ fn read_video(
     let fit = frame_bytes.map_or(0, |bytes| limits.max_bytes / 2 / bytes.max(1));
     if fit == 0 {
         let (width, height) = (probe.width, probe.height);
-        return Err(unreadable(format!("its frames, {width}x{height}, are too large to read")));
+        return Err(unreadable(format!("its frames, {width}×{height}, are too large to read")));
     }
     let available = probe.duration.filter(|_| !probe.still_image).map(|whole| whole - start);
     if let Some(available) = available.filter(|&available| available <= 0.0) {
@@ -190,7 +190,7 @@ fn read_video(
     let mut warnings = Vec::new();
     if wanted > fit {
         warnings.push(format!(
-            "read at {:.1} frames a second, as more of {}x{} wouldn't fit in memory",
+            "read at {:.1} frames a second, as more of {}×{} wouldn't fit in memory",
             decoded.fps, decoded.width, decoded.height
         ));
     }
