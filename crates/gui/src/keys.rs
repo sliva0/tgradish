@@ -16,7 +16,7 @@ impl App {
     /// Files dropped on the window, pasted, and keys.
     pub(crate) fn take_input(&mut self, ctx: &egui::Context) {
         let paste = ctx.input(|input| self.paste_key.read(&input.events));
-        let (dropped, hovered, space, delete) = ctx.input(|input| {
+        let (dropped, hovered, space, delete, undo) = ctx.input(|input| {
             let dropped: Vec<PathBuf> = input
                 .raw
                 .dropped_files
@@ -29,6 +29,9 @@ impl App {
                 !input.raw.hovered_files.is_empty(),
                 input.key_pressed(egui::Key::Space),
                 input.key_pressed(egui::Key::Delete),
+                input.modifiers.command
+                    && !input.modifiers.shift
+                    && input.key_pressed(egui::Key::Z),
             )
         });
         self.hovering = hovered || self.hovering;
@@ -86,6 +89,10 @@ impl App {
         }
         if delete && let Some(id) = self.selected {
             self.remove(id);
+        }
+        // while the banner offers it
+        if undo {
+            self.undo_removing();
         }
         if paste {
             self.paste();
@@ -314,6 +321,63 @@ mod tests {
         harness.key_press(egui::Key::Delete);
         harness.run_steps(2);
         assert!(harness.state().items.is_empty());
+    }
+
+    #[test]
+    fn puts_files_removed_back_where_they_were() {
+        use crate::l10n::fl;
+        use egui_kittest::kittest::Queryable;
+        use tgradish_core::options::Crop;
+        let dir = tempfile::tempdir().unwrap();
+        let arts: Vec<_> = (0..3)
+            .map(|n| {
+                let art = dir.path().join(format!("{n}.png"));
+                square(&art, [255, 0, 0, 255]);
+                art
+            })
+            .collect();
+        let mut harness = harness(Config::default());
+        harness.state_mut().add(arts);
+        finish(&mut harness);
+        let crop = Some(Crop { x: 1, y: 1, width: 2, height: 2 });
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        harness.state_mut().items[1].choices.crop = crop;
+        harness.state_mut().select(ids[1]);
+        harness.run_steps(2);
+        // the middle one, by its key, said with a way back
+        harness.key_press(egui::Key::Delete);
+        harness.run_steps(2);
+        let order = |harness: &egui_kittest::Harness<App>| -> Vec<u64> {
+            harness.state().items.iter().map(|item| item.id).collect()
+        };
+        assert_eq!(order(&harness), [ids[0], ids[2]]);
+        harness.get_by_label(&fl!("files-removed", count = 1));
+        harness.get_by_label(&fl!("undo-removing")).click();
+        harness.run_steps(2);
+        let app = harness.state();
+        assert_eq!((order(&harness), app.items[1].choices.crop), (ids.clone(), crop));
+        assert_eq!(app.selected, Some(ids[1]));
+        assert!(app.banner.rows.is_empty() && app.removed.is_none());
+        // one, then the rest: all of them back with Ctrl+Z
+        harness.state_mut().remove(ids[0]);
+        let rest = order(&harness);
+        harness.state_mut().remove_all(&rest);
+        harness.run_steps(2);
+        assert!(harness.state().items.is_empty());
+        harness.get_by_label(&fl!("files-removed", count = 3));
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        harness.run_steps(2);
+        assert_eq!(order(&harness), ids);
+        assert_eq!(harness.state().items[1].choices.crop, crop);
+        // once the offer goes, so do they
+        harness.state_mut().remove(ids[2]);
+        harness.run_steps(2);
+        harness.state_mut().banner.rows.clear();
+        harness.run_steps(2);
+        assert!(harness.state().removed.is_none());
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        harness.run_steps(2);
+        assert_eq!(order(&harness), ids[..2]);
     }
 
     #[test]

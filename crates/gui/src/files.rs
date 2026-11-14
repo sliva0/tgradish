@@ -184,9 +184,7 @@ impl App {
                     }
                     if !self.items.is_empty() && ui.button(fl!("remove-all")).clicked() {
                         let ids: Vec<u64> = self.items.iter().map(|item| item.id).collect();
-                        for id in ids {
-                            self.remove(id);
-                        }
+                        self.remove_all(&ids);
                     }
                     if attention > 0 {
                         let text = format!("⚠ {}", fl!("need-attention", count = attention));

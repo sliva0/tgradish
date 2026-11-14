@@ -186,6 +186,10 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().add(vec![art, clip]);
     finish(&mut harness);
     shot(&mut harness, save, "state-no-ffmpeg");
+    // all of them removed, with a way back
+    let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+    harness.state_mut().remove_all(&ids);
+    shot(&mut harness, save, "state-undo");
 }
 
 /// Takes the window through each state worth a picture, handing each to

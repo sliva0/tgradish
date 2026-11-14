@@ -99,6 +99,8 @@ pub(crate) struct App {
     pub(crate) fallbacks: fallback::Fallbacks,
     /// What the window says over its bottom.
     pub(crate) banner: Banner,
+    /// Files removed a moment ago, which may be put back.
+    pub(crate) removed: Option<Removed>,
     /// What Ctrl+V has done so far.
     pub(crate) paste_key: crate::keys::PasteKey,
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -266,6 +268,7 @@ impl App {
             next_save: 0.0,
             fallbacks: fallback::Fallbacks::new(fonts()),
             banner: Banner::default(),
+            removed: None,
             paste_key: crate::keys::PasteKey::default(),
             #[cfg(all(unix, not(target_os = "macos")))]
             drops: None,
@@ -442,17 +445,70 @@ impl App {
         self.copy_pasted();
     }
 
+    /// Takes the file `id` out of the list, which can be undone a while.
     pub(crate) fn remove(&mut self, id: u64) {
-        if let Some(item) = self.item(id)
-            && let Some(conversion) = &item.job
-        {
-            conversion.job.cancel();
+        self.remove_all(&[id]);
+    }
+
+    /// Takes the files `ids` out of the list, stopping their conversions;
+    /// they are kept, with their settings and results, while the banner
+    /// offers to put them back, with those removed just before.
+    pub(crate) fn remove_all(&mut self, ids: &[u64]) {
+        let selected = self.selected.filter(|id| ids.contains(id));
+        let mut taken = Vec::new();
+        let mut index = 0;
+        while index < self.items.len() {
+            if !ids.contains(&self.items[index].id) {
+                index += 1;
+                continue;
+            }
+            let mut item = self.items.remove(index);
+            if let Some(conversion) = item.job.take() {
+                conversion.job.cancel();
+            }
+            release(&mut item);
+            taken.push((index + taken.len(), item));
         }
-        self.items.retain(|item| item.id != id);
-        self.queue.retain(|&other| other != id);
-        self.recent.retain(|&other| other != id);
-        if self.selected == Some(id) {
+        if taken.is_empty() {
+            return;
+        }
+        self.queue.retain(|id| !ids.contains(id));
+        self.recent.retain(|id| !ids.contains(id));
+        if selected.is_some() {
             self.selected = self.recent.front().copied().or(self.items.last().map(|item| item.id));
+        }
+        // with those removed a moment ago, which were put back before these
+        let removed = self.removed.get_or_insert_with(Removed::default);
+        removed.batches.push(taken);
+        removed.selected = removed.selected.or(selected);
+        let count = removed.batches.iter().map(Vec::len).sum::<usize>();
+        let message = Message::info(fl!("files-removed", count = count));
+        self.say(message.actions(&[Action::Undo]).about(Subject::Removed));
+    }
+
+    /// Puts the files removed a moment ago back where they were, with
+    /// their settings and results.
+    pub(crate) fn undo_removing(&mut self) {
+        let Some(removed) = self.removed.take() else { return };
+        self.banner.forget(Subject::Removed);
+        // the latest out first back, each where it was among the rest
+        for batch in removed.batches.into_iter().rev() {
+            for (index, item) in batch {
+                let index = index.min(self.items.len());
+                self.items.insert(index, item);
+            }
+        }
+        if let Some(id) = removed.selected {
+            self.select(id);
+        }
+    }
+
+    /// Lets go of files removed once the offer to put them back is gone.
+    pub(crate) fn forget_removed(&mut self) {
+        let offered =
+            self.banner.rows.iter().any(|said| said.message.subject == Some(Subject::Removed));
+        if !offered {
+            self.removed = None;
         }
     }
 
@@ -511,6 +567,15 @@ impl App {
             || self.inspection.is_some()
             || self.preset_dialog.is_some()
     }
+}
+
+/// Files taken out of the list, each batch as it was removed, with where
+/// each was, kept while they may be put back.
+#[derive(Default)]
+pub(crate) struct Removed {
+    batches: Vec<Vec<(usize, Item)>>,
+    /// The file selected, if it was removed.
+    selected: Option<u64>,
 }
 
 /// The settings at `path`, or the defaults where they can't be read, with
@@ -714,6 +779,7 @@ impl eframe::App for App {
         for (message, action) in self.banner.show(&ctx) {
             self.act(&ctx, &message, action);
         }
+        self.forget_removed();
         if let Some(action) = crate::banner::asked(&ctx) {
             self.act(&ctx, &Message::info(""), action);
         }

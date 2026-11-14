@@ -27,6 +27,8 @@ pub(crate) enum Subject {
     Presets,
     /// ffmpeg, which isn't there for files that need it.
     Ffmpeg,
+    /// Files removed a moment ago.
+    Removed,
 }
 
 /// A button in a message's row, which the window does when it is clicked.
@@ -47,6 +49,8 @@ pub(crate) enum Action {
     ChooseFfmpeg,
     /// Opens Settings.
     OpenSettings,
+    /// Puts the files removed a moment ago back.
+    Undo,
 }
 
 fn asked_id() -> egui::Id {
@@ -73,6 +77,7 @@ impl Action {
             Action::ShowInFolder => fl!("folder-of"),
             Action::ChooseFfmpeg => fl!("choose-ffmpeg"),
             Action::OpenSettings => fl!("open-settings"),
+            Action::Undo => fl!("undo-removing"),
         }
     }
 
@@ -84,6 +89,7 @@ impl Action {
             Action::ShowInFolder => fl!("folder-of", "hint"),
             Action::ChooseFfmpeg => fl!("choose-ffmpeg", "hint"),
             Action::OpenSettings => fl!("open-settings", "hint"),
+            Action::Undo => fl!("undo-removing", "hint"),
         }
     }
 
@@ -371,6 +377,7 @@ impl crate::app::App {
             }
             Action::ChooseFfmpeg => self.pick(ctx, crate::files::Pick::Ffmpeg),
             Action::OpenSettings => self.settings_dialog.open(),
+            Action::Undo => self.undo_removing(),
             Action::ReadPresetsAgain => {
                 if !self.reload_presets() {
                     self.banner.flash(message, fl!("read-again", "failed"), now);

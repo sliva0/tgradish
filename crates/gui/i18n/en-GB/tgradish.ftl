@@ -109,6 +109,13 @@ settings-read = The settings file reads again, and its settings are in use
 copy-path = Copy path
     .hint = Copy where the file is, to open it in an editor
     .done = Copied
+# Said once files are removed from the list, which Undo puts back.
+files-removed = { $count ->
+    [one] Removed 1 file
+   *[other] Removed { $count } files
+}
+undo-removing = Undo
+    .hint = Put them back where they were, with their settings and results (Ctrl+Z)
 # Opens the Settings dialog, from a message.
 open-settings = Open Settings
     .hint = Where ffmpeg, and the rest, are chosen
