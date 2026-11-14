@@ -1295,6 +1295,24 @@ pub(crate) fn problems(ui: &mut egui::Ui, problems: &[Problem]) {
     }
 }
 
+/// Fades what is drawn in `rect` out into `colour`, from none of it at
+/// the top to all of it at the bottom: what goes on below, cut off there.
+pub(crate) fn fade_out(painter: &egui::Painter, rect: egui::Rect, colour: Color32) {
+    let mut mesh = egui::Mesh::default();
+    let clear = Color32::TRANSPARENT;
+    for (at, colour) in [
+        (rect.left_top(), clear),
+        (rect.right_top(), clear),
+        (rect.right_bottom(), colour),
+        (rect.left_bottom(), colour),
+    ] {
+        mesh.colored_vertex(at, colour);
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    painter.add(mesh);
+}
+
 /// Draws a checkerboard, so transparency shows, its squares counted from
 /// `rect`'s corner.
 pub(crate) fn checkerboard(painter: &egui::Painter, rect: egui::Rect, square: f32) {

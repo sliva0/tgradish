@@ -114,6 +114,10 @@ pub(crate) fn write(config: &mut Config, path: &Path) -> Result<Option<PathBuf>,
     Ok(kept)
 }
 
+/// How much of the last of the settings that fit fades out, where there
+/// are more below.
+const FADE: f32 = 24.0;
+
 /// Shows the dialog if it is open. `ffmpeg_given` says an ffmpeg was given
 /// as the window was started, which it uses over the settings'.
 pub(crate) fn show(
@@ -143,10 +147,30 @@ pub(crate) fn show(
         close = widgets::dialog_title(ui, widgets::title_text(ui, fl!("settings")));
         // the dialog fits the window, its settings scrolling within
         let room = (ctx.content_rect().height() - 210.0).max(200.0);
-        egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
-            widgets::settings_spacing(ui);
-            sections(ui, dialog, config, ffmpeg_given, presets);
-        });
+        // that there is more below shows: the bar is always drawn where
+        // they don't all fit, rather than as the pointer comes near, and
+        // the last of what fits fades out until scrolled to the end
+        let solid = egui::style::ScrollStyle::solid();
+        let scrolled = ui
+            .scope(|ui| {
+                ui.spacing_mut().scroll = solid;
+                egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
+                    widgets::settings_spacing(ui);
+                    sections(ui, dialog, config, ffmpeg_given, presets);
+                })
+            })
+            .inner;
+        let hidden =
+            scrolled.content_size.y - scrolled.state.offset.y - scrolled.inner_rect.height();
+        if hidden > 1.0 {
+            let rect = scrolled.inner_rect;
+            let bar = solid.bar_width + solid.bar_inner_margin + solid.bar_outer_margin;
+            let fade = egui::Rect::from_min_max(
+                egui::pos2(rect.left(), rect.bottom() - FADE.min(hidden)),
+                egui::pos2(rect.right() - bar, rect.bottom()),
+            );
+            widgets::fade_out(ui.painter(), fade, ui.visuals().window_fill);
+        }
         // what saving did, under the settings, where a path has the
         // dialog's width
         ui.add_space(4.0);
