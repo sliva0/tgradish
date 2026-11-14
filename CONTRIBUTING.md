@@ -141,7 +141,10 @@ never enable its GPL parts. Paths and commands say "licenses", prose says
    and `crates/tgs-lab/Cargo.lock`, which records the versions of the
    workspace's crates it uses, with the same and `--manifest-path
    crates/tgs-lab/Cargo.toml`, and commit them, as release builds and CI
-   use `--locked`. The release workflow
+   use `--locked`. Raise `RUSTUP_TOOLCHAIN` in
+   `.github/workflows/release.yml`, the Rust release builds are made
+   with, to the newest stable; pinned there, building a tag again makes
+   the same binaries. The release workflow
    checks the PKGBUILDs; the Windows executable takes its version from
    `Cargo.toml` when it is built.
 2. `cargo xtask local-release` builds every variant into
@@ -152,7 +155,10 @@ never enable its GPL parts. Paths and commands say "licenses", prose says
    packages on AlmaLinux, Ubuntu, Debian, Fedora, openSUSE and Windows,
    the musl builds on Alpine, and the AUR packages, built with makepkg, on
    Arch Linux, and drafts a release with the archives, packages,
-   checksums and ffmpeg's sources. Check the draft, then publish it.
+   checksums, each file's and all in `SHA256SUMS`, and ffmpeg's sources.
+   Release builds write the workspace's and cargo's paths as `/tgradish`
+   and `/cargo` (`xtask/src/build.rs`), so no runner's paths are in them.
+   Check the draft, then publish it.
 4. Copy each `packaging/aur/*/PKGBUILD` into your clone of that package
    on the AUR, and there run `updpkgsums`, then `makepkg --printsrcinfo >
    .SRCINFO`, and push. The checksums go in the AUR clones alone: the

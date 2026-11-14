@@ -39,6 +39,9 @@ pub fn build(target: Target, system_ffmpeg: bool) -> Result<()> {
         .current_dir(root)
         .args(["build", "--release", "--locked", "-p", "tgradish"])
         .args(["--target", target.triple()]);
+    // the target's code alone, as --target leaves build scripts out of
+    // them; each flag a word of its own, so paths with spaces stay whole
+    let mut rustflags = remapped_paths(root);
     if !system_ffmpeg {
         let pkgconfig = ffmpeg_prefix(target).join("lib/pkgconfig");
         ensure!(
@@ -65,10 +68,10 @@ pub fn build(target: Target, system_ffmpeg: bool) -> Result<()> {
             .env(
                 "BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_gnu",
                 format!("-I/usr/x86_64-w64-mingw32/include -I{}", stubs.display()),
-            )
-            // links winpthread and libgcc into the executable instead of
-            // depending on their DLLs; `xtask package` checks the result
-            .env("CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS", "-C link-arg=-static");
+            );
+        // links winpthread and libgcc into the executable instead of
+        // depending on their DLLs; `xtask package` checks the result
+        rustflags.extend(["-C".into(), "link-arg=-static".into()]);
     }
     if target.is_musl() {
         let triple = target.triple().replace('-', "_");
@@ -77,20 +80,19 @@ pub fn build(target: Target, system_ffmpeg: bool) -> Result<()> {
             .env("PKG_CONFIG_ALLOW_CROSS", "1")
             .env(format!("CC_{triple}"), MUSL_GCC)
             .env(format!("AR_{triple}"), "ar")
-            .env(format!("CARGO_TARGET_{upper}_LINKER"), MUSL_GCC)
-            // linked to musl dynamically, unlike Rust's musl builds by
-            // default, as the window loads the system's graphics
-            // libraries; with the loader where musl distributions keep it,
-            // whatever path the build machine's musl-gcc names
-            .env(
-                format!("CARGO_TARGET_{upper}_RUSTFLAGS"),
-                format!(
-                    "-C target-feature=-crt-static -C link-arg=-Wl,--dynamic-linker={} \
-                     -L native={}",
-                    target.musl_loader(),
-                    static_unwinder(root, target)?.display()
-                ),
-            );
+            .env(format!("CARGO_TARGET_{upper}_LINKER"), MUSL_GCC);
+        // linked to musl dynamically, unlike Rust's musl builds by default,
+        // as the window loads the system's graphics libraries; with the
+        // loader where musl distributions keep it, whatever path the build
+        // machine's musl-gcc names
+        rustflags.extend([
+            "-C".into(),
+            "target-feature=-crt-static".into(),
+            "-C".into(),
+            format!("link-arg=-Wl,--dynamic-linker={}", target.musl_loader()),
+            "-L".into(),
+            format!("native={}", static_unwinder(root, target)?.display()),
+        ]);
         if let Some(flags) = c_flags(target) {
             cargo.env(format!("CFLAGS_{triple}"), flags);
         }
@@ -102,8 +104,27 @@ pub fn build(target: Target, system_ffmpeg: bool) -> Result<()> {
             );
         }
     }
+    cargo.env("CARGO_ENCODED_RUSTFLAGS", rustflags.join("\x1f"));
     run(&mut cargo)
 }
+
+/// Flags that write the paths of the machine building into the binary,
+/// where panics and debug information name source files, as the same
+/// on every machine: the workspace as `/tgradish`, and cargo's registry
+/// and git checkouts under `/cargo`, as the AUR's package of the source
+/// does with its own folder.
+fn remapped_paths(root: &Path) -> Vec<String> {
+    let cargo_home = std::env::var_os("CARGO_HOME").map(PathBuf::from).or_else(|| {
+        let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
+        Some(PathBuf::from(home).join(".cargo"))
+    });
+    let mut flags = vec![format!("--remap-path-prefix={}=/tgradish", root.display())];
+    if let Some(cargo_home) = cargo_home {
+        flags.push(format!("--remap-path-prefix={}=/cargo", cargo_home.display()));
+    }
+    flags
+}
+
 
 /// A folder whose `libgcc_s.so` names Rust's own static libunwind for
 /// `target`. Rust's std links libgcc's unwinder when musl is linked
@@ -147,4 +168,16 @@ fn musl_headers() -> Result<PathBuf> {
         .find(|word| word.ends_with("/stdio.h"))
         .context("musl-gcc named no stdio.h")?;
     Ok(PathBuf::from(stdio).parent().context("stdio.h in no folder")?.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writes_the_same_paths_on_every_machine() {
+        let flags = remapped_paths(Path::new("/home/me/my projects/tgradish"));
+        assert_eq!(flags[0], "--remap-path-prefix=/home/me/my projects/tgradish=/tgradish");
+        assert!(flags.iter().any(|flag| flag.ends_with("=/cargo")), "{flags:?}");
+    }
 }

@@ -8,6 +8,9 @@
 # conversion results accidentally left in the repo root
 /*.mp4
 /*.webm
+/*.tgs
+/*.webp
+/*.gif
 
 # what makepkg and updpkgsums leave beside the AUR packages
 /packaging/aur/*/src/

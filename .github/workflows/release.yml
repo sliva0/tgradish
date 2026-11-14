@@ -50,6 +50,11 @@ env:
 
 jobs:
   build:
+    # the Rust releases are built with, over rust-toolchain.toml's newest
+    # stable, so that building a tag again makes the same binaries; raise
+    # it as a release is prepared, see CONTRIBUTING.md
+    env:
+      RUSTUP_TOOLCHAIN: "1.99.0"
     strategy:
       fail-fast: false
       matrix:
@@ -133,7 +138,9 @@ jobs:
             linux-musl-*) sudo apt-get install -y musl-tools ;;
           esac
 
-      - run: rustup target add ${{ matrix.triple }}
+      - run: |
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+          rustup target add ${{ matrix.triple }}
       # ffmpeg-sys-next packs the static libraries into its rlib, and
       # `xtask ffmpeg` only makes cargo build it again in a run that builds
       # them: a build cache from before a new ffmpeg recipe, beside a cache
@@ -455,6 +462,15 @@ jobs:
         run: |
           cp target/ffmpeg/ffmpeg-*-sources.tar artifacts/
           ls -l artifacts
+
+      # one list to check everything by, `sha256sum -c SHA256SUMS`, beside
+      # each file's own
+      - name: Sum every file in one list
+        working-directory: artifacts
+        run: |
+          find . -maxdepth 1 -type f ! -name '*.sha256' -printf '%f\n' | LC_ALL=C sort \
+            | xargs -d '\n' sha256sum -- > SHA256SUMS
+          cat SHA256SUMS
 
       # archives already, which compressing again only slows
       - uses: actions/upload-artifact@v7
