@@ -807,6 +807,18 @@ fn status_without_vp9_is_one_document() {
     let status: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(status["capabilities"]["libvpx-vp9"], false);
     assert_eq!(status["capabilities"]["version"], "ffmpeg version fake");
+    assert_eq!(status["from"], "flag");
+    // as text, lined up, with who chose it and a plain no
+    let text = tgradish(&["--ffmpeg", dir.path().to_str().unwrap(), "ffmpeg"]);
+    assert_eq!(text.status.code(), Some(1));
+    let ffmpeg = dir.path().join("ffmpeg");
+    let expected = format!(
+        "ffmpeg    {} (from --ffmpeg)\nffprobe   {}\nversion   fake\nlibvpx    no, can't make video \
+         stickers\n",
+        ffmpeg.display(),
+        dir.path().join("ffprobe").display()
+    );
+    assert_eq!(String::from_utf8_lossy(&text.stdout), expected);
 }
 
 /// Which ffmpeg is used: either flag, which can't be given together, over
@@ -842,6 +854,7 @@ fn ranks_where_ffmpeg_comes_from() {
     // the variable over the config file
     let (_, line) = status(Some(dir.path()), &[]);
     assert_eq!(used(&line), fake, "{line}");
+    assert_eq!(line["from"], "environment");
     // the config's path alone, which isn't there, and says where it came
     // from, as each place does
     let (code, line) = status(None, &[]);

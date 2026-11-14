@@ -751,7 +751,7 @@ pub enum ConfigCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum FfmpegCommand {
-    /// Show which ffmpeg is used and whether it can encode stickers.
+    /// Show which ffmpeg is used and whether it can make video stickers.
     Status,
 }
 

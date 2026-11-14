@@ -397,31 +397,71 @@ pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
         FfmpegCommand::Status => {
             let backend = ctx.backend().map_err(|err| ctx.explain(err))?;
             let caps = backend.capabilities(&ctx.cancel)?;
+            let info = backend.info();
+            // who chose it: a path given, or else where it was found
+            let (from, from_text) = match (&info, ctx.ffmpeg_path()) {
+                (BackendInfo::Process { .. }, Some((_, named))) => {
+                    let key = match named {
+                        crate::FfmpegNamed::Flag => "flag",
+                        crate::FfmpegNamed::Env => "environment",
+                        crate::FfmpegNamed::Config => "config",
+                    };
+                    (key, format!("from {}", ctx.ffmpeg_named_by(named)))
+                }
+                (BackendInfo::Process { .. }, None) => ("path", "found on PATH".to_owned()),
+                _ => ("built-in", String::new()),
+            };
             if ctx.global.json {
-                crate::json_line(&json!({ "ffmpeg": backend.info(), "capabilities": caps }));
+                let line = json!({ "ffmpeg": info, "from": from, "capabilities": caps });
+                crate::json_line(&line);
                 if !caps.libvpx_vp9 {
                     return Err(crate::Exit(1).into());
                 }
+                return Ok(());
+            }
+            match &info {
+                BackendInfo::Process { ffmpeg } => {
+                    outln!(
+                        "{}",
+                        fact("ffmpeg", format!("{} ({from_text})", ffmpeg.ffmpeg.display()))
+                    );
+                    outln!("{}", fact("ffprobe", ffmpeg.ffprobe.display()));
+                }
+                BackendInfo::Builtin => outln!("{}", fact("ffmpeg", "built into tgradish")),
+                // a kind core has that this command line doesn't word yet
+                _ => outln!("{}", fact("ffmpeg", "shown with --json")),
+            }
+            outln!("{}", fact("version", short_version(&caps.version)));
+            if caps.libvpx_vp9 {
+                outln!(
+                    "{}",
+                    fact("libvpx", format!("{}, can make video stickers", style("yes").green()))
+                );
             } else {
-                match backend.info() {
-                    BackendInfo::Process { ffmpeg } => {
-                        outln!("ffmpeg   {}", ffmpeg.ffmpeg.display());
-                        outln!("ffprobe  {}", ffmpeg.ffprobe.display());
-                        outln!("source   {}", ui::name(&ffmpeg.source));
-                    }
-                    BackendInfo::Builtin => outln!("ffmpeg   built into tgradish"),
-                    other => outln!("ffmpeg   {other:?}"),
-                }
-                outln!("version  {}", caps.version);
-                let vp9 = if caps.libvpx_vp9 { style("yes").green() } else { style("no").red() };
-                outln!("libvpx-vp9 encoder  {vp9}");
-                if !caps.libvpx_vp9 {
-                    bail!("this ffmpeg can't encode VP9 with libvpx, stickers need it");
-                }
+                let no = style("no").red();
+                outln!("{}", fact("libvpx", format!("{no}, can't make video stickers")));
+                bail!(
+                    "this ffmpeg has no libvpx-vp9 encoder, which video stickers need: install \
+                     one built with it, or use --ffmpeg-from builtin where this build has it"
+                );
             }
         }
     }
     Ok(())
+}
+
+/// A line of `ffmpeg`'s status, its key coloured and the values lined up.
+fn fact(key: &str, value: impl std::fmt::Display) -> String {
+    format!("{} {value}", style(format!("{key:<9}")).cyan())
+}
+
+/// The version in the first line `ffmpeg -version` prints, as `n9.0.2`
+/// of "ffmpeg version n9.0.2 Copyright (c) 2000-2026 the FFmpeg
+/// developers", or the line as it is where it says otherwise.
+fn short_version(line: &str) -> &str {
+    line.strip_prefix("ffmpeg version ")
+        .and_then(|rest| rest.split_whitespace().next())
+        .unwrap_or(line)
 }
 
 fn print_sticker(path: &std::path::Path, stats: &check::Stats, issues: &[check::Issue]) {
