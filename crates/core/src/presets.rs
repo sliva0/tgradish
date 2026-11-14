@@ -69,6 +69,7 @@ impl Format {
         }
     }
 
+    /// The extension of the files it makes, without a dot.
     pub fn extension(self) -> &'static str {
         match self {
             Format::Webm => "webm",
@@ -120,6 +121,8 @@ impl Format {
         unused
     }
 
+    /// The built-in preset it is made with when none is given or
+    /// configured: [`DEFAULT_PRESET`] or [`DEFAULT_TGS_PRESET`].
     pub fn default_preset(self) -> &'static str {
         match self {
             Format::Webm | Format::Webp => DEFAULT_PRESET,
@@ -132,13 +135,16 @@ impl Format {
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum FormatOptions {
+    /// WebM's options.
     Webm(Options),
+    /// `.tgs` options.
     Tgs(tgs::Options),
     /// WebM's options, for an image.
     Webp(Options),
 }
 
 impl FormatOptions {
+    /// The format they are for.
     pub fn format(&self) -> Format {
         match self {
             FormatOptions::Webm(_) => Format::Webm,
@@ -185,10 +191,14 @@ struct PresetFile {
     tgs: toml::Table,
 }
 
+/// A named set of options for either format, built in or a user's file.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct Preset {
+    /// What it is called: its file's name, without `.toml`.
     pub name: String,
+    /// What it is for, in the user's words; may be empty.
     pub description: String,
+    /// The preset whose options it starts from, if any.
     pub extends: Option<String>,
     /// Options for WebM and image results set by this preset itself,
     /// without the presets it extends: those its file sets.
@@ -271,11 +281,17 @@ fn builtin() -> Vec<Preset> {
 pub enum PresetError {
     /// No preset has the name; `known` are those that do.
     #[error("unknown preset {name:?}, available: {}", known.join(", "))]
-    Unknown { name: String, known: Vec<String> },
+    Unknown {
+        /// The name asked for.
+        name: String,
+        /// The presets there are.
+        known: Vec<String>,
+    },
     /// Its file, or that of one it extends, isn't a preset's: the message
     /// names it and says why.
     #[error("broken preset {0}")]
     Broken(String),
+    /// The presets the one named extends lead back to it.
     #[error("preset {0:?} extends itself")]
     ExtendsItself(String),
     /// A name too short, too long or starting with a space.
@@ -294,7 +310,12 @@ pub enum PresetError {
     /// A preset's file sets an option of one file, one of [`PER_FILE`],
     /// as `key` names it in its table, `webm.crop`; `place` is the file.
     #[error("broken preset {place}: {key} is one file's to choose, which a preset says nothing of")]
-    PerFile { place: String, key: String },
+    PerFile {
+        /// The preset's file.
+        place: String,
+        /// The option, as its table names it.
+        key: String,
+    },
 }
 
 /// All presets, by name. Broken preset files are kept as errors so that
@@ -372,6 +393,8 @@ impl Presets {
         self.entries.iter().map(|(name, entry)| (name.as_str(), entry.as_ref()))
     }
 
+    /// The preset `name`, as loaded: [`PresetError::Unknown`] when there
+    /// is none, and why it is broken when its file is.
     pub fn get(&self, name: &str) -> Result<&Preset> {
         match self.entries.get(name) {
             Some(Ok(preset)) => Ok(preset),

@@ -22,10 +22,14 @@ struct Inner {
 }
 
 impl CancelToken {
+    /// A token nothing has cancelled yet.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Says to stop: work asks at its next step, and the ffmpeg process
+    /// running for it, if one is, is killed. Every clone of the token is
+    /// cancelled, for good.
     pub fn cancel(&self) {
         self.inner.cancelled.store(true, Ordering::SeqCst);
         if let Some(child) = self.inner.child.lock().unwrap().as_ref() {
@@ -33,6 +37,7 @@ impl CancelToken {
         }
     }
 
+    /// Whether [`CancelToken::cancel`] was called, on it or a clone.
     pub fn is_cancelled(&self) -> bool {
         self.inner.cancelled.load(Ordering::SeqCst)
     }

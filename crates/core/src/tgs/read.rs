@@ -219,7 +219,9 @@ fn read_video(
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct Art {
+    /// Width in pixels.
     pub width: u32,
+    /// Height in pixels.
     pub height: u32,
     /// Straight RGBA, each frame with how long it shows, in seconds.
     pub frames: Vec<(Vec<u8>, f64)>,

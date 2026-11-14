@@ -34,25 +34,47 @@ const DEFAULT_TIMESTAMP_SCALE: u64 = 1_000_000;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum WebmError {
+    /// Its EBML doesn't parse.
     #[error("malformed WebM: {0}")]
     Ebml(#[from] EbmlError),
+    /// It doesn't start with an EBML header.
     #[error("not a WebM file: no EBML header")]
     NotEbml,
+    /// It has no Segment, which holds everything else.
     #[error("no Segment element found")]
     NoSegment,
+    /// Its Segment has no Info, which holds the duration.
     #[error("no Info element found in the Segment")]
     NoInfo,
+    /// A fake duration, in seconds, not above 0 or past
+    /// [`MAX_FAKE_DURATION`].
     #[error("fake duration must be more than 0 and at most {MAX_FAKE_DURATION} seconds, got {0}")]
     InvalidDuration(f64),
+    /// Its `TimestampScale` is 0, so no duration can be written in it.
     #[error("the file has an invalid TimestampScale")]
     InvalidTimestampScale,
+    /// A value to write is longer than an EBML element holds.
     #[error("{field} is too long ({len} bytes)")]
-    ValueTooLong { field: &'static str, len: usize },
+    ValueTooLong {
+        /// What: `title`, `muxing app`, `writing app` or the whole `Info`.
+        field: &'static str,
+        /// Its length in bytes.
+        len: usize,
+    },
+    /// The patched Info doesn't fit where the old one and the padding
+    /// around it were.
     #[error(
         "not enough padding around the Info element for the new metadata: \
          need {needed} bytes, have {available}"
     )]
-    NoRoom { needed: usize, available: usize },
+    NoRoom {
+        /// Bytes it needs.
+        needed: usize,
+        /// Bytes there are.
+        available: usize,
+    },
+    /// The Info moved, and the SeekHead's position of it has too few
+    /// bytes for where it is now.
     #[error("the SeekHead entry for Info is too narrow to store its new position")]
     SeekPositionTooNarrow,
     /// Larger than [`MAX_INSPECTED_BYTES`], which isn't read.
@@ -60,6 +82,7 @@ pub enum WebmError {
     TooLarge,
 }
 
+/// What reading and patching WebM return.
 pub type Result<T> = std::result::Result<T, WebmError>;
 
 /// Longest fake duration [`patch`] accepts, in seconds (a year).

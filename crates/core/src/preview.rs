@@ -12,8 +12,11 @@ pub const TICKS: f64 = 60.0;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Preview {
+    /// Width in pixels.
     pub width: u32,
+    /// Height in pixels.
     pub height: u32,
+    /// Each frame, `width * height * 4` bytes, and its [`TICKS`].
     pub frames: Vec<(Vec<u8>, u32)>,
 }
 

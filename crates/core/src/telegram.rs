@@ -61,6 +61,7 @@ impl Target {
         }
     }
 
+    /// What `--target` and the JSON call it.
     pub fn name(self) -> &'static str {
         match self {
             Target::Sticker => "sticker",
@@ -79,32 +80,51 @@ impl Target {
 #[serde(into = "Reported")]
 #[non_exhaustive]
 pub enum Issue {
+    /// The container isn't WebM.
     NotWebm {
+        /// What its EBML header says it is.
         doc_type: String,
     },
+    /// There is no video track.
     NoVideo,
+    /// The video isn't VP9.
     NotVp9 {
+        /// Its Matroska codec ID, as `V_VP8`.
         codec_id: String,
     },
+    /// There is an audio track.
     HasAudio,
     /// Not a size Telegram takes: one side `side` pixels long and the
     /// other at most that, or with `exact`, both that long.
     WrongSize {
+        /// Its width in pixels.
         width: u64,
+        /// Its height in pixels.
         height: u64,
+        /// The side Telegram wants.
         side: u64,
+        /// Whether both sides must be `side`, as for emoji.
         exact: bool,
     },
+    /// Larger than `max` bytes.
     TooBig {
+        /// Its size in bytes.
         bytes: u64,
+        /// The most Telegram takes.
         max: u64,
     },
+    /// Its header says it lasts longer than `max` seconds.
     TooLong {
+        /// How long its header says it lasts.
         seconds: f64,
+        /// The longest Telegram takes.
         max: f64,
     },
+    /// More than `max` frames a second.
     TooManyFps {
+        /// Its frame rate.
         fps: f64,
+        /// The most Telegram takes.
         max: f64,
     },
     /// An animated image, where image stickers are one picture.

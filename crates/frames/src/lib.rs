@@ -23,6 +23,7 @@
 //! [`aseprite::Sprite`]; [`DecodeOptions`] picks among them.
 
 #![warn(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::fmt;
 use std::time::Duration;

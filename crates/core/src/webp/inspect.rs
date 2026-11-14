@@ -36,11 +36,17 @@ pub fn creator_tool(webp: &[u8]) -> Option<String> {
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Info {
+    /// Width in pixels.
     pub width: u32,
+    /// Height in pixels.
     pub height: u32,
+    /// Size of the file in bytes.
     pub bytes: u64,
+    /// Whether it has an alpha channel.
     pub alpha: bool,
+    /// Whether it is lossy, VP8, rather than lossless.
     pub lossy: bool,
+    /// Whether it is animated.
     pub animated: bool,
     /// The tool its metadata names as its maker.
     pub made_with: Option<String>,

@@ -78,12 +78,23 @@ const MAX_SIZE_LEN: usize = 8;
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum EbmlError {
+    /// The data ends inside an element's header, at this byte.
     #[error("unexpected end of data at byte {0}")]
     Truncated(usize),
+    /// An element ID or size at this byte isn't a valid variable-size
+    /// integer, or is longer than WebM allows.
     #[error("invalid variable-size integer at byte {0}")]
     InvalidVint(usize),
+    /// An element's value is of a size its type can't have.
     #[error("invalid {size}-byte {kind} value at byte {offset}")]
-    InvalidValue { kind: &'static str, size: usize, offset: usize },
+    InvalidValue {
+        /// Its type: `unsigned integer` or `float`.
+        kind: &'static str,
+        /// Its size in bytes.
+        size: usize,
+        /// Where it starts.
+        offset: usize,
+    },
 }
 
 pub(crate) type Result<T> = std::result::Result<T, EbmlError>;

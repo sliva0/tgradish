@@ -37,6 +37,7 @@ pub struct Readable {
 }
 
 impl Readable {
+    /// The file ffmpeg reads: the input, or the PNG drawn of it.
     pub fn path(&self) -> &Path {
         &self.path
     }

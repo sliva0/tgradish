@@ -35,27 +35,37 @@ use crate::webm::Options;
 /// leaves it as it is, so front-ends ignore what they don't know.
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// What `describe` prints: the protocol, the formats with the schemas of
+/// their options and events, and the presets.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Description {
+    /// [`PROTOCOL_VERSION`].
     pub protocol: u32,
+    /// `tgradish`.
     pub tool: &'static str,
+    /// tgradish's version.
     pub version: &'static str,
     /// The format conversions make when nothing asks for another.
     pub default_format: Format,
     /// How a front-end stops `convert` or `watch` where it can't send
     /// Ctrl-C.
     pub cancel: &'static str,
+    /// Every format conversions make.
     pub formats: Vec<FormatDescription>,
+    /// Every preset, built in or the user's, broken ones too.
     pub presets: Vec<PresetDescription>,
 }
 
+/// A format, as [`Description`] tells of it.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct FormatDescription {
+    /// Which.
     pub format: Format,
+    /// What it makes, from what, in a sentence.
     pub description: &'static str,
     /// Extension of produced files.
     pub output_extension: &'static str,
@@ -68,12 +78,16 @@ pub struct FormatDescription {
     pub events: Schema,
 }
 
+/// A preset, as [`Description`] tells of it.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct PresetDescription {
+    /// What it is called.
     pub name: String,
+    /// What it is for; empty when it says nothing, or is broken.
     pub description: String,
+    /// Whether it is built into tgradish rather than a user's file.
     pub builtin: bool,
     /// Options for WebM and image results, with everything the preset
     /// extends applied; `None` if broken.
@@ -91,6 +105,7 @@ pub struct PresetDescription {
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct Failure {
+    /// What went wrong, in English.
     pub message: String,
     /// The input that failed, `None` when the whole command did.
     #[serde(serialize_with = "crate::protocol::serialize_optional_path")]

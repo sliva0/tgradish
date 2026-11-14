@@ -21,11 +21,30 @@ use crate::{tgs, webp};
 #[non_exhaustive]
 pub enum Inspected {
     /// A WebP picture, judged as `target`.
-    Webp { target: Target, info: webp::Info, issues: Vec<telegram::Issue> },
+    Webp {
+        /// What it was judged as.
+        target: Target,
+        /// What it is.
+        info: webp::Info,
+        /// What Telegram would refuse of it as `target`.
+        issues: Vec<telegram::Issue>,
+    },
     /// A `.tgs`, whose limits are the same for stickers and emoji.
-    Tgs { info: Box<check::Stats>, issues: Vec<check::Issue> },
+    Tgs {
+        /// What its Lottie holds.
+        info: Box<check::Stats>,
+        /// What breaks Telegram's limits or renderers, by severity.
+        issues: Vec<check::Issue>,
+    },
     /// A WebM video, judged as `target`.
-    Webm { target: Target, info: Box<WebmInfo>, issues: Vec<telegram::Issue> },
+    Webm {
+        /// What it was judged as.
+        target: Target,
+        /// What its container says.
+        info: Box<WebmInfo>,
+        /// What Telegram would refuse of it as `target`.
+        issues: Vec<telegram::Issue>,
+    },
 }
 
 impl Inspected {

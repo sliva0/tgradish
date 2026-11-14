@@ -11,7 +11,9 @@ include!("notice_titles.rs");
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Notice {
+    /// What it is the licence of.
     pub title: String,
+    /// The licence, as its authors wrote it.
     pub text: String,
 }
 

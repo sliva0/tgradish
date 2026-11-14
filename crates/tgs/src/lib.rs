@@ -29,6 +29,8 @@
 //! tgradish's own research tools: it is unstable, and exempt from semver.
 
 #![warn(missing_docs)]
+// docs.rs says which items need which features
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::time::Duration;
 

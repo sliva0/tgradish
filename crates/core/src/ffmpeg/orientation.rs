@@ -11,14 +11,18 @@ use serde::Serialize;
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Orientation {
+    /// As stored.
     #[default]
     Normal,
     /// A quarter turn clockwise.
     Rotate90,
+    /// A half turn.
     Rotate180,
     /// A quarter turn counterclockwise.
     Rotate270,
+    /// Mirrored left to right.
     FlipHorizontal,
+    /// Mirrored top to bottom.
     FlipVertical,
     /// Mirrored along the top-left to bottom-right diagonal.
     Transpose,

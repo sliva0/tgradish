@@ -20,9 +20,10 @@ fn even(value: f64) -> u32 {
 pub struct Sizes {
     /// What the picture is scaled to.
     pub scaled: (u32, u32),
-    /// The result, which the scaled picture is cropped or padded to, around
-    /// its middle.
+    /// The result's width, which the scaled picture is cropped or padded
+    /// to, around its middle.
     pub width: u32,
+    /// The result's height, as the width.
     pub height: u32,
     /// The scaling used: [`Scaling::Auto`] is smooth until the picture
     /// turns out to be pixel art, and pixel-perfect needs room to grow.
