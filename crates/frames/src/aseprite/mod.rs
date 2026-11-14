@@ -24,6 +24,12 @@ use read::{Reader, budget, error, kept, spend};
 
 use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Frame, Limits, Oversize, Result};
 
+#[cfg(test)]
+thread_local! {
+    /// Frames drawn on this thread, for tests of how much drawing does.
+    static RENDERED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Groups nested deeper than this are refused; Aseprite's interface makes
 /// nothing close, and rendering recurses once per level.
 const MAX_GROUP_DEPTH: usize = 64;
@@ -543,14 +549,20 @@ impl Sprite {
         let canvases = order.len().saturating_add(self.depth_of_groups + 1);
         let drawn = budget([frame_size, canvases, 1], &self.limits)?;
         spend(&mut self.spent.clone(), drawn, &self.limits)?;
-        let frames = order
-            .into_iter()
-            .map(|index| {
-                let (duration, _) = self.frames[index as usize];
-                let canvas = self.render(index as usize, &shown)?;
-                Ok(Frame { rgba: canvas.into_flattened(), duration })
-            })
-            .collect::<Result<_>>()?;
+        // a frame a tag plays again, as ping-pong ones do, is drawn once
+        let mut drawn: Vec<Option<usize>> = vec![None; self.frames.len()];
+        let mut frames: Vec<Frame> = Vec::with_capacity(order.len());
+        for index in order.into_iter().map(|index| index as usize) {
+            let (duration, _) = self.frames[index];
+            let rgba = match drawn[index] {
+                Some(at) => frames[at].rgba.clone(),
+                None => {
+                    drawn[index] = Some(frames.len());
+                    self.render(index, &shown)?.into_flattened()
+                }
+            };
+            frames.push(Frame { rgba, duration });
+        }
         Animation::new(self.width, self.height, frames)
     }
 
@@ -624,8 +636,10 @@ mod tests {
             (0..animation.frames().len()).map(|i| animation.pixel(i, 0, 0).unwrap()).collect()
         };
         assert_eq!(first(None), [RED, GREEN, RED]);
-        // ping-pong reverse over 0..=2: 2, 1, 0, 1
+        // ping-pong reverse over 0..=2: 2, 1, 0, 1, each drawn once
+        RENDERED.set(0);
         assert_eq!(first(Some("back")), [RED, GREEN, RED, GREEN]);
+        assert_eq!(RENDERED.get(), 3);
         assert_eq!(first(Some("on")), [GREEN, RED]);
         assert_eq!(
             sprite.animation(None, &Layers::default()).unwrap().duration(),

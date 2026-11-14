@@ -119,6 +119,8 @@ impl Sprite {
     /// A frame, with the layers `shown` says, which are hidden with their
     /// groups.
     pub(super) fn render(&self, frame: usize, shown: &[bool]) -> Result<Vec<Colour>> {
+        #[cfg(test)]
+        super::RENDERED.set(super::RENDERED.get() + 1);
         let mut canvas = Surface::new(self.canvas());
         if self.composite_groups {
             let plan = self.plan(frame, shown);
