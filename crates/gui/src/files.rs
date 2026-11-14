@@ -234,7 +234,13 @@ impl App {
             let mut clicked = None;
             let mut removed = None;
             let mut again = None;
-            for item in &self.items {
+            // Delete or Backspace on the row with the keyboard's focus,
+            // which a text field with the focus would take instead
+            let delete = ui.input(|input| {
+                input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace)
+            });
+            let mut focus_next = None;
+            for (index, item) in self.items.iter().enumerate() {
                 let selected = self.selected == Some(item.id);
                 let queued = self.queue.iter().position(|&id| id == item.id);
                 let (response, action) = row(ui, item, selected, queued, &self.fallbacks);
@@ -242,6 +248,13 @@ impl App {
                     Some(RowAction::Remove) => removed = Some(item.id),
                     Some(RowAction::Convert) => again = Some(item.id),
                     None if response.clicked() => clicked = Some(item.id),
+                    None if delete && response.has_focus() => {
+                        removed = Some(item.id);
+                        // the focus on to the next, or the one before at the end
+                        let next =
+                            self.items.get(index + 1).or(self.items.get(index.wrapping_sub(1)));
+                        focus_next = next.map(|next| row_id(ui, next.id));
+                    }
                     None => {}
                 }
                 response.context_menu(|ui| {
@@ -256,6 +269,9 @@ impl App {
             }
             if let Some(id) = removed {
                 self.remove(id);
+            }
+            if let Some(id) = focus_next {
+                ui.memory_mut(|memory| memory.request_focus(id));
             }
             if let Some(id) = again {
                 self.enqueue(id);
@@ -373,7 +389,9 @@ fn row(
     fallbacks: &fallback::Fallbacks,
 ) -> (egui::Response, Option<RowAction>) {
     let width = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(vec2(width, THUMB + 12.0), egui::Sense::click());
+    // by the file, so the focus stays with it as rows come and go
+    let (_, rect) = ui.allocate_space(vec2(width, THUMB + 12.0));
+    let response = ui.interact(rect, row_id(ui, item.id), egui::Sense::click());
     // read out as a choice of the list, by its file's name
     let name = item.name();
     response.widget_info(|| {
@@ -479,6 +497,11 @@ fn row(
         }
     });
     (response, action)
+}
+
+/// The row of item `id` in the list.
+fn row_id(ui: &egui::Ui, id: u64) -> egui::Id {
+    ui.id().with(("file", id))
 }
 
 /// Whether a row has a button to convert where its result would be: until
@@ -634,6 +657,55 @@ mod tests {
             Some(Task::spawn(&ctx, move |_| Ok(Some(Picked::OutputDir(folder)))));
         finish(&mut harness);
         assert_eq!(harness.state().config.gui.output_dir, Some(dir.path().join("out")));
+    }
+
+    #[test]
+    fn removes_the_file_whose_row_has_the_focus_by_its_key() {
+        use egui_kittest::kittest::{NodeT, Queryable, by};
+        let dir = tempfile::tempdir().unwrap();
+        let arts: Vec<PathBuf> = (0..3)
+            .map(|n| {
+                let art = dir.path().join(format!("{n}.png"));
+                square(&art, [255, 0, 0, 255]);
+                art
+            })
+            .collect();
+        let mut harness = harness(Config::default());
+        harness.state_mut().add(arts);
+        finish(&mut harness);
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        let names: Vec<String> = harness.state().items.iter().map(Item::name).collect();
+        let order = |harness: &egui_kittest::Harness<App>| -> Vec<u64> {
+            harness.state().items.iter().map(|item| item.id).collect()
+        };
+        fn row(name: &str) -> egui_kittest::kittest::By<'_> {
+            by().label(name).role(egui::accesskit::Role::Button)
+        }
+        // the middle one, though the last is selected; the focus goes on
+        // to the next, which Backspace removes as well
+        harness.get(row(&names[1])).focus();
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Delete);
+        harness.run_steps(2);
+        assert_eq!(order(&harness), [ids[0], ids[2]]);
+        assert!(harness.get(row(&names[2])).accesskit_node().is_focused());
+        harness.key_press(egui::Key::Backspace);
+        harness.run_steps(2);
+        assert_eq!(order(&harness), [ids[0]]);
+        // and back, as any removed are
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        harness.run_steps(2);
+        assert_eq!(order(&harness), ids);
+        // typing in a field is typing: a number's, once it has the focus
+        let field = egui::accesskit::Role::SpinButton;
+        harness.query_all_by_role(field).next().expect("a number field").focus();
+        harness.run_steps(2);
+        assert!(harness.ctx.text_edit_focused());
+        for key in [egui::Key::Delete, egui::Key::Backspace] {
+            harness.key_press(key);
+            harness.run_steps(2);
+        }
+        assert_eq!(order(&harness), ids);
     }
 
     #[test]

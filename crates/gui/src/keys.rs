@@ -49,7 +49,16 @@ impl App {
         }
         // typing into a text field is just typing, and keys pressed in a
         // dialog are for it, not the window behind
-        if ctx.memory(|memory| memory.focused().is_some()) || self.dialog_open() {
+        if ctx.text_edit_focused() || self.dialog_open() {
+            return;
+        }
+        // while the banner offers it, as after a row with the focus was
+        // removed by its key
+        if undo {
+            self.undo_removing();
+        }
+        // the rest are a focused button's own, as Space and the arrows
+        if ctx.memory(|memory| memory.focused().is_some()) {
             return;
         }
         if space
@@ -89,10 +98,6 @@ impl App {
         }
         if delete && let Some(id) = self.selected {
             self.remove(id);
-        }
-        // while the banner offers it
-        if undo {
-            self.undo_removing();
         }
         if paste {
             self.paste();
