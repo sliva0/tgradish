@@ -148,6 +148,26 @@ pub struct Global {
     pub colour: ColourChoice,
 }
 
+/// The shells `tgradish completions` writes scripts for.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ShellArg {
+    Bash,
+    Zsh,
+    Fish,
+    Powershell,
+}
+
+impl From<ShellArg> for clap_complete::Shell {
+    fn from(value: ShellArg) -> Self {
+        match value {
+            ShellArg::Bash => clap_complete::Shell::Bash,
+            ShellArg::Zsh => clap_complete::Shell::Zsh,
+            ShellArg::Fish => clap_complete::Shell::Fish,
+            ShellArg::Powershell => clap_complete::Shell::PowerShell,
+        }
+    }
+}
+
 /// [`FfmpegChoice`] for clap.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum FfmpegFrom {
@@ -200,6 +220,13 @@ pub enum Command {
     /// every copy carries.
     #[command(alias = "licences")]
     Licenses,
+    /// Print the script that completes tgradish's commands and flags in a
+    /// shell, as `tgradish completions bash > ~/.local/share/bash-completion/completions/tgradish`.
+    Completions {
+        /// The shell to complete in.
+        shell: ShellArg,
+    },
+
     /// Open the tgradish window. It also opens when tgradish is started
     /// without arguments outside a terminal.
     #[cfg(feature = "gui")]
@@ -279,7 +306,8 @@ impl Command {
             | Command::Inspect(_)
             | Command::Preset(_)
             | Command::Config(_)
-            | Command::Licenses => false,
+            | Command::Licenses
+            | Command::Completions { .. } => false,
             #[cfg(feature = "gui")]
             Command::Gui => false,
         }
@@ -302,7 +330,7 @@ pub struct ConvertArgs {
     #[arg(required_unless_present_any = ["clipboard", "old_input"])]
     pub inputs: Vec<PathBuf>,
     /// 1.x's way of naming an input, which is said to have changed.
-    #[arg(short = 'i', long = "input", hide = true, value_name = "FILE")]
+    #[arg(short = 'i', hide = true, value_name = "FILE")]
     pub old_input: Vec<PathBuf>,
     /// Convert what is on the clipboard: copied files, a copied path, or an
     /// image.

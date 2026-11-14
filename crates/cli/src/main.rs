@@ -395,6 +395,11 @@ fn run(cli: Cli) -> Result<()> {
             commands::licenses(&ctx);
             Ok(())
         }
+        Command::Completions { shell } => {
+            commands::completions(shell);
+            Ok(())
+        }
+
         #[cfg(feature = "gui")]
         Command::Gui => {
             if let Some(why) = no_display() {
@@ -485,6 +490,20 @@ mod windows_console {
 fn main() -> ExitCode {
     #[cfg(target_env = "musl")]
     return_freed_memory_sooner();
+    // for packages: the man pages, written by `tgradish __man DIR`, which
+    // isn't a command clap knows, so neither help nor completions name it
+    let given: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if let [_, man, dir] = given.as_slice()
+        && man == "__man"
+    {
+        return match commands::man(std::path::Path::new(dir)) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("error: {err:#}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     #[cfg(feature = "gui")]
     if started_outside_a_terminal() {
         // started from a script, or over ssh: there is no window to open,

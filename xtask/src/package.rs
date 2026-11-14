@@ -173,6 +173,9 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
             std::fs::copy(root.join("crates/cli/assets").join(&icon), stage.join(&icon))?;
         }
     }
+    if !target.is_windows() {
+        shell_files(&binary, &stage, target)?;
+    }
     // libwebp, which every build has for image stickers
     std::fs::create_dir_all(stage.join("licenses"))?;
     for file in ["COPYING", "PATENTS"] {
@@ -249,6 +252,42 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
     Ok(())
 }
 
+/// The completion scripts of bash, zsh and fish, as `completions/`, and
+/// the man pages, gzipped as `man/*.1.gz`, written by the built `binary`
+/// into `stage`. A musl build that this machine can't run, without musl's
+/// loader, goes without them, as it says.
+fn shell_files(binary: &Path, stage: &Path, target: Target) -> Result<()> {
+    let man = stage.join("man");
+    if let Err(err) = run(Command::new(binary).arg("__man").arg(&man)) {
+        ensure!(target.is_musl(), err);
+        println!("no man pages or completions in the archive: {err:#}");
+        return Ok(());
+    }
+    for page in std::fs::read_dir(&man)? {
+        // -n leaves out the time, so the same pages pack the same
+        run(Command::new("gzip").arg("-n9").arg(page?.path()))?;
+    }
+    let completions = stage.join("completions");
+    std::fs::create_dir_all(&completions)?;
+    for (shell, name) in SHELL_FILES {
+        let script = output(Command::new(binary).args(["completions", shell]))?;
+        std::fs::write(completions.join(name), script)?;
+    }
+    Ok(())
+}
+
+/// Each shell's completion script, as the archive names it, and where
+/// packages install it, from `/usr/share`.
+const SHELL_FILES: [(&str, &str); 3] =
+    [("bash", "tgradish.bash"), ("zsh", "_tgradish"), ("fish", "tgradish.fish")];
+
+/// Where packages install each of [`SHELL_FILES`], under `/usr/share`.
+const SHELL_PATHS: [&str; 3] = [
+    "bash-completion/completions/tgradish",
+    "zsh/site-functions/_tgradish",
+    "fish/vendor_completions.d/tgradish.fish",
+];
+
 /// What the window loads when it opens, as Debian packages and as the
 /// libraries an .rpm can ask for by name, which Fedora and openSUSE both
 /// resolve: the graphics libraries, and D-Bus for file dialogs. winit opens
@@ -312,6 +351,18 @@ fn linux_packages(
         let icon = format!("icons/hicolor/{size}x{size}/apps/tgradish.png");
         contents
             .push(format!("  - src: {}\n    dst: /usr/share/{icon}", quoted(&stage.join(&icon))));
+    }
+    for ((_, name), path) in SHELL_FILES.iter().zip(SHELL_PATHS) {
+        let script = stage.join("completions").join(name);
+        contents.push(format!("  - src: {}\n    dst: /usr/share/{path}", quoted(&script)));
+    }
+    for page in std::fs::read_dir(stage.join("man"))? {
+        let page = page?;
+        let name = page.file_name().to_string_lossy().into_owned();
+        contents.push(format!(
+            "  - src: {}\n    dst: /usr/share/man/man1/{name}",
+            quoted(&page.path())
+        ));
     }
     for doc in ["README.md", "THIRD-PARTY.txt", "THIRD-PARTY-CRATES.txt"] {
         contents.push(format!(

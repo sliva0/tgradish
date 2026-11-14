@@ -106,6 +106,33 @@ fn carries_licences() {
     }
 }
 
+/// Completion scripts for each shell, and man pages without the help's
+/// colours, a page for each command.
+#[test]
+fn writes_completions_and_man_pages() {
+    for (shell, marker) in [
+        ("bash", "complete -F"),
+        ("zsh", "#compdef tgradish"),
+        ("fish", "complete -c tgradish"),
+        ("powershell", "Register-ArgumentCompleter"),
+    ] {
+        let output = tgradish(&["completions", shell]);
+        assert!(output.status.success(), "{shell}");
+        let script = String::from_utf8(output.stdout).unwrap();
+        assert!(script.contains(marker) && script.contains("convert"), "{shell}");
+        assert!(!script.contains("__man") && !script.contains(" man "), "{shell}");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let output = tgradish(&["__man", dir.path().to_str().unwrap()]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    for page in ["tgradish.1", "tgradish-convert.1", "tgradish-config-example.1"] {
+        let text = std::fs::read_to_string(dir.path().join(page)).unwrap();
+        assert!(text.starts_with(".ie") || text.contains(".TH"), "{page}");
+        assert!(!text.contains('\x1b'), "{page} has the help's colours");
+    }
+    assert!(!dir.path().join("tgradish-__man.1").exists());
+}
+
 /// A reader that stops early, as `tgradish licenses | head -2`, ends the
 /// command without a panic's message.
 #[test]

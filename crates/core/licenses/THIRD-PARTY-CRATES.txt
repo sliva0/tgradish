@@ -2,7 +2,7 @@ Rust crates in tgradish and their licences
 ==========================================
 
 How many crates each licence covers:
-  MIT License: 253
+  MIT License: 256
   Apache License 2.0: 12
   Boost Software License 1.0: 2
   Unicode License v3: 2
@@ -1708,11 +1708,14 @@ MIT License, used by:
   anstyle-wincon 3.0.11
   clap 4.6.7
   clap_builder 4.6.7
+  clap_complete 4.6.11
   clap_derive 4.6.7
   clap_lex 1.1.1
+  clap_mangen 0.3.3
   colorchoice 1.0.5
   is_terminal_polyfill 1.70.2
   once_cell_polyfill 1.70.2
+  roff 1.1.1
   serde_spanned 1.1.2
   toml 1.1.7+spec-1.1.0
   toml_datetime 1.1.2+spec-1.1.0

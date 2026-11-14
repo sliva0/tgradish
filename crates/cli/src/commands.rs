@@ -273,6 +273,50 @@ pub fn licenses(ctx: &Context) {
     }
 }
 
+/// Prints the script that completes tgradish in `shell`.
+pub fn completions(shell: crate::args::ShellArg) {
+    use clap::CommandFactory;
+    let mut script = Vec::new();
+    let shell: clap_complete::Shell = shell.into();
+    clap_complete::generate(shell, &mut crate::args::Cli::command(), "tgradish", &mut script);
+    out!("{}", String::from_utf8_lossy(&script));
+}
+
+/// Writes the man pages into `dir`: `tgradish.1`, and a page for each
+/// command, as `tgradish-convert.1`, without the colours of the help. For
+/// packages, by `tgradish __man DIR`.
+pub fn man(dir: &std::path::Path) -> Result<()> {
+    use clap::CommandFactory;
+    std::fs::create_dir_all(dir).map_err(|err| {
+        anyhow::anyhow!("couldn't create {}: {}", dir.display(), tgradish_core::io_reason(&err))
+    })?;
+    let command = plain(crate::args::Cli::command().name("tgradish"));
+    clap_mangen::generate_to(command, dir).map_err(|err| {
+        anyhow::anyhow!(
+            "couldn't write the man pages into {}: {}",
+            dir.display(),
+            tgradish_core::io_reason(&err)
+        )
+    })?;
+    Ok(())
+}
+
+/// `command`, and the commands in it, with the text after their options
+/// without the colours it has on a terminal, which a man page would show
+/// as they are.
+fn plain(mut command: clap::Command) -> clap::Command {
+    if let Some(after) = command.get_after_help() {
+        let text = console::strip_ansi_codes(&after.ansi().to_string()).into_owned();
+        command = command.after_help(text);
+    }
+    let names: Vec<String> =
+        command.get_subcommands().map(|sub| sub.get_name().to_owned()).collect();
+    for name in names {
+        command = command.mut_subcommand(name, plain);
+    }
+    command
+}
+
 pub fn describe(ctx: &Context) -> Result<()> {
     let presets = Presets::load_user()?;
     crate::json_line(&protocol::describe(&presets, &ctx.config));

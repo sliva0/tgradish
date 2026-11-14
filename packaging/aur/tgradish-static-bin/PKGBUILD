@@ -42,6 +42,10 @@ sha256sums_aarch64=('SKIP')
 package() {
   cd "$_pkgname-$pkgver-$CARCH-unknown-linux-gnu"
   install -Dm755 tgradish -t "$pkgdir/usr/bin/"
+  install -Dm644 man/*.1.gz -t "$pkgdir/usr/share/man/man1/"
+  install -Dm644 completions/tgradish.bash "$pkgdir/usr/share/bash-completion/completions/tgradish"
+  install -Dm644 completions/_tgradish -t "$pkgdir/usr/share/zsh/site-functions/"
+  install -Dm644 completions/tgradish.fish -t "$pkgdir/usr/share/fish/vendor_completions.d/"
   install -Dm644 tgradish.desktop -t "$pkgdir/usr/share/applications/"
   for icon in icons/hicolor/*/apps/tgradish.png; do
     install -Dm644 "$icon" "$pkgdir/usr/share/$icon"
