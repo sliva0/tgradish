@@ -317,7 +317,8 @@ pub struct OptionArgs {
     pub crop: Option<Crop>,
     /// How to scale into the target size [default: contain for stickers,
     /// pad for emoji]; TGS must be square: pad the pixel art, crop its
-    /// middle, or stretch it [default: pad].
+    /// middle, or stretch it [default: pad], or contain where the crop, or
+    /// the input without one, is square already.
     #[arg(long, value_enum, help_heading = "Output")]
     pub resize: Option<ResizeArg>,
     /// How pixels are scaled: smooth, sharp blocks for pixel art, or

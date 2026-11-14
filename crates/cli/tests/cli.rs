@@ -477,6 +477,27 @@ fn refuses_outputs_that_cant_hold_the_result() {
     refused(&["spoof", upper.to_str().unwrap(), "-o", outdir], "is a directory");
 }
 
+/// `--resize contain` keeps a TGS's art as it is, which only a square part
+/// of the input can be.
+#[test]
+fn keeps_only_a_square_tgs_as_it_is() {
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("dot.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let png = png.to_str().unwrap();
+    let out = dir.path().join("dot.tgs");
+    let out = out.to_str().unwrap();
+    let convert = |crop: &str| {
+        tgradish(&["convert", png, "-o", out, "-y", "--resize", "contain", "--crop", crop])
+    };
+    let made = convert("4x4+0+0");
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let refused = convert("4x3+0+0");
+    assert_eq!(refused.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(stderr.contains("contain keeps the shape of the part used, 4x3"), "{stderr}");
+}
+
 #[test]
 fn makes_animated_stickers() {
     let dir = tempfile::tempdir().unwrap();

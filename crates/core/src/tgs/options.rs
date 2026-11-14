@@ -62,7 +62,10 @@ pub struct Options {
     pub crop: Option<Crop>,
     /// How art that isn't square fills the square sticker: pad (whole,
     /// with transparent margins), crop (its middle) or
-    /// stretch (its art pixels no longer square). Default: pad.
+    /// stretch (its art pixels no longer square). Default: pad. Contain
+    /// keeps the shape of the part used, which must then be square: the
+    /// crop, or the input where there is none; the art is never cut or
+    /// stretched, as with pad.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resize: Option<Resize>,
     /// Keep the input's canvas, or the crop, instead of cropping to the
@@ -225,14 +228,11 @@ impl Options {
                     tempo => tempo,
                 },
                 square: match self.resize_or_default() {
-                    Resize::Pad => normalise::Square::Pad,
+                    // the part used is square, which converting checks
+                    // once it knows the input's size: nothing to fill
+                    Resize::Pad | Resize::Contain => normalise::Square::Pad,
                     Resize::Crop => normalise::Square::Crop,
                     Resize::Stretch => normalise::Square::Stretch,
-                    Resize::Contain => {
-                        let reason = "contain can't make TGS stickers, which are square: use pad, \
-                                      crop or stretch";
-                        return Err(Error::invalid("resize", reason));
-                    }
                 },
             },
             effort: match self.speed_or_default() {

@@ -29,6 +29,7 @@ use crate::CancelToken;
 use crate::backend::Backend;
 use crate::error::{Error, Result};
 use crate::input::Input;
+use crate::options::Resize;
 use crate::presets::Format;
 use crate::preview::Preview;
 
@@ -97,6 +98,21 @@ pub fn convert(
     request.input.check_output(&output, request.overwrite)?;
     let mut settings = request.options.sticker_options()?;
     let loaded = load(backend, &request.input, &request.options, cancel)?;
+    // kept as it is, the part used must already be square
+    if request.options.resize_or_default() == Resize::Contain {
+        let animation = &loaded.animation;
+        let (width, height) = match settings.normalise.crop {
+            Some(crop) => (crop.width, crop.height),
+            None => (animation.width(), animation.height()),
+        };
+        if width != height {
+            let reason = format!(
+                "contain keeps the shape of the part used, {width}x{height}, and TGS stickers \
+                 are square: crop it to a square, or use pad, crop or stretch"
+            );
+            return Err(Error::invalid("resize", reason));
+        }
+    }
     if let Some(part) = &loaded.video {
         // read from the start: as long as the part used
         settings.normalise.start = Duration::ZERO;
@@ -164,7 +180,6 @@ pub fn convert(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::options::Resize;
 
     #[test]
     fn refuses_to_overwrite_inputs() {
@@ -210,9 +225,28 @@ mod tests {
             assert!(made.issues.is_empty(), "{resize:?}: {:?}", made.issues);
             assert_eq!(made.preview.width, made.preview.height, "{resize:?}");
         }
-        assert!(matches!(
-            make(Resize::Contain),
-            Err(Error::InvalidOption { option: "resize", .. })
-        ));
+        // kept as it is only where it is square already: the whole of
+        // the walker, but not a crop of it that isn't
+        let (width, height) = (
+            u32::from(u16::from_le_bytes([walker.bytes[6], walker.bytes[7]])),
+            u32::from(u16::from_le_bytes([walker.bytes[8], walker.bytes[9]])),
+        );
+        assert_eq!(width, height);
+        let made = make(Resize::Contain).unwrap();
+        assert_eq!(made.preview.width, padded.preview.width);
+        let crop = crate::options::Crop { x: 0, y: 0, width, height: height - 2 };
+        let options =
+            Options { resize: Some(Resize::Contain), crop: Some(crop), ..Options::default() };
+        let request = Request {
+            output: Some(dir.path().join("contained.tgs")),
+            options,
+            overwrite: true,
+            ..Request::new(Input::File(input.clone()))
+        };
+        let refused = convert(None, &request, &CancelToken::new(), &mut |_| {});
+        assert!(
+            matches!(refused, Err(Error::InvalidOption { option: "resize", .. })),
+            "{refused:?}"
+        );
     }
 }

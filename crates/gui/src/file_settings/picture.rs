@@ -14,8 +14,8 @@ use crate::canvas::{Exact, Keep};
 use crate::item::{Aspect, Item, Recipe};
 use crate::l10n::fl;
 use crate::widgets::{
-    self, Choice, Pick, chosen_hint, flag, note, preset_number, preset_picking, preset_segments,
-    row, segments,
+    self, Choice, Pick, chosen_hint, flag, note, picking, preset_number, preset_picking,
+    preset_segments, row, segments,
 };
 
 /// The shapes the crop can keep.
@@ -86,7 +86,7 @@ fn squares() -> [Choice<Resize>; 4] {
 /// How TGS stickers, which are always square, become so.
 fn tgs_squares() -> [Choice<Resize>; 4] {
     [
-        (Resize::Contain, fl!("square-off"), String::new()),
+        (Resize::Contain, fl!("square-off"), fl!("square-off", "kept")),
         (Resize::Pad, fl!("square-pad"), fl!("square-pad", "tgs")),
         (Resize::Crop, fl!("square-crop"), fl!("square-crop", "tgs")),
         (Resize::Stretch, fl!("square-stretch"), fl!("square-stretch", "tgs")),
@@ -175,10 +175,22 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             item.choices.crop = (fitted != full).then_some(fitted);
         }
     }
+    // how a .tgs becomes square, its preset's or else the default, which
+    // keeps the crop's shape square while it is "Off"
+    let tgs_base = (item.format == Format::Tgs)
+        .then(|| item.choices.tgs_base(presets, config).unwrap_or_default().resize_or_default());
+    if let Some(base) = tgs_base
+        && keeps_shape(item, base)
+    {
+        if size.is_some_and(|size| ratio(item.view.aspect, size) != Some(1.0)) {
+            item.view.aspect = SQUARE;
+        }
+        keep_aspect(item, size, None);
+    }
     row(ui, &fl!("crop"), &fl!("crop", "hint"), Ok(()), |ui| crop_box(ui, item, size, exact));
 
     row(ui, &fl!("aspect-ratio"), &fl!("aspect-ratio", "hint"), Ok(()), |ui| {
-        aspect_ratio(ui, item, size, exact, &effective)
+        aspect_ratio(ui, item, size, exact, &effective, tgs_base)
     });
 
     match item.format {
@@ -230,11 +242,20 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             row(ui, &fl!("square"), &fl!("square", "tgs"), Ok(()), |ui| {
                 let squares = tgs_squares();
                 let base = preset.clone().unwrap_or_default().resize_or_default();
+                // kept as it is, the crop must be square: picked while the
+                // aspect ratio isn't 1:1, it makes it so
+                let square = size.is_some_and(|size| ratio(item.view.aspect, size) == Some(1.0));
                 let pick = |option| match option {
-                    Resize::Contain => Pick::No(fl!("square-off", "tgs")),
+                    Resize::Contain if !square => Pick::Changes(fl!("square-off", "tgs")),
                     _ => Pick::Yes,
                 };
-                preset_picking(ui, &mut item.choices.tgs.resize, base, &squares, pick);
+                if preset_picking(ui, &mut item.choices.tgs.resize, base, &squares, pick)
+                    && keeps_shape(item, base)
+                    && !square
+                {
+                    item.view.aspect = SQUARE;
+                    keep_aspect(item, size, None);
+                }
                 chosen_hint(ui, item.choices.tgs.resize.unwrap_or(base), &squares);
             });
             let base = preset.clone().unwrap_or_default().keep_canvas_or_default();
@@ -492,32 +513,62 @@ fn sketch(ui: &mut egui::Ui, (width, height): (u32, u32), crop: Crop, wide: f32)
     painter.with_clip_rect(cut).add(egui::Shape::line(peaks, egui::Stroke::new(1.5, weak)));
 }
 
+/// The aspect of a square crop.
+const SQUARE: Aspect = Aspect::Ratio(1.0, 1.0);
+
+/// Whether the item, made a `.tgs`, keeps the crop's shape, rather than
+/// forcing it into square: then the crop must be square already. `base` is
+/// how its preset, or else the default, makes it square.
+fn keeps_shape(item: &Item, base: Resize) -> bool {
+    item.choices.tgs.resize.unwrap_or(base) == Resize::Contain
+}
+
 /// The shape the crop keeps: none, the input's, or one typed as a ratio
-/// or, where the result takes the crop's shape, as the result's size.
+/// or, where the result takes the crop's shape, as the result's size. A
+/// `.tgs` that keeps the crop's shape, whose preset or else the default
+/// makes it square as `tgs_base` says, must keep a square one: another
+/// shape forces it into square again, as its preset does, or by padding.
 fn aspect_ratio(
     ui: &mut egui::Ui,
     item: &mut Item,
     size: Option<(u32, u32)>,
     exact: Option<Exact>,
     effective: &Options,
+    tgs_base: Option<Resize>,
 ) {
     let full = size.map(Crop::whole);
     let crop = item.choices.crop.or(full);
+    let shaped = |shape: Shape| match shape {
+        Shape::Free => Aspect::Free,
+        Shape::Preserve => Aspect::Input,
+        // the crop's own shape to start from
+        Shape::Custom => {
+            let (width, height) = crop.map_or((1.0, 1.0), |c| reduced(c.width, c.height));
+            Aspect::Ratio(width, height)
+        }
+    };
+    let square_kept = tgs_base.is_some_and(|base| keeps_shape(item, base));
+    let leaves_square = |aspect: Aspect| size.is_none_or(|size| ratio(aspect, size) != Some(1.0));
+    let unsquare = |item: &mut Item| {
+        if let Some(base) = tgs_base {
+            item.choices.tgs.resize = (base == Resize::Contain).then_some(Resize::Pad);
+        }
+    };
     let mut shape = match item.view.aspect {
         Aspect::Free => Shape::Free,
         Aspect::Input => Shape::Preserve,
         Aspect::Ratio(..) => Shape::Custom,
     };
-    if segments(ui, &mut shape, &shapes(), |_| Ok(())) {
-        item.view.aspect = match shape {
-            Shape::Free => Aspect::Free,
-            Shape::Preserve => Aspect::Input,
-            // the crop's own shape to start from
-            Shape::Custom => {
-                let (width, height) = crop.map_or((1.0, 1.0), |c| reduced(c.width, c.height));
-                Aspect::Ratio(width, height)
-            }
-        };
+    let current = shape;
+    let pick = |option: Shape| match square_kept && option != current {
+        true if leaves_square(shaped(option)) => Pick::Changes(fl!("aspect-ratio", "square")),
+        _ => Pick::Yes,
+    };
+    if picking(ui, &mut shape, &shapes(), pick) {
+        item.view.aspect = shaped(shape);
+        if square_kept && leaves_square(item.view.aspect) {
+            unsquare(item);
+        }
         keep_aspect(item, size, exact);
     }
     // the ratio kept, or for the other shapes the crop's own, greyed out
@@ -571,6 +622,9 @@ fn aspect_ratio(
     });
     if typed && custom {
         item.view.aspect = Aspect::Ratio(width, height);
+        if square_kept && leaves_square(item.view.aspect) {
+            unsquare(item);
+        }
         keep_aspect(item, size, exact);
     }
 }
@@ -818,5 +872,74 @@ mod tests {
         assert!(lit(&harness, &fl!("square-off")) && !lit(&harness, &fl!("square-crop")));
         // and kept for when the scale goes
         assert_eq!(harness.state().items[0].choices.webm.resize, Some(Resize::Crop));
+    }
+
+    #[test]
+    fn ties_keeping_a_tgs_shape_to_a_square_crop() {
+        use egui_kittest::kittest::Queryable;
+        use tgradish_core::presets::Format;
+
+        // pixel art wider than high, made a .tgs
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("wide.png");
+        let mut wide = image::RgbaImage::new(40, 24);
+        for (x, y, pixel) in wide.enumerate_pixels_mut() {
+            *pixel = image::Rgba([(x * 6) as u8, (y * 10) as u8, 90, 255]);
+        }
+        wide.save(&art).unwrap();
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![art]);
+        finish(&mut harness);
+        harness.state_mut().items[0].format = Format::Tgs;
+        harness.run_steps(3);
+        let click = |harness: &mut egui_kittest::Harness<crate::app::App>, text: &str| {
+            harness.query_all_by_label(text).next().unwrap().click();
+            harness.run_steps(3);
+        };
+        let square = |item: &Item| item.choices.crop.is_some_and(|c| c.width == c.height);
+        // "Off" sets the aspect ratio to 1:1, and the crop with it
+        click(&mut harness, &fl!("square-off"));
+        let item = &harness.state().items[0];
+        assert_eq!(item.choices.tgs.resize, Some(Resize::Contain));
+        assert_eq!(item.view.aspect, SQUARE);
+        assert!(square(item), "{:?}", item.choices.crop);
+        // another shape forces it into square again, by padding, the
+        // default's way
+        click(&mut harness, &fl!("shape-free"));
+        let item = &harness.state().items[0];
+        assert_eq!((item.choices.tgs.resize, item.view.aspect), (None, Aspect::Free));
+        click(&mut harness, &fl!("square-off"));
+        click(&mut harness, &fl!("shape-preserve"));
+        let item = &harness.state().items[0];
+        assert_eq!((item.choices.tgs.resize, item.view.aspect), (None, Aspect::Input));
+        // as does a ratio of another shape typed
+        click(&mut harness, &fl!("square-off"));
+        // the first side of the ratio, 1 : 1
+        let side =
+            egui_kittest::kittest::by().role(eframe::egui::accesskit::Role::SpinButton).value("1");
+        harness.query_all(side).next().unwrap().focus();
+        harness.run_steps(2);
+        harness.event(eframe::egui::Event::Text("4".into()));
+        harness.key_press(eframe::egui::Key::Enter);
+        harness.run_steps(3);
+        let item = &harness.state().items[0];
+        assert_eq!(item.choices.tgs.resize, None);
+        assert!(matches!(item.view.aspect, Aspect::Ratio(w, h) if w > h), "{:?}", item.view.aspect);
+        // kept from before, as a session or a preset keeps it, with a
+        // crop of another shape: the crop is made square
+        let item = &mut harness.state_mut().items[0];
+        item.choices.tgs.resize = Some(Resize::Contain);
+        (item.view.aspect, item.choices.crop) = (Aspect::Free, None);
+        harness.run_steps(3);
+        let item = &harness.state().items[0];
+        assert!(item.view.aspect == SQUARE && square(item), "{:?}", item.choices.crop);
+        // and it makes a square sticker of the art as it is
+        crate::testing::convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let made = harness.state().items[0].made.as_ref().expect("made");
+        assert!(matches!(made.job.status, crate::jobs::Status::Done(_)), "{:?}", made.job.status);
     }
 }
