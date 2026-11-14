@@ -31,7 +31,8 @@ that makes every kind of Telegram sticker and emoji.
 - Fitting a WebM stops at the first encode that uses 96% to 100% of the
   limit, predicts each next setting from the encodes so far, and skips an
   encode predicted to gain under 1% of the limit or any likeness to be
-  seen. `--fit auto` tries lower frame rates only where nothing fits, or
+  seen; where nothing fits, it encodes the least of the range before
+  saying so, whatever was predicted of it. `--fit auto` tries lower frame rates only where nothing fits, or
   where the best that fits looks poor and looked better for more bits.
   Why fitting stops, or tries a lower frame rate or not, is said: in
   `convert`'s output, as `decided` events with `--json`, and under the

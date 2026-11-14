@@ -1009,7 +1009,7 @@ decided-in-band = Stopped: encode { $number } uses { $share } of the limit, at l
 decided-alike-enough = Stopped: encode { $number } already looks { $alike } like the input, so more bits would only make it larger
 decided-alike-unchanged = Stopped: encode { $number } looks { $alike } like the input, hardly more than encode { $than } with fewer bits
 decided-little-to-gain = Stopped: encode { $number } uses { $share } of the limit, and another would use only about { $predicted }
-decided-too-large-at-least = Stopped: even the least of the range would use about { $predicted } of the limit
+decided-too-large-at-least = Stopped: even the least of the range, in encode { $number }, uses { $share } of the limit
 decided-nothing-left = Stopped: no setting is left worth trying
 decided-out-of-attempts = { $count ->
     [one] Stopped: the { $count } encode allowed is made

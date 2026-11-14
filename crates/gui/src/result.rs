@@ -425,8 +425,8 @@ fn decision_text(decision: &tgradish_core::webm::Decision) -> String {
             share = percent(share),
             predicted = percent(predicted)
         ),
-        Decision::TooLargeAtLeast { predicted } => {
-            fl!("decided-too-large-at-least", predicted = percent(predicted))
+        Decision::TooLargeAtLeast { attempt, share } => {
+            fl!("decided-too-large-at-least", number = attempt, share = percent(share))
         }
         Decision::NothingLeft => fl!("decided-nothing-left"),
         Decision::OutOfAttempts { attempts } => fl!("decided-out-of-attempts", count = attempts),

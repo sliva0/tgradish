@@ -14,8 +14,9 @@
 //!   tell ([`SPREAD`]), or in proportion from one. An encode predicted to
 //!   use under [`MIN_GAIN`] more of the limit than the best that fits, or
 //!   to look no more like the input by more than [`ALIKE_NOISE`], isn't
-//!   made, nor one where nothing fits and even the least of the range is
-//!   predicted not to;
+//!   made. Where nothing fits, the least of the range is encoded before
+//!   the search gives up, and at once where it is predicted not to fit:
+//!   a prediction never shows that nothing fits;
 //! - `fit = auto` lowers the frame rate only where nothing fits at it, or
 //!   the best that fits looks poor (under [`ALIKE_GOOD`]) and the encodes
 //!   don't show that looks hardly depend on bits, as fewer frames only
@@ -293,8 +294,8 @@ fn next_value(points: &[Point], limit: u64, (min, max): (f64, f64)) -> Next {
         }
         (None, Some(above)) => {
             if above.x <= min {
-                let predicted = above.bytes as f64 / limit as f64;
-                return Next::Stop(Decision::TooLargeAtLeast { predicted });
+                let share = above.bytes as f64 / limit as f64;
+                return Next::Stop(Decision::TooLargeAtLeast { attempt: above.number, share });
             }
             let other = points
                 .iter()
@@ -303,11 +304,13 @@ fn next_value(points: &[Point], limit: u64, (min, max): (f64, f64)) -> Next {
                 .copied()
                 .map(|other| Line::through(above, other))
                 .filter(|line| line.slope > 0.0);
+            // even the least predicted not to fit: encoding it is what
+            // shows whether anything does, as sizes may flatten out where
+            // a line through two larger ones can't tell
             if let Some(line) = other
                 && line.at(min) > limit as f64
             {
-                let predicted = line.at(min) / limit as f64;
-                return Next::Stop(Decision::TooLargeAtLeast { predicted });
+                return Next::Try(min, line);
             }
             let line = other.unwrap_or(Line::proportional(above));
             let x = line.solve(aim).unwrap_or(0.0);
@@ -390,22 +393,26 @@ fn maximise(
             break;
         }
 
-        let (next, line) = match next_value(&search.points, f.limit, (min, max)) {
-            Next::Try(next, line) => (snap(next), line),
-            Next::Stop(decision) => {
+        let tried = |x: f64| search.points.iter().any(|point| point.x == x);
+        let next = match next_value(&search.points, f.limit, (min, max)) {
+            Next::Try(next, _) if tried(snap(next)) => Err(Decision::NothingLeft),
+            Next::Try(next, line) => match not_worth_it(f, &search, snap(next), line) {
+                Some(decision) => Err(decision),
+                None => Ok(snap(next)),
+            },
+            Next::Stop(decision) => Err(decision),
+        };
+        x = match next {
+            Ok(next) => next,
+            // predictions order encodes and skip them, but only an encode
+            // shows that nothing fits: the least of the range, before
+            // giving up on the value
+            Err(_) if search.best.is_none() && !tried(snap(min)) => snap(min),
+            Err(decision) => {
                 f.decide(decision);
                 break;
             }
         };
-        if search.points.iter().any(|point| point.x == next) {
-            f.decide(Decision::NothingLeft);
-            break;
-        }
-        if let Some(decision) = not_worth_it(f, &search, next, line) {
-            f.decide(decision);
-            break;
-        }
-        x = next;
     }
     Ok(search)
 }
@@ -1159,6 +1166,54 @@ mod tests {
                 assert!(last.filter(says).is_some(), "{fit:?} {length}: {:?}", encoder.decisions);
             }
         }
+    }
+
+    /// Runs `fit = bitrate` from `bitrate` in the range `from`..=`to`
+    /// kbit/s, on a clip 3 seconds long, through `encoder`.
+    fn bitrate(bitrate: f64, (from, to): (f64, f64), encoder: &mut Scenario) -> Result<Fitted> {
+        let fit_range = Some(Range { min: from, max: to });
+        let options = Options { bitrate: Some(bitrate), fit_range, ..options(Fit::Bitrate) };
+        run(&test_plan(options, 3.0), encoder)
+    }
+
+    #[test]
+    fn encodes_the_least_before_saying_nothing_fits() {
+        // sizes that flatten out at high bitrates, but fall away at low
+        // ones: the line through the first two says even 1 kbit/s comes
+        // to 110%, where it comes to 83%
+        let share = |kbps: f64, _| 0.8 + 0.3 * (1.0 - (-kbps / 10.0).exp());
+        let mut encoder = Scenario::new(share, |_, _| 0.9);
+        let fitted = bitrate(100.0, (1.0, 1000.0), &mut encoder).unwrap();
+        let calls = encoder.calls();
+        assert_eq!(calls[..3], ["30@100", "30@89.5", "30@1"], "{calls:?}");
+        // something fits, at the least if nothing else
+        assert!(fitted.best.bytes <= MAX_BYTES, "{calls:?}");
+        assert!(!encoder.decided(|d| matches!(d, Decision::TooLargeAtLeast { .. })));
+    }
+
+    #[test]
+    fn encodes_the_least_where_rounding_leaves_nothing_else() {
+        // 2 kbit/s just over the limit: the next, a little under it,
+        // rounds to 2 again, which says nothing of 1 kbit/s, which fits
+        let mut encoder = Scenario::new(|kbps, _| 0.9 + 0.0505 * kbps, |_, _| 0.9);
+        let fitted = bitrate(2.0, (1.0, 1000.0), &mut encoder).unwrap();
+        let calls = encoder.calls();
+        assert_eq!(calls[..2], ["30@2", "30@1"], "{calls:?}");
+        assert_good_fit(&fitted.best);
+    }
+
+    #[test]
+    fn says_nothing_fits_once_the_least_is_encoded() {
+        // never under 105%: the least is encoded at once, as predicted
+        // not to fit, and shows it
+        let mut encoder = Scenario::new(|kbps, _| 1.05 + kbps / 1000.0, |_, _| 0.9);
+        let fitted = bitrate(100.0, (1.0, 1000.0), &mut encoder);
+        assert!(matches!(fitted, Err(Error::NothingFits { .. })), "{fitted:?}");
+        let calls = encoder.calls();
+        assert_eq!(calls.last().map(String::as_str), Some("30@1"), "{calls:?}");
+        let least = calls.len() as u32;
+        let said = |d: &Decision| matches!(d, Decision::TooLargeAtLeast { attempt, .. } if *attempt == least);
+        assert!(encoder.decided(said), "{:?}", encoder.decisions);
     }
 
     /// Fits with 80% of the limit at the first bitrate, and looks the same

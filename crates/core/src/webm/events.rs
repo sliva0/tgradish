@@ -218,11 +218,13 @@ pub enum Decision {
         /// The next one's, as predicted.
         predicted: f64,
     },
-    /// Stopped: nothing fits, and even the least of the range searched is
-    /// predicted to use `predicted` of the limit.
+    /// Stopped: nothing fits, not even the least of the range searched,
+    /// encoded in `attempt`, which uses `share` of the limit.
     TooLargeAtLeast {
-        /// The share predicted.
-        predicted: f64,
+        /// The encode of the least.
+        attempt: u32,
+        /// Its share of the limit.
+        share: f64,
     },
     /// Stopped: every value of the range worth trying is tried.
     NothingLeft,
@@ -321,10 +323,10 @@ impl std::fmt::Display for Decision {
                 percent(share),
                 percent(predicted)
             ),
-            Decision::TooLargeAtLeast { predicted } => write!(
+            Decision::TooLargeAtLeast { attempt, share } => write!(
                 f,
-                "stopped: even the least of the range would use about {} of the limit",
-                percent(predicted)
+                "stopped: even the least of the range, attempt {attempt}, uses {} of the limit",
+                percent(share)
             ),
             Decision::NothingLeft => write!(f, "stopped: no value is left worth trying"),
             Decision::OutOfAttempts { attempts } => {
