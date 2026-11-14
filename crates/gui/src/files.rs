@@ -206,9 +206,11 @@ impl App {
                         self.remove_all(&ids);
                     }
                     if attention > 0 {
+                        // whole, on a line of its own where it doesn't fit
                         let text = format!("⚠ {}", fl!("need-attention", count = attention));
-                        ui.colored_label(theme::warn(ui.visuals()), text)
-                            .on_hover_text(fl!("row-attention", "hint"));
+                        let text = RichText::new(text).color(theme::warn(ui.visuals()));
+                        let label = egui::Label::new(text).wrap_mode(egui::TextWrapMode::Extend);
+                        ui.add(label).on_hover_text(fl!("row-attention", "hint"));
                     }
                 });
                 ui.add_space(4.0);

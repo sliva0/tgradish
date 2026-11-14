@@ -50,7 +50,9 @@ impl App {
             Status::Done(done) => Some(done.output.clone()).filter(|output| output.exists()),
             _ => None,
         });
-        let saved = item.result_is_current() && made.is_some() && made == output;
+        // the one the bar names, not one of another format made before
+        let made = made.filter(|made| Some(made) == output.as_ref());
+        let saved = item.result_is_current() && made.is_some();
         let mut convert = false;
         let mut replace = None;
         let mut copy = None;
@@ -274,6 +276,9 @@ impl Said {
     }
 }
 
+/// The least room for where the result goes, which is left out with less.
+const FOLDER_LEAST: f32 = 60.0;
+
 /// What copying the result last did, and when, kept under this name.
 const COPIED: &str = "result copied";
 /// How long what copying did is said on its button.
@@ -426,6 +431,10 @@ impl<'a> Right<'a> {
             .or(folders.last())
             .cloned()
             .unwrap_or_default();
+        // none of it where hardly any would show
+        if room < FOLDER_LEAST {
+            return copy;
+        }
         let saves = self.saves(ui, fallbacks, &folder);
         // shortened: said in full on hover
         let hint = match folders.first().filter(|whole| **whole != folder) {
@@ -706,8 +715,8 @@ mod tests {
             label.starts_with(&fl!("convert")) && !label.contains(&fl!("convert-again")),
             "{label}"
         );
-        // the one made still there to copy
-        harness.get_by_label(&format!("✔ {}", fl!("copy-result", "done")));
+        // nor one of it to copy
+        assert!(harness.query_by_label(&format!("✔ {}", fl!("copy-result", "done"))).is_none());
     }
 
     #[test]
