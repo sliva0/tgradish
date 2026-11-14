@@ -64,9 +64,11 @@ pub(crate) struct SettingsDialog {
     /// the one back to 100%.
     stepped: Option<egui::Rect>,
     /// Where the scale's button last clicked is on the screen, in pixels,
-    /// and how far it is from the dialog's corner, in points: the dialog is
-    /// kept so that the button stays there as everything grows or shrinks
-    /// around it, under the pointer, rather than in the window's middle.
+    /// and how far it is from the dialog's corner, in points, with the
+    /// settings scrolled to their top: the dialog is kept so that the
+    /// button stays there as everything grows or shrinks around it, under
+    /// the pointer, rather than in the window's middle, and where it can't
+    /// move far enough within the window, its settings are scrolled.
     pinned: Option<(egui::Pos2, egui::Vec2)>,
     /// When the scale's button was last clicked.
     stepped_at: f64,
@@ -78,6 +80,19 @@ pub(crate) struct SettingsDialog {
     returning: Option<(egui::Pos2, f64)>,
     /// Where the dialog was drawn last.
     drawn: Drawn,
+    /// How the settings were scrolled as last drawn.
+    scrolled: Scrolled,
+}
+
+/// How the dialog's settings were scrolled, in points: how far, how tall
+/// they all are, how much of them shows, and how far under the dialog's
+/// top that starts.
+#[derive(Clone, Copy, Debug, Default)]
+struct Scrolled {
+    offset: f32,
+    content: f32,
+    shown: f32,
+    top: f32,
 }
 
 impl SettingsDialog {
@@ -141,29 +156,85 @@ const HELD: f64 = 1.5;
 /// How long the dialog takes back to the window's middle.
 const RETURNING: f64 = 0.15;
 
+/// How tall the settings may show, scrolling within the rest of the
+/// dialog, so that it fits the window.
+fn settings_room(ctx: &egui::Context) -> f32 {
+    (ctx.content_rect().height() - 210.0).max(200.0)
+}
+
+/// How far within the settings that show the scale's button is kept from
+/// their top and bottom, where the last of them fade out: all of it shows.
+const KEPT_IN: f32 = FADE + 16.0;
+
+/// Where the dialog goes, and how its settings show.
+struct Placed {
+    /// Where its corner goes, or the window's middle.
+    corner: Option<egui::Pos2>,
+    /// How far its settings are scrolled, where that changes.
+    scroll: Option<f32>,
+    /// How tall its settings show at the most.
+    room: f32,
+}
+
 /// Where the dialog's corner goes: where it keeps the scale's button
 /// clicked under the pointer, or on its way back to the window's middle
-/// from there, within the window either way; `None` in the middle.
-fn placed(ctx: &egui::Context, dialog: &mut SettingsDialog) -> Option<egui::Pos2> {
+/// from there, within the window either way; `None` in the middle. Where
+/// it can't move far enough to keep the button there, its settings are
+/// scrolled, and shown shorter, so that it ends at the window's edge.
+fn placed(ctx: &egui::Context, dialog: &mut SettingsDialog) -> Placed {
     let window = ctx.content_rect();
-    let size = dialog.drawn.0.size().max(egui::Vec2::ZERO);
+    let room = settings_room(ctx);
+    let scrolled = dialog.scrolled;
+    let drawn = dialog.drawn.0.size().max(egui::Vec2::ZERO);
+    // how tall it is with `shown` of its settings showing at the most
+    let rest = (drawn.y - scrolled.shown).max(0.0);
+    let height = |shown: f32| rest + shown.min(scrolled.content);
     // all of it in the window, its corner at the least where it is larger
-    let within = |corner: egui::Pos2| {
-        let most = (window.max - size).max(window.min);
+    let within = |corner: egui::Pos2, shown: f32| {
+        let most = (window.max - egui::vec2(drawn.x, height(shown))).max(window.min);
         corner.clamp(window.min, most)
     };
     if let Some((at, offset)) = dialog.pinned {
-        return Some(within(at / ctx.pixels_per_point() - offset));
+        let at = at / ctx.pixels_per_point();
+        // where its top is with the settings scrolled `scroll`
+        let top = |scroll: f32| at.y - offset.y + scroll;
+        // not over the window's top: scrolled further instead
+        let mut scroll = scrolled.offset.max(window.top() - top(0.0)).max(0.0);
+        // nor past its bottom: scrolled back as far as that keeps it under
+        // the window's top, then its settings shown shorter
+        let fits = window.bottom() - height(room) - top(0.0);
+        if scroll > fits {
+            scroll = fits.max(window.top() - top(0.0)).max(0.0);
+        }
+        let mut shown = room.min(scrolled.content);
+        let over = top(scroll) + height(shown) - window.bottom();
+        if over > 0.0 {
+            let least = at.y + KEPT_IN - top(scroll) - scrolled.top;
+            shown = (shown - over).max(least);
+        }
+        // as far as the settings scroll, the button in what shows of them
+        let most = (scrolled.content - shown).min(offset.y - scrolled.top - KEPT_IN);
+        let scroll = scroll.min(most).max(0.0);
+        let corner = within(egui::pos2(at.x - offset.x, top(scroll)), shown);
+        return Placed { corner: Some(corner), scroll: Some(scroll), room: shown };
     }
-    let (from, since) = dialog.returning?;
+    let unplaced = Placed { corner: None, scroll: None, room };
+    let Some((from, since)) = dialog.returning else { return unplaced };
     let share = (ctx.input(|input| input.time) - since) / RETURNING;
     if share >= 1.0 {
         dialog.returning = None;
-        return None;
+        return unplaced;
     }
     ctx.request_repaint();
-    let middle = window.center() - size / 2.0;
-    Some(within(from.lerp(middle, crate::inset::eased(share))))
+    let middle = window.center() - egui::vec2(drawn.x, height(room)) / 2.0;
+    let corner = within(from.lerp(middle, crate::inset::eased(share)), room);
+    Placed { corner: Some(corner), ..unplaced }
+}
+
+/// Whether the wheel turned this frame, as to scroll.
+fn wheeled(ctx: &egui::Context) -> bool {
+    let wheel = |event: &egui::Event| matches!(event, egui::Event::MouseWheel { .. });
+    ctx.input(|input| input.raw.events.iter().any(wheel))
 }
 
 /// Lets the dialog go back to the window's middle, from where it is drawn.
@@ -195,29 +266,47 @@ pub(crate) fn show(
         dialog.checking = None;
     }
     let mut close = false;
+    let now = ctx.input(|input| input.time);
+    // its settings scrolled by hand while it is kept: let go, rather than
+    // moved to keep the button where it was
+    if dialog.pinned.is_some() && wheeled(ctx) {
+        release(dialog, now);
+    }
     let mut modal = widgets::dialog(ctx, "settings");
-    if let Some(corner) = placed(ctx, dialog) {
+    let Placed { corner, scroll, room } = placed(ctx, dialog);
+    if let Some(corner) = corner {
         let area = egui::Modal::default_area(egui::Id::new("settings"));
         modal = modal.area(area.anchor(egui::Align2::LEFT_TOP, corner.to_vec2()));
     }
     let modal = modal.show(ctx, |ui| {
         ui.set_width(620.0);
         close = widgets::dialog_title(ui, widgets::title_text(ui, fl!("settings")));
-        // the dialog fits the window, its settings scrolling within
-        let room = (ctx.content_rect().height() - 210.0).max(200.0);
-        // that there is more below shows: the bar is always drawn where
+        // the dialog fits the window, its settings scrolling within, and
+        // shown shorter where it is kept low in it. That there is more
+        // below shows: the bar is always drawn where
         // they don't all fit, rather than as the pointer comes near, and
         // the last of what fits fades out until scrolled to the end
         let solid = egui::style::ScrollStyle::solid();
         let scrolled = ui
             .scope(|ui| {
                 ui.spacing_mut().scroll = solid;
-                egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
+                let mut area = egui::ScrollArea::vertical().max_height(room);
+                if let Some(scroll) = scroll {
+                    area = area.vertical_scroll_offset(scroll);
+                }
+                area.show(ui, |ui| {
                     widgets::settings_spacing(ui);
                     sections(ui, dialog, config, ffmpeg_given, presets);
                 })
             })
             .inner;
+        dialog.scrolled = Scrolled {
+            offset: scrolled.state.offset.y,
+            content: scrolled.content_size.y,
+            shown: scrolled.inner_rect.height(),
+            // from the window's top until it is drawn
+            top: scrolled.inner_rect.top(),
+        };
         let hidden =
             scrolled.content_size.y - scrolled.state.offset.y - scrolled.inner_rect.height();
         if hidden > 1.0 {
@@ -264,11 +353,18 @@ pub(crate) fn show(
         });
     });
     dialog.drawn = Drawn(modal.response.rect);
-    let now = ctx.input(|input| input.time);
+    dialog.scrolled.top -= modal.response.rect.top();
     match dialog.stepped.take() {
         Some(button) if button.is_positive() => {
-            let offset = button.center() - modal.response.rect.min;
-            dialog.pinned = Some((button.center() * ctx.pixels_per_point(), offset));
+            // the button kept there already clicked again: kept there as
+            // it was, so that what egui rounds to pixels doesn't add up
+            let ppp = ctx.pixels_per_point();
+            let again = dialog.pinned.is_some_and(|(at, _)| button.contains(at / ppp));
+            if !again {
+                let offset = button.center() - modal.response.rect.min
+                    + egui::vec2(0.0, dialog.scrolled.offset);
+                dialog.pinned = Some((button.center() * ppp, offset));
+            }
             dialog.stepped_at = now;
             dialog.returning = None;
         }
@@ -930,6 +1026,56 @@ mod tests {
                 assert!(screen.on(&label), "{label} at {scale}: the pointer at {pointer:?}");
             }
         }
+    }
+
+    #[test]
+    fn takes_clicks_again_and_again_in_a_window_it_hardly_fits() {
+        use crate::testing::Screen;
+        // `label`'s button clicked again and again, the pointer kept still,
+        // each click scaling the window to the next of `scales`
+        let clicks = |screen: &mut Screen, label: &str, scales: &[f64]| {
+            let under = screen.pixels(label);
+            for &scale in scales {
+                screen.click();
+                screen.frames(4);
+                let app = screen.harness.state();
+                assert_eq!(app.config.gui.scale, scale, "{label}");
+                assert!(app.settings_dialog.pinned.is_some(), "{label} at {scale}");
+                let now = screen.pixels(label);
+                assert!((now - under).length() < 2.0, "{label} at {scale}: {now:?}, not {under:?}");
+                assert!(screen.on(label), "{label} at {scale}");
+            }
+        };
+        let dialog = |screen: &Screen| {
+            let dialog = &screen.harness.state().settings_dialog;
+            (dialog.drawn.0, dialog.scrolled)
+        };
+        // a usual window, which the dialog is nearly as tall as, to where
+        // the window, 1280 pixels wide, is too narrow for it
+        let (larger, smaller) = (fl!("scale-larger"), fl!("scale-smaller"));
+        let mut screen = on_the_scale(1.0, [1280.0, 900.0], &larger);
+        clicks(&mut screen, &larger, &[1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7]);
+        // which it did by scrolling its settings: it is at the window's top
+        let (drawn, scrolled) = dialog(&screen);
+        assert!(drawn.top() < 1.0 && scrolled.offset > 50.0, "{drawn:?}, {scrolled:?}");
+        // and back by − from there, the pointer moved along the row:
+        // scrolled back, then lower
+        screen.move_to(screen.pixels(&smaller));
+        clicks(&mut screen, &smaller, &[1.6, 1.5, 1.4, 1.3, 1.2, 1.1, 1.0]);
+        // by − from the middle, further down the window: lower, then
+        // ending at the window's bottom, its settings shown shorter
+        let mut screen = on_the_scale(1.7, [1280.0, 900.0], &smaller);
+        clicks(&mut screen, &smaller, &[1.6, 1.5, 1.4, 1.3, 1.2, 1.1, 1.0, 0.9, 0.8]);
+        let (drawn, scrolled) = dialog(&screen);
+        let bottom = screen.harness.ctx.content_rect().bottom();
+        assert!((drawn.bottom() - bottom).abs() < 1.0, "{drawn:?} in {bottom}");
+        assert!(scrolled.offset < 1.0 && scrolled.shown < scrolled.content - 10.0, "{scrolled:?}");
+        // and scrolled by hand, it is let go
+        let (unit, phase) = (egui::MouseWheelUnit::Point, egui::TouchPhase::Move);
+        let modifiers = egui::Modifiers::NONE;
+        let delta = egui::vec2(0.0, -40.0);
+        screen.frame(vec![egui::Event::MouseWheel { unit, delta, phase, modifiers }]);
+        assert!(screen.harness.state().settings_dialog.pinned.is_none());
     }
 
     #[test]
