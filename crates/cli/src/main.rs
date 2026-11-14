@@ -109,6 +109,41 @@ fn stdout_was_closed() -> bool {
 /// cancels, rather than keeping the best of the next input's.
 const SETTLE_AGAIN: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// What Ctrl-C means to a command: keeping the best WebM encode so far,
+/// in `convert`, or else cancelling.
+#[derive(Debug)]
+struct CtrlC {
+    /// Whether it may keep the best so far: in `convert`.
+    settles: bool,
+    /// When it last did.
+    settled_at: Option<std::time::Instant>,
+}
+
+/// What a Ctrl-C was taken as.
+#[derive(Debug, PartialEq, Eq)]
+enum Meaning {
+    Settle,
+    Cancel,
+}
+
+impl CtrlC {
+    /// What Ctrl-C pressed at `now` means: keeping the best so far where
+    /// `settle` does so, unless it did within [`SETTLE_AGAIN`] before, as
+    /// then it is asked twice; cancelling otherwise, for whoever pressed
+    /// it to do. `settle` is called only where it would settle, and both
+    /// says whether it can and does it, so that the two are of the same
+    /// moment.
+    fn press(&mut self, now: std::time::Instant, settle: impl FnOnce() -> bool) -> Meaning {
+        let again =
+            self.settled_at.is_some_and(|at| now.saturating_duration_since(at) < SETTLE_AGAIN);
+        if self.settles && !again && settle() {
+            self.settled_at = Some(now);
+            return Meaning::Settle;
+        }
+        Meaning::Cancel
+    }
+}
+
 /// The command's token, which a closed stdout cancels.
 static CANCEL: std::sync::OnceLock<CancelToken> = std::sync::OnceLock::new();
 
@@ -376,7 +411,7 @@ fn run(cli: Cli) -> Result<()> {
         // too, and stops at once; core waits a moment for what it meant,
         // decided here on the signal's thread, so promptly
         let settles = matches!(cli.command, Command::Convert(_));
-        let settled_at = std::sync::Mutex::new(None::<std::time::Instant>);
+        let presses = std::sync::Mutex::new(CtrlC { settles, settled_at: None });
         ctrlc::set_handler({
             let cancel = cancel.clone();
             move || {
@@ -385,14 +420,11 @@ fn run(cli: Cli) -> Result<()> {
                     cancel.cancel();
                     std::process::exit(130);
                 }
-                let mut settled_at = settled_at.lock().unwrap();
-                // again soon after keeping the best: cancel, as asked twice
-                let again = settled_at.is_some_and(|at| at.elapsed() < SETTLE_AGAIN);
-                if settles && !again && cancel.settle() {
-                    *settled_at = Some(std::time::Instant::now());
-                    return;
+                let mut presses = presses.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let now = std::time::Instant::now();
+                if presses.press(now, || cancel.settle()) == Meaning::Cancel {
+                    cancel.cancel();
                 }
-                cancel.cancel();
             }
         })?;
     }
@@ -594,6 +626,33 @@ fn report(ran: Result<()>, json: bool) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    use super::{CtrlC, Meaning};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn ctrl_c_keeps_the_best_so_far_unless_pressed_again_soon() {
+        let start = Instant::now();
+        let at = |secs: f64| start + Duration::from_secs_f64(secs);
+        let fits = || true;
+        let never = || -> bool { panic!("asked to settle as it shouldn't") };
+        // the first, where an encode fits, keeps it
+        let mut convert = CtrlC { settles: true, settled_at: None };
+        assert_eq!(convert.press(at(0.0), fits), Meaning::Settle);
+        // again within 2 seconds cancels, though it could settle again,
+        // as the next input's encode fits by then
+        assert_eq!(convert.press(at(1.9), never), Meaning::Cancel);
+        // after them, it keeps the best so far again
+        let mut convert = CtrlC { settles: true, settled_at: None };
+        assert_eq!(convert.press(at(0.0), fits), Meaning::Settle);
+        assert_eq!(convert.press(at(2.1), fits), Meaning::Settle);
+        // nothing fitting yet, it cancels
+        let mut convert = CtrlC { settles: true, settled_at: None };
+        assert_eq!(convert.press(at(0.0), || false), Meaning::Cancel);
+        // as it does in other commands, whatever fits
+        let mut watch = CtrlC { settles: false, settled_at: None };
+        assert_eq!(watch.press(at(0.0), never), Meaning::Cancel);
+    }
+
     /// build.rs writes Cargo.toml's version into the manifest built into
     /// tgradish.exe, with the fourth number Windows wants.
     #[test]
