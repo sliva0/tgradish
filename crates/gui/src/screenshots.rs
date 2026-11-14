@@ -218,9 +218,71 @@ fn window(config: Config, size: egui::Vec2) -> Harness<'static, App> {
     )
 }
 
+/// The bar over the preview at its fullest, at the narrowest window and
+/// the usual one: a video made, cropped, zoomed in and changed since; and
+/// the result's small picture of pixel art, at its smallest and largest.
+/// Needs ffmpeg.
+fn bars_and_insets(save: &mut impl FnMut(&mut Harness<App>, &str)) {
+    use crate::config::Corner;
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::default();
+    config.gui.output_dir = Some(dir.path().join("out"));
+    config.ffmpeg.choice = FfmpegChoice::System;
+    let shot =
+        |harness: &mut Harness<App>, save: &mut dyn FnMut(&mut Harness<App>, &str), name: &str| {
+            harness.event(egui::Event::PointerGone);
+            for item in &mut harness.state_mut().items {
+                item.view.playing = false;
+            }
+            harness.run_steps(3);
+            std::thread::sleep(Duration::from_millis(300));
+            harness.run_steps(3);
+            save(harness, name);
+        };
+    let Some(clip) = video(dir.path(), "640x360") else { return };
+    for width in [crate::MIN_WIDTH, 1280.0] {
+        let mut harness = window(config.clone(), egui::vec2(width, 820.0));
+        harness.state_mut().add(vec![clip.clone()]);
+        finish(&mut harness);
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let item = &mut harness.state_mut().items[0];
+        item.view.show = Show::Input;
+        item.choices.crop = Some(Crop { x: 120, y: 60, width: 320, height: 200 });
+        item.view.input_zoom.level = 1.5;
+        shot(&mut harness, save, &format!("bar-crop-zoomed-{width}"));
+        // changed since it was made
+        harness.state_mut().items[0].choices.webm.tempo = Some(2.0);
+        shot(&mut harness, save, &format!("bar-outdated-{width}"));
+    }
+    // pixel art as a sticker, and as an emoji, whose result is small
+    let walker = tgradish_corpus::sprite("walker_2x");
+    let ase = dir.path().join("walker.ase");
+    std::fs::write(&ase, tgradish_corpus::encode::aseprite_with(&walker, &[], &[])).unwrap();
+    let mut harness = window(config.clone(), egui::vec2(1280.0, 820.0));
+    harness.state_mut().add(vec![ase]);
+    finish(&mut harness);
+    let item = &mut harness.state_mut().items[0];
+    (item.format, item.format_guessed) = (Format::Webm, false);
+    finish(&mut harness);
+    for (target, name) in [
+        (tgradish_core::telegram::Target::Sticker, "sticker"),
+        (tgradish_core::telegram::Target::Emoji, "emoji"),
+    ] {
+        harness.state_mut().items[0].choices.target = target;
+        for size in [1, 3, 5] {
+            harness.state_mut().config.gui.result_preview =
+                ResultPreview { size, corner: Corner::default() };
+            shot(&mut harness, save, &format!("inset-{name}-{size}"));
+        }
+    }
+}
+
 /// The states the window shows of what goes on around a conversion: a
 /// video made. Needs ffmpeg.
 fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
+    bars_and_insets(save);
     let dir = tempfile::tempdir().unwrap();
     let mut config = Config::default();
     config.gui.output_dir = Some(dir.path().join("out"));
