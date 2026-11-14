@@ -131,7 +131,9 @@ never enable its GPL parts. Paths and commands say "licenses", prose says
 
 ## Releasing
 
-1. Set the version in `Cargo.toml`: `[workspace.package]`, and
+1. Give the version its section in `CHANGELOG.md`, dated: the release's
+   notes are that section, which the release workflow fails without.
+   Set the version in `Cargo.toml`: `[workspace.package]`, and
    `tgradish-core` and `tgradish-gui` under `[workspace.dependencies]`,
    which ask for it exactly; and `pkgver` in each
    `packaging/aur/*/PKGBUILD`. The two libraries, `tgradish-frames` and

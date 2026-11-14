@@ -480,6 +480,24 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
+      # the release's notes: CHANGELOG.md's section for Cargo.toml's
+      # version, which the tag is; fails where there is none
+      - name: Take the notes from the changelog
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          mkdir notes
+          awk -v heading="## [$version]" '
+            /^## \[/ { if (on) exit; on = index($0, heading) == 1; next }
+            on
+          ' CHANGELOG.md > notes/notes.md
+          grep -q . notes/notes.md || { echo "CHANGELOG.md has no $version"; exit 1; }
+          cat notes/notes.md
+      - uses: actions/upload-artifact@v7
+        with:
+          name: notes
+          path: notes/notes.md
+          if-no-files-found: error
+
   # drafts the release from what assemble gathered, on a tag pushed: the
   # one job that may write to the repository, which runs none of its code
   publish:
@@ -494,12 +512,17 @@ jobs:
         with:
           name: draft
           path: artifacts
+      - uses: actions/download-artifact@v8
+        with:
+          name: notes
+          path: notes
 
+      # the changelog's section, then what GitHub lists of the changes
       - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: >
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag
-          --title "tgradish $GITHUB_REF_NAME" --generate-notes
-          artifacts/*
+          --title "tgradish $GITHUB_REF_NAME" --notes-file notes/notes.md
+          --generate-notes artifacts/*
