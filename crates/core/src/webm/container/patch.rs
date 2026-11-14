@@ -32,7 +32,7 @@ pub struct Patch {
     pub track_uid: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct PatchReport {
     pub old_duration: Option<f64>,

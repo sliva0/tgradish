@@ -311,6 +311,7 @@ fn encode_in(
     let issues = telegram::check(&info, plan.target);
     let temp_dir = request.keep_temp.then(|| dir.to_path_buf());
     on_event(Event::Finished {
+        input: plan.input.clone(),
         output: plan.output.clone(),
         bytes: info.file_size,
         attempt: best.number,

@@ -165,6 +165,7 @@ pub fn convert(
         ),
     };
     on_event(Event::Finished {
+        input: request.input.first().to_path_buf(),
         output: outcome.output.clone(),
         bytes: outcome.bytes,
         json_bytes: outcome.json_bytes,

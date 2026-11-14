@@ -32,6 +32,10 @@ pub enum Event {
     /// Something about the art worth knowing, as normalising found it.
     Warning { message: String },
     Finished {
+        /// The input, the first picture of a sequence, as every format's
+        /// result names it.
+        #[serde(serialize_with = "crate::protocol::serialize_path")]
+        input: PathBuf,
         #[serde(serialize_with = "crate::protocol::serialize_path")]
         output: PathBuf,
         bytes: u64,

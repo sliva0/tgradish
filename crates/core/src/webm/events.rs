@@ -101,6 +101,10 @@ pub enum Event {
         line: String,
     },
     Finished {
+        /// The input, the first picture of a sequence, as every format's
+        /// result names it.
+        #[serde(serialize_with = "crate::protocol::serialize_path")]
+        input: PathBuf,
         #[serde(serialize_with = "crate::protocol::serialize_path")]
         output: PathBuf,
         bytes: u64,

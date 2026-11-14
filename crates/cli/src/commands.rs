@@ -75,10 +75,17 @@ fn spoof_file(ctx: &Context, args: &SpoofArgs) -> Result<()> {
         )?;
 
     // a duration Telegram doesn't take makes a file it refuses
-    let refused = args.fake_duration > telegram::MAX_SECONDS;
+    let refused = telegram::too_long(args.fake_duration);
     let done = || if refused { Err(crate::Exit(crate::REFUSED).into()) } else { Ok(()) };
     if ctx.global.json {
-        crate::json_line(&json!({ "output": output.to_string_lossy(), "report": report }));
+        let too_long =
+            telegram::Issue::TooLong { seconds: args.fake_duration, max: telegram::MAX_SECONDS };
+        crate::json_line(&protocol::SpoofEvent::Finished {
+            input: args.input.clone(),
+            output,
+            report,
+            issues: refused.then_some(too_long).into_iter().collect(),
+        });
         return done();
     }
     if refused {

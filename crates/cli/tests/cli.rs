@@ -73,6 +73,9 @@ fn describes_protocol() {
     assert_eq!(preset("fast")["tgs"]["speed"], "fast");
     assert!(preset("best")["webm"]["target"].is_null());
     assert!(preset("best")["error"].is_null());
+    // what spoof prints, an event as conversions' are
+    let spoof = serde_json::to_string(&description["spoof-events"]).unwrap();
+    assert!(spoof.contains("\"finished\"") && spoof.contains("\"error\""), "{spoof}");
 }
 
 #[test]
@@ -329,6 +332,8 @@ fn converts_with_json_events() {
     assert_eq!(plan["title"], "from flag", "flags win over --options-json");
     let finished = events.last().unwrap();
     assert_eq!(finished["event"], "finished");
+    // every format's result names its input
+    assert!(finished["input"].is_string(), "{finished}");
     assert_eq!(finished["issues"], Value::Array(vec![]));
 
     let inspected = tgradish(&["--json", "inspect", out.to_str().unwrap()]);
@@ -688,6 +693,7 @@ fn makes_animated_stickers() {
         (Some("finished"), Some(false))
     );
     assert_eq!(finished["issues"], serde_json::json!([]));
+    assert_eq!(finished["input"], lines[0]["input"]);
 
     let inspected = tgradish(&["--json", "inspect", out.to_str().unwrap()]);
     let lines = json_lines(&inspected);
@@ -1356,12 +1362,26 @@ fn spoofs_durations() {
     let output = tgradish(&["--json", "spoof", input, "-y"]);
     let lines = json_lines(&output);
     assert_eq!(lines.len(), 1);
+    assert_eq!(
+        (lines[0]["event"].as_str(), lines[0]["input"].as_str()),
+        (Some("finished"), Some(input))
+    );
     assert!(lines[0]["output"].as_str().unwrap().ends_with("square.spoofed.webm"));
     assert_eq!(lines[0]["report"]["old-duration"], 1.0);
+    assert_eq!(lines[0]["issues"], serde_json::json!([]));
     // a duration Telegram refuses is written, and refused
     let output = tgradish(&["spoof", input, "-y", "-d", "5"]);
     assert_eq!(output.status.code(), Some(3));
     assert!(String::from_utf8_lossy(&output.stderr).contains("Telegram will still refuse it"));
+    // saying why as JSON too
+    let output = tgradish(&["--json", "spoof", input, "-y", "-d", "5"]);
+    assert_eq!(output.status.code(), Some(3));
+    let issues = &json_lines(&output)[0]["issues"];
+    assert_eq!(
+        (issues[0]["kind"].as_str(), issues[0]["severity"].as_str()),
+        (Some("too-long"), Some("error"))
+    );
+    assert!(issues[0]["message"].is_string());
 }
 
 /// A config is read only by what uses it, and one named that isn't there
