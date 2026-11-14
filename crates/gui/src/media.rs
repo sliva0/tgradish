@@ -485,14 +485,17 @@ impl Art {
         match (self.sheet_refused, reading.sheet) {
             (Some(frames), _) => frames,
             (None, Some(_)) => 1,
-            (None, None) => self.clip.frames.len(),
+            // all of an Aseprite file's, whichever its tag uses
+            (None, None) => self.clip.frames.len().max(self.durations.len()),
         }
     }
 }
 
-/// `input` read as it is, where reading it as the sprite sheet `options`
-/// ask for can't be, as it has frames of its own, and how many: `None`
-/// where they ask for no sheet, or it has one frame.
+/// `input` read as it is, with the rest of `options`, as its tag, where
+/// reading it as the sprite sheet they ask for can't be, as the file has
+/// frames of its own, and how many: `None` where they ask for no sheet, or
+/// it has one frame. An Aseprite file's are all of its frames, whichever
+/// its tag, which may have only one, uses.
 pub(crate) fn animated(
     backend: Option<&Backend>,
     input: &Input,
@@ -502,7 +505,7 @@ pub(crate) fn animated(
     options.sheet?;
     let whole = tgs::Options { sheet: None, sheet_frames: None, ..options.clone() };
     let art = tgs::read_art(backend, input, &whole, cancel).ok()?;
-    let frames = art.frames.len();
+    let frames = art.frames.len().max(art.durations.len());
     (frames > 1).then_some((art, frames))
 }
 
@@ -543,5 +546,30 @@ mod tests {
             Preview { width: 1, height: 1, frames: vec![(vec![0; 4], 6), (vec![0; 4], 3)] };
         let clip = Clip::from_preview(preview, true);
         assert_eq!(clip.times, [0.0, 0.1, 0.15]);
+    }
+
+    #[test]
+    fn reads_a_file_of_frames_kept_as_a_sheet_as_it_is_whatever_its_tag() {
+        // an Aseprite file of frames, as a session may keep it ticked as a
+        // sheet, its tag one of a single frame
+        let dir = tempfile::tempdir().unwrap();
+        let walker = tgradish_corpus::sprite("walker_2x");
+        let tags = [("still", 0, 0), ("walk", 1, 7)];
+        let path = dir.path().join("walker.aseprite");
+        std::fs::write(&path, tgradish_corpus::encode::aseprite_with(&walker, &tags, &[])).unwrap();
+        let input = Input::File(path);
+        let options = tgs::Options {
+            sheet: "2x1".parse().ok(),
+            tag: Some("still".into()),
+            ..tgs::Options::default()
+        };
+        let cancel = CancelToken::new();
+        assert!(tgs::read_art(None, &input, &options, &cancel).is_err());
+        // read as it is, its tag kept: one frame, of a file of eight
+        let (art, frames) = animated(None, &input, &options, &cancel).expect("read as it is");
+        assert_eq!((art.frames.len(), frames), (1, walker.frames.len()));
+        // and no sheet asked for, nothing to read again
+        let plain = tgs::Options { sheet: None, ..options };
+        assert!(animated(None, &input, &plain, &cancel).is_none());
     }
 }
