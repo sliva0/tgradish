@@ -210,7 +210,7 @@ impl Cli {
             Command::Watch(args) => {
                 vec![Some(args.dir.clone()), args.conversion.output_dir.clone()]
             }
-            Command::Spoof(args) => vec![Some(args.input.clone()), args.output.clone()],
+            Command::Spoof(args) => vec![Some(args.input.clone()), args.output(), args.to.clone()],
             Command::Inspect(args) => args.files.iter().cloned().map(Some).collect(),
             _ => Vec::new(),
         };
@@ -218,6 +218,22 @@ impl Cli {
             return Some("reading stdin or writing stdout isn't supported: name a file".into());
         }
         let Command::Convert(args) = &self.command else { return None };
+        if !args.old_input.is_empty() {
+            let inputs: Vec<String> = args
+                .old_input
+                .iter()
+                .chain(&args.inputs)
+                .map(|path| {
+                    let path = path.to_string_lossy();
+                    shlex::try_quote(&path)
+                        .map_or_else(|_| path.to_string(), |quoted| quoted.into_owned())
+                })
+                .collect();
+            return Some(format!(
+                "2.0 takes inputs without -i: tgradish convert {}",
+                inputs.join(" ")
+            ));
+        }
         let word = args
             .inputs
             .iter()
@@ -265,8 +281,11 @@ impl Command {
 #[derive(Debug, Args)]
 pub struct ConvertArgs {
     /// Videos or images to convert.
-    #[arg(required_unless_present = "clipboard")]
+    #[arg(required_unless_present_any = ["clipboard", "old_input"])]
     pub inputs: Vec<PathBuf>,
+    /// 1.x's way of naming an input, which is said to have changed.
+    #[arg(short = 'i', long = "input", hide = true, value_name = "FILE")]
+    pub old_input: Vec<PathBuf>,
     /// Convert what is on the clipboard: copied files, a copied path, or an
     /// image.
     #[arg(long, conflicts_with = "inputs")]
@@ -713,6 +732,9 @@ value_enum!(CompromiseArg => reduce::Compromise { Auto, Motion, Detail });
 pub struct SpoofArgs {
     /// WebM file to spoof.
     pub input: PathBuf,
+    /// Output file, as -o names it, where cp would take it.
+    #[arg(value_name = "OUTPUT", conflicts_with_all = ["output", "in_place"])]
+    pub to: Option<PathBuf>,
     /// Output file. [default: NAME.spoofed.webm beside the input]
     #[arg(short, long, value_name = "FILE", conflicts_with = "in_place")]
     pub output: Option<PathBuf>,
@@ -736,6 +758,13 @@ pub struct SpoofArgs {
     pub watermark: bool,
     #[arg(long, overrides_with = "watermark", hide = true)]
     pub no_watermark: bool,
+}
+
+impl SpoofArgs {
+    /// The output file, by `-o` or after the input.
+    pub fn output(&self) -> Option<PathBuf> {
+        self.output.clone().or_else(|| self.to.clone())
+    }
 }
 
 #[derive(Debug, Args)]
@@ -939,6 +968,22 @@ mod tests {
             assert_eq!(args.fake_duration, 1.5, "{flag}");
         }
         assert!(Cli::try_parse_from(["tgradish", "spoof", "a.webm", "--duration=1"]).is_err());
+    }
+
+    /// What 1.x took: spoof's output after its input, as cp takes it, and
+    /// convert's -i, which is said to be gone.
+    #[test]
+    fn takes_or_explains_what_1x_took() {
+        let cli = Cli::parse_from(["tgradish", "spoof", "a.webm", "b.webm"]);
+        let Command::Spoof(args) = cli.command else { panic!() };
+        assert_eq!(args.output(), Some(PathBuf::from("b.webm")));
+        for both in [&["-o", "c.webm"][..], &["-i"]] {
+            let args = ["tgradish", "spoof", "a.webm", "b.webm"].iter().chain(both);
+            assert!(Cli::try_parse_from(args).is_err(), "{both:?}");
+        }
+        let cli = Cli::parse_from(["tgradish", "convert", "-i", "my clip.mp4"]);
+        let said = cli.misused().unwrap();
+        assert_eq!(said, "2.0 takes inputs without -i: tgradish convert 'my clip.mp4'");
     }
 
     #[test]

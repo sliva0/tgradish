@@ -37,7 +37,7 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
 }
 
 fn spoof_file(ctx: &Context, args: &SpoofArgs) -> Result<()> {
-    let output = match (&args.output, args.in_place) {
+    let output = match (&args.output(), args.in_place) {
         (_, true) => args.input.clone(),
         (Some(output), false) => output.clone(),
         (None, false) => args.input.with_extension(&SPOOFED[1..]),
