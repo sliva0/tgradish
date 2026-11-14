@@ -17,8 +17,9 @@ that makes every kind of Telegram sticker and emoji.
   would say of the result. It reopens the files of last time, laid out as
   they were. Keyboard shortcuts, listed under F1, add, pick, convert and
   copy files, step through frames and cut, and open Settings or Inspect.
-- Shell completions (`tgradish completions SHELL`) and man pages, which
-  packages install.
+- Shell completions (`tgradish completions SHELL`) for bash, zsh, fish,
+  PowerShell and nushell, and man pages, which packages install, nushell's
+  in its vendor autoload folder.
 - Animated stickers and emoji as `.tgs` (`-f tgs`), drawn from pixel art:
   GIF, PNG and APNG, WebP, Aseprite files, sprite sheets, image sequences
   and videos of pixel art, fitted into 64 KiB.

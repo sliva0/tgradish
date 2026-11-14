@@ -73,7 +73,8 @@ rustPlatform.buildRustPackage {
     installShellCompletion --cmd tgradish \
       --bash <($out/bin/tgradish completions bash) \
       --zsh <($out/bin/tgradish completions zsh) \
-      --fish <($out/bin/tgradish completions fish)
+      --fish <($out/bin/tgradish completions fish) \
+      --nushell <($out/bin/tgradish completions nushell)
     $out/bin/tgradish __man man
     installManPage man/*.1
   '';

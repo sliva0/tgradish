@@ -73,6 +73,8 @@ package() {
     | install -Dm644 /dev/stdin "$pkgdir/usr/share/zsh/site-functions/_tgradish"
   target/release/tgradish completions fish \
     | install -Dm644 /dev/stdin "$pkgdir/usr/share/fish/vendor_completions.d/tgradish.fish"
+  target/release/tgradish completions nushell \
+    | install -Dm644 /dev/stdin "$pkgdir/usr/share/nushell/vendor/autoload/tgradish.nu"
   install -Dm644 crates/cli/assets/tgradish.desktop -t "$pkgdir/usr/share/applications/"
   for icon in crates/cli/assets/icons/hicolor/*/apps/tgradish.png; do
     install -Dm644 "$icon" "$pkgdir/usr/share/${icon#crates/cli/assets/}"

@@ -330,10 +330,18 @@ pub fn licenses(ctx: &Context) {
 
 /// Prints the script that completes tgradish in `shell`.
 pub fn completions(shell: crate::args::ShellArg) {
+    use crate::args::ShellArg;
     use clap::CommandFactory;
+    use clap_complete::{Shell, generate};
     let mut script = Vec::new();
-    let shell: clap_complete::Shell = shell.into();
-    clap_complete::generate(shell, &mut crate::args::Cli::command(), "tgradish", &mut script);
+    let (cli, name) = (&mut crate::args::Cli::command(), "tgradish");
+    match shell {
+        ShellArg::Bash => generate(Shell::Bash, cli, name, &mut script),
+        ShellArg::Zsh => generate(Shell::Zsh, cli, name, &mut script),
+        ShellArg::Fish => generate(Shell::Fish, cli, name, &mut script),
+        ShellArg::Powershell => generate(Shell::PowerShell, cli, name, &mut script),
+        ShellArg::Nushell => generate(clap_complete_nushell::Nushell, cli, name, &mut script),
+    }
     out!("{}", String::from_utf8_lossy(&script));
 }
 

@@ -115,6 +115,7 @@ fn writes_completions_and_man_pages() {
         ("zsh", "#compdef tgradish"),
         ("fish", "complete -c tgradish"),
         ("powershell", "Register-ArgumentCompleter"),
+        ("nushell", "export extern tgradish ["),
     ] {
         let output = tgradish(&["completions", shell]);
         assert!(output.status.success(), "{shell}");

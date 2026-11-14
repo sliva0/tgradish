@@ -252,9 +252,9 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
     Ok(())
 }
 
-/// The completion scripts of bash, zsh and fish, as `completions/`, and
-/// the man pages, gzipped as `man/*.1.gz`, written by the built `binary`
-/// into `stage`. A musl build that this machine can't run, without musl's
+/// The completion scripts of bash, zsh, fish and nushell, as
+/// `completions/`, and the man pages, gzipped as `man/*.1.gz`, written by
+/// the built `binary` into `stage`. A musl build that this machine can't run, without musl's
 /// loader, goes without them, as it says.
 fn shell_files(binary: &Path, stage: &Path, target: Target) -> Result<()> {
     let man = stage.join("man");
@@ -278,14 +278,21 @@ fn shell_files(binary: &Path, stage: &Path, target: Target) -> Result<()> {
 
 /// Each shell's completion script, as the archive names it, and where
 /// packages install it, from `/usr/share`.
-const SHELL_FILES: [(&str, &str); 3] =
-    [("bash", "tgradish.bash"), ("zsh", "_tgradish"), ("fish", "tgradish.fish")];
+const SHELL_FILES: [(&str, &str); 4] = [
+    ("bash", "tgradish.bash"),
+    ("zsh", "_tgradish"),
+    ("fish", "tgradish.fish"),
+    ("nushell", "tgradish.nu"),
+];
 
 /// Where packages install each of [`SHELL_FILES`], under `/usr/share`.
-const SHELL_PATHS: [&str; 3] = [
+/// Nushell sources every file in its vendor autoload folders as it starts,
+/// those of `XDG_DATA_DIRS` among them, which are for packages' files.
+const SHELL_PATHS: [&str; 4] = [
     "bash-completion/completions/tgradish",
     "zsh/site-functions/_tgradish",
     "fish/vendor_completions.d/tgradish.fish",
+    "nushell/vendor/autoload/tgradish.nu",
 ];
 
 /// What the GUI loads when it opens, as Debian packages and as the

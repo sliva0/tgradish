@@ -167,17 +167,7 @@ pub enum ShellArg {
     Zsh,
     Fish,
     Powershell,
-}
-
-impl From<ShellArg> for clap_complete::Shell {
-    fn from(value: ShellArg) -> Self {
-        match value {
-            ShellArg::Bash => clap_complete::Shell::Bash,
-            ShellArg::Zsh => clap_complete::Shell::Zsh,
-            ShellArg::Fish => clap_complete::Shell::Fish,
-            ShellArg::Powershell => clap_complete::Shell::PowerShell,
-        }
-    }
+    Nushell,
 }
 
 /// [`FfmpegChoice`] for clap.
@@ -237,8 +227,10 @@ pub enum Command {
     /// shell.
     ///
     /// For bash, as `tgradish completions bash >
-    /// ~/.local/share/bash-completion/completions/tgradish`; packages
-    /// install them for every shell.
+    /// ~/.local/share/bash-completion/completions/tgradish`; for nushell,
+    /// as `tgradish completions nushell | save -f
+    /// ($nu.user-autoload-dirs.0 | path join tgradish.nu)`. Packages
+    /// install them for every shell but PowerShell.
     Completions {
         /// The shell to complete in.
         shell: ShellArg,
