@@ -18,6 +18,16 @@ use crate::media::Task;
 use crate::theme;
 use crate::widgets::{self, note, row, segments};
 
+/// Where something was drawn, nowhere until it is.
+#[derive(Clone, Copy, Debug)]
+struct Drawn(egui::Rect);
+
+impl Default for Drawn {
+    fn default() -> Drawn {
+        Drawn(egui::Rect::NOTHING)
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct SettingsDialog {
     open: bool,
@@ -58,6 +68,16 @@ pub(crate) struct SettingsDialog {
     /// kept so that the button stays there as everything grows or shrinks
     /// around it, under the pointer, rather than in the window's middle.
     pinned: Option<(egui::Pos2, egui::Vec2)>,
+    /// When the scale's button was last clicked.
+    stepped_at: f64,
+    /// Where the scale's row is, as last drawn, which the pointer keeps the
+    /// dialog pinned near.
+    scale_row: Option<egui::Rect>,
+    /// Where the dialog's corner was as it went back to the window's middle
+    /// from where it was pinned, and when.
+    returning: Option<(egui::Pos2, f64)>,
+    /// Where the dialog was drawn last.
+    drawn: Drawn,
 }
 
 impl SettingsDialog {
@@ -114,6 +134,45 @@ pub(crate) fn write(config: &mut Config, path: &Path) -> Result<Option<PathBuf>,
     Ok(kept)
 }
 
+/// How near the scale's row the pointer keeps the dialog where it is, as
+/// its buttons scale the window, and for how long after the last click.
+const NEAR: f32 = 24.0;
+const HELD: f64 = 1.5;
+/// How long the dialog takes back to the window's middle.
+const RETURNING: f64 = 0.15;
+
+/// Where the dialog's corner goes: where it keeps the scale's button
+/// clicked under the pointer, or on its way back to the window's middle
+/// from there, within the window either way; `None` in the middle.
+fn placed(ctx: &egui::Context, dialog: &mut SettingsDialog) -> Option<egui::Pos2> {
+    let window = ctx.content_rect();
+    let size = dialog.drawn.0.size().max(egui::Vec2::ZERO);
+    // all of it in the window, its corner at the least where it is larger
+    let within = |corner: egui::Pos2| {
+        let most = (window.max - size).max(window.min);
+        corner.clamp(window.min, most)
+    };
+    if let Some((at, offset)) = dialog.pinned {
+        return Some(within(at / ctx.pixels_per_point() - offset));
+    }
+    let (from, since) = dialog.returning?;
+    let share = (ctx.input(|input| input.time) - since) / RETURNING;
+    if share >= 1.0 {
+        dialog.returning = None;
+        return None;
+    }
+    ctx.request_repaint();
+    let middle = window.center() - size / 2.0;
+    Some(within(from.lerp(middle, crate::inset::eased(share))))
+}
+
+/// Lets the dialog go back to the window's middle, from where it is drawn.
+fn release(dialog: &mut SettingsDialog, now: f64) {
+    if dialog.pinned.take().is_some() {
+        dialog.returning = Some((dialog.drawn.0.min, now));
+    }
+}
+
 /// How much of the last of the settings that fit fades out, where there
 /// are more below.
 const FADE: f32 = 24.0;
@@ -137,8 +196,7 @@ pub(crate) fn show(
     }
     let mut close = false;
     let mut modal = widgets::dialog(ctx, "settings");
-    if let Some((at, offset)) = dialog.pinned {
-        let corner = at / ctx.pixels_per_point() - offset;
+    if let Some(corner) = placed(ctx, dialog) {
         let area = egui::Modal::default_area(egui::Id::new("settings"));
         modal = modal.area(area.anchor(egui::Align2::LEFT_TOP, corner.to_vec2()));
     }
@@ -205,9 +263,35 @@ pub(crate) fn show(
             });
         });
     });
-    if let Some(button) = dialog.stepped.take().filter(|button| button.is_positive()) {
-        let offset = button.center() - modal.response.rect.min;
-        dialog.pinned = Some((button.center() * ctx.pixels_per_point(), offset));
+    dialog.drawn = Drawn(modal.response.rect);
+    let now = ctx.input(|input| input.time);
+    match dialog.stepped.take() {
+        Some(button) if button.is_positive() => {
+            let offset = button.center() - modal.response.rect.min;
+            dialog.pinned = Some((button.center() * ctx.pixels_per_point(), offset));
+            dialog.stepped_at = now;
+            dialog.returning = None;
+        }
+        // back to 100%, from a button that stays where it is
+        Some(_) => release(dialog, now),
+        None => {}
+    }
+    // held while the pointer is on the scale's row, for the next click,
+    // and back to the middle once it leaves, or a while after a click
+    if dialog.pinned.is_some() {
+        let pointer = ctx.input(|input| input.pointer.hover_pos());
+        // without a pointer, as clicked by the keyboard, for a while
+        let near = match (dialog.scale_row, pointer) {
+            (Some(row), Some(at)) => row.expand(NEAR).contains(at),
+            (_, None) => true,
+            (None, Some(_)) => false,
+        };
+        let waited = now - dialog.stepped_at;
+        if !near || waited >= HELD {
+            release(dialog, now);
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(HELD - waited));
+        }
     }
     // changes stay either way, until tgradish closes unless saved
     if close || modal.should_close() {
@@ -346,11 +430,14 @@ fn sections(
     row(ui, &fl!("accent"), &fl!("accent", "hint"), Ok(()), |ui| {
         accents(ui, &mut gui.accent, &mut dialog.accent_typed);
     });
-    row(ui, &fl!("scale"), &fl!("scale", "hint"), Ok(()), |ui| {
-        if let Some(button) = scale(ui, &mut gui.scale) {
-            dialog.stepped = Some(button);
-        }
+    let scale_row = ui.scope(|ui| {
+        row(ui, &fl!("scale"), &fl!("scale", "hint"), Ok(()), |ui| {
+            if let Some(button) = scale(ui, &mut gui.scale) {
+                dialog.stepped = Some(button);
+            }
+        });
     });
+    dialog.scale_row = Some(scale_row.response.rect);
     row(ui, &fl!("files"), "", Ok(()), |ui| {
         ui.checkbox(&mut gui.reopen_files, fl!("reopen-files"));
     });
@@ -663,7 +750,9 @@ mod tests {
         // the window's size in pixels, which egui sees as fewer points as
         // it grows, as eframe tells it
         let pixels = vec2(1280.0, 900.0);
-        let mut harness = Harness::builder().with_size(pixels).build_eframe(move |_| {
+        // clicked a moment apart, as by hand, rather than seconds
+        let builder = Harness::builder().with_size(pixels).with_step_dt(1.0 / 60.0);
+        let mut harness = builder.build_eframe(move |_| {
             App::with(Config::default(), Some(at.clone()), Presets::builtin())
         });
         let settle = |harness: &mut Harness<App>| {
@@ -731,6 +820,54 @@ mod tests {
         harness.state_mut().config.ffmpeg.choice = FfmpegChoice::Builtin;
         harness.run_steps(2);
         assert!(offered(&harness));
+    }
+
+    #[test]
+    fn goes_back_to_the_middle_once_the_pointer_leaves_the_scale() {
+        use eframe::egui::{Event, PointerButton, Pos2, vec2};
+        let pixels = vec2(1280.0, 900.0);
+        let mut harness = Harness::builder()
+            .with_size(pixels)
+            .with_step_dt(1.0 / 60.0)
+            .build_eframe(move |_| App::with(Config::default(), None, Presets::builtin()));
+        let settle = |harness: &mut Harness<App>, steps: usize| {
+            for _ in 0..steps {
+                let zoom = harness.ctx.zoom_factor();
+                harness.set_size(pixels / zoom);
+                harness.step();
+            }
+        };
+        let centred = |harness: &Harness<App>| {
+            let drawn = harness.state().settings_dialog.drawn.0;
+            (drawn.center() - harness.ctx.content_rect().center()).length() < 1.0
+        };
+        harness.state_mut().settings_dialog.open();
+        // which takes a few frames as its parts find their sizes
+        settle(&mut harness, 16);
+        assert!(centred(&harness));
+        // clicked with the pointer, which stays on the row a moment
+        let click = |harness: &mut Harness<App>, at: Pos2| {
+            harness.event(Event::PointerMoved(at));
+            for pressed in [true, false] {
+                let button = PointerButton::Primary;
+                let modifiers = egui::Modifiers::NONE;
+                harness.event(Event::PointerButton { pos: at, button, pressed, modifiers });
+                harness.step();
+            }
+        };
+        for _ in 0..2 {
+            let plus = harness.get_by_label("+").rect().center();
+            click(&mut harness, plus);
+            settle(&mut harness, 4);
+        }
+        assert_eq!(harness.state().config.gui.scale, 1.2);
+        assert!(harness.state().settings_dialog.pinned.is_some() && !centred(&harness));
+        // the pointer away: back in the middle, a moment later
+        harness.event(Event::PointerMoved(egui::pos2(5.0, 5.0)));
+        settle(&mut harness, 2);
+        assert!(harness.state().settings_dialog.pinned.is_none());
+        settle(&mut harness, 30);
+        assert!(centred(&harness) && harness.state().settings_dialog.returning.is_none());
     }
 
     #[test]

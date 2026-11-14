@@ -100,8 +100,7 @@ impl Inset {
         let drawn = match self.motion {
             Some((from, since)) if now - since < EASING => {
                 ctx.request_repaint();
-                // fast, then settling
-                let t = (1.0 - (1.0 - (now - since) / EASING).powi(3)) as f32;
+                let t = eased((now - since) / EASING);
                 (
                     lerp(from.0, layout.0, t),
                     lerp(from.1, layout.1, t),
@@ -465,6 +464,12 @@ pub(crate) fn split(
         }
     };
     (input, room)
+}
+
+/// How far something moving is along its way, `share` of its time gone,
+/// from 0 to 1: fast, then settling.
+pub(crate) fn eased(share: f64) -> f32 {
+    (1.0 - (1.0 - share.clamp(0.0, 1.0)).powi(3)) as f32
 }
 
 #[cfg(test)]

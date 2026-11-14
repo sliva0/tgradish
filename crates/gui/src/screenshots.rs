@@ -106,6 +106,23 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     // Settings, at the usual size and the smallest
     harness.state_mut().settings_dialog.open();
     shot(&mut harness, save, "state-settings");
+    // made larger by its buttons, the pointer gone from them since: back
+    // in the middle
+    for _ in 0..2 {
+        let plus = harness.get_by_label("+").rect().center();
+        harness.event(egui::Event::PointerMoved(plus));
+        for pressed in [true, false] {
+            let (button, modifiers) = (egui::PointerButton::Primary, egui::Modifiers::NONE);
+            harness.event(egui::Event::PointerButton { pos: plus, button, pressed, modifiers });
+            harness.step();
+        }
+        harness.run_steps(2);
+    }
+    harness.event(egui::Event::PointerMoved(egui::pos2(5.0, 5.0)));
+    harness.run_steps(4);
+    shot(&mut harness, save, "state-settings-scaled");
+    harness.state_mut().config.gui.scale = 1.0;
+    harness.run_steps(3);
     harness.set_size(egui::vec2(crate::MIN_WIDTH, 640.0));
     shot(&mut harness, save, "state-settings-small");
     harness.state_mut().settings_dialog = settings_dialog::SettingsDialog::default();
