@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::error::{Error, Result};
+use crate::error::{Error, FileAction, Result};
 use crate::presets::Format;
 use crate::telegram::Target;
 
@@ -64,8 +64,9 @@ impl Input {
 
     /// Fails before anything is read when writing `output` would lose a
     /// file: when it is one of the files read, even through `..` or a
-    /// link, or, unless `overwrite`, when it exists. Every conversion asks
-    /// this first.
+    /// link, or, unless `overwrite`, when it exists; or when it couldn't
+    /// be written at all, its folder being read-only. Every conversion
+    /// asks this first.
     pub(crate) fn check_output(&self, output: &Path, overwrite: bool) -> Result<()> {
         if self.files()?.iter().any(|input| same_file(input, output)) {
             return Err(Error::OutputIsInput(output.to_path_buf()));
@@ -73,7 +74,7 @@ impl Input {
         if !overwrite && output.exists() {
             return Err(Error::OutputExists(output.to_path_buf()));
         }
-        Ok(())
+        crate::fsutil::check_writable(output).map_err(Error::io(FileAction::Write, output))
     }
 }
 

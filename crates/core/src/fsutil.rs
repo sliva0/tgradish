@@ -43,6 +43,18 @@ pub(crate) fn write_file(path: &Path, bytes: &[u8], replace: bool) -> std::io::R
     result.map(drop).map_err(|err| err.error)
 }
 
+/// Fails as writing `path` would where its folder can't be written to, as
+/// one that is read-only: a temporary file made there and removed, so it
+/// is found before the work whose result it is, not after. A folder that
+/// isn't there yet passes, as it is made before the result is written.
+pub(crate) fn check_writable(path: &Path) -> std::io::Result<()> {
+    let dir = path.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    tempfile::Builder::new().prefix(".tgradish-").tempfile_in(dir).map(drop)
+}
+
 /// The bytes of the file at `path` if it has at most `most` of them, or
 /// `None`, read without reading more than that, however large it is.
 pub(crate) fn read_at_most(path: &Path, most: u64) -> std::io::Result<Option<Vec<u8>>> {
@@ -78,6 +90,29 @@ mod tests {
         assert_eq!(beside(&folder, "sticker.webm"), dir.path().join("walk.v2.sticker.webm"));
         let file = dir.path().join("pig.v2.mp4");
         assert_eq!(beside(&file, "sticker.webm"), dir.path().join("pig.v2.sticker.webm"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn finds_folders_that_cant_be_written_to() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let locked = dir.path().join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let checked = check_writable(&locked.join("out.tgs"));
+        let written = write_output(&locked.join("out.tgs"), b"x", false);
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(check_writable(&dir.path().join("out.tgs")).is_ok());
+        assert!(check_writable(&dir.path().join("not yet").join("out.tgs")).is_ok());
+        // root writes anywhere
+        let Err(err) = checked else { return };
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        // said without the temporary file's path, nor the OS's number
+        let path = locked.join("out.tgs");
+        let said = written.unwrap_err().to_string();
+        assert_eq!(said, format!("couldn't write {}: permission denied", path.display()));
+        assert_eq!(std::fs::read_dir(&locked).unwrap().count(), 0);
     }
 
     #[test]

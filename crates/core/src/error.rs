@@ -73,9 +73,32 @@ pub enum Error {
     #[error("couldn't encode the WebP: {0}")]
     Webp(String),
     /// Something done to a file failed, as writing the result: `action`
-    /// says what, and `error` why.
-    #[error("couldn't {action} {}: {error}", path.display())]
+    /// says what, and `error` why, said as [`io_reason`] says it.
+    #[error("couldn't {action} {}: {}", path.display(), io_reason(error))]
     Io { action: FileAction, path: PathBuf, error: std::io::Error },
+}
+
+/// Why `error` happened, as words to follow a colon: the system's, in
+/// lower case, without the "(os error 13)" Rust adds, nor what a library
+/// adds after it, as tempfile does the temporary file's path.
+pub fn io_reason(error: &std::io::Error) -> String {
+    let mut text = error.to_string();
+    if let Some(end) = text.find(" (os error ") {
+        text.truncate(end);
+    }
+    lower_first(&text)
+}
+
+/// `text` with its first letter in lower case, unless it starts a word in
+/// capitals, as "UTF-8".
+pub(crate) fn lower_first(text: &str) -> String {
+    let mut chars = text.chars();
+    match (chars.next(), chars.next()) {
+        (Some(first), second) if !second.is_some_and(char::is_uppercase) => {
+            first.to_lowercase().chain(text[first.len_utf8()..].chars()).collect()
+        }
+        _ => text.to_owned(),
+    }
 }
 
 impl Error {

@@ -186,6 +186,32 @@ fn says_when_there_is_no_display() {
     assert!(stderr.contains("tgradish gui") && stderr.contains("Usage:"), "{stderr}");
 }
 
+/// A folder that can't be written to is found before converting, and said
+/// without the temporary file's path or the OS's number.
+#[cfg(unix)]
+#[test]
+fn says_when_the_output_cant_be_written() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("a.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let locked = dir.path().join("ro");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let out = locked.join("a.sticker.tgs");
+    let output = tgradish(&["convert", png.to_str().unwrap(), "-o", out.to_str().unwrap()]);
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // root writes anywhere
+    if output.status.success() {
+        return;
+    }
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let expected = format!("couldn't write {}: permission denied\n", out.display());
+    assert!(stderr.ends_with(&expected), "{stderr}");
+    assert!(!stderr.contains("Converting"), "{stderr}");
+}
+
 /// What is wrong with the command line, however it was found, exits 2,
 /// is said once before any input is read, and names the flag.
 #[test]

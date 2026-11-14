@@ -31,7 +31,7 @@ pub enum Failed {
     )]
     SameOutput { output: PathBuf, other: PathBuf },
     /// The folder the output goes in couldn't be made.
-    #[error("couldn't create {}: {error}", dir.display())]
+    #[error("couldn't create {}: {}", dir.display(), tgradish_core::io_reason(error))]
     Folder { dir: PathBuf, error: std::io::Error },
 }
 
