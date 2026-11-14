@@ -209,6 +209,9 @@ pub(crate) fn failure(err: &Error) -> String {
             fl!("unreadable-file", name = name(path), details = message.as_str())
         }
         Error::NoVideo(path) => fl!("no-video", name = name(path)),
+        Error::NoSuchFile(path) => fl!("no-such-file", name = name(path)),
+        Error::NotWebm(path) => fl!("not-webm", name = name(path)),
+        Error::NotSticker(path) => fl!("not-sticker", name = name(path)),
         Error::NoFrame { path, at } => {
             fl!("no-frame-at", name = name(path), seconds = widgets::seconds(*at))
         }
@@ -707,6 +710,13 @@ mod tests {
             failure(&unreadable),
             fl!("unreadable-file", name = "clip.mp4", details = "broken")
         );
+        // a file gone, or of the wrong kind, by its name in the window's words
+        let gone = Error::NoSuchFile(PathBuf::from("/some/where/clip.mp4"));
+        assert_eq!(failure(&gone), fl!("no-such-file", name = "clip.mp4"));
+        let not = Error::NotSticker(PathBuf::from("/some/where/notes.txt"));
+        assert_eq!(failure(&not), fl!("not-sticker", name = "notes.txt"));
+        let not = Error::NotWebm(PathBuf::from("/some/where/clip.mp4"));
+        assert_eq!(failure(&not), fl!("not-webm", name = "clip.mp4"));
         // what the window has no words of its own for, as tgradish-core says
         assert_eq!(failure(&Error::Cancelled), Error::Cancelled.to_string());
     }

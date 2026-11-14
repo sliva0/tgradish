@@ -1060,6 +1060,11 @@ ffmpeg-args-need-program = ffmpeg arguments need the system's ffmpeg, which "{ s
 program-failed = { $program } failed ({ $status }):
 unreadable-file = Couldn't read { $name }: { $details }
 no-video = { $name } has no video in it
+# A file that isn't there, as one moved or deleted since it was added.
+no-such-file = { $name } isn't there any more
+# A file inspected, or read as a video sticker, that is of another kind.
+not-webm = { $name } isn't a WebM file
+not-sticker = { $name } isn't a sticker: a WebM, WebP or .tgs file
 no-frame-at = { $name } has no frame at { $seconds }
 nothing-fits = Nothing fits the { $limit } limit: the smallest encode was { $smallest }. A shorter used part, a lower frame rate or a wider range to search within can help
 clipboard-failed = Couldn't paste from the clipboard: { $details }
