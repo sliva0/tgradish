@@ -46,7 +46,13 @@ that makes every kind of Telegram sticker and emoji.
   (`settled`).
 - `tgradish watch DIR`, converting what appears in a folder.
 - `tgradish inspect`, which says what a WebM, WebP or `.tgs` file holds
-  and whether Telegram would take it.
+  and whether Telegram would take it; and of what stickers are made of,
+  pictures, animations, Aseprite files and videos, their size, frames,
+  length and frame rate, and what a sticker that kept them would be
+  refused for.
+- `-q`/`--quiet`, with which `convert` and `watch` print the path of each
+  file made alone, a line each, for scripts: `tgradish convert -q *.png |
+  xargs …`.
 - `--json` output for scripts and front-ends, as JSON Lines, and `tgradish
   describe`, which gives the schemas of its options and events.
 - ffmpeg built in, in the release builds that say so, or the system's.

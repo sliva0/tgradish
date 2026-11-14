@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use tgradish_corpus::{Canvas, Clip};
 
 fn tgradish(args: &[&str]) -> Output {
@@ -299,7 +299,6 @@ fn says_a_file_is_of_the_wrong_kind() {
         assert_eq!(output.status.code(), Some(1), "{args:?}");
         String::from_utf8_lossy(&output.stderr).trim_end().to_owned()
     };
-    assert_eq!(stderr(&["inspect", png]), format!("error: {png} isn't a WebM, WebP or .tgs file"));
     assert_eq!(
         stderr(&["spoof", png]),
         format!("error: {png} isn't a WebM file: tgradish convert {png} makes one")
@@ -853,7 +852,15 @@ fn reports_results_on_stdout() {
             assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
             let stdout = String::from_utf8(output.stdout).unwrap();
             let line = format!("dot.sticker.{format}");
-            assert!(stdout.trim().starts_with("Finished") && stdout.contains(&line), "{stdout}");
+            if quiet {
+                // its path alone, for scripts
+                assert_eq!(stdout, format!("{}\n", dir.path().join(&line).display()));
+            } else {
+                assert!(
+                    stdout.trim().starts_with("Finished") && stdout.contains(&line),
+                    "{stdout}"
+                );
+            }
             assert_eq!(stdout.lines().count(), 1, "{format}: {stdout}");
             let stderr = String::from_utf8_lossy(&output.stderr);
             assert!(!quiet || stderr.is_empty(), "{format}: {stderr}");
@@ -864,6 +871,58 @@ fn reports_results_on_stdout() {
             assert!(quiet || said, "{format}: {stderr}");
         }
     }
+}
+
+/// `inspect` reads what stickers are made of too: what they hold, and that
+/// Telegram takes none as it is, with what a sticker that kept them would
+/// be refused for.
+#[test]
+fn inspects_what_stickers_are_made_of() {
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("dot.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let png = png.to_str().unwrap();
+    let output = tgradish(&["inspect", png]);
+    assert_eq!(output.status.code(), Some(3), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("a picture, not a sticker yet"), "{stdout}");
+    assert!(stdout.contains(&format!("tgradish convert {png} makes one")), "{stdout}");
+    assert!(stdout.contains("expected one side 512 px"), "{stdout}");
+    let line = &json_lines(&tgradish(&["--json", "inspect", png]))[0];
+    assert_eq!((&line["format"], &line["accepted"]), (&json!("input"), &json!(false)));
+    assert_eq!((&line["info"]["kind"], &line["info"]["frames"]), (&json!("picture"), &json!(1)));
+    assert_eq!(line["issues"][0]["kind"], "wrong-size");
+    // as an emoji
+    let line = &json_lines(&tgradish(&["--json", "inspect", png, "--target", "emoji"]))[0];
+    assert_eq!(line["target"], "emoji");
+    // a video, by ffmpeg: its length and frame rate too
+    if tgradish_corpus::ffmpeg_on_path() {
+        let video = dir.path().join("clip.mp4");
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-f", "lavfi", "-i", "testsrc2=s=512x288:d=4:r=30"])
+            .args(["-pix_fmt", "yuv420p"])
+            .arg(&video)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let video = video.to_str().unwrap();
+        let inspected = tgradish(&["--ffmpeg-from", "system", "--json", "inspect", video]);
+        assert_eq!(inspected.status.code(), Some(3));
+        let info = &json_lines(&inspected)[0]["info"];
+        assert_eq!(
+            (&info["kind"], &info["width"], &info["fps"]),
+            (&json!("video"), &json!(512), &json!(30.0))
+        );
+        assert_eq!((&info["duration"], &info["frames"]), (&json!(4.0), &json!(120)));
+        let issues = &json_lines(&inspected)[0]["issues"];
+        assert_eq!((issues.as_array().unwrap().len(), &issues[0]["kind"]), (1, &json!("too-long")));
+    }
+    // a sticker says it is accepted
+    let tgs = dir.path().join("dot.sticker.tgs");
+    let made = tgradish(&["convert", png, "-f", "tgs", "-o", tgs.to_str().unwrap()]);
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let line = &json_lines(&tgradish(&["--json", "inspect", tgs.to_str().unwrap()]))[0];
+    assert_eq!((&line["format"], &line["accepted"]), (&json!("tgs"), &json!(true)));
 }
 
 /// `-o` names a file of the format made, which is checked before any work.

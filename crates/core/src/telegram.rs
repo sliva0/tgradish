@@ -247,6 +247,24 @@ pub(crate) fn check_still(width: u32, height: u32, bytes: u64, target: Target) -
     issues
 }
 
+/// Lists what Telegram would refuse of a sticker that kept the size,
+/// length and frame rate of the input `info` tells of, as `target`.
+pub fn check_input(info: &crate::inspect::InputInfo, target: Target) -> Vec<Issue> {
+    let mut issues: Vec<Issue> =
+        size_issue(u64::from(info.width), u64::from(info.height), target).into_iter().collect();
+    if let Some(seconds) = info.duration
+        && too_long(seconds)
+    {
+        issues.push(Issue::TooLong { seconds, max: MAX_SECONDS });
+    }
+    if let Some(fps) = info.fps
+        && fps > MAX_FPS + 0.01
+    {
+        issues.push(Issue::TooManyFps { fps, max: MAX_FPS });
+    }
+    issues
+}
+
 /// Lists everything that would make Telegram reject `info` as `target`.
 ///
 /// Duration is checked against the header, which is what Telegram reads, so

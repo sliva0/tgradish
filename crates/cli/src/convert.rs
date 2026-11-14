@@ -417,7 +417,7 @@ impl<'a> Converter<'a> {
         if let webp::Encoding::Lossy { quality } = outcome.encoding {
             line.push_str(&format!(", lossy at quality {quality} to fit"));
         }
-        outln!("{}", ui::status("Finished", line));
+        finished(self.ctx.global.quiet, &outcome.output, line);
         for issue in &outcome.issues {
             eprintln!("{} Telegram will refuse it: {issue}", ui::warning_label());
         }
@@ -674,20 +674,31 @@ impl Printer {
             Event::Finished { output, bytes, params, spoofed, settled, issues, .. } => {
                 self.bar.finish();
                 let spoofed = if spoofed { ", duration spoofed" } else { "" };
-                // the result line says it, even when quiet
+                // the result line says it, where it says more than its path
                 let settled = if settled { ", the best so far as asked" } else { "" };
-                outln!(
-                    "{} {}, {}{spoofed}{settled}",
-                    ui::status("Finished", term::link_out(style(output.display()).bold(), &output)),
+                let output_text = term::link_out(style(output.display()).bold(), &output);
+                let line = format!(
+                    "{output_text} {}, {}{spoofed}{settled}",
                     ui::size_within(bytes, self.limit),
                     ui::params(&params),
                 );
+                finished(self.quiet, &output, line);
                 for issue in issues {
                     eprintln!("{} Telegram will refuse it: {issue}", ui::warning_label());
                 }
             }
             _ => {}
         }
+    }
+}
+
+/// The line on stdout of a file made, `output`: "Finished" and `line`,
+/// which says what it is, or `quiet`, its path alone, for scripts.
+fn finished(quiet: bool, output: &Path, line: String) {
+    if quiet {
+        outln!("{}", output.display());
+    } else {
+        outln!("{}", ui::status("Finished", line));
     }
 }
 
@@ -812,11 +823,10 @@ impl TgsPrinter {
                 } else {
                     ", exact".to_string()
                 };
-                outln!(
-                    "{} {}{changed}",
-                    ui::status("Finished", term::link_out(style(output.display()).bold(), &output)),
-                    ui::size_within(bytes, tgs::MAX_BYTES),
-                );
+                let output_text = term::link_out(style(output.display()).bold(), &output);
+                let line =
+                    format!("{output_text} {}{changed}", ui::size_within(bytes, tgs::MAX_BYTES));
+                finished(self.quiet, &output, line);
                 for issue in issues {
                     let label = match issue.severity {
                         Severity::Error => ui::error_label(),

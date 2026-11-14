@@ -19,12 +19,14 @@ const EXAMPLES: &str =
   tgradish convert walk.ase -f tgs          an animated sticker, walk.sticker.tgs
   tgradish convert photo.jpg -f webp        an image sticker, photo.sticker.webp
   tgradish watch ~/Videos -O ~/Stickers     each new video or picture as it comes
-  tgradish inspect clip.sticker.webm        what Telegram would say of it";
+  tgradish inspect clip.sticker.webm        what Telegram would say of it
+  tgradish inspect clip.mp4                 its size, frames, length and frame rate";
 
 const CONVERT_EXAMPLES: &str =
     "  tgradish convert clip.mp4 -s 2 -t 5          5 seconds from 0:02, spoofed to pass
   tgradish convert frames/ --sequence -f tgs   the pictures in frames/ as one sticker
-  tgradish convert *.gif -O stickers -y        each into stickers/, replacing results";
+  tgradish convert *.gif -O stickers -y        each into stickers/, replacing results
+  tgradish convert -q *.png | xargs ls -l      the paths of the results alone, a line each";
 
 const ENVIRONMENT: &str = "  TGRADISH_CONFIG  The config file, as --config names it.
   TGRADISH_FFMPEG  The ffmpeg to use, as --ffmpeg names it, when neither --ffmpeg
@@ -124,8 +126,9 @@ pub struct Global {
     /// Show more output, including ffmpeg logs with -vv.
     #[arg(short, long, global = true, action = clap::ArgAction::Count, conflicts_with = "quiet")]
     pub verbose: u8,
-    /// Only print errors, warnings and results: a line on stdout for each
-    /// file made.
+    /// Only print errors and warnings, on stderr, and each file made, its
+    /// path alone, a line on stdout each, as `tgradish convert -q *.png |
+    /// xargs …` reads them.
     #[arg(short, long, global = true)]
     pub quiet: bool,
     /// The ffmpeg executable to use, or a directory with ffmpeg and
@@ -836,11 +839,17 @@ impl SpoofArgs {
 
 #[derive(Debug, Args)]
 pub struct InspectArgs {
-    /// WebM, WebP or TGS files to inspect.
+    /// Stickers to inspect, WebM, WebP or TGS; or what stickers are made
+    /// of, which convert reads: pictures, animations, Aseprite files and
+    /// videos, these read by ffmpeg, as --ffmpeg, --ffmpeg-from or
+    /// TGRADISH_FFMPEG name it. Those are no stickers yet, which Telegram
+    /// refuses, so they are said to be refused, with what a sticker that
+    /// kept their size, length and frame rate would be refused for.
     #[arg(required = true)]
     pub files: Vec<PathBuf>,
-    /// What to check WebM and WebP files as; TGS stickers and emoji have the
-    /// same limits. [default: guessed from the size]
+    /// What to check WebM and WebP files as, and what stickers are made
+    /// of; TGS stickers and emoji have the same limits. [default: guessed
+    /// from the size, and a sticker for what isn't one yet]
     #[arg(long, value_enum)]
     pub target: Option<TargetArg>,
 }

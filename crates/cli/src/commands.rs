@@ -148,6 +148,55 @@ fn print_verdict(issues: &[telegram::Issue], target: Target) {
     }
 }
 
+/// What a file a sticker is made of holds, and what Telegram would say of
+/// a sticker that kept its size, length and frame rate.
+fn print_input(
+    path: &std::path::Path,
+    info: &inspect::InputInfo,
+    target: Target,
+    issues: &[telegram::Issue],
+) {
+    use tgradish_core::inspect::InputKind;
+    outln!("{}", style(term::link_out(path.display(), path)).bold());
+    let kind = match info.kind {
+        InputKind::Picture => "a picture",
+        InputKind::Animation => "an animation",
+        InputKind::Aseprite => "an Aseprite file",
+        _ => "a video",
+    };
+    outln!("{}", ui::field("kind", format!("{kind}, not a sticker yet")));
+    outln!("{}", ui::field("size", ui::kib(info.bytes)));
+    let codec = info.codec.as_deref().map_or(String::new(), |codec| format!("{codec} "));
+    let alpha = if info.alpha { ", transparent" } else { "" };
+    outln!("{}", ui::field("picture", format!("{codec}{}×{}{alpha}", info.width, info.height)));
+    if let Some(frames) = info.frames {
+        let about = if info.kind == InputKind::Video { "about " } else { "" };
+        outln!("{}", ui::field("frames", format!("{about}{frames}")));
+    }
+    if let Some(duration) = info.duration {
+        outln!("{}", ui::field("duration", ui::seconds(duration)));
+    }
+    if let Some(fps) = info.fps {
+        outln!("{}", ui::field("frame rate", ui::fps(fps)));
+    }
+    // Telegram takes no file of this kind, whatever it holds
+    let make = format!("tgradish convert {} makes one", path.display());
+    outln!(
+        "{}",
+        ui::field("telegram", format!("{} as it is: {make}", style("✖ refuses it").red()))
+    );
+    if issues.is_empty() {
+        let kept = format!("a {} keeping its size and length would pass", target.name());
+        outln!("              {}", style(kept).green());
+    } else {
+        let name = target.name();
+        outln!("              a {name} keeping its size and length would be refused too:");
+        for issue in issues {
+            outln!("              {} {issue}", style("-").red());
+        }
+    }
+}
+
 fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target, issues: &[telegram::Issue]) {
     outln!("{}", style(term::link_out(path.display(), path)).bold());
     outln!("{}", ui::field("size", ui::size_within(info.file_size, target.max_bytes())));
@@ -206,11 +255,13 @@ fn print_failure(ctx: &Context, path: &std::path::Path, err: &impl std::fmt::Dis
 pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
     let (mut failed, mut refused) = (0, false);
     for (i, path) in args.files.iter().enumerate() {
-        let inspected = match inspect::inspect(path, args.target.map(Into::into)) {
+        let target = args.target.map(Into::into);
+        let inspected = inspect::inspect_any(path, target, || ctx.backend(), &ctx.cancel);
+        let inspected = match inspected {
             Ok(inspected) => inspected,
             Err(err) => {
                 failed += 1;
-                print_failure(ctx, path, &err);
+                print_failure(ctx, path, &ctx.explain(err));
                 continue;
             }
         };
@@ -220,10 +271,13 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
             struct Line<'a> {
                 #[serde(serialize_with = "protocol::serialize_path")]
                 input: &'a std::path::Path,
+                /// Whether Telegram would take the file as it is.
+                accepted: bool,
                 #[serde(flatten)]
                 inspected: &'a Inspected,
             }
-            crate::json_line(&Line { input: path, inspected: &inspected });
+            let accepted = !inspected.refused();
+            crate::json_line(&Line { input: path, accepted, inspected: &inspected });
             continue;
         }
         if i > 0 {
@@ -233,6 +287,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
             Inspected::Webp { target, info, issues } => print_image(path, info, *target, issues),
             Inspected::Tgs { info, issues } => print_sticker(path, info, issues),
             Inspected::Webm { target, info, issues } => print_info(path, info, *target, issues),
+            Inspected::Input { target, info, issues } => print_input(path, info, *target, issues),
             // a kind core has that this command line doesn't word yet
             _ => outln!("{}: shown with --json", path.display()),
         }
