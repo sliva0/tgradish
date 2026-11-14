@@ -41,10 +41,14 @@ impl App {
             })
             .count();
         for item in &mut self.items {
+            // a .tgs that keeps the crop's shape keeps it square, shown or not
+            crate::file_settings::keep_square(item, &self.presets, &self.config);
             item.recipe = item.choices.recipe(item.format, &self.presets, &self.config).ok();
             check_earlier(ctx, item);
             let is_selected = selected == Some(item.id);
-            let kept = is_selected || self.recent.contains(&item.id);
+            // and what is queued to convert, which may wait for it to be read
+            let queued = item.job.as_ref().is_some_and(|conversion| conversion.job.is_waiting());
+            let kept = is_selected || self.recent.contains(&item.id) || queued;
             if item.sniffed.poll() {
                 // taken by its name where it couldn't be read
                 let kind = item.sniffed.ready().copied().unwrap_or(item.kind);
@@ -88,7 +92,7 @@ impl App {
                 reading += usize::from(item.result_clip.is_loading());
             }
             // read what the item needs
-            let wanted = is_selected || item.input_thumb.is_none();
+            let wanted = is_selected || item.input_thumb.is_none() || queued;
             if !wanted || (!is_selected && reading >= READING) {
                 continue;
             }
@@ -230,6 +234,33 @@ impl App {
         }
         while let Some(id) = self.queue.pop_front() {
             let Some(item) = self.item(id) else { continue };
+            let Some(Conversion { format, choices: Some(choices), .. }) = &item.job else {
+                continue;
+            };
+            // a .tgs keeping the crop's shape keeps a square one, which its
+            // size, once read, says: waited for, where it is being read
+            if *format == Format::Tgs
+                && crate::file_settings::keeps_crop_shape(choices, &self.presets, &self.config)
+            {
+                let size = item.art.ready().map(|art| (art.clip.width, art.clip.height));
+                match size {
+                    Some(size) => {
+                        let (presets, config) = (&self.presets, &self.config);
+                        let item = self.items.iter_mut().find(|item| item.id == id);
+                        if let Some(Conversion { choices: Some(choices), .. }) =
+                            item.and_then(|item| item.job.as_mut())
+                        {
+                            crate::file_settings::square_choices(choices, size, presets, config);
+                        }
+                    }
+                    None if !matches!(item.art, crate::media::Load::Failed(_)) => {
+                        self.queue.push_front(id);
+                        return;
+                    }
+                    None => {}
+                }
+            }
+            let item = self.item(id).expect("found above");
             let Some(Conversion { job, format, choices: Some(choices), .. }) = &item.job else {
                 continue;
             };

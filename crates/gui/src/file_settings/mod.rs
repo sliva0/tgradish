@@ -31,7 +31,10 @@ use tgs::{reading, tgs_quality};
 use time::{frame, time};
 use webm::webm_quality;
 
-pub(crate) use picture::{exact_of, ratio, resize_of, webm_sizes, whole_picture};
+pub(crate) use picture::{
+    exact_of, keep_square, keeps_crop_shape, ratio, resize_of, square_choices, webm_sizes,
+    whole_picture,
+};
 pub(crate) use plan::plan;
 pub(crate) use webm::{fit_of, follow_fit};
 
