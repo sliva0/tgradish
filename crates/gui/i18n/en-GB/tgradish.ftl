@@ -116,6 +116,11 @@ files-removed = { $count ->
 }
 undo-removing = Undo
     .hint = Put them back where they were, with their settings and results (Ctrl+Z)
+# Said once Settings' Reset to defaults has put them back, with a way to
+# undo it.
+settings-reset = Settings are back to their defaults
+undo-reset = Undo
+    .hint = Put back the settings as they were before
 # Opens the Settings dialog, from a message.
 open-settings = Open Settings
     .hint = Where ffmpeg, and the rest, are chosen
@@ -838,15 +843,19 @@ no-ffmpeg-commands = No ffmpeg commands: { $why }
 
 ## The Settings dialog
 
+# Saves a preset.
 save = Save
-    .hint = Keep current settings for next time
-# Beside Save once it has saved; .kept when the file there couldn't be
-# read, so it was copied aside first.
+# Under the settings once a change has been written; .kept when the file
+# there couldn't be read, so it was copied aside first.
 saved-to = Saved to { $path }
     .kept = Saved to { $path }; the file that couldn't be read is kept as { $kept }
 not-saved = Couldn't save: { $error }
 no-home = There is no home folder to keep settings in
-settings-note = Changes apply now; "{ save }" keeps them between restarts
+settings-note = Changes apply and are kept as you make them
+# At the left of the dialog's buttons: every setting in the dialog back to
+# its default, which its message offers to undo.
+reset-settings = Reset to defaults
+    .hint = Every setting here back to how tgradish first had it
 # Under the ffmpeg heading, when tgradish was started with --ffmpeg or
 # --ffmpeg-from, or with the TGRADISH_FFMPEG environment variable set,
 # which this run uses over the settings below.
@@ -862,6 +871,7 @@ ffmpeg-system = The system's
     .hint = ffmpeg and ffprobe on PATH; allows raw ffmpeg arguments
 ffmpeg-program = Program
     .hint = An ffmpeg executable, or a folder with ffmpeg and ffprobe; overrides the choice above
+    .missing = There is nothing there, so the program in use stays as it was
 # What the empty field of the ffmpeg program shows.
 ffmpeg-found = { $path }, found on PATH
 for-example = For example: { $example }
@@ -878,6 +888,8 @@ save-results = Save them
 next-to-input = Next to each input
 in-a-folder = In a folder
     .unchosen = Until a folder is chosen, results are saved next to each input
+    .relative = Write the whole path, from the top, so the folder in use can change
+    .file = That is a file, not a folder, so the folder in use stays as it was
 existing-files = Existing files
     .hint = Results tgradish made are always replaced when made again
 replace-in-the-way = Replace any file that is in the way
@@ -928,6 +940,7 @@ accent-shade = Shade
 accent-hue = Hue
 # Beside a field of the colour picked, as #rrggbb.
 accent-hex = Hex
+    .wrong = Write it as # and six hexadecimal digits, as #3daee9
 files = Files
 reopen-files = Reopen the files of last time, with their settings
 scrolling = Scrolling

@@ -126,6 +126,9 @@ pub(crate) struct App {
     pub(crate) banner: Banner,
     /// Files removed a moment ago, which may be put back.
     pub(crate) removed: Option<Removed>,
+    /// The settings as they were before Settings put them back to their
+    /// defaults a moment ago, which may be put back.
+    pub(crate) settings_reset: Option<Config>,
     /// The clipboard results are copied to, as files.
     pub(crate) clipboard: system::Clipboard,
     /// What Ctrl+V has done so far.
@@ -320,6 +323,7 @@ impl App {
             fonts_checked: None,
             banner: Banner::default(),
             removed: None,
+            settings_reset: None,
             clipboard: system::Clipboard::default(),
             paste_key: crate::keys::PasteKey::default(),
             #[cfg(all(unix, not(target_os = "macos")))]
@@ -591,6 +595,48 @@ impl App {
         }
     }
 
+    /// Puts every setting of the Settings dialog back to its default, with
+    /// a message that offers to undo it. Settings, which is open, keeps
+    /// them as it keeps any change.
+    pub(crate) fn reset_settings(&mut self) {
+        let before = self.config.clone();
+        self.take_dialog_settings(&Config::default());
+        self.settings_dialog.forget_typed();
+        self.settings_reset = Some(before);
+        let message = Message::info(fl!("settings-reset"));
+        self.say(message.actions(&[Action::UndoReset]).about(Subject::SettingsReset));
+    }
+
+    /// Puts back the settings as they were before they were reset, and
+    /// keeps them, at once where Settings is closed by now.
+    pub(crate) fn undo_reset(&mut self) {
+        let Some(before) = self.settings_reset.take() else { return };
+        self.banner.forget(Subject::SettingsReset);
+        self.take_dialog_settings(&before);
+        self.settings_dialog.forget_typed();
+        if !self.settings_dialog.is_open() {
+            self.save_config_setting(|config| dialog_settings(&before, config));
+        }
+    }
+
+    /// Takes the settings the Settings dialog shows from `from`: the
+    /// default presets as Settings picks them, so the files that follow
+    /// them may fit another way, and the window's language as it changes.
+    fn take_dialog_settings(&mut self, from: &Config) {
+        use tgradish_core::presets::Format;
+        for format in [Format::Webm, Format::Tgs] {
+            let name = from.preset_for(format).to_owned();
+            if name != self.config.preset_for(format) {
+                self.set_default_preset(format, name);
+            }
+        }
+        let language = self.config.gui.language.clone();
+        dialog_settings(from, &mut self.config);
+        if self.config.gui.language != language {
+            crate::l10n::choose(self.config.gui.language.as_deref());
+        }
+    }
+
     /// Lets go of files removed once the offer to put them back is gone.
     pub(crate) fn forget_removed(&mut self) {
         let offered =
@@ -692,6 +738,18 @@ impl Removed {
     fn items_mut(&mut self) -> impl Iterator<Item = &mut Item> {
         self.batches.iter_mut().flatten().map(|(_, item)| item)
     }
+}
+
+/// Copies the settings the Settings dialog shows from `from` to `to`.
+fn dialog_settings(from: &Config, to: &mut Config) {
+    (to.ffmpeg.choice, to.ffmpeg.path) = (from.ffmpeg.choice, from.ffmpeg.path.clone());
+    (to.preset, to.tgs_preset) = (from.preset.clone(), from.tgs_preset.clone());
+    let (gui, from) = (&mut to.gui, &from.gui);
+    (gui.output_dir, gui.overwrite, gui.target) =
+        (from.output_dir.clone(), from.overwrite, from.target);
+    (gui.language, gui.theme, gui.accent) = (from.language.clone(), from.theme, from.accent);
+    (gui.scale, gui.reopen_files, gui.smooth_scrolling) =
+        (from.scale, from.reopen_files, from.smooth_scrolling);
 }
 
 /// The settings at `path`, or the defaults where they can't be read, with
@@ -877,6 +935,9 @@ impl eframe::App for App {
         if let Some(pick) = self.settings_dialog.pick.take() {
             self.pick(&ctx, pick);
         }
+        if std::mem::take(&mut self.settings_dialog.reset) {
+            self.reset_settings();
+        }
         if std::mem::take(&mut self.settings_dialog.wrote) {
             self.banner.forget(Subject::SettingsFile);
         }
@@ -915,6 +976,10 @@ impl eframe::App for App {
             self.act(&ctx, &message, action);
         }
         self.forget_removed();
+        if !self.banner.rows.iter().any(|said| said.message.subject == Some(Subject::SettingsReset))
+        {
+            self.settings_reset = None;
+        }
         if let Some(action) = crate::banner::asked(&ctx) {
             self.act(&ctx, &Message::info(""), action);
         }

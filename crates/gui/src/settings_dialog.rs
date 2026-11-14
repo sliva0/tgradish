@@ -1,6 +1,7 @@
 //! The Settings dialog, of the window's own settings: ffmpeg, where
-//! results go, and what new files start with. Changes apply at once; Save
-//! keeps them in `config.toml`.
+//! results go, and what new files start with. Changes apply at once, and
+//! are kept in `config.toml` at once too: as typing or dragging pauses,
+//! and only what is typed that makes sense.
 
 use std::path::{Path, PathBuf};
 
@@ -36,8 +37,21 @@ pub(crate) struct SettingsDialog {
     /// Checking ffmpeg, which runs it, on a thread of its own: stopped if
     /// the dialog is opened again or the window closes.
     checking: Option<Task<(bool, String)>>,
-    /// What Save did: where the settings went, or why they didn't.
+    /// What writing the settings did last: where they went, or why they
+    /// didn't.
     saved: Option<Result<String, String>>,
+    /// The settings as they were last written, or as the dialog opened.
+    written: Option<Config>,
+    /// The settings as the last frame left them, and when they last
+    /// changed: a change waits to be written while it is typed or dragged.
+    seen: Option<(Config, f64)>,
+    /// The paths typed in the fields of the ffmpeg program and of the
+    /// folder for results.
+    ffmpeg_typed: Typed,
+    folder_typed: Typed,
+    /// Reset to defaults was clicked, which the window takes up, as it may
+    /// be undone from its message.
+    pub(crate) reset: bool,
     /// What the fields show while empty, found once the dialog opens: the
     /// ffmpeg on PATH, and a folder results could go to.
     placeholders: (String, String),
@@ -49,7 +63,7 @@ pub(crate) struct SettingsDialog {
     /// A default preset picked for a format, which the window takes up, as
     /// the items that follow it may then fit another way.
     pub(crate) default_preset: Option<(Format, String)>,
-    /// Save wrote the settings file, which the window takes up, as what
+    /// The settings file was written, which the window takes up, as what
     /// it said of the file is past.
     pub(crate) wrote: bool,
     /// The accent colour of one's own as typed, `#rrggbb`, while it is.
@@ -110,6 +124,114 @@ impl SettingsDialog {
     pub(crate) fn is_open(&self) -> bool {
         self.open
     }
+
+    /// Forgets what is typed and not taken, and a folder to be chosen, as
+    /// the settings are put back to their defaults, or back from them.
+    pub(crate) fn forget_typed(&mut self) {
+        (self.ffmpeg_typed, self.folder_typed) = Default::default();
+        self.folder_unchosen = false;
+    }
+}
+
+/// A path typed in a field, and the setting it shows: what is typed is
+/// kept while it isn't a path the setting can take, and follows the
+/// setting once that changes otherwise, as by Choose….
+#[derive(Default)]
+struct Typed {
+    text: String,
+    of: Option<Option<PathBuf>>,
+}
+
+/// A field of a path, for `setting`, which takes what is typed where
+/// `problem` finds nothing wrong with it: an empty field leaves it unset.
+/// Gives what is wrong with what is typed, which keeps the setting as it
+/// was, and whether the setting changed.
+fn path_field(
+    ui: &mut egui::Ui,
+    typed: &mut Typed,
+    setting: &mut Option<PathBuf>,
+    placeholder: &str,
+    problem: impl Fn(&Path) -> Option<String>,
+) -> (Option<String>, bool) {
+    if typed.of.as_ref() != Some(setting) {
+        typed.text = setting.as_ref().map(|path| path.display().to_string()).unwrap_or_default();
+        typed.of = Some(setting.clone());
+    }
+    let edit = widgets::text_field(&mut typed.text).hint_text(placeholder).desired_width(280.0);
+    let field = ui.add(edit);
+    let trimmed = typed.text.trim();
+    let path = (!trimmed.is_empty()).then(|| PathBuf::from(trimmed));
+    let wrong = path.as_deref().and_then(problem);
+    let mut changed = false;
+    if field.changed() && wrong.is_none() && path != *setting {
+        *setting = path.clone();
+        typed.of = Some(path);
+        changed = true;
+    }
+    (wrong, changed)
+}
+
+/// What is wrong with `path` as the ffmpeg program: it must be there,
+/// unless it is a name alone, which is looked for on PATH.
+fn ffmpeg_problem(path: &Path) -> Option<String> {
+    let named = path.components().count() == 1 && !path.has_root();
+    (!named && !path.exists()).then(|| fl!("ffmpeg-program", "missing"))
+}
+
+/// What is wrong with `path` as the folder for results: it must be whole,
+/// and not a file.
+fn folder_problem(path: &Path) -> Option<String> {
+    if !path.is_absolute() {
+        Some(fl!("in-a-folder", "relative"))
+    } else if path.is_file() {
+        Some(fl!("in-a-folder", "file"))
+    } else {
+        None
+    }
+}
+
+/// What is wrong with a field's content, said under it.
+fn problem(ui: &mut egui::Ui, wrong: Option<String>) {
+    if let Some(wrong) = wrong {
+        let text = egui::RichText::new(wrong).color(theme::bad(ui.visuals())).size(12.5);
+        ui.add(egui::Label::new(text).wrap());
+    }
+}
+
+/// How long a change waits to be written while it is typed or dragged.
+const SETTLE: f64 = 0.6;
+
+/// Writes `config` to `config_path` as it changes, once typing or dragging
+/// pauses, or at once as the dialog `closing` does.
+fn keep(
+    ctx: &egui::Context,
+    dialog: &mut SettingsDialog,
+    config: &mut Config,
+    config_path: Option<&Path>,
+    closing: bool,
+) {
+    let now = ctx.input(|input| input.time);
+    let written = dialog.written.get_or_insert_with(|| config.clone());
+    let (seen, changed_at) = dialog.seen.get_or_insert_with(|| (config.clone(), now));
+    if *seen != *config {
+        (*seen, *changed_at) = (config.clone(), now);
+    }
+    if *written == *config {
+        return;
+    }
+    let busy = ctx.text_edit_focused() || ctx.input(|input| input.pointer.any_down());
+    let waited = now - *changed_at;
+    if busy && waited < SETTLE && !closing {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(SETTLE - waited));
+        return;
+    }
+    dialog.saved = Some(match config_path {
+        Some(path) => save(config, path),
+        None => Err(fl!("no-home")),
+    });
+    dialog.wrote = matches!(dialog.saved, Some(Ok(_)));
+    // tried once, whether it worked or not, until it changes again
+    dialog.written = Some(config.clone());
 }
 
 /// Saves `config` to `path`, or says why it couldn't. A file there that
@@ -310,8 +432,8 @@ pub(crate) fn show(
             );
             widgets::fade_out(ui.painter(), fade, ui.visuals().window_fill);
         }
-        // what saving did, under the settings, where a path has the
-        // dialog's width
+        // what writing them did, under the settings, where a path has
+        // the dialog's width
         ui.add_space(4.0);
         match &dialog.saved {
             Some(Ok(saved)) => widgets::note(ui, saved),
@@ -322,15 +444,13 @@ pub(crate) fn show(
         }
         widgets::dialog_buttons(ui, |ui| {
             close |= ui.add(widgets::dialog_button(fl!("close"))).clicked();
-            let button = widgets::dialog_button(widgets::medium(ui, fl!("save"), 14.0));
-            let button = widgets::primary(ui, true, button);
-            if button.on_hover_text(fl!("save", "hint")).clicked() {
-                dialog.saved = Some(match config_path {
-                    Some(path) => save(config, path),
-                    None => Err(fl!("no-home")),
-                });
-                dialog.wrote = matches!(dialog.saved, Some(Ok(_)));
-            }
+            // at the left, as it isn't the way out
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                let reset = ui.add(widgets::dialog_button(fl!("reset-settings")));
+                if reset.on_hover_text(fl!("reset-settings", "hint")).clicked() {
+                    dialog.reset = true;
+                }
+            });
         });
     });
     dialog.drawn = Drawn(modal.response.rect);
@@ -370,8 +490,9 @@ pub(crate) fn show(
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(HELD - waited));
         }
     }
-    // changes stay either way, until tgradish closes unless saved
-    if close || modal.should_close() {
+    let closing = close || modal.should_close();
+    keep(ctx, dialog, config, config_path, closing);
+    if closing {
         dialog.open = false;
     }
 }
@@ -396,19 +517,19 @@ fn sections(
     }
     row(ui, &fl!("ffmpeg-program"), &fl!("ffmpeg-program", "hint"), Ok(()), |ui| {
         let ffmpeg = &mut config.ffmpeg;
-        ui.horizontal(|ui| {
-            let mut text =
-                ffmpeg.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
-            let edit = widgets::text_field(&mut text)
-                .hint_text(dialog.placeholders.0.as_str())
-                .desired_width(280.0);
-            if ui.add(edit).changed() {
-                ffmpeg.path = (!text.trim().is_empty()).then(|| PathBuf::from(text.trim()));
-            }
-            if ui.button(fl!("choose")).clicked() {
-                dialog.pick = Some(crate::files::Pick::Ffmpeg);
-            }
-        });
+        let wrong = ui
+            .horizontal(|ui| {
+                let placeholder = dialog.placeholders.0.as_str();
+                let typed = &mut dialog.ffmpeg_typed;
+                let (wrong, _) =
+                    path_field(ui, typed, &mut ffmpeg.path, placeholder, ffmpeg_problem);
+                if ui.button(fl!("choose")).clicked() {
+                    dialog.pick = Some(crate::files::Pick::Ffmpeg);
+                }
+                wrong
+            })
+            .inner;
+        problem(ui, wrong);
         ui.horizontal(|ui| {
             let check = egui::Button::new(fl!("check"));
             let clicked = ui
@@ -448,23 +569,27 @@ fn sections(
             gui.output_dir = None;
             dialog.folder_unchosen = elsewhere;
         }
-        ui.add_enabled_ui(elsewhere, |ui| {
-            ui.horizontal(|ui| {
-                let mut text =
-                    gui.output_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
-                let edit = widgets::text_field(&mut text)
-                    .hint_text(placeholder.as_str())
-                    .desired_width(280.0);
-                if ui.add(edit).changed() {
-                    let dir = PathBuf::from(text.trim());
-                    gui.output_dir = (!dir.as_os_str().is_empty()).then_some(dir);
-                    dialog.folder_unchosen = gui.output_dir.is_none();
-                }
-                if ui.button(fl!("choose")).clicked() {
-                    dialog.pick = Some(crate::files::Pick::OutputDir);
-                }
-            });
-        });
+        let wrong = ui
+            .add_enabled_ui(elsewhere, |ui| {
+                ui.horizontal(|ui| {
+                    let typed = &mut dialog.folder_typed;
+                    let output_dir = &mut gui.output_dir;
+                    let (wrong, changed) =
+                        path_field(ui, typed, output_dir, placeholder, folder_problem);
+                    if changed {
+                        dialog.folder_unchosen = output_dir.is_none();
+                    }
+                    if ui.button(fl!("choose")).clicked() {
+                        dialog.pick = Some(crate::files::Pick::OutputDir);
+                    }
+                    wrong
+                })
+                .inner
+            })
+            .inner;
+        if elsewhere {
+            problem(ui, wrong);
+        }
         if elsewhere && gui.output_dir.is_none() {
             widgets::hint(ui, fl!("in-a-folder", "unchosen"));
         }
@@ -679,6 +804,9 @@ fn accents(ui: &mut egui::Ui, accent: &mut Accent, typed: &mut String) {
                     *typed = config::hex(colour);
                 }
             });
+            if Accent::hex(typed.trim()).is_none() {
+                problem(ui, Some(fl!("accent-hex", "wrong")));
+            }
         });
     });
 }
@@ -755,30 +883,135 @@ mod tests {
 
     use super::*;
 
+    /// A window whose settings are kept in `path`, with frames a moment
+    /// apart, as by hand.
+    fn kept_in(path: &Path) -> Harness<'static, App> {
+        let at = path.to_path_buf();
+        let builder = Harness::builder().with_size([1280.0, 820.0]).with_step_dt(1.0 / 30.0);
+        builder.build_eframe(move |_| {
+            App::with(Config::default(), Some(at.clone()), Presets::builtin())
+        })
+    }
+
     #[test]
-    fn saves_settings_when_asked() {
+    fn keeps_each_change_as_it_is_made() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        let at = path.clone();
-        let mut harness = Harness::builder().with_size([1280.0, 820.0]).build_eframe(move |_| {
-            App::with(Config::default(), Some(at.clone()), Presets::builtin())
-        });
+        let mut harness = kept_in(&path);
         harness.state_mut().settings_dialog.open();
         harness.run_steps(2);
-        // a change applies at once, and stays in the file once saved
-        harness.state_mut().config.gui.overwrite = true;
-        harness.get_by_label("Save").click_accesskit();
+        // opening it writes nothing
+        assert!(!path.exists());
+        harness.get_by_label(&fl!("settings-note"));
+        // a click applies, and is kept, at once
+        harness.get_by_label(&fl!("replace-in-the-way")).click_accesskit();
         harness.run_steps(2);
+        assert!(harness.state().config.gui.overwrite);
         assert!(Config::load(&path).unwrap().gui.overwrite);
         harness.get_by_label_contains("Saved to");
-        // closing keeps what changed
+        // and so is a change made as it closes
         harness.state_mut().config.gui.reopen_files = false;
         harness.get_all_by_label(&fl!("close")).last().unwrap().click_accesskit();
         harness.run_steps(2);
-        assert!(
-            !harness.state().settings_dialog.is_open() && !harness.state().config.gui.reopen_files
-        );
-        assert!(Config::load(&path).unwrap().gui.reopen_files);
+        assert!(!harness.state().settings_dialog.is_open());
+        assert!(!Config::load(&path).unwrap().gui.reopen_files);
+        // there is no Save to forget
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(2);
+        assert!(harness.query_by_label(&fl!("save")).is_none());
+    }
+
+    #[test]
+    fn keeps_what_is_typed_once_typing_pauses_and_only_what_makes_sense() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut harness = kept_in(&path);
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(2);
+        harness.get_by_label(&fl!("in-a-folder")).click_accesskit();
+        harness.run_steps(2);
+        // the fields of the ffmpeg program and of the folder, in turn
+        let role = egui::accesskit::Role::TextInput;
+        let field = || {
+            egui_kittest::kittest::by().predicate(move |node| {
+                node.role() == role
+                    && node.placeholder().is_some_and(|text| text.contains("Stickers"))
+            })
+        };
+        let on_disk = || Config::load(&path).ok().and_then(|config| config.gui.output_dir);
+        // half a path: said to be wrong, and neither used nor kept
+        harness.get(field()).focus();
+        harness.run_steps(1);
+        harness.get(field()).type_text("results");
+        harness.run_steps(2);
+        harness.get_by_label(&fl!("in-a-folder", "relative"));
+        assert_eq!((harness.state().config.gui.output_dir.clone(), on_disk()), (None, None));
+        // made whole: used at once, and kept once typing pauses
+        let whole = dir.path().join("results");
+        harness.key_press(egui::Key::Home);
+        harness.run_steps(1);
+        let parent = format!("{}{}", dir.path().display(), std::path::MAIN_SEPARATOR);
+        harness.get(field()).type_text(&parent);
+        harness.run_steps(1);
+        assert!(harness.query_by_label(&fl!("in-a-folder", "relative")).is_none());
+        assert_eq!(harness.state().config.gui.output_dir, Some(whole.clone()));
+        assert_eq!(on_disk(), None);
+        harness.run_steps(30);
+        assert_eq!(on_disk(), Some(whole.clone()));
+        // a file where the folder would be is wrong too; a program's name
+        // alone is looked for on PATH
+        let file = dir.path().join("a file");
+        std::fs::write(&file, "").unwrap();
+        assert_eq!(folder_problem(&file), Some(fl!("in-a-folder", "file")));
+        assert_eq!(folder_problem(dir.path()), None);
+        assert_eq!(ffmpeg_problem(Path::new("ffmpeg")), None);
+        // an ffmpeg that isn't there likewise
+        let ffmpeg = || {
+            egui_kittest::kittest::by().predicate(move |node| {
+                node.role() == role
+                    && node.placeholder().is_some_and(|text| text.contains("ffmpeg"))
+            })
+        };
+        harness.get(ffmpeg()).focus();
+        harness.run_steps(1);
+        harness.get(ffmpeg()).type_text(&dir.path().join("no ffmpeg").display().to_string());
+        harness.run_steps(30);
+        harness.get_by_label(&fl!("ffmpeg-program", "missing"));
+        assert_eq!(harness.state().config.ffmpeg.path, None);
+    }
+
+    #[test]
+    fn resets_to_the_defaults_and_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut harness = kept_in(&path);
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(2);
+        harness.get_by_label(&fl!("replace-in-the-way")).click_accesskit();
+        harness.get_by_label(&fl!("theme-dark")).click_accesskit();
+        harness.run_steps(2);
+        let kept = || Config::load(&path).unwrap().gui;
+        assert!(kept().overwrite && kept().theme == crate::config::Theme::Dark);
+        harness.get_by_label(&fl!("reset-settings")).click_accesskit();
+        harness.run_steps(3);
+        assert!(!harness.state().config.gui.overwrite);
+        assert!(!kept().overwrite && kept().theme == crate::config::Theme::System);
+        // the message's Undo, over Settings, puts them back, and keeps them
+        harness.get_by_label(&fl!("settings-reset"));
+        harness.get_by_label(&fl!("undo-reset")).click();
+        harness.run_steps(3);
+        assert!(harness.state().config.gui.overwrite);
+        assert!(kept().overwrite && kept().theme == crate::config::Theme::Dark);
+        assert!(harness.query_by_label(&fl!("settings-reset")).is_none());
+        // and from the message once Settings has closed
+        harness.get_by_label(&fl!("reset-settings")).click_accesskit();
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+        assert!(!harness.state().settings_dialog.is_open() && !kept().overwrite);
+        harness.get_by_label(&fl!("undo-reset")).click();
+        harness.run_steps(2);
+        assert!(kept().overwrite && kept().theme == crate::config::Theme::Dark);
     }
 
     #[test]
@@ -820,21 +1053,16 @@ mod tests {
             assert!((now - under).length() < 1.5, "at {percent}%: {now:?}, not {under:?}");
         }
         assert_eq!((harness.state().config.gui.scale, harness.ctx.zoom_factor()), (1.3, 1.3));
-        // applied at once, but kept only once saved, as the rest of Settings
+        // applied and kept at once, as the rest of Settings
         let on_disk = || Config::load(&path).map_or(1.0, |config| config.gui.scale);
-        assert_eq!(on_disk(), 1.0);
-        // applied at once, kept once saved
-        harness.get_by_label(&fl!("save")).click_accesskit();
-        settle(&mut harness);
-        assert_eq!(Config::load(&path).unwrap().gui.scale, 1.3);
-        // back to 100%, and closed without saving: as it is until the
-        // window closes, as a theme chosen is, and not kept
+        assert_eq!(on_disk(), 1.3);
+        // back to 100%, and closed
         harness.get_by_label(&fl!("scale-reset")).click_accesskit();
         settle(&mut harness);
         assert_eq!((harness.state().config.gui.scale, harness.ctx.zoom_factor()), (1.0, 1.0));
         harness.get_all_by_label(&fl!("close")).last().unwrap().click_accesskit();
         settle(&mut harness);
-        assert_eq!((harness.ctx.zoom_factor(), on_disk()), (1.0, 1.3));
+        assert_eq!((harness.ctx.zoom_factor(), on_disk()), (1.0, 1.0));
         // by the keys, with Settings closed: kept at once
         harness.key_press_modifiers(Modifiers::COMMAND, Key::Equals);
         settle(&mut harness);
@@ -1250,7 +1478,7 @@ mod tests {
         // in a folder, said to be unchosen, yet none is kept
         harness.get_by_label(&fl!("in-a-folder", "unchosen"));
         assert_eq!(harness.state().config.gui.output_dir, None);
-        harness.get_by_label("Save").click_accesskit();
+        harness.get_by_label(&fl!("replace-in-the-way")).click_accesskit();
         harness.run_steps(2);
         assert!(!std::fs::read_to_string(&path).unwrap().contains("output-dir"));
     }

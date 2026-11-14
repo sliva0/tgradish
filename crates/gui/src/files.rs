@@ -115,9 +115,9 @@ impl App {
             Ok(Some(Picked::Folder(dir))) => self.add(vec![dir]),
             Ok(Some(Picked::Frames(files))) => self.add_frames(files),
             Ok(Some(Picked::Inspected(inspection))) => self.inspection = Some(*inspection),
-            // for Settings, which keeps it once saved; else, as a message
-            // or a file's settings asked, kept at once, and used over one
-            // given as the window was started
+            // for Settings, which keeps it as it keeps any change; else, as
+            // a message or a file's settings asked, kept at once, and used
+            // over one given as the window was started
             Ok(Some(Picked::Ffmpeg(file))) if self.settings_dialog.is_open() => {
                 self.config.ffmpeg.path = Some(file)
             }

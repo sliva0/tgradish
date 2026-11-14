@@ -317,6 +317,27 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     shot(&mut harness, save, "state-settings-scaled");
     harness.state_mut().config.gui.scale = 1.0;
     harness.run_steps(3);
+    // half a path typed for the folder, said to be wrong under it
+    harness.state_mut().config.gui.output_dir = None;
+    harness.run_steps(2);
+    harness.get_by_label(&crate::l10n::fl!("in-a-folder")).click();
+    harness.run_steps(2);
+    let field = || {
+        let fields =
+            harness.query_all(egui_kittest::kittest::by().role(egui::accesskit::Role::TextInput));
+        use egui_kittest::kittest::NodeT;
+        fields.last().expect("the folder's field").accesskit_node().id()
+    };
+    let field = field();
+    let by_id = || egui_kittest::kittest::by().predicate(move |node| node.id() == field);
+    harness.get(by_id()).focus();
+    harness.run_steps(1);
+    harness.get(by_id()).type_text("Stickers");
+    shot(&mut harness, save, "state-settings-typed");
+    // back to the defaults, with a way back
+    harness.get_by_label(&crate::l10n::fl!("reset-settings")).click();
+    shot(&mut harness, save, "state-settings-reset");
+    harness.state_mut().banner = Default::default();
     harness.set_size(egui::vec2(crate::MIN_WIDTH, 640.0));
     shot(&mut harness, save, "state-settings-small");
     harness.state_mut().settings_dialog = settings_dialog::SettingsDialog::default();

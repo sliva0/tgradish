@@ -33,6 +33,8 @@ pub(crate) enum Subject {
     Ffmpeg,
     /// Files removed a moment ago.
     Removed,
+    /// Settings put back to their defaults a moment ago.
+    SettingsReset,
 }
 
 /// A button in a message's row, which the window does when it is clicked.
@@ -55,6 +57,8 @@ pub(crate) enum Action {
     OpenSettings,
     /// Puts the files removed a moment ago back.
     Undo,
+    /// Puts back the settings as they were before they were reset.
+    UndoReset,
 }
 
 fn asked_id() -> egui::Id {
@@ -82,6 +86,7 @@ impl Action {
             Action::ChooseFfmpeg => fl!("choose-ffmpeg"),
             Action::OpenSettings => fl!("open-settings"),
             Action::Undo => fl!("undo-removing"),
+            Action::UndoReset => fl!("undo-reset"),
         }
     }
 
@@ -94,6 +99,7 @@ impl Action {
             Action::ChooseFfmpeg => fl!("choose-ffmpeg", "hint"),
             Action::OpenSettings => fl!("open-settings", "hint"),
             Action::Undo => fl!("undo-removing", "hint"),
+            Action::UndoReset => fl!("undo-reset", "hint"),
         }
     }
 
@@ -433,41 +439,49 @@ impl Banner {
         let id = egui::Id::new("notices");
         let before = egui::AreaState::load(ctx, id).and_then(|state| state.size);
         let mut focused = false;
+        // under menus, but over a dialog while one is open, as one said
+        // there can be acted on there, as Settings put back to their
+        // defaults is undone
+        let over_dialog = ctx.memory(|memory| memory.top_modal_layer().is_some());
+        let order = if over_dialog { egui::Order::Foreground } else { egui::Order::Middle };
         let area = egui::Area::new(id)
-            .order(egui::Order::Middle)
+            .order(order)
             .pivot(egui::Align2::LEFT_BOTTOM)
-            .fixed_pos(egui::pos2(corner.left() + CORNER_ROOM, corner.bottom() - CORNER_ROOM))
-            .show(ctx, |ui| {
-                ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
-                    node.set_live(egui::accesskit::Live::Polite);
-                });
-                ui.spacing_mut().item_spacing.y = CORNER_ROOM;
-                let room = width - NOTICE_MARGIN.sum().x - ICON - 2.0 * GAP - DISMISS;
-                for said in self.rows.iter_mut().filter(|said| said.passes()) {
-                    let card = egui::Frame::new()
-                        .fill(ui.visuals().panel_fill)
-                        .stroke(theme::floating_outline(ui.visuals()))
-                        .corner_radius(ui.visuals().window_corner_radius)
-                        .shadow(theme::floating_shadow(ui.visuals()))
-                        .inner_margin(NOTICE_MARGIN)
-                        .show(ui, |ui| {
-                            ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
-                                node.set_role(egui::accesskit::Role::Status);
-                            });
-                            ui.set_width(width - NOTICE_MARGIN.sum().x);
-                            draw(ui, said, room, now, true)
-                        });
-                    let row = card.inner;
-                    focused |= row.focused;
-                    clicked.extend(row.actions.into_iter().map(|a| (said.message.clone(), a)));
-                    if row.dismissed {
-                        dismissed.push(said.id);
-                    }
-                    // the time left, held while hovered
-                    let left = said.since.map_or(1.0, |since| (1.0 - (now - since) / SHOWN) as f32);
-                    countdown(ui, card.response.rect, left.clamp(0.0, 1.0));
-                }
+            .fixed_pos(egui::pos2(corner.left() + CORNER_ROOM, corner.bottom() - CORNER_ROOM));
+        if over_dialog {
+            ctx.move_to_top(area.layer());
+        }
+        let area = area.show(ctx, |ui| {
+            ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
+                node.set_live(egui::accesskit::Live::Polite);
             });
+            ui.spacing_mut().item_spacing.y = CORNER_ROOM;
+            let room = width - NOTICE_MARGIN.sum().x - ICON - 2.0 * GAP - DISMISS;
+            for said in self.rows.iter_mut().filter(|said| said.passes()) {
+                let card = egui::Frame::new()
+                    .fill(ui.visuals().panel_fill)
+                    .stroke(theme::floating_outline(ui.visuals()))
+                    .corner_radius(ui.visuals().window_corner_radius)
+                    .shadow(theme::floating_shadow(ui.visuals()))
+                    .inner_margin(NOTICE_MARGIN)
+                    .show(ui, |ui| {
+                        ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
+                            node.set_role(egui::accesskit::Role::Status);
+                        });
+                        ui.set_width(width - NOTICE_MARGIN.sum().x);
+                        draw(ui, said, room, now, true)
+                    });
+                let row = card.inner;
+                focused |= row.focused;
+                clicked.extend(row.actions.into_iter().map(|a| (said.message.clone(), a)));
+                if row.dismissed {
+                    dismissed.push(said.id);
+                }
+                // the time left, held while hovered
+                let left = said.since.map_or(1.0, |since| (1.0 - (now - since) / SHOWN) as f32);
+                countdown(ui, card.response.rect, left.clamp(0.0, 1.0));
+            }
+        });
         // drawn again at once where the notices take more room or less
         // than last time, as they are laid out from where they end
         if before.is_some_and(|before| before != area.response.rect.size()) {
@@ -530,6 +544,7 @@ impl crate::app::App {
             Action::ChooseFfmpeg => self.pick(ctx, crate::files::Pick::Ffmpeg),
             Action::OpenSettings => self.settings_dialog.open(),
             Action::Undo => self.undo_removing(),
+            Action::UndoReset => self.undo_reset(),
             Action::ReadPresetsAgain => {
                 if !self.reload_presets() {
                     self.banner.flash(message, fl!("read-again", "failed"), now);
