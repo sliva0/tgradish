@@ -19,6 +19,9 @@ accent = "system"                  # the accent colour: the system's, one of
                                    # "pink", "red", "orange", "yellow", "green",
                                    # "teal", "blue", "purple", "violet", "grey",
                                    # or one of your own as "#rrggbb"
+scale = 1.0                        # how large the window's text and controls
+                                   # are, from 0.2 to 5, as Ctrl+= and Ctrl+-
+                                   # change it; Ctrl+0 is back to 1
 reopen-files = true                # reopen the files of last time
 timeline-frames = false            # count the timeline in frames, not seconds
 

@@ -107,6 +107,9 @@ pub(crate) struct GuiConfig {
     pub(crate) theme: Theme,
     /// The colour that marks what is chosen, hovered and focused.
     pub(crate) accent: Accent,
+    /// How large everything in the window is, 1 as the system has it: as
+    /// Ctrl+= and Ctrl+- change it, from [`SCALES`]'s start to its end.
+    pub(crate) scale: f64,
     /// Start with the files open when the window last closed.
     pub(crate) reopen_files: bool,
     /// Show the timeline's cuts and times in frames rather than seconds.
@@ -124,6 +127,7 @@ impl Default for GuiConfig {
             language: None,
             theme: Theme::default(),
             accent: Accent::default(),
+            scale: 1.0,
             reopen_files: true,
             timeline_frames: false,
             result_preview: ResultPreview::default(),
@@ -132,7 +136,7 @@ impl Default for GuiConfig {
 }
 
 /// The keys of `[gui]` the window reads and writes; others are kept.
-const KEYS: [&str; 10] = [
+const KEYS: [&str; 11] = [
     "output-dir",
     "overwrite",
     "target",
@@ -140,10 +144,20 @@ const KEYS: [&str; 10] = [
     "language",
     "theme",
     "accent",
+    "scale",
     "reopen-files",
     "timeline-frames",
     "result-preview",
 ];
+
+/// The scales the window may have, as egui's keys for zooming allow.
+pub(crate) const SCALES: std::ops::RangeInclusive<f64> = 0.2..=5.0;
+
+/// `scale` to the hundredth, as egui's steps of a tenth leave it, without
+/// what an `f32` adds to it.
+pub(crate) fn rounded_scale(scale: f64) -> f64 {
+    (scale * 100.0).round() / 100.0
+}
 
 /// The value at `key` in `table`, if it is there and reads as a `T`.
 fn get<T: DeserializeOwned>(table: &toml::Table, key: &str) -> Option<T> {
@@ -164,6 +178,9 @@ impl GuiConfig {
             language: get(table, "language"),
             theme: get(table, "theme").unwrap_or(default.theme),
             accent: get(table, "accent").unwrap_or(default.accent),
+            scale: get::<f64>(table, "scale")
+                .filter(|scale| SCALES.contains(scale))
+                .map_or(default.scale, rounded_scale),
             reopen_files: get(table, "reopen-files").unwrap_or(default.reopen_files),
             timeline_frames: get(table, "timeline-frames").unwrap_or(default.timeline_frames),
             result_preview: match table.get("result-preview") {
@@ -382,6 +399,21 @@ mod tests {
         let own =
             GuiConfig { accent: Accent::Own(Color32::from_rgb(1, 2, 254)), ..Default::default() };
         assert_eq!(toml::Table::try_from(&own).unwrap()["accent"].as_str(), Some("#0102fe"));
+    }
+
+    #[test]
+    fn reads_and_writes_the_scale_as_it_is_stepped() {
+        let scale = |value: &str| read(&format!("[gui]\nscale = {value}\n")).scale;
+        assert_eq!(scale("1.25"), 1.25);
+        // out of egui's range, or no number: 100%
+        for unread in ["0.1", "9.0", "'big'", "nan"] {
+            assert_eq!(scale(unread), 1.0, "{unread}");
+        }
+        // egui's steps as an f32 are written as they read
+        let stepped = rounded_scale(f64::from(1.1_f32));
+        let gui = GuiConfig { scale: stepped, ..GuiConfig::default() };
+        let written = toml::Table::try_from(&gui).unwrap();
+        assert_eq!(written["scale"].as_float(), Some(1.1));
     }
 
     #[test]

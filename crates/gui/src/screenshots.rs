@@ -776,6 +776,14 @@ fn accents(save: &mut impl FnMut(&mut Harness<App>, &str)) {
         let theme = if theme == Theme::Dark { "dark" } else { "light" };
         shot(&mut harness, save, &format!("accent-settings-grey-{theme}"));
     }
+    // at 125%, as egui sees a window of the same pixels then
+    harness.state_mut().config.gui.accent = Accent::Named("teal");
+    set_theme(&harness.ctx, Theme::Dark);
+    harness.state_mut().config.gui.scale = 1.25;
+    harness.run_steps(6);
+    shot(&mut harness, save, "accent-settings-scale-125");
+    harness.state_mut().config.gui.scale = 1.0;
+    harness.run_steps(3);
     // the chosen one with the keyboard's focus, and the picker of one's own
     harness.set_size(egui::vec2(1280.0, 820.0));
     set_theme(&harness.ctx, Theme::Dark);

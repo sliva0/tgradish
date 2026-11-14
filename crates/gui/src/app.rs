@@ -84,6 +84,9 @@ pub(crate) struct App {
     pub(crate) inspection: Option<inspect::Inspection>,
     /// The theme Settings showed last, to apply a change made there.
     pub(crate) theme_shown: Option<crate::config::Theme>,
+    /// The window's scale shown last, to apply a change made in Settings
+    /// and save one made by egui's keys.
+    pub(crate) scale_shown: Option<f32>,
     /// Where the open files are kept between runs; `None` where they
     /// aren't.
     pub(crate) session: Option<session::Store>,
@@ -254,6 +257,7 @@ impl App {
             preset_dialog: None,
             inspection: None,
             theme_shown: None,
+            scale_shown: None,
             session: None,
             next_save: 0.0,
             fallbacks: fallback::Fallbacks::new(fonts()),
@@ -268,6 +272,29 @@ impl App {
             accent: None,
             applied_accent: None,
         }
+    }
+
+    /// Keeps the window's scale and its setting together: the setting is
+    /// applied as the window opens, and as Settings changes it, where it is
+    /// kept once saved; a change by egui's keys, Ctrl+= and Ctrl+- and
+    /// Ctrl+0, is saved at once, as the theme's button saves its change.
+    fn follow_scale(&mut self, ctx: &egui::Context) {
+        let zoom = ctx.zoom_factor();
+        let set = self.config.gui.scale as f32;
+        let alike = |a: f32, b: f32| (a - b).abs() < 0.005;
+        match self.scale_shown {
+            // stepped in Settings, which applied it and set it at once
+            Some(shown) if !alike(zoom, shown) && alike(zoom, set) => {}
+            // by the keys, Settings open or not
+            Some(shown) if !alike(zoom, shown) => {
+                let scale = crate::config::rounded_scale(f64::from(zoom));
+                self.save_setting(|gui| gui.scale = scale);
+            }
+            Some(shown) if alike(set, shown) => return,
+            // as the window opens, or set another way
+            _ => ctx.set_zoom_factor(set),
+        }
+        self.scale_shown = Some(ctx.zoom_factor());
     }
 
     pub(crate) fn style(&self, ctx: &egui::Context) {
@@ -656,6 +683,7 @@ impl eframe::App for App {
             set_theme(&ctx, self.config.gui.theme);
             self.theme_shown = Some(self.config.gui.theme);
         }
+        self.follow_scale(&ctx);
         self.inspection_dialog(&ctx);
         self.preset_dialogs(&ctx);
         if self.settings_dialog.about {
