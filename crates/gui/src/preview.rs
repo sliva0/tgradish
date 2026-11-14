@@ -314,18 +314,15 @@ fn preview(
                 let exact = file_settings::exact_of(webm).is_some() && item.format != Format::Tgs;
                 file_settings::whole_picture(ui, item, exact);
             }
-            let mark = widgets::text_width(ui, "⚠", 4.0);
-            if has_result && !item.result_is_current() && ui.available_width() >= mark {
-                // the mark alone where the word doesn't fit, and nothing
-                // where it doesn't either: the list and the column beside
-                // say so too
-                let text = format!("⚠ {}", fl!("outdated"));
-                let text = if ui.available_width() >= widgets::text_width(ui, &text, 4.0) {
-                    text
-                } else {
-                    "⚠".to_owned()
-                };
-                let stale = RichText::new(text).color(theme::warn(ui.visuals()));
+            // the mark alone where the word doesn't fit, and nothing where
+            // it doesn't either: the list and the column beside say so too
+            let word = format!("⚠ {}", fl!("outdated"));
+            let forms = [word.as_str(), "⚠"];
+            let outdated = (has_result && !item.result_is_current())
+                .then(|| widgets::fitting(ui, &forms, ui.available_width(), 4.0))
+                .flatten();
+            if let Some(form) = outdated {
+                let stale = RichText::new(forms[form]).color(theme::warn(ui.visuals()));
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add(egui::Label::new(stale).truncate())
                         .on_hover_text(fl!("outdated", "hint"));

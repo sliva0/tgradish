@@ -153,10 +153,9 @@ impl App {
                         // an icon alone where what follows needs the room
                         let text = fl!("save-preset");
                         let room = ui.available_width() - keep - said;
-                        let save = if room >= widgets::text_width(ui, &text, 16.0) {
-                            egui::Button::new(text)
-                        } else {
-                            egui::Button::new(RichText::new("💾").size(15.0))
+                        let save = match widgets::fitting(ui, &[&text], room, 16.0) {
+                            Some(_) => egui::Button::new(text),
+                            None => egui::Button::new(RichText::new("💾").size(15.0)),
                         };
                         let hint = fl!("save-preset", "hint");
                         let save = save.min_size(vec2(BAR_ROW, BAR_ROW));

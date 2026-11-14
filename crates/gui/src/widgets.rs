@@ -199,6 +199,14 @@ pub(crate) fn text_width(ui: &egui::Ui, text: &str, padding: f32) -> f32 {
     galley.size().x + padding
 }
 
+/// Which of `texts`, its forms from the longest to the shortest, fits in
+/// `room` with `padding` beside it, in buttons' font: the first that does,
+/// if any. Words that have a shorter form where room is short take it
+/// rather than being cut short.
+pub(crate) fn fitting(ui: &egui::Ui, texts: &[&str], room: f32, padding: f32) -> Option<usize> {
+    texts.iter().position(|text| text_width(ui, text, padding) <= room)
+}
+
 /// Number fields added by `add` as wide as `digits` digits and `suffix`
 /// take, so that they keep their width as the number changes, typed or
 /// dragged: Ubuntu's digits are all as wide as each other.
@@ -653,7 +661,6 @@ fn picking_in<T: PartialEq + Copy>(
             }
         }
         let radius = ui.visuals().widgets.inactive.corner_radius.nw;
-        let height = ui.spacing().interact_size.y;
         for (line, most) in flow(&natural, gap, room, wrap) {
             ui.horizontal(|ui| {
                 for index in line.clone() {
@@ -668,15 +675,8 @@ fn picking_in<T: PartialEq + Copy>(
                         se: round(last),
                     };
                     let selected = *value == option;
-                    let mut button = egui::Button::selectable(selected, text.as_str())
-                        .truncate()
-                        .corner_radius(corners)
-                        .min_size(vec2(0.0, height));
-                    button = if selected {
-                        button.stroke(theme::on_outline(ui.visuals()))
-                    } else {
-                        button.frame_when_inactive(true)
-                    };
+                    let button = egui::Button::new(text.as_str()).truncate().corner_radius(corners);
+                    let button = as_choice(ui, button, selected);
                     let cut = natural[index] > most;
                     let response = ui
                         .scope(|ui| {
@@ -711,15 +711,17 @@ fn picking_in<T: PartialEq + Copy>(
     changed
 }
 
-/// `button` as a choice of [`segments`] is, on its own: lit, and outlined,
-/// where `selected`.
+/// `button` as a choice is, of [`segments`] or on its own: framed, as high
+/// as a control, and lit and outlined where `selected`. Every choice is
+/// drawn so.
 pub(crate) fn as_choice<'a>(
     ui: &egui::Ui,
     button: egui::Button<'a>,
     selected: bool,
 ) -> egui::Button<'a> {
     let height = ui.spacing().interact_size.y;
-    let button = button.selected(selected).frame_when_inactive(true).min_size(vec2(0.0, height));
+    let button =
+        button.selected(selected).frame(true).frame_when_inactive(true).min_size(vec2(0.0, height));
     if selected { button.stroke(theme::on_outline(ui.visuals())) } else { button }
 }
 
@@ -734,13 +736,7 @@ pub(crate) fn choice(
     text: &str,
     enabled: bool,
 ) -> egui::Response {
-    let height = ui.spacing().interact_size.y;
-    let button = egui::Button::selectable(selected, text).min_size(vec2(0.0, height));
-    let button = if selected {
-        button.stroke(theme::on_outline(ui.visuals()))
-    } else {
-        button.frame_when_inactive(true)
-    };
+    let button = as_choice(ui, egui::Button::new(text), selected);
     let line = ui.max_rect().width();
     let padding = 2.0 * ui.spacing().button_padding.x;
     if text_width(ui, text, padding) <= line {
