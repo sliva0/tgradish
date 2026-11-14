@@ -109,8 +109,9 @@ pub struct Global {
     /// the config file. [default: the config's, or auto]
     #[arg(long, global = true, value_name = "WHERE", value_enum)]
     pub ffmpeg_from: Option<FfmpegFrom>,
-    /// Config file to use instead of the default one.
-    #[arg(long, global = true, env = "TGRADISH_CONFIG", value_name = "FILE")]
+    /// Config file to use instead of the default one, which `tgradish
+    /// config path` prints. Over TGRADISH_CONFIG.
+    #[arg(long, global = true, value_name = "FILE")]
     pub config: Option<PathBuf>,
     /// Colours, links on file names, progress in the terminal's tab or
     /// taskbar and pictures of results, where the terminal shows them.
@@ -204,6 +205,26 @@ impl Cli {
 }
 
 impl Command {
+    /// Whether it reads the config file: only what uses it does, so that a
+    /// mistake in it never stops the rest. The window reads its own.
+    pub fn reads_config(&self) -> bool {
+        match self {
+            Command::Convert(_)
+            | Command::Watch(_)
+            | Command::Describe
+            | Command::Preset(PresetCommand::List)
+            | Command::Config(ConfigCommand::Show)
+            | Command::Ffmpeg { .. } => true,
+            Command::Spoof(_)
+            | Command::Inspect(_)
+            | Command::Preset(_)
+            | Command::Config(_)
+            | Command::Licenses => false,
+            #[cfg(feature = "gui")]
+            Command::Gui => false,
+        }
+    }
+
     /// Whether it opens the window, which takes Ctrl-C as any program
     /// does and marks what it makes as its own.
     pub fn is_window(&self) -> bool {

@@ -12,9 +12,20 @@ fn tgradish(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(args)
         // don't pick up the developer's own config
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .output()
         .unwrap()
+}
+
+/// An empty config file, for TGRADISH_CONFIG: the defaults, rather than
+/// the developer's own config.
+fn no_config() -> &'static Path {
+    static FILE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    FILE.get_or_init(|| {
+        let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join("empty-config.toml");
+        std::fs::write(&path, "").unwrap();
+        path
+    })
 }
 
 fn json_lines(output: &Output) -> Vec<Value> {
@@ -102,7 +113,7 @@ fn stops_quietly_when_stdout_closes() {
     for args in [&["licenses"][..], &["--json", "describe"], &["preset", "list"]] {
         let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
             .args(args)
-            .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+            .env("TGRADISH_CONFIG", no_config())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -231,7 +242,7 @@ fn stops_cleanly_when_stdout_closes() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["--ffmpeg-from", "system", "--json", "convert", input.to_str().unwrap(), "-o"])
         .arg(&out)
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .env("TMPDIR", &temp)
         .stdout(Stdio::piped())
         .spawn()
@@ -266,7 +277,7 @@ fn cancels_from_stdin() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["--json", "convert", input.to_str().unwrap(), "-o", out.to_str().unwrap()])
         .arg("--cancel-on-stdin")
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -304,7 +315,7 @@ fn leaves_stdin_alone() {
     let output = Command::new("sh")
         .args(["-c", script, env!("CARGO_BIN_EXE_tgradish")])
         .arg(dir.path().join("list"))
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .output()
         .unwrap();
     let finished = json_lines(&output).iter().filter(|e| e["event"] == "finished").count();
@@ -747,7 +758,7 @@ fn watch_converts_new_files() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["--json", "watch", dir.path().to_str().unwrap(), "--interval", "0.2", "-r"])
         .args(["--output-dir", out.to_str().unwrap(), "--preset", "fast", "--length", "0.5"])
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
@@ -799,7 +810,7 @@ impl Watching {
         let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
             .args(["--json", "watch", dir.to_str().unwrap(), "--interval", "0.1"])
             .args(args)
-            .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+            .env("TGRADISH_CONFIG", no_config())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -931,7 +942,7 @@ fn watch_stops_as_done() {
     // and says so
     let child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["watch", dir.path().to_str().unwrap(), "--interval", "0.1"])
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
@@ -1033,7 +1044,7 @@ fn names_files_whose_names_are_not_unicode() {
     let output = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["--json", "convert", "--format", "tgs"])
         .arg(&input)
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .output()
         .unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -1047,7 +1058,7 @@ fn names_files_whose_names_are_not_unicode() {
     let output = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["convert", "--format", "tgs", "-y"])
         .arg(&input)
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .output()
         .unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -1076,7 +1087,7 @@ fn names_files_whose_names_are_not_unicode() {
 fn with_presets(dir: &std::path::Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(args)
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .env("XDG_CONFIG_HOME", dir)
         .output()
         .unwrap()
@@ -1240,6 +1251,56 @@ fn spoofs_durations() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("Telegram will still refuse it"));
 }
 
+/// A config is read only by what uses it, and one named that isn't there
+/// is a mistake, not the defaults.
+#[test]
+fn reads_the_config_only_where_used() {
+    let dir = tempfile::tempdir().unwrap();
+    let broken = dir.path().join("config.toml");
+    std::fs::write(&broken, "presett = 'fast'\n").unwrap();
+    let broken = broken.to_str().unwrap();
+    let run = |args: &[&str], env: Option<&str>| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_tgradish"));
+        command.args(args).env_remove("TGRADISH_CONFIG");
+        if let Some(env) = env {
+            command.env("TGRADISH_CONFIG", env);
+        }
+        command.output().unwrap()
+    };
+    for args in [&["config", "path"][..], &["licenses"], &["preset", "path"]] {
+        let output = run(args, Some(broken));
+        assert!(output.status.success(), "{args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    }
+    let shown = run(&["config", "show"], Some(broken));
+    assert_eq!(shown.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&shown.stderr).contains("presett"));
+    // named and missing
+    let missing = dir.path().join("missing.toml");
+    let missing = missing.to_str().unwrap();
+    let flag = run(&["--config", missing, "config", "show"], None);
+    assert_eq!(flag.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&flag.stderr);
+    assert_eq!(stderr.trim_end(), format!("error: --config {missing} doesn't exist"));
+    let env = run(&["describe"], Some(missing));
+    let stderr = String::from_utf8_lossy(&env.stderr);
+    assert_eq!(stderr.trim_end(), format!("error: {missing}, from TGRADISH_CONFIG, doesn't exist"));
+    // the flag beats the variable
+    let flag_wins = run(&["--config", no_config().to_str().unwrap(), "describe"], Some(missing));
+    assert!(flag_wins.status.success());
+    // a preset the config names that isn't there says it was the config's
+    let config = dir.path().join("nope.toml");
+    std::fs::write(&config, "tgs-preset = 'nope'\n").unwrap();
+    let png = dir.path().join("a.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let output = run(&["convert", png.to_str().unwrap(), "-f", "tgs"], config.to_str());
+    assert_eq!(output.status.code(), Some(1));
+    let expected = format!(
+        "the config's tgs-preset \"nope\" doesn't exist ({}: tgs-preset); available: ",
+        config.display()
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains(&expected));
+}
+
 #[test]
 fn shows_presets_and_the_config() {
     // a preset as a file would hold it
@@ -1292,7 +1353,7 @@ fn cancels_text_conversions_with_130() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["--ffmpeg-from", "system", "convert", input.to_str().unwrap()])
         .args(["-o", out.to_str().unwrap()])
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
@@ -1322,7 +1383,7 @@ fn exits_as_stdout_closed_when_only_the_error_finds_it() {
         drop(reader);
         let status = Command::new(env!("CARGO_BIN_EXE_tgradish"))
             .args(args)
-            .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+            .env("TGRADISH_CONFIG", no_config())
             .stdout(writer)
             .stderr(std::process::Stdio::null())
             .status()

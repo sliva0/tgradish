@@ -196,8 +196,63 @@ pub fn explain(err: tgradish_core::Error) -> anyhow::Error {
 /// Settings shared by all commands.
 pub struct Context {
     pub global: Global,
+    /// The config file's settings, for the commands that read them, which
+    /// [`Command::reads_config`] names; the defaults for the rest.
     pub config: Config,
+    /// Where the config file is, or would be.
+    pub config_file: Option<ConfigFile>,
     pub cancel: CancelToken,
+}
+
+/// Where the config file is, and who said so.
+#[derive(Debug, Clone)]
+pub struct ConfigFile {
+    pub path: PathBuf,
+    pub from: ConfigFrom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigFrom {
+    /// `--config`.
+    Flag,
+    /// `TGRADISH_CONFIG`.
+    Env,
+    /// Where it is unless something says otherwise.
+    Default,
+}
+
+impl ConfigFile {
+    /// The config file `--config` names, or else `TGRADISH_CONFIG`, or
+    /// else the one in the config dir, if there is a config dir.
+    fn find(flag: Option<&std::path::Path>) -> Option<ConfigFile> {
+        let env = std::env::var_os("TGRADISH_CONFIG").filter(|path| !path.is_empty());
+        match (flag, env) {
+            (Some(path), _) => Some(ConfigFile { path: path.into(), from: ConfigFrom::Flag }),
+            (None, Some(path)) => Some(ConfigFile { path: path.into(), from: ConfigFrom::Env }),
+            (None, None) => {
+                let path = Config::default_path()?;
+                Some(ConfigFile { path, from: ConfigFrom::Default })
+            }
+        }
+    }
+
+    /// Reads the file. One that isn't there gives the defaults, unless it
+    /// was named, which would be a mistake: `--config` or
+    /// `TGRADISH_CONFIG` naming nothing are said to.
+    fn load(&self) -> Result<Config> {
+        let path = self.path.display();
+        let named = match self.from {
+            ConfigFrom::Flag => Some(format!("--config {path} doesn't exist")),
+            ConfigFrom::Env => Some(format!("{path}, from TGRADISH_CONFIG, doesn't exist")),
+            ConfigFrom::Default => None,
+        };
+        if let Some(missing) = named
+            && !self.path.exists()
+        {
+            anyhow::bail!("{missing}");
+        }
+        Ok(Config::load(&self.path)?)
+    }
 }
 
 /// The ffmpeg given over the config file's, as the window takes it too: by
@@ -235,11 +290,15 @@ impl Context {
 }
 
 fn run(cli: Cli) -> Result<()> {
-    let config_path = cli.global.config.clone().or_else(Config::default_path);
-    let config = match &config_path {
-        Some(path) => Config::load(path)?,
-        None => Config::default(),
+    let config_file = ConfigFile::find(cli.global.config.as_deref());
+    // read only where it is used, so a mistake in it never stops what
+    // could say where it is, as `config path`, or what has nothing to do
+    // with it
+    let config = match &config_file {
+        Some(file) if cli.command.reads_config() => file.load()?,
+        _ => Config::default(),
     };
+    let config_path = config_file.as_ref().map(|file| file.path.clone());
 
     let cancel = CANCEL.get_or_init(CancelToken::new).clone();
     // the window never reads the token, so Ctrl-C there ends it as usual
@@ -256,7 +315,7 @@ fn run(cli: Cli) -> Result<()> {
         })?;
     }
 
-    let ctx = Context { global: cli.global, config, cancel };
+    let ctx = Context { global: cli.global, config, config_file, cancel };
     match cli.command {
         Command::Convert(args) => convert::run(&ctx, args),
         Command::Watch(args) => watch::run(&ctx, args),

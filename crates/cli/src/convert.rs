@@ -188,13 +188,20 @@ impl<'a> Converter<'a> {
             Ok(options)
         };
         let resolved = presets.resolve(name, format).map_err(|err| match err {
-            tgradish_core::Error::Preset(PresetError::Unknown { known, .. })
-                if args.preset.is_some() =>
-            {
-                crate::usage(format!(
-                    "--preset {name:?} doesn't exist; available: {}",
-                    known.join(", ")
-                ))
+            tgradish_core::Error::Preset(PresetError::Unknown { known, .. }) => {
+                let known = known.join(", ");
+                if args.preset.is_some() {
+                    return crate::usage(format!(
+                        "--preset {name:?} doesn't exist; available: {known}"
+                    ));
+                }
+                // the only other place a preset is named
+                let key = if format == Format::Tgs { "tgs-preset" } else { "preset" };
+                let file = ctx.config_file.as_ref().map(|file| file.path.display());
+                let place = file.map_or(String::new(), |file| format!(" ({file}: {key})"));
+                anyhow::anyhow!(
+                    "the config's {key} {name:?} doesn't exist{place}; available: {known}"
+                )
             }
             err => err.into(),
         })?;
