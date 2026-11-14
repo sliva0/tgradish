@@ -320,13 +320,21 @@ result-no-frames = The result has no frames
 
 ## The result's small picture over the preview
 
-# Its label: how large it is shown, as a share of its own pixels, then, on
-# a line under it, its size, as "512 × 512 px".
-inset-label = Result at { $scale }%
+# Its label: how large it is shown, as inset-scale says it, then, on a line
+# under it, its size, as "512 × 512 px".
+inset-label = Result at { $scale }
     .plain = Result
     .drag = Drag it to another corner
+# How large it is shown: as a share of its own pixels, or, where it is
+# shown pixel for pixel larger, as so many times its size.
+inset-scale = { $percent }%
+    .times = { $times }×
+# .same, on hover, where the next size would show it no otherwise, as it
+# shows at its own size in both, or there is none.
 inset-smaller = Smaller
+    .same = It would show no smaller
 inset-larger = Larger
+    .same = It would show no larger
 
 
 ## Over the preview

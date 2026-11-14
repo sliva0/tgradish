@@ -260,7 +260,7 @@ fn bars_and_insets(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     let walker = tgradish_corpus::sprite("walker_2x");
     let ase = dir.path().join("walker.ase");
     std::fs::write(&ase, tgradish_corpus::encode::aseprite_with(&walker, &[], &[])).unwrap();
-    let mut harness = window(config.clone(), egui::vec2(1280.0, 820.0));
+    let mut harness = window(config.clone(), egui::vec2(1280.0, 1300.0));
     harness.state_mut().add(vec![ase]);
     finish(&mut harness);
     let item = &mut harness.state_mut().items[0];

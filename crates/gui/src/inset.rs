@@ -124,10 +124,13 @@ impl Inset {
     /// Shows the picture `make` makes of a `full` sized result, made again
     /// only when `key` changes, as large as fits `room`, at `align` in it,
     /// labelled as the result, with `details` under that and then how
-    /// large it shows. `make` is told the most pixels along a side the
-    /// picture shows with, which it needn't make more of. With `controls`,
-    /// buttons on the label change its `size`, one of [`INSET_SIZES`], and
-    /// dragging it or its label to another corner of `view` than its
+    /// large it shows. A result of pixels, which has `details`, shows at
+    /// most at its own size, or a whole number of times it, pixel for
+    /// pixel, where there is room for twice it or more. `make` is told the
+    /// most pixels along a side the picture shows with, which it needn't
+    /// make more of. With `controls`, buttons on the label change its
+    /// `size`, one of [`INSET_SIZES`], where that would show it otherwise,
+    /// and dragging it or its label to another corner of `view` than its
     /// `corner` moves it there.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn show(
@@ -141,13 +144,15 @@ impl Inset {
         make: impl FnOnce(usize) -> egui::ColorImage,
     ) -> Option<InsetChange> {
         let ppp = ui.ctx().pixels_per_point();
-        let room_size = room.size().max(Vec2::splat(1.0));
-        let fits = |size: Vec2| (room_size.x / size.x).min(room_size.y / size.y).min(1.0 / ppp);
         let full = full.max(Vec2::splat(1.0));
-        let shown = full * fits(full);
+        let whole_times = details.is_some();
+        // screen pixels to each of the result's in a room of `side`
+        let scale_in = |side: Vec2| shown_scale(side, full, ppp, whole_times);
+        let scale = scale_in(room.size().max(Vec2::splat(1.0)));
+        let shown = full * scale / ppp;
         // as many pixels as show, and no more than the result has
-        let most = ((shown.max_elem() * ppp).ceil() as usize).max(1);
-        let sharp = fits(full) * ppp >= 1.0;
+        let most = ((full.max_elem() * scale.min(1.0)).ceil() as usize).max(1);
+        let sharp = scale >= 1.0;
         if self.key != Some((key, sharp, most)) || self.texture.is_none() {
             let options =
                 if sharp { egui::TextureOptions::NEAREST } else { egui::TextureOptions::LINEAR };
@@ -165,8 +170,7 @@ impl Inset {
         // pixels takes
         let label = match details {
             Some(details) => {
-                let scale = (fits(full) * ppp * 100.0).round();
-                format!("{}\n{details}", fl!("inset-label", scale = scale))
+                format!("{}\n{details}", fl!("inset-label", scale = scale_text(scale)))
             }
             None => fl!("inset-label", "plain"),
         };
@@ -285,17 +289,48 @@ impl Inset {
         row.spacing_mut().button_padding = vec2(0.0, 0.0);
         row.spacing_mut().interact_size = Vec2::splat(SIZE_BUTTON);
         let button = |text| egui::Button::new(text).min_size(vec2(SIZE_BUTTON, SIZE_BUTTON));
-        let last = INSET_SIZES.len() - 1;
-        let smaller = widgets::named(row.add_enabled(size > 0, button("−")), &fl!("inset-smaller"));
+        // only where the next size would show it otherwise: not past the
+        // ends, nor while it shows at its own size in either
+        let label_height = boxed.y + LABEL_GAP;
+        let scale_at = |size: usize| {
+            scale_in(Vec2::splat(room_side(view, label_height, INSET_SIZES[size]).max(1.0)))
+        };
+        let differs = |other: Option<usize>| {
+            other
+                .filter(|other| *other < INSET_SIZES.len())
+                .is_some_and(|other| (scale_at(other) - scale_at(size)).abs() > 1e-3)
+        };
+        let (less, more) = (differs(size.checked_sub(1)), differs(Some(size + 1)));
+        let smaller = widgets::named(row.add_enabled(less, button("−")), &fl!("inset-smaller"));
+        let smaller = smaller.on_disabled_hover_text(fl!("inset-smaller", "same"));
         if smaller.on_hover_text(fl!("inset-smaller")).clicked() {
             change = Some(InsetChange::Size(size - 1));
         }
-        let larger =
-            widgets::named(row.add_enabled(size < last, button("+")), &fl!("inset-larger"));
+        let larger = widgets::named(row.add_enabled(more, button("+")), &fl!("inset-larger"));
+        let larger = larger.on_disabled_hover_text(fl!("inset-larger", "same"));
         if larger.on_hover_text(fl!("inset-larger")).clicked() {
             change = Some(InsetChange::Size(size + 1));
         }
         change
+    }
+}
+
+/// Screen pixels to each of a `full` sized result's pixels as it shows in
+/// a room `room` large, `ppp` screen pixels to a point: as much as fits, up
+/// to its own size; or, where it may show a `whole_times` larger, the most
+/// whole times its size that fit, from twice up.
+fn shown_scale(room: Vec2, full: Vec2, ppp: f32, whole_times: bool) -> f32 {
+    let fit = (room.x / full.x).min(room.y / full.y) * ppp;
+    if whole_times && fit >= 2.0 { fit.floor() } else { fit.min(1.0) }
+}
+
+/// How large a result shows, as `scale` says: as a share of its size, or
+/// as so many times it.
+fn scale_text(scale: f32) -> String {
+    if scale >= 2.0 {
+        fl!("inset-scale", "times", times = scale.round())
+    } else {
+        fl!("inset-scale", percent = (scale * 100.0).round())
     }
 }
 
@@ -338,7 +373,7 @@ pub(crate) fn label_box(text: Vec2) -> Vec2 {
 /// digits are all as wide as each other.
 pub(crate) fn widest_label(detailed: bool) -> String {
     match detailed {
-        true => format!("{}\n{}", fl!("inset-label", scale = 100), "512 × 512 px"),
+        true => format!("{}\n{}", fl!("inset-label", scale = scale_text(1.0)), "512 × 512 px"),
         false => fl!("inset-label", "plain"),
     }
 }
@@ -390,6 +425,14 @@ fn nearest(frame: Rect, places: &[(Corner, Rect); 4]) -> Corner {
         .map_or(Corner::BottomRight, |(corner, _)| *corner)
 }
 
+/// The side of the small picture's room in `view`, `share` of its shorter
+/// side, one of [`INSET_SIZES`], with room for a label `label_height` high.
+fn room_side(view: Rect, label_height: f32, share: f32) -> f32 {
+    let largest =
+        (view.width() - 2.0 * MARGIN - FRAME).min(view.height() - 2.0 * MARGIN - label_height);
+    (view.size().min_elem() * share).max(SMALLEST_INSET).min(largest).max(0.0)
+}
+
 /// Where the input and the result's small picture go in `view`. The small
 /// picture is `share` of the view's shorter side, one of [`INSET_SIZES`],
 /// in `corner`. The input gives up a strip along a side of that corner for
@@ -411,9 +454,7 @@ pub(crate) fn split(
     corner: Corner,
 ) -> (Rect, Rect) {
     let label_height = label.y + LABEL_GAP;
-    let largest =
-        (view.width() - 2.0 * MARGIN - FRAME).min(view.height() - 2.0 * MARGIN - label_height);
-    let side = (view.size().min_elem() * share).max(SMALLEST_INSET).min(largest).max(0.0);
+    let side = room_side(view, label_height, share);
     let room = docked(view, Vec2::splat(side), label_height, corner);
 
     let input = vec2(input.0.max(1) as f32, input.1.max(1) as f32);
@@ -519,7 +560,7 @@ mod tests {
             let place = (Corner::BottomRight, *size, true);
             let red = |_| egui::ColorImage::filled([8, 8], Color32::RED);
             let room = (view, room, vec2(1.0, 1.0));
-            *change = inset.show(ui, room, place, 1, None, vec2(8.0, 8.0), red).or(*change);
+            *change = inset.show(ui, room, place, 1, None, vec2(512.0, 512.0), red).or(*change);
         };
         let mut harness = egui_kittest::Harness::new_ui_state(show, (Inset::default(), None, 2));
         harness.get_by_label(&fl!("inset-larger")).click();
@@ -593,6 +634,70 @@ mod tests {
         widgets::test_fonts(&harness);
         harness.run_steps(2);
         harness
+    }
+
+    #[test]
+    fn shows_a_small_result_whole_times_larger_and_offers_only_sizes_that_show_otherwise() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        // at its own size at most, unless twice it fits, and then whole times
+        let full = vec2(100.0, 100.0);
+        let scale = |side: f32, whole_times| shown_scale(Vec2::splat(side), full, 1.0, whole_times);
+        assert_eq!([scale(50.0, true), scale(150.0, true), scale(250.0, true)], [0.5, 1.0, 2.0]);
+        assert_eq!((scale(399.0, true), scale(399.0, false)), (3.0, 1.0));
+        // on a screen of two pixels to a point, in its pixels
+        assert_eq!(shown_scale(Vec2::splat(150.0), full, 2.0, true), 3.0);
+        assert_eq!(scale_text(0.42), "42%");
+        assert_eq!(scale_text(3.0), "3×");
+        // a 100 × 100 emoji in a view 700 high: 100% in the two smallest
+        // rooms, twice its size in the next two, three times in the last
+        let show = |ui: &mut egui::Ui, (inset, size): &mut (Inset, usize)| {
+            let view = ui.max_rect();
+            let widest =
+                ui.painter().layout_no_wrap(widest_label(true), INSET_LABEL, Color32::WHITE);
+            let label = label_box(widest.size());
+            let room = split(view, (640, 360), label, INSET_SIZES[*size], Corner::BottomRight).1;
+            let place = ((view, room, vec2(1.0, 1.0)), (Corner::BottomRight, *size, true));
+            let red = |_| egui::ColorImage::filled([100, 100], Color32::RED);
+            inset.show(ui, place.0, place.1, 1, Some("100 × 100 px"), full, red);
+        };
+        let state = (Inset::default(), 0);
+        let builder = egui_kittest::Harness::builder().with_size(vec2(1000.0, 700.0));
+        let mut harness = builder.build_ui_state(show, state);
+        let enabled = |harness: &egui_kittest::Harness<'_, (Inset, usize)>| {
+            let on = |label: String| !harness.get_by_label(&label).accesskit_node().is_disabled();
+            (on(fl!("inset-smaller")), on(fl!("inset-larger")))
+        };
+        let mut found = Vec::new();
+        for size in 0..INSET_SIZES.len() {
+            harness.state_mut().1 = size;
+            harness.run_steps(2);
+            // the label as it is drawn
+            let drawn: Vec<String> = harness
+                .output()
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+            let label = |scale: &str| format!("Result at {scale}\n");
+            let shown = ["100%", "2×", "3×"]
+                .into_iter()
+                .find(|scale| drawn.iter().any(|text| text.starts_with(&label(scale))));
+            found.push((shown, enabled(&harness)));
+        }
+        let (whole, twice, thrice) = (Some("100%"), Some("2×"), Some("3×"));
+        assert_eq!(
+            found,
+            [
+                (whole, (false, false)),
+                (whole, (false, true)),
+                (twice, (true, false)),
+                (twice, (false, true)),
+                (thrice, (true, false)),
+            ]
+        );
     }
 
     #[test]
