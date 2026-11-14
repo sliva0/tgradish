@@ -210,8 +210,9 @@ pub enum Command {
     /// Show the config file, where it is, or an example of one.
     #[command(subcommand, after_help = config_help())]
     Config(ConfigCommand),
-    /// Show which ffmpeg is used and whether it can make video stickers:
-    /// `status`, which `tgradish ffmpeg` alone runs.
+    /// Show which ffmpeg is used and whether it can make video stickers.
+    ///
+    /// `tgradish ffmpeg` alone runs `status`.
     Ffmpeg {
         #[command(subcommand)]
         command: Option<FfmpegCommand>,
@@ -221,14 +222,20 @@ pub enum Command {
     #[command(alias = "licences")]
     Licenses,
     /// Print the script that completes tgradish's commands and flags in a
-    /// shell, as `tgradish completions bash > ~/.local/share/bash-completion/completions/tgradish`.
+    /// shell.
+    ///
+    /// For bash, as `tgradish completions bash >
+    /// ~/.local/share/bash-completion/completions/tgradish`; packages
+    /// install them for every shell.
     Completions {
         /// The shell to complete in.
         shell: ShellArg,
     },
 
-    /// Open the tgradish window. It also opens when tgradish is started
-    /// without arguments outside a terminal.
+    /// Open the tgradish window.
+    ///
+    /// It also opens when tgradish is started without arguments outside a
+    /// terminal.
     #[cfg(feature = "gui")]
     Gui,
 }
@@ -844,8 +851,9 @@ pub enum ConfigCommand {
     /// Show the config in effect: the file's, with the defaults it leaves
     /// out.
     Show,
-    /// Print an example config, each setting explained, to start one from:
-    /// `tgradish config example > "$(tgradish config path)"`.
+    /// Print an example config, each setting explained, to start one from.
+    ///
+    /// As `tgradish config example > "$(tgradish config path)"`.
     Example,
 }
 
