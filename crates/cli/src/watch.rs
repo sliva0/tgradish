@@ -190,10 +190,10 @@ fn warn(ctx: &Context, message: String) {
 pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
     let dir = args.dir.display();
     if !args.dir.exists() {
-        bail!("{dir}: no such folder");
+        bail!("{dir}: no such directory");
     }
     if !args.dir.is_dir() {
-        bail!("{dir} isn't a folder: watch watches one");
+        bail!("{dir} isn't a directory: watch watches one");
     }
     std::fs::read_dir(&args.dir).map_err(|err| {
         anyhow::anyhow!("couldn't read {dir}: {}", tgradish_core::io_reason(&err))
