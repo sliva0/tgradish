@@ -192,12 +192,15 @@ remove-file = Remove it from the list
 # A file's button that makes its result, before it has one.
 convert = Convert
     .hint = Make its sticker or emoji
-row-convert-again = Settings changed: convert again
+# The badge on a file's result that is outdated, which converts it again.
+# "Outdated" is the one name for a result made with other settings than
+# its file has now, wherever it is said.
+row-convert-again = Outdated: convert again
 # A file's state, under its name.
 row-next = next
 row-waiting = waiting, { $ahead } ahead
 # After the size of a file's result, once its settings no longer match it.
-row-stale = { $size } · settings changed
+row-stale = { $size } · outdated
 row-failed = failed
 row-exists = a file is in the way
 row-stopped = stopped
@@ -229,7 +232,7 @@ waiting-for = Waiting for { $ahead } more
 # The bar's Convert button once there is a result. The hovers of the button
 # either way: made with the settings as they are now, or again with the same.
 convert-again = Convert again
-    .changed = Make it with current settings
+    .changed = Outdated: make it again with the current settings
     .hint = Make it again with the same settings
 # The keys that convert the file picked, shown on its Convert button.
 convert-keys = Ctrl+Enter
@@ -306,7 +309,7 @@ zoom-out = Zoom out
 # The result no longer matches the settings; "⚠" alone where there is no
 # room for the word.
 outdated = Outdated
-    .hint = Current result file was made with earlier settings
+    .hint = Outdated: the result was made with earlier settings
 # How the mouse works on the preview.
 input-hint = Drag to crop · wheel to zoom · right button to pan
 crop-hint = Drag the crop or its edges · double-click for all
@@ -910,7 +913,7 @@ last-conversion = Last conversion
 path-in-the-way = { $path } is in the way
 stopped-early = Stopped before it was done
 result = Result
-    .stale = Result, from earlier settings
+    .stale = Result, outdated
 # A WebM result: its size in pixels, frame rate and length.
 result-webm = { $width } × { $height } px, { $fps } fps, { $length }
     .spoofed = { $width } × { $height } px, { $fps } fps, { $length }, duration spoofed
