@@ -105,6 +105,10 @@ fn stdout_was_closed() -> bool {
     STDOUT_WAS_CLOSED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// How soon after Ctrl-C kept the best WebM encode so far another one
+/// cancels, rather than keeping the best of the next input's.
+const SETTLE_AGAIN: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// The command's token, which a closed stdout cancels.
 static CANCEL: std::sync::OnceLock<CancelToken> = std::sync::OnceLock::new();
 
@@ -367,12 +371,29 @@ fn run(cli: Cli) -> Result<()> {
     let cancel = CANCEL.get_or_init(CancelToken::new).clone();
     // the window never reads the token, so Ctrl-C there ends it as usual
     if !cli.command.is_window() {
+        // convert's first Ctrl-C keeps the best WebM encode so far, where
+        // one fits: ffmpeg is kept from the terminal's Ctrl-C, so that it
+        // isn't stopped before that is decided, and is stopped through
+        // the token either way
+        let settles = matches!(cli.command, Command::Convert(_));
+        if settles {
+            cancel.take_interrupts();
+        }
+        let settled_at = std::sync::Mutex::new(None::<std::time::Instant>);
         ctrlc::set_handler({
             let cancel = cancel.clone();
             move || {
                 if cancel.is_cancelled() {
-                    // second Ctrl-C: stop waiting for cleanup
+                    // second Ctrl-C: stop waiting for cleanup, and ffmpeg
+                    cancel.cancel();
                     std::process::exit(130);
+                }
+                let mut settled_at = settled_at.lock().unwrap();
+                // again soon after keeping the best: cancel, as asked twice
+                let again = settled_at.is_some_and(|at| at.elapsed() < SETTLE_AGAIN);
+                if settles && !again && cancel.settle() {
+                    *settled_at = Some(std::time::Instant::now());
+                    return;
                 }
                 cancel.cancel();
             }

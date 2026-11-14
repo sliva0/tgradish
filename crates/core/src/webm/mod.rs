@@ -107,6 +107,9 @@ pub struct Outcome {
     pub params: Params,
     /// Whether its header's duration was spoofed.
     pub spoofed: bool,
+    /// Whether fitting was asked to stop early and kept the best encode
+    /// that fit so far, see [`CancelToken::settle`].
+    pub settled: bool,
     /// Problems Telegram would still have with the result.
     pub issues: Vec<Issue>,
     /// Directory with intermediate files, if they were kept.
@@ -137,7 +140,14 @@ impl BackendEncoder<'_> {
     ) -> Result<()> {
         let length = params.length;
         let on_event = &mut *self.on_event;
-        let progress = |fraction| Event::Progress { attempt, pass: pass_number, passes, fraction };
+        let cancel = self.cancel;
+        let progress = |fraction| Event::Progress {
+            attempt,
+            pass: pass_number,
+            passes,
+            fraction,
+            can_settle: cancel.can_settle(),
+        };
         on_event(progress(0.0));
         self.backend.encode(self.plan, params, pass, output, self.cancel, &mut |output| {
             match output {
@@ -190,7 +200,13 @@ impl Encoder for BackendEncoder<'_> {
 
         let bytes = std::fs::metadata(&path).map_err(Error::io(FileAction::Read, &path))?.len();
         let fits = bytes <= self.plan.target.max_bytes();
-        (self.on_event)(Event::AttemptFinished { attempt, params, bytes, fits });
+        // fitting may settle on it from now on; a single encode has nothing
+        // to settle on
+        if fits && self.plan.fit != crate::options::Fit::Off {
+            self.cancel.allow_settling();
+        }
+        let can_settle = self.cancel.can_settle();
+        (self.on_event)(Event::AttemptFinished { attempt, params, bytes, fits, can_settle });
         Ok(Attempt { number: attempt, params, bytes, path })
     }
 
@@ -207,6 +223,20 @@ impl Encoder for BackendEncoder<'_> {
     fn decided(&mut self, decision: Decision) {
         (self.on_event)(Event::Decided { decision, message: decision.to_string() });
     }
+
+    fn settling(&self) -> bool {
+        self.cancel.is_settling()
+    }
+}
+
+/// Forgets, once a conversion ends however it does, that its fitting
+/// could settle or was asked to, so the token may serve the next.
+struct EndFitting<'a>(&'a CancelToken);
+
+impl Drop for EndFitting<'_> {
+    fn drop(&mut self) {
+        self.0.end_fitting();
+    }
 }
 
 /// Converts a video into a Telegram sticker or emoji.
@@ -216,6 +246,8 @@ pub fn convert(
     cancel: &CancelToken,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Outcome> {
+    // nothing settles until one of this conversion's encodes fits
+    cancel.end_fitting();
     request.input.check_output(&request.output(), request.overwrite)?;
     // pixel art, drawn for ffmpeg
     let mut readable = crate::drawn::readable(&request.input, &request.options, cancel)?;
@@ -295,6 +327,7 @@ fn encode_in(
     cancel: &CancelToken,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Outcome> {
+    let _fitting = EndFitting(cancel);
     let mut encoder = BackendEncoder {
         backend,
         plan: &plan,
@@ -304,8 +337,11 @@ fn encode_in(
         attempts: 0,
         pass_logs: HashMap::new(),
     };
-    let best = fit::run(&plan, &mut encoder)?;
-    cancel.check()?;
+    let fit::Fitted { best, settled } = fit::run(&plan, &mut encoder)?;
+    // settling stops encodes as cancelling does, but writes the result
+    if cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
     let spoofs = plan.spoofs(encoded_length(best.params.length, best.params.fps));
 
     let changes = Patch {
@@ -331,6 +367,7 @@ fn encode_in(
         attempt: best.number,
         params: best.params,
         spoofed,
+        settled,
         issues: issues.clone(),
         temp_dir: temp_dir.clone(),
     });
@@ -340,6 +377,7 @@ fn encode_in(
         attempt: best.number,
         params: best.params,
         spoofed,
+        settled,
         issues,
         temp_dir,
     })

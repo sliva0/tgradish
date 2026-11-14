@@ -244,6 +244,12 @@ no-font = { $count ->
 
 stop = Stop
 stopping = Stopping…
+# Beside Stop while a WebM is fitted to the size limit in several encodes:
+# stops there and saves the best encode that fits so far.
+keep-best = Keep best so far
+    .hint = Stop trying more encodes, and save the best that fits so far as the result
+    .nothing-fits = Nothing fits yet: there is no encode to keep
+keeping-best = Keeping best…
 # The button on a file waiting to be converted, which takes it out of the queue.
 cancel-waiting = Cancel
 next-to-convert = Next to convert
@@ -1013,7 +1019,8 @@ decided-keeps-frame-rate = Not trying a lower frame rate: encode { $number } at 
 decided-frame-rate-wont-help = Not trying a lower frame rate: at { $fps } fps, how like the input it looks hardly changed with the bitrate, so more bits a frame wouldn't help
 decided-lowers-to-fit = Trying { $fps } fps: nothing fit at { $from } fps
 decided-lowers-for-looks = Trying { $fps } fps: encode { $number } at { $from } fps looks only { $alike } like the input
-decided-lower-no-better = Stopped: { $fps } fps looks { $alike } like the input, no more than encode { $kept } at { $kept_fps } fps with { $kept_alike }
+decided-settled = Stopped early: kept encode { $number }
+decided-lower-no-better =Stopped: { $fps } fps looks { $alike } like the input, no more than encode { $kept } at { $kept_fps } fps with { $kept_alike }
 # Telegram's problems with a WebM or image result.
 issue-not-webm = Its container is { $container }, not WebM
 issue-no-video = It has no video track

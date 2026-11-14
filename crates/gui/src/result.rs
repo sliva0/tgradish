@@ -74,6 +74,10 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
             },
         );
     }
+    // stopped early, as asked: which encode is kept, as the table ticks it
+    if let (true, Some(kept)) = (done.settled, done.attempt) {
+        widgets::note(ui, decision_text(&tgradish_core::webm::Decision::Settled { attempt: kept }));
+    }
     if done.changed {
         widgets::note(ui, fl!("changed-to-fit"));
     }
@@ -378,7 +382,11 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
             });
         });
     }
-    for decision in &progress.decisions {
+    // settling is said with the result, above
+    let said = |decision: &&tgradish_core::webm::Decision| {
+        !matches!(decision, tgradish_core::webm::Decision::Settled { .. })
+    };
+    for decision in progress.decisions.iter().filter(said) {
         widgets::note(ui, decision_text(decision));
     }
     for warning in &progress.warnings {
@@ -449,6 +457,7 @@ fn decision_text(decision: &tgradish_core::webm::Decision) -> String {
             kept_fps = fps(kept_fps),
             kept_alike = percent(kept_ssim)
         ),
+        Decision::Settled { attempt } => fl!("decided-settled", number = attempt),
         // one added to core since, which the window has no words for
         decision => decision.to_string(),
     }

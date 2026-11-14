@@ -106,6 +106,17 @@ pub(crate) fn walk(width: f32, mut visit: impl FnMut(&mut Harness<App>, &str)) {
         }
         settle(&mut harness, None);
         visit(&mut harness, "video-folds");
+        // as it converts, Keep best so far beside Stop, as long as it gets
+        let id = harness.state().items.last().unwrap().id;
+        harness.state_mut().enqueue(id);
+        harness.state_mut().queue.retain(|&other| other != id);
+        let item = harness.state_mut().items.last_mut().unwrap();
+        let job = &mut item.job.as_mut().expect("queued").job;
+        (job.status, job.settles) = (crate::jobs::Status::Running, true);
+        settle(&mut harness, None);
+        assert!(harness.query_by_label(&fl!("keep-best")).is_some(), "no Keep best so far");
+        visit(&mut harness, "converting");
+        harness.state_mut().items.last_mut().unwrap().job = None;
         // a frame of it, picked on the bar
         harness.state_mut().items.last_mut().unwrap().format = Format::Webp;
         finish(&mut harness);

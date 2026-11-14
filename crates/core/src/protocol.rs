@@ -235,7 +235,9 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
         default_format: Format::default(),
         cancel: "run with --cancel-on-stdin and write a line reading cancel to stdin: it stops \
                  as Ctrl-C does, convert exiting with 130 and watch stopping as done, with 0; \
-                 without the flag stdin isn't read",
+                 a line reading settle instead stops fitting the WebM under way where an \
+                 encode fits, as progress events' can-settle says, and keeps the best so far, \
+                 its finished event saying settled; without the flag stdin isn't read",
         formats: vec![
             FormatDescription {
                 format: Format::Webm,
@@ -311,8 +313,14 @@ mod tests {
         let webm = [
             Event::Started { plan: Box::new(plan()) },
             Event::AttemptStarted { attempt: 1, params },
-            Event::Progress { attempt: 1, pass: 1, passes: 2, fraction: 0.5 },
-            Event::AttemptFinished { attempt: 1, params, bytes: 300_000, fits: false },
+            Event::Progress { attempt: 1, pass: 1, passes: 2, fraction: 0.5, can_settle: false },
+            Event::AttemptFinished {
+                attempt: 1,
+                params,
+                bytes: 300_000,
+                fits: false,
+                can_settle: false,
+            },
             Event::Scored { attempt: 1, ssim: 0.95 },
             {
                 let decision = Decision::InBand { attempt: 1, share: 0.99, least: 0.96 };
@@ -327,6 +335,7 @@ mod tests {
                 attempt: 2,
                 params: Params { rate: Rate::Crf(32), ..params },
                 spoofed: false,
+                settled: false,
                 issues: vec![too_big.clone()],
                 temp_dir: Some("/tmp/tgradish-x".into()),
             },
@@ -571,9 +580,11 @@ mod tests {
             Some(
                 r#"{"event":"attempt-started","attempt":1,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"bitrate","kbps":500.0}}}"#,
             ),
-            Some(r#"{"event":"progress","attempt":1,"pass":1,"passes":2,"fraction":0.5}"#),
             Some(
-                r#"{"event":"attempt-finished","attempt":1,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"bitrate","kbps":500.0}},"bytes":300000,"fits":false}"#,
+                r#"{"event":"progress","attempt":1,"pass":1,"passes":2,"fraction":0.5,"can-settle":false}"#,
+            ),
+            Some(
+                r#"{"event":"attempt-finished","attempt":1,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"bitrate","kbps":500.0}},"bytes":300000,"fits":false,"can-settle":false}"#,
             ),
             Some(r#"{"event":"scored","attempt":1,"ssim":0.95}"#),
             Some(
@@ -582,7 +593,7 @@ mod tests {
             Some(r#"{"event":"warning","message":"a warning"}"#),
             Some(r#"{"event":"log","line":"a line"}"#),
             Some(
-                r#"{"event":"finished","input":"in.mp4","output":"in.sticker.webm","bytes":250000,"attempt":2,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"crf","crf":32}},"spoofed":false,"issues":[{"kind":"too-big","bytes":300000,"max":262144,"severity":"error","message":"293.0 KiB, over the 256 KiB limit"}],"temp-dir":"/tmp/tgradish-x"}"#,
+                r#"{"event":"finished","input":"in.mp4","output":"in.sticker.webm","bytes":250000,"attempt":2,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"crf","crf":32}},"spoofed":false,"settled":false,"issues":[{"kind":"too-big","bytes":300000,"max":262144,"severity":"error","message":"293.0 KiB, over the 256 KiB limit"}],"temp-dir":"/tmp/tgradish-x"}"#,
             ),
             Some(r#"{"event":"error","message":"it failed","input":"in.mp4"}"#),
             None,

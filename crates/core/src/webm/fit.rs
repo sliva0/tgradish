@@ -72,6 +72,20 @@ pub(crate) trait Encoder {
     fn score(&mut self, attempt: &Attempt) -> Result<f64>;
     /// Hears why fitting stopped, or tried a change or not.
     fn decided(&mut self, _decision: Decision) {}
+    /// Whether fitting was asked to settle on the best that fits so far,
+    /// see [`CancelToken::settle`](crate::CancelToken::settle): asked only
+    /// once an encode fits.
+    fn settling(&self) -> bool {
+        false
+    }
+}
+
+/// What fitting keeps.
+#[derive(Debug)]
+pub(crate) struct Fitted {
+    pub(crate) best: Attempt,
+    /// Asked to, it settled on the best that fit so far.
+    pub(crate) settled: bool,
 }
 
 /// An encode as the search weighs it: the value tried, its size, which
@@ -114,22 +128,54 @@ impl Line {
 }
 
 /// The encoder as the searches share it: counting encodes against the
-/// most allowed, and passing on what they decide.
+/// most allowed, passing on what they decide, and stopping them once
+/// asked to settle.
 struct Fitter<'a> {
     encoder: &'a mut dyn Encoder,
     limit: u64,
     used: u32,
     attempts: u32,
+    /// Asked to settle: no more encodes are made, and each search ends
+    /// with the best it has.
+    settled: bool,
 }
 
-impl Fitter<'_> {
-    fn encode(&mut self, params: Params) -> Result<Attempt> {
-        self.used += 1;
-        self.encoder.encode(params)
+impl<'a> Fitter<'a> {
+    fn new(encoder: &'a mut dyn Encoder, limit: u64, attempts: u32) -> Self {
+        Fitter { encoder, limit, used: 0, attempts, settled: false }
     }
 
-    fn score(&mut self, attempt: &Attempt) -> Result<f64> {
-        self.encoder.score(attempt)
+    /// Whether to settle now, as asked at any time since.
+    fn settles(&mut self) -> bool {
+        self.settled |= self.encoder.settling();
+        self.settled
+    }
+
+    /// Encodes, unless asked to settle; `None` once it is. The encode at
+    /// work when it is asked is given up, as its ffmpeg is stopped: what
+    /// went wrong then is of no account.
+    fn encode(&mut self, params: Params) -> Result<Option<Attempt>> {
+        if self.settles() {
+            return Ok(None);
+        }
+        self.used += 1;
+        match self.encoder.encode(params) {
+            Ok(attempt) => Ok(Some(attempt)),
+            Err(_) if self.settles() => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Scores, unless asked to settle; `None` once it is.
+    fn score(&mut self, attempt: &Attempt) -> Result<Option<f64>> {
+        if self.settles() {
+            return Ok(None);
+        }
+        match self.encoder.score(attempt) {
+            Ok(ssim) => Ok(Some(ssim)),
+            Err(_) if self.settles() => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     fn decide(&mut self, decision: Decision) {
@@ -316,7 +362,7 @@ fn maximise(
             f.out_of_attempts();
             break;
         }
-        let attempt = f.encode(params(x))?;
+        let Some(attempt) = f.encode(params(x))? else { break };
         used += 1;
         let fits = attempt.bytes <= f.limit;
         let mut point = Point { x, bytes: attempt.bytes, number: attempt.number, alike: None };
@@ -328,7 +374,10 @@ fn maximise(
             Some(Decision::InBand { attempt: attempt.number, share, least: IN_BAND })
         } else if fits && scoring {
             // more of the value would only be tried for a larger file
-            let ssim = f.score(&attempt)?;
+            let Some(ssim) = f.score(&attempt)? else {
+                search.points.push(point);
+                break;
+            };
             point.alike = Some(ssim);
             (ssim >= ALIKE_ENOUGH)
                 .then_some(Decision::AlikeEnough { attempt: attempt.number, ssim })
@@ -384,7 +433,7 @@ fn bisect(
             break;
         }
         let mid = lo + (hi - lo) / 2;
-        let attempt = f.encode(params(mid))?;
+        let Some(attempt) = f.encode(params(mid))? else { break };
         used += 1;
         let fits = attempt.bytes <= f.limit;
         let point =
@@ -474,6 +523,14 @@ fn fit_auto(f: &mut Fitter, plan: &Plan) -> Result<Search> {
 
         let mut search = fit_bitrate(f, plan, budget, fps, initial)?;
         total.points.extend(search.points.iter().copied());
+        // settled: the best kept so far, or else this rate's, which only
+        // a lower rate that looks better would have taken the place of
+        if f.settled {
+            if kept.is_none() {
+                total.best = search.best;
+            }
+            break;
+        }
         let lower = rates.get(i + 1).copied();
         let Some(candidate) = search.best.clone() else {
             // fewer frames make a smaller file at the same bitrate
@@ -493,9 +550,15 @@ fn fit_auto(f: &mut Fitter, plan: &Plan) -> Result<Search> {
             break;
         }
 
-        let ssim = match search.best_point().and_then(|best| best.alike) {
-            Some(ssim) => ssim,
+        let scored = match search.best_point().and_then(|best| best.alike) {
+            Some(ssim) => Some(ssim),
             None => f.score(&candidate)?,
+        };
+        let Some(ssim) = scored else {
+            if kept.is_none() {
+                total.best = Some(candidate);
+            }
+            break;
         };
         search.scored(candidate.number, ssim);
         // a lower frame rate looking worse means even lower ones will too;
@@ -565,24 +628,27 @@ pub fn first_params(plan: &Plan) -> Params {
 }
 
 /// Runs the search configured in `plan` and returns the attempt to keep:
-/// the best under its target's size limit. With `fit = off` that is the
-/// single attempt, even if it is too big.
-pub(crate) fn run(plan: &Plan, encoder: &mut dyn Encoder) -> Result<Attempt> {
+/// the best under its target's size limit, or the best so far where it
+/// was asked to settle. With `fit = off` that is the single attempt, even
+/// if it is too big.
+pub(crate) fn run(plan: &Plan, encoder: &mut dyn Encoder) -> Result<Fitted> {
     let limit = plan.target.max_bytes();
     let (fps, length, budget) = (plan.fps, plan.length, plan.attempts);
     let quality = if plan.lossless { Rate::Lossless } else { Rate::Crf(plan.crf) };
     let range = plan.fit_range;
-    let mut f = Fitter { encoder, limit, used: 0, attempts: budget };
 
+    if plan.fit == Fit::Off {
+        let rate = match () {
+            _ if plan.lossless => Rate::Lossless,
+            _ if plan.constant_quality => Rate::Crf(plan.crf),
+            _ => Rate::Bitrate(plan.bitrate),
+        };
+        let best = encoder.encode(Params { fps, length, rate })?;
+        return Ok(Fitted { best, settled: false });
+    }
+    let mut f = Fitter::new(encoder, limit, budget);
     let search = match plan.fit {
-        Fit::Off => {
-            let rate = match () {
-                _ if plan.lossless => Rate::Lossless,
-                _ if plan.constant_quality => Rate::Crf(plan.crf),
-                _ => Rate::Bitrate(plan.bitrate),
-            };
-            return f.encode(Params { fps, length, rate });
-        }
+        Fit::Off => unreachable!("encoded above"),
         Fit::Auto => fit_auto(&mut f, plan)?,
         Fit::Bitrate => fit_bitrate(&mut f, plan, budget, fps, plan.bitrate)?,
         Fit::Crf => bisect(
@@ -611,7 +677,11 @@ pub(crate) fn run(plan: &Plan, encoder: &mut dyn Encoder) -> Result<Attempt> {
     };
 
     let smallest = search.smallest().unwrap_or(0);
-    search.best.ok_or(Error::NothingFits { smallest, limit })
+    let best = search.best.ok_or(Error::NothingFits { smallest, limit })?;
+    if f.settled {
+        f.decide(Decision::Settled { attempt: best.number });
+    }
+    Ok(Fitted { best, settled: f.settled })
 }
 
 #[cfg(test)]
@@ -725,7 +795,7 @@ mod tests {
         for duration in [1.0, 3.0, 12.6, 60.0] {
             let plan = test_plan(options(Fit::Bitrate), duration);
             let mut encoder = FakeEncoder::new(0.0);
-            let best = run(&plan, &mut encoder).unwrap();
+            let best = run(&plan, &mut encoder).unwrap().best;
             assert_good_fit(&best);
             assert!(encoder.calls.len() <= 3, "{duration} s took {:?}", encoder.calls);
         }
@@ -736,7 +806,7 @@ mod tests {
         for bitrate in [1.0, 20_000.0] {
             let plan = test_plan(Options { bitrate: Some(bitrate), ..options(Fit::Bitrate) }, 3.0);
             let mut encoder = FakeEncoder::new(0.0);
-            assert_good_fit(&run(&plan, &mut encoder).unwrap());
+            assert_good_fit(&run(&plan, &mut encoder).unwrap().best);
         }
     }
 
@@ -752,7 +822,7 @@ mod tests {
     fn crf_fit_finds_smallest_fitting_value() {
         let plan = test_plan(options(Fit::Crf), 3.0);
         let mut encoder = FakeEncoder::new(0.0);
-        let best = run(&plan, &mut encoder).unwrap();
+        let best = run(&plan, &mut encoder).unwrap().best;
         let Rate::Crf(crf) = best.params.rate else { panic!() };
         // one step better quality must not fit
         let better = encoder.encode(Params { rate: Rate::Crf(crf - 1), ..best.params }).unwrap();
@@ -763,11 +833,11 @@ mod tests {
     #[test]
     fn fps_and_length_fits_stay_in_range() {
         let plan = test_plan(Options { crf: Some(30), ..options(Fit::Fps) }, 3.0);
-        let best = run(&plan, &mut FakeEncoder::new(0.0)).unwrap();
+        let best = run(&plan, &mut FakeEncoder::new(0.0)).unwrap().best;
         assert!((1.0..=30.0).contains(&best.params.fps) && best.bytes <= MAX_BYTES);
 
         let plan = test_plan(Options { crf: Some(30), ..options(Fit::Length) }, 10.0);
-        let best = run(&plan, &mut FakeEncoder::new(0.0)).unwrap();
+        let best = run(&plan, &mut FakeEncoder::new(0.0)).unwrap().best;
         assert!(best.params.length < 10.0);
         assert_good_fit(&best);
     }
@@ -777,7 +847,7 @@ mod tests {
         let plan = test_plan(options(Fit::Auto), 30.0);
         assert_eq!(auto_frame_rates(&plan, MAX_BYTES), [30.0, 20.0, 15.0]);
         let mut encoder = FakeEncoder::new(0.0);
-        let best = run(&plan, &mut encoder).unwrap();
+        let best = run(&plan, &mut encoder).unwrap().best;
         assert!(best.params.fps < 30.0);
         assert!(encoder.calls.len() as u32 <= plan.attempts);
         assert_good_fit(&best);
@@ -787,7 +857,7 @@ mod tests {
     fn auto_keeps_fps_for_moving_videos() {
         let plan = test_plan(options(Fit::Auto), 30.0);
         let mut encoder = FakeEncoder::new(1.0);
-        let best = run(&plan, &mut encoder).unwrap();
+        let best = run(&plan, &mut encoder).unwrap().best;
         assert_eq!(best.params.fps, 30.0);
         // stopped after the second frame rate looked worse
         let rates: Vec<_> = encoder.calls.iter().map(|p| p.fps).collect();
@@ -801,7 +871,7 @@ mod tests {
         for fit in [Fit::Auto, Fit::Bitrate] {
             let plan = test_plan(options(fit), 30.0);
             let mut encoder = FakeEncoder::simple(MAX_BYTES as f64 / 5.0, 0.999);
-            let best = run(&plan, &mut encoder).unwrap();
+            let best = run(&plan, &mut encoder).unwrap().best;
             assert_eq!(encoder.calls.len(), 1, "{fit:?}: {:?}", encoder.calls);
             // scored once, not again to compare frame rates
             assert_eq!((encoder.scored, best.number), (1, 1), "{fit:?}");
@@ -825,7 +895,7 @@ mod tests {
     #[test]
     fn counts_a_share_shown_as_in_the_band_as_in_it() {
         let mut encoder = FakeEncoder::new(0.0);
-        let f = Fitter { encoder: &mut encoder, limit: 100_000, used: 0, attempts: 8 };
+        let f = Fitter::new(&mut encoder, 100_000, 8);
         // 95.96% shows as 96.0%
         assert!(f.in_band(95_960) && f.in_band(99_000) && f.in_band(100_000));
         assert!(!f.in_band(95_940) && !f.in_band(100_001));
@@ -840,7 +910,7 @@ mod tests {
             ..options(Fit::Length)
         };
         let plan = test_plan(exact, 10.0);
-        let best = run(&plan, &mut FakeEncoder::new(0.0)).unwrap();
+        let best = run(&plan, &mut FakeEncoder::new(0.0)).unwrap().best;
         assert_eq!(best.params.length, 2.996);
 
         let fit_range = Some(Range { min: 1.0, max: 1.04 });
@@ -857,7 +927,7 @@ mod tests {
     fn off_encodes_once() {
         let plan = test_plan(Options { crf: Some(10), ..options(Fit::Off) }, 3.0);
         let mut encoder = FakeEncoder::new(0.0);
-        let best = run(&plan, &mut encoder).unwrap();
+        let best = run(&plan, &mut encoder).unwrap().best;
         assert_eq!(encoder.calls.len(), 1);
         assert_eq!(best.params.rate, Rate::Crf(10));
         assert!(best.bytes > MAX_BYTES);
@@ -871,6 +941,18 @@ mod tests {
         decisions: Vec<Decision>,
         share: Box<dyn Fn(f64, f64) -> f64>,
         alike: Box<dyn Fn(f64, f64) -> f64>,
+        /// The conversion's token, which it says fits to as conversions do.
+        token: crate::CancelToken,
+        /// Asked to settle after the encode of this number, or while it
+        /// encodes it, and whether that took.
+        settle: Option<(u32, Settle)>,
+        settled: Option<bool>,
+    }
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum Settle {
+        After,
+        During,
     }
 
     impl Scenario {
@@ -884,7 +966,14 @@ mod tests {
                 decisions: Vec::new(),
                 share: Box::new(share),
                 alike: Box::new(alike),
+                token: crate::CancelToken::new(),
+                settle: None,
+                settled: None,
             }
+        }
+
+        fn settling(self, number: u32, when: Settle) -> Self {
+            Self { settle: Some((number, when)), ..self }
         }
 
         /// What it encoded, as frame rate @ bitrate.
@@ -904,14 +993,21 @@ mod tests {
     impl Encoder for Scenario {
         fn encode(&mut self, params: Params) -> Result<Attempt> {
             self.calls.push(params);
+            let number = self.calls.len() as u32;
+            // asked while it encodes: ffmpeg is stopped, and fails
+            if self.settle == Some((number, Settle::During)) {
+                self.settled = Some(self.token.settle());
+                return Err(Error::Cancelled);
+            }
             let Rate::Bitrate(kbps) = params.rate else { unreachable!() };
-            let bytes = (self.share)(kbps, params.fps) * MAX_BYTES as f64;
-            Ok(Attempt {
-                number: self.calls.len() as u32,
-                params,
-                bytes: bytes as u64,
-                path: PathBuf::new(),
-            })
+            let bytes = ((self.share)(kbps, params.fps) * MAX_BYTES as f64) as u64;
+            if bytes <= MAX_BYTES {
+                self.token.allow_settling();
+            }
+            if self.settle == Some((number, Settle::After)) {
+                self.settled = Some(self.token.settle());
+            }
+            Ok(Attempt { number, params, bytes, path: PathBuf::new() })
         }
 
         fn score(&mut self, attempt: &Attempt) -> Result<f64> {
@@ -922,6 +1018,10 @@ mod tests {
 
         fn decided(&mut self, decision: Decision) {
             self.decisions.push(decision);
+        }
+
+        fn settling(&self) -> bool {
+            self.token.is_settling()
         }
     }
 
@@ -941,7 +1041,7 @@ mod tests {
     /// `encoder`.
     fn auto(length: f64, encoder: &mut Scenario) -> Attempt {
         let plan = test_plan(options(Fit::Auto), length);
-        let best = run(&plan, encoder).unwrap();
+        let best = run(&plan, encoder).unwrap().best;
         assert!(encoder.calls.len() as u32 <= plan.attempts, "{:?}", encoder.calls());
         best
     }
@@ -1057,5 +1157,71 @@ mod tests {
                 assert!(last.filter(says).is_some(), "{fit:?} {length}: {:?}", encoder.decisions);
             }
         }
+    }
+
+    /// Fits with 80% of the limit at the first bitrate, and looks the same
+    /// at any, settling at `number` as `when` says.
+    fn settling(number: u32, when: Settle) -> (Fitted, Scenario) {
+        let length = 25.17;
+        let from = start(length);
+        let encoder = Scenario::new(move |kbps, _| 0.8 * kbps / from, |_, _| 0.9);
+        let mut encoder = encoder.settling(number, when);
+        let plan = test_plan(options(Fit::Auto), length);
+        (run(&plan, &mut encoder).unwrap(), encoder)
+    }
+
+    #[test]
+    fn settles_on_the_first_attempt_once_it_fits() {
+        let (fitted, encoder) = settling(1, Settle::After);
+        assert_eq!(encoder.settled, Some(true));
+        assert!(fitted.settled);
+        // no more encodes, nor scoring the one kept
+        assert_eq!((fitted.best.number, encoder.calls.len(), encoder.scored), (1, 1, 0));
+        assert_eq!(encoder.decisions.last(), Some(&Decision::Settled { attempt: 1 }));
+    }
+
+    #[test]
+    fn settles_on_the_best_before_the_attempt_it_gives_up() {
+        // asked while the second encodes, which fails as ffmpeg is stopped
+        let (fitted, encoder) = settling(2, Settle::During);
+        assert_eq!(encoder.settled, Some(true));
+        assert!(fitted.settled);
+        assert_eq!((fitted.best.number, encoder.calls.len()), (1, 2));
+        assert_eq!(encoder.decisions.last(), Some(&Decision::Settled { attempt: 1 }));
+    }
+
+    #[test]
+    fn cant_settle_before_anything_fits() {
+        // nothing fits at 30 fps: asked to settle then, it says it can't,
+        // and fitting goes on as if never asked
+        let length = 30.0;
+        let from = start(length);
+        let share = move |kbps, fps| 1.05 * fps / 30.0 + 0.3 * kbps / from;
+        let alike = |kbps: f64, fps: f64| 1.0 - 1.0 / (kbps / fps * 10.0);
+        let plan = test_plan(options(Fit::Auto), length);
+        let mut asked = Scenario::new(share, alike).settling(1, Settle::After);
+        let fitted = run(&plan, &mut asked).unwrap();
+        assert_eq!(asked.settled, Some(false));
+        let mut never = Scenario::new(share, alike);
+        let unasked = run(&plan, &mut never).unwrap();
+        assert!(!fitted.settled && fitted.best == unasked.best);
+        assert_eq!(asked.calls, never.calls);
+        assert!(!asked.decided(|d| matches!(d, Decision::Settled { .. })));
+    }
+
+    #[test]
+    fn settles_on_the_rate_that_looked_best_so_far() {
+        // 20 fps fits in the band, but isn't yet shown to look better
+        // than 30 fps did: 30 fps is kept
+        let length = 30.0;
+        let from = start(length);
+        let encoder =
+            Scenario::new(move |kbps, _| 0.958 * kbps / from, |kbps, fps| 1.0 - 1.0 / (kbps / fps));
+        let mut encoder = encoder.settling(3, Settle::After);
+        let plan = test_plan(options(Fit::Auto), length);
+        let fitted = run(&plan, &mut encoder).unwrap();
+        assert!(fitted.settled, "{:?}", encoder.calls());
+        assert_eq!((fitted.best.number, fitted.best.params.fps), (2, 30.0));
+        assert_eq!(encoder.calls.len(), 3);
     }
 }

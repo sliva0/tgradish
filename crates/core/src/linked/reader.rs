@@ -51,7 +51,7 @@ impl Decoding {
                     self.decoder.send_eof().map_err(libav("decoding"))?;
                 }
                 // the interrupt callback makes reads fail when cancelled
-                Err(_) if self.cancel.is_cancelled() => return Err(Error::Cancelled),
+                Err(_) if self.cancel.interrupted() => return Err(Error::Cancelled),
                 Err(err) => return Err(libav("reading the input")(err)),
             }
         }
@@ -136,12 +136,12 @@ impl Reader {
         // lets ffmpeg give up on reads that take long, like on network drives
         let interrupt = {
             let cancel = cancel.clone();
-            move || cancel.is_cancelled()
+            move || cancel.interrupted()
         };
         let unreadable = |message: String| Error::Unreadable { path: path.to_path_buf(), message };
         let name = c_path(path).map_err(|why| unreadable(why.into()))?;
         let input = open_input(&name, interrupt).map_err(|err| {
-            if cancel.is_cancelled() { Error::Cancelled } else { unreadable(err.to_string()) }
+            if cancel.interrupted() { Error::Cancelled } else { unreadable(err.to_string()) }
         })?;
         let stream = input
             .streams()
@@ -253,7 +253,7 @@ impl Reader {
                 },
                 Ok(()) | Err(ff::Error::InvalidData) => {}
                 Err(ff::Error::Eof) => return Ok(Some(times)),
-                Err(_) if decoding.cancel.is_cancelled() => return Err(Error::Cancelled),
+                Err(_) if decoding.cancel.interrupted() => return Err(Error::Cancelled),
                 Err(err) => return Err(libav("reading the input")(err)),
             }
         }

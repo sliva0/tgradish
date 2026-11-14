@@ -57,8 +57,17 @@ fn top_help() -> String {
     sections(&[("Examples", EXAMPLES), ("Environment", ENVIRONMENT), ("Exit status", EXIT_STATUS)])
 }
 
+const CONVERT_STOPPING: &str =
+    "  Ctrl-C while a WebM is fitting, once one of its encodes fits, stops fitting, keeps
+  the best encode so far as the result and goes on to the next input. Ctrl-C again
+  within 2 seconds, or before anything fits, cancels, as it does for other formats.";
+
 fn convert_help() -> String {
-    sections(&[("Examples", CONVERT_EXAMPLES), ("Exit status", EXIT_STATUS)])
+    sections(&[
+        ("Examples", CONVERT_EXAMPLES),
+        ("Stopping", CONVERT_STOPPING),
+        ("Exit status", EXIT_STATUS),
+    ])
 }
 
 fn config_help() -> String {
@@ -419,8 +428,9 @@ pub struct ConversionArgs {
     #[arg(long)]
     pub keep_temp: bool,
     /// Stop, as Ctrl-C does, when a line reading `cancel` comes on stdin:
-    /// for front-ends, which can't always send Ctrl-C. Without it stdin is
-    /// left alone, for a script's loop to read.
+    /// for front-ends, which can't always send Ctrl-C. A line reading
+    /// `settle` stops fitting a WebM once an encode fits and keeps the best
+    /// so far. Without it stdin is left alone, for a script's loop to read.
     #[arg(long)]
     pub cancel_on_stdin: bool,
     #[command(flatten)]

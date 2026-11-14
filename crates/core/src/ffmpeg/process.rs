@@ -35,6 +35,14 @@ fn spawn(
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
+    #[cfg(unix)]
+    if cancel.takes_interrupts() {
+        use std::os::unix::process::CommandExt;
+        // a group of its own, which Ctrl-C in the terminal doesn't reach:
+        // the token's owner decides what it means, and kills it through
+        // the token
+        cmd.process_group(0);
+    }
 
     let mut child = cmd.spawn().map_err(|err| match err.kind() {
         std::io::ErrorKind::NotFound => {
@@ -48,7 +56,7 @@ fn spawn(
     let child = Arc::new(Mutex::new(child));
     cancel.register(Some(child.clone()));
     // cancel() may have run between the check above and register()
-    if cancel.is_cancelled() {
+    if cancel.interrupted() {
         let _ = child.lock().unwrap().kill();
     }
     Ok((child, stdout, stderr))

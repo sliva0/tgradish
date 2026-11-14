@@ -633,7 +633,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     save(&mut harness, "narrow");
     // a WebM on its second encode, there and at the usual size
     let mut job = Job::waiting(dir.path().join("progress.webm"));
-    job.status = Status::Running;
+    (job.status, job.settles) = (Status::Running, true);
     let params = |kbps| tgradish_core::webm::Params {
         fps: 30.0,
         length: 1.0,

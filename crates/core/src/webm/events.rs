@@ -95,6 +95,10 @@ pub enum Event {
         passes: u8,
         /// How much of the pass is done.
         fraction: f64,
+        /// Whether an encode fits already, so that fitting can settle on
+        /// the best so far, see
+        /// [`CancelToken::settle`](crate::CancelToken::settle).
+        can_settle: bool,
     },
     /// An encode is done.
     AttemptFinished {
@@ -106,6 +110,9 @@ pub enum Event {
         bytes: u64,
         /// Whether that is within the target's limit.
         fits: bool,
+        /// Whether this or an earlier encode fits, so that fitting can
+        /// settle on the best so far.
+        can_settle: bool,
     },
     /// SSIM of an attempt compared to the source, from 0 to 1.
     Scored {
@@ -149,6 +156,10 @@ pub enum Event {
         params: Params,
         /// Whether its header's duration was spoofed.
         spoofed: bool,
+        /// Whether fitting was asked to stop early and kept the best
+        /// encode that fit so far, see
+        /// [`CancelToken::settle`](crate::CancelToken::settle).
+        settled: bool,
         /// Problems Telegram would still have with the result.
         issues: Vec<Issue>,
         /// Where the intermediate files are, when they were kept.
@@ -270,6 +281,12 @@ pub enum Decision {
         /// Its SSIM.
         kept_ssim: f64,
     },
+    /// Stopped early, as asked: `attempt` is kept, the best that fits so
+    /// far, see [`CancelToken::settle`](crate::CancelToken::settle).
+    Settled {
+        /// The encode kept.
+        attempt: u32,
+    },
 }
 
 impl std::fmt::Display for Decision {
@@ -345,6 +362,9 @@ impl std::fmt::Display for Decision {
                 fps(kept_fps),
                 percent(kept_ssim)
             ),
+            Decision::Settled { attempt } => {
+                write!(f, "stopped early, as asked: kept attempt {attempt}, the best that fits")
+            }
         }
     }
 }

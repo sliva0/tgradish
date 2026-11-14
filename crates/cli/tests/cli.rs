@@ -484,6 +484,95 @@ fn cancels_from_stdin() {
     assert!(!out.exists());
 }
 
+/// `convert` of `inputs`, fitting the bitrate from far under the limit so
+/// that fitting goes on, events as JSON, stdin and stdout piped.
+fn fitting(inputs: &[&Path], dir: &Path, args: &[&str]) -> std::process::Child {
+    use std::process::Stdio;
+    Command::new(env!("CARGO_BIN_EXE_tgradish"))
+        .args(["--json", "convert", "-y", "-t", "2", "--fit", "bitrate", "-b", "50"])
+        .args(["--speed", "fast", "-O"])
+        .arg(dir)
+        .args(inputs)
+        .args(args)
+        .env("TGRADISH_CONFIG", no_config())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap()
+}
+
+#[test]
+fn keeps_the_best_so_far_when_asked_on_stdin() {
+    use std::io::{BufRead, BufReader, Write};
+
+    let Some(input) = clip(Clip::Square) else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = fitting(&[&input], dir.path(), &["--cancel-on-stdin"]);
+    let mut stdin = child.stdin.take().unwrap();
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut events = Vec::new();
+    for line in stdout.lines() {
+        let event: Value = serde_json::from_str(&line.unwrap()).unwrap();
+        if event["event"] == "progress" && event["can-settle"] == true {
+            let _ = writeln!(stdin, "settle");
+        }
+        events.push(event);
+    }
+    assert!(child.wait().unwrap().success());
+    let finished = events.last().unwrap();
+    assert_eq!((&finished["event"], &finished["settled"]), (&"finished".into(), &true.into()));
+    let kept = &finished["attempt"];
+    assert!(
+        events
+            .iter()
+            .any(|e| e["decision"]["reason"] == "settled" && e["decision"]["attempt"] == *kept)
+    );
+}
+
+/// The first Ctrl-C where an encode fits keeps the best so far and goes
+/// on to the next input; one where nothing fits yet cancels.
+#[cfg(unix)]
+#[test]
+fn keeps_the_best_so_far_on_ctrl_c() {
+    use std::io::{BufRead, BufReader};
+
+    let Some(input) = clip(Clip::Square) else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let (first, second) = (dir.path().join("first.mp4"), dir.path().join("second.mp4"));
+    std::fs::copy(&input, &first).unwrap();
+    std::fs::copy(&input, &second).unwrap();
+    let out = dir.path().join("out");
+    let mut child = fitting(&[&first, &second], &out, &[]);
+    let interrupt = |child: &std::process::Child| {
+        let pid = child.id().to_string();
+        assert!(Command::new("kill").args(["-INT", &pid]).status().unwrap().success());
+    };
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let (mut settled, mut cancelled, mut finished) = (false, false, Vec::new());
+    for line in stdout.lines() {
+        let event: Value = serde_json::from_str(&line.unwrap()).unwrap();
+        match event["event"].as_str() {
+            Some("progress") if event["can-settle"] == true && !settled => {
+                interrupt(&child);
+                settled = true;
+            }
+            // the second input, nothing of it fitting yet
+            Some("progress") if finished.len() == 1 && !cancelled => {
+                interrupt(&child);
+                cancelled = true;
+            }
+            Some("finished") => finished.push(event),
+            _ => {}
+        }
+    }
+    let status = child.wait().unwrap();
+    assert_eq!(finished.len(), 1, "{finished:?}");
+    assert_eq!(finished[0]["settled"], true);
+    assert!(out.join("first.sticker.webm").exists());
+    assert!(!out.join("second.sticker.webm").exists());
+    assert_eq!(status.code(), Some(130));
+}
+
 /// Without `--cancel-on-stdin`, stdin is the caller's: a loop reading
 /// files from it converts every one.
 #[cfg(unix)]

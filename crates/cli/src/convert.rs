@@ -515,8 +515,9 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
     Ok(())
 }
 
-/// Cancels when a front-end writes `cancel` to stdin, with
-/// `--cancel-on-stdin`: sending Ctrl-C to a child process is awkward on
+/// Cancels when a front-end writes `cancel` to stdin, and keeps the best
+/// WebM encode so far on `settle`, with `--cancel-on-stdin`: sending
+/// Ctrl-C to a child process is awkward on
 /// Windows. Only when asked, as a script reading its own stdin in a loop
 /// would lose what this read. End of input is ignored, so running without
 /// stdin is fine.
@@ -524,8 +525,11 @@ fn listen_for_cancel(ctx: &Context) {
     let cancel = ctx.cancel.clone();
     std::thread::spawn(move || {
         for line in std::io::stdin().lines().map_while(Result::ok) {
-            if line.trim() == "cancel" {
-                cancel.cancel();
+            match line.trim() {
+                "cancel" => cancel.cancel(),
+                // where nothing fits yet, there is nothing to keep
+                "settle" => _ = cancel.settle(),
+                _ => {}
             }
         }
     });
@@ -641,7 +645,7 @@ impl Printer {
                 }
                 term::progress(Some(done));
             }
-            Event::AttemptFinished { attempt, params, bytes, fits } if !self.quiet => {
+            Event::AttemptFinished { attempt, params, bytes, fits, .. } if !self.quiet => {
                 self.bar.clear();
                 let mark = if fits { style("fits").green() } else { style("too large").red() };
                 self.bar.line(ui::status(
@@ -667,11 +671,13 @@ impl Printer {
             Event::Log { line } if self.verbose > 1 => {
                 self.bar.line(ui::dim(format!("    {line}")))
             }
-            Event::Finished { output, bytes, params, spoofed, issues, .. } => {
+            Event::Finished { output, bytes, params, spoofed, settled, issues, .. } => {
                 self.bar.finish();
                 let spoofed = if spoofed { ", duration spoofed" } else { "" };
+                // the result line says it, even when quiet
+                let settled = if settled { ", the best so far as asked" } else { "" };
                 outln!(
-                    "{} {}, {}{spoofed}",
+                    "{} {}, {}{spoofed}{settled}",
                     ui::status("Finished", term::link_out(style(output.display()).bold(), &output)),
                     ui::size_within(bytes, self.limit),
                     ui::params(&params),

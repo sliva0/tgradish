@@ -17,9 +17,9 @@ use tgradish_core::input::Input;
 use tgradish_core::mark::made_by_tgradish;
 use tgradish_core::options::{Crop, Fit, Resize, Scaling, Speed};
 use tgradish_core::telegram::{self, Target};
-use tgradish_core::webm::Event;
 use tgradish_core::webm::Options;
 use tgradish_core::webm::container;
+use tgradish_core::webm::{Decision, Event};
 use tgradish_core::webm::{Request, convert};
 use tgradish_core::webp;
 use tgradish_corpus::Clip;
@@ -84,6 +84,58 @@ fn converts_short_clip_without_spoofing() {
         assert!(info.signature.is_some());
         // which the window may replace without asking
         assert!(made_by_tgradish(&outcome.output), "{name}");
+    }
+}
+
+#[test]
+fn settles_on_the_best_so_far_when_asked() {
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
+    for backend in &backends {
+        let name = name(backend);
+        let dir = tempfile::tempdir().unwrap();
+        // a bitrate far under what fits, so fitting would go on
+        let request = Request {
+            output: Some(dir.path().join("out.webm")),
+            options: Options { length: Some(2.0), bitrate: Some(50.0), ..fast(Fit::Bitrate) },
+            ..Request::new(Input::File(input.clone()))
+        };
+        let cancel = CancelToken::new();
+        let mut events = Vec::new();
+        let (mut refused, mut asked) = (false, false);
+        let outcome = convert(backend, &request, &cancel, &mut |event| {
+            match &event {
+                // nothing fits yet: it can't
+                Event::Progress { attempt: 1, can_settle, .. } => {
+                    assert!(!can_settle);
+                    refused |= !cancel.settle();
+                }
+                // asked while the second encodes, which is given up
+                Event::Progress { attempt: 2, can_settle, fraction, .. }
+                    if *fraction > 0.0 && !asked =>
+                {
+                    assert!(can_settle);
+                    asked = cancel.settle();
+                }
+                _ => {}
+            }
+            events.push(event);
+        })
+        .unwrap();
+        assert!(refused && asked, "{name}");
+        assert!(outcome.settled && outcome.attempt == 1, "{name}: {outcome:?}");
+        assert!(outcome.bytes <= telegram::MAX_STICKER_BYTES);
+        assert!(container::inspect_file(&outcome.output).is_ok(), "{name}");
+        // no third, and said so
+        assert!(!events.iter().any(|e| matches!(e, Event::AttemptStarted { attempt: 3, .. })));
+        let settled = Decision::Settled { attempt: 1 };
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::Decided { decision, .. } if *decision == settled))
+        );
+        assert!(matches!(events.last(), Some(Event::Finished { settled: true, attempt: 1, .. })));
+        // the token serves the next conversion afresh
+        assert!(!cancel.can_settle() && !cancel.is_settling() && !cancel.is_cancelled());
     }
 }
 

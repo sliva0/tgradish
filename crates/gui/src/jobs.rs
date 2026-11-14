@@ -250,6 +250,9 @@ pub(crate) struct Done {
     /// duration is spoofed.
     pub(crate) attempt: Option<u32>,
     pub(crate) spoofed: bool,
+    /// For WebM: fitting was asked to stop early, and kept the best
+    /// attempt that fit so far.
+    pub(crate) settled: bool,
     /// For `.tgs`: its Lottie's size, layers and rectangles.
     pub(crate) json_bytes: Option<u64>,
     pub(crate) shapes: Option<(usize, usize)>,
@@ -275,6 +278,7 @@ impl Done {
                     changed: false,
                     attempt: None,
                     spoofed,
+                    settled: false,
                     json_bytes: None,
                     shapes: None,
                     problems: refused(&telegram::check(&info, target), target),
@@ -291,6 +295,7 @@ impl Done {
                     changed: false,
                     attempt: None,
                     spoofed: false,
+                    settled: false,
                     json_bytes: None,
                     shapes: None,
                     problems: refused(&issues, target),
@@ -306,6 +311,7 @@ impl Done {
                     changed: false,
                     attempt: None,
                     spoofed: false,
+                    settled: false,
                     json_bytes: Some(stats.json_bytes as u64),
                     shapes: Some((stats.layers, stats.shapes)),
                     problems: issues.into_iter().map(Problem::of_tgs).collect(),
@@ -342,6 +348,8 @@ pub(crate) struct Job {
     pub(crate) replaces: bool,
     pub(crate) status: Status,
     pub(crate) progress: Progress,
+    /// It fits a WebM in several encodes, and can keep the best so far.
+    pub(crate) settles: bool,
     cancel: CancelToken,
     messages: Option<Receiver<Message>>,
     worker: Option<std::thread::JoinHandle<()>>,
@@ -360,6 +368,7 @@ impl Job {
             replaces: false,
             status: Status::Waiting,
             progress: Progress::default(),
+            settles: false,
             cancel: CancelToken::new(),
             messages: None,
             worker: None,
@@ -390,6 +399,8 @@ impl Job {
         self.messages = Some(receiver);
         self.status = Status::Running;
         self.progress = Progress::default();
+        self.settles = matches!(&setup, Setup::Webm { options, .. }
+            if options.fit_or_default() != tgradish_core::options::Fit::Off);
         let output = self.output.clone();
         let cancel = self.cancel.clone();
         let ctx = ctx.clone();
@@ -437,6 +448,21 @@ impl Job {
     /// Asked to stop, and not yet stopped.
     pub(crate) fn is_stopping(&self) -> bool {
         self.is_running() && self.cancel.is_cancelled()
+    }
+
+    /// Whether it can keep the best encode so far now: one fits.
+    pub(crate) fn can_settle(&self) -> bool {
+        self.is_running() && self.cancel.can_settle()
+    }
+
+    /// Stops fitting and keeps the best encode so far, where one fits.
+    pub(crate) fn settle(&self) {
+        self.cancel.settle();
+    }
+
+    /// Asked to keep the best so far, and not yet done.
+    pub(crate) fn is_settling(&self) -> bool {
+        self.is_running() && self.cancel.is_settling()
     }
 
     /// Takes in what the worker reported; true when it just finished.
@@ -507,6 +533,7 @@ fn run(
                 changed: matches!(outcome.encoding, webp::Encoding::Lossy { .. }),
                 attempt: None,
                 spoofed: false,
+                settled: false,
                 json_bytes: None,
                 shapes: None,
                 problems: refused(&outcome.issues, target),
@@ -558,6 +585,7 @@ fn run(
                 changed: outcome.changed,
                 attempt: None,
                 spoofed: false,
+                settled: false,
                 json_bytes: Some(outcome.json_bytes),
                 shapes: Some((outcome.layers, outcome.rectangles)),
                 problems: outcome.issues.into_iter().map(Problem::of_tgs).collect(),
@@ -630,6 +658,7 @@ fn convert_webm(
         changed: false,
         attempt: Some(outcome.attempt),
         spoofed: outcome.spoofed,
+        settled: outcome.settled,
         json_bytes: None,
         shapes: None,
         problems: refused(&outcome.issues, request.options.target.unwrap_or_default()),

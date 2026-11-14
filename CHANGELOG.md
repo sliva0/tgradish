@@ -36,6 +36,13 @@ that makes every kind of Telegram sticker and emoji.
   Why fitting stops, or tries a lower frame rate or not, is said: in
   `convert`'s output, as `decided` events with `--json`, and under the
   table of encodes in the window.
+- Keeping the best WebM encode so far, once one fits, rather than letting
+  fitting go on: Keep best so far beside Stop in the window; in `convert`,
+  the first Ctrl-C, which goes on to the next input, a second within 2
+  seconds cancelling as before; a line reading `settle` on stdin with
+  `--cancel-on-stdin`. `progress` and `attempt-finished` events say
+  whether it can (`can-settle`), and `finished` whether it did
+  (`settled`).
 - `tgradish watch DIR`, converting what appears in a folder.
 - `tgradish inspect`, which says what a WebM, WebP or `.tgs` file holds
   and whether Telegram would take it.

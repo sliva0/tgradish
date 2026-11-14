@@ -95,6 +95,11 @@ impl App {
                     if ui.add_enabled(!stopping, stop).clicked() {
                         job.cancel();
                     }
+                    // there from the start, so nothing beside it moves
+                    // once an encode fits
+                    if job.settles {
+                        keep_best(ui, job, stopping);
+                    }
                     let size = vec2(ui.available_width(), BAR_ROW);
                     crate::result::step_bar(ui, job, size);
                 }
@@ -209,6 +214,31 @@ impl App {
         if convert || (shortcut && self.item(id).is_some_and(|item| item.job.is_none())) {
             self.enqueue(id);
         }
+    }
+}
+
+/// Keep best so far, beside Stop while a WebM is fitted: it stops fitting
+/// and saves the best encode that fits so far, once one does. As wide
+/// whatever it says, and as high as Stop.
+fn keep_best(ui: &mut egui::Ui, job: &crate::jobs::Job, stopping: bool) {
+    let (keep, keeping) = (fl!("keep-best"), fl!("keeping-best"));
+    let width = [&keep, &keeping]
+        .iter()
+        .map(|text| widgets::text_width(ui, text, button_padding(ui)))
+        .fold(0.0, f32::max);
+    let settling = job.is_settling();
+    let text = if settling { keeping } else { keep };
+    let button = egui::Button::new(text).min_size(vec2(width, BAR_ROW));
+    let enabled = job.can_settle() && !settling && !stopping;
+    // disabled: why, unless it is only as it stops anyway
+    let why = match settling || job.can_settle() {
+        true => fl!("keep-best", "hint"),
+        false => fl!("keep-best", "nothing-fits"),
+    };
+    let response = ui.add_enabled(enabled, button);
+    let response = response.on_hover_text(fl!("keep-best", "hint")).on_disabled_hover_text(why);
+    if response.clicked() {
+        job.settle();
     }
 }
 
@@ -699,6 +729,62 @@ mod tests {
         assert!(matches!(failed, Some(Status::Cancelled)), "{failed:?}");
         assert!(item.made.is_none());
         harness.get_by_label("Stopped");
+    }
+
+    #[test]
+    fn keeps_the_best_encode_so_far() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video_of(dir.path(), "1280x720", 8) else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        // fitting from far under the limit, so it goes on once one fits
+        let webm = &mut harness.state_mut().items[0].choices.webm;
+        webm.fit = Some(tgradish_core::options::Fit::Bitrate);
+        webm.bitrate = Some(20.0);
+        convert(&harness);
+        harness.run_steps(2);
+        let keep = fl!("keep-best");
+        let button = |harness: &Harness<App>| {
+            let node = harness.get_by_label(&keep);
+            (node.rect(), node.accesskit_node().is_disabled())
+        };
+        let stop = harness.get_by_label("Stop").rect();
+        // there before anything fits, beside Stop and as high
+        let (before, disabled) = button(&harness);
+        assert!(disabled);
+        assert_eq!((before.top(), before.bottom()), (stop.top(), stop.bottom()));
+        assert!(before.left() > stop.right());
+        let fits = |harness: &Harness<App>| {
+            harness.state().items[0].job.as_ref().is_some_and(|c| c.job.can_settle())
+        };
+        for _ in 0..3000 {
+            if fits(&harness) {
+                break;
+            }
+            harness.step();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(fits(&harness), "nothing fit");
+        harness.run_steps(1);
+        // where it was, and enabled
+        let (after, disabled) = button(&harness);
+        assert!(!disabled);
+        assert_eq!(after, before);
+        harness.get_by_label(&keep).click();
+        harness.run_steps(1);
+        finish(&mut harness);
+        let item = &harness.state().items[0];
+        let Status::Done(done) = &made_job(item).status else { panic!("not made") };
+        assert!(done.settled, "{done:?}");
+        // the first, far under the limit, which fitting would have gone on
+        // from: said with the result
+        let kept = done.attempt.unwrap();
+        assert_eq!(kept, 1);
+        harness.get_by_label(&fl!("decided-settled", number = kept));
     }
 
     #[test]
