@@ -610,6 +610,11 @@ reading-art = Reading the pixel art
 sprite-sheet = Sprite sheet
     .hint = Frames laid out in a grid of equal cells, row by row
 read-as-sheet = Read as a sprite sheet
+# Why a file can't be read as a sprite sheet, which is one picture; and,
+# .converted, a warning of a conversion that read it as it is, as a
+# session kept it ticked.
+sheet-refused = This file already has { $frames } frames: a sprite sheet is one picture
+    .converted = Read as it is, not as a sprite sheet: it already has { $frames } frames
 # The sprite sheet's columns × rows.
 sheet-cells = Cells
 sheet-frames = Frames
