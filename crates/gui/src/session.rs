@@ -299,9 +299,8 @@ impl Store {
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let partial = self.path.with_extension("json.partial");
-        std::fs::write(&partial, &json)?;
-        std::fs::rename(&partial, &self.path)?;
+        // whole or not at all, and on the disk before it replaces the last
+        tgradish_core::fsutil::write_file(&self.path, json.as_bytes(), true)?;
         self.written = json;
         let named: HashSet<String> =
             session.items.iter().filter_map(|item| item.pasted_copy.clone()).collect();

@@ -50,7 +50,7 @@ pub mod config;
 pub mod drawn;
 mod error;
 pub mod ffmpeg;
-mod fsutil;
+pub mod fsutil;
 pub mod input;
 pub mod inspect;
 pub mod licenses;

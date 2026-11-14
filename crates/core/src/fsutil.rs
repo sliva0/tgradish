@@ -1,4 +1,5 @@
-//! Writing results without leaving half-written files behind.
+//! Writing files without leaving half-written ones behind: results, and
+//! files kept between runs, as the config and the window's session.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -20,7 +21,7 @@ pub(crate) fn beside(input: &Path, suffix: &str) -> PathBuf {
 /// this fails with [`std::io::ErrorKind::AlreadyExists`], even if the file
 /// appeared while tgradish was working. Where `path` is a link to a file,
 /// that file is the one written, and the link stays.
-pub(crate) fn write_file(path: &Path, bytes: &[u8], replace: bool) -> std::io::Result<()> {
+pub fn write_file(path: &Path, bytes: &[u8], replace: bool) -> std::io::Result<()> {
     // renaming over a link would put a file in its place, and leave what
     // it points to, as a config file kept in a dotfiles folder, behind; a
     // link to nothing is replaced, as there is nowhere to write through it
