@@ -86,7 +86,7 @@ fn overlay<T: serde::de::DeserializeOwned>(
 /// that gave one, or its key in `--options-json`, both mistakes in the
 /// command line; or else the preset `preset`, which set it.
 fn check_options(
-    options: &impl serde::Serialize,
+    options: &impl tgradish_core::options::Checked,
     args: &ConversionArgs,
     json: Option<&serde_json::Map<String, serde_json::Value>>,
     preset: &str,

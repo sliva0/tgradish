@@ -534,10 +534,6 @@ pub fn flags(options: &impl Serialize) -> Vec<String> {
 /// The slowest and fastest tempos, for WebM and .tgs alike.
 pub const TEMPOS: std::ops::RangeInclusive<f64> = tgradish_tgs::normalise::TEMPOS;
 
-/// The numeric options [`check`] holds to what [`wrong_value`] says.
-const CHECKED: [&str; 8] =
-    ["start", "length", "tempo", "fps", "bitrate", "crf", "attempts", "fake-duration"];
-
 /// Why `value` can't be the option `key`'s whatever the input is, as
 /// "must be from 0.1 to 10", or `None` when it can be, or `key` is no
 /// number [`check`] knows: what a front-end checks a value by as it is
@@ -571,22 +567,61 @@ pub fn wrong_value(key: &str, value: f64) -> Option<String> {
     })
 }
 
+/// Options [`check`] looks over, by their fields: serialised, as to JSON,
+/// a number that isn't finite would be nothing at all, and pass.
+pub trait Checked {
+    /// The numbers set that [`wrong_value`] knows, each under its key.
+    fn numbers(&self) -> Vec<(&'static str, f64)>;
+    /// The range searched while fitting, if one is set.
+    fn fit_range(&self) -> Option<Range> {
+        None
+    }
+}
+
+impl Checked for crate::webm::Options {
+    fn numbers(&self) -> Vec<(&'static str, f64)> {
+        let numbers = [
+            ("start", self.start),
+            ("length", self.length),
+            ("tempo", self.tempo),
+            ("fps", self.fps),
+            ("bitrate", self.bitrate),
+            ("crf", self.crf.map(f64::from)),
+            ("attempts", self.attempts.map(f64::from)),
+            ("fake-duration", self.fake_duration),
+        ];
+        numbers.into_iter().filter_map(|(key, value)| Some((key, value?))).collect()
+    }
+
+    fn fit_range(&self) -> Option<Range> {
+        self.fit_range
+    }
+}
+
+impl Checked for crate::tgs::Options {
+    fn numbers(&self) -> Vec<(&'static str, f64)> {
+        let numbers = [
+            ("start", self.start),
+            ("length", self.length),
+            ("tempo", self.tempo),
+            ("fps", self.fps),
+        ];
+        numbers.into_iter().filter_map(|(key, value)| Some((key, value?))).collect()
+    }
+}
+
 /// Checks the values `options` sets that are wrong whatever the input:
-/// numbers out of their range, as [`wrong_value`] says, and a fit range
-/// that isn't finite or runs backwards. What depends on the input, as a
-/// start past its end, is checked as it is converted.
-pub fn check(options: &impl Serialize) -> crate::Result<()> {
-    let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(options) else {
-        return Ok(());
-    };
-    for key in CHECKED {
-        let value = fields.get(key).and_then(serde_json::Value::as_f64);
-        if let Some(reason) = value.and_then(|value| wrong_value(key, value)) {
+/// numbers out of their range, as [`wrong_value`] says, those that aren't
+/// finite among them, and a fit range that isn't finite or runs backwards.
+/// What depends on the input, as a start past its end, is checked as it is
+/// converted.
+pub fn check(options: &impl Checked) -> crate::Result<()> {
+    for (key, value) in options.numbers() {
+        if let Some(reason) = wrong_value(key, value) {
             return Err(crate::Error::invalid(key, reason));
         }
     }
-    let range = fields.get("fit-range").and_then(|range| Range::deserialize(range).ok());
-    if let Some(range) = range {
+    if let Some(range) = options.fit_range() {
         if !(range.min.is_finite() && range.max.is_finite()) {
             return Err(crate::Error::invalid("fit-range", format!("{range} must be finite")));
         }
@@ -623,6 +658,86 @@ mod tests {
         assert!(check(&fine).is_ok());
         assert_eq!(wrong_value("start", f64::NAN).unwrap(), "must be 0 or more seconds");
         assert!(wrong_value("title", -1.0).is_none());
+    }
+
+    /// The option `check` finds wrong in `options`.
+    fn wrong_option(options: &impl Checked) -> &'static str {
+        match check(options) {
+            Err(crate::Error::InvalidOption { option, .. }) => option,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn checks_numbers_that_arent_finite() {
+        type Set<T> = fn(&mut T, f64);
+        let webm: [(&str, Set<Options>); 8] = [
+            ("start", |options, n| options.start = Some(n)),
+            ("length", |options, n| options.length = Some(n)),
+            ("tempo", |options, n| options.tempo = Some(n)),
+            ("fps", |options, n| options.fps = Some(n)),
+            ("bitrate", |options, n| options.bitrate = Some(n)),
+            ("fake-duration", |options, n| options.fake_duration = Some(n)),
+            ("fit-range", |options, n| options.fit_range = Some(Range { min: n, max: 400.0 })),
+            ("fit-range", |options, n| options.fit_range = Some(Range { min: 100.0, max: n })),
+        ];
+        let tgs: [(&str, Set<crate::tgs::Options>); 4] = [
+            ("start", |options, n| options.start = Some(n)),
+            ("length", |options, n| options.length = Some(n)),
+            ("tempo", |options, n| options.tempo = Some(n)),
+            ("fps", |options, n| options.fps = Some(n)),
+        ];
+        for n in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for (key, set) in webm {
+                let mut options = Options::default();
+                set(&mut options, n);
+                assert_eq!(wrong_option(&options), key, "{key} {n}");
+            }
+            for (key, set) in tgs {
+                let mut options = crate::tgs::Options::default();
+                set(&mut options, n);
+                assert_eq!(wrong_option(&options), key, "{key} {n}");
+            }
+        }
+        let range =
+            Options { fit_range: Some(Range { min: 1.0, max: f64::NAN }), ..Default::default() };
+        let Err(crate::Error::InvalidOption { reason, .. }) = check(&range) else { panic!() };
+        assert_eq!(reason, "1..NaN must be finite");
+    }
+
+    #[test]
+    fn checks_numbers_a_preset_sets_that_arent_finite() {
+        use crate::presets::Presets;
+        let dir = tempfile::tempdir().unwrap();
+        let mut presets = Vec::new();
+        // each a preset can set: a start and a length are one file's
+        for value in ["nan", "+nan", "-nan", "inf", "+inf", "-inf"] {
+            for key in ["tempo", "fps", "bitrate", "fake-duration"] {
+                presets.push((key, "webm", format!("{key} = {value}")));
+            }
+            for key in ["tempo", "fps"] {
+                presets.push((key, "tgs", format!("{key} = {value}")));
+            }
+            for range in [
+                format!("{{ min = {value}, max = 400.0 }}"),
+                format!("{{ min = 1.0, max = {value} }}"),
+            ] {
+                presets.push(("fit-range", "webm", format!("fit-range = {range}")));
+            }
+        }
+        for (number, (_, table, line)) in presets.iter().enumerate() {
+            let text = format!("[{table}]\n{line}\n");
+            std::fs::write(dir.path().join(format!("p{number}.toml")), text).unwrap();
+        }
+        let loaded = Presets::load(Some(dir.path())).unwrap();
+        for (number, (key, table, line)) in presets.iter().enumerate() {
+            let name = format!("p{number}");
+            let option = match *table {
+                "webm" => wrong_option(&loaded.webm(&name).unwrap()),
+                _ => wrong_option(&loaded.tgs(&name).unwrap()),
+            };
+            assert_eq!(option, *key, "{line}");
+        }
     }
 
     #[test]
