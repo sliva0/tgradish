@@ -36,7 +36,9 @@ nix run github:sliva0/tgradish
 
 From source, with Rust 1.95 or newer, `cargo build --release` makes `target/release/tgradish`, which uses the system's ffmpeg; [CONTRIBUTING.md](CONTRIBUTING.md) says how to build it with ffmpeg built in.
 
-The Python version, 1.x, is on the [`1.x`](https://github.com/sliva0/tgradish/tree/1.x) branch and on PyPI. 2.0's command line is different: `convert` takes its inputs as arguments, without `-i`.
+Packages install shell completions and man pages; elsewhere `tgradish completions SHELL` prints the script for bash, zsh, fish or PowerShell.
+
+The Python version, 1.x, is on the [`1.x`](https://github.com/sliva0/tgradish/tree/1.x) branch and on PyPI. 2.0's command line is different: `convert` takes its inputs as arguments, without `-i`. [CHANGELOG.md](CHANGELOG.md) says what changed, with a table of what each 1.x command and flag became.
 
 
 ## Dependencies
@@ -48,7 +50,7 @@ Builds with ffmpeg built in need no separate ffmpeg. The rest use `ffmpeg` and `
 
 ## Usage examples
 
-`tgradish` opens the window when started without arguments outside a terminal, as does `tgradish gui`. Everything the window does can be done on the command line too: `tgradish --help` lists the commands, and `tgradish <command> --help` their options.
+`tgradish` opens the window when started without arguments outside a terminal, as does `tgradish gui [FILES]`, with the files given. It opens at the size and layout it was left in, with the files of last time. Everything the window does can be done on the command line too: `tgradish --help` lists the commands, and `tgradish <command> --help` their options.
 
 ``` console
 tgradish convert clip.mp4                  # a video sticker, clip.sticker.webm
@@ -57,7 +59,7 @@ tgradish convert walk.ase -f tgs           # an animated sticker, walk.sticker.t
 tgradish convert photo.jpg -f webp         # an image sticker, photo.sticker.webp
 tgradish watch ~/Videos -O ~/Stickers      # each new video or picture as it comes
 tgradish inspect clip.sticker.webm         # what Telegram would say of it
-tgradish spoof ready.webm                  # a WebM made elsewhere, spoofed: ready.spoofed.webm
+tgradish spoof ready.webm long.webm        # a WebM made elsewhere, spoofed into long.webm
 ```
 
 From an Aseprite file, only its `idle` tag, with its `sketch` layer hidden:
@@ -65,10 +67,12 @@ From an Aseprite file, only its `idle` tag, with its `sketch` layer hidden:
 tgradish convert walk.ase -f tgs --tag idle --hide-layers sketch
 ```
 
+`tgradish config example` prints a config file, each setting explained, to start one from; `tgradish config path` says where it goes.
+
 
 ## Scripting
 
-Switches a preset can set come in pairs, as `--exact` and `--no-exact`. `--json` prints JSON Lines, and `tgradish describe` gives the schemas of the events `convert` and `watch` print. The exit status is 0 when done, 1 when something failed, 2 when the command line was wrong, 3 when everything was made but Telegram would refuse a result, and 130 when `convert` is cancelled; a cancelled `watch` ends with 0.
+Switches a preset can set come in pairs, as `--exact` and `--no-exact`. `--json` prints JSON Lines, and `tgradish describe` gives the schemas of the events `convert`, `watch` and `spoof` print; each file's `finished` event names its `input`. The exit status is 0 when done, 1 when something failed, 2 when the command line was wrong, 3 when everything was made but Telegram would refuse a result, and 130 when `convert` is cancelled; a cancelled `watch` ends with 0.
 
 
 ## Contributing
