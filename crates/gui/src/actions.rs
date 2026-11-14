@@ -585,7 +585,9 @@ mod tests {
         let long = "holiday at the seaside with the whole family, the long cut, final edit (2)";
         let art = dir.path().join(format!("{long}.png"));
         square(&art, [255, 0, 0, 255]);
-        let deep = dir.path().join("out").join("for the family").join("Stickers");
+        // a folder as long wherever the temporary one is, never written to
+        let root = if cfg!(windows) { r"C:\" } else { "/" };
+        let deep = std::path::Path::new(root).join("out").join("for the family").join("Stickers");
         let mut config = Config::default();
         config.gui.output_dir = Some(deep.clone());
         let mut harness =
