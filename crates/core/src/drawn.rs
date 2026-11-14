@@ -31,8 +31,9 @@ pub struct Readable {
     aseprite: Aseprite,
     /// What was drawn, until it is taken, and whether it is a still picture.
     drawn: Option<(Animation, bool)>,
-    /// How many frames a sequence has and how many it plays a second.
-    sequence: Option<(usize, f64)>,
+    /// How long a sequence plays, in seconds, its frame rate and its base
+    /// frame rate (see [`sequence_timing`]).
+    sequence: Option<(f64, f64, f64)>,
 }
 
 impl Readable {
@@ -72,12 +73,12 @@ impl Readable {
         })
     }
 
-    /// `probe` with a sequence's length and frame rate as they were asked
-    /// for.
+    /// `probe` with a sequence's length and frame rate as its frames are
+    /// timed.
     fn timed(&self, mut probe: Probe) -> Probe {
-        if let Some((frames, fps)) = self.sequence.filter(|_| !probe.still_image) {
-            probe.duration = Some(frames as f64 / fps);
-            (probe.fps, probe.base_fps) = (Some(fps), Some(fps));
+        if let Some((duration, fps, base_fps)) = self.sequence.filter(|_| !probe.still_image) {
+            probe.duration = Some(duration);
+            (probe.fps, probe.base_fps) = (Some(fps), Some(base_fps));
         }
         probe
     }
@@ -182,9 +183,27 @@ pub fn readable(input: &Input, options: &Options, cancel: &CancelToken) -> Resul
     let animated = sequence || animation.frames().len() > 1;
     write_png(&path, &animation, animated)
         .map_err(|err| Error::io(FileAction::Write, &path)(std::io::Error::other(err)))?;
-    let rate = sequence.then(|| (animation.frames().len(), options.fps.unwrap_or(DEFAULT_FPS)));
+    let rate = sequence.then(|| sequence_timing(&animation, options.fps.unwrap_or(DEFAULT_FPS)));
     let drawn = Some((animation, !animated));
     Ok(Readable { path, dir: Some(dir), aseprite, drawn, sequence: rate })
+}
+
+/// How long a sequence of `animation`'s frames plays, in seconds, its
+/// frame rate and its base frame rate. Where every frame is a still
+/// picture shown at `fps`, as asked for: ffmpeg's reading of the frames'
+/// times can come enough short of them to leave the last frame out. Where
+/// an animated picture among them keeps its own frames' times, as those
+/// are timed, as [`Readable::probe_drawn`] times any drawn animation.
+fn sequence_timing(animation: &Animation, fps: f64) -> (f64, f64, f64) {
+    let frames = animation.frames();
+    let still = art::frame_duration(Some(fps)).ok();
+    if still.is_some_and(|still| frames.iter().all(|frame| frame.duration == still)) {
+        return (frames.len() as f64 / fps, fps, fps);
+    }
+    let seconds = frames.iter().map(|frame| frame.duration.as_secs_f64());
+    let length: f64 = seconds.clone().sum();
+    let shortest = seconds.fold(f64::INFINITY, f64::min);
+    (length, frames.len() as f64 / length, 1.0 / shortest)
 }
 
 /// Writes `animation` as a PNG, `animated` with each frame lasting its own
@@ -354,6 +373,41 @@ mod tests {
         // the frames of a sequence have no tags
         let tagged = Options { tag: Some("idle".into()), ..twelve };
         assert!(readable(&sequence, &tagged, &CancelToken::new()).is_err());
+    }
+
+    #[test]
+    fn times_sequences_with_an_animation_in_them_by_its_frames() {
+        // ten frames of 40 ms, then a picture at 12 fps: 0.483 s, not the
+        // 11 / 12 s eleven pictures would last
+        let dir = tempfile::tempdir().unwrap();
+        let canvas = |shade: u8| {
+            let mut canvas = tgradish_corpus::Canvas::new(2, 2);
+            canvas.rect(0, 0, 2, 2, [shade, 100, 40, 255]);
+            canvas
+        };
+        let gif = tgradish_corpus::Sprite {
+            name: "blink",
+            about: "",
+            frames: (0..10).map(|frame| canvas(frame * 20)).collect(),
+            delays: vec![40; 10],
+            scale: 1,
+            likely_scale: None,
+        };
+        let files = [dir.path().join("1.gif"), dir.path().join("2.png")];
+        std::fs::write(&files[0], tgradish_corpus::encode::gif(&gif)).unwrap();
+        std::fs::write(&files[1], tgradish_corpus::encode::png(&canvas(250))).unwrap();
+        let twelve = Options { fps: Some(12.0), ..Options::default() };
+        let input = Input::Sequence(files.to_vec());
+        let mut drawn = readable(&input, &twelve, &CancelToken::new()).unwrap();
+        let (taken, still) = drawn.take_drawn().unwrap();
+        let probe = drawn.probe_drawn(&taken, still);
+        let length = 10.0 * 0.04 + 1.0 / 12.0;
+        let near = |found: Option<f64>, expected: f64| {
+            found.is_some_and(|found| (found - expected).abs() < 1e-6)
+        };
+        assert!(near(probe.duration, length), "{:?}", probe.duration);
+        assert!(near(probe.fps, 11.0 / length), "{:?}", probe.fps);
+        assert!(near(probe.base_fps, 25.0), "{:?}", probe.base_fps);
     }
 
     #[test]
