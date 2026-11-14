@@ -90,8 +90,13 @@ const BAR: f32 = theme::CONTROL;
 /// Width of the fields of where the used part starts and ends.
 const FIELD: f32 = 64.0;
 
-/// The least the bar narrows to.
-const NARROWEST_BAR: f32 = 48.0;
+/// The least the bar narrows to: narrower, the unit's segments go under it.
+const NARROWEST_BAR: f32 = 160.0;
+
+/// Width of the play button, and of the frame picker's steps.
+const BUTTON: f32 = 30.0;
+/// Width of the frame picker's field.
+const PICKED: f32 = 72.0;
 
 /// The choices of what the numbers count.
 fn units() -> [widgets::Choice<bool>; 2] {
@@ -101,19 +106,63 @@ fn units() -> [widgets::Choice<bool>; 2] {
     ]
 }
 
+/// How wide the unit's segments are, as their words make them.
+fn unit_width(ui: &egui::Ui) -> f32 {
+    let padding = 2.0 * ui.spacing().button_padding.x;
+    units().iter().map(|(_, text, _)| widgets::text_width(ui, text, padding) + 1.0).sum()
+}
+
+/// Whether a timeline `width` wide puts the unit's segments on a line of
+/// their own, under its end, as the row leaves the bar less than its
+/// narrowest beside them; for the `picker` of a frame, or of a part.
+fn two_lines(ui: &egui::Ui, width: f32, picker: bool) -> bool {
+    let gap = ui.spacing().item_spacing.x;
+    let fixed = match picker {
+        true => 2.0 * BUTTON + PICKED + 3.0 * gap,
+        false => BUTTON + 2.0 * FIELD + 3.0 * gap,
+    };
+    fixed + NARROWEST_BAR + gap + unit_width(ui) > width
+}
+
+/// How much higher than a row a timeline `width` wide is, for the `picker`
+/// of a frame or of a part: a line more where the unit's segments go under
+/// the bar.
+pub(crate) fn extra_height(ui: &egui::Ui, width: f32, picker: bool) -> f32 {
+    match two_lines(ui, width, picker) {
+        true => theme::CONTROL + ui.spacing().item_spacing.y,
+        false => 0.0,
+    }
+}
+
 /// How wide the bar is, and the room of the unit's segments after it, out
 /// of what is left of the row, with `after` more between them: the bar takes
 /// what the segments leave, as wide as their words make them, so the row
-/// ends where the preview does. It narrows to `narrowest` at the least,
-/// before they do.
-fn bar_width(ui: &egui::Ui, after: f32, narrowest: f32) -> (f32, f32) {
+/// ends where the preview does; all of it where they go on a line of their
+/// own, as `alone` says.
+fn bar_width(ui: &egui::Ui, after: f32, alone: bool) -> (f32, f32) {
     let gap = ui.spacing().item_spacing.x;
-    let padding = 2.0 * ui.spacing().button_padding.x;
-    let unit: f32 =
-        units().iter().map(|(_, text, _)| widgets::text_width(ui, text, padding) + 1.0).sum();
+    let unit = unit_width(ui);
     let rest = ui.available_width() - after - gap;
-    let unit = unit.min(rest - narrowest);
-    ((rest - unit).max(narrowest), unit)
+    if alone {
+        // with no gap before segments after it
+        return ((rest + gap).max(1.0), unit);
+    }
+    let unit = unit.min(rest - NARROWEST_BAR);
+    ((rest - unit).max(NARROWEST_BAR), unit)
+}
+
+/// The unit's segments on a line of their own, under the row, at its end.
+fn unit_below(ui: &mut egui::Ui, in_frames: &mut bool, known: bool) {
+    // as wide as they are drawn: their words, and a point between them
+    let padding = 2.0 * ui.spacing().button_padding.x;
+    let choices = units();
+    let words: f32 =
+        choices.iter().map(|(_, text, _)| widgets::text_width(ui, text, padding)).sum();
+    let room = (words + (choices.len() - 1) as f32).min(ui.available_width());
+    ui.horizontal(|ui| {
+        ui.add_space(ui.available_width() - room);
+        unit(ui, in_frames, known, room);
+    });
 }
 
 /// Whether the numbers count frames or seconds, which `known` frames
@@ -143,6 +192,7 @@ pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
     if still {
         *playing = false;
     }
+    let alone = two_lines(ui, ui.available_width(), false);
     ui.horizontal(|ui| {
         ui.add_enabled_ui(!still, |ui| play_button(ui, playing))
             .response
@@ -170,7 +220,7 @@ pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
                 }
             }
         }
-        let (width, unit_room) = bar_width(ui, FIELD + ui.spacing().item_spacing.x, NARROWEST_BAR);
+        let (width, unit_room) = bar_width(ui, FIELD + ui.spacing().item_spacing.x, alone);
         let (rect, response) = ui.allocate_exact_size(vec2(width, BAR), Sense::click_and_drag());
         bar(ui, rect, &response, (length, frames, *in_frames), (start, used), time, limit);
         match frames {
@@ -182,7 +232,9 @@ pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
                 if ui.add_sized(size, field).on_hover_text(hint).changed() {
                     frames.set_part((first, after), start, used);
                 }
-                unit(ui, in_frames, true, unit_room);
+                if !alone {
+                    unit(ui, in_frames, true, unit_room);
+                }
             }
             None => {
                 let (from, mut to) = part(length, *start, *used);
@@ -191,10 +243,15 @@ pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
                     to = to.max(from + 0.01).min(length);
                     set_part(length, (from, to), start, used);
                 }
-                unit(ui, in_frames, false, unit_room);
+                if !alone {
+                    unit(ui, in_frames, false, unit_room);
+                }
             }
         }
     });
+    if alone {
+        unit_below(ui, in_frames, frames.is_some());
+    }
 }
 
 /// A field of a time in the input, written as [`widgets::seconds`] writes
@@ -421,6 +478,7 @@ pub(crate) fn frame_picker(
     in_frames: &mut bool,
 ) {
     let length = frames.times[frames.count()].max(1e-6);
+    let alone = two_lines(ui, ui.available_width(), true);
     ui.horizontal(|ui| {
         let mut index = frames.at(frame.unwrap_or(0.0));
         let last = frames.count() - 1;
@@ -428,7 +486,7 @@ pub(crate) fn frame_picker(
         // as large as the play button, which stands here in the other modes
         let step = |ui: &mut egui::Ui, icon: &str, enabled: bool, hint: String, end: String| {
             let button =
-                egui::Button::new(egui::RichText::new(icon).size(15.0)).min_size(vec2(30.0, 0.0));
+                egui::Button::new(egui::RichText::new(icon).size(15.0)).min_size(vec2(BUTTON, 0.0));
             ui.add_enabled(enabled, button)
                 .on_hover_text(hint)
                 .on_disabled_hover_text(end)
@@ -441,11 +499,11 @@ pub(crate) fn frame_picker(
             picked = Some(index + 1);
         }
         let field = frame_field(&mut index, frames, *in_frames);
-        let size = vec2(72.0, ui.spacing().interact_size.y);
+        let size = vec2(PICKED, ui.spacing().interact_size.y);
         if ui.add_sized(size, field).on_hover_text(fl!("frame-picked")).changed() {
             picked = Some(index);
         }
-        let (width, unit_room) = bar_width(ui, 0.0, 80.0);
+        let (width, unit_room) = bar_width(ui, 0.0, alone);
         let (rect, response) = ui.allocate_exact_size(vec2(width, BAR), Sense::click_and_drag());
         // as the bar of the used part in the other modes
         let track = Rect::from_min_max(
@@ -469,7 +527,9 @@ pub(crate) fn frame_picker(
             index = picked;
             *frame = (picked > 0).then_some(frames.times[picked]);
         }
-        unit(ui, in_frames, true, unit_room);
+        if !alone {
+            unit(ui, in_frames, true, unit_room);
+        }
         // the span of a frame on the bar, at least wide enough to see
         let span = |index: usize| {
             let (from, to) = (x_of(frames.times[index]), x_of(frames.times[index + 1]));
@@ -500,12 +560,15 @@ pub(crate) fn frame_picker(
             painter.rect_stroke(span(hovered), 2.0, outline, egui::StrokeKind::Inside);
         }
     });
+    if alone {
+        unit_below(ui, in_frames, true);
+    }
 }
 
 fn play_button(ui: &mut egui::Ui, playing: &mut bool) {
     let icon = if *playing { "⏸" } else { "▶" };
     if ui
-        .add(egui::Button::new(egui::RichText::new(icon).size(15.0)).min_size(vec2(30.0, 0.0)))
+        .add(egui::Button::new(egui::RichText::new(icon).size(15.0)).min_size(vec2(BUTTON, 0.0)))
         .on_hover_text(fl!("play-keys"))
         .clicked()
     {

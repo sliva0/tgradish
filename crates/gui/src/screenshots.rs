@@ -134,6 +134,17 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     harness.run_steps(2);
     finish(&mut harness);
     shot(&mut harness, save, "state-video-made");
+    // the timeline and the frame picker at the narrowest
+    harness.set_size(egui::vec2(crate::MIN_WIDTH, 820.0));
+    harness.ctx.memory_mut(|memory| memory.reset_areas());
+    harness.state_mut().items[0].view.show = Show::Input;
+    shot(&mut harness, save, "state-timeline-narrow");
+    harness.state_mut().items[0].format = Format::Webp;
+    finish(&mut harness);
+    shot(&mut harness, save, "state-picker-narrow");
+    harness.state_mut().items[0].format = Format::Webm;
+    finish(&mut harness);
+    harness.set_size(egui::vec2(1280.0, 820.0));
 }
 
 /// Takes the window through each state worth a picture, handing each to

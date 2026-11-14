@@ -343,8 +343,11 @@ fn preview(
     let length = item.input_length();
     let result_length =
         item.result_clip.ready().filter(|clip| clip.is_animated()).map(|clip| clip.end());
+    let picker = item.format == Format::Webp;
     let timeline_height = match shown {
-        Show::Input if length.is_some() => TIMELINE,
+        Show::Input if length.is_some() => {
+            TIMELINE + timeline::extra_height(ui, ui.available_width(), picker)
+        }
         Show::Result if result_length.is_some() => TIMELINE,
         _ => 0.0,
     };
@@ -654,9 +657,13 @@ mod tests {
         std::fs::create_dir(&frames).unwrap();
         square(&frames.join("1.png"), [255, 0, 0, 255]);
         square(&frames.join("2.png"), [0, 0, 255, 255]);
-        let mut harness = Harness::builder()
-            .with_size([crate::MIN_WIDTH, 640.0])
-            .build_eframe(|_| App::with(Config::default(), None, Presets::builtin()));
+        // in the window's fonts and style, as its words take their room
+        let mut harness =
+            Harness::builder().with_size([crate::MIN_WIDTH, 640.0]).build_eframe(|cc| {
+                let app = App::with(Config::default(), None, Presets::builtin());
+                app.style(&cc.egui_ctx);
+                app
+            });
         harness.state_mut().add(vec![frames]);
         finish(&mut harness);
         let column = harness.get_by_label(&fl!("make")).accesskit_node().bounding_box().unwrap();
@@ -668,6 +675,19 @@ mod tests {
         );
         // and the row under the preview stops short of it
         assert!(row.x1 < column.x0, "{row:?} runs into {column:?}");
+        // the unit's segments under the bar, rather than leaving it narrow,
+        // ending where the field before them does
+        let play = harness.get_by_label("⏸").accesskit_node().bounding_box().unwrap();
+        assert!(row.y0 >= play.y1, "{row:?} beside {play:?}");
+        let spin = egui_kittest::kittest::by().role(egui::accesskit::Role::SpinButton);
+        let fields: Vec<_> = harness
+            .query_all(spin)
+            .map(|node| node.accesskit_node().bounding_box().unwrap())
+            .filter(|field| (field.y0 - play.y0).abs() < 1.0)
+            .collect();
+        let [start, end] = fields[..] else { panic!("{fields:?}") };
+        assert!(end.x0 - start.x1 >= 160.0, "{start:?} to {end:?}");
+        assert!((row.x1 - end.x1).abs() < 1.0, "{row:?} under {end:?}");
     }
 
     #[test]
