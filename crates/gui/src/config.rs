@@ -376,7 +376,7 @@ mod tests {
 
     #[test]
     fn reads_every_key_the_example_documents() {
-        let example = include_str!("../../core/src/config.example.toml");
+        let example = tgradish_core::config::EXAMPLE;
         let config =
             Config::from(toml::from_str::<tgradish_core::config::Config>(example).unwrap());
         // none left over as unknown, or as a value it couldn't read
