@@ -72,6 +72,9 @@ pub(crate) struct App {
     /// The ffmpeg inputs were last read with, or why there was none: when
     /// it changes, reads that failed are tried again.
     pub(crate) read_with: Option<Result<Backend, String>>,
+    /// Files that need ffmpeg are open while there is none, which the
+    /// banner says while it is so.
+    pub(crate) ffmpeg_missing: bool,
     pub(crate) screen: Screen,
     pub(crate) inset: Inset,
     pub(crate) settings_dialog: settings_dialog::SettingsDialog,
@@ -249,6 +252,7 @@ impl App {
             found_backend: Default::default(),
             ffmpeg_override: (None, None),
             read_with: None,
+            ffmpeg_missing: false,
             screen: Screen::default(),
             inset: Inset::default(),
             settings_dialog: settings_dialog::SettingsDialog::default(),

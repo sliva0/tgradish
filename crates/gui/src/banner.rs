@@ -25,6 +25,8 @@ pub(crate) enum Severity {
 pub(crate) enum Subject {
     SettingsFile,
     Presets,
+    /// ffmpeg, which isn't there for files that need it.
+    Ffmpeg,
 }
 
 /// A button in a message's row, which the window does when it is clicked.
@@ -43,6 +45,8 @@ pub(crate) enum Action {
     ShowInFolder,
     /// Asks for the ffmpeg program, and keeps it in the settings.
     ChooseFfmpeg,
+    /// Opens Settings.
+    OpenSettings,
 }
 
 fn asked_id() -> egui::Id {
@@ -68,6 +72,7 @@ impl Action {
             Action::CopyPath => fl!("copy-path"),
             Action::ShowInFolder => fl!("folder-of"),
             Action::ChooseFfmpeg => fl!("choose-ffmpeg"),
+            Action::OpenSettings => fl!("open-settings"),
         }
     }
 
@@ -78,6 +83,7 @@ impl Action {
             Action::CopyPath => fl!("copy-path", "hint"),
             Action::ShowInFolder => fl!("folder-of", "hint"),
             Action::ChooseFfmpeg => fl!("choose-ffmpeg", "hint"),
+            Action::OpenSettings => fl!("open-settings", "hint"),
         }
     }
 
@@ -364,6 +370,7 @@ impl crate::app::App {
                 }
             }
             Action::ChooseFfmpeg => self.pick(ctx, crate::files::Pick::Ffmpeg),
+            Action::OpenSettings => self.settings_dialog.open(),
             Action::ReadPresetsAgain => {
                 if !self.reload_presets() {
                     self.banner.flash(message, fl!("read-again", "failed"), now);

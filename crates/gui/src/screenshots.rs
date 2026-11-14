@@ -176,6 +176,16 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     harness.set_size(egui::vec2(1280.0, 1300.0));
     shot(&mut harness, save, "state-blocked-tag-tall");
     harness.set_size(egui::vec2(1280.0, 820.0));
+    // no ffmpeg, a video and pixel art open
+    let clip = harness.state().items[0].inputs[0].clone();
+    let mut config = config.clone();
+    config.ffmpeg.path = Some(dir.path().join("no-ffmpeg-here"));
+    let mut harness = window(config, egui::vec2(1280.0, 820.0));
+    let art = dir.path().join("pixel heart.png");
+    square(&art, [220, 30, 60, 255]);
+    harness.state_mut().add(vec![art, clip]);
+    finish(&mut harness);
+    shot(&mut harness, save, "state-no-ffmpeg");
 }
 
 /// Takes the window through each state worth a picture, handing each to

@@ -385,7 +385,11 @@ fn preview(
 
     match shown {
         Show::Input => {
-            if let Some(message) = error {
+            // for want of ffmpeg, which is said otherwise, nothing is wrong
+            // with the file
+            if error.is_some() && item.blockers.contains(&crate::item::Blocker::NeedsFfmpeg) {
+                message_in(ui, rect, &fl!("needs-ffmpeg"), ui.visuals().weak_text_color());
+            } else if let Some(message) = error {
                 message_in(ui, rect, &fl!("unreadable", error = message), theme::bad(ui.visuals()));
             } else if let (Some(clip), Some(size)) = (overview, input_size) {
                 // a picture is one frame: shown still, where it is picked

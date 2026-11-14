@@ -109,6 +109,13 @@ settings-read = The settings file reads again, and its settings are in use
 copy-path = Copy path
     .hint = Copy where the file is, to open it in an editor
     .done = Copied
+# Opens the Settings dialog, from a message.
+open-settings = Open Settings
+    .hint = Where ffmpeg, and the rest, are chosen
+# Over the window while files that need ffmpeg are open and there is none;
+# what went wrong looking for it follows.
+ffmpeg-missing = Videos need ffmpeg
+    .note = Install ffmpeg from your system's packages, or from ffmpeg.org, or choose where it is. Files are read again once it is found
 # The hover of show-folder's button in a message.
 folder-of = Show in folder
     .hint = Open the folder it is in
@@ -705,6 +712,8 @@ choose-ffmpeg = Choose ffmpeg…
 # A file's state in the list, in place of its Convert button.
 row-attention = needs attention
     .hint = Something keeps it from being converted: see its settings
+row-needs-ffmpeg = needs ffmpeg
+    .hint = ffmpeg reads it or makes its result, and wasn't found
 # Beside Convert all, of the files it leaves out.
 need-attention = { $count ->
     [one] 1 needs attention

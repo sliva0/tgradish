@@ -11,7 +11,7 @@ use tgradish_core::{input, telegram};
 use crate::app::{App, set_theme};
 use crate::fonts::{drawable, missing_note, text_format};
 use crate::inspect::Inspection;
-use crate::item::Item;
+use crate::item::{Blocker, Item};
 use crate::jobs::Status;
 use crate::l10n::fl;
 use crate::media::Task;
@@ -347,7 +347,9 @@ fn row(
     }
     let inner = rect.shrink2(vec2(6.0, 6.0));
     let input = egui::Rect::from_min_size(inner.min, vec2(THUMB, THUMB));
-    thumb(ui, input, item.input_thumb.as_ref(), item.input_error().is_some(), false);
+    // unread for want of ffmpeg, which is said otherwise, isn't broken
+    let broken = item.input_error().is_some() && !item.blockers.contains(&Blocker::NeedsFfmpeg);
+    thumb(ui, input, item.input_thumb.as_ref(), broken, false);
     let result =
         egui::Rect::from_min_size(egui::pos2(inner.max.x - THUMB, inner.min.y), vec2(THUMB, THUMB));
     let mut action = None;
@@ -481,9 +483,13 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
     let job = item.job.as_ref().map(|conversion| &conversion.job);
     // what keeps it from being converted, said where its settings are
     if job.is_none() && item.blocked() {
-        let text = small(format!("⚠ {}", fl!("row-attention")));
-        ui.colored_label(theme::warn(ui.visuals()), text)
-            .on_hover_text(fl!("row-attention", "hint"));
+        // ffmpeg alone, which the banner says how to get
+        let (text, hint) = match &item.blockers[..] {
+            [Blocker::NeedsFfmpeg] => (fl!("row-needs-ffmpeg"), fl!("row-needs-ffmpeg", "hint")),
+            _ => (fl!("row-attention"), fl!("row-attention", "hint")),
+        };
+        let text = small(format!("⚠ {text}"));
+        ui.colored_label(theme::warn(ui.visuals()), text).on_hover_text(hint);
         return;
     }
     match (job, item.failed.as_ref().or(item.made.as_ref())) {

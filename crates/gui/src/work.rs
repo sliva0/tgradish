@@ -11,6 +11,7 @@ use tgradish_core::webm::Options;
 use tgradish_core::webp;
 
 use crate::app::App;
+use crate::banner::{Action, Message, Subject};
 use crate::files::THUMB;
 use crate::item::{Conversion, Item, Kind, Recipe, Show};
 use crate::jobs::{Done, Setup, Status};
@@ -152,8 +153,26 @@ impl App {
                 }
             }
         }
+        self.say_ffmpeg_missing(&backend);
         self.load_detail(ctx, &backend);
         self.convert_next(ctx, &backend);
+    }
+
+    /// Says, once, that files open need ffmpeg, which isn't there, and
+    /// stops saying it once it is found or they are gone.
+    fn say_ffmpeg_missing(&mut self, backend: &Result<Backend, String>) {
+        let missing = backend.is_err() && self.items.iter().any(Item::needs_ffmpeg);
+        if missing == self.ffmpeg_missing {
+            return;
+        }
+        self.ffmpeg_missing = missing;
+        let (true, Err(why)) = (missing, backend) else {
+            self.banner.forget(Subject::Ffmpeg);
+            return;
+        };
+        let message = Message::warning(fl!("ffmpeg-missing")).note(fl!("ffmpeg-missing", "note"));
+        let actions = [Action::ChooseFfmpeg, Action::OpenSettings];
+        self.say(message.detail(why).actions(&actions).about(Subject::Ffmpeg));
     }
 
     /// Reads more of the selected video once what is looked at stays put
@@ -697,6 +716,43 @@ mod tests {
         let item = &harness.state().items[0];
         assert_eq!((item.input_error(), item.input_size()), (None, Some((64, 48))));
         assert!(item.input_thumb.is_some());
+    }
+
+    #[test]
+    fn says_once_that_videos_need_ffmpeg_while_there_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let clip = dir.path().join("clip.mp4");
+        std::fs::write(&clip, b"a video, as far as its name says").unwrap();
+        let mut config = Config::default();
+        config.ffmpeg.path = Some(dir.path().join("no-ffmpeg-here"));
+        let mut harness = harness(config);
+        harness.run_steps(2);
+        // nothing said without a file that needs it
+        assert!(harness.state().banner.rows.is_empty());
+        harness.state_mut().add(vec![clip]);
+        finish(&mut harness);
+        let app = harness.state();
+        assert_eq!(app.items[0].blockers, [Blocker::NeedsFfmpeg]);
+        let said: Vec<_> = app.banner.rows.iter().map(|said| &said.message).collect();
+        assert_eq!(said.len(), 1);
+        assert_eq!(said[0].headline, fl!("ffmpeg-missing"));
+        assert_eq!(said[0].subject, Some(Subject::Ffmpeg));
+        assert_eq!(said[0].actions, [Action::ChooseFfmpeg, Action::OpenSettings]);
+        // the file waits for it, rather than failing
+        harness.get_by_label(&format!("⚠ {}", fl!("row-needs-ffmpeg")));
+        convert(&harness);
+        harness.run_steps(2);
+        let item = &harness.state().items[0];
+        assert!(item.job.is_none() && item.failed.is_none());
+        // once there is one, it is said no more
+        if !has_ffmpeg() {
+            return;
+        }
+        let ffmpeg = &mut harness.state_mut().config.ffmpeg;
+        (ffmpeg.choice, ffmpeg.path) = (FfmpegChoice::System, None);
+        harness.run_steps(2);
+        assert!(harness.state().banner.rows.is_empty());
+        assert!(!harness.state().items[0].blockers.contains(&Blocker::NeedsFfmpeg));
     }
 
     #[test]

@@ -664,10 +664,19 @@ fn aspect_ratio(
             }
             // as wide as a side of three digits and three decimals, as
             // dragging makes them, so what follows stays put
+            // nothing made up for a crop not known yet, as before the input
+            // is read: a dash
+            let unknown = crop.is_none() && !custom;
+            fn shown(field: egui::DragValue<'_>, unknown: bool) -> egui::DragValue<'_> {
+                match unknown {
+                    true => field.custom_formatter(|_, _| "—".to_owned()),
+                    false => field,
+                }
+            }
             let (across, down) = widgets::steady_width(ui, "000.000", |ui| {
-                let across = ui.add(side(&mut width)).on_hover_text(fl!("width"));
+                let across = ui.add(shown(side(&mut width), unknown)).on_hover_text(fl!("width"));
                 ui.label(":");
-                (across, ui.add(side(&mut height)).on_hover_text(fl!("height")))
+                (across, ui.add(shown(side(&mut height), unknown)).on_hover_text(fl!("height")))
             });
             typed |= across.on_disabled_hover_text(pick.as_str()).changed();
             typed |= down.on_disabled_hover_text(pick.as_str()).changed();
@@ -687,9 +696,17 @@ fn aspect_ratio(
                 ui.label(fl!("ratio-result")).on_disabled_hover_text(fl!("ratio-result", "fixed"));
                 let digits = box_w.max(box_h).to_string().len();
                 let across = egui::DragValue::new(&mut result_w).range(1..=box_w);
+                let down = egui::DragValue::new(&mut result_h).range(1..=box_h).suffix(" px");
+                // a dash where the crop, and so the result, isn't known yet
+                let (across, down) = match sizes {
+                    Some(_) => (across, down),
+                    None => {
+                        let dash = |_: f64, _| "—".to_owned();
+                        (across.custom_formatter(dash), down.custom_formatter(dash).suffix(""))
+                    }
+                };
                 let across = widgets::steady_numbers(ui, digits, "", |ui| ui.add(across));
                 ui.label("×");
-                let down = egui::DragValue::new(&mut result_h).range(1..=box_h).suffix(" px");
                 let down = widgets::steady_numbers(ui, digits, " px", |ui| ui.add(down));
                 if follows && (across.changed() || down.changed()) {
                     (width, height) = reduced(result_w, result_h);
