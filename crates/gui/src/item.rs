@@ -353,9 +353,9 @@ pub(crate) struct View {
 }
 
 impl View {
-    /// The zoom of the picture shown.
-    pub(crate) fn zoom_mut(&mut self) -> &mut Zoom {
-        match self.show {
+    /// The zoom of the picture `shown`.
+    pub(crate) fn zoom_mut(&mut self, shown: Show) -> &mut Zoom {
+        match shown {
             Show::Input => &mut self.input_zoom,
             Show::Result => &mut self.result_zoom,
         }
@@ -698,6 +698,16 @@ impl Item {
 
     pub(crate) fn is_busy(&self) -> bool {
         self.job.is_some()
+    }
+
+    /// Which picture the preview shows: the one chosen, though the input
+    /// while the result chosen is still being read, as a WebM's is once
+    /// made, which then shows as it is there.
+    pub(crate) fn shown(&self) -> Show {
+        match self.view.show {
+            Show::Result if self.result_clip.ready().is_some() => Show::Result,
+            _ => Show::Input,
+        }
     }
 }
 

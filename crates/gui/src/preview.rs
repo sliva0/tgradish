@@ -180,9 +180,8 @@ fn preview(
         item.view.show = Show::Input;
     }
     item.view.framing = Some(framing);
-    if !has_result {
-        item.view.show = Show::Input;
-    }
+    // the result chosen shows once it is read; the input meanwhile
+    let shown = item.shown();
     ui.add_space(6.0);
     // the result's small picture's toggle, as it says it then, or under
     // the bar where even its short name doesn't fit beside the rest
@@ -191,7 +190,7 @@ fn preview(
     };
     let mut toggle_below = false;
     ui.horizontal(|ui| {
-        let mut show = item.view.show;
+        let mut show = shown;
         // a narrow column has room only for what is most needed; the
         // narrowest leaves the folder to the bar under the settings. What
         // each takes is measured, as words are longer in some languages
@@ -235,10 +234,11 @@ fn preview(
         } else {
             fl!("convert-first")
         };
-        widgets::segments(ui, &mut show, &choices, |show| {
+        if widgets::segments(ui, &mut show, &choices, |show| {
             if show == Show::Result && !has_result { Err(unseen.clone()) } else { Ok(()) }
-        });
-        item.view.show = show;
+        }) {
+            item.view.show = show;
+        }
         // where the input came from, and where the result went
         let result = item.made.as_ref().and_then(|made| match &made.job.status {
             Status::Done(done) => Some(done.output.clone()).filter(|output| output.exists()),
@@ -273,7 +273,7 @@ fn preview(
         }
         // what doesn't fit is cut short or left out, the hint first
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if item.view.show == Show::Input && !toggle_below {
+            if show == Show::Input && !toggle_below {
                 let text = match short_preview {
                     false => fl!("result-preview"),
                     true => fl!("result-preview", "short"),
@@ -282,7 +282,7 @@ fn preview(
             }
             // always there where there is room, so nothing beside them
             // moves as zooming starts
-            let zoom = item.view.zoom_mut();
+            let zoom = item.view.zoom_mut(show);
             let zoomed = zoom.level > 1.0;
             if zoomed || !compact {
                 let out = ui
@@ -300,7 +300,7 @@ fn preview(
             // fields, for those who crop here: in room kept for it, before
             // the hint, which gives way to it, so nothing else moves as it
             // comes and goes; zoomed in, at the narrowest, it gives way too
-            if item.view.show == Show::Input
+            if show == Show::Input
                 && item.choices.crop.is_some()
                 && ui.available_width() >= whole - gap
             {
@@ -324,7 +324,7 @@ fn preview(
                         .on_hover_text(fl!("outdated", "hint"));
                 });
             } else if ui.available_width() > 60.0 {
-                let hint = match (item.view.show, item.choices.crop.is_some()) {
+                let hint = match (show, item.choices.crop.is_some()) {
                     (Show::Input, false) => fl!("input-hint"),
                     (Show::Input, true) => fl!("crop-hint"),
                     (Show::Result, _) => fl!("result-hint"),
@@ -333,7 +333,8 @@ fn preview(
             }
         });
     });
-    if toggle_below && item.view.show == Show::Input {
+    let shown = item.shown();
+    if toggle_below && shown == Show::Input {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
             toggle(ui, &mut item.view.inset, fl!("result-preview"));
         });
@@ -342,7 +343,7 @@ fn preview(
     let length = item.input_length();
     let result_length =
         item.result_clip.ready().filter(|clip| clip.is_animated()).map(|clip| clip.end());
-    let timeline_height = match item.view.show {
+    let timeline_height = match shown {
         Show::Input if length.is_some() => TIMELINE,
         Show::Result if result_length.is_some() => TIMELINE,
         _ => 0.0,
@@ -378,7 +379,7 @@ fn preview(
         f64::from(width) / f64::from(height)
     });
 
-    match item.view.show {
+    match shown {
         Show::Input => {
             if let Some(message) = error {
                 message_in(ui, rect, &fl!("unreadable", error = message), theme::bad(ui.visuals()));
@@ -545,7 +546,7 @@ fn preview(
         return;
     }
     ui.add_space(6.0);
-    match (item.view.show, length, result_length) {
+    match (shown, length, result_length) {
         (Show::Input, Some(_), _) if item.format == Format::Webp => {
             if let Some(frames) = item.input_frames() {
                 timeline::frame_picker(ui, &frames, &mut item.choices.frame, in_frames);

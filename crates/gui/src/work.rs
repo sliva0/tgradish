@@ -440,7 +440,7 @@ mod tests {
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
     use tgradish_core::ffmpeg::FfmpegChoice;
-    use tgradish_core::options::Crop;
+    use tgradish_core::options::{Crop, Fit};
     use tgradish_core::telegram;
 
     use super::*;
@@ -579,6 +579,43 @@ mod tests {
         let picture = info.video.unwrap();
         assert_eq!((picture.width, picture.height), (512, 256));
         assert!(item.result_clip.ready().is_some());
+    }
+
+    #[test]
+    fn shows_a_video_made_once_it_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video(dir.path(), "64x48") else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        let item = &mut harness.state_mut().items[0];
+        (item.choices.preset, item.choices.webm.fit) = (Some("fast".into()), Some(Fit::Off));
+        harness.run_steps(2);
+        convert(&harness);
+        harness.run_steps(2);
+        // made, its result read from its file afterwards, the input shown
+        // meanwhile
+        for _ in 0..3000 {
+            harness.step();
+            if harness.state().items[0].made.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let item = &harness.state().items[0];
+        assert_eq!(item.view.show, Show::Result);
+        if item.result_clip.is_loading() {
+            assert_eq!(item.shown(), Show::Input);
+        }
+        // and the result once it is read, as chosen
+        finish(&mut harness);
+        let item = &harness.state().items[0];
+        assert_eq!((item.view.show, item.shown()), (Show::Result, Show::Result));
+        let clip = item.result_clip.ready().map(|clip| clip.id);
+        assert_eq!(harness.state().screen.showing(), clip);
     }
 
     #[test]

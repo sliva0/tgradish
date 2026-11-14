@@ -56,6 +56,62 @@ fn accent_screenshots() {
     });
 }
 
+/// Only the pictures of [`states`], to `$TGRADISH_SCREENSHOTS` as
+/// [`screenshots`] makes them.
+#[test]
+#[ignore]
+fn state_screenshots() {
+    let out =
+        PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
+    crate::l10n::choose(None);
+    states(&mut |harness: &mut Harness<App>, name: &str| {
+        let image = harness.render().expect("rendering needs a GPU");
+        image.save(out.join(format!("tgradish-{name}.png"))).unwrap();
+    });
+}
+
+/// A window drawn as the screenshots draw it, of `config`, `size` large.
+fn window(config: Config, size: egui::Vec2) -> Harness<'static, App> {
+    // filtering as the window does it, so pixel art stays sharp
+    let filtering = egui_wgpu::RendererOptions {
+        predictable_texture_filtering: false,
+        ..egui_wgpu::RendererOptions::PREDICTABLE
+    };
+    Harness::builder().with_size(size).with_render_options(filtering).wgpu().build_eframe(
+        move |cc| {
+            let app = App::with(config.clone(), None, Presets::builtin());
+            app.style(&cc.egui_ctx);
+            app
+        },
+    )
+}
+
+/// The states the window shows of what goes on around a conversion: a
+/// video made. Needs ffmpeg.
+fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::default();
+    config.gui.output_dir = Some(dir.path().join("out"));
+    config.ffmpeg.choice = FfmpegChoice::System;
+    let shot = |harness: &mut Harness<App>, save: &mut dyn FnMut(&mut Harness<App>, &str), name| {
+        // the pointer away from what it would hover
+        harness.event(egui::Event::PointerGone);
+        for item in &mut harness.state_mut().items {
+            item.view.playing = false;
+        }
+        harness.run_steps(3);
+        save(harness, name);
+    };
+    let mut harness = window(config.clone(), egui::vec2(1280.0, 820.0));
+    let Some(clip) = video(dir.path(), "640x360") else { return };
+    harness.state_mut().add(vec![clip]);
+    finish(&mut harness);
+    convert(&harness);
+    harness.run_steps(2);
+    finish(&mut harness);
+    shot(&mut harness, save, "state-video-made");
+}
+
 /// Takes the window through each state worth a picture, handing each to
 /// `save` by name. Needs a GPU wgpu can use, and ffmpeg.
 pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {

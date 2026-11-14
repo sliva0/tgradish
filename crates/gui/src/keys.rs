@@ -162,7 +162,7 @@ impl Keys {
         };
         let moves = self.by != 0 || self.first || self.last;
         let trims = self.move_start != 0 || self.move_end != 0;
-        match item.view.show {
+        match item.shown() {
             Show::Result => {
                 let Some(clip) = item.result_clip.ready() else { return };
                 if moves {
