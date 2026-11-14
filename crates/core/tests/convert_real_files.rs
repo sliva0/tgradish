@@ -66,12 +66,23 @@ fn converts_short_clip_without_spoofing() {
             ..Request::new(Input::File(input.clone()))
         };
         let mut events = Vec::new();
-        let outcome =
-            convert(backend, &request, &CancelToken::new(), &mut |e| events.push(e)).unwrap();
+        let cancel = CancelToken::new();
+        let (mut late, mut refused) = (false, true);
+        let outcome = convert(backend, &request, &cancel, &mut |e| {
+            // once the search ends, as its result is written, too late to
+            // settle on what it kept, and so not offered
+            if let Event::Finished { .. } = e {
+                late = true;
+                refused = !cancel.can_settle() && !cancel.settle();
+            }
+            events.push(e)
+        })
+        .unwrap();
 
         let name = name(backend);
+        assert!(late && refused, "{name}");
         assert!(outcome.issues.is_empty(), "{name}: {:?}", outcome.issues);
-        assert!(!outcome.spoofed);
+        assert!(!outcome.spoofed && !outcome.settled);
         assert!(outcome.bytes <= telegram::MAX_STICKER_BYTES);
         assert!(matches!(events.first(), Some(Event::Started { .. })));
         assert!(matches!(events.last(), Some(Event::Finished { .. })));

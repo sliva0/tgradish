@@ -37,7 +37,8 @@ struct Inner {
 #[derive(Debug, Default)]
 struct State {
     fitting: Fitting,
-    /// Asked to settle, while it could.
+    /// Asked to settle, while it could: until the conversion ends, though
+    /// it stops work only while the search goes on.
     settling: bool,
     child: Option<Arc<Mutex<Child>>>,
 }
@@ -52,6 +53,9 @@ enum Fitting {
     Searching,
     /// Searching, and an encode fits, so it can settle.
     Fits,
+    /// The search has ended, and what it kept is written: too late to
+    /// settle, though cancelling still stops it.
+    Done,
 }
 
 impl CancelToken {
@@ -109,7 +113,8 @@ impl CancelToken {
     /// search's own ordering, is written as the result, as if the search
     /// had ended there. The outcome says it settled. Returns false, and
     /// does nothing, where it can't: when nothing fits yet, nothing is
-    /// fitting, or the work was cancelled. It holds for the conversion
+    /// fitting, the search has ended and its result is being written, or
+    /// the work was cancelled. It holds for the conversion
     /// under way only: whether it can, and what it stops, are of the same
     /// moment, so a conversion that starts as it is asked is never stopped
     /// by it.
@@ -131,9 +136,10 @@ impl CancelToken {
         self.state().settling && !self.is_cancelled()
     }
 
-    /// Cancelled, or settling: the step at work is to stop.
+    /// Cancelled, or settling while the search goes on: the step at work
+    /// is to stop.
     pub(crate) fn interrupted(&self) -> bool {
-        self.is_cancelled() || self.state().settling
+        self.is_cancelled() || self.state().stops_search()
     }
 
     /// An error where the step at work is to stop, cancelled or settling.
@@ -158,6 +164,15 @@ impl CancelToken {
         }
     }
 
+    /// The search ends, however it does: no settle is taken from now on,
+    /// and none stops what follows. Gives whether one was taken, in the
+    /// search's last moment as well, for the outcome to say so.
+    pub(crate) fn end_search(&self) -> bool {
+        let mut state = self.state();
+        state.fitting = Fitting::Done;
+        state.settling
+    }
+
     /// Forgets that fitting could settle, or was asked to: a conversion
     /// ends, and the token may serve the next.
     pub(crate) fn end_fitting(&self) {
@@ -171,9 +186,16 @@ impl CancelToken {
     pub(crate) fn register(&self, child: Option<Arc<Mutex<Child>>>) {
         let mut state = self.state();
         state.child = child;
-        if self.is_cancelled() || state.settling {
+        if self.is_cancelled() || state.stops_search() {
             kill(&state);
         }
+    }
+}
+
+impl State {
+    /// Asked to settle while the search goes on, which is to stop.
+    fn stops_search(&self) -> bool {
+        self.settling && self.fitting != Fitting::Done
     }
 }
 
@@ -240,6 +262,28 @@ mod tests {
         token.settle();
         token.cancel();
         assert!(!token.is_settling() && !token.can_settle() && !token.settle());
+    }
+
+    #[test]
+    fn cant_settle_once_the_search_ends() {
+        let token = CancelToken::new();
+        token.begin_fitting();
+        token.allow_settling();
+        // ended: what the search kept is written, which no settle stops
+        assert!(!token.end_search());
+        assert!(!token.can_settle() && !token.settle() && !token.is_settling());
+        assert!(token.check().is_ok());
+        // nor does an encode that fits let it again
+        token.allow_settling();
+        assert!(!token.can_settle());
+        // and taken in its last moment, it says so, and stops nothing after
+        token.begin_fitting();
+        token.allow_settling();
+        assert!(token.settle());
+        assert!(token.end_search() && token.is_settling() && token.check().is_ok());
+        // cancelling still stops it
+        token.cancel();
+        assert!(token.check().is_err());
     }
 
     /// A process that runs until killed, as ffmpeg encoding.

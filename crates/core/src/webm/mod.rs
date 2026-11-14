@@ -337,7 +337,13 @@ fn encode_in(
         attempts: 0,
         pass_logs: HashMap::new(),
     };
-    let fit::Fitted { best, settled } = fit::run(&plan, &mut encoder)?;
+    let fitted = fit::run(&plan, &mut encoder);
+    // no settling from here, so that one taken is one the outcome says:
+    // a settle taken as the search ended keeps what it found, the best
+    // that fits so far
+    let asked = cancel.end_search();
+    let fit::Fitted { best, settled } = fitted?;
+    let settled = settled || asked;
     // settling stops encodes as cancelling does, but writes the result
     if cancel.is_cancelled() {
         return Err(Error::Cancelled);
