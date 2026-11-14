@@ -9,7 +9,7 @@
 | `crates/core` (`tgradish-core`) | What the command line and the window share. A module for each kind of result, `webm`, `webp` and `tgs`, converts an `input::Input`, a file or a sequence of pictures, by the same `convert(backend, &Request, &cancel, on_event)`, reporting through its `Event`s; `webm` also plans and fits WebM to the size limit, and in `webm::container` inspects WebM and patches it for duration spoofing. Beside them: `picture`, where a picture lands in a sticker and telling pixel art; `input`, results' default names and `sniff`, which tells kinds of file apart; `drawn`, pixel art drawn for ffmpeg; presets, the config file, and `inspect`. ffmpeg runs through a `Backend`: the `ffmpeg` and `ffprobe` programs, or with the `linked` feature its libraries, used to do exactly what those command lines do. It re-exports `tgradish-tgs`, so the types of it that core's API names are reached through core. What it serialises for `--json` and `describe` keeps the rules `protocol`'s docs give, as kebab-case and an object a line, and its errors say what is wrong without naming flags, which the command line adds and the window words its own way. |
 | `crates/gui` (`tgradish-gui`) | The egui window, which calls core directly, and reaches `tgradish-tgs` through it. |
 | `crates/cli` (`tgradish`) | The binary: arguments and terminal output. It includes the window unless built with `--no-default-features`. |
-| `crates/corpus` | Test art drawn in code, and video clips made with ffmpeg, so nothing in the repository belongs to anyone else. `tgs-lab corpus DIR` writes it all out. |
+| `crates/corpus` (`tgradish-corpus`) | Test art drawn in code, and video clips made with ffmpeg, so nothing in the repository belongs to anyone else. `tgs-lab corpus DIR` writes it all out. Published only so the other crates' tests build from their packages, as cargo keeps only dev-dependencies that are on crates.io. |
 | `crates/tgs-lab` | Encoder research: benchmarks, renders checked against tlottie and rlottie, and the probes that measured Telegram's limits. A workspace of its own with its own `Cargo.lock`, so tlottie, which isn't on crates.io, and rlottie stay out of what packagers fetch: run it from its folder, as `cargo run -- corpus DIR`, or with `--manifest-path crates/tgs-lab/Cargo.toml`. |
 | `xtask` | Release builds with ffmpeg built in, packages, licences and icons; its module docs list the tasks. |
 
@@ -137,8 +137,9 @@ never enable its GPL parts. Paths and commands say "licenses", prose says
    `tgradish-core` and `tgradish-gui` under `[workspace.dependencies]`,
    which ask for it exactly; and `pkgver` in each
    `packaging/aur/*/PKGBUILD`. The two libraries, `tgradish-frames` and
-   `tgradish-tgs`, have versions of their own: raise one in its manifest
-   and under `[workspace.dependencies]` when it changed since it was last
+   `tgradish-tgs`, and the test corpus, `tgradish-corpus`, have versions
+   of their own: raise one in its manifest and under
+   `[workspace.dependencies]` when it changed since it was last
    published. Then refresh `Cargo.lock` with `cargo update --workspace`,
    and `crates/tgs-lab/Cargo.lock`, which records the versions of the
    workspace's crates it uses, with the same and `--manifest-path
@@ -168,14 +169,15 @@ never enable its GPL parts. Paths and commands say "licenses", prose says
    archives each run makes anew, which no checksum written down matches.
 
 5. `cargo publish -p` each crate whose version is new, in the order they
-   depend on each other: `tgradish-frames`, `tgradish-tgs`,
-   `tgradish-core`, `tgradish-gui`, then `tgradish`. They ask for each
+   depend on each other: `tgradish-corpus`, which the others' tests use,
+   `tgradish-frames`, `tgradish-tgs`, `tgradish-core`, `tgradish-gui`,
+   then `tgradish`. They ask for each
    other's exact versions, since `cargo install` doesn't read
    `Cargo.lock`. Packaging checks them against each other from copies
    it unpacks under cargo's `registry/src`, and keeps using those while
    the version is the same, so before packaging again at a version
    already packaged, delete the `tgradish-*` folders there.
 
-The corpus, tgs-lab and xtask are `publish = false`, and stay that way.
+tgs-lab and xtask are `publish = false`, and stay that way.
 `rust-version` in `Cargo.toml` is the oldest Rust that builds every crate,
 which CI checks with; `rust-toolchain.toml` builds with the newest.
