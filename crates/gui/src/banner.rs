@@ -209,6 +209,10 @@ pub(crate) struct Banner {
     pub(crate) corner: Option<egui::Rect>,
     /// When the messages were last drawn: hovering what passes holds it.
     drawn: Option<f64>,
+    /// Whether what passes was held as they were: the time since, until
+    /// they are drawn again, is its as it was then, however long, as the
+    /// window may not be drawn while the pointer rests.
+    held: bool,
 }
 
 /// How long information shows unless hovered; warnings stay until
@@ -305,15 +309,24 @@ impl Banner {
         let now = ctx.input(|input| input.time);
         let all = self.banner(ctx, now, &mut clicked, &mut dismissed);
         let held = self.passing(ctx, now, &mut clicked, &mut dismissed);
-        // hovering what passes holds it where it is, for as long
+        // hovering what passes holds it where it is, for as long: the time
+        // since it was last drawn by whether it was held then, as it may
+        // be let go of only now, after a long while undrawn
         let passed = self.drawn.map_or(0.0, |drawn| (now - drawn).max(0.0));
+        let was_held = std::mem::replace(&mut self.held, held);
         self.drawn = Some(now);
         for said in &mut self.rows {
             let passes = said.passes();
             match &mut said.since {
                 None => said.since = Some(now),
-                Some(since) if passes && held => *since += passed,
-                Some(since) if passes && now - *since > SHOWN => dismissed.push(said.id),
+                Some(since) if passes => {
+                    if was_held {
+                        *since += passed;
+                    }
+                    if !held && now - *since > SHOWN {
+                        dismissed.push(said.id);
+                    }
+                }
                 Some(_) => {}
             }
             if said.flash.as_ref().is_some_and(|(_, until)| now > *until) {
@@ -1107,6 +1120,35 @@ mod tests {
         harness.run_steps(4 * (SHOWN as usize - 2));
         assert_eq!(harness.state().banner.rows.len(), 1);
         harness.run_steps(4 * 3);
+        assert!(harness.state().banner.rows.is_empty());
+    }
+
+    /// Time spent hovering counts as held however long the window goes
+    /// undrawn meanwhile, as it does while the pointer rests: let go of
+    /// after that, a notice has as long left as when it was hovered.
+    #[test]
+    fn holds_what_passes_while_hovered_however_long_undrawn() {
+        let mut harness = crate::testing::harness(Config::default());
+        let step_to = |harness: &mut Harness<App>, at: f64| {
+            harness.input_mut().time = Some(at);
+            harness.step();
+        };
+        harness.state_mut().say(Message::info("Passing"));
+        harness.run_steps(2);
+        let shown = harness.state().banner.rows[0].since.expect("drawn");
+        // two seconds left, and then hovered
+        step_to(&mut harness, shown + SHOWN - 2.0);
+        let at = harness.get_by_label("Passing").rect().center();
+        harness.event(egui::Event::PointerMoved(at));
+        step_to(&mut harness, shown + SHOWN - 2.0);
+        // resting there five seconds, undrawn, and then moved off it
+        harness.event(egui::Event::PointerMoved(egui::pos2(1.0, 1.0)));
+        step_to(&mut harness, shown + SHOWN + 3.0);
+        assert_eq!(harness.state().banner.rows.len(), 1);
+        // with about two seconds left
+        step_to(&mut harness, shown + SHOWN + 4.5);
+        assert_eq!(harness.state().banner.rows.len(), 1);
+        step_to(&mut harness, shown + SHOWN + 5.5);
         assert!(harness.state().banner.rows.is_empty());
     }
 
