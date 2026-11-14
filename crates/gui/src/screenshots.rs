@@ -736,6 +736,7 @@ fn accents(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     let own = |r, g, b| Accent::Own(egui::Color32::from_rgb(r, g, b));
     for (name, accent) in [
         ("orange", Accent::Named("orange")),
+        ("grey", Accent::Named("grey")),
         ("light", own(246, 240, 170)),
         ("dark", own(28, 36, 64)),
     ] {
@@ -766,6 +767,14 @@ fn accents(save: &mut impl FnMut(&mut Harness<App>, &str)) {
             let theme = if theme == Theme::Dark { "dark" } else { "light" };
             shot(&mut harness, save, &format!("accent-settings-{width}-{theme}"));
         }
+    }
+    // the grey, whose choices a tint of it would hardly set apart
+    harness.set_size(egui::vec2(1280.0, 820.0));
+    harness.state_mut().config.gui.accent = Accent::Named("grey");
+    for theme in [Theme::Dark, Theme::Light] {
+        set_theme(&harness.ctx, theme);
+        let theme = if theme == Theme::Dark { "dark" } else { "light" };
+        shot(&mut harness, save, &format!("accent-settings-grey-{theme}"));
     }
     // the chosen one with the keyboard's focus, and the picker of one's own
     harness.set_size(egui::vec2(1280.0, 820.0));
