@@ -1,10 +1,11 @@
 //! The window's main scenes, drawn without a GPU, for tests that look over
 //! all of them at once: that every button has a name screen readers can
-//! say, and that no button's words are cut short.
+//! say, that no button's words are cut short, and that the list's bars
+//! are level with those beside them.
 
 use std::path::Path;
 
-use eframe::egui;
+use eframe::egui::{self, Rect};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable, by};
 use tgradish_core::presets::{Format, Presets};
@@ -173,6 +174,26 @@ fn dialogs(
     settle(harness, None);
 }
 
+/// Each text the window drew last, with where, and whether it was cut
+/// short.
+fn texts(harness: &Harness<App>) -> Vec<(String, Rect, bool)> {
+    fn walk(shape: &egui::Shape, found: &mut Vec<(String, Rect, bool)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+            egui::Shape::Text(text) => {
+                let rect = text.galley.rect.translate(text.pos.to_vec2());
+                found.push((text.galley.text().to_owned(), rect, text.galley.elided));
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for shape in &harness.output().shapes {
+        walk(&shape.shape, &mut found);
+    }
+    found
+}
+
 /// The roles of what can be pressed or picked.
 fn pressable(role: egui::accesskit::Role) -> bool {
     use egui::accesskit::Role;
@@ -224,4 +245,40 @@ fn lays_the_lists_bars_level_with_those_beside_them() {
         });
     }
     assert_eq!(seen, 2);
+}
+
+#[test]
+fn cuts_no_buttons_words_short() {
+    let mut cut = Vec::new();
+    for width in [crate::MIN_WIDTH, 1280.0] {
+        walk(width, |harness, scene| {
+            // names of files, and where they are, may be cut short
+            let names: Vec<String> = harness.state().items.iter().map(|item| item.name()).collect();
+            let buttons: Vec<(Rect, String)> = harness
+                .query_all(by())
+                .filter(|node| pressable(node.accesskit_node().role()))
+                .filter_map(|node| {
+                    let node = node.accesskit_node();
+                    let rect = node.bounding_box()?;
+                    let rect = Rect::from_min_max(
+                        egui::pos2(rect.x0 as f32, rect.y0 as f32),
+                        egui::pos2(rect.x1 as f32, rect.y1 as f32),
+                    );
+                    Some((rect, node.label().unwrap_or_default()))
+                })
+                .collect();
+            for (text, rect, elided) in texts(harness) {
+                if !elided {
+                    continue;
+                }
+                let on = buttons.iter().find(|(button, _)| button.contains(rect.center()));
+                if let Some((_, label)) = on
+                    && !names.contains(label)
+                {
+                    cut.push(format!("{width}, {scene}: {text:?} of {label:?}"));
+                }
+            }
+        });
+    }
+    assert!(cut.is_empty(), "cut short:\n{}", cut.join("\n"));
 }
