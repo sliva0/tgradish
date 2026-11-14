@@ -39,9 +39,28 @@ pub(crate) fn aseprite(
     Ok((animation, Aseprite { tags: sprite.tags().to_vec(), layers: sprite.layers(), durations }))
 }
 
-/// The bytes of the file at `path`, failing as an unreadable input.
-pub(crate) fn read(path: &Path) -> Result<Vec<u8>> {
-    std::fs::read(path).map_err(|err| unreadable(path, err))
+/// The largest sticker file, `.tgs` or WebP, read to inspect or preview
+/// it: far more than any sticker, and than a `.tgs` that unpacks within
+/// [`tgradish_tgs::file::unpack`]'s limit.
+pub(crate) const MAX_STICKER_BYTES: u64 = 16 << 20;
+
+/// The most bytes of a pixel art file decoded within `limits`: as many as
+/// its frames may take, which a larger file can't fit.
+pub(crate) fn most_bytes(limits: &Limits) -> u64 {
+    limits.max_bytes as u64
+}
+
+/// The bytes of the file at `path`, failing as an unreadable input, also
+/// when it has more than `most`, which aren't read.
+pub(crate) fn read(path: &Path, most: u64) -> Result<Vec<u8>> {
+    match crate::fsutil::read_at_most(path, most) {
+        Ok(Some(bytes)) => Ok(bytes),
+        Ok(None) => {
+            let size = std::fs::metadata(path).map_or(most + 1, |found| found.len());
+            Err(unreadable(path, format!("it has {size} bytes, more than the {most} read of it")))
+        }
+        Err(err) => Err(unreadable(path, err)),
+    }
 }
 
 /// `path` couldn't be read for `err`.
@@ -108,36 +127,24 @@ fn natural_order(a: &Path, b: &Path) -> std::cmp::Ordering {
 }
 
 /// The frames of one animation in several files, `inputs`: image files,
-/// or folders of them, in name order, `fps` a second. `cancel` is asked
-/// between files. A file that doesn't read is named in the error.
+/// or folders of them, in name order, `fps` a second. Each file is read
+/// and decoded before the next, so only one is held at once, and `cancel`
+/// is asked between them. A file that doesn't read is named in the error.
 pub(crate) fn read_sequence(
     inputs: &[PathBuf],
     fps: Option<f64>,
     cancel: &CancelToken,
 ) -> Result<Animation> {
     let files = sequence_files(inputs)?;
-    let mut bytes = Vec::with_capacity(files.len());
+    let limits = Limits::default();
+    let mut sequence = frames::Sequence::new(frame_duration(fps)?, &limits);
     for file in &files {
         cancel.check()?;
-        bytes.push(read(file)?);
+        let bytes = read(file, most_bytes(&limits))?;
+        sequence.push(&bytes).map_err(|err| unreadable(file, err))?;
     }
-    // which file is being decoded, for the error if it doesn't
-    let at = std::cell::Cell::new(0);
-    // a file can't be stopped part of the way, but the rest are left
-    let images =
-        bytes.iter().enumerate().take_while(|_| !cancel.is_cancelled()).map(|(index, bytes)| {
-            at.set(index);
-            bytes.as_slice()
-        });
-    let animation = frames::sequence(images, frame_duration(fps)?, &Limits::default());
     cancel.check()?;
-    animation.map_err(|err| {
-        let index = match err {
-            frames::Error::SequenceSize { index, .. } => index,
-            _ => at.get(),
-        };
-        unreadable(&files[index], err)
-    })
+    sequence.finish().map_err(|err| unreadable(&files[0], err))
 }
 
 #[cfg(test)]
@@ -160,6 +167,25 @@ mod tests {
             sequence_files(&files).unwrap(),
             [dir.path().join("2.png"), dir.path().join("10.png")]
         );
+    }
+
+    #[test]
+    fn reads_no_more_than_each_use_takes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.tgs");
+        // sparse: as large as it says, with nothing written
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(MAX_STICKER_BYTES + 1).unwrap();
+        let message = |err: Error| match err {
+            Error::Unreadable { message, .. } => message,
+            err => panic!("{err:?}"),
+        };
+        let too_large = format!("it has {} bytes, more than the {MAX_STICKER_BYTES}", 16 << 20 | 1);
+        let refused = message(crate::tgs::inspect_file(&path).unwrap_err());
+        assert!(refused.contains(&too_large), "{refused}");
+        let refused = message(crate::webp::inspect_file(&path).unwrap_err());
+        assert!(refused.contains(&too_large), "{refused}");
+        assert_eq!(read(&path, MAX_STICKER_BYTES + 1).unwrap().len() as u64, MAX_STICKER_BYTES + 1);
     }
 
     #[test]

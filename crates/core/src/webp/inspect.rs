@@ -68,7 +68,7 @@ impl Info {
 
 /// What the WebP at `path` is.
 pub fn inspect_file(path: &Path) -> Result<Info> {
-    let bytes = crate::art::read(path)?;
+    let bytes = crate::art::read(path, crate::art::MAX_STICKER_BYTES)?;
     let invalid = |message: String| Error::Unreadable { path: path.to_path_buf(), message };
     let mut decoder = image_webp::WebPDecoder::new(Cursor::new(&bytes))
         .map_err(|err| invalid(err.to_string()))?;
@@ -90,7 +90,7 @@ pub fn inspect_file(path: &Path) -> Result<Info> {
 
 /// A WebP, decoded for a preview: one frame, as long as a `.tgs` one.
 pub fn preview(path: &Path) -> Result<crate::preview::Preview> {
-    let bytes = crate::art::read(path)?;
+    let bytes = crate::art::read(path, crate::art::MAX_STICKER_BYTES)?;
     let invalid = |message: String| Error::Unreadable { path: path.to_path_buf(), message };
     let mut decoder = image_webp::WebPDecoder::new(Cursor::new(&bytes))
         .map_err(|err| invalid(err.to_string()))?;

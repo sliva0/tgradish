@@ -147,13 +147,13 @@ pub fn readable(input: &Input, options: &Options, cancel: &CancelToken) -> Resul
         }
         Input::File(path) if aseprite => {
             cancel.check()?;
-            let bytes = art::read(path)?;
+            let bytes = art::read(path, art::most_bytes(&Limits::default()))?;
             art::aseprite(&bytes, options.tag.as_deref(), &layers, &Limits::default())
                 .map_err(|err| art::unreadable(path, err))?
         }
         Input::File(path) if sniff(path) == (FileKind::Webp { animated: true }) => {
             cancel.check()?;
-            let bytes = art::read(path)?;
+            let bytes = art::read(path, art::most_bytes(&Limits::default()))?;
             let animation =
                 frames::decode(&bytes, &frames::DecodeOptions::default(), &Limits::default())
                     .map_err(|err| art::unreadable(path, err))?;

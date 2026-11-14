@@ -73,7 +73,7 @@ pub(super) fn load(
         })?;
         return read_video(backend, input, options, cancel);
     }
-    let bytes = art::read(input)?;
+    let bytes = art::read(input, art::most_bytes(&limits))?;
     cancel.check()?;
     let sheet = options.sheet_layout()?;
     // a sheet is one picture, whatever tag is asked for

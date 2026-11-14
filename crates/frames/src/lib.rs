@@ -34,7 +34,7 @@ mod raster;
 mod sheet;
 
 use aseprite::{Layers, Sprite};
-pub use sheet::{Sheet, sequence, split_sheet, sprite_sheet};
+pub use sheet::{Sequence, Sheet, sequence, split_sheet, sprite_sheet};
 
 /// Duration of still images in an animation when nothing else says how long
 /// to show them, and of every frame that says 0, in whatever format or

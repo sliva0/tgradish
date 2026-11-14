@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use tgradish_corpus::{File, Sprite, encode};
 use tgradish_frames::{
-    Animation, DecodeOptions, Error, Limits, Sheet, aseprite::Layers, decode, sequence,
+    Animation, DecodeOptions, Error, Limits, Sequence, Sheet, aseprite::Layers, decode, sequence,
     sprite_sheet,
 };
 
@@ -98,6 +98,25 @@ fn joins_image_sequences() {
         sequence(mixed.iter().map(Vec::as_slice), Duration::from_millis(200), &Limits::default()),
         Err(Error::SequenceSize { index: 1, .. })
     ));
+
+    // images read one at a time, as owned bytes, and none past the first
+    // that fails
+    let mut read = 0;
+    let lazily = mixed.iter().chain(&files).map(|bytes| {
+        read += 1;
+        bytes.clone()
+    });
+    let refused = sequence(lazily, Duration::from_millis(200), &Limits::default());
+    assert!(matches!(refused, Err(Error::SequenceSize { index: 1, .. })));
+    assert_eq!(read, 2);
+    // or pushed one by one, an image that fails leaving those before
+    let mut pushed = Sequence::new(Duration::from_millis(200), &Limits::default());
+    pushed.push(&files[0]).unwrap();
+    assert!(matches!(pushed.push(&mixed[1]), Err(Error::SequenceSize { index: 1, .. })));
+    pushed.push(&files[1]).unwrap();
+    assert_eq!(pushed.finish().unwrap().frames().len(), 2);
+    let empty = Sequence::new(Duration::ZERO, &Limits::default());
+    assert_eq!(empty.finish(), Err(Error::Empty));
 }
 
 #[test]

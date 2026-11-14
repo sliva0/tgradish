@@ -364,7 +364,7 @@ pub fn patch_file(
     changes: &Patch,
     replace: bool,
 ) -> crate::Result<PatchReport> {
-    let mut buf = crate::art::read(input)?;
+    let mut buf = crate::art::read(input, super::MAX_INSPECTED_BYTES)?;
     let report = patch(&mut buf, changes)?;
     crate::fsutil::write_output(output, &buf, replace)?;
     Ok(report)
