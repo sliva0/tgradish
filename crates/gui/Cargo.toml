@@ -49,8 +49,14 @@ objc2.workspace = true
 objc2-app-kit = { workspace = true, features = ["std", "NSColor", "NSColorSpace", "objc2-core-foundation"] }
 
 [target.'cfg(windows)'.dependencies]
-# the accent colour, from the registry
-windows-sys = { workspace = true, features = ["Win32_System_Registry"] }
+# the accent colour, from the registry, and links opened through the shell
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Registry",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [lints]
 workspace = true

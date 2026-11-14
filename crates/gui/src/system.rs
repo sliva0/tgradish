@@ -177,11 +177,68 @@ impl Telegram for Host {
     }
 
     fn open(&self, url: &str) -> bool {
-        let Ok(mut child) = opener(url).spawn() else { return false };
-        // Explorer ends with 1 whether it opened something or not
-        let ended = child.wait();
-        cfg!(target_os = "windows") || ended.is_ok_and(|status| status.success())
+        // through the shell, which says whether it opened it: Explorer
+        // ends with 1 either way
+        #[cfg(target_os = "windows")]
+        return windows_open(url);
+        #[cfg(not(target_os = "windows"))]
+        {
+            let Ok(mut child) = opener(url).spawn() else { return false };
+            child.wait().is_ok_and(|status| status.success())
+        }
     }
+}
+
+/// Opens `url` as the shell opens it, and whether that went: a `tg:` link
+/// whose registered program is gone fails here, rather than nothing
+/// happening, so the web link can follow.
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)]
+fn windows_open(url: &str) -> bool {
+    use windows_sys::Win32::System::Com::{
+        COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx,
+    };
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let (verb, file) = (wide("open"), wide(url));
+    // SAFETY: COM is set up for this thread, which the shell may need for
+    // the program a link opens with, as Microsoft asks before
+    // ShellExecute; both strings end in a NUL, and the null window and
+    // parameters are allowed
+    let opened = unsafe {
+        let flags = (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32;
+        CoInitializeEx(std::ptr::null(), flags);
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    // a value above 32 is success, as ShellExecute has it
+    opened as usize > 32
+}
+
+/// The program of a command line as the registry keeps one for opening a
+/// link, `"C:\path\Telegram.exe" -- "%1"` or `C:\path\Telegram.exe -- %1`:
+/// the quoted part, or else up to the first `.exe` and the rest.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn command_program(command: &str) -> Option<std::path::PathBuf> {
+    let command = command.trim();
+    let program = match command.strip_prefix('"') {
+        Some(rest) => rest.split_once('"').map(|(program, _)| program)?,
+        None => {
+            let end = command.to_ascii_lowercase().find(".exe").map(|at| at + 4);
+            end.map_or_else(
+                || command.split_whitespace().next().unwrap_or(""),
+                |end| &command[..end],
+            )
+        }
+    };
+    (!program.is_empty()).then(|| std::path::PathBuf::from(program))
 }
 
 /// Whether tgradish runs in a Flatpak or Snap sandbox.
@@ -193,33 +250,52 @@ fn sandboxed() -> bool {
 }
 
 /// Whether a `tg` URL protocol is registered, for the user or the machine,
-/// with a command to open it with.
+/// with a command to open it with whose program is there: one left behind
+/// by a Telegram since removed opens nothing.
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code)]
 fn windows_takes_tg() -> bool {
-    use windows_sys::Win32::System::Registry::{HKEY_CLASSES_ROOT, RRF_RT_ANY, RegGetValueW};
+    use windows_sys::Win32::System::Registry::{
+        HKEY_CLASSES_ROOT, RRF_RT_ANY, RRF_RT_REG_SZ, RegGetValueW,
+    };
     let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
-    let has = |key: &str, name: Option<&str>| {
+    // the value's size, or with `data` its text, where it is there
+    let value = |key: &str, name: Option<&str>, data: Option<&mut Vec<u16>>| {
         let key = wide(key);
         let name = name.map(wide);
         let name = name.as_ref().map_or(std::ptr::null(), |name| name.as_ptr());
-        let mut size = 0u32;
-        // SAFETY: the key and the name, where given, end in a NUL; no data
-        // is asked for, only its size, into `size`
+        let mut size = data.as_ref().map_or(0, |data| (data.len() * 2) as u32);
+        let (flags, pointer) = match data {
+            Some(data) => (RRF_RT_REG_SZ, data.as_mut_ptr().cast()),
+            None => (RRF_RT_ANY, std::ptr::null_mut()),
+        };
+        // SAFETY: the key and the name, where given, end in a NUL; `size`
+        // says how many bytes `pointer` has room for, none where it is null
         let status = unsafe {
             RegGetValueW(
                 HKEY_CLASSES_ROOT,
                 key.as_ptr(),
                 name,
-                RRF_RT_ANY,
+                flags,
                 std::ptr::null_mut(),
-                std::ptr::null_mut(),
+                pointer,
                 &mut size,
             )
         };
-        status == 0
+        (status == 0).then_some(size)
     };
-    has("tg", Some("URL Protocol")) && has("tg\\shell\\open\\command", None)
+    let command_key = "tg\\shell\\open\\command";
+    if value("tg", Some("URL Protocol"), None).is_none() {
+        return false;
+    }
+    let Some(size) = value(command_key, None, None) else { return false };
+    let mut text = vec![0u16; (size as usize).div_ceil(2).max(1)];
+    if value(command_key, None, Some(&mut text)).is_none() {
+        return false;
+    }
+    let end = text.iter().position(|&unit| unit == 0).unwrap_or(text.len());
+    let command = String::from_utf16_lossy(&text[..end]);
+    command_program(&command).is_some_and(|program| program.is_file())
 }
 
 /// Web addresses tests asked to open, rather than opening them.
@@ -260,6 +336,21 @@ mod tests {
         for other in ["https://t.me/+invite", "https://t.me/s/channel?x", "https://example.org"] {
             assert_eq!(app_link(other), None, "{other}");
         }
+    }
+
+    #[test]
+    fn finds_the_program_of_a_registered_command() {
+        let program = |command| command_program(command).map(|path| path.display().to_string());
+        let quoted = r#""C:\Users\me\AppData\Roaming\Telegram Desktop\Telegram.exe" -- "%1""#;
+        let expected = r"C:\Users\me\AppData\Roaming\Telegram Desktop\Telegram.exe";
+        assert_eq!(program(quoted).as_deref(), Some(expected));
+        assert_eq!(
+            program(r"C:\Telegram\Telegram.exe -- %1").as_deref(),
+            Some(r"C:\Telegram\Telegram.exe")
+        );
+        assert_eq!(program("telegram %1").as_deref(), Some("telegram"));
+        assert_eq!(program("  "), None);
+        assert_eq!(program(r#""unclosed"#), None);
     }
 
     /// A system that says `takes`, `may_try`s or not, whose opening of
