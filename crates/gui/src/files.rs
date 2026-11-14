@@ -283,6 +283,19 @@ impl App {
                     None => {}
                 }
                 response.context_menu(|ui| {
+                    // the input in its folder; the result's is on the bar
+                    // under the preview
+                    let input = ui
+                        .add_enabled(
+                            item.paste_dir.is_none(),
+                            egui::Button::new(fl!("show-input-in-folder")),
+                        )
+                        .on_hover_text(item.inputs[0].display().to_string())
+                        .on_disabled_hover_text(fl!("show-input-in-folder", "pasted"));
+                    if input.clicked() {
+                        crate::system::reveal(&item.inputs[0]);
+                        ui.close();
+                    }
                     if ui.button(fl!("remove")).clicked() {
                         removed = Some(item.id);
                         ui.close();

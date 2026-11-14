@@ -727,7 +727,7 @@ fn aspect_ratio(
 /// The button back to all of the picture from a crop, greyed out without
 /// one, or as much of it as a fixed scale takes, where it is `exact`: under
 /// the crop's fields, and over the preview. True once clicked.
-pub(crate) fn whole_picture(ui: &mut egui::Ui, item: &mut Item, exact: bool) -> bool {
+fn whole_picture(ui: &mut egui::Ui, item: &mut Item, exact: bool) -> bool {
     let cropped = item.choices.crop.is_some();
     let whole = ui.add_enabled(cropped, egui::Button::new(fl!("whole-picture")));
     let whole = whole.on_hover_text(if exact {

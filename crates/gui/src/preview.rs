@@ -17,7 +17,6 @@ use crate::app::App;
 use crate::canvas::{self, Cropping, Kept, Picture, Screen};
 use crate::inset::{self, Inset, InsetChange};
 use crate::item::{Framing, Item, Show, Zoom};
-use crate::jobs::Status;
 use crate::l10n::fl;
 use crate::media::Clip;
 use crate::result::{details, summary};
@@ -45,9 +44,6 @@ const TIMELINE: f32 = 38.0;
 /// the settings below lose their first row.
 pub(crate) const LEAST_SHARE: f32 = 0.2;
 pub(crate) const MOST_SHARE: f32 = 0.85;
-
-/// Width of the zoom level, as 400%, beside Zoom out.
-const ZOOM_LEVEL: f32 = 42.0;
 
 impl App {
     pub(crate) fn main_panel(&mut self, ui: &mut egui::Ui) {
@@ -99,7 +95,6 @@ impl App {
                         let webm = webm.unwrap_or_else(|_| item.choices.webm.clone());
                         preview(
                             ui,
-                            &self.probes,
                             (&mut self.screen, &mut self.inset),
                             item,
                             (tempo, &mut in_frames),
@@ -173,7 +168,6 @@ impl App {
 /// `tempo`, as the result will.
 fn preview(
     ui: &mut egui::Ui,
-    probes: &crate::outputs::Probes,
     (screen, inset): (&mut Screen, &mut Inset),
     item: &mut Item,
     (tempo, in_frames): (f64, &mut bool),
@@ -190,52 +184,35 @@ fn preview(
     // the result chosen shows once it is read; the input meanwhile
     let shown = item.shown();
     ui.add_space(6.0);
-    // the result's small picture's toggle, as it says it then, or under
-    // the bar where even its short name doesn't fit beside the rest
-    let toggle = |ui: &mut egui::Ui, inset: &mut bool, text: String| {
-        ui.toggle_value(inset, text).on_hover_text(fl!("result-preview", "hint"));
+    // the result's small picture's toggle, or under the bar where it
+    // doesn't fit beside the rest
+    let toggle = |ui: &mut egui::Ui, inset: &mut bool| {
+        ui.toggle_value(inset, fl!("result-preview")).on_hover_text(fl!("result-preview", "hint"));
     };
     let mut toggle_below = false;
     ui.horizontal(|ui| {
         let mut show = shown;
-        // a narrow column has room only for what is most needed; the
-        // narrowest leaves the folder to the bar under the settings. What
-        // each takes is measured, as words are longer in some languages
+        // what each takes is measured, as words are longer in some
+        // languages
         let gap = ui.spacing().item_spacing.x;
         let button =
-            |text: &str| widgets::text_width(ui, text, 2.0 * ui.spacing().button_padding.x) + gap;
-        let shows = button(&fl!("show-input")) + button(&fl!("show-result"));
-        // room kept for the way back to all of the picture, which comes and
-        // goes with a crop, so nothing else changes as it does
-        let whole = button(&fl!("whole-picture"));
-        let zooming = button(&fl!("zoom-out")) + ZOOM_LEVEL + gap;
-        let (folders, previews) = (
-            [button(&fl!("show-folder")), button(&fl!("show-folder", "short"))],
-            [button(&fl!("result-preview")), button(&fl!("result-preview", "short"))],
-        );
+            |text: &str| widgets::text_width(ui, text, 2.0 * ui.spacing().button_padding.x);
+        // the segments, a point apart, the result's as wide as it is when
+        // out of date, which its mark says
+        let shows = button(&fl!("show-input")) + 1.0 + button(&fl!("show-result", "outdated"));
+        let zoom_out = zoom_out_width(ui);
+        let zooming = gap + zoom_out;
+        let preview = gap + button(&fl!("result-preview"));
         let room = ui.available_width();
-        // shorter words first, then zooming's buttons only while zoomed in
-        let fits = |folder: usize, preview: usize, zoom: bool| {
-            let zoom = if zoom { zooming } else { 0.0 };
-            shows + folders[folder] + whole + zoom + previews[preview] <= room
-        };
-        let (short_folder, short_preview, compact) = if fits(0, 0, true) {
-            (false, false, false)
-        } else if fits(1, 0, true) {
-            (true, false, false)
-        } else if fits(1, 1, true) {
-            (true, true, false)
-        } else {
-            (true, true, true)
-        };
-        let least = shows + folders[1] + previews[1];
-        let folder = ui.available_width() >= least;
-        toggle_below = ui.available_width() < shows + button(&fl!("result-preview", "short"));
-        let choices = [
-            (Show::Input, fl!("show-input"), String::new()),
-            (Show::Result, fl!("show-result"), String::new()),
-        ];
-        // .tgs results of before a restart, which tgradish can't draw
+        // zooming's buttons only while zoomed in where there is no room
+        let compact = shows + zooming + preview > room;
+        toggle_below = room < shows + preview;
+        let outdated = has_result && !item.result_is_current();
+        let result = if outdated { fl!("show-result", "outdated") } else { fl!("show-result") };
+        let result_hint = if outdated { fl!("show-result", "hint") } else { String::new() };
+        let choices =
+            [(Show::Input, fl!("show-input"), String::new()), (Show::Result, result, result_hint)];
+        // .tgs results made by an earlier run, which tgradish can't draw
         let unseen = if item.made.as_ref().is_some_and(|made| made.format == Format::Tgs) {
             fl!("tgs-unseen")
         } else {
@@ -246,101 +223,52 @@ fn preview(
         }) {
             item.view.show = show;
         }
-        // where the input came from, and where the result went
-        let result = item.made.as_ref().and_then(|made| match &made.job.status {
-            Status::Done(done) => Some(done.output.clone()).filter(|output| probes.exists(output)),
-            _ => None,
-        });
-        let show_folder = |ui: &mut egui::Ui| {
-            let input = ui
-                .add_enabled(item.paste_dir.is_none(), egui::Button::new(fl!("folder-input")))
-                .on_hover_text(item.inputs[0].display().to_string())
-                .on_disabled_hover_text(fl!("folder-input", "pasted"));
-            if input.clicked() {
-                crate::system::reveal(&item.inputs[0]);
-                ui.close();
-            }
-            let made = ui
-                .add_enabled(result.is_some(), egui::Button::new(fl!("folder-result")))
-                .on_disabled_hover_text(fl!("convert-first"));
-            let made = match &result {
-                Some(output) => made.on_hover_text(output.display().to_string()),
-                None => made,
-            };
-            if made.clicked()
-                && let Some(output) = &result
-            {
-                crate::system::reveal(output);
-                ui.close();
-            }
-        };
-        if folder {
-            let text = if short_folder { fl!("show-folder", "short") } else { fl!("show-folder") };
-            ui.menu_button(text, show_folder);
-        }
         // what doesn't fit is cut short or left out, the hint first
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if show == Show::Input && !toggle_below {
-                let text = match short_preview {
-                    false => fl!("result-preview"),
-                    true => fl!("result-preview", "short"),
-                };
-                toggle(ui, &mut item.view.inset, text);
+                toggle(ui, &mut item.view.inset);
             }
             // always there where there is room, so nothing beside them
             // moves as zooming starts
             let zoom = item.view.zoom_mut(show);
             let zoomed = zoom.level > 1.0;
             if zoomed || !compact {
+                // how far it is zoomed in, on the button that zooms out,
+                // which is as wide as the widest it gets, so nothing moves
+                // as it changes
+                let level = fl!("zoom-level", percent = (zoom.level * 100.0).round());
+                let button = egui::Button::new(fl!("zoom-out"))
+                    .shortcut_text(level)
+                    .gap(ZOOM_GAP)
+                    .min_size(vec2(zoom_out, 0.0));
                 let out = ui
-                    .add_enabled(zoomed, egui::Button::new(fl!("zoom-out")))
+                    .scope(|ui| {
+                        ui.spacing_mut().button_padding.x = ZOOM_PADDING;
+                        ui.add_enabled(zoomed, button)
+                    })
+                    .inner
                     .on_hover_text(fl!("zoom-out", "hint"))
                     .on_disabled_hover_text(fl!("zoom-out", "all"));
                 if out.clicked() {
                     *zoom = Zoom::default();
                 }
-                let level = RichText::new(format!("{:.0}%", zoom.level * 100.0));
-                let level = if zoomed { level } else { level.weak() };
-                ui.add_sized(vec2(ZOOM_LEVEL, 18.0), egui::Label::new(level));
             }
-            // back to all of the picture from a crop, as under the crop's
-            // fields, for those who crop here: in room kept for it, before
-            // the hint, which gives way to it, so nothing else moves as it
-            // comes and goes; zoomed in, at the narrowest, it gives way too
-            if show == Show::Input
-                && item.choices.crop.is_some()
-                && ui.available_width() >= whole - gap
-            {
-                let exact = file_settings::exact_of(webm).is_some() && item.format != Format::Tgs;
-                file_settings::whole_picture(ui, item, exact);
-            }
-            // the mark alone where the word doesn't fit, and nothing where
-            // it doesn't either: the list and the column beside say so too
-            let word = format!("⚠ {}", fl!("outdated"));
-            let forms = [word.as_str(), "⚠"];
-            let outdated = (has_result && !item.result_is_current())
-                .then(|| widgets::fitting(ui, &forms, ui.available_width(), 4.0))
-                .flatten();
-            if let Some(form) = outdated {
-                let stale = RichText::new(forms[form]).color(theme::warn(ui.visuals()));
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.add(egui::Label::new(stale).truncate())
-                        .on_hover_text(fl!("outdated", "hint"));
-                });
-            } else if ui.available_width() > 60.0 {
+            if ui.available_width() > 60.0 {
                 let hint = match (show, item.choices.crop.is_some()) {
                     (Show::Input, false) => fl!("input-hint"),
                     (Show::Input, true) => fl!("crop-hint"),
                     (Show::Result, _) => fl!("result-hint"),
                 };
-                ui.add(egui::Label::new(RichText::new(hint).weak().size(12.5)).truncate());
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add(egui::Label::new(RichText::new(hint).weak().size(12.5)).truncate());
+                });
             }
         });
     });
     let shown = item.shown();
     if toggle_below && shown == Show::Input {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-            toggle(ui, &mut item.view.inset, fl!("result-preview"));
+            toggle(ui, &mut item.view.inset);
         });
     }
 
@@ -588,6 +516,22 @@ fn preview(
     }
 }
 
+/// Least room between Zoom out's words and how far it is zoomed in, and
+/// the room at its ends, a little less than other buttons have, so that
+/// the bar's words fit whole in the narrowest window.
+const ZOOM_GAP: f32 = 2.0;
+const ZOOM_PADDING: f32 = 6.0;
+
+/// Width of Zoom out, with how far it is zoomed in on it: as wide as the
+/// widest it gets, so that nothing moves as it changes.
+fn zoom_out_width(ui: &egui::Ui) -> f32 {
+    let widest = fl!("zoom-level", percent = (canvas::MAX_ZOOM * 100.0).round());
+    // the gap on either side of the room between the two
+    let padding = 2.0 * (ZOOM_PADDING + ZOOM_GAP);
+    let words = widgets::text_width(ui, &fl!("zoom-out"), padding);
+    (words + widgets::text_width(ui, &widgets::zeros(&widest), 0.0)).ceil()
+}
+
 /// What of `clip` a `.tgs` result shows, before it is made square: the
 /// `part` used, cut to what is visible unless it keeps the canvas.
 fn tgs_bounds(
@@ -704,6 +648,65 @@ mod tests {
     }
 
     #[test]
+    fn keeps_the_bar_whole_and_still_as_zoom_and_result_change() {
+        use tgradish_core::options::Crop;
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        for width in [crate::MIN_WIDTH, 1280.0] {
+            let mut harness = Harness::builder().with_size([width, 820.0]).build_eframe(|cc| {
+                let app = App::with(Config::default(), None, Presets::builtin());
+                app.style(&cc.egui_ctx);
+                app
+            });
+            harness.state_mut().add(vec![art.clone()]);
+            finish(&mut harness);
+            crate::testing::convert(&harness);
+            harness.run_steps(2);
+            finish(&mut harness);
+            harness.state_mut().items[0].view.show = Show::Input;
+            harness.state_mut().items[0].choices.crop =
+                Some(Crop { x: 1, y: 1, width: 2, height: 2 });
+            harness.run_steps(2);
+            let place = |harness: &Harness<App>| {
+                let out = harness.get_by_label_contains(&fl!("zoom-out")).rect();
+                let preview = harness.get_by_label(&fl!("result-preview")).rect();
+                let (result, outdated) = (fl!("show-result"), fl!("show-result", "outdated"));
+                let result = harness.query_by_label(&result);
+                let result = result.or_else(|| harness.query_by_label(&outdated)).unwrap().rect();
+                (out, preview, result)
+            };
+            let before = place(&harness);
+            // zoomed in as far as it goes, and out of date
+            harness.state_mut().items[0].view.input_zoom.level = crate::canvas::MAX_ZOOM;
+            harness.state_mut().items[0].choices.tgs.keep_canvas = Some(true);
+            harness.run_steps(2);
+            harness.get_by_label(&fl!("show-result", "outdated"));
+            harness.get_by_label_contains(&fl!("zoom-level", percent = 6400));
+            // the buttons at the right stay; only the hint after the
+            // result's segment, which grows by its mark, moves
+            let (out, preview, result) = place(&harness);
+            assert_eq!((out, preview), (before.0, before.1), "{width}");
+            assert_eq!(result.left(), before.2.left(), "{width}");
+            // nothing cut short, and no way to the folders over the preview
+            for shape in &harness.output().shapes {
+                if let egui::Shape::Text(text) = &shape.shape {
+                    let said = text.galley.text();
+                    assert!(
+                        !text.galley.elided || said.starts_with("Drag"),
+                        "{width}: {said:?} cut short"
+                    );
+                }
+            }
+            assert!(
+                harness
+                    .query_by_label("Show in folder")
+                    .is_none_or(|button| { button.rect().top() > out.bottom() + 200.0 })
+            );
+        }
+    }
+
+    #[test]
     fn offers_the_whole_picture_over_the_preview_too() {
         use tgradish_core::options::Crop;
         let dir = tempfile::tempdir().unwrap();
@@ -725,7 +728,8 @@ mod tests {
             };
             // without a crop, only the one under the crop's fields, greyed out
             assert_eq!(buttons(&harness), (1, 0), "{width}");
-            let zoom = |harness: &Harness<App>| harness.get_by_label(&fl!("zoom-out")).rect();
+            let zoom =
+                |harness: &Harness<App>| harness.get_by_label_contains(&fl!("zoom-out")).rect();
             let before = zoom(&harness);
             harness.state_mut().items[0].choices.crop =
                 Some(Crop { x: 1, y: 1, width: 2, height: 2 });

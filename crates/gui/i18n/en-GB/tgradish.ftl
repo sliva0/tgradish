@@ -194,6 +194,10 @@ inspect = Inspect a sticker…
 feedback = Send feedback
     .hint = Write to the author on Telegram: in its app, where it is installed, or in the browser
 about-and-licences = About and licences…
+# In the menu of a file's row: shows its input in the file manager, which a
+# pasted image has none of.
+show-input-in-folder = Show in folder
+    .pasted = A pasted image has no file of its own
 # Opens the dialog of keyboard shortcuts; its keys are shown beside it.
 shortcuts = Keyboard shortcuts
 add-files = Add files…
@@ -323,28 +327,22 @@ inset-larger = Larger
 ## Over the preview
 
 show-input = Input
+# .outdated once the result no longer matches the settings, which .hint
+# explains on hover.
 show-result = Result
+    .outdated = Result ⚠
+    .hint = Outdated: the result was made with earlier settings
 # Why the result can't be shown yet.
 convert-first = Convert it first
 tgs-unseen = This window can only show TGS results it made itself; convert again to see it
-# A menu of the folders the file and its result are in; "Folder" where
-# there is no room for more.
-show-folder = Show in folder
-    .short = Folder
-folder-input = Input file
-    .pasted = A pasted image has no file of its own
-folder-result = Result
 # Turns on the result's small picture.
 result-preview = Result preview
-    .short = Preview
     .hint = Show / hide small preview beside the input
 zoom-out = Zoom out
     .hint = Show all of it
     .all = Already fully zoomed out
-# The result no longer matches the settings; "⚠" alone where there is no
-# room for the word.
-outdated = Outdated
-    .hint = Outdated: the result was made with earlier settings
+# How far the preview is zoomed in, as a percentage.
+zoom-level = { $percent }%
 # How the mouse works on the preview.
 input-hint = Drag to crop · wheel to zoom · right button to pan
 crop-hint = Drag the crop or its edges · double-click for all
@@ -444,6 +442,8 @@ margin-right = Right margin: pixels cut off the right
 margin-bottom = Bottom margin: pixels cut off the bottom
 width = Width
 height = Height
+# Under the crop's fields, and what screen readers call the cross on the
+# crop's size over the preview, which does the same.
 whole-picture = Whole picture
     .hint = Use all of the picture
     .exact = Use all of the picture, or as much as the fixed scale takes from its top left

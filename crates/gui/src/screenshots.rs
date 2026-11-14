@@ -489,15 +489,17 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         save(&mut harness, "main-menu");
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
-        // its short name where longer words leave no room for the long one
-        let (full, short) =
-            (crate::l10n::fl!("show-folder"), crate::l10n::fl!("show-folder", "short"));
-        match harness.query_by_label(&full) {
-            Some(folder) => folder.click(),
-            None => harness.get_by_label(&short).click(),
+        // a row's own menu, its right button clicked
+        let name = harness.state().items[0].name();
+        let row = harness.get_all_by_label(&name).next().unwrap().rect().center();
+        harness.event(egui::Event::PointerMoved(row));
+        for pressed in [true, false] {
+            let (button, modifiers) = (egui::PointerButton::Secondary, egui::Modifiers::NONE);
+            harness.event(egui::Event::PointerButton { pos: row, button, pressed, modifiers });
+            harness.step();
         }
         harness.run_steps(2);
-        save(&mut harness, "folder-menu");
+        save(&mut harness, "row-menu");
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
         // made, its encodes listed beside the preview

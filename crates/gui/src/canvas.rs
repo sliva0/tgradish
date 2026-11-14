@@ -173,7 +173,7 @@ enum Drag {
 pub(crate) const MARGIN: f32 = 14.0;
 /// How near an edge the pointer grabs it, in points.
 const GRAB: f32 = 7.0;
-const MAX_ZOOM: f32 = 64.0;
+pub(crate) const MAX_ZOOM: f32 = 64.0;
 /// Side of the squares that show transparency, in points.
 const CHECKER: f32 = 8.0;
 
@@ -333,15 +333,18 @@ pub(crate) fn show(
     if response.drag_stopped() {
         ui.data_mut(|data| data.remove::<Drag>(id));
     }
-    if response.double_clicked() && cropping.crop.is_some() {
-        // all of the picture, or as much of it as the exact scale takes
+    // all of the picture, or as much of it as the exact scale takes
+    let whole_picture = |crop: &mut Option<Crop>| {
         let middle = (Keep::Middle, Keep::Middle);
-        *cropping.crop = match cropping.exact {
+        *crop = match cropping.exact {
             Some(exact) => {
                 exact.fit(full, middle, cropping.ratio, size).filter(|crop| *crop != full)
             }
             None => None,
         };
+    };
+    if response.double_clicked() && cropping.crop.is_some() {
+        whole_picture(cropping.crop);
     }
 
     // the crop as it is now
@@ -431,15 +434,40 @@ pub(crate) fn show(
     if cropping.crop.is_some() {
         let text = format!("{} × {}", crop.width, crop.height);
         let galley = painter.layout_no_wrap(text, egui::FontId::proportional(12.5), Color32::WHITE);
+        // the size, then a cross back to all of the picture, as wide as
+        // the tag is high
+        let side = galley.size().y + 8.0;
+        let tag = vec2(galley.size().x + side, galley.size().y);
         // over the crop's corner, kept within the stage
-        let x = (on_screen.left() + 6.0).min(rect.right() - galley.size().x - 8.0);
-        let at = pos2(
-            x.max(rect.left() + 4.0),
-            (on_screen.top() - galley.size().y - 8.0).max(rect.top() + 4.0),
-        );
-        let back = Rect::from_min_size(at, galley.size()).expand(4.0);
+        let x = (on_screen.left() + 6.0).min(rect.right() - tag.x - 8.0);
+        let at =
+            pos2(x.max(rect.left() + 4.0), (on_screen.top() - tag.y - 8.0).max(rect.top() + 4.0));
+        let back = Rect::from_min_size(at, tag).expand(4.0);
         painter.rect_filled(back, 4.0, Color32::from_black_alpha(170));
         painter.galley(at, galley, Color32::WHITE);
+        let cross = Rect::from_min_max(pos2(back.right() - side, back.top()), back.max);
+        let hint = match cropping.exact {
+            Some(_) => crate::l10n::fl!("whole-picture", "exact"),
+            None => crate::l10n::fl!("whole-picture", "hint"),
+        };
+        let button = egui::Button::new(egui::RichText::new("✖").size(10.0).color(Color32::WHITE))
+            .min_size(cross.size());
+        let clicked = ui.scope(|ui| {
+            // bare on the dark tag, and lit on hover, whichever the theme
+            let states = &mut ui.visuals_mut().widgets;
+            for (state, fill) in [
+                (&mut states.inactive, Color32::TRANSPARENT),
+                (&mut states.hovered, Color32::from_white_alpha(40)),
+                (&mut states.active, Color32::from_white_alpha(70)),
+            ] {
+                (state.weak_bg_fill, state.bg_stroke) = (fill, Stroke::NONE);
+            }
+            let button = ui.place(cross, button);
+            widgets::named(button, &crate::l10n::fl!("whole-picture")).on_hover_text(hint).clicked()
+        });
+        if clicked.inner {
+            whole_picture(cropping.crop);
+        }
     }
 }
 
