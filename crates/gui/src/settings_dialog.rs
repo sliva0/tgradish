@@ -23,6 +23,10 @@ pub(crate) struct SettingsDialog {
     open: bool,
     /// Whether the window of tgradish's version and licences is open.
     pub(crate) about: bool,
+    /// Which visit to Settings it is, which About keeps its place by: how
+    /// far it is scrolled and which licences are open stay while Settings
+    /// is open, and are forgotten once it closes.
+    pub(crate) visit: u64,
     /// What checking ffmpeg found: whether it is ready, and what to say.
     ffmpeg_status: Option<(bool, String)>,
     /// Checking ffmpeg, which runs it, on a thread of its own: stopped if
@@ -61,6 +65,7 @@ impl SettingsDialog {
         *self = SettingsDialog {
             open: true,
             about: self.about,
+            visit: self.visit,
             placeholders: (ffmpeg, folder),
             ..SettingsDialog::default()
         };
@@ -159,6 +164,8 @@ pub(crate) fn show(
     // changes stay either way, until tgradish closes unless saved
     if close || modal.should_close() {
         dialog.open = false;
+        // About starts afresh next time
+        dialog.visit += 1;
     }
 }
 
@@ -485,6 +492,46 @@ mod tests {
             !harness.state().settings_dialog.is_open() && !harness.state().config.gui.reopen_files
         );
         assert!(Config::load(&path).unwrap().gui.reopen_files);
+    }
+
+    #[test]
+    fn keeps_the_place_in_about_until_settings_closes() {
+        let mut harness = crate::testing::harness(Config::default());
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(2);
+        // a notice after tgradish's own, whose title is in the heading too
+        let notice = crate::about::notices().swap_remove(1);
+        let (title, text) = (notice.title, notice.text.trim().lines().next().unwrap().to_owned());
+        let about = |harness: &mut Harness<App>| {
+            harness.get_by_label(&fl!("about-and-licences")).click_accesskit();
+            harness.run_steps(2);
+        };
+        let back = |harness: &mut Harness<App>| {
+            harness.get_all_by_label(&fl!("close")).last().unwrap().click_accesskit();
+            harness.run_steps(2);
+        };
+        // a licence opened in About, which is open still after going back
+        // to Settings and to About again
+        about(&mut harness);
+        assert!(harness.query_by_label_contains(&text).is_none());
+        harness.get_by_label(&title).click_accesskit();
+        harness.run_steps(2);
+        harness.get_by_label_contains(&text);
+        back(&mut harness);
+        assert!(
+            !harness.state().settings_dialog.about && harness.state().settings_dialog.is_open()
+        );
+        about(&mut harness);
+        harness.get_by_label_contains(&text);
+        back(&mut harness);
+        // Settings closed and opened again: About as it first was
+        harness.get_by_label(&fl!("close")).click_accesskit();
+        harness.run_steps(2);
+        assert!(!harness.state().settings_dialog.is_open());
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(2);
+        about(&mut harness);
+        assert!(harness.query_by_label_contains(&text).is_none());
     }
 
     #[test]
