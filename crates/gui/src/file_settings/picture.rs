@@ -391,16 +391,7 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                let cropped = item.choices.crop.is_some();
-                let whole = ui.add_enabled(cropped, egui::Button::new(fl!("whole-picture")));
-                let whole = whole.on_hover_text(if exact.is_some() {
-                    fl!("whole-picture", "exact")
-                } else {
-                    fl!("whole-picture", "hint")
-                });
-                if whole.clicked() {
-                    item.choices.crop = None;
-                }
+                whole_picture(ui, item, exact.is_some());
                 // with an exact scale, as much of its middle as that takes
                 if let Some(exact) = exact {
                     let middle = (Keep::Middle, Keep::Middle);
@@ -631,6 +622,23 @@ fn aspect_ratio(
         }
         keep_aspect(item, size, exact);
     }
+}
+
+/// The button back to all of the picture from a crop, greyed out without
+/// one, or as much of it as a fixed scale takes, where it is `exact`: under
+/// the crop's fields, and over the preview. True once clicked.
+pub(crate) fn whole_picture(ui: &mut egui::Ui, item: &mut Item, exact: bool) -> bool {
+    let cropped = item.choices.crop.is_some();
+    let whole = ui.add_enabled(cropped, egui::Button::new(fl!("whole-picture")));
+    let whole = whole.on_hover_text(if exact {
+        fl!("whole-picture", "exact")
+    } else {
+        fl!("whole-picture", "hint")
+    });
+    if whole.clicked() {
+        item.choices.crop = None;
+    }
+    whole.clicked()
 }
 
 /// Gives the item's crop the shape its aspect keeps.
