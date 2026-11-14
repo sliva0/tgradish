@@ -711,9 +711,11 @@ mod tests {
         harness.key_press(egui::Key::Backspace);
         harness.run_steps(2);
         assert_eq!(order(&harness), [ids[0]]);
-        // and back, as any removed are
+        // and back, as any removed are, and read again: what shows of the
+        // one selected changes once it is, which a field may not keep the
+        // focus through
         harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
-        harness.run_steps(2);
+        finish(&mut harness);
         assert_eq!(order(&harness), ids);
         // typing in a field is typing: a number's, once it has the focus
         let field = egui::accesskit::Role::SpinButton;

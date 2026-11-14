@@ -242,7 +242,12 @@ mod tests {
         let copy = crate::l10n::fl!("copy-result");
         harness.get_by_label(&copy);
         // frames that change nothing look at nothing, for a while, and
-        // ask for no more frames
+        // ask for no more frames: a while from the window getting the
+        // focus, which looks again, and the frame egui asks for after it,
+        // rather than from the conversion, which finished however many
+        // frames ago it took to see that it had
+        harness.event(egui::Event::WindowFocused(true));
+        harness.run_steps(2);
         let before = looked(&harness);
         for _ in 0..5 {
             harness.step();

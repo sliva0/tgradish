@@ -146,8 +146,12 @@ pub(crate) fn convert(harness: &Harness<App>) {
     harness.get(egui_kittest::kittest::by().label_contains(&keys)).click();
 }
 
-/// Steps the window until no item is busy and no file dialog is open.
+/// Steps the window until no item is busy and no file dialog is open, two
+/// frames in a row: the window starts what is due as a frame begins, so
+/// what a frame's click changed, as a setting that has an input read
+/// again, is only started by the next.
 pub(crate) fn finish(harness: &mut Harness<App>) {
+    let mut settled = false;
     for _ in 0..6000 {
         harness.step();
         let state = harness.state();
@@ -160,9 +164,14 @@ pub(crate) fn finish(harness: &mut Harness<App>) {
         });
         let idle = state.queue.is_empty() && state.picking.is_none();
         if !reading && idle && state.items.iter().all(|item| item.job.is_none()) {
-            harness.run_steps(2);
-            return;
+            if settled {
+                harness.run_steps(2);
+                return;
+            }
+            settled = true;
+            continue;
         }
+        settled = false;
         std::thread::sleep(Duration::from_millis(10));
     }
     panic!("the window didn't settle");
