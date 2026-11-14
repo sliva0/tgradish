@@ -50,6 +50,14 @@ pub(crate) struct SettingsDialog {
     pub(crate) wrote: bool,
     /// The accent colour of one's own as typed, `#rrggbb`, while it is.
     accent_typed: String,
+    /// The scale's button clicked this frame, where it is, or nowhere for
+    /// the one back to 100%.
+    stepped: Option<egui::Rect>,
+    /// Where the scale's button last clicked is on the screen, in pixels,
+    /// and how far it is from the dialog's corner, in points: the dialog is
+    /// kept so that the button stays there as everything grows or shrinks
+    /// around it, under the pointer, rather than in the window's middle.
+    pinned: Option<(egui::Pos2, egui::Vec2)>,
 }
 
 impl SettingsDialog {
@@ -62,6 +70,7 @@ impl SettingsDialog {
         let folder = tgradish_core::paths::pictures_dir()
             .map(|dir| fl!("for-example", example = dir.join("Stickers").display().to_string()))
             .unwrap_or_default();
+        // `pinned` goes: the dialog opens in the window's middle again
         *self = SettingsDialog {
             open: true,
             about: self.about,
@@ -123,7 +132,13 @@ pub(crate) fn show(
         dialog.checking = None;
     }
     let mut close = false;
-    let modal = widgets::dialog(ctx, "settings").show(ctx, |ui| {
+    let mut modal = widgets::dialog(ctx, "settings");
+    if let Some((at, offset)) = dialog.pinned {
+        let corner = at / ctx.pixels_per_point() - offset;
+        let area = egui::Modal::default_area(egui::Id::new("settings"));
+        modal = modal.area(area.anchor(egui::Align2::LEFT_TOP, corner.to_vec2()));
+    }
+    let modal = modal.show(ctx, |ui| {
         ui.set_width(620.0);
         close = widgets::dialog_title(ui, widgets::title_text(ui, fl!("settings")));
         // the dialog fits the window, its settings scrolling within
@@ -166,6 +181,10 @@ pub(crate) fn show(
             });
         });
     });
+    if let Some(button) = dialog.stepped.take().filter(|button| button.is_positive()) {
+        let offset = button.center() - modal.response.rect.min;
+        dialog.pinned = Some((button.center() * ctx.pixels_per_point(), offset));
+    }
     // changes stay either way, until tgradish closes unless saved
     if close || modal.should_close() {
         dialog.open = false;
@@ -308,6 +327,11 @@ fn sections(
     row(ui, &fl!("accent"), &fl!("accent", "hint"), Ok(()), |ui| {
         accents(ui, &mut gui.accent, &mut dialog.accent_typed);
     });
+    row(ui, &fl!("scale"), &fl!("scale", "hint"), Ok(()), |ui| {
+        if let Some(button) = scale(ui, &mut gui.scale) {
+            dialog.stepped = Some(button);
+        }
+    });
     row(ui, &fl!("files"), "", Ok(()), |ui| {
         ui.checkbox(&mut gui.reopen_files, fl!("reopen-files"));
     });
@@ -350,6 +374,59 @@ fn sections(
             dialog.default_preset = Some((format, picked));
         }
     }
+}
+
+/// The window's scale, `scale`, smaller and larger by the steps egui's
+/// keys take, and back to 100%, which it applies at once, with those keys
+/// under it, as the system writes them. Gives the button that changed it,
+/// where one did: nowhere for the one back to 100%.
+fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
+    use egui::gui_zoom::{self, kb_shortcuts};
+    let ctx = ui.ctx().clone();
+    let mut stepped = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 3.0;
+        let side = ui.spacing().interact_size.y;
+        let button = |text| egui::Button::new(text).min_size(egui::vec2(side, side));
+        let least = *scale <= *config::SCALES.start() + 1e-6;
+        let smaller = ui.add_enabled(!least, button("−")).on_hover_text(fl!("scale-smaller"));
+        if smaller.clicked() {
+            gui_zoom::zoom_out(&ctx);
+            stepped = Some(smaller.rect);
+        }
+        // as wide as the widest, so + stays put
+        let percent = fl!("scale-percent", percent = (*scale * 100.0).round());
+        let widest = fl!("scale-percent", percent = 500);
+        let width = widgets::text_width(ui, &widgets::zeros(&widest), 4.0);
+        ui.add_sized(egui::vec2(width, side), egui::Label::new(percent));
+        let most = *scale >= *config::SCALES.end() - 1e-6;
+        let larger = ui.add_enabled(!most, button("+")).on_hover_text(fl!("scale-larger"));
+        if larger.clicked() {
+            gui_zoom::zoom_in(&ctx);
+            stepped = Some(larger.rect);
+        }
+        if widgets::reset_to(ui, (*scale - 1.0).abs() > 1e-6, &fl!("scale-reset")) {
+            ctx.set_zoom_factor(1.0);
+            stepped = Some(egui::Rect::NOTHING);
+        }
+    });
+    // what the buttons did, as egui's keys would have; the window keeps
+    // the setting and the scale together otherwise
+    if stepped.is_some() {
+        *scale = config::rounded_scale(f64::from(ctx.zoom_factor()));
+    }
+    let keys = |shortcut| ctx.format_shortcut(shortcut);
+    widgets::hint(
+        ui,
+        fl!(
+            "scale",
+            "keys",
+            larger = keys(&kb_shortcuts::ZOOM_IN_SECONDARY),
+            smaller = keys(&kb_shortcuts::ZOOM_OUT),
+            reset = keys(&kb_shortcuts::ZOOM_RESET)
+        ),
+    );
+    stepped
 }
 
 /// The accent colours to choose from: the system's, Plasma's, and one's
@@ -537,6 +614,65 @@ mod tests {
         harness.run_steps(2);
         about(&mut harness);
         assert!(harness.query_by_label_contains(&text).is_none());
+    }
+
+    #[test]
+    fn scales_the_window_keeping_its_buttons_under_the_pointer() {
+        use eframe::egui::{Key, Modifiers, vec2};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let at = path.clone();
+        // the window's size in pixels, which egui sees as fewer points as
+        // it grows, as eframe tells it
+        let pixels = vec2(1280.0, 900.0);
+        let mut harness = Harness::builder().with_size(pixels).build_eframe(move |_| {
+            App::with(Config::default(), Some(at.clone()), Presets::builtin())
+        });
+        let settle = |harness: &mut Harness<App>| {
+            for _ in 0..8 {
+                let zoom = harness.ctx.zoom_factor();
+                harness.set_size(pixels / zoom);
+                harness.step();
+            }
+        };
+        harness.state_mut().settings_dialog.open();
+        settle(&mut harness);
+        harness.get_by_label(&fl!("scale-percent", percent = 100));
+        // + clicked again and again where it is on the screen
+        let pixel = |harness: &Harness<App>, label: &str| {
+            harness.get_by_label(label).rect().center() * harness.ctx.zoom_factor()
+        };
+        let under = pixel(&harness, "+");
+        for percent in [110, 120, 130] {
+            harness.get_by_label("+").click_accesskit();
+            settle(&mut harness);
+            harness.get_by_label(&fl!("scale-percent", percent = percent));
+            let now = pixel(&harness, "+");
+            assert!((now - under).length() < 1.5, "at {percent}%: {now:?}, not {under:?}");
+        }
+        assert_eq!(harness.state().config.gui.scale, 1.3);
+        // applied at once, kept once saved
+        harness.get_by_label(&fl!("save")).click_accesskit();
+        settle(&mut harness);
+        assert_eq!(Config::load(&path).unwrap().gui.scale, 1.3);
+        // back to 100%
+        harness.get_by_label("⟲").click_accesskit();
+        settle(&mut harness);
+        assert_eq!((harness.state().config.gui.scale, harness.ctx.zoom_factor()), (1.0, 1.0));
+        // by the keys, with Settings closed: kept at once
+        harness.get_by_label("✖").click_accesskit();
+        settle(&mut harness);
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::Equals);
+        settle(&mut harness);
+        assert_eq!(harness.ctx.zoom_factor(), 1.1);
+        assert_eq!(Config::load(&path).unwrap().gui.scale, 1.1);
+        // and read as the window opens again
+        let config = Config::load(&path).unwrap();
+        let mut again = Harness::builder()
+            .with_size(pixels)
+            .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin()));
+        again.run_steps(2);
+        assert_eq!(again.ctx.zoom_factor(), 1.1);
     }
 
     #[test]

@@ -453,7 +453,12 @@ pub(crate) fn dialog_buttons<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::U
     ui.add_space(4.0);
     ui.separator();
     ui.add_space(4.0);
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add).inner
+    // as high as a button: a layout from the right takes all the height
+    // left otherwise, which a dialog keeps as it was when the window, or
+    // its scale, leaves it less room
+    let row = vec2(ui.available_width(), theme::CONTROL);
+    let layout = egui::Layout::right_to_left(egui::Align::Center);
+    ui.allocate_ui_with_layout(row, layout, add).inner
 }
 
 /// A button of a dialog's row, as wide as the others at the least.

@@ -769,6 +769,16 @@ theme-light = Light
 theme-dark = Dark
 accent = Accent colour
     .hint = What marks the chosen, the hovered and the focused
+# How large everything in the window is; .keys under it says the keys that
+# change it too, as the system writes them, as Ctrl+=.
+scale = Scale
+    .hint = How large the window's text and controls are
+    .keys = { $larger } and { $smaller } change it too; { $reset } is back to 100%
+scale-smaller = Smaller
+scale-larger = Larger
+scale-reset = Back to 100%
+# The scale, as a percentage.
+scale-percent = { $percent }%
 # The first of the accent colours, "As the system" again.
 accent-system = { as-the-system }
     .hint = The desktop's accent colour, or Breeze's blue where it has none
