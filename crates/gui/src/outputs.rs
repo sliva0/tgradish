@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
+use eframe::egui;
 use serde::{Deserialize, Serialize};
 
 use tgradish_core::paths;
@@ -28,6 +29,73 @@ impl FileVersion {
         let metadata = std::fs::metadata(path).ok()?;
         let modified = metadata.modified().ok().and_then(|at| at.duration_since(UNIX_EPOCH).ok());
         Some(FileVersion { bytes: metadata.len(), modified })
+    }
+}
+
+/// How long what was seen of files is taken as it is, while nothing
+/// happens in the window: one put in place or taken away meanwhile, by
+/// another program, is noticed this long after, or as the window gets the
+/// focus back.
+const LOOK_AGAIN: f64 = 2.0;
+
+/// What the window saw of files on disk, results where they go and files
+/// in their way, each looked at once rather than on every frame: seen
+/// again every [`LOOK_AGAIN`] seconds, as the window gets the focus back,
+/// and as anything happens in it, a click or a key, or a conversion
+/// working or done.
+#[derive(Default)]
+pub(crate) struct Probes {
+    seen: std::cell::RefCell<std::collections::HashMap<PathBuf, Option<FileVersion>>>,
+    /// When it was last emptied, in egui's time.
+    since: std::cell::Cell<f64>,
+    /// How many times files were looked at, for tests.
+    #[cfg(test)]
+    pub(crate) looked: std::cell::Cell<usize>,
+}
+
+impl Probes {
+    /// The file at `path` as it was seen, if it was there.
+    pub(crate) fn version(&self, path: &Path) -> Option<FileVersion> {
+        if let Some(seen) = self.seen.borrow().get(path) {
+            return *seen;
+        }
+        #[cfg(test)]
+        self.looked.set(self.looked.get() + 1);
+        let version = FileVersion::of(path);
+        self.seen.borrow_mut().insert(path.to_path_buf(), version);
+        version
+    }
+
+    /// Whether there was a file, or a folder, at `path`.
+    pub(crate) fn exists(&self, path: &Path) -> bool {
+        self.version(path).is_some()
+    }
+
+    /// Forgets what was seen, so files are looked at again.
+    pub(crate) fn forget(&self) {
+        self.seen.borrow_mut().clear();
+    }
+
+    /// Forgets what was seen where `ctx`'s frame calls for it: a while
+    /// after it was seen, or as something happens that may change it.
+    pub(crate) fn follow(&self, ctx: &egui::Context, working: bool) {
+        let (now, happened) = ctx.input(|input| {
+            let happened = input.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::PointerButton { .. }
+                        | egui::Event::Key { .. }
+                        | egui::Event::Text(_)
+                        | egui::Event::Paste(_)
+                        | egui::Event::WindowFocused(true)
+                )
+            });
+            (input.time, happened || !input.raw.dropped_files.is_empty())
+        });
+        if working || happened || now - self.since.get() >= LOOK_AGAIN || now < self.since.get() {
+            self.forget();
+            self.since.set(now);
+        }
     }
 }
 
@@ -86,7 +154,7 @@ impl App {
                 Some(_) => self.wrote(item.id, path),
                 None => self.may_replace(item.id, path),
             };
-            path.exists() && !may_replace
+            self.probes.exists(path) && !may_replace
         };
         free_name(&first, &suffix, &claimed, own, &blocked)
     }
@@ -102,14 +170,14 @@ impl App {
     /// since.
     pub(crate) fn wrote(&self, item: u64, path: &Path) -> bool {
         self.written.get(path).is_some_and(|written| {
-            written.item == item && FileVersion::of(path) == Some(written.version)
+            written.item == item && self.probes.version(path) == Some(written.version)
         })
     }
 
     /// Whether tgradish made the file at `path`, by the marks it shows:
     /// read once for each version of the file.
     pub(crate) fn made_by_tgradish(&self, path: &Path) -> bool {
-        let Some(version) = FileVersion::of(path) else { return false };
+        let Some(version) = self.probes.version(path) else { return false };
         let mut known = self.made_by_tgradish.borrow_mut();
         match known.get(path) {
             Some(&(seen, made)) if seen == version => made,
@@ -158,6 +226,36 @@ mod tests {
     use super::*;
     use crate::jobs::Status;
     use crate::testing::{convert, finish, harness, made_job, pasted_image, square};
+
+    #[test]
+    fn looks_at_files_now_and_then_and_rests_while_nothing_happens() {
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        let mut harness = harness(Config::default());
+        harness.state_mut().add(vec![art]);
+        finish(&mut harness);
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let looked = |harness: &Harness<App>| harness.state().probes.looked.get();
+        let copy = crate::l10n::fl!("copy-result");
+        harness.get_by_label(&copy);
+        // frames that change nothing look at nothing, for a while, and
+        // ask for no more frames
+        let before = looked(&harness);
+        for _ in 0..5 {
+            harness.step();
+            let delay = harness.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+            assert_eq!(delay, std::time::Duration::MAX);
+        }
+        assert_eq!(looked(&harness), before);
+        // then they look again: the result gone meanwhile can't be copied
+        std::fs::remove_file(dir.path().join("art.sticker.tgs")).unwrap();
+        harness.run_steps(8);
+        assert!(looked(&harness) > before);
+        assert!(harness.query_by_label(&copy).is_none());
+    }
 
     #[test]
     fn numbers_results_of_files_with_the_same_name() {

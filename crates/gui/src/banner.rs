@@ -176,7 +176,7 @@ impl Message {
 /// A message shown, with how it is shown.
 pub(crate) struct Said {
     /// Tells its row's state apart in egui's memory.
-    id: u64,
+    pub(crate) id: u64,
     pub(crate) message: Message,
     /// How many times it was said while it showed.
     pub(crate) count: u32,
@@ -329,12 +329,21 @@ impl Banner {
             self.rows.clear();
         }
         self.rows.retain(|said| !dismissed.contains(&said.id));
-        let waiting = self
+        // drawn again as the first goes or stops flashing, and not before
+        let next = self
             .rows
             .iter()
-            .any(|said| said.message.severity == Severity::Info || said.flash.is_some());
-        if waiting {
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            .flat_map(|said| {
+                let goes = (said.message.severity == Severity::Info)
+                    .then(|| said.since.map(|since| since + SHOWN))
+                    .flatten();
+                goes.into_iter().chain(said.flash.as_ref().map(|(_, until)| *until))
+            })
+            .fold(f64::INFINITY, f64::min);
+        if next.is_finite() {
+            // a little after, so it is past by then
+            let wait = (next - now).max(0.0) + 0.05;
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
         }
         clicked
     }

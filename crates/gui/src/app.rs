@@ -58,6 +58,9 @@ pub(crate) struct App {
     /// made them, so they may be replaced. Working out where results go
     /// fills it in, though it only borrows the window, hence the cell.
     pub(crate) made_by_tgradish: std::cell::RefCell<HashMap<PathBuf, (FileVersion, bool)>>,
+    /// What was seen of files where results go, looked at again only now
+    /// and then rather than on every frame.
+    pub(crate) probes: crate::outputs::Probes,
     /// Where each item's result goes, worked out once a frame: it looks
     /// at the other items and at files on disk, and is asked for several
     /// times a frame. Cleared as each frame starts.
@@ -99,6 +102,8 @@ pub(crate) struct App {
     pub(crate) next_save: f64,
     /// The system's fonts for what the window's own lack.
     pub(crate) fallbacks: fallback::Fallbacks,
+    /// What the texts were when fonts were last looked for them.
+    pub(crate) fonts_checked: Option<u64>,
     /// What the window says over its bottom.
     pub(crate) banner: Banner,
     /// Files removed a moment ago, which may be put back.
@@ -255,6 +260,7 @@ impl App {
             batch: 0,
             written: HashMap::new(),
             made_by_tgradish: Default::default(),
+            probes: Default::default(),
             outputs: Default::default(),
             found_backend: Default::default(),
             ffmpeg_override: (None, None),
@@ -272,6 +278,7 @@ impl App {
             session: None,
             next_save: 0.0,
             fallbacks: fallback::Fallbacks::new(fonts()),
+            fonts_checked: None,
             banner: Banner::default(),
             removed: None,
             clipboard: system::Clipboard::default(),
@@ -522,7 +529,9 @@ impl App {
     pub(crate) fn enqueue(&mut self, id: u64) {
         // not while something keeps it from being converted as it is
         let Some(item) = self.item(id).filter(|item| !item.blocked()) else { return };
-        // as things are now, not as they were when the frame started
+        // as things are now, not as they were when the frame started, nor
+        // as files were seen a moment ago
+        self.probes.forget();
         let output = self.work_out_output(item);
         // counted from the first while nothing else converts
         if self.items.iter().all(|item| item.job.is_none()) {
@@ -736,6 +745,9 @@ impl eframe::App for App {
         self.file_dialog = rfd::FileDialog::new().set_parent(frame);
         self.take_picked();
         self.outputs.borrow_mut().clear();
+        // converting, or done this frame
+        let working = self.items.iter().any(|item| item.job.is_some());
+        self.probes.follow(&ctx, working);
         self.follow_accent(&ctx);
         if !self.config.gui.smooth_scrolling {
             direct_scrolling(&ctx);

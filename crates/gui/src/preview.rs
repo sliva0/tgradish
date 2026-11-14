@@ -93,8 +93,8 @@ impl App {
                         let webm = webm.unwrap_or_else(|_| item.choices.webm.clone());
                         preview(
                             ui,
-                            &mut self.screen,
-                            &mut self.inset,
+                            &self.probes,
+                            (&mut self.screen, &mut self.inset),
                             item,
                             (tempo, &mut in_frames),
                             (&webm, &tgs.unwrap_or_default()),
@@ -167,8 +167,8 @@ impl App {
 /// `tempo`, as the result will.
 fn preview(
     ui: &mut egui::Ui,
-    screen: &mut Screen,
-    inset: &mut Inset,
+    probes: &crate::outputs::Probes,
+    (screen, inset): (&mut Screen, &mut Inset),
     item: &mut Item,
     (tempo, in_frames): (f64, &mut bool),
     (webm, tgs): (&Options, &tgs::Options),
@@ -242,7 +242,7 @@ fn preview(
         }
         // where the input came from, and where the result went
         let result = item.made.as_ref().and_then(|made| match &made.job.status {
-            Status::Done(done) => Some(done.output.clone()).filter(|output| output.exists()),
+            Status::Done(done) => Some(done.output.clone()).filter(|output| probes.exists(output)),
             _ => None,
         });
         let show_folder = |ui: &mut egui::Ui| {
@@ -526,8 +526,8 @@ fn preview(
                     None => {}
                 }
             } else {
+                // drawn again once read, as reading asks
                 message_in(ui, rect, &fl!("reading"), ui.visuals().weak_text_color());
-                ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
             }
         }
         Show::Result => {

@@ -42,18 +42,20 @@ impl App {
         let output = self.item(id).map(|item| self.output_for(item));
         // a file there that this item didn't write, which tgradish made or
         // the settings let any result replace
-        let replaces = output.as_ref().filter(|output| output.exists() && !self.wrote(id, output));
+        let there = output.as_ref().is_some_and(|output| self.probes.exists(output));
+        let replaces = output.as_ref().filter(|output| there && !self.wrote(id, output));
         let replaces = replaces.map(|output| match self.made_by_tgradish(output) {
             true => fl!("replaces-earlier"),
             false => fl!("replaces-earlier", "any"),
         });
         let queued = self.queue.iter().position(|&other| other == id);
         let presets_kept = self.presets_dir.is_some();
+        let probes = &self.probes;
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
         // the result made, there still, which can be copied as a file, and
         // whether it is where the next goes, made as it would be made now
         let made = item.made.as_ref().and_then(|made| match &made.job.status {
-            Status::Done(done) => Some(done.output.clone()).filter(|output| output.exists()),
+            Status::Done(done) => Some(done.output.clone()).filter(|output| probes.exists(output)),
             _ => None,
         });
         // the one the bar names, not one of another format made before
@@ -67,7 +69,7 @@ impl App {
         let converting = item.job.as_ref().is_some_and(|conversion| conversion.job.is_running());
         let fallbacks = &self.fallbacks;
         let right = output.as_ref().filter(|_| !converting).map(|output| {
-            Right::of(ui, fallbacks, (output, made.clone(), saved), replaces.as_deref())
+            Right::of(ui, fallbacks, (output, there, made.clone(), saved), replaces.as_deref())
         });
         let gap = ui.spacing().item_spacing.x;
         let bar = ui.available_width();
@@ -297,6 +299,8 @@ const COPIED_SHOWN: f64 = 2.0;
 /// that copy the result made and show its folder.
 struct Right<'a> {
     output: &'a Path,
+    /// Something is there, whose folder can be shown.
+    there: bool,
     /// The result made, which can be copied.
     made: Option<PathBuf>,
     /// Made where it goes, as it would be made now.
@@ -311,12 +315,12 @@ impl<'a> Right<'a> {
     fn of(
         ui: &egui::Ui,
         fallbacks: &crate::fallback::Fallbacks,
-        (output, made, saved): (&'a Path, Option<PathBuf>, bool),
+        (output, there, made, saved): (&'a Path, bool, Option<PathBuf>, bool),
         replaces: Option<&str>,
     ) -> Right<'a> {
         let name = output.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let replaces = replaces.map(|replaces| format!("⚠ {replaces}"));
-        let mut right = Right { output, made, saved, name, replaces, least: 0.0 };
+        let mut right = Right { output, there, made, saved, name, replaces, least: 0.0 };
         let gap = ui.spacing().item_spacing.x;
         let shortest = folders(output).pop().unwrap_or_default();
         let mut least = right.buttons_width(ui)
@@ -364,7 +368,7 @@ impl<'a> Right<'a> {
     fn buttons_width(&self, ui: &egui::Ui) -> f32 {
         let gap = ui.spacing().item_spacing.x;
         let mut width = 0.0;
-        if self.output.exists() {
+        if self.there {
             width += widgets::text_width(ui, &fl!("show-in-folder"), button_padding(ui)) + gap;
         }
         if self.made.is_some() {
@@ -378,7 +382,7 @@ impl<'a> Right<'a> {
     /// it alone is wider than that, its ending kept. Gives the result to
     /// copy, once asked.
     fn show(&self, ui: &mut egui::Ui, fallbacks: &crate::fallback::Fallbacks) -> Option<PathBuf> {
-        if self.output.exists() && ui.button(fl!("show-in-folder")).clicked() {
+        if self.there && ui.button(fl!("show-in-folder")).clicked() {
             system::reveal(self.output);
         }
         let mut copy = None;

@@ -91,6 +91,11 @@ impl Fallbacks {
         self.asked.contains(&c) && !self.searching.contains(&block(c)) && !self.covered.contains(&c)
     }
 
+    /// Whether fonts are still being looked for.
+    pub(crate) fn looking(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
     /// Looks for fonts for the characters of `texts` the window can't show,
     /// and adds those found by now.
     pub(crate) fn check<'a>(

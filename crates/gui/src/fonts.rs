@@ -2,6 +2,8 @@
 //! reads as something: a character no font has, the system's included, is
 //! shown as its code. `fallback` finds the system's fonts.
 
+use std::hash::{Hash, Hasher};
+
 use eframe::egui::{self, Color32};
 
 use crate::app::App;
@@ -55,6 +57,22 @@ impl App {
     /// Looks for the system's fonts for characters in names the window's
     /// own fonts lack.
     pub(crate) fn find_fonts(&mut self, ctx: &egui::Context) {
+        // only as what is shown changes, or while fonts are looked for:
+        // known by what the texts are made from, without making them
+        let mut hasher = std::hash::DefaultHasher::new();
+        for item in &self.items {
+            (&item.inputs, item.made.as_ref().map(|made| &made.job.output)).hash(&mut hasher);
+        }
+        let selected = self.selected.and_then(|id| self.item(id));
+        selected.map(|item| self.output_for(item)).hash(&mut hasher);
+        self.banner.rows.iter().for_each(|said| said.id.hash(&mut hasher));
+        self.inspection.as_ref().map(|inspection| &inspection.path).hash(&mut hasher);
+        self.config.gui.output_dir.hash(&mut hasher);
+        let shown = hasher.finish();
+        if self.fonts_checked == Some(shown) && !self.fallbacks.looking() {
+            return;
+        }
+        self.fonts_checked = Some(shown);
         let mut texts: Vec<String> = Vec::new();
         for item in &self.items {
             texts.push(item.name());
