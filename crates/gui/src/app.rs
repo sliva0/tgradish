@@ -189,7 +189,8 @@ impl App {
                 // not to be written over, then
                 Err(err) => {
                     let message = Message::warning(fl!("session-unsaved"));
-                    return self.say(message.file(store.path()).detail(err.to_string()));
+                    return self
+                        .say(message.file(store.path()).detail(tgradish_core::io_reason(&err)));
                 }
             };
             if let Some(unreadable) = loaded.unreadable {
@@ -233,7 +234,7 @@ impl App {
                 Ok(name) => item.pasted_copy = Some(name),
                 Err(err) => {
                     let message = Message::warning(fl!("session-unsaved"));
-                    let message = message.file(store.path()).detail(err.to_string());
+                    let message = message.file(store.path()).detail(tgradish_core::io_reason(&err));
                     self.session = None;
                     return self.say(message);
                 }
@@ -259,7 +260,7 @@ impl App {
         let session = session.with_window(self.window);
         if let Err(err) = store.save(&session) {
             let message = Message::warning(fl!("session-unsaved"));
-            let message = message.file(store.path()).detail(err.to_string());
+            let message = message.file(store.path()).detail(tgradish_core::io_reason(&err));
             // once is enough
             self.session = None;
             self.say(message);
@@ -711,7 +712,7 @@ pub(crate) fn error_parts(err: &tgradish_core::Error) -> (Option<PathBuf>, Strin
         Error::Config { path, message } | Error::Unreadable { path, message } => {
             (Some(path.clone()), message.clone())
         }
-        Error::Io { path, error, .. } => (Some(path.clone()), error.to_string()),
+        Error::Io { path, error, .. } => (Some(path.clone()), tgradish_core::io_reason(error)),
         _ => (None, failure(err)),
     }
 }
