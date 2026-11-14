@@ -61,6 +61,13 @@ fn convert_help() -> String {
     sections(&[("Examples", CONVERT_EXAMPLES), ("Exit status", EXIT_STATUS)])
 }
 
+fn config_help() -> String {
+    sections(&[(
+        "Examples",
+        "  tgradish config example > \"$(tgradish config path)\"   start a config file",
+    )])
+}
+
 /// The exit statuses alone, for the commands with no examples of their
 /// own: inspect, watch and spoof.
 fn exit_status_help() -> String {
@@ -180,8 +187,8 @@ pub enum Command {
     /// List and show presets.
     #[command(subcommand)]
     Preset(PresetCommand),
-    /// Show the config file.
-    #[command(subcommand)]
+    /// Show the config file, where it is, or an example of one.
+    #[command(subcommand, after_help = config_help())]
     Config(ConfigCommand),
     /// Show which ffmpeg is used and whether it can make video stickers:
     /// `status`, which `tgradish ffmpeg` alone runs.
@@ -804,10 +811,14 @@ pub enum PresetCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
-    /// Print the config file path.
+    /// Print the config file's path.
     Path,
-    /// Show the effective config.
+    /// Show the config in effect: the file's, with the defaults it leaves
+    /// out.
     Show,
+    /// Print an example config, each setting explained, to start one from:
+    /// `tgradish config example > "$(tgradish config path)"`.
+    Example,
 }
 
 #[derive(Debug, Subcommand)]

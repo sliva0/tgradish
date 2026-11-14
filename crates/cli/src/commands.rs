@@ -362,6 +362,10 @@ pub fn preset(ctx: &Context, command: PresetCommand) -> Result<()> {
 
 pub fn config(ctx: &Context, command: ConfigCommand, path: Option<PathBuf>) -> Result<()> {
     match command {
+        ConfigCommand::Example if ctx.global.json => {
+            crate::json_line(&json!({ "text": tgradish_core::config::starting_example() }));
+        }
+        ConfigCommand::Example => out!("{}", tgradish_core::config::starting_example()),
         ConfigCommand::Path => {
             let path = path.context("no home directory found")?;
             if ctx.global.json {

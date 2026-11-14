@@ -1567,6 +1567,18 @@ fn shows_presets_and_the_config() {
     assert_ne!(read, defaults);
     let json = json_lines(&tgradish(&["--json", "--config", config, "config", "show"]));
     assert_eq!(json[0]["preset"], "fast");
+    // an example to start one from, which reads as one
+    let example = tgradish(&["config", "example"]);
+    assert!(example.status.success());
+    let example = String::from_utf8(example.stdout).unwrap();
+    assert!(example.contains("# preset used when none is given"), "{example}");
+    let written = dir.path().join("example.toml");
+    std::fs::write(&written, &example).unwrap();
+    let shown = tgradish(&["--config", written.to_str().unwrap(), "--json", "config", "show"]);
+    assert!(shown.status.success(), "{}", String::from_utf8_lossy(&shown.stderr));
+    assert!(json_lines(&shown)[0]["ffmpeg"]["path"].is_null());
+    let help = String::from_utf8(tgradish(&["config", "--help"]).stdout).unwrap();
+    assert!(help.contains("tgradish config example > "), "{help}");
     let path = json_lines(&tgradish(&["--json", "--config", config, "config", "path"]));
     assert_eq!((path[0]["path"].as_str(), path[0]["exists"].as_bool()), (Some(config), Some(true)));
 }
