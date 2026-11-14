@@ -377,13 +377,18 @@ fn sections(
 }
 
 /// The window's scale, `scale`, smaller and larger by the steps egui's
-/// keys take, and back to 100%, which it applies at once, with those keys
+/// keys take, and back to 100%, which the window applies at once, with those keys
 /// under it, as the system writes them. Gives the button that changed it,
 /// where one did: nowhere for the one back to 100%.
 fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
-    use egui::gui_zoom::{self, kb_shortcuts};
+    use egui::gui_zoom::kb_shortcuts;
     let ctx = ui.ctx().clone();
     let mut stepped = None;
+    // the setting changes, which the window then applies, as it does a
+    // theme: kept once saved, like the rest of Settings; egui would only
+    // apply a scale asked of it on the next frame, which the window would
+    // take for its keys', which it keeps at once
+    let mut changed = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 3.0;
         let side = ui.spacing().interact_size.y;
@@ -391,7 +396,7 @@ fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
         let least = *scale <= *config::SCALES.start() + 1e-6;
         let smaller = ui.add_enabled(!least, button("−")).on_hover_text(fl!("scale-smaller"));
         if smaller.clicked() {
-            gui_zoom::zoom_out(&ctx);
+            changed = Some(config::scale_step(*scale, -1));
             stepped = Some(smaller.rect);
         }
         // as wide as the widest, so + stays put
@@ -402,18 +407,16 @@ fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
         let most = *scale >= *config::SCALES.end() - 1e-6;
         let larger = ui.add_enabled(!most, button("+")).on_hover_text(fl!("scale-larger"));
         if larger.clicked() {
-            gui_zoom::zoom_in(&ctx);
+            changed = Some(config::scale_step(*scale, 1));
             stepped = Some(larger.rect);
         }
         if widgets::reset_to(ui, (*scale - 1.0).abs() > 1e-6, &fl!("scale-reset")) {
-            ctx.set_zoom_factor(1.0);
+            changed = Some(1.0);
             stepped = Some(egui::Rect::NOTHING);
         }
     });
-    // what the buttons did, as egui's keys would have; the window keeps
-    // the setting and the scale together otherwise
-    if stepped.is_some() {
-        *scale = config::rounded_scale(f64::from(ctx.zoom_factor()));
+    if let Some(changed) = changed {
+        *scale = changed;
     }
     let keys = |shortcut| ctx.format_shortcut(shortcut);
     widgets::hint(
@@ -650,18 +653,23 @@ mod tests {
             let now = pixel(&harness, "+");
             assert!((now - under).length() < 1.5, "at {percent}%: {now:?}, not {under:?}");
         }
-        assert_eq!(harness.state().config.gui.scale, 1.3);
+        assert_eq!((harness.state().config.gui.scale, harness.ctx.zoom_factor()), (1.3, 1.3));
+        // applied at once, but kept only once saved, as the rest of Settings
+        let on_disk = || Config::load(&path).map_or(1.0, |config| config.gui.scale);
+        assert_eq!(on_disk(), 1.0);
         // applied at once, kept once saved
         harness.get_by_label(&fl!("save")).click_accesskit();
         settle(&mut harness);
         assert_eq!(Config::load(&path).unwrap().gui.scale, 1.3);
-        // back to 100%
+        // back to 100%, and closed without saving: as it is until the
+        // window closes, as a theme chosen is, and not kept
         harness.get_by_label("⟲").click_accesskit();
         settle(&mut harness);
         assert_eq!((harness.state().config.gui.scale, harness.ctx.zoom_factor()), (1.0, 1.0));
-        // by the keys, with Settings closed: kept at once
         harness.get_by_label("✖").click_accesskit();
         settle(&mut harness);
+        assert_eq!((harness.ctx.zoom_factor(), on_disk()), (1.0, 1.3));
+        // by the keys, with Settings closed: kept at once
         harness.key_press_modifiers(Modifiers::COMMAND, Key::Equals);
         settle(&mut harness);
         assert_eq!(harness.ctx.zoom_factor(), 1.1);

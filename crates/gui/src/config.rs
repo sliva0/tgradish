@@ -153,6 +153,13 @@ const KEYS: [&str; 11] = [
 /// The scales the window may have, as egui's keys for zooming allow.
 pub(crate) const SCALES: std::ops::RangeInclusive<f64> = 0.2..=5.0;
 
+/// `scale` a step of a tenth larger, or `by` steps, within [`SCALES`], as
+/// egui's keys step it.
+pub(crate) fn scale_step(scale: f64, by: i32) -> f64 {
+    let scale = (scale + 0.1 * f64::from(by)).clamp(*SCALES.start(), *SCALES.end());
+    rounded_scale((scale * 10.0).round() / 10.0)
+}
+
 /// `scale` to the hundredth, as egui's steps of a tenth leave it, without
 /// what an `f32` adds to it.
 pub(crate) fn rounded_scale(scale: f64) -> f64 {
@@ -414,6 +421,9 @@ mod tests {
         let gui = GuiConfig { scale: stepped, ..GuiConfig::default() };
         let written = toml::Table::try_from(&gui).unwrap();
         assert_eq!(written["scale"].as_float(), Some(1.1));
+        // stepped as egui's keys step it, within its range
+        assert_eq!((scale_step(1.0, 1), scale_step(1.1, -1), scale_step(1.25, 1)), (1.1, 1.0, 1.4));
+        assert_eq!((scale_step(5.0, 1), scale_step(0.2, -1)), (5.0, 0.2));
     }
 
     #[test]
