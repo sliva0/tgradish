@@ -109,7 +109,8 @@ impl App {
     }
 
     pub(crate) fn files_panel(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(6.0);
+        // its buttons level with the bar over the preview beside it
+        ui.add_space(4.0);
         let icon_side = icon::side(ui.ctx(), ICON_ROOM);
         // as tall as the icon, with the buttons beside its middle
         let header = vec2(ui.available_width(), icon_side);
@@ -165,7 +166,11 @@ impl App {
         if !self.items.is_empty() {
             let mut stop = false;
             egui::Panel::bottom("files-footer").show(ui, |ui| {
-                ui.add_space(6.0);
+                // level with the bar under the preview beside it: its line,
+                // and the middle of its buttons, which are taller; that
+                // bar's panel has more room under it than this one's
+                let (above, below) = footer_spaces(ui.style());
+                ui.add_space(above);
                 // converting: how far it got of all asked for, and a way to
                 // stop it all, each where it stays as the numbers change
                 if let Some((current, total)) = self.batch_progress() {
@@ -216,7 +221,7 @@ impl App {
                         ui.add(label).on_hover_text(fl!("row-attention", "hint"));
                     }
                 });
-                ui.add_space(4.0);
+                ui.add_space(below);
             });
             if stop {
                 self.stop_all();
@@ -344,6 +349,16 @@ impl App {
             });
         });
     }
+}
+
+/// The space over the list's bar, and under it, which lay its buttons
+/// level with those of the bar under the preview beside it.
+fn footer_spaces(style: &egui::Style) -> (f32, f32) {
+    use crate::actions::{BAR_ABOVE, BAR_BELOW, BAR_ROW};
+    let taller = (BAR_ROW - theme::CONTROL) / 2.0;
+    let central = egui::Frame::central_panel(style).inner_margin.bottom;
+    let side = egui::Frame::side_top_panel(style).inner_margin.bottom;
+    (BAR_ABOVE + taller, BAR_BELOW + taller + f32::from(central - side))
 }
 
 /// What a file dialog asks for.

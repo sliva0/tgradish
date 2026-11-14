@@ -24,6 +24,12 @@ fn within<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R
     .inner
 }
 
+/// Space over the bar's row, under it, and how high it is, as its first
+/// button is: the list of files lays its own bar out level with it.
+pub(crate) const BAR_ABOVE: f32 = 8.0;
+pub(crate) const BAR_BELOW: f32 = 6.0;
+pub(crate) const BAR_ROW: f32 = 32.0;
+
 /// Whether the bar is on two lines, as it last needed, kept under this
 /// name.
 const LINES: &str = "action bar lines";
@@ -83,16 +89,18 @@ impl App {
                     // until the conversion gets to its next check
                     let stopping = job.is_stopping();
                     let text = if stopping { fl!("stopping") } else { fl!("stop") };
-                    let stop = egui::Button::new(text).min_size(vec2(140.0, 32.0));
+                    let stop = egui::Button::new(text).min_size(vec2(140.0, BAR_ROW));
                     if ui.add_enabled(!stopping, stop).clicked() {
                         job.cancel();
                     }
-                    let size = vec2(ui.available_width(), 32.0);
+                    let size = vec2(ui.available_width(), BAR_ROW);
                     crate::result::step_bar(ui, job, size);
                 }
                 Some(job) => {
                     if ui
-                        .add(egui::Button::new(fl!("cancel-waiting")).min_size(vec2(140.0, 32.0)))
+                        .add(
+                            egui::Button::new(fl!("cancel-waiting")).min_size(vec2(140.0, BAR_ROW)),
+                        )
                         .clicked()
                     {
                         job.cancel();
@@ -115,7 +123,7 @@ impl App {
                     let again = item.made.as_ref().is_some_and(|made| made.format == item.format);
                     let text = if again { fl!("convert-again") } else { fl!("convert") };
                     let button = egui::Button::new(widgets::medium(ui, text, 15.0))
-                        .min_size(vec2(140.0, 32.0))
+                        .min_size(vec2(140.0, BAR_ROW))
                         .shortcut_text(fl!("convert-keys"));
                     let hint = if current {
                         fl!("convert-again", "hint")
@@ -149,7 +157,7 @@ impl App {
                             egui::Button::new(RichText::new("💾").size(15.0))
                         };
                         let hint = fl!("save-preset", "hint");
-                        let save = save.min_size(vec2(32.0, 32.0));
+                        let save = save.min_size(vec2(BAR_ROW, BAR_ROW));
                         let save = widgets::named(ui.add(save), &fl!("save-preset"));
                         if save.on_hover_text(hint).clicked() {
                             crate::preset_dialogs::ask(

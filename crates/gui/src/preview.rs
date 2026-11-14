@@ -52,9 +52,9 @@ impl App {
         let ffmpeg_args = self.backend().as_ref().is_ok_and(Backend::supports_ffmpeg_args);
         let queued = self.queue.iter().position(|&other| other == id);
         egui::Panel::bottom("actions").show(ui, |ui| {
-            ui.add_space(8.0);
+            ui.add_space(crate::actions::BAR_ABOVE);
             self.actions(ui, id);
-            ui.add_space(6.0);
+            ui.add_space(crate::actions::BAR_BELOW);
         });
         let output = self.item(id).map(|item| self.output_for(item));
         let (choice, path) = self.ffmpeg_settings();

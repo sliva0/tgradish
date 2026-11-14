@@ -197,3 +197,31 @@ fn names_every_button_for_screen_readers() {
     });
     assert!(nameless.is_empty(), "nameless:\n{}", nameless.join("\n"));
 }
+
+#[test]
+fn lays_the_lists_bars_level_with_those_beside_them() {
+    // where each is, top and bottom, by its name
+    let place = |harness: &Harness<App>, by: egui_kittest::kittest::By<'_>| {
+        let node = harness.get(by.role(egui::accesskit::Role::Button));
+        let rect = node.accesskit_node().bounding_box().expect("drawn");
+        (rect.y0, rect.y1)
+    };
+    let mut seen = 0;
+    for width in [crate::MIN_WIDTH, 1280.0] {
+        walk(width, |harness, scene| {
+            if scene != "files" {
+                return;
+            }
+            seen += 1;
+            // the buttons over the list and over the preview, edge to edge
+            let (add, input) = (fl!("add-files"), fl!("show-input"));
+            assert_eq!(place(harness, by().label(&add)), place(harness, by().label(&input)));
+            // those under them about the same middle, Convert being taller
+            let (remove, keys) = (fl!("remove-all"), fl!("convert-keys"));
+            let all = place(harness, by().label(&remove));
+            let convert = place(harness, by().label_contains(&keys));
+            assert_eq!(all.0 + all.1, convert.0 + convert.1, "{all:?} {convert:?}");
+        });
+    }
+    assert_eq!(seen, 2);
+}
