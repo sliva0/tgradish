@@ -372,12 +372,21 @@ pub fn config(ctx: &Context, command: ConfigCommand, path: Option<PathBuf>) -> R
                 outln!("{}", path.display());
             }
         }
-        ConfigCommand::Show if ctx.global.json => crate::json_line(&ctx.config),
         ConfigCommand::Show => {
-            if ctx.config == Config::default() {
-                eprintln!("# no config file, using defaults");
+            // what is used, the presets too where the file names none
+            let effective = Config {
+                preset: Some(ctx.config.preset_for(Format::Webm).to_owned()),
+                tgs_preset: Some(ctx.config.preset_for(Format::Tgs).to_owned()),
+                ..ctx.config.clone()
+            };
+            if ctx.global.json {
+                crate::json_line(&effective);
+            } else {
+                if path.as_deref().is_none_or(|path| !path.exists()) {
+                    eprintln!("# no config file, using defaults");
+                }
+                out!("{}", toml::to_string(&effective)?);
             }
-            out!("{}", toml::to_string(&ctx.config)?);
         }
     }
     Ok(())

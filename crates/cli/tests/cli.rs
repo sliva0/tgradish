@@ -1453,11 +1453,27 @@ fn shows_presets_and_the_config() {
     let text = console::strip_ansi_codes(&String::from_utf8_lossy(&listed.stdout)).into_owned();
     assert!(text.contains("fast  ") && text.contains("built-in"), "{text}");
 
-    // no config file: the defaults, which say so
+    // an empty config: the defaults, the presets used among them
     let shown = tgradish(&["config", "show"]);
     assert!(shown.status.success());
-    assert!(String::from_utf8_lossy(&shown.stderr).contains("no config file"));
     let defaults: toml::Table = toml::from_str(&String::from_utf8(shown.stdout).unwrap()).unwrap();
+    assert_eq!(defaults["preset"].as_str(), Some("balanced"));
+    assert_eq!(defaults["tgs-preset"].as_str(), Some("best"));
+    assert_eq!(json_lines(&tgradish(&["--json", "config", "show"]))[0]["preset"], "balanced");
+    // and no file at all, which it says
+    #[cfg(target_os = "linux")]
+    {
+        let home = tempfile::tempdir().unwrap();
+        let shown = Command::new(env!("CARGO_BIN_EXE_tgradish"))
+            .args(["config", "show"])
+            .env_remove("TGRADISH_CONFIG")
+            .env("XDG_CONFIG_HOME", home.path())
+            .output()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&shown.stderr).contains("no config file"));
+        let read: toml::Table = toml::from_str(&String::from_utf8(shown.stdout).unwrap()).unwrap();
+        assert_eq!(read, defaults);
+    }
     // and one that says something
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join("config.toml");
