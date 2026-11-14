@@ -17,6 +17,12 @@ pub enum Error {
     FfmpegNotFound(FfmpegMissing),
     #[error("{program} failed ({status}):\n{stderr}")]
     Ffmpeg { program: &'static str, status: String, stderr: String },
+    /// A file read as WebM, as one spoofed or inspected, that isn't one.
+    #[error("{} isn't a WebM file", .0.display())]
+    NotWebm(PathBuf),
+    /// A file inspected that is no kind of sticker.
+    #[error("{} isn't a WebM, WebP or .tgs file", .0.display())]
+    NotSticker(PathBuf),
     /// An input that isn't there: said the same whatever was to read it.
     #[error("{}: no such file", .0.display())]
     NoSuchFile(PathBuf),

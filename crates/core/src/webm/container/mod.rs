@@ -34,8 +34,10 @@ const DEFAULT_TIMESTAMP_SCALE: u64 = 1_000_000;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum WebmError {
+    /// Not `#[from]`, which would make it the source too, and the
+    /// message say it twice where its chain is printed.
     #[error("malformed WebM: {0}")]
-    Ebml(#[from] EbmlError),
+    Ebml(EbmlError),
     #[error("not a WebM file: no EBML header")]
     NotEbml,
     #[error("no Segment element found")]
@@ -58,6 +60,12 @@ pub enum WebmError {
     /// Larger than [`MAX_INSPECTED_BYTES`], which isn't read.
     #[error("it has more than {} MiB, far more than a sticker", MAX_INSPECTED_BYTES >> 20)]
     TooLarge,
+}
+
+impl From<EbmlError> for WebmError {
+    fn from(err: EbmlError) -> WebmError {
+        WebmError::Ebml(err)
+    }
 }
 
 pub type Result<T> = std::result::Result<T, WebmError>;

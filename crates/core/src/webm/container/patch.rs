@@ -364,6 +364,7 @@ pub fn patch_file(
     changes: &Patch,
     replace: bool,
 ) -> crate::Result<PatchReport> {
+    super::inspect::starts_as_webm(input)?;
     let mut buf = crate::art::read(input)?;
     crate::fsutil::check_writable(output)
         .map_err(crate::Error::io(crate::FileAction::Write, output))?;

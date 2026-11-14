@@ -216,6 +216,31 @@ fn says_an_input_is_missing_alike_everywhere() {
     }
 }
 
+/// A file of the wrong kind is said to be, with what makes the right one.
+#[test]
+fn says_a_file_is_of_the_wrong_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("a.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let png = png.to_str().unwrap();
+    let stderr = |args: &[&str]| {
+        let output = tgradish(args);
+        assert_eq!(output.status.code(), Some(1), "{args:?}");
+        String::from_utf8_lossy(&output.stderr).trim_end().to_owned()
+    };
+    assert_eq!(stderr(&["inspect", png]), format!("error: {png} isn't a WebM, WebP or .tgs file"));
+    assert_eq!(
+        stderr(&["spoof", png]),
+        format!("error: {png} isn't a WebM file: tgradish convert {png} makes one")
+    );
+    // one that starts as WebM, and breaks, says why once
+    let broken = dir.path().join("broken.webm");
+    std::fs::write(&broken, b"\x1a\x45\xdf\xa3\x00\x00").unwrap();
+    let said = stderr(&["spoof", broken.to_str().unwrap()]);
+    let why = said.rsplit(": ").next().unwrap();
+    assert_eq!(said.matches(why).count(), 1, "{said}");
+}
+
 /// A folder that can't be written to is found before converting, and said
 /// without the temporary file's path or the OS's number.
 #[cfg(unix)]

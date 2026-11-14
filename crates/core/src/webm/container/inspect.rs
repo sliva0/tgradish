@@ -464,15 +464,15 @@ pub fn inspect_file(path: &Path) -> crate::Result<WebmInfo> {
 }
 
 /// Fails unless the file at `path` starts with the EBML header's ID.
-fn starts_as_webm(path: &Path) -> crate::Result<()> {
+pub(crate) fn starts_as_webm(path: &Path) -> crate::Result<()> {
     let mut start = [0u8; 4];
     let read = std::fs::File::open(path)
         .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut start));
     match read {
         Ok(()) if start == EBML_MAGIC => Ok(()),
-        Ok(()) => Err(WebmError::NotEbml.into()),
+        Ok(()) => Err(crate::Error::NotWebm(path.to_path_buf())),
         Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
-            Err(WebmError::NotEbml.into())
+            Err(crate::Error::NotWebm(path.to_path_buf()))
         }
         Err(err) => Err(read_failed(path, err)),
     }

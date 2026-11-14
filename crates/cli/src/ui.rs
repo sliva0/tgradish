@@ -74,11 +74,14 @@ pub fn introduce(to_stderr: bool) {
 
 /// `message` about the file at `path`, put after its name, linked: once,
 /// where the message starts with the name already, as "nope.mp4: no such
-/// file" does.
+/// file" and "a.gif isn't a WebM file" do.
 pub fn about(path: &std::path::Path, message: &str) -> String {
     let name = path.display().to_string();
-    let message = message.strip_prefix(&format!("{name}: ")).unwrap_or(message);
-    format!("{}: {message}", crate::term::link(&name, path))
+    let link = crate::term::link(&name, path);
+    match message.strip_prefix(&name) {
+        Some(rest) if rest.starts_with([' ', ':']) => format!("{link}{rest}"),
+        _ => format!("{link}: {message}"),
+    }
 }
 
 pub fn error_label() -> console::StyledObject<&'static str> {

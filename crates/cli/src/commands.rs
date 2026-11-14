@@ -61,6 +61,10 @@ fn spoof_file(ctx: &Context, args: &SpoofArgs) -> Result<()> {
     let report =
         container::patch_file(&args.input, &output, &changes, replace).map_err(
             |err| match err {
+                tgradish_core::Error::NotWebm(path) => {
+                    let path = path.display();
+                    anyhow::anyhow!("{path} isn't a WebM file: tgradish convert {path} makes one")
+                }
                 // these name the file themselves
                 tgradish_core::Error::NoSuchFile(_)
                 | tgradish_core::Error::Unreadable { .. }
