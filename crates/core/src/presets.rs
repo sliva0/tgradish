@@ -69,6 +69,7 @@ impl Format {
         }
     }
 
+    /// The extension of the files it makes, without a dot.
     pub fn extension(self) -> &'static str {
         match self {
             Format::Webm => "webm",
@@ -120,6 +121,8 @@ impl Format {
         unused
     }
 
+    /// The built-in preset it is made with when none is given or
+    /// configured: [`DEFAULT_PRESET`] or [`DEFAULT_TGS_PRESET`].
     pub fn default_preset(self) -> &'static str {
         match self {
             Format::Webm | Format::Webp => DEFAULT_PRESET,
@@ -132,13 +135,16 @@ impl Format {
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum FormatOptions {
+    /// WebM's options.
     Webm(Options),
+    /// `.tgs` options.
     Tgs(tgs::Options),
     /// WebM's options, for an image.
     Webp(Options),
 }
 
 impl FormatOptions {
+    /// The format they are for.
     pub fn format(&self) -> Format {
         match self {
             FormatOptions::Webm(_) => Format::Webm,
@@ -185,10 +191,14 @@ struct PresetFile {
     tgs: toml::Table,
 }
 
+/// A named set of options for either format, built in or a user's file.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct Preset {
+    /// What it is called: its file's name, without `.toml`.
     pub name: String,
+    /// What it is for, in the user's words; may be empty.
     pub description: String,
+    /// The preset whose options it starts from, if any.
     pub extends: Option<String>,
     /// Options for WebM and image results set by this preset itself,
     /// without the presets it extends: those its file sets.
@@ -271,11 +281,17 @@ fn builtin() -> Vec<Preset> {
 pub enum PresetError {
     /// No preset has the name; `known` are those that do.
     #[error("unknown preset {name:?}, available: {}", known.join(", "))]
-    Unknown { name: String, known: Vec<String> },
+    Unknown {
+        /// The name asked for.
+        name: String,
+        /// The presets there are.
+        known: Vec<String>,
+    },
     /// Its file, or that of one it extends, isn't a preset's: the message
     /// names it and says why.
     #[error("broken preset {0}")]
     Broken(String),
+    /// The presets the one named extends lead back to it.
     #[error("preset {0:?} extends itself")]
     ExtendsItself(String),
     /// A name too short, too long or starting with a space.
@@ -294,7 +310,12 @@ pub enum PresetError {
     /// A preset's file sets an option of one file, one of [`PER_FILE`],
     /// as `key` names it in its table, `webm.crop`; `place` is the file.
     #[error("broken preset {place}: {key} is one file's to choose, which a preset says nothing of")]
-    PerFile { place: String, key: String },
+    PerFile {
+        /// The preset's file.
+        place: String,
+        /// The option, as its table names it.
+        key: String,
+    },
 }
 
 /// All presets, by name. Broken preset files are kept as errors so that
@@ -372,6 +393,8 @@ impl Presets {
         self.entries.iter().map(|(name, entry)| (name.as_str(), entry.as_ref()))
     }
 
+    /// The preset `name`, as loaded: [`PresetError::Unknown`] when there
+    /// is none, and why it is broken when its file is.
     pub fn get(&self, name: &str) -> Result<&Preset> {
         match self.entries.get(name) {
             Some(Ok(preset)) => Ok(preset),
@@ -489,8 +512,8 @@ pub fn save(
     file.insert("webm".into(), table(&shareable(webm)).into());
     file.insert("tgs".into(), table(&shareable(tgs)).into());
     let text = toml::to_string(&file).map_err(|err| PresetError::Broken(err.to_string()))?;
+    let path = file_in(dir, name)?;
     std::fs::create_dir_all(dir).map_err(Error::io(FileAction::Create, dir))?;
-    let path = dir.join(format!("{name}.toml"));
     crate::fsutil::write_output(&path, text.as_bytes(), replace)?;
     Ok(path)
 }
@@ -521,7 +544,7 @@ pub fn check_remove(name: &str, presets: &Presets) -> Result<()> {
 /// Renames the preset `from` in `dir` to `to`, as [`check_rename`] allows.
 pub fn rename(dir: &Path, from: &str, to: &str, presets: &Presets) -> Result<PathBuf> {
     check_rename(from, to, presets)?;
-    let (old, new) = (dir.join(format!("{from}.toml")), dir.join(format!("{to}.toml")));
+    let (old, new) = (file_in(dir, from)?, file_in(dir, to)?);
     // a name changed only in case names the same file where case doesn't
     // matter; where it does, the other file is another preset's
     if new.exists() && !same_file(&old, &new) {
@@ -529,6 +552,23 @@ pub fn rename(dir: &Path, from: &str, to: &str, presets: &Presets) -> Result<Pat
     }
     std::fs::rename(&old, &new).map_err(Error::io(FileAction::Rename, &old))?;
     Ok(new)
+}
+
+/// The file of the preset `name` in `dir`, refused for a name that would
+/// lead out of it. Names of presets already there are file names, which
+/// [`check_name`] needn't allow, as those saved by hand; only new names
+/// are held to it.
+fn file_in(dir: &Path, name: &str) -> Result<PathBuf> {
+    let file = format!("{name}.toml");
+    let mut parts = Path::new(&file).components();
+    let plain = matches!(parts.next(), Some(std::path::Component::Normal(part)) if part == file.as_str())
+        && parts.next().is_none()
+        && !name.contains(['/', '\\', '\0'])
+        && !name.is_empty();
+    if !plain {
+        return Err(PresetError::NameCharacters.into());
+    }
+    Ok(dir.join(file))
 }
 
 /// Whether `a` and `b` are one file, under two names or the same.
@@ -565,7 +605,7 @@ pub fn set_description(path: &Path, description: &str) -> Result<()> {
 /// returns what it held, which [`restore`] puts back.
 pub fn remove(dir: &Path, name: &str, presets: &Presets) -> Result<String> {
     check_remove(name, presets)?;
-    let path = &dir.join(format!("{name}.toml"));
+    let path = &file_in(dir, name)?;
     let text = std::fs::read_to_string(path).map_err(Error::io(FileAction::Read, path))?;
     std::fs::remove_file(path).map_err(Error::io(FileAction::Remove, path))?;
     Ok(text)
@@ -574,8 +614,8 @@ pub fn remove(dir: &Path, name: &str, presets: &Presets) -> Result<String> {
 /// Puts back as `name` in `dir` a preset [`remove`] deleted, which held
 /// `text`, unless another of its name is there now.
 pub fn restore(dir: &Path, name: &str, text: &str) -> Result<PathBuf> {
+    let path = file_in(dir, name)?;
     std::fs::create_dir_all(dir).map_err(Error::io(FileAction::Create, dir))?;
-    let path = dir.join(format!("{name}.toml"));
     crate::fsutil::write_output(&path, text.as_bytes(), false)?;
     Ok(path)
 }
@@ -685,6 +725,34 @@ mod tests {
         for bad in ["", " lead", "a/b", "..", &"x".repeat(65)] {
             assert!(check_name(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn keeps_to_the_presets_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("presets");
+        std::fs::create_dir(&dir).unwrap();
+        let outside = root.path().join("x.toml");
+        std::fs::write(&outside, "description = 'not a preset of the folder'\n").unwrap();
+        let presets = Presets::load(Some(&dir)).unwrap();
+        for name in ["../x", "..\\x", "/x", "a/../../x"] {
+            let refused = |result: Result<()>| {
+                matches!(result, Err(Error::Preset(PresetError::NameCharacters)))
+            };
+            assert!(refused(remove(&dir, name, &presets).map(drop)), "{name}");
+            assert!(refused(restore(&dir, name, "").map(drop)), "{name}");
+            assert!(refused(rename(&dir, name, "y", &presets).map(drop)), "{name}");
+        }
+        assert!(outside.exists());
+        assert!(!root.path().join("y.toml").exists());
+        // one saved by hand under a name the window wouldn't give is still
+        // the user's to rename and delete
+        write(&dir, "by.hand", "description = ''\n");
+        let presets = Presets::load(Some(&dir)).unwrap();
+        let text = remove(&dir, "by.hand", &presets).unwrap();
+        restore(&dir, "by.hand", &text).unwrap();
+        rename(&dir, "by.hand", "by hand", &presets).unwrap();
+        assert!(dir.join("by hand.toml").exists());
     }
 
     fn write(dir: &Path, name: &str, text: &str) {

@@ -111,7 +111,7 @@ pub fn run(dir: Option<&Path>, bench: &Bench) -> Result<()> {
         let started = Instant::now();
         let input = decode(bytes, &DecodeOptions::default(), &Default::default())
             .with_context(|| name.clone())?;
-        let (anim, _) = normalise(&input, &Options::default())?;
+        let (anim, _) = normalise(input, &Options::default())?;
         let name_tag = Some("tgradish".to_owned());
         let score = |scene: &tgradish_tgs::scene::Scene| {
             file::quick_size(

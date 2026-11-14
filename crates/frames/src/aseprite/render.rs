@@ -2,6 +2,7 @@
 //! file asks for it, cels by z-index, and tilemaps.
 
 use std::collections::HashMap;
+use std::ops::Range;
 
 use super::blend::{self, Colour};
 use super::read::error;
@@ -119,6 +120,8 @@ impl Sprite {
     /// A frame, with the layers `shown` says, which are hidden with their
     /// groups.
     pub(super) fn render(&self, frame: usize, shown: &[bool]) -> Result<Vec<Colour>> {
+        #[cfg(test)]
+        super::RENDERED.set(super::RENDERED.get() + 1);
         let mut canvas = Surface::new(self.canvas());
         if self.composite_groups {
             let plan = self.plan(frame, shown);
@@ -300,33 +303,56 @@ impl Sprite {
                 let LayerKind::Tilemap { tileset } = layer.kind else { return Ok(()) };
                 // checked when reading: the tileset exists
                 let set = self.tilesets.iter().find(|t| t.id == tileset).unwrap();
+                if set.width == 0 || set.height == 0 || *width == 0 {
+                    return Ok(());
+                }
                 let tile_bytes = set.width * set.height * self.depth.bytes();
-                for (index, &tile) in tiles.iter().enumerate() {
-                    if tile & flip_mask != 0 {
-                        return Err(error("flipped tiles aren't supported"));
+                // only the tiles on the surface, which may be few of many
+                let Bounds { left, top, right, bottom } = canvas.bounds;
+                let columns = tiles_on(cel.x, set.width, *width, (left, right));
+                let rows = tiles_on(cel.y, set.height, tiles.len() / width, (top, bottom));
+                for row in rows {
+                    let line = &tiles[row * width..][columns.clone()];
+                    for (column, &tile) in columns.clone().zip(line) {
+                        #[cfg(test)]
+                        super::TILES.set(super::TILES.get() + 1);
+                        if tile & flip_mask != 0 {
+                            return Err(error("flipped tiles aren't supported"));
+                        }
+                        // checked when reading: the mask is one run of bits,
+                        // whose lowest is an id's lowest
+                        let shift = id_mask.trailing_zeros();
+                        let (id, all) = ((tile & id_mask) >> shift, id_mask >> shift);
+                        let empty = if set.zero_is_empty { id == 0 } else { id == all };
+                        if empty {
+                            continue;
+                        }
+                        let id = id as usize;
+                        if id >= set.count {
+                            return Err(error(format!("tile {id} isn't in its tileset")));
+                        }
+                        let at = (
+                            cel.x + column as i64 * set.width as i64,
+                            cel.y + row as i64 * set.height as i64,
+                        );
+                        let pixels = &set.pixels[id * tile_bytes..(id + 1) * tile_bytes];
+                        self.draw_image(pixels, (set.width, set.height), at, paint, canvas);
                     }
-                    // checked when reading: the mask is one run of bits,
-                    // whose lowest is an id's lowest
-                    let shift = id_mask.trailing_zeros();
-                    let (id, all) = ((tile & id_mask) >> shift, id_mask >> shift);
-                    let empty = if set.zero_is_empty { id == 0 } else { id == all };
-                    if empty {
-                        continue;
-                    }
-                    let id = id as usize;
-                    if id >= set.count {
-                        return Err(error(format!("tile {id} isn't in its tileset")));
-                    }
-                    let (column, row) = ((index % width) as i64, (index / width) as i64);
-                    let at = (cel.x + column * set.width as i64, cel.y + row * set.height as i64);
-                    let pixels = &set.pixels[id * tile_bytes..(id + 1) * tile_bytes];
-                    self.draw_image(pixels, (set.width, set.height), at, paint, canvas);
                 }
             }
             Content::Linked(_) => {}
         }
         Ok(())
     }
+}
+
+/// Which of `count` tiles of `size` pixels, the first at `at`, lie at
+/// least partly between `from` and `to` along one side.
+fn tiles_on(at: i64, size: usize, count: usize, (from, to): (usize, usize)) -> Range<usize> {
+    let (size, count) = (size as i64, count as i64);
+    let first = (from as i64 - at).div_euclid(size).clamp(0, count);
+    let last = (to as i64 - at + size - 1).div_euclid(size).clamp(0, count);
+    first as usize..last.max(first) as usize
 }
 
 #[cfg(test)]
@@ -532,6 +558,33 @@ mod tests {
         assert_eq!(pixels(&decode(&sprite(&[2, 0, 1])).unwrap(), 0), [GREEN, [0; 4], RED]);
         assert!(matches!(decode(&sprite(&[2 | 0x2000_0000, 0, 1])), Err(Error::Decode { .. })));
         assert!(matches!(decode(&sprite(&[9, 0, 1])), Err(Error::Decode { .. })));
+    }
+
+    #[test]
+    fn looks_only_at_tiles_on_the_canvas() {
+        // a row of 60 000 tiles moved 30 000 to the left, so the canvas
+        // shows three in its middle, linked to by a thousand frames: every
+        // tile of every frame would be 60 million looked at
+        let mut tiles = vec![1u32; 60_000];
+        tiles[30_000..30_003].copy_from_slice(&[2, 0, 1]);
+        // a flipped tile off the canvas is never drawn, so it is no error
+        tiles[100] |= 0x2000_0000;
+        let drawn = |tiles: &[u32], x: i16, frames: u16| {
+            let mut cel = tilemap(32, tiles);
+            // the cel's x, past the chunk's header and its layer
+            cel[8..10].copy_from_slice(&x.to_le_bytes());
+            let mut chunks = vec![vec![layer(1, 2, 0, 0, 255), tileset(), cel]];
+            chunks.extend((1..frames).map(|_| vec![linked_cel(0, 0)]));
+            crate::aseprite::TILES.set(0);
+            let animation = decode(&file(3, 1, 32, 1, &chunks)).unwrap();
+            (pixels(&animation, 0), crate::aseprite::TILES.get())
+        };
+        assert_eq!(drawn(&tiles, -30_000, 1000), (vec![GREEN, [0; 4], RED], 3 * 1000));
+        // wholly off it at either side, none
+        assert_eq!(drawn(&tiles, 3, 1), (vec![[0; 4]; 3], 0));
+        assert_eq!(drawn(&[1, 1, 2], -3, 1), (vec![[0; 4]; 3], 0));
+        // the last of them at its left
+        assert_eq!(drawn(&[1, 1, 2], -2, 1), (vec![GREEN, [0; 4], [0; 4]], 1));
     }
 
     #[test]

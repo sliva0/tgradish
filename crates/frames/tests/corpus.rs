@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use tgradish_corpus::{File, Sprite, encode};
 use tgradish_frames::{
-    Animation, DecodeOptions, Error, Limits, Sheet, aseprite::Layers, decode, sequence,
+    Animation, DecodeOptions, Error, Limits, Sequence, Sheet, aseprite::Layers, decode, sequence,
     sprite_sheet,
 };
 
@@ -98,6 +98,25 @@ fn joins_image_sequences() {
         sequence(mixed.iter().map(Vec::as_slice), Duration::from_millis(200), &Limits::default()),
         Err(Error::SequenceSize { index: 1, .. })
     ));
+
+    // images read one at a time, as owned bytes, and none past the first
+    // that fails
+    let mut read = 0;
+    let lazily = mixed.iter().chain(&files).map(|bytes| {
+        read += 1;
+        bytes.clone()
+    });
+    let refused = sequence(lazily, Duration::from_millis(200), &Limits::default());
+    assert!(matches!(refused, Err(Error::SequenceSize { index: 1, .. })));
+    assert_eq!(read, 2);
+    // or pushed one by one, an image that fails leaving those before
+    let mut pushed = Sequence::new(Duration::from_millis(200), &Limits::default());
+    pushed.push(&files[0]).unwrap();
+    assert!(matches!(pushed.push(&mixed[1]), Err(Error::SequenceSize { index: 1, .. })));
+    pushed.push(&files[1]).unwrap();
+    assert_eq!(pushed.finish().unwrap().frames().len(), 2);
+    let empty = Sequence::new(Duration::ZERO, &Limits::default());
+    assert_eq!(empty.finish(), Err(Error::Empty));
 }
 
 #[test]
@@ -237,4 +256,29 @@ fn reads_jpeg_and_bmp_stills() {
         let [r, _, b, _] = animation.pixel(0, 13, 4).unwrap();
         assert!(b > 200 && r < 60, "{format:?}: {r} {b}");
     }
+}
+
+#[test]
+fn stops_between_frames_when_cancelled() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    // says to stop the third time it is asked
+    let asked = AtomicUsize::new(0);
+    let third = || asked.fetch_add(1, Ordering::SeqCst) == 2;
+    for name in ["bounce.png", "walker_2x.gif", "glow.webp", "walker_2x.ase"] {
+        let file = file(name);
+        assert!(file.sprite.frames.len() > 3, "{name}");
+        asked.store(0, Ordering::SeqCst);
+        let options = DecodeOptions { cancelled: Some(&third), ..DecodeOptions::default() };
+        let stopped = decode(&file.bytes, &options, &Limits::default());
+        assert_eq!(stopped, Err(Error::Cancelled), "{name}");
+        assert_eq!(asked.load(Ordering::SeqCst), 3, "{name}");
+    }
+    // and between the images of a sequence, before the third is decoded
+    let [(_, steps), _] = tgradish_corpus::sequences();
+    let files: Vec<Vec<u8>> = steps.iter().map(encode::png).collect();
+    asked.store(0, Ordering::SeqCst);
+    let mut sequence = Sequence::new(Duration::ZERO, &Limits::default()).cancelled_by(&third);
+    sequence.push(&files[0]).unwrap();
+    sequence.push(&files[1]).unwrap();
+    assert_eq!(sequence.push(&files[2]), Err(Error::Cancelled));
 }

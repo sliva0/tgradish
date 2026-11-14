@@ -599,8 +599,7 @@ mod tests {
 
     #[test]
     fn times_sticker_frames_in_60ths() {
-        let preview =
-            Preview { width: 1, height: 1, frames: vec![(vec![0; 4], 6), (vec![0; 4], 3)] };
+        let preview = Preview::new(1, 1, vec![(vec![0; 4], 6), (vec![0; 4], 3)]);
         let clip = Clip::from_preview(preview, true);
         assert_eq!(clip.times, [0.0, 0.1, 0.15]);
     }

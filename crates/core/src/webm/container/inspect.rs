@@ -10,13 +10,20 @@ use super::ebml::{self, Element, ids};
 use super::{DEFAULT_TIMESTAMP_SCALE, EbmlError, Result, SIGNATURE_PREFIX, WebmError};
 use crate::art::unreadable;
 
+/// A WebM's video track, as its `TrackEntry` says.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct VideoTrack {
+    /// Its `TrackNumber`, which its blocks name it by.
     pub number: u64,
+    /// Its Matroska codec ID, as `V_VP9`.
     pub codec_id: String,
+    /// Its `PixelWidth`.
     pub width: u64,
+    /// Its `PixelHeight`.
     pub height: u64,
+    /// Whether its `AlphaMode` says it has transparency.
     pub alpha: bool,
     /// Frame duration declared by the track, in nanoseconds.
     pub default_duration_ns: Option<u64>,
@@ -24,11 +31,16 @@ pub struct VideoTrack {
     pub uid: Option<u64>,
 }
 
+/// What a WebM's container says of it, as [`inspect`] reads it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct WebmInfo {
+    /// The EBML header's `DocType`: `webm` or `matroska`.
     pub doc_type: String,
+    /// Its size in bytes.
     pub file_size: u64,
+    /// Nanoseconds a timestamp unit stands for.
     pub timestamp_scale_ns: u64,
     /// Duration from the Segment Info header, in seconds. This is the value
     /// that duration spoofing changes.
@@ -36,16 +48,23 @@ pub struct WebmInfo {
     /// Duration of the video frames, in seconds, measured from block
     /// timestamps.
     pub content_duration: Option<f64>,
+    /// The Info header's `Title`.
     pub title: Option<String>,
+    /// The Info header's `MuxingApp`.
     pub muxing_app: Option<String>,
+    /// The Info header's `WritingApp`.
     pub writing_app: Option<String>,
     /// Values of `DURATION` tags, which ffmpeg writes for each track.
     pub duration_tags: Vec<String>,
     /// tgradish signature found in padding, see [`Patch::signature`](super::Patch::signature).
     pub signature: Option<String>,
+    /// The first video track.
     pub video: Option<VideoTrack>,
+    /// Frames of the video track, counted in its blocks.
     pub video_frames: u64,
+    /// How many audio tracks it has.
     pub audio_tracks: u32,
+    /// How many tracks it has that are neither video nor audio.
     pub other_tracks: u32,
     /// Some element claimed to be longer than the file.
     pub truncated: bool,
@@ -74,6 +93,8 @@ impl WebmInfo {
         }
     }
 
+    /// Its frame rate: from the video track's frame duration, or else
+    /// its frames over how long they last.
     pub fn fps(&self) -> Option<f64> {
         if let Some(ns) = self.video.as_ref().and_then(|v| v.default_duration_ns)
             && ns > 0

@@ -514,7 +514,7 @@ mod tests {
             .collect();
         let input = Animation::new(5, 4, frames).unwrap();
         let (anim, _) =
-            normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap();
+            normalise(input.clone(), &Options { keep_canvas: true, ..Options::default() }).unwrap();
         let scene = encode::runs(&anim);
         assert_eq!(scene.compare(&anim), None);
         assert!(!scene.seams(anim.palette()).is_empty());

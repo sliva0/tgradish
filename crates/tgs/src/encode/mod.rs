@@ -76,7 +76,7 @@ mod tests {
             .map(|file| {
                 let input = decode(&file.bytes, &options.0, &options.1)
                     .unwrap_or_else(|err| panic!("{}: {err}", file.name));
-                (file.name, normalise(&input, &Options::default()).unwrap().0)
+                (file.name, normalise(input.clone(), &Options::default()).unwrap().0)
             })
             .collect()
     }

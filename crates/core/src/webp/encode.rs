@@ -83,9 +83,11 @@ const LOSSLESS_EFFORT: i32 = 6;
 #[serde(tag = "kind", rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Encoding {
+    /// Lossless, which fitted.
     Lossless,
     /// Lossy at this quality, from 0 to 100, as lossless didn't fit.
     Lossy {
+        /// libwebp's quality.
         quality: u8,
     },
 }

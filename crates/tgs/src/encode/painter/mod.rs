@@ -828,8 +828,9 @@ mod tests {
             })
             .collect();
         let input = Animation::new(size, size, frames).unwrap();
-        let anim =
-            normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
+        let anim = normalise(input.clone(), &Options { keep_canvas: true, ..Options::default() })
+            .unwrap()
+            .0;
         let scene = painter(&anim, &Settings::default(), None, &|| false).unwrap();
         assert_eq!(scene.compare(&anim), None);
         for layer in &scene.layers {
@@ -846,8 +847,9 @@ mod tests {
         let rgba = (0..width).flat_map(|x| if x % 2 == 0 { [230, 40, 40, 255] } else { [0; 4] });
         let frame = Frame { rgba: rgba.collect(), duration: Duration::from_millis(100) };
         let input = Animation::new(width, 1, vec![frame]).unwrap();
-        let anim =
-            normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
+        let anim = normalise(input.clone(), &Options { keep_canvas: true, ..Options::default() })
+            .unwrap()
+            .0;
         let scene = painter(&anim, &Settings::default(), None, &|| false).unwrap();
         assert_eq!(scene.compare(&anim), None);
         assert_eq!(scene.seams(anim.palette()), []);
@@ -870,8 +872,9 @@ mod tests {
             .collect();
         let frame = Frame { rgba, duration: Duration::from_millis(100) };
         let input = Animation::new(10, 8, vec![frame]).unwrap();
-        let anim =
-            normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
+        let anim = normalise(input.clone(), &Options { keep_canvas: true, ..Options::default() })
+            .unwrap()
+            .0;
         let painter = Painter::new(&anim, &Settings::default(), &|| false);
         let colours = painter.guessed_order();
         assert_eq!(painter.greedy(&colours, true), painter.greedy(&colours, false));
@@ -890,8 +893,9 @@ mod tests {
         let halves = [red, red, red, red, blue, blue, blue, blue];
         let alone = [green, clear, clear, clear, clear, clear, clear, clear];
         let input = Animation::new(8, 1, vec![frame(halves), frame(alone), frame(halves)]).unwrap();
-        let anim =
-            normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
+        let anim = normalise(input.clone(), &Options { keep_canvas: true, ..Options::default() })
+            .unwrap()
+            .0;
         let groups = |settings: &Settings| {
             let scene = painter(&anim, settings, None, &|| false).unwrap();
             assert_eq!(scene.compare(&anim), None);
@@ -990,8 +994,9 @@ mod tests {
             })
             .collect();
         let input = Animation::new(width, height, frames).unwrap();
-        let anim =
-            normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0;
+        let anim = normalise(input.clone(), &Options { keep_canvas: true, ..Options::default() })
+            .unwrap()
+            .0;
         let scene = painter(&anim, &Settings::default(), None, &|| false).unwrap();
         assert_eq!(scene.compare(&anim), None);
         assert_eq!(scene.seams(anim.palette()), []);
@@ -1025,7 +1030,7 @@ mod tests {
         let input =
             Animation::new(size, size, vec![Frame { rgba, duration: Duration::from_millis(100) }])
                 .unwrap();
-        let anim = normalise(&input, &Options::default()).unwrap().0;
+        let anim = normalise(input.clone(), &Options::default()).unwrap().0;
         assert!(matches!(
             painter(&anim, &Settings::default(), None, &|| false),
             Err(EncodeError::TooManyRects { .. })

@@ -11,6 +11,7 @@ pub const PASTED_IMAGE_NAME: &str = "clipboard.png";
 
 /// What was on the clipboard.
 pub struct Pasted {
+    /// The files to convert: those copied, or the pasted image saved.
     pub files: Vec<PathBuf>,
     /// The temporary directory of a pasted image, which is the one file;
     /// it is deleted when this is dropped.

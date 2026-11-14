@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, FileAction, Result};
 use crate::ffmpeg::FfmpegChoice;
 
+/// The user's settings, from `config.toml` ([`Config::default_path`]).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Config {
@@ -20,6 +21,7 @@ pub struct Config {
     pub preset: Option<String>,
     /// Preset used when none is given, for `.tgs`.
     pub tgs_preset: Option<String>,
+    /// Which ffmpeg to use.
     pub ffmpeg: FfmpegConfig,
     /// The window's settings, which the window reads and words itself:
     /// kept here as written, and saved again with the rest. They aren't
@@ -41,6 +43,7 @@ impl Config {
     }
 }
 
+/// Which ffmpeg to use: the `[ffmpeg]` table of the config file.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct FfmpegConfig {

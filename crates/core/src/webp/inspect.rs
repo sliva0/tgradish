@@ -34,12 +34,19 @@ pub fn creator_tool(webp: &[u8]) -> Option<String> {
 /// What an image sticker is, for inspecting it.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct Info {
+    /// Width in pixels.
     pub width: u32,
+    /// Height in pixels.
     pub height: u32,
+    /// Size of the file in bytes.
     pub bytes: u64,
+    /// Whether it has an alpha channel.
     pub alpha: bool,
+    /// Whether it is lossy, VP8, rather than lossless.
     pub lossy: bool,
+    /// Whether it is animated.
     pub animated: bool,
     /// The tool its metadata names as its maker.
     pub made_with: Option<String>,
@@ -68,7 +75,7 @@ impl Info {
 
 /// What the WebP at `path` is.
 pub fn inspect_file(path: &Path) -> Result<Info> {
-    let bytes = crate::art::read(path)?;
+    let bytes = crate::art::read(path, crate::art::MAX_STICKER_BYTES)?;
     let invalid = |message: String| Error::Unreadable { path: path.to_path_buf(), message };
     let mut decoder = image_webp::WebPDecoder::new(Cursor::new(&bytes))
         .map_err(|err| invalid(err.to_string()))?;
@@ -90,7 +97,7 @@ pub fn inspect_file(path: &Path) -> Result<Info> {
 
 /// A WebP, decoded for a preview: one frame, as long as a `.tgs` one.
 pub fn preview(path: &Path) -> Result<crate::preview::Preview> {
-    let bytes = crate::art::read(path)?;
+    let bytes = crate::art::read(path, crate::art::MAX_STICKER_BYTES)?;
     let invalid = |message: String| Error::Unreadable { path: path.to_path_buf(), message };
     let mut decoder = image_webp::WebPDecoder::new(Cursor::new(&bytes))
         .map_err(|err| invalid(err.to_string()))?;

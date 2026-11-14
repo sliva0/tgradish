@@ -92,12 +92,12 @@ pub(crate) fn within(sizes: &Sizes, most: usize) -> Sizes {
         return *sizes;
     }
     let scaled = |value: u32| ((f64::from(value) * factor).round() as u32).max(1);
-    Sizes {
-        scaled: (scaled(sizes.scaled.0), scaled(sizes.scaled.1)),
-        width: scaled(sizes.width),
-        height: scaled(sizes.height),
-        scaling: sizes.scaling,
-    }
+    Sizes::new(
+        (scaled(sizes.scaled.0), scaled(sizes.scaled.1)),
+        scaled(sizes.width),
+        scaled(sizes.height),
+        sizes.scaling,
+    )
 }
 
 /// The WebM result of `frame` (`width` pixels wide, straight RGBA):
@@ -137,7 +137,7 @@ pub(crate) fn webm(frame: &[u8], width: u32, part: Part, sizes: &Sizes) -> egui:
                     Scaling::Smooth | Scaling::Auto if per >= 1.0 => {
                         area(from + at * per, from + (at + 1.0) * per, size)
                     }
-                    Scaling::Smooth | Scaling::Auto => {
+                    _ => {
                         // growing: between the two nearest pixel centres,
                         // within the part, which is cropped before scaling
                         let lowest = from.floor().clamp(0.0, size as f64 - 1.0);

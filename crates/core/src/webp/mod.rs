@@ -35,16 +35,20 @@ use crate::webm::{self, Plan};
 /// A picture to make.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Request {
+    /// What to make it of.
     pub input: Input,
     /// Where the result goes: by default [`Input::default_output`], as
     /// [`Request::output`] gives it.
     pub output: Option<PathBuf>,
+    /// How to make it: WebM's options, of which a picture uses some.
     pub options: Options,
     /// Replace the output if it exists.
     pub overwrite: bool,
 }
 
 impl Request {
+    /// A picture of `input` with the default options, beside it, not
+    /// replacing one there.
     pub fn new(input: Input) -> Self {
         Self { input, output: None, options: Options::default(), overwrite: false }
     }
@@ -65,11 +69,13 @@ impl Request {
 #[schemars(rename = "StillEvent")]
 #[non_exhaustive]
 pub enum Event {
+    /// The picture is written.
     Finished(Outcome),
     /// Something worth knowing: about the picture, as options that were
     /// adjusted or ignored, or about more than one, as `watch` says of
     /// folders it can't read.
     Warning {
+        /// What, in English.
         message: String,
     },
     /// A conversion, or the whole command, failed. Only printed by the
@@ -81,17 +87,24 @@ pub enum Event {
 /// events were followed.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct Outcome {
     /// The input as given, or a sequence's first picture: a picture has no
     /// event before it is made to name it, as WebM's and `.tgs`'s start.
     #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub input: PathBuf,
+    /// Where the picture was written.
     #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub output: PathBuf,
+    /// Its size in bytes.
     pub bytes: u64,
+    /// Its width in pixels.
     pub width: u32,
+    /// Its height in pixels.
     pub height: u32,
+    /// How it was encoded to fit.
     pub encoding: Encoding,
+    /// Problems Telegram would still have with it.
     pub issues: Vec<Issue>,
 }
 

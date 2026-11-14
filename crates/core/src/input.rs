@@ -114,7 +114,10 @@ pub enum FileKind {
     /// WebM, or other Matroska: a video sticker, or a video.
     Webm,
     /// A WebP picture, still or animated.
-    Webp { animated: bool },
+    Webp {
+        /// Whether its extended header says it is animated.
+        animated: bool,
+    },
     /// A `.tgs` sticker: gzip, or Lottie JSON named `.tgs`.
     Tgs,
     /// An Aseprite file.

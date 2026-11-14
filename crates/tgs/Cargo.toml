@@ -17,6 +17,7 @@ categories = ["multimedia::images", "multimedia::encoding", "wasm"]
 # for others to use; core's features need ffmpeg, so it has no such line
 [package.metadata.docs.rs]
 features = ["schema", "threads"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 tgradish-frames.workspace = true

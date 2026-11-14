@@ -62,6 +62,7 @@ pub const MAX_RAW_JSON: usize = 2 * 1024 * 1024;
 /// `src/composition/limits.rs`, only the ones tgradish's output can get
 /// near.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct RendererLimits {
     /// Bytes of JSON.
     pub max_input_bytes: usize,

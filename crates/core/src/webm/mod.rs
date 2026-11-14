@@ -55,10 +55,12 @@ use fit::{Attempt, Encoder};
 /// A conversion to run.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Request {
+    /// What to convert.
     pub input: Input,
     /// Where the result goes: by default [`Input::default_output`], as
     /// [`Request::output`] gives it.
     pub output: Option<PathBuf>,
+    /// How to convert it.
     pub options: Options,
     /// Replace the output if it exists.
     pub overwrite: bool,
@@ -69,6 +71,8 @@ pub struct Request {
 }
 
 impl Request {
+    /// A conversion of `input` with the default options, beside it, not
+    /// replacing one there, intermediate files deleted.
     pub fn new(input: Input) -> Self {
         Self {
             input,
@@ -90,14 +94,20 @@ impl Request {
 /// events were followed.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct Outcome {
+    /// Where the sticker was written.
     #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub output: PathBuf,
+    /// Its size in bytes.
     pub bytes: u64,
     /// The attempt that was kept.
     pub attempt: u32,
+    /// Its settings.
     pub params: Params,
+    /// Whether its header's duration was spoofed.
     pub spoofed: bool,
+    /// Problems Telegram would still have with the result.
     pub issues: Vec<Issue>,
     /// Directory with intermediate files, if they were kept.
     #[serde(serialize_with = "crate::protocol::serialize_optional_path")]

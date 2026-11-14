@@ -3,9 +3,9 @@
 
 use std::io::Write;
 
+use super::Sprite;
 use super::blend::Colour;
-use super::{Layers, Sprite};
-use crate::{Animation, Limits, Result};
+use crate::{Animation, DecodeOptions, Limits, Result};
 
 pub(super) const RED: Colour = [255, 0, 0, 255];
 pub(super) const GREEN: Colour = [0, 255, 0, 255];
@@ -155,7 +155,7 @@ pub(super) fn pixels(animation: &Animation, frame: usize) -> Vec<Colour> {
 }
 
 pub(super) fn decode(bytes: &[u8]) -> Result<Animation> {
-    Sprite::read(bytes, &Limits::default())?.animation(None, &Layers::default())
+    Sprite::read(bytes, &Limits::default())?.animation(&DecodeOptions::default())
 }
 
 /// The tileset layers made by [`layer`] use: two 1x1 tiles (red,

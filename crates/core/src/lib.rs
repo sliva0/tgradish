@@ -36,11 +36,15 @@
 
 // what only core uses says so, which keeps it out of the API
 #![warn(unreachable_pub)]
+#![warn(missing_docs)]
+// docs.rs says which items need which features
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod art;
 pub mod backend;
 mod cancel;
 #[cfg(feature = "clipboard")]
+#[cfg_attr(docsrs, doc(cfg(feature = "clipboard")))]
 pub mod clipboard;
 pub mod config;
 pub mod drawn;

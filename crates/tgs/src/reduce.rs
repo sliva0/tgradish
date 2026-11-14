@@ -8,8 +8,8 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
-use crate::grid::{Edges, Grid, grid_starts, snap_to};
-use crate::normalise::{PixelAnim, PixelFrame, assemble};
+use crate::grid::{Edges, Grid, grid_starts};
+use crate::normalise::{PixelAnim, PixelFrame, assemble, assemble_with};
 use crate::{Error, Result};
 
 /// One reduction at one strength. [`Reduction::apply`] refuses strengths
@@ -534,27 +534,79 @@ fn despeckle(anim: &PixelAnim) -> PixelAnim {
     compact(PixelAnim { frames, ..anim.clone() })
 }
 
-/// Frames as packed pixels over the whole crop.
-fn expand(anim: &PixelAnim) -> Vec<Vec<u32>> {
-    (0..anim.frames.len()).map(|frame| anim.packed(frame)).collect()
+/// Where the cells between `targets` (edges in pixels, from 0 to the size)
+/// lie on those between `sources` along one side: for each target cell,
+/// the pieces of source cells in it, as (pixels, source cell), and the
+/// source cell its middle pixel is in.
+fn overlay(sources: &[u32], targets: &[u32]) -> Vec<(Vec<(u32, usize)>, usize)> {
+    let cell = |at: u32| sources.partition_point(|&edge| edge <= at) - 1;
+    targets
+        .windows(2)
+        .map(|target| {
+            let mut pieces = Vec::new();
+            let mut at = target[0];
+            while at < target[1] {
+                let source = cell(at);
+                let end = sources[source + 1].min(target[1]);
+                pieces.push((end - at, source));
+                at = end;
+            }
+            (pieces, cell(target[0] + (target[1] - target[0]) / 2))
+        })
+        .collect()
 }
 
-/// Snaps `pixels`, `anim` [`expand`]ed, to cells with these edges and
-/// turns them into cells.
-fn snapped(
-    anim: &PixelAnim,
-    mut pixels: Vec<Vec<u32>>,
-    columns: &[u32],
-    rows: &[u32],
-) -> Result<PixelAnim> {
-    let width = *anim.grid.columns.last().unwrap();
-    let height = *anim.grid.rows.last().unwrap();
-    for frame in &mut pixels {
-        snap_to(frame, width, columns, rows);
-    }
+/// `anim` snapped to cells with these edges, in input pixels from 0 to the
+/// crop's size, and turned into cells: each takes the colour that covers
+/// most of it, the one at its middle on ties, then the largest packed, as
+/// [`snap_to`](crate::grid::snap_to) fills them. Worked out on the cells
+/// of `anim` and the new ones, never on the pixels they stand for, which
+/// can be many times as many.
+fn snapped(anim: &PixelAnim, columns: &[u32], rows: &[u32]) -> Result<PixelAnim> {
+    let packed: Vec<u32> = anim.palette.iter().map(|&colour| u32::from_le_bytes(colour)).collect();
+    let (across, down) = (overlay(&anim.grid.columns, columns), overlay(&anim.grid.rows, rows));
+    let wide = anim.width as usize;
+    // how much of a new cell each colour covers, by its index
+    let mut covered: Vec<(u16, u64)> = Vec::new();
+    let frames: Vec<Vec<u16>> = anim
+        .frames
+        .iter()
+        .map(|frame| {
+            let mut cells = Vec::with_capacity(across.len() * down.len());
+            for (row_pieces, middle_row) in &down {
+                for (column_pieces, middle_column) in &across {
+                    covered.clear();
+                    for &(height, row) in row_pieces {
+                        for &(width, column) in column_pieces {
+                            let colour = frame.pixels[row * wide + column];
+                            let area = u64::from(height) * u64::from(width);
+                            match covered.iter_mut().find(|(seen, _)| *seen == colour) {
+                                Some((_, total)) => *total += area,
+                                None => covered.push((colour, area)),
+                            }
+                        }
+                    }
+                    let middle = frame.pixels[middle_row * wide + middle_column];
+                    let (colour, _) = covered
+                        .iter()
+                        .max_by_key(|&&(colour, area)| {
+                            (area, colour == middle, packed[usize::from(colour)])
+                        })
+                        .unwrap();
+                    cells.push(*colour);
+                }
+            }
+            cells
+        })
+        .collect();
+    let edges = Edges::of_cells(columns, rows, frames.iter().map(Vec::as_slice));
     let ticks: Vec<u32> = anim.frames.iter().map(|frame| frame.ticks).collect();
-    let edges = Edges::count(&pixels, width, height);
-    Ok(compact(assemble(&pixels, &ticks, width, &edges)?))
+    let cell = |edges: &[u32], at: u32| edges.partition_point(|&edge| edge <= at) - 1;
+    let wide = columns.len() - 1;
+    let reduced = assemble_with(&ticks, &edges, |frame, x, y| {
+        packed[usize::from(frames[frame][cell(rows, y) * wide + cell(columns, x)])]
+    })?;
+    Ok(compact(reduced))
 }
 
 /// `scale` must be at least 1.
@@ -564,13 +616,13 @@ fn snap_to_grid(anim: &PixelAnim, scale: u32) -> Result<PixelAnim> {
     // as when normalising forces a scale: anything larger than the art
     // makes it one cell either way, and needn't be counted through
     let scale = scale.min(width.max(height));
-    let pixels = expand(anim);
-    let edges = Edges::count(&pixels, width, height);
+    let cells = anim.frames.iter().map(|frame| frame.pixels.as_slice());
+    let edges = Edges::of_cells(&anim.grid.columns, &anim.grid.rows, cells);
     // a square cut from the middle cuts through art pixels at its sides
     let offset = edges.fit(scale, !anim.grid.cut_at_sides()).offset;
     let (columns, rows) =
         (grid_starts(offset.0, width, scale), grid_starts(offset.1, height, scale));
-    snapped(anim, pixels, &columns, &rows)
+    snapped(anim, &columns, &rows)
 }
 
 /// `factor` must be between 0 and 1.
@@ -593,7 +645,7 @@ fn downscale(anim: &PixelAnim, factor: f64) -> Result<PixelAnim> {
         edges.push(size);
         edges
     };
-    snapped(anim, expand(anim), &edges(width, across), &edges(height, down))
+    snapped(anim, &edges(width, across), &edges(height, down))
 }
 
 #[cfg(test)]
@@ -614,7 +666,7 @@ mod tests {
             })
             .collect();
         let input = Animation::new(width, height, frames).unwrap();
-        normalise(&input, &Options { keep_canvas: true, ..Options::default() }).unwrap().0
+        normalise(input.clone(), &Options { keep_canvas: true, ..Options::default() }).unwrap().0
     }
 
     const RED: [u8; 4] = [255, 0, 0, 255];
@@ -634,6 +686,72 @@ mod tests {
         // distance, on average
         let b = anim(2, 1, &[(&[RED, BLUE], 100), (&[RED, RED], 100)]);
         assert!((distortion(&a, &b) - distance(BLUE, RED) / 4.0).abs() < 1e-9);
+    }
+
+    /// What snapping made when it worked on every pixel of the crop.
+    fn snapped_by_pixels(anim: &PixelAnim, columns: &[u32], rows: &[u32]) -> PixelAnim {
+        let width = *anim.grid.columns.last().unwrap();
+        let height = *anim.grid.rows.last().unwrap();
+        let mut pixels: Vec<Vec<u32>> = (0..anim.frames.len()).map(|f| anim.packed(f)).collect();
+        for frame in &mut pixels {
+            crate::grid::snap_to(frame, width, columns, rows);
+        }
+        let ticks: Vec<u32> = anim.frames.iter().map(|frame| frame.ticks).collect();
+        let edges = Edges::count(&pixels, width, height);
+        compact(assemble(&pixels, &ticks, width, &edges).unwrap())
+    }
+
+    #[test]
+    fn snaps_cells_as_snapping_their_pixels_does() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |below: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % below
+        };
+        for case in 0..40 {
+            let (width, height) = (3 + next(30) as u32, 3 + next(30) as u32);
+            // blocks of a few sizes, so cells are uneven, of few colours
+            let (block_x, block_y) = (1 + next(4) as u32, 1 + next(4) as u32);
+            let frames = (0..1 + next(4))
+                .map(|_| {
+                    let colours: Vec<u64> = (0..width * height).map(|_| next(4)).collect();
+                    let mut rgba = Vec::new();
+                    for y in 0..height {
+                        for x in 0..width {
+                            let c = colours[(y / block_y * width + x / block_x) as usize] as u8;
+                            rgba.extend(if c == 0 { CLEAR } else { [c * 60, 90, 200 - c, 255] });
+                        }
+                    }
+                    Frame { rgba, duration: Duration::from_millis(50 + next(100)) }
+                })
+                .collect();
+            let input = Animation::new(width, height, frames).unwrap();
+            let square = crate::normalise::Square::Crop;
+            for options in [Options::default(), Options { square, ..Options::default() }] {
+                let Ok((a, _)) = normalise(input.clone(), &options) else { continue };
+                let (w, h) = (*a.grid.columns.last().unwrap(), *a.grid.rows.last().unwrap());
+                let pixels: Vec<Vec<u32>> = (0..a.frames.len()).map(|f| a.packed(f)).collect();
+                let cells = a.frames.iter().map(|frame| frame.pixels.as_slice());
+                assert_eq!(
+                    Edges::of_cells(&a.grid.columns, &a.grid.rows, cells),
+                    Edges::count(&pixels, w, h),
+                    "case {case}"
+                );
+                for scale in 1..6 {
+                    for offset in 0..scale {
+                        let columns = grid_starts(offset, w, scale);
+                        let rows = grid_starts((offset + 1) % scale, h, scale);
+                        assert_eq!(
+                            snapped(&a, &columns, &rows).unwrap(),
+                            snapped_by_pixels(&a, &columns, &rows),
+                            "case {case}, scale {scale} from {offset}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -782,12 +900,6 @@ mod tests {
             })
             .collect();
         let a = anim(16, 3, &[(&pixels, 100)]);
-        let expanded: Vec<Vec<u32>> = (0..a.frames().len())
-            .map(|frame| {
-                a.rgba(frame).as_chunks::<4>().0.iter().map(|&p| u32::from_le_bytes(p)).collect()
-            })
-            .collect();
-        assert_eq!(expand(&a), expanded);
         for threshold in [0.02, 0.05, 0.1, 0.3] {
             // each colour in order of use joins the first kept colour near it
             let mut counts = vec![0usize; a.palette.len()];
@@ -852,7 +964,7 @@ mod tests {
         assert_eq!(too_large, json!({"stage": "too-large", "bytes": 1}));
         let input =
             Animation::new(1, 1, vec![Frame { rgba: RED.to_vec(), duration: Duration::ZERO }]);
-        let (_, report) = normalise(&input.unwrap(), &Options::default()).unwrap();
+        let (_, report) = normalise(input.unwrap(), &Options::default()).unwrap();
         let report = serde_json::to_value(report).unwrap();
         assert!(report.get("input-width").is_some() && report.get("snapped-pixels").is_some());
     }

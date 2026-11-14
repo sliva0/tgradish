@@ -59,13 +59,17 @@ fn naming<T>(result: Result<T>, given: &Path, read: &Path) -> Result<T> {
     })
 }
 
+/// The ffmpeg that reads videos and encodes WebM, which every conversion
+/// and inspection that needs one is given.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Backend {
     /// ffmpeg and ffprobe executables.
     Process(Ffmpeg),
     /// The built-in ffmpeg: its libraries linked into tgradish, with the
     /// `linked` feature.
     #[cfg(feature = "linked")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "linked")))]
     Builtin,
 }
 
@@ -74,10 +78,13 @@ pub enum Backend {
 #[serde(tag = "kind", rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum BackendInfo {
+    /// [`Backend::Process`].
     Process {
+        /// Its executables, and where they were found.
         #[serde(flatten)]
         ffmpeg: Ffmpeg,
     },
+    /// The built-in ffmpeg.
     Builtin,
 }
 
@@ -104,6 +111,7 @@ impl Backend {
         matches!(self, Backend::Process(_))
     }
 
+    /// Which backend this is, for status output.
     pub fn info(&self) -> BackendInfo {
         match self {
             Backend::Process(ffmpeg) => BackendInfo::Process { ffmpeg: ffmpeg.clone() },
@@ -112,6 +120,8 @@ impl Backend {
         }
     }
 
+    /// What `input` is, as ffprobe tells it: its video stream's size,
+    /// rate, length and the rest of [`Probe`].
     pub fn probe(&self, input: &Path, cancel: &CancelToken) -> Result<Probe> {
         let read = absolute(input);
         let probe = match self {
@@ -141,6 +151,7 @@ impl Backend {
         Ok(in_video(in_file, probe.start))
     }
 
+    /// Its version, and whether it has the VP9 encoder stickers need.
     pub fn capabilities(&self, cancel: &CancelToken) -> Result<Capabilities> {
         match self {
             Backend::Process(ffmpeg) => ffmpeg::capabilities(ffmpeg, cancel),
@@ -346,13 +357,17 @@ pub struct FramesRequest {
 /// Evenly spaced frames of a video, as straight RGBA in its display
 /// orientation.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Frames {
+    /// Their width in pixels.
     pub width: u32,
+    /// Their height in pixels.
     pub height: u32,
     /// Seconds into the input of the first frame.
     pub start: f64,
     /// Frames per second: the spacing of the frames.
     pub fps: f64,
+    /// Each frame, `width * height * 4` bytes.
     pub frames: Vec<Vec<u8>>,
 }
 

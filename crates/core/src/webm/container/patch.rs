@@ -18,8 +18,11 @@ pub struct Patch {
     /// Fake duration in seconds, written to the Info header and `DURATION`
     /// tags.
     pub duration: Option<f64>,
+    /// The Info header's `Title`.
     pub title: Option<String>,
+    /// The Info header's `MuxingApp`.
     pub muxing_app: Option<String>,
+    /// The Info header's `WritingApp`.
     pub writing_app: Option<String>,
     /// Text written into the padding next to Info, which players ignore and
     /// ffprobe doesn't show. Must start with
@@ -32,15 +35,23 @@ pub struct Patch {
     pub track_uid: Option<u64>,
 }
 
+/// What [`patch`] changed.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct PatchReport {
+    /// The Info header's duration before, in seconds.
     pub old_duration: Option<f64>,
+    /// And after.
     pub new_duration: Option<f64>,
+    /// `DURATION` tags rewritten.
     pub duration_tags_patched: usize,
     /// `DURATION` tags with too little space for the new value.
     pub duration_tags_skipped: usize,
+    /// Whether Info moved within the padding around it, and the SeekHead
+    /// was changed to find it there.
     pub info_moved: bool,
+    /// Whether the signature fitted into the padding.
     pub signature_written: bool,
 }
 
@@ -364,7 +375,7 @@ pub fn patch_file(
     changes: &Patch,
     replace: bool,
 ) -> crate::Result<PatchReport> {
-    let mut buf = crate::art::read(input)?;
+    let mut buf = crate::art::read(input, super::MAX_INSPECTED_BYTES)?;
     let report = patch(&mut buf, changes)?;
     crate::fsutil::write_output(output, &buf, replace)?;
     Ok(report)

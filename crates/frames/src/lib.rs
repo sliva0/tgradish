@@ -23,6 +23,7 @@
 //! [`aseprite::Sprite`]; [`DecodeOptions`] picks among them.
 
 #![warn(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::fmt;
 use std::time::Duration;
@@ -34,7 +35,7 @@ mod raster;
 mod sheet;
 
 use aseprite::{Layers, Sprite};
-pub use sheet::{Sheet, sequence, split_sheet, sprite_sheet};
+pub use sheet::{Sequence, Sheet, sequence, split_sheet, sprite_sheet};
 
 /// Duration of still images in an animation when nothing else says how long
 /// to show them, and of every frame that says 0, in whatever format or
@@ -152,6 +153,9 @@ pub enum Error {
         /// The limit it went past.
         limit: Limit,
     },
+    /// [`DecodeOptions::cancelled`] said to stop.
+    #[error("cancelled")]
+    Cancelled,
 }
 
 /// What decoding found too large for its [`Limits`], with its size.
@@ -257,7 +261,7 @@ impl Format {
             Some(Format::Png)
         } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
             Some(Format::WebP)
-        } else if bytes.get(4..6) == Some(&[0xe0, 0xa5]) {
+        } else if aseprite_header(bytes) {
             Some(Format::Aseprite)
         } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
             Some(Format::Jpeg)
@@ -267,6 +271,18 @@ impl Format {
             None
         }
     }
+}
+
+/// Whether `bytes` start as an Aseprite file's header does: its magic
+/// number at 4, a colour depth of 8, 16 or 32 bits at 12, and the two
+/// DWORDs at 20 and 24 the specification says are 0. The magic number
+/// alone is two bytes where a RIFF file, as an AVI, has its size, so one
+/// in 65536 of them would pass for one.
+fn aseprite_header(bytes: &[u8]) -> bool {
+    let word = |at: usize| bytes.get(at..at + 2).map(|word| u16::from_le_bytes([word[0], word[1]]));
+    word(4) == Some(0xa5e0)
+        && matches!(word(12), Some(8 | 16 | 32))
+        && bytes.get(20..28).is_some_and(|reserved| reserved.iter().all(|&byte| byte == 0))
 }
 
 /// How much decoding may take, so hostile files fail instead of
@@ -313,15 +329,42 @@ impl Limits {
     }
 }
 
-/// What [`decode`] reads of a file. Built as `DecodeOptions { tag,
-/// ..DecodeOptions::default() }`, so that what is added later keeps its
-/// default.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DecodeOptions {
+/// Asked between frames while decoding, and between the images of a
+/// [`Sequence`]: when it says yes, decoding stops with
+/// [`Error::Cancelled`]. Decoding a frame can't be stopped part of the
+/// way, so a stop is noticed once the frame under way is done.
+pub type Cancelled<'a> = &'a (dyn Fn() -> bool + Sync);
+
+/// Fails with [`Error::Cancelled`] once `cancelled` says to stop.
+fn check(cancelled: Option<Cancelled>) -> Result<()> {
+    match cancelled {
+        Some(cancelled) if cancelled() => Err(Error::Cancelled),
+        _ => Ok(()),
+    }
+}
+
+/// What [`decode`] reads of a file, and what stops it. Built as
+/// `DecodeOptions { tag, ..DecodeOptions::default() }`, so that what is
+/// added later keeps its default.
+#[derive(Clone, Default)]
+pub struct DecodeOptions<'a> {
     /// Aseprite: only the frames of this tag, in its direction.
     pub tag: Option<String>,
     /// Aseprite: layers to show or hide, over what the file shows.
     pub layers: Layers,
+    /// Asked before each frame is decoded or drawn; nothing stops decoding
+    /// without it.
+    pub cancelled: Option<Cancelled<'a>>,
+}
+
+impl fmt::Debug for DecodeOptions<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DecodeOptions")
+            .field("tag", &self.tag)
+            .field("layers", &self.layers)
+            .field("cancelled", &self.cancelled.is_some())
+            .finish()
+    }
 }
 
 /// Decodes an animated or still image, within `limits`. Still images get
@@ -334,11 +377,10 @@ pub fn decode(bytes: &[u8], options: &DecodeOptions, limits: &Limits) -> Result<
     if format != Format::Aseprite && !options.layers.is_empty() {
         return Err(Error::LayersWithoutAseprite);
     }
+    check(options.cancelled)?;
     match format {
-        Format::Aseprite => {
-            Sprite::read(bytes, limits)?.animation(options.tag.as_deref(), &options.layers)
-        }
-        _ => raster::decode(bytes, format, limits),
+        Format::Aseprite => Sprite::read(bytes, limits)?.animation(options),
+        _ => raster::decode(bytes, format, limits, options.cancelled),
     }
 }
 
@@ -489,7 +531,24 @@ mod tests {
         assert_eq!(Format::detect(b"GIF89a..."), Some(Format::Gif));
         assert_eq!(Format::detect(b"\x89PNG\r\n\x1a\n...."), Some(Format::Png));
         assert_eq!(Format::detect(b"RIFF\0\0\0\0WEBPVP8 "), Some(Format::WebP));
-        assert_eq!(Format::detect(b"\0\0\0\0\xe0\xa5"), Some(Format::Aseprite));
+        let mut aseprite = [0; 128];
+        aseprite[4..6].copy_from_slice(&0xa5e0u16.to_le_bytes());
+        aseprite[12] = 32;
+        assert_eq!(Format::detect(&aseprite), Some(Format::Aseprite));
+        // as much as a sniff reads
+        assert_eq!(Format::detect(&aseprite[..28]), Some(Format::Aseprite));
+        // an AVI whose size has the magic number's bytes where an Aseprite
+        // file has it
+        let mut avi = *b"RIFF\xe0\xa5\0\0AVI LIST\x94\x12\0\0hdrlavih8\0\0\0";
+        assert_eq!(Format::detect(&avi), None);
+        // nor one of an unknown depth, or of what must be 0 set
+        aseprite[12] = 24;
+        assert_eq!(Format::detect(&aseprite), None);
+        aseprite[12] = 8;
+        aseprite[24] = 1;
+        assert_eq!(Format::detect(&aseprite), None);
+        avi[12..14].copy_from_slice(&16u16.to_le_bytes());
+        assert_eq!(Format::detect(&avi), None);
         assert_eq!(Format::detect(b"RIFF\0\0\0\0WAVE"), None);
         assert_eq!(
             decode(b"nope", &DecodeOptions::default(), &Limits::default()),

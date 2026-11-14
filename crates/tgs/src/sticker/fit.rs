@@ -334,5 +334,5 @@ pub(super) fn normalise_likely_scale(anim: &PixelAnim) -> Option<u32> {
     let height = *anim.grid().rows.last()?;
     let animation = Animation::new(width, height, rgba).ok()?;
     let options = normalise::Options { keep_canvas: true, ..normalise::Options::default() };
-    normalise(&animation, &options).ok()?.1.likely_scale.map(|likely| likely.scale)
+    normalise(animation.clone(), &options).ok()?.1.likely_scale.map(|likely| likely.scale)
 }

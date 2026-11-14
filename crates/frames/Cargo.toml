@@ -13,6 +13,10 @@ readme = "README.md"
 keywords = ["animation", "gif", "apng", "aseprite", "sprite-sheet"]
 categories = ["multimedia::images", "wasm"]
 
+# it has no features; docsrs for what a later one would mark
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 flate2.workspace = true
 image.workspace = true

@@ -17,11 +17,16 @@ use crate::error::{Error, Result};
 /// Properties of an input video, as reported by ffprobe.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct Probe {
+    /// The container, as ffprobe names its format: `matroska,webm`,
+    /// `gif`, `png_pipe`.
     pub format: String,
+    /// The video stream's codec, as ffprobe names it: `vp9`, `h264`.
     pub codec: String,
-    /// Display size, after applying rotation and sample aspect ratio.
+    /// Display width, after applying rotation and sample aspect ratio.
     pub width: u32,
+    /// Display height, as the width.
     pub height: u32,
     /// The average frame rate.
     pub fps: Option<f64>,
@@ -35,7 +40,11 @@ pub struct Probe {
     /// [`Backend::frame_starts`](crate::backend::Backend::frame_starts)
     /// give them, count from here.
     pub start: f64,
+    /// Whether its pixel format can hold transparency: with an alpha
+    /// plane, a palette, or a WebM's `ALPHA_MODE` tag.
     pub alpha: bool,
+    /// Whether it is a single picture, read by an image demuxer, which
+    /// has no length or frame rate.
     pub still_image: bool,
     /// How frames are turned for display. Width and height above already
     /// take it into account.

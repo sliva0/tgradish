@@ -16,6 +16,7 @@ use crate::webm::CRFS;
 /// How the video is scaled into the target box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Resize {
     /// Keep the aspect ratio, touch the box with the longer side. Default
     /// for stickers.
@@ -32,6 +33,7 @@ pub enum Resize {
 /// How the picture's pixels become the result's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Scaling {
     /// Sharp for pixel art made at least twice as large, smooth otherwise.
     Auto,
@@ -48,6 +50,7 @@ pub enum Scaling {
 /// What to tune so the file ends up just under the file size limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Fit {
     /// Try a few frame rates, fit the bitrate for each and keep the one that
     /// looks most like the input (by SSIM). Slowest, best looking.
@@ -108,9 +111,13 @@ impl Fit {
 /// size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Speed {
+    /// `-cpu-used 4`.
     Fast,
+    /// `-cpu-used 2`.
     Balanced,
+    /// `-cpu-used 0`, the slowest.
     Best,
 }
 
@@ -128,9 +135,11 @@ impl Speed {
 /// When to spoof the duration in the metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Spoof {
     /// Only when the video is longer than Telegram allows.
     Auto,
+    /// Always, even for a video Telegram takes as it is.
     Always,
     /// Never; videos longer than Telegram allows are cut to fit.
     Never,
@@ -140,7 +149,9 @@ pub enum Spoof {
 /// [`FitUnit`].
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Range {
+    /// The least it may be.
     pub min: f64,
+    /// The most it may be, at least `min`.
     pub max: f64,
 }
 
@@ -169,10 +180,14 @@ impl std::fmt::Display for Range {
 /// from the top left.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Crop {
+    /// Its left edge, from the input's.
     pub x: u32,
+    /// Its top edge, from the input's.
     pub y: u32,
+    /// Its width, at least 1.
     #[schemars(range(min = 1))]
     pub width: u32,
+    /// Its height, at least 1.
     #[schemars(range(min = 1))]
     pub height: u32,
 }
@@ -234,7 +249,9 @@ impl std::fmt::Display for Crop {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct Sheet {
+    /// Cells across.
     pub columns: u32,
+    /// Cells down.
     pub rows: u32,
 }
 

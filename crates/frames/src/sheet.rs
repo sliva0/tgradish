@@ -1,9 +1,10 @@
 //! Animations assembled from several pictures: sprite sheets and image
 //! sequences.
 
+use std::fmt;
 use std::time::Duration;
 
-use crate::{Animation, DecodeOptions, Error, Frame, Limits, Result, decode};
+use crate::{Animation, Cancelled, DecodeOptions, Error, Frame, Limits, Result, decode};
 
 /// How a sprite sheet is laid out: equal cells, frames row by row. Built
 /// with [`Sheet::new`], then changed field by field, so that what is added
@@ -98,35 +99,117 @@ pub fn split_sheet(image: &Animation, sheet: &Sheet, limits: &Limits) -> Result<
 /// Joins images of one size into an animation. Still images are shown for
 /// `frame_duration`, zero standing for
 /// [`DEFAULT_FRAME_DURATION`](crate::DEFAULT_FRAME_DURATION); animated ones
-/// keep their own frames and timing.
-pub fn sequence<'a>(
-    images: impl IntoIterator<Item = &'a [u8]>,
+/// keep their own frames and timing. Each image is decoded as it comes,
+/// so an iterator that reads them one at a time holds one file at once;
+/// [`Sequence`] does the same for callers that loop themselves.
+pub fn sequence(
+    images: impl IntoIterator<Item = impl AsRef<[u8]>>,
     frame_duration: Duration,
     limits: &Limits,
 ) -> Result<Animation> {
-    let mut size = None;
-    let mut frames = Vec::new();
-    let mut held = 0;
-    for (index, bytes) in images.into_iter().enumerate() {
-        // each image is decoded in what the ones before left of the budget
-        let left = Limits { max_bytes: limits.max_bytes.saturating_sub(held), ..*limits };
-        let image = decode(bytes, &DecodeOptions::default(), &left)?;
+    let mut sequence = Sequence::new(frame_duration, limits);
+    for image in images {
+        sequence.push(image.as_ref())?;
+    }
+    sequence.finish()
+}
+
+/// An animation [`sequence`] joins, given its images one at a time, so
+/// each file's bytes can go once it is decoded:
+///
+/// ```
+/// use std::time::Duration;
+/// use tgradish_frames::{Limits, Sequence};
+///
+/// // a GIF of one black pixel
+/// let gif = b"GIF89a\x01\0\x01\0\x80\0\0\0\0\0\xff\xff\xff,\0\0\0\0\x01\0\x01\0\0\x02\x02D\x01\0;";
+/// let mut sequence = Sequence::new(Duration::from_millis(50), &Limits::default());
+/// for _ in 0..3 {
+///     sequence.push(gif)?;
+/// }
+/// assert_eq!(sequence.finish()?.duration(), Duration::from_millis(150));
+/// # Ok::<(), tgradish_frames::Error>(())
+/// ```
+pub struct Sequence<'a> {
+    frame_duration: Duration,
+    limits: Limits,
+    cancelled: Option<Cancelled<'a>>,
+    /// The first image's size, once there is one.
+    size: Option<(u32, u32)>,
+    frames: Vec<Frame>,
+    /// Bytes of the frames so far.
+    held: usize,
+    /// Images pushed so far.
+    images: usize,
+}
+
+impl fmt::Debug for Sequence<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Sequence")
+            .field("frame_duration", &self.frame_duration)
+            .field("limits", &self.limits)
+            .field("cancelled", &self.cancelled.is_some())
+            .field("size", &self.size)
+            .field("frames", &self.frames.len())
+            .finish()
+    }
+}
+
+impl<'a> Sequence<'a> {
+    /// An empty sequence, whose still images show for `frame_duration`, as
+    /// [`sequence`]'s do, and which holds no more than `limits` allow.
+    pub fn new(frame_duration: Duration, limits: &Limits) -> Sequence<'a> {
+        Sequence {
+            frame_duration,
+            limits: *limits,
+            cancelled: None,
+            size: None,
+            frames: Vec::new(),
+            held: 0,
+            images: 0,
+        }
+    }
+
+    /// The sequence, asking `cancelled` before each image and each of its
+    /// frames, as [`DecodeOptions::cancelled`] is.
+    pub fn cancelled_by(self, cancelled: Cancelled<'a>) -> Sequence<'a> {
+        Sequence { cancelled: Some(cancelled), ..self }
+    }
+
+    /// Decodes the next image and adds its frames, in what the images
+    /// before left of the limits. An image that doesn't decode, or is of
+    /// another size than the first, is an error, the sequence staying as
+    /// it was; [`Error::SequenceSize`] counts images from 0.
+    pub fn push(&mut self, bytes: &[u8]) -> Result<()> {
+        let index = self.images;
+        let limits = &self.limits;
+        let left = Limits { max_bytes: limits.max_bytes.saturating_sub(self.held), ..*limits };
+        let options = DecodeOptions { cancelled: self.cancelled, ..DecodeOptions::default() };
+        let image = decode(bytes, &options, &left)?;
         let (width, height) = (image.width(), image.height());
-        let (first_width, first_height) = *size.get_or_insert((width, height));
+        let (first_width, first_height) = self.size.unwrap_or((width, height));
         if (width, height) != (first_width, first_height) {
             return Err(Error::SequenceSize { index, width, height, first_width, first_height });
         }
-        held += image.frames().iter().map(|frame| frame.rgba.len()).sum::<usize>();
+        self.size = Some((width, height));
+        self.images += 1;
+        self.held += image.frames().iter().map(|frame| frame.rgba.len()).sum::<usize>();
         let still = image.frames().len() == 1;
-        frames.extend(image.into_frames().into_iter().map(|mut frame| {
+        let frame_duration = self.frame_duration;
+        self.frames.extend(image.into_frames().into_iter().map(|mut frame| {
             if still {
                 frame.duration = frame_duration;
             }
             frame
         }));
+        Ok(())
     }
-    let (width, height) = size.ok_or(Error::Empty)?;
-    Animation::new(width, height, frames)
+
+    /// The animation of the images pushed, or [`Error::Empty`] for none.
+    pub fn finish(self) -> Result<Animation> {
+        let (width, height) = self.size.ok_or(Error::Empty)?;
+        Animation::new(width, height, self.frames)
+    }
 }
 
 #[cfg(test)]

@@ -63,7 +63,7 @@ mod tests {
                 (0..height).flat_map(|y| (0..width).flat_map(move |x| colour(x, y))).collect();
             let frame = frames::Frame { rgba, duration: Duration::from_millis(100) };
             let animation = frames::Animation::new(width, height, vec![frame]).unwrap();
-            tgradish_tgs::normalise(&animation, &Default::default()).unwrap().0
+            tgradish_tgs::normalise(animation.clone(), &Default::default()).unwrap().0
         };
         let (red, blue) = ([255, 0, 0, 255], [0, 0, 255, 255]);
         // 3x2 art at 4x

@@ -67,7 +67,7 @@ fn sprite() -> Result<Frames> {
 /// The sprite as the encoder writes it, on a canvas with room to move.
 fn sprite_json(style: Style) -> Result<String> {
     let options = Options { keep_canvas: true, ..Options::default() };
-    let (anim, _) = normalise(&sprite()?, &options)?;
+    let (anim, _) = normalise(sprite()?, &options)?;
     let scene = encode::painter(&anim, &Default::default(), None, &|| false)?;
     Ok(lay_out(&scene, &anim, Some("tgradish probe".into()), false).to_json(style))
 }

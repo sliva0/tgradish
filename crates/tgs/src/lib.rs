@@ -11,7 +11,7 @@
 //! // a GIF of one black pixel
 //! let gif = b"GIF89a\x01\0\x01\0\x80\0\0\0\0\0\xff\xff\xff,\0\0\0\0\x01\0\x01\0\0\x02\x02D\x01\0;";
 //! let animation = decode(gif, &DecodeOptions::default(), &Limits::default())?;
-//! let sticker = make(&animation, &Options::default(), &mut |_progress| {}, &|| false)?;
+//! let sticker = make(animation, &Options::default(), &mut |_progress| {}, &|| false)?;
 //! assert!(sticker.fits());
 //! // the .tgs file, gzipped
 //! assert_eq!(sticker.tgs[..2], [0x1f, 0x8b]);
@@ -29,6 +29,8 @@
 //! tgradish's own research tools: it is unstable, and exempt from semver.
 
 #![warn(missing_docs)]
+// docs.rs says which items need which features
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::time::Duration;
 

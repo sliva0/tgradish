@@ -18,27 +18,38 @@ use crate::telegram::{self, Target};
 /// taken into account.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct Plan {
+    /// The file ffmpeg reads.
     #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub input: PathBuf,
+    /// Where the result goes.
     #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub output: PathBuf,
+    /// What the input is.
     pub source: Probe,
+    /// What it makes.
     pub target: Target,
     /// The part of the source used, in its display pixels.
     pub crop: Option<Crop>,
+    /// How the part used fills the result's size.
     pub resize: Resize,
     /// How pixels are scaled; never [`Scaling::Auto`].
     pub scaling: Scaling,
-    /// Size of the encoded video.
+    /// Width of the encoded video.
     pub width: u32,
+    /// Height of the encoded video.
     pub height: u32,
-    /// Size the source is scaled to before padding or cropping to the
+    /// Width the source is scaled to before padding or cropping to the
     /// encoded size.
     pub scaled_width: u32,
+    /// Height the source is scaled to, as the width.
     pub scaled_height: u32,
+    /// What fitting tunes to come close to the size limit.
     pub fit: Fit,
+    /// The most encodes fitting makes.
     pub attempts: u32,
+    /// The range fitting searches, in the unit of what it tunes.
     pub fit_range: Range,
     /// Whether `fit = auto` may lower the frame rate. False when the frame
     /// rate was set explicitly.
@@ -50,21 +61,32 @@ pub struct Plan {
     /// How many times as fast as the input the result plays: it uses
     /// `length * tempo` seconds of the input.
     pub tempo: f64,
+    /// Frames a second of the result, or to start fitting from.
     pub fps: f64,
     /// Bitrate in kbit/s to use or to start fitting from.
     pub bitrate: f64,
+    /// Constant quality, from 0 (best) to 63, to use or to start fitting
+    /// from.
     pub crf: u8,
     /// With `fit = off`, encode at constant quality instead of bitrate.
     /// True when only `crf` was set.
     pub constant_quality: bool,
+    /// Encode losslessly.
     pub lossless: bool,
+    /// The encoder's speed.
     pub speed: Speed,
     /// Encode with an alpha channel.
     pub alpha: bool,
+    /// When the duration in the header is spoofed.
     pub spoof: Spoof,
+    /// The duration a spoofed header says, in seconds.
     pub fake_duration: f64,
+    /// The title written into the file's metadata.
     pub title: Option<String>,
+    /// Whether the file is marked as made by tgradish, in its writing and
+    /// muxing app metadata and a signature in padding.
     pub watermark: bool,
+    /// libvpx-vp9 options by name, over tgradish's own.
     pub encoder_options: BTreeMap<String, String>,
     /// Raw ffmpeg arguments, only for ffmpeg as a separate program.
     pub ffmpeg_args: Vec<String>,

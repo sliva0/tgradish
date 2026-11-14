@@ -43,16 +43,20 @@ pub const MAX_BYTES: u64 = tgradish_tgs::limits::telegram::MAX_BYTES as u64;
 /// A sticker to make.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Request {
+    /// What to make it of.
     pub input: Input,
     /// Where the result goes: by default [`Input::default_output`], as
     /// [`Request::output`] gives it.
     pub output: Option<PathBuf>,
+    /// How to make it.
     pub options: Options,
     /// Replace the output if it exists.
     pub overwrite: bool,
 }
 
 impl Request {
+    /// A sticker of `input` with the default options, beside it, not
+    /// replacing one there.
     pub fn new(input: Input) -> Self {
         Self { input, output: None, options: Options::default(), overwrite: false }
     }
@@ -67,8 +71,11 @@ impl Request {
 /// What converting made: all that [`Event::Finished`] says, whether or
 /// not events were followed, and a preview.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Outcome {
+    /// Where the sticker was written.
     pub output: PathBuf,
+    /// Its size in bytes.
     pub bytes: u64,
     /// Size of the Lottie JSON inside.
     pub json_bytes: u64,
@@ -77,7 +84,9 @@ pub struct Outcome {
     pub changed: bool,
     /// Reductions fitting applied, in order.
     pub steps: Vec<Step>,
+    /// Lottie layers in it.
     pub layers: usize,
+    /// Rectangles drawn in all of them.
     pub rectangles: usize,
     /// Problems Telegram would still have with the result.
     pub issues: Vec<Issue>,
@@ -120,7 +129,7 @@ pub fn convert(
     }
     let input = request.input.first().to_path_buf();
     let sticker = sticker::make(
-        &loaded.animation,
+        loaded.animation,
         &settings,
         &mut |progress| match progress {
             // what reading the art found worth saying, after it

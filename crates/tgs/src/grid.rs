@@ -68,6 +68,7 @@ fn gcd(a: u32, b: u32) -> u32 {
 /// column) of every frame: `columns[x]` counts changes between columns
 /// `x - 1` and `x`. Outside the crop counts as transparent, so the first
 /// and last entries count visible pixels on the border.
+#[cfg_attr(test, derive(Debug, PartialEq))]
 pub(crate) struct Edges {
     columns: Vec<u64>,
     rows: Vec<u64>,
@@ -103,6 +104,50 @@ impl Edges {
             rows[h] += visible(&pixels[(h - 1) * w..]);
         }
         Edges { columns, rows }
+    }
+
+    /// [`Edges::count`] of frames of cells between `columns` and `rows`
+    /// (edges in pixels, from 0 to the size), each frame a colour index a
+    /// cell, row by row, with 0 transparent and no two indices of one
+    /// colour: what counting their pixels gives, without them.
+    pub(crate) fn of_cells<'a>(
+        columns: &[u32],
+        rows: &[u32],
+        frames: impl IntoIterator<Item = &'a [u16]>,
+    ) -> Edges {
+        let (wide, high) = (columns.len() - 1, rows.len() - 1);
+        let (w, h) = (*columns.last().unwrap() as usize, *rows.last().unwrap() as usize);
+        let mut column_counts = vec![0u64; w + 1];
+        let mut row_counts = vec![0u64; h + 1];
+        let width = |cell: usize| u64::from(columns[cell + 1] - columns[cell]);
+        // the cells of a line that are visible, or that differ from another
+        // line's, as the pixels they stand for
+        let visible = |line: &[u16]| {
+            line.iter()
+                .enumerate()
+                .filter(|&(_, &cell)| cell != 0)
+                .map(|(x, _)| width(x))
+                .sum::<u64>()
+        };
+        for cells in frames {
+            for (y, line) in cells.chunks_exact(wide).enumerate() {
+                let height = u64::from(rows[y + 1] - rows[y]);
+                column_counts[0] += height * u64::from(line[0] != 0);
+                column_counts[w] += height * u64::from(line[wide - 1] != 0);
+                for x in 1..wide {
+                    column_counts[columns[x] as usize] +=
+                        height * u64::from(line[x] != line[x - 1]);
+                }
+                if y > 0 {
+                    let above = &cells[(y - 1) * wide..y * wide];
+                    let changed: u64 = (0..wide).filter(|&x| line[x] != above[x]).map(width).sum();
+                    row_counts[rows[y] as usize] += changed;
+                }
+            }
+            row_counts[0] += visible(&cells[..wide]);
+            row_counts[h] += visible(&cells[(high - 1) * wide..]);
+        }
+        Edges { columns: column_counts, rows: row_counts }
     }
 
     /// Columns and rows that differ from their neighbour in some frame
