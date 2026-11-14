@@ -11,9 +11,13 @@ that makes every kind of Telegram sticker and emoji.
 
 ### Added
 
-- A window, `tgradish gui`, which also opens when tgradish is started from
-  a file manager or a menu: drop files in, crop, cut and preview them, and
-  see what Telegram would say of the result.
+- A window, `tgradish gui [FILES]`, which also opens when tgradish is
+  started from a file manager or a menu, or with files opened in it from
+  one: drop files in, crop, cut and preview them, and see what Telegram
+  would say of the result. It reopens the files of last time, laid out as
+  they were.
+- Shell completions (`tgradish completions SHELL`) and man pages, which
+  packages install.
 - Animated stickers and emoji as `.tgs` (`-f tgs`), drawn from pixel art:
   GIF, PNG and APNG, WebP, Aseprite files, sprite sheets, image sequences
   and videos of pixel art, fitted into 64 KiB.
