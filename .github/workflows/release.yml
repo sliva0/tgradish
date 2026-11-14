@@ -464,13 +464,16 @@ jobs:
           ls -l artifacts
 
       # one list to check everything by, `sha256sum -c SHA256SUMS`, beside
-      # each file's own
+      # each file's own; written elsewhere first, as the list being written
+      # in the folder would be among the files listed
       - name: Sum every file in one list
         working-directory: artifacts
         run: |
-          find . -maxdepth 1 -type f ! -name '*.sha256' -printf '%f\n' | LC_ALL=C sort \
-            | xargs -d '\n' sha256sum -- > SHA256SUMS
+          find . -maxdepth 1 -type f ! -name '*.sha256' ! -name SHA256SUMS -printf '%f\n' \
+            | LC_ALL=C sort | xargs -d '\n' sha256sum -- > "$RUNNER_TEMP/SHA256SUMS"
+          mv "$RUNNER_TEMP/SHA256SUMS" SHA256SUMS
           cat SHA256SUMS
+          sha256sum -c SHA256SUMS
 
       # archives already, which compressing again only slows
       - uses: actions/upload-artifact@v7
