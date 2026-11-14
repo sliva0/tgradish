@@ -154,6 +154,38 @@ fn rejects_bad_flags() {
     }
 }
 
+/// Without a display the window says so plainly, and tgradish alone, which
+/// would have opened it, says what it is instead.
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn says_when_there_is_no_display() {
+    if !cfg!(feature = "gui") {
+        return;
+    }
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_tgradish"))
+            .args(args)
+            .env("TGRADISH_CONFIG", no_config())
+            .env_remove("WAYLAND_DISPLAY")
+            .env_remove("WAYLAND_SOCKET")
+            .env_remove("DISPLAY")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+    };
+    let gui = run(&["gui"]);
+    assert_eq!(gui.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&gui.stderr).trim_end(),
+        "error: the window can't open: no display (neither WAYLAND_DISPLAY nor DISPLAY is set)"
+    );
+    let alone = run(&[]);
+    assert_eq!(alone.status.code(), Some(2));
+    assert!(alone.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&alone.stderr);
+    assert!(stderr.contains("tgradish gui") && stderr.contains("Usage:"), "{stderr}");
+}
+
 /// What is wrong with the command line, however it was found, exits 2,
 /// is said once before any input is read, and names the flag.
 #[test]

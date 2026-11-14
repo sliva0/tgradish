@@ -38,8 +38,10 @@ pub fn dim(text: impl std::fmt::Display) -> String {
     style(text).dim().to_string()
 }
 
-/// What `tgradish` alone prints: a note on the window above the help.
-pub fn introduce() {
+/// What `tgradish` alone prints: a note on the window above the help,
+/// which goes to stdout unless `to_stderr`, as where it stands in for the
+/// window, which couldn't open.
+pub fn introduce(to_stderr: bool) {
     use clap::CommandFactory;
     let window = cfg!(feature = "gui");
     if window {
@@ -58,7 +60,16 @@ pub fn introduce() {
         eprintln!("{}", style(&line).cyan());
         eprintln!();
     }
-    let _ = crate::args::Cli::command().print_help();
+    if to_stderr {
+        let help = crate::args::Cli::command().render_help();
+        if console::colors_enabled_stderr() {
+            eprint!("{}", help.ansi());
+        } else {
+            eprint!("{help}");
+        }
+    } else {
+        let _ = crate::args::Cli::command().print_help();
+    }
 }
 
 pub fn error_label() -> console::StyledObject<&'static str> {

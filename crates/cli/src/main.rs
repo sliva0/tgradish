@@ -333,9 +333,13 @@ fn run(cli: Cli) -> Result<()> {
         }
         #[cfg(feature = "gui")]
         Command::Gui => {
+            if let Some(why) = no_display() {
+                anyhow::bail!("the window can't open: {why}");
+            }
             let (choice, path) = ctx.ffmpeg_given();
             let launch = tgradish_gui::Launch::default().config_path(config_path);
-            tgradish_gui::run(launch.ffmpeg(choice, path)).map_err(|err| anyhow::anyhow!("{err}"))
+            tgradish_gui::run(launch.ffmpeg(choice, path))
+                .map_err(|err| anyhow::anyhow!("the window can't open: {}", window_error(&err)))
         }
     }
 }
@@ -356,6 +360,42 @@ fn started_outside_a_terminal() -> bool {
         return true;
     }
     !std::io::stdin().is_terminal() && !std::io::stdout().is_terminal()
+}
+
+/// Why no window can open here, where that can be told without trying:
+/// on Linux and the BSDs, with neither Wayland nor X to open it on.
+#[cfg(feature = "gui")]
+fn no_display() -> Option<&'static str> {
+    if !cfg!(all(unix, not(target_os = "macos"))) {
+        return None;
+    }
+    let set = |name: &str| std::env::var_os(name).is_some_and(|value| !value.is_empty());
+    let display = ["WAYLAND_DISPLAY", "WAYLAND_SOCKET", "DISPLAY"].into_iter().any(set);
+    (!display).then_some("no display (neither WAYLAND_DISPLAY nor DISPLAY is set)")
+}
+
+/// What stopped the window, without what winit adds of where in its
+/// source it was found, a path on the machine that built tgradish.
+#[cfg(feature = "gui")]
+fn window_error(err: &tgradish_gui::Error) -> String {
+    without_source_place(err.to_string())
+}
+
+/// `message` without winit's "os error at FILE:LINE: ".
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+fn without_source_place(message: String) -> String {
+    const AT: &str = "os error at ";
+    let Some(start) = message.find(AT) else { return message };
+    // "os error at FILE:LINE: why", where FILE may hold colons too
+    let rest = &message[start + AT.len()..];
+    let why = rest.char_indices().find_map(|(index, _)| {
+        let (place, why) = rest[index..].split_once(": ")?;
+        place.parse::<u32>().ok().map(|_| why)
+    });
+    match why {
+        Some(why) => format!("{}{why}", &message[..start]),
+        None => message,
+    }
 }
 
 #[cfg(all(windows, feature = "gui"))]
@@ -383,11 +423,19 @@ fn main() -> ExitCode {
     return_freed_memory_sooner();
     #[cfg(feature = "gui")]
     if started_outside_a_terminal() {
+        // started from a script, or over ssh: there is no window to open,
+        // but maybe someone to read why
+        if no_display().is_some() {
+            term::init(args::ColourChoice::Auto, false);
+            ui::introduce(true);
+            return ExitCode::from(USAGE);
+        }
         let (choice, path) = ffmpeg_given(None, None);
         return match tgradish_gui::run(tgradish_gui::Launch::default().ffmpeg(choice, path)) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 // there is no terminal to print to
+                let err = window_error(&err);
                 tgradish_gui::show_error(&format!("The window couldn't open: {err}"));
                 ExitCode::FAILURE
             }
@@ -397,7 +445,7 @@ fn main() -> ExitCode {
     // too
     if std::env::args_os().len() == 1 {
         term::init(args::ColourChoice::Auto, false);
-        ui::introduce();
+        ui::introduce(false);
         return if stdout_was_closed() { ExitCode::from(STDOUT_CLOSED) } else { ExitCode::SUCCESS };
     }
     let cli = Cli::parse();
@@ -457,5 +505,17 @@ mod tests {
             env!("CARGO_PKG_VERSION_PATCH")
         );
         assert!(manifest.contains(&version), "tgradish.exe.manifest should have {version}");
+    }
+
+    /// Where in winit an error was found is no one's business but its.
+    #[test]
+    fn says_why_the_window_failed_without_winits_source() {
+        let raw = "winit EventLoopError: os error at /home/me/.cargo/registry/src/c:d/winit-0.30.13/\
+                   src/platform_impl/linux/mod.rs:765: neither WAYLAND_DISPLAY nor DISPLAY: set";
+        assert_eq!(
+            super::without_source_place(raw.into()),
+            "winit EventLoopError: neither WAYLAND_DISPLAY nor DISPLAY: set"
+        );
+        assert_eq!(super::without_source_place("no GPU".into()), "no GPU");
     }
 }
