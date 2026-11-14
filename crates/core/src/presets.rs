@@ -489,8 +489,8 @@ pub fn save(
     file.insert("webm".into(), table(&shareable(webm)).into());
     file.insert("tgs".into(), table(&shareable(tgs)).into());
     let text = toml::to_string(&file).map_err(|err| PresetError::Broken(err.to_string()))?;
+    let path = file_in(dir, name)?;
     std::fs::create_dir_all(dir).map_err(Error::io(FileAction::Create, dir))?;
-    let path = dir.join(format!("{name}.toml"));
     crate::fsutil::write_output(&path, text.as_bytes(), replace)?;
     Ok(path)
 }
@@ -521,7 +521,7 @@ pub fn check_remove(name: &str, presets: &Presets) -> Result<()> {
 /// Renames the preset `from` in `dir` to `to`, as [`check_rename`] allows.
 pub fn rename(dir: &Path, from: &str, to: &str, presets: &Presets) -> Result<PathBuf> {
     check_rename(from, to, presets)?;
-    let (old, new) = (dir.join(format!("{from}.toml")), dir.join(format!("{to}.toml")));
+    let (old, new) = (file_in(dir, from)?, file_in(dir, to)?);
     // a name changed only in case names the same file where case doesn't
     // matter; where it does, the other file is another preset's
     if new.exists() && !same_file(&old, &new) {
@@ -529,6 +529,23 @@ pub fn rename(dir: &Path, from: &str, to: &str, presets: &Presets) -> Result<Pat
     }
     std::fs::rename(&old, &new).map_err(Error::io(FileAction::Rename, &old))?;
     Ok(new)
+}
+
+/// The file of the preset `name` in `dir`, refused for a name that would
+/// lead out of it. Names of presets already there are file names, which
+/// [`check_name`] needn't allow, as those saved by hand; only new names
+/// are held to it.
+fn file_in(dir: &Path, name: &str) -> Result<PathBuf> {
+    let file = format!("{name}.toml");
+    let mut parts = Path::new(&file).components();
+    let plain = matches!(parts.next(), Some(std::path::Component::Normal(part)) if part == file.as_str())
+        && parts.next().is_none()
+        && !name.contains(['/', '\\', '\0'])
+        && !name.is_empty();
+    if !plain {
+        return Err(PresetError::NameCharacters.into());
+    }
+    Ok(dir.join(file))
 }
 
 /// Whether `a` and `b` are one file, under two names or the same.
@@ -565,7 +582,7 @@ pub fn set_description(path: &Path, description: &str) -> Result<()> {
 /// returns what it held, which [`restore`] puts back.
 pub fn remove(dir: &Path, name: &str, presets: &Presets) -> Result<String> {
     check_remove(name, presets)?;
-    let path = &dir.join(format!("{name}.toml"));
+    let path = &file_in(dir, name)?;
     let text = std::fs::read_to_string(path).map_err(Error::io(FileAction::Read, path))?;
     std::fs::remove_file(path).map_err(Error::io(FileAction::Remove, path))?;
     Ok(text)
@@ -574,8 +591,8 @@ pub fn remove(dir: &Path, name: &str, presets: &Presets) -> Result<String> {
 /// Puts back as `name` in `dir` a preset [`remove`] deleted, which held
 /// `text`, unless another of its name is there now.
 pub fn restore(dir: &Path, name: &str, text: &str) -> Result<PathBuf> {
+    let path = file_in(dir, name)?;
     std::fs::create_dir_all(dir).map_err(Error::io(FileAction::Create, dir))?;
-    let path = dir.join(format!("{name}.toml"));
     crate::fsutil::write_output(&path, text.as_bytes(), false)?;
     Ok(path)
 }
@@ -685,6 +702,34 @@ mod tests {
         for bad in ["", " lead", "a/b", "..", &"x".repeat(65)] {
             assert!(check_name(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn keeps_to_the_presets_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("presets");
+        std::fs::create_dir(&dir).unwrap();
+        let outside = root.path().join("x.toml");
+        std::fs::write(&outside, "description = 'not a preset of the folder'\n").unwrap();
+        let presets = Presets::load(Some(&dir)).unwrap();
+        for name in ["../x", "..\\x", "/x", "a/../../x"] {
+            let refused = |result: Result<()>| {
+                matches!(result, Err(Error::Preset(PresetError::NameCharacters)))
+            };
+            assert!(refused(remove(&dir, name, &presets).map(drop)), "{name}");
+            assert!(refused(restore(&dir, name, "").map(drop)), "{name}");
+            assert!(refused(rename(&dir, name, "y", &presets).map(drop)), "{name}");
+        }
+        assert!(outside.exists());
+        assert!(!root.path().join("y.toml").exists());
+        // one saved by hand under a name the window wouldn't give is still
+        // the user's to rename and delete
+        write(&dir, "by.hand", "description = ''\n");
+        let presets = Presets::load(Some(&dir)).unwrap();
+        let text = remove(&dir, "by.hand", &presets).unwrap();
+        restore(&dir, "by.hand", &text).unwrap();
+        rename(&dir, "by.hand", "by hand", &presets).unwrap();
+        assert!(dir.join("by hand.toml").exists());
     }
 
     fn write(dir: &Path, name: &str, text: &str) {
