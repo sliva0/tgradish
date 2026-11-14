@@ -720,6 +720,10 @@ saved-to = Saved to { $path }
 not-saved = Couldn't save: { $error }
 no-home = There is no home folder to keep settings in
 about-and-licences = About and licences…
+# Beside it: a chat with the author, in Telegram's app where it is
+# installed, else in the browser.
+feedback = Send feedback
+    .hint = Write to the author on Telegram: in its app, where it is installed, or in the browser
 settings-note = Changes apply now; "{ save }" keeps them between restarts
 # Under the ffmpeg heading, when tgradish was started with --ffmpeg or
 # --ffmpeg-from, or with the TGRADISH_FFMPEG environment variable set,

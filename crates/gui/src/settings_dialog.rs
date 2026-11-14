@@ -153,10 +153,15 @@ pub(crate) fn show(
                 });
                 dialog.wrote = matches!(dialog.saved, Some(Ok(_)));
             }
-            // at the left, the way to About, which isn't a setting
+            // at the left, the ways to About and to the author, which
+            // aren't settings
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 if ui.add(widgets::dialog_button(fl!("about-and-licences"))).clicked() {
                     dialog.about = true;
+                }
+                let feedback = ui.add(widgets::dialog_button(fl!("feedback")));
+                if feedback.on_hover_text(fl!("feedback", "hint")).clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(crate::about::FEEDBACK));
                 }
             });
         });

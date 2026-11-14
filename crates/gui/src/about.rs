@@ -7,8 +7,9 @@ use eframe::egui::{self, RichText, vec2};
 use crate::l10n::fl;
 use crate::{icon, widgets};
 
-/// Where feedback goes: the author's Telegram.
-const FEEDBACK: &str = "https://t.me/s0untitled?direct";
+/// Where feedback goes: the author's Telegram, which opens in its app
+/// where it is installed, as [`crate::system::browse`] opens it.
+pub(crate) const FEEDBACK: &str = "https://t.me/s0untitled?direct";
 
 /// tgradish's version and the licences of what it is made of.
 pub(crate) fn about(ui: &mut egui::Ui) {
