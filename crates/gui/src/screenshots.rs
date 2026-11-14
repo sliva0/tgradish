@@ -103,6 +103,13 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
         save(harness, name);
     };
     let mut harness = window(config.clone(), egui::vec2(1280.0, 820.0));
+    // Settings, at the usual size and the smallest
+    harness.state_mut().settings_dialog.open();
+    shot(&mut harness, save, "state-settings");
+    harness.set_size(egui::vec2(crate::MIN_WIDTH, 640.0));
+    shot(&mut harness, save, "state-settings-small");
+    harness.state_mut().settings_dialog = settings_dialog::SettingsDialog::default();
+    harness.set_size(egui::vec2(1280.0, 820.0));
     let Some(clip) = video(dir.path(), "640x360") else { return };
     harness.state_mut().add(vec![clip]);
     finish(&mut harness);

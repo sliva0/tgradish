@@ -205,17 +205,12 @@ fn sections(
         note(ui, fl!("ffmpeg-given"));
     }
     let builtin = Backend::select(FfmpegChoice::Builtin, None).is_ok();
-    row(ui, &fl!("ffmpeg-use"), &fl!("ffmpeg-use", "hint"), Ok(()), |ui| {
-        let choices = [
-            (FfmpegChoice::Auto, fl!("ffmpeg-auto"), fl!("ffmpeg-auto", "hint")),
-            (FfmpegChoice::Builtin, fl!("ffmpeg-builtin"), fl!("ffmpeg-builtin", "hint")),
-            (FfmpegChoice::System, fl!("ffmpeg-system"), fl!("ffmpeg-system", "hint")),
-        ];
-        segments(ui, &mut config.ffmpeg.choice, &choices, |choice| match choice {
-            FfmpegChoice::Builtin if !builtin => Err(fl!("ffmpeg-builtin", "missing")),
-            _ => Ok(()),
-        });
-    });
+    // without one built in, Automatic is the system's: nothing to choose,
+    // unless the built-in one is chosen, as by another build's settings
+    let choosing = builtin || config.ffmpeg.choice == FfmpegChoice::Builtin;
+    if choosing {
+        ffmpeg_use(ui, config, builtin);
+    }
     row(ui, &fl!("ffmpeg-program"), &fl!("ffmpeg-program", "hint"), Ok(()), |ui| {
         let ffmpeg = &mut config.ffmpeg;
         ui.horizontal(|ui| {
@@ -374,6 +369,22 @@ fn sections(
             dialog.default_preset = Some((format, picked));
         }
     }
+}
+
+/// Which ffmpeg to use: the one built in, where `builtin` says there is
+/// one, or the system's, or either.
+fn ffmpeg_use(ui: &mut egui::Ui, config: &mut Config, builtin: bool) {
+    row(ui, &fl!("ffmpeg-use"), &fl!("ffmpeg-use", "hint"), Ok(()), |ui| {
+        let choices = [
+            (FfmpegChoice::Auto, fl!("ffmpeg-auto"), fl!("ffmpeg-auto", "hint")),
+            (FfmpegChoice::Builtin, fl!("ffmpeg-builtin"), fl!("ffmpeg-builtin", "hint")),
+            (FfmpegChoice::System, fl!("ffmpeg-system"), fl!("ffmpeg-system", "hint")),
+        ];
+        segments(ui, &mut config.ffmpeg.choice, &choices, |choice| match choice {
+            FfmpegChoice::Builtin if !builtin => Err(fl!("ffmpeg-builtin", "missing")),
+            _ => Ok(()),
+        });
+    });
 }
 
 /// The window's scale, `scale`, smaller and larger by the steps egui's
@@ -681,6 +692,21 @@ mod tests {
             .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin()));
         again.run_steps(2);
         assert_eq!(again.ctx.zoom_factor(), 1.1);
+    }
+
+    #[test]
+    fn offers_a_choice_of_ffmpeg_only_where_one_is_built_in() {
+        let mut harness = crate::testing::harness(Config::default());
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(2);
+        let builtin = Backend::select(FfmpegChoice::Builtin, None).is_ok();
+        let offered = |harness: &Harness<App>| harness.query_by_label(&fl!("ffmpeg-use")).is_some();
+        assert_eq!(offered(&harness), builtin);
+        harness.get_by_label(&fl!("ffmpeg-program"));
+        // chosen though there is none, as by another build: there to change
+        harness.state_mut().config.ffmpeg.choice = FfmpegChoice::Builtin;
+        harness.run_steps(2);
+        assert!(offered(&harness));
     }
 
     #[test]
