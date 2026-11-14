@@ -258,9 +258,9 @@ fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         #[cfg(feature = "gui")]
-        Command::Gui => {
+        Command::Gui { files } => {
             let (choice, path) = ctx.ffmpeg_given();
-            let launch = tgradish_gui::Launch::default().config_path(config_path);
+            let launch = tgradish_gui::Launch::default().config_path(config_path).files(files);
             tgradish_gui::run(launch.ffmpeg(choice, path)).map_err(|err| anyhow::anyhow!("{err}"))
         }
     }

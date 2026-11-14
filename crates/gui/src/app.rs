@@ -155,6 +155,9 @@ impl App {
         if let Some(path) = session_path() {
             app.reopen(path);
         }
+        // as the command line names them, from where it was started
+        let files = launch.files.into_iter().map(|file| std::path::absolute(&file).unwrap_or(file));
+        app.add(files.collect());
         app
     }
 

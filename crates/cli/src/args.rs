@@ -176,10 +176,14 @@ pub enum Command {
     /// every copy carries.
     #[command(alias = "licences")]
     Licenses,
-    /// Open the tgradish window. It also opens when tgradish is started
-    /// without arguments outside a terminal.
+    /// Open the tgradish window, with FILES in it. It also opens when
+    /// tgradish is started without arguments outside a terminal.
     #[cfg(feature = "gui")]
-    Gui,
+    Gui {
+        /// Pictures, videos or folders of frames to open
+        #[arg(value_name = "FILES")]
+        files: Vec<PathBuf>,
+    },
 }
 
 impl Cli {
@@ -208,7 +212,7 @@ impl Command {
     /// does and marks what it makes as its own.
     pub fn is_window(&self) -> bool {
         #[cfg(feature = "gui")]
-        if matches!(self, Command::Gui) {
+        if matches!(self, Command::Gui { .. }) {
             return true;
         }
         false
@@ -833,6 +837,14 @@ mod tests {
         assert!(Cli::try_parse_from(["tgradish", "convert", "a.png", "-f", "crf"]).is_err());
         let help = Cli::command().find_subcommand_mut("convert").unwrap().render_help();
         assert!(help.to_string().contains("-o, --output <FILE>"), "{help}");
+    }
+
+    #[cfg(feature = "gui")]
+    #[test]
+    fn opens_the_window_with_the_files_named() {
+        let cli = Cli::parse_from(["tgradish", "gui", "a.png", "frames"]);
+        let Command::Gui { files } = cli.command else { panic!() };
+        assert_eq!(files, [PathBuf::from("a.png"), PathBuf::from("frames")]);
     }
 
     #[test]

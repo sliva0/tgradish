@@ -78,6 +78,8 @@ pub struct Launch {
     pub(crate) ffmpeg_choice: Option<FfmpegChoice>,
     /// An ffmpeg executable or directory to use instead of the config's.
     pub(crate) ffmpeg_path: Option<PathBuf>,
+    /// Files to open in the window as it opens.
+    pub(crate) files: Vec<PathBuf>,
 }
 
 impl Launch {
@@ -92,6 +94,13 @@ impl Launch {
     /// alone: as the command line or `TGRADISH_FFMPEG` gives them.
     pub fn ffmpeg(self, choice: Option<FfmpegChoice>, path: Option<PathBuf>) -> Launch {
         Launch { ffmpeg_choice: choice, ffmpeg_path: path, ..self }
+    }
+
+    /// Opens `files` in the window as it opens, each as one dropped there
+    /// is, after those of last time: pictures, videos, or folders of
+    /// frames.
+    pub fn files(self, files: Vec<PathBuf>) -> Launch {
+        Launch { files, ..self }
     }
 }
 
