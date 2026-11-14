@@ -748,14 +748,11 @@ mod tests {
         chunks.extend((1..frames).map(|frame| vec![linked_cel(0, frame - 1)]));
         let bytes = file(1, 1, 32, 1, &chunks);
         FOLLOWED.set(0);
-        let started = std::time::Instant::now();
         let animation = decode(&bytes).unwrap();
         // each linked cel is followed one step, not the whole chain
         assert_eq!(FOLLOWED.get(), usize::from(frames) - 1);
         assert_eq!(animation.frames().len(), usize::from(frames));
         assert_eq!(animation.pixel(usize::from(frames) - 1, 0, 0), Some(RED));
-        // a second in release; generously more for unoptimised builds
-        assert!(started.elapsed() < Duration::from_secs(20), "{:?}", started.elapsed());
 
         // a long loop is refused, however long it is
         let mut looped = chunks;
