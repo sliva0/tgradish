@@ -12,6 +12,7 @@ use crate::art::unreadable;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct VideoTrack {
     pub number: u64,
     pub codec_id: String,
@@ -26,6 +27,7 @@ pub struct VideoTrack {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct WebmInfo {
     pub doc_type: String,
     pub file_size: u64,

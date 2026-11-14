@@ -217,6 +217,7 @@ fn read_video(
 
 /// Pixel art as it is read, before anything is cropped or reduced.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Art {
     pub width: u32,
     pub height: u32,

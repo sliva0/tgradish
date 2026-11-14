@@ -16,6 +16,7 @@ fn even(value: f64) -> u32 {
 
 /// How a picture lands in the result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Sizes {
     /// What the picture is scaled to.
     pub scaled: (u32, u32),
@@ -29,6 +30,13 @@ pub struct Sizes {
 }
 
 impl Sizes {
+    /// A picture scaled to `scaled` with `scaling`, cropped or padded to a
+    /// `width` by `height` result: for front-ends that work out sizes of
+    /// their own, as for a smaller preview.
+    pub fn new(scaled: (u32, u32), width: u32, height: u32, scaling: Scaling) -> Sizes {
+        Sizes { scaled, width, height, scaling }
+    }
+
     /// Whether transparent margins fill part of the result.
     pub fn pads(&self) -> bool {
         self.scaled.0 < self.width || self.scaled.1 < self.height

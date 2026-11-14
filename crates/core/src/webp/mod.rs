@@ -81,6 +81,7 @@ pub enum Event {
 /// events were followed.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct Outcome {
     /// The input as given, or a sequence's first picture: a picture has no
     /// event before it is made to name it, as WebM's and `.tgs`'s start.

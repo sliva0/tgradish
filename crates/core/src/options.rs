@@ -16,6 +16,7 @@ use crate::webm::CRFS;
 /// How the video is scaled into the target box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Resize {
     /// Keep the aspect ratio, touch the box with the longer side. Default
     /// for stickers.
@@ -32,6 +33,7 @@ pub enum Resize {
 /// How the picture's pixels become the result's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Scaling {
     /// Sharp for pixel art made at least twice as large, smooth otherwise.
     Auto,
@@ -48,6 +50,7 @@ pub enum Scaling {
 /// What to tune so the file ends up just under the file size limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Fit {
     /// Try a few frame rates, fit the bitrate for each and keep the one that
     /// looks most like the input (by SSIM). Slowest, best looking.
@@ -108,6 +111,7 @@ impl Fit {
 /// size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Speed {
     Fast,
     Balanced,
@@ -128,6 +132,7 @@ impl Speed {
 /// When to spoof the duration in the metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Spoof {
     /// Only when the video is longer than Telegram allows.
     Auto,

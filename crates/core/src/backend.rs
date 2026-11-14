@@ -347,6 +347,7 @@ pub struct FramesRequest {
 /// Evenly spaced frames of a video, as straight RGBA in its display
 /// orientation.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Frames {
     pub width: u32,
     pub height: u32,

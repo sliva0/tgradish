@@ -9,6 +9,7 @@ use serde::Serialize;
 /// is what the ffmpeg command line applies when it autorotates.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum Orientation {
     #[default]
     Normal,

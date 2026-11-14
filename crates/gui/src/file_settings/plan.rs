@@ -158,6 +158,7 @@ fn art(options: &tgs::Options, steps: &mut Vec<String>) {
         Resize::Crop => fl!("plan-square-crop"),
         Resize::Stretch => fl!("plan-square-stretch"),
         Resize::Pad | Resize::Contain => fl!("plan-square-pad"),
+        _ => fl!("plan-square-pad"),
     });
 }
 
@@ -192,6 +193,7 @@ fn length_step(played: f64, spoof: Spoof) -> Option<String> {
         Spoof::Auto | Spoof::Always if long => Some(fl!("plan-spoofed", played = played)),
         Spoof::Always => Some(fl!("plan-spoofed-anyway", played = played)),
         Spoof::Auto | Spoof::Never => None,
+        _ => None,
     }
 }
 

@@ -67,6 +67,7 @@ impl Request {
 /// What converting made: all that [`Event::Finished`] says, whether or
 /// not events were followed, and a preview.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Outcome {
     pub output: PathBuf,
     pub bytes: u64,

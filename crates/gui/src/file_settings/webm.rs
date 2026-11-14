@@ -172,6 +172,7 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
         Fit::Fps | Fit::Length | Fit::Off => Ok(()),
         Fit::Crf => Err(fl!("crf", "fitted")),
         Fit::Auto | Fit::Bitrate => Err(fl!("crf", "bitrate")),
+        _ => Ok(()),
     };
     row(
         ui,
@@ -211,6 +212,7 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
         Fit::Off => Ok(()),
         Fit::Auto | Fit::Bitrate => Err(fl!("bitrate", "fitted")),
         Fit::Crf | Fit::Fps | Fit::Length => Err(fl!("bitrate", "constant")),
+        _ => Ok(()),
     };
     let allowed = bitrate.as_ref().map_err(String::as_str).copied();
     row(ui, &fl!("bitrate"), &fl!("bitrate", "hint"), allowed, |ui| {

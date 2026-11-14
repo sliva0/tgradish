@@ -107,7 +107,7 @@ pub fn notices() -> Vec<tgradish_core::licenses::Notice> {
     // before the long list of crates
     let at = notices.iter().position(|notice| notice.title == CRATES).unwrap_or(notices.len());
     for (offset, (title, text)) in fonts.into_iter().enumerate() {
-        notices.insert(at + offset, Notice { title: title.into(), text: text.into() });
+        notices.insert(at + offset, Notice::new(title, text));
     }
     notices
 }

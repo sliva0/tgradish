@@ -10,8 +10,18 @@ pub const TICKS: f64 = 60.0;
 /// ([`crate::backend::Backend::preview`]), and image stickers are one
 /// frame ([`crate::webp::preview`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Preview {
     pub width: u32,
     pub height: u32,
     pub frames: Vec<(Vec<u8>, u32)>,
+}
+
+impl Preview {
+    /// Frames of `width` by `height` straight RGBA, each with how many
+    /// [`TICKS`] it shows for: for front-ends to show one made up, as in
+    /// tests.
+    pub fn new(width: u32, height: u32, frames: Vec<(Vec<u8>, u32)>) -> Preview {
+        Preview { width, height, frames }
+    }
 }

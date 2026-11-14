@@ -34,6 +34,7 @@ pub fn creator_tool(webp: &[u8]) -> Option<String> {
 /// What an image sticker is, for inspecting it.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct Info {
     pub width: u32,
     pub height: u32,

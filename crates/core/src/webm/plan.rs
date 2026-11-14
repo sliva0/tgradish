@@ -18,6 +18,7 @@ use crate::telegram::{self, Target};
 /// taken into account.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct Plan {
     #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub input: PathBuf,

@@ -36,6 +36,7 @@ pub(crate) use ssim::ssim;
 /// Where to look for ffmpeg.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum FfmpegChoice {
     /// The built-in ffmpeg if there is one, otherwise the system one.
     #[default]
@@ -60,6 +61,7 @@ pub enum FfmpegSource {
 /// What an ffmpeg build can do, as far as tgradish cares.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct Capabilities {
     /// First line of `ffmpeg -version`.
     pub version: String,

@@ -90,6 +90,7 @@ impl Request {
 /// events were followed.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct Outcome {
     #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub output: PathBuf,

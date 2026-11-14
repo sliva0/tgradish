@@ -34,6 +34,7 @@ pub struct Patch {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct PatchReport {
     pub old_duration: Option<f64>,
     pub new_duration: Option<f64>,

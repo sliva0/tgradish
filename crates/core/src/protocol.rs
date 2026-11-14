@@ -37,6 +37,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct Description {
     pub protocol: u32,
     pub tool: &'static str,
@@ -52,6 +53,7 @@ pub struct Description {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct FormatDescription {
     pub format: Format,
     pub description: &'static str,
@@ -68,6 +70,7 @@ pub struct FormatDescription {
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct PresetDescription {
     pub name: String,
     pub description: String,

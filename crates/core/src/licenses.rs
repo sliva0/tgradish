@@ -9,9 +9,18 @@ include!("notice_titles.rs");
 
 /// One licence notice.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Notice {
     pub title: String,
     pub text: String,
+}
+
+impl Notice {
+    /// A notice of `text` titled `title`, for front-ends that show more
+    /// than the build's, as the licences of fonts.
+    pub fn new(title: impl Into<String>, text: impl Into<String>) -> Notice {
+        Notice { title: title.into(), text: text.into() }
+    }
 }
 
 /// Every notice of this build, tgradish's own first.

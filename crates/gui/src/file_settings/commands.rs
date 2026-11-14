@@ -68,6 +68,7 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
             FfmpegChoice::Auto => None,
             FfmpegChoice::System => Some("system"),
             FfmpegChoice::Builtin => Some("builtin"),
+            _ => None,
         };
         match (&ffmpeg.path, from) {
             (Some(path), _) => args.extend(["--ffmpeg".into(), path.display().to_string()]),
