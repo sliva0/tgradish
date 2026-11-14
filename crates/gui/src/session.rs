@@ -353,20 +353,31 @@ impl Store {
     }
 
     /// Writes `session` if it changed, whole or not at all, and removes
-    /// the copies of pasted images it no longer has.
-    pub(crate) fn save(&mut self, session: &Session) -> std::io::Result<()> {
+    /// the copies of pasted images it no longer has, but for those `held`
+    /// names: the copies of files removed a moment ago, which may yet be
+    /// put back.
+    pub(crate) fn save(
+        &mut self,
+        session: &Session,
+        held: impl IntoIterator<Item = String>,
+    ) -> std::io::Result<()> {
         let json = session.to_json().map_err(std::io::Error::other)?;
-        if json == self.written {
+        let mut named: HashSet<String> =
+            session.items.iter().filter_map(|item| item.pasted_copy.clone()).collect();
+        named.extend(held);
+        // the copies are looked over again when files that could be put
+        // back no longer can, though the session is as it was
+        if json == self.written && named == self.copies {
             return Ok(());
         }
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir)?;
+        if json != self.written {
+            if let Some(dir) = self.path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            // whole or not at all, and on the disk before it replaces the last
+            tgradish_core::fsutil::write_file(&self.path, json.as_bytes(), true)?;
+            self.written = json;
         }
-        // whole or not at all, and on the disk before it replaces the last
-        tgradish_core::fsutil::write_file(&self.path, json.as_bytes(), true)?;
-        self.written = json;
-        let named: HashSet<String> =
-            session.items.iter().filter_map(|item| item.pasted_copy.clone()).collect();
         // copies nobody names are left over, unless a session set aside
         // may name them: then only this window's own go, and of those not
         // the ones a session set aside names, as one read in part does
@@ -619,7 +630,7 @@ mod tests {
         for item in items.iter_mut().filter(|item| item.pasted_copy.is_none()) {
             item.pasted_copy = Some(store.copy_pasted(item.id, &item.inputs[0]).unwrap());
         }
-        store.save(&session(items, None)).unwrap();
+        store.save(&session(items, None), []).unwrap();
         drop(store);
         Store::open(path.to_path_buf()).unwrap().read().unwrap().session.restore(path, 1).items
     }
@@ -684,9 +695,9 @@ mod tests {
             // come and go, and leaves the other's alone
             let mut items = [pasted(1, b"one")];
             items[0].pasted_copy = Some(store.copy_pasted(1, &items[0].inputs[0]).unwrap());
-            store.save(&session(&items, None)).unwrap();
+            store.save(&session(&items, None), []).unwrap();
             assert_eq!(copies(&path), 2);
-            store.save(&session(&[], None)).unwrap();
+            store.save(&session(&[], None), []).unwrap();
             assert_eq!(copies(&path), left);
             assert_eq!(std::fs::read(pasted_dir(&path).join("19a0-3.png")).unwrap(), b"pasted");
             assert_eq!(std::fs::read_to_string(&unreadable.aside).unwrap(), text);
@@ -703,7 +714,7 @@ mod tests {
             item.pasted_copy = Some(store.copy_pasted(item.id, &item.inputs[0]).unwrap());
             item.choices.webm.crf = Some(20);
         }
-        store.save(&session(&items, Some(2))).unwrap();
+        store.save(&session(&items, Some(2)), []).unwrap();
         // as a newer tgradish would keep the first, with an option of its own
         let text = std::fs::read_to_string(&path).unwrap();
         let newer = text.replacen(r#""webm":{"#, r#""webm":{"made-up":1,"#, 1);
@@ -721,7 +732,7 @@ mod tests {
         assert_eq!(contents(&restored.items), [b"two".to_vec()]);
         assert_eq!((restored.selected, restored.gone), (Some(7), 0));
         // and writing the session leaves the copy of the one left out
-        store.save(&session(&restored.items, restored.selected)).unwrap();
+        store.save(&session(&restored.items, restored.selected), []).unwrap();
         assert_eq!(copies(&path), 2);
     }
 
@@ -758,7 +769,7 @@ mod tests {
             item.pasted_copy = Some(store.copy_pasted(item.id, &item.inputs[0]).unwrap());
         }
         items[0].choices.webm.crf = Some(20);
-        store.save(&session(&items, None)).unwrap();
+        store.save(&session(&items, None), []).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         std::fs::write(&path, text.replacen(r#""webm":{"#, r#""webm":{"made-up":1,"#, 1)).unwrap();
         drop(store);
@@ -768,14 +779,14 @@ mod tests {
         let loaded = store.read().unwrap();
         let aside = loaded.unreadable.expect("unreadable").aside;
         assert_eq!(loaded.session.restore(&path, 1).items.len(), 1);
-        store.save(&session(&[], None)).unwrap();
+        store.save(&session(&[], None), []).unwrap();
         // the session set aside still names it
         assert_eq!(copies(&path), 2);
         // until it is gone
         std::fs::remove_file(aside).unwrap();
         let mut three = pasted(3, b"three");
         three.pasted_copy = Some(store.copy_pasted(3, &three.inputs[0]).unwrap());
-        store.save(&session(&[three], None)).unwrap();
+        store.save(&session(&[three], None), []).unwrap();
         assert_eq!(copies(&path), 1);
     }
 
@@ -789,7 +800,7 @@ mod tests {
             item.pasted_copy = Some(store.copy_pasted(item.id, &item.inputs[0]).unwrap());
         }
         items[0].choices.webm.crf = Some(20);
-        store.save(&session(&items, None)).unwrap();
+        store.save(&session(&items, None), []).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         let newer = text.replacen(r#""webm":{"#, r#""webm":{"made-up":1,"#, 1);
         std::fs::write(&path, &newer).unwrap();
@@ -807,17 +818,17 @@ mod tests {
         let mut three = pasted(3, b"three");
         three.pasted_copy = Some(store.copy_pasted(3, &three.inputs[0]).unwrap());
         items.push(three);
-        store.save(&session(&items, None)).unwrap();
+        store.save(&session(&items, None), []).unwrap();
         assert_eq!(copies(&path), 3);
         // then it can't be told what it names, as it isn't whole
         std::fs::write(&aside, &newer[..newer.len() / 2]).unwrap();
-        store.save(&session(&[], None)).unwrap();
+        store.save(&session(&[], None), []).unwrap();
         assert_eq!(copies(&path), 3);
         // and once it is gone, so are they
         std::fs::remove_file(aside).unwrap();
         let mut four = pasted(4, b"four");
         four.pasted_copy = Some(store.copy_pasted(4, &four.inputs[0]).unwrap());
-        store.save(&session(&[four], None)).unwrap();
+        store.save(&session(&[four], None), []).unwrap();
         assert_eq!(copies(&path), 1);
     }
 
@@ -917,7 +928,7 @@ mod tests {
             preview: 0.5,
         };
         let mut store = Store::open(path.clone()).unwrap();
-        store.save(&session(&[], None).with_window(Some(window))).unwrap();
+        store.save(&session(&[], None).with_window(Some(window)), []).unwrap();
         assert_eq!(super::window(&path), Some(window));
         // sizes no window could have, and a place off any screen
         let odd = Window {

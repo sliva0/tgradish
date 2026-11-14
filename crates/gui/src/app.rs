@@ -250,15 +250,18 @@ impl App {
         // with the setting off, nothing is kept: an empty session, whose
         // saving removes the copies of pasted images, so they are copied
         // again once it is back on
-        let items: &[Item] = if self.config.gui.reopen_files {
-            &self.items
+        let removed = self.removed.iter_mut().flat_map(Removed::items_mut);
+        // the copies of those removed a moment ago are kept while they may
+        // be put back, as they come back with them
+        let (items, held): (&[Item], Vec<String>) = if self.config.gui.reopen_files {
+            (&self.items, removed.filter_map(|item| item.pasted_copy.clone()).collect())
         } else {
-            self.items.iter_mut().for_each(|item| item.pasted_copy = None);
-            &[]
+            self.items.iter_mut().chain(removed).for_each(|item| item.pasted_copy = None);
+            (&[], Vec::new())
         };
         let session = session::Session::of(items, self.selected, &self.written);
         let session = session.with_window(self.window);
-        if let Err(err) = store.save(&session) {
+        if let Err(err) = store.save(&session, held) {
             let message = Message::warning(fl!("session-unsaved"));
             let message = message.file(store.path()).detail(tgradish_core::io_reason(&err));
             // once is enough
@@ -669,6 +672,12 @@ pub(crate) struct Removed {
     selected: Option<u64>,
 }
 
+impl Removed {
+    fn items_mut(&mut self) -> impl Iterator<Item = &mut Item> {
+        self.batches.iter_mut().flatten().map(|(_, item)| item)
+    }
+}
+
 /// The settings at `path`, or the defaults where they can't be read, with
 /// why. Such a file is copied aside at once, while it is as it was.
 fn load_config(path: &Path) -> (Config, Option<tgradish_core::Error>) {
@@ -989,6 +998,40 @@ mod tests {
         second.state_mut().reopen(state);
         assert_eq!(second.state().items.len(), 1);
         assert!(second.state().banner.rows.is_empty(), "{}", crate::testing::said(second.state()));
+    }
+
+    #[test]
+    fn keeps_the_copy_of_a_pasted_image_while_it_may_be_put_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state").join("session.json");
+        let copies = state.with_file_name("pasted");
+        let mut first = harness(Config::default());
+        first.state_mut().reopen(state.clone());
+        let (files, folder) = pasted_image();
+        first.state_mut().add_pasted(files, folder);
+        first.state_mut().save_session();
+        let id = first.state().items[0].id;
+        first.state_mut().remove(id);
+        first.state_mut().save_session();
+        assert_eq!(std::fs::read_dir(&copies).unwrap().count(), 1);
+        first.state_mut().undo_removing();
+        first.state_mut().save_session();
+        drop(first);
+
+        let mut second = harness(Config::default());
+        second.state_mut().reopen(state.clone());
+        assert_eq!(second.state().items.len(), 1);
+        assert!(second.state().banner.rows.is_empty(), "{}", crate::testing::said(second.state()));
+
+        // and lets go of it once it can't be
+        let id = second.state().items[0].id;
+        second.state_mut().remove(id);
+        second.state_mut().save_session();
+        assert_eq!(std::fs::read_dir(&copies).unwrap().count(), 1);
+        second.state_mut().banner.rows.clear();
+        second.state_mut().forget_removed();
+        second.state_mut().save_session();
+        assert_eq!(std::fs::read_dir(&copies).unwrap().count(), 0);
     }
 
     #[test]
