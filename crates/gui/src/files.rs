@@ -62,19 +62,14 @@ impl App {
         if self.picking.is_some() {
             return;
         }
-        let dialog = self.file_dialog.clone();
-        let (images, stickers) = (fl!("images-filter"), fl!("stickers-filter"));
+        let dialog = pick.dialog(self.file_dialog.clone());
         self.picking = Some(Task::spawn(ctx, move |_| {
             Ok(match pick {
                 Pick::Files => dialog.pick_files().map(Picked::Files),
                 Pick::Folder => dialog.pick_folder().map(Picked::Folder),
-                Pick::Frames => dialog
-                    .add_filter(images, &[input::IMAGES, input::ASEPRITE].concat())
-                    .pick_files()
-                    .map(Picked::Frames),
+                Pick::Frames => dialog.pick_files().map(Picked::Frames),
                 // read here too, as large files take a moment
                 Pick::Inspected => dialog
-                    .add_filter(stickers, &["webm", "tgs", "webp"])
                     .pick_file()
                     .map(|file| Picked::Inspected(Box::new(Inspection::of(&file)))),
                 Pick::Ffmpeg => dialog.pick_file().map(Picked::Ffmpeg),
@@ -381,6 +376,31 @@ pub(crate) enum Pick {
     OutputDir,
 }
 
+impl Pick {
+    /// `dialog`, which has the window as its parent, titled with what it
+    /// is for, as the system's dialog may be another program's window,
+    /// titled with that program's name otherwise, and showing only the
+    /// files it is for where those are known. Made on the window's thread,
+    /// where its messages are given.
+    fn dialog(self, dialog: rfd::FileDialog) -> rfd::FileDialog {
+        let dialog = dialog.set_title(match self {
+            Pick::Files => fl!("dialog-add-files"),
+            Pick::Folder => fl!("dialog-add-folder"),
+            Pick::Frames => fl!("dialog-add-images"),
+            Pick::Inspected => fl!("dialog-inspect"),
+            Pick::Ffmpeg => fl!("dialog-ffmpeg"),
+            Pick::OutputDir => fl!("dialog-results-folder"),
+        });
+        match self {
+            Pick::Frames => {
+                dialog.add_filter(fl!("images-filter"), &[input::IMAGES, input::ASEPRITE].concat())
+            }
+            Pick::Inspected => dialog.add_filter(fl!("stickers-filter"), &["webm", "tgs", "webp"]),
+            Pick::Files | Pick::Folder | Pick::Ffmpeg | Pick::OutputDir => dialog,
+        }
+    }
+}
+
 /// What a file dialog picked, for what it asked.
 pub(crate) enum Picked {
     Files(Vec<PathBuf>),
@@ -679,6 +699,73 @@ mod tests {
             Some(Task::spawn(&ctx, move |_| Ok(Some(Picked::OutputDir(folder)))));
         finish(&mut harness);
         assert_eq!(harness.state().config.gui.output_dir, Some(dir.path().join("out")));
+    }
+
+    /// Each file dialog says what it is for, and shows the files it is for
+    /// where they are known: as rfd's dialog keeps them, which only its
+    /// Debug shows.
+    #[test]
+    fn titles_each_file_dialog_with_what_it_is_for() {
+        let picks = [
+            Pick::Files,
+            Pick::Folder,
+            Pick::Frames,
+            Pick::Inspected,
+            Pick::Ffmpeg,
+            Pick::OutputDir,
+        ];
+        let titles = [
+            fl!("dialog-add-files"),
+            fl!("dialog-add-folder"),
+            fl!("dialog-add-images"),
+            fl!("dialog-inspect"),
+            fl!("dialog-ffmpeg"),
+            fl!("dialog-results-folder"),
+        ];
+        let filters = [None, None, Some(fl!("images-filter")), Some(fl!("stickers-filter"))];
+        for (n, pick) in picks.into_iter().enumerate() {
+            let dialog = format!("{:?}", pick.dialog(rfd::FileDialog::new()));
+            assert!(dialog.contains(&format!("title: Some({:?})", titles[n])), "{dialog}");
+            match filters.get(n).cloned().flatten() {
+                Some(name) => assert!(dialog.contains(&format!("name: {name:?}")), "{dialog}"),
+                None => assert!(dialog.contains("filters: []"), "{dialog}"),
+            }
+        }
+        let distinct: std::collections::BTreeSet<_> = titles.iter().collect();
+        assert_eq!(distinct.len(), titles.len());
+    }
+
+    /// The window stays the dialog's parent, with its display, which rfd
+    /// needs on Wayland to export the window for the portal's dialog.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[allow(unsafe_code)]
+    #[test]
+    fn keeps_the_window_as_the_file_dialogs_parent() {
+        use raw_window_handle::{
+            DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle,
+            RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle, WindowHandle,
+        };
+        use std::ptr::NonNull;
+        struct Window(NonNull<std::ffi::c_void>);
+        impl HasWindowHandle for Window {
+            fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+                let raw = RawWindowHandle::Wayland(WaylandWindowHandle::new(self.0));
+                // SAFETY: only kept by the dialog, which isn't shown
+                Ok(unsafe { WindowHandle::borrow_raw(raw) })
+            }
+        }
+        impl HasDisplayHandle for Window {
+            fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+                let raw = RawDisplayHandle::Wayland(WaylandDisplayHandle::new(self.0));
+                // SAFETY: as above
+                Ok(unsafe { DisplayHandle::borrow_raw(raw) })
+            }
+        }
+        let window = Window(NonNull::dangling());
+        let dialog =
+            format!("{:?}", Pick::Files.dialog(rfd::FileDialog::new().set_parent(&window)));
+        assert!(dialog.contains("parent: Some(Wayland("), "{dialog}");
+        assert!(dialog.contains("parent_display: Some(Wayland("), "{dialog}");
     }
 
     #[test]

@@ -155,6 +155,27 @@ paste-failed = Nothing could be pasted
 drop-to-add = Drop to add
 
 
+## The system's file dialogs: their titles, which say what each is for,
+## and the names of the kinds of files they show
+
+# From Add files…
+dialog-add-files = Add files to convert
+# From A folder of frames…, in the menu beside Add files…
+dialog-add-folder = Add a folder of frames
+# From Images as one animation…, in the same menu
+dialog-add-images = Add images as one animation
+# From the microscope's button, and Inspect another…
+dialog-inspect = Choose a sticker to inspect
+# From Choose ffmpeg…, and Choose… beside Settings' ffmpeg program
+dialog-ffmpeg = Choose ffmpeg
+# From Choose… beside Settings' folder for results
+dialog-results-folder = Choose where results go
+# The kinds of files shown, when adding images as one animation
+images-filter = Images
+# The kinds of files shown, when choosing a sticker to inspect
+stickers-filter = Stickers
+
+
 ## The list of files, on the left
 
 settings = Settings
@@ -174,8 +195,6 @@ add-images = Images as one animation…
     .hint = The images picked, in name order
 add-pasted = From the clipboard
     .hint = Copied files, paths or an image (Ctrl+V)
-# The file picker's name for the images it shows.
-images-filter = Images
 convert-all = { $count ->
     [0] Convert all
    *[other] Convert all ({ $count })
@@ -993,8 +1012,6 @@ issue-animated = It is animated, where image stickers are one picture
 ## Inspecting a sticker
 
 inspect-another = Inspect another…
-# The file picker's name for the files it shows.
-stickers-filter = Stickers
 inspect-webm-sticker = A video sticker
 inspect-webm-emoji = A video emoji
 inspect-image-sticker = An image sticker
