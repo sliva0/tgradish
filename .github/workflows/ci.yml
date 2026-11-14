@@ -65,6 +65,11 @@ jobs:
         if: runner.os == 'Linux'
         env:
           RUSTDOCFLAGS: -D warnings
+      # the libraries packaged as crates.io would get them, and built from
+      # those packages, each against the others', in the order they depend
+      # on each other
+      - run: cargo publish --dry-run --locked -p tgradish-frames -p tgradish-tgs -p tgradish-core
+        if: runner.os == 'Linux'
 
       # binaries carry the licences of their crates; they must list today's
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
