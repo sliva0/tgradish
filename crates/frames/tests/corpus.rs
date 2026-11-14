@@ -257,3 +257,28 @@ fn reads_jpeg_and_bmp_stills() {
         assert!(b > 200 && r < 60, "{format:?}: {r} {b}");
     }
 }
+
+#[test]
+fn stops_between_frames_when_cancelled() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    // says to stop the third time it is asked
+    let asked = AtomicUsize::new(0);
+    let third = || asked.fetch_add(1, Ordering::SeqCst) == 2;
+    for name in ["bounce.png", "walker_2x.gif", "glow.webp", "walker_2x.ase"] {
+        let file = file(name);
+        assert!(file.sprite.frames.len() > 3, "{name}");
+        asked.store(0, Ordering::SeqCst);
+        let options = DecodeOptions { cancelled: Some(&third), ..DecodeOptions::default() };
+        let stopped = decode(&file.bytes, &options, &Limits::default());
+        assert_eq!(stopped, Err(Error::Cancelled), "{name}");
+        assert_eq!(asked.load(Ordering::SeqCst), 3, "{name}");
+    }
+    // and between the images of a sequence, before the third is decoded
+    let [(_, steps), _] = tgradish_corpus::sequences();
+    let files: Vec<Vec<u8>> = steps.iter().map(encode::png).collect();
+    asked.store(0, Ordering::SeqCst);
+    let mut sequence = Sequence::new(Duration::ZERO, &Limits::default()).cancelled_by(&third);
+    sequence.push(&files[0]).unwrap();
+    sequence.push(&files[1]).unwrap();
+    assert_eq!(sequence.push(&files[2]), Err(Error::Cancelled));
+}

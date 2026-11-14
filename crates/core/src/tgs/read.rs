@@ -80,13 +80,12 @@ pub(super) fn load(
     let tag = options.tag.clone().filter(|_| sheet.is_none());
     let chosen =
         crate::drawn::layers(options.show_layers.as_deref(), options.hide_layers.as_deref());
+    let stop = || cancel.is_cancelled();
+    let decode = DecodeOptions { tag, layers: chosen, cancelled: Some(&stop) };
     let decoded = match frames::Format::detect(&bytes) {
-        Some(frames::Format::Aseprite) => art::aseprite(&bytes, tag.as_deref(), &chosen, &limits),
-        _ => {
-            let options = DecodeOptions { tag, layers: chosen };
-            frames::decode(&bytes, &options, &limits)
-                .map(|animation| (animation, Aseprite::default()))
-        }
+        Some(frames::Format::Aseprite) => art::aseprite(&bytes, &decode, &limits),
+        _ => frames::decode(&bytes, &decode, &limits)
+            .map(|animation| (animation, Aseprite::default())),
     };
     let (animation, aseprite) = match sheet {
         // which refuses an animation, rather than lose all but a frame
@@ -95,7 +94,7 @@ pub(super) fn load(
         }),
         None => decoded,
     }
-    .map_err(|err| art::unreadable(input, err))?;
+    .map_err(|err| art::undecodable(input, err))?;
     let Aseprite { tags, layers, durations } = aseprite;
     Ok(Loaded { tags, layers, durations, ..Loaded::art(animation) })
 }

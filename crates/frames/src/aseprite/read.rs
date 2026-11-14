@@ -118,8 +118,9 @@ pub(super) fn spend(spent: &mut usize, bytes: usize, limits: &Limits) -> Result<
 
 #[cfg(test)]
 mod tests {
+    use crate::DecodeOptions;
+    use crate::aseprite::Sprite;
     use crate::aseprite::testfile::*;
-    use crate::aseprite::{Layers, Sprite};
     use crate::{Error, Limits};
 
     #[test]
@@ -130,7 +131,7 @@ mod tests {
         let roomy = Limits { max_dimension: 8192, max_bytes: 1 << 20 };
         // the canvas is fine, 100 MB of frames aren't
         let sprite = Sprite::read(&big, &roomy).unwrap();
-        assert!(matches!(sprite.animation(None, &Layers::default()), Err(Error::TooLarge { .. })));
+        assert!(matches!(sprite.animation(&DecodeOptions::default()), Err(Error::TooLarge { .. })));
         // nor is a cel that claims to be huge
         let cel = file(
             1,
@@ -167,7 +168,7 @@ mod tests {
         let draw = |bytes: &[u8]| {
             least(|limits| {
                 Sprite::read(bytes, &limits)
-                    .and_then(|sprite| sprite.animation(None, &Layers::default()))
+                    .and_then(|sprite| sprite.animation(&DecodeOptions::default()))
                     .is_ok()
             })
         };

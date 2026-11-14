@@ -152,6 +152,9 @@ pub enum Error {
         /// The limit it went past.
         limit: Limit,
     },
+    /// [`DecodeOptions::cancelled`] said to stop.
+    #[error("cancelled")]
+    Cancelled,
 }
 
 /// What decoding found too large for its [`Limits`], with its size.
@@ -325,15 +328,42 @@ impl Limits {
     }
 }
 
-/// What [`decode`] reads of a file. Built as `DecodeOptions { tag,
-/// ..DecodeOptions::default() }`, so that what is added later keeps its
-/// default.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DecodeOptions {
+/// Asked between frames while decoding, and between the images of a
+/// [`Sequence`]: when it says yes, decoding stops with
+/// [`Error::Cancelled`]. Decoding a frame can't be stopped part of the
+/// way, so a stop is noticed once the frame under way is done.
+pub type Cancelled<'a> = &'a (dyn Fn() -> bool + Sync);
+
+/// Fails with [`Error::Cancelled`] once `cancelled` says to stop.
+fn check(cancelled: Option<Cancelled>) -> Result<()> {
+    match cancelled {
+        Some(cancelled) if cancelled() => Err(Error::Cancelled),
+        _ => Ok(()),
+    }
+}
+
+/// What [`decode`] reads of a file, and what stops it. Built as
+/// `DecodeOptions { tag, ..DecodeOptions::default() }`, so that what is
+/// added later keeps its default.
+#[derive(Clone, Default)]
+pub struct DecodeOptions<'a> {
     /// Aseprite: only the frames of this tag, in its direction.
     pub tag: Option<String>,
     /// Aseprite: layers to show or hide, over what the file shows.
     pub layers: Layers,
+    /// Asked before each frame is decoded or drawn; nothing stops decoding
+    /// without it.
+    pub cancelled: Option<Cancelled<'a>>,
+}
+
+impl fmt::Debug for DecodeOptions<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DecodeOptions")
+            .field("tag", &self.tag)
+            .field("layers", &self.layers)
+            .field("cancelled", &self.cancelled.is_some())
+            .finish()
+    }
 }
 
 /// Decodes an animated or still image, within `limits`. Still images get
@@ -346,11 +376,10 @@ pub fn decode(bytes: &[u8], options: &DecodeOptions, limits: &Limits) -> Result<
     if format != Format::Aseprite && !options.layers.is_empty() {
         return Err(Error::LayersWithoutAseprite);
     }
+    check(options.cancelled)?;
     match format {
-        Format::Aseprite => {
-            Sprite::read(bytes, limits)?.animation(options.tag.as_deref(), &options.layers)
-        }
-        _ => raster::decode(bytes, format, limits),
+        Format::Aseprite => Sprite::read(bytes, limits)?.animation(options),
+        _ => raster::decode(bytes, format, limits, options.cancelled),
     }
 }
 

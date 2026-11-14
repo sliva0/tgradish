@@ -141,6 +141,7 @@ pub fn readable(input: &Input, options: &Options, cancel: &CancelToken) -> Resul
         return Err(err);
     }
     let sequence = matches!(input, Input::Sequence(_));
+    let stop = || cancel.is_cancelled();
     let (animation, aseprite) = match input {
         Input::Sequence(frames) => {
             (art::read_sequence(frames, options.fps, cancel)?, Aseprite::default())
@@ -148,15 +149,20 @@ pub fn readable(input: &Input, options: &Options, cancel: &CancelToken) -> Resul
         Input::File(path) if aseprite => {
             cancel.check()?;
             let bytes = art::read(path, art::most_bytes(&Limits::default()))?;
-            art::aseprite(&bytes, options.tag.as_deref(), &layers, &Limits::default())
-                .map_err(|err| art::unreadable(path, err))?
+            let tag = options.tag.clone();
+            let decode = frames::DecodeOptions { tag, layers, cancelled: Some(&stop) };
+            art::aseprite(&bytes, &decode, &Limits::default())
+                .map_err(|err| art::undecodable(path, err))?
         }
         Input::File(path) if sniff(path) == (FileKind::Webp { animated: true }) => {
             cancel.check()?;
             let bytes = art::read(path, art::most_bytes(&Limits::default()))?;
-            let animation =
-                frames::decode(&bytes, &frames::DecodeOptions::default(), &Limits::default())
-                    .map_err(|err| art::unreadable(path, err))?;
+            let decode = frames::DecodeOptions {
+                cancelled: Some(&stop),
+                ..frames::DecodeOptions::default()
+            };
+            let animation = frames::decode(&bytes, &decode, &Limits::default())
+                .map_err(|err| art::undecodable(path, err))?;
             (animation, Aseprite::default())
         }
         Input::File(path) => {
@@ -269,7 +275,7 @@ mod tests {
         let sprite =
             frames::aseprite::Sprite::read(&std::fs::read(&ase).unwrap(), &Limits::default())
                 .unwrap();
-        let all = sprite.animation(None, &Layers::default()).unwrap();
+        let all = sprite.animation(&frames::DecodeOptions::default()).unwrap();
         assert_eq!(read(&ase, Options::default()).unwrap(), all);
         let idle = Options { tag: Some("idle".into()), ..Options::default() };
         assert_eq!(read(&ase, idle).unwrap().frames().len(), 2);

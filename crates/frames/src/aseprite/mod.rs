@@ -22,7 +22,9 @@ use blend::Colour;
 use chunks::{read_layer, read_old_palette, read_palette, read_tags, read_user_colour};
 use read::{Reader, budget, error, kept, spend};
 
-use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Frame, Limits, Oversize, Result};
+use crate::{
+    Animation, DEFAULT_FRAME_DURATION, DecodeOptions, Error, Frame, Limits, Oversize, Result, check,
+};
 
 #[cfg(test)]
 thread_local! {
@@ -576,9 +578,11 @@ impl Sprite {
             .collect())
     }
 
-    /// The frames of `tag`, or all frames, with the layers the file shows
-    /// and `layers` changes.
-    pub fn animation(&self, tag: Option<&str>, layers: &Layers) -> Result<Animation> {
+    /// The frames of the options' tag, or all frames, with the layers the
+    /// file shows and the options' layers change, asking whether to stop
+    /// before drawing each.
+    pub fn animation(&self, options: &DecodeOptions) -> Result<Animation> {
+        let DecodeOptions { tag, layers, cancelled } = options;
         // a hidden group hides what is in it; groups come before their layers
         let mut shown = self.shown(layers)?;
         for index in 0..shown.len() {
@@ -586,7 +590,7 @@ impl Sprite {
                 shown[index] &= shown[parent];
             }
         }
-        let order: Vec<u32> = match tag {
+        let order: Vec<u32> = match tag.as_deref() {
             None => (0..self.frames.len() as u32).collect(),
             Some(name) => self
                 .tags
@@ -612,6 +616,7 @@ impl Sprite {
             let rgba = match drawn[index] {
                 Some(at) => frames[at].rgba.clone(),
                 None => {
+                    check(*cancelled)?;
                     drawn[index] = Some(frames.len());
                     self.render(index, &shown)?.into_flattened()
                 }
@@ -681,8 +686,9 @@ mod tests {
             ],
         );
         let sprite = Sprite::read(&bytes, &Limits::default()).unwrap();
-        let first = |tag| -> Vec<Colour> {
-            let animation = sprite.animation(tag, &Layers::default()).unwrap();
+        let first = |tag: Option<&str>| -> Vec<Colour> {
+            let options = DecodeOptions { tag: tag.map(String::from), ..DecodeOptions::default() };
+            let animation = sprite.animation(&options).unwrap();
             (0..animation.frames().len()).map(|i| animation.pixel(i, 0, 0).unwrap()).collect()
         };
         assert_eq!(first(None), [RED, GREEN, RED]);
@@ -692,11 +698,11 @@ mod tests {
         assert_eq!(RENDERED.get(), 3);
         assert_eq!(first(Some("on")), [GREEN, RED]);
         assert_eq!(
-            sprite.animation(None, &Layers::default()).unwrap().duration(),
+            sprite.animation(&DecodeOptions::default()).unwrap().duration(),
             Duration::from_millis(150)
         );
         assert!(matches!(
-            sprite.animation(Some("nope"), &Layers::default()),
+            sprite.animation(&DecodeOptions { tag: Some("nope".into()), ..DecodeOptions::default() }),
             Err(Error::NoSuchTag { available, .. }) if available == ["back", "on"]
         ));
     }
@@ -801,7 +807,8 @@ mod tests {
         let drawn = |show: &[&str], hide: &[&str]| {
             let names = |list: &[&str]| list.iter().map(|&n| n.to_owned()).collect();
             let layers = Layers { show: names(show), hide: names(hide) };
-            sprite.animation(None, &layers).map(|animation| pixels(&animation, 0))
+            let options = DecodeOptions { layers, ..DecodeOptions::default() };
+            sprite.animation(&options).map(|animation| pixels(&animation, 0))
         };
         const CLEAR: Colour = [0; 4];
         assert_eq!(drawn(&[], &[]), Ok(vec![RED, GREEN, CLEAR, CLEAR]));

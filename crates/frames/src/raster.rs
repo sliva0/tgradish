@@ -13,7 +13,10 @@ use image::codecs::webp::WebPDecoder;
 use image::error::LimitErrorKind;
 use image::{AnimationDecoder, DynamicImage, Frames, ImageDecoder, ImageError};
 
-use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Format, Frame, Limits, Oversize, Result};
+use crate::{
+    Animation, Cancelled, DEFAULT_FRAME_DURATION, Error, Format, Frame, Limits, Oversize, Result,
+    check,
+};
 
 /// The `image` crate's errors as ours: a codec stopped by its limits says
 /// the input is too large, anything else that it doesn't decode.
@@ -28,7 +31,12 @@ fn image_error(format: Format, limits: &Limits) -> impl Fn(ImageError) -> Error 
     }
 }
 
-pub(crate) fn decode(bytes: &[u8], format: Format, limits: &Limits) -> Result<Animation> {
+pub(crate) fn decode(
+    bytes: &[u8],
+    format: Format,
+    limits: &Limits,
+    cancelled: Option<Cancelled>,
+) -> Result<Animation> {
     let error = image_error(format, limits);
     // the codecs check sizes against these before they allocate
     let mut codec_limits = image::Limits::default();
@@ -40,13 +48,13 @@ pub(crate) fn decode(bytes: &[u8], format: Format, limits: &Limits) -> Result<An
         Format::Gif => {
             let mut decoder = GifDecoder::new(reader).map_err(error)?;
             decoder.set_limits(codec_limits).map_err(error)?;
-            collect(decoder.into_frames(), format, limits, gif_delay)?
+            collect(decoder.into_frames(), format, limits, cancelled, gif_delay)?
         }
         Format::Png => {
             let decoder = PngDecoder::with_limits(reader, codec_limits).map_err(error)?;
             if decoder.is_apng().map_err(error)? {
                 let frames = decoder.apng().map_err(error)?.into_frames();
-                collect(frames, format, limits, |delay| delay)?
+                collect(frames, format, limits, cancelled, |delay| delay)?
             } else {
                 return still(decoder, format, limits);
             }
@@ -55,7 +63,7 @@ pub(crate) fn decode(bytes: &[u8], format: Format, limits: &Limits) -> Result<An
             let mut decoder = WebPDecoder::new(reader).map_err(error)?;
             decoder.set_limits(codec_limits).map_err(error)?;
             if decoder.has_animation() {
-                collect(decoder.into_frames(), format, limits, |delay| delay)?
+                collect(decoder.into_frames(), format, limits, cancelled, |delay| delay)?
             } else {
                 return still(decoder, format, limits);
             }
@@ -85,11 +93,15 @@ fn collect(
     frames: Frames<'_>,
     format: Format,
     limits: &Limits,
+    cancelled: Option<Cancelled>,
     delay: impl Fn(Duration) -> Duration,
 ) -> Result<Option<Animation>> {
     let mut size = None;
     let mut out = Vec::new();
-    for frame in frames {
+    let mut frames = frames.into_iter();
+    // asked before each frame, which the iterator decodes when it is
+    // taken
+    while let Some(frame) = check(cancelled).map(|()| frames.next())? {
         let frame = frame.map_err(image_error(format, limits))?;
         let duration = delay(Duration::from(frame.delay()));
         let buffer = frame.into_buffer();

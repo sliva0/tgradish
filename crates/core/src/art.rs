@@ -7,8 +7,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use tgradish_tgs::frames::aseprite::{LayerInfo, Layers, Sprite, Tag};
-use tgradish_tgs::frames::{self, Animation, Limits};
+use tgradish_tgs::frames::aseprite::{LayerInfo, Sprite, Tag};
+use tgradish_tgs::frames::{self, Animation, DecodeOptions, Limits};
 
 use crate::CancelToken;
 use crate::error::{Error, Result};
@@ -25,16 +25,16 @@ pub(crate) struct Aseprite {
     pub(crate) durations: Vec<f64>,
 }
 
-/// The frames of an Aseprite file, from its bytes, with `tag` and `layers`
-/// chosen, and what it tells of itself; parsed once for all of these.
+/// The frames of an Aseprite file, from its bytes, with the tag and layers
+/// `options` choose, and what it tells of itself; parsed once for all of
+/// these.
 pub(crate) fn aseprite(
     bytes: &[u8],
-    tag: Option<&str>,
-    layers: &Layers,
+    options: &DecodeOptions,
     limits: &Limits,
 ) -> frames::Result<(Animation, Aseprite)> {
     let sprite = Sprite::read(bytes, limits)?;
-    let animation = sprite.animation(tag, layers)?;
+    let animation = sprite.animation(options)?;
     let durations = sprite.durations().iter().map(Duration::as_secs_f64).collect();
     Ok((animation, Aseprite { tags: sprite.tags().to_vec(), layers: sprite.layers(), durations }))
 }
@@ -66,6 +66,14 @@ pub(crate) fn read(path: &Path, most: u64) -> Result<Vec<u8>> {
 /// `path` couldn't be read for `err`.
 pub(crate) fn unreadable(path: &Path, err: impl std::fmt::Display) -> Error {
     Error::Unreadable { path: path.to_path_buf(), message: err.to_string() }
+}
+
+/// `path` didn't decode for `err`, or its decoding was cancelled.
+pub(crate) fn undecodable(path: &Path, err: frames::Error) -> Error {
+    match err {
+        frames::Error::Cancelled => Error::Cancelled,
+        err => unreadable(path, err),
+    }
 }
 
 /// How long each frame of a sequence or sprite sheet shows, at `fps`
@@ -137,14 +145,15 @@ pub(crate) fn read_sequence(
 ) -> Result<Animation> {
     let files = sequence_files(inputs)?;
     let limits = Limits::default();
-    let mut sequence = frames::Sequence::new(frame_duration(fps)?, &limits);
+    let stop = || cancel.is_cancelled();
+    let mut sequence = frames::Sequence::new(frame_duration(fps)?, &limits).cancelled_by(&stop);
     for file in &files {
         cancel.check()?;
         let bytes = read(file, most_bytes(&limits))?;
-        sequence.push(&bytes).map_err(|err| unreadable(file, err))?;
+        sequence.push(&bytes).map_err(|err| undecodable(file, err))?;
     }
     cancel.check()?;
-    sequence.finish().map_err(|err| unreadable(&files[0], err))
+    sequence.finish().map_err(|err| undecodable(&files[0], err))
 }
 
 #[cfg(test)]
@@ -167,6 +176,17 @@ mod tests {
             sequence_files(&files).unwrap(),
             [dir.path().join("2.png"), dir.path().join("10.png")]
         );
+    }
+
+    #[test]
+    fn stops_decoding_when_cancelled() {
+        let cancel = CancelToken::new();
+        cancel.cancel();
+        let stop = || cancel.is_cancelled();
+        let ase = tgradish_corpus::files().into_iter().find(|file| file.name == "walker_2x.ase");
+        let options = DecodeOptions { cancelled: Some(&stop), ..DecodeOptions::default() };
+        let stopped = aseprite(&ase.unwrap().bytes, &options, &Limits::default()).unwrap_err();
+        assert!(matches!(undecodable(Path::new("walker.ase"), stopped), Error::Cancelled));
     }
 
     #[test]

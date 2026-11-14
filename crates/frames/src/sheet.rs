@@ -1,9 +1,10 @@
 //! Animations assembled from several pictures: sprite sheets and image
 //! sequences.
 
+use std::fmt;
 use std::time::Duration;
 
-use crate::{Animation, DecodeOptions, Error, Frame, Limits, Result, decode};
+use crate::{Animation, Cancelled, DecodeOptions, Error, Frame, Limits, Result, decode};
 
 /// How a sprite sheet is laid out: equal cells, frames row by row. Built
 /// with [`Sheet::new`], then changed field by field, so that what is added
@@ -129,10 +130,10 @@ pub fn sequence(
 /// assert_eq!(sequence.finish()?.duration(), Duration::from_millis(150));
 /// # Ok::<(), tgradish_frames::Error>(())
 /// ```
-#[derive(Debug)]
-pub struct Sequence {
+pub struct Sequence<'a> {
     frame_duration: Duration,
     limits: Limits,
+    cancelled: Option<Cancelled<'a>>,
     /// The first image's size, once there is one.
     size: Option<(u32, u32)>,
     frames: Vec<Frame>,
@@ -142,18 +143,37 @@ pub struct Sequence {
     images: usize,
 }
 
-impl Sequence {
+impl fmt::Debug for Sequence<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Sequence")
+            .field("frame_duration", &self.frame_duration)
+            .field("limits", &self.limits)
+            .field("cancelled", &self.cancelled.is_some())
+            .field("size", &self.size)
+            .field("frames", &self.frames.len())
+            .finish()
+    }
+}
+
+impl<'a> Sequence<'a> {
     /// An empty sequence, whose still images show for `frame_duration`, as
     /// [`sequence`]'s do, and which holds no more than `limits` allow.
-    pub fn new(frame_duration: Duration, limits: &Limits) -> Sequence {
+    pub fn new(frame_duration: Duration, limits: &Limits) -> Sequence<'a> {
         Sequence {
             frame_duration,
             limits: *limits,
+            cancelled: None,
             size: None,
             frames: Vec::new(),
             held: 0,
             images: 0,
         }
+    }
+
+    /// The sequence, asking `cancelled` before each image and each of its
+    /// frames, as [`DecodeOptions::cancelled`] is.
+    pub fn cancelled_by(self, cancelled: Cancelled<'a>) -> Sequence<'a> {
+        Sequence { cancelled: Some(cancelled), ..self }
     }
 
     /// Decodes the next image and adds its frames, in what the images
@@ -164,7 +184,8 @@ impl Sequence {
         let index = self.images;
         let limits = &self.limits;
         let left = Limits { max_bytes: limits.max_bytes.saturating_sub(self.held), ..*limits };
-        let image = decode(bytes, &DecodeOptions::default(), &left)?;
+        let options = DecodeOptions { cancelled: self.cancelled, ..DecodeOptions::default() };
+        let image = decode(bytes, &options, &left)?;
         let (width, height) = (image.width(), image.height());
         let (first_width, first_height) = self.size.unwrap_or((width, height));
         if (width, height) != (first_width, first_height) {
