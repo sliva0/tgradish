@@ -275,26 +275,30 @@ impl App {
     }
 
     /// Keeps the window's scale and its setting together: the setting is
-    /// applied as the window opens, and as Settings changes it, where it is
-    /// kept once saved; a change by egui's keys, Ctrl+= and Ctrl+- and
-    /// Ctrl+0, is saved at once, as the theme's button saves its change.
+    /// applied as the window opens, and as Settings changes it, which
+    /// keeps it once saved, as it does the theme; a change by egui's keys,
+    /// Ctrl+= and Ctrl+- and Ctrl+0, is saved at once, as the theme's button
+    /// saves its change. egui applies a scale asked of it from the next
+    /// frame, which `scale_shown`, what was last asked or seen, awaits.
     fn follow_scale(&mut self, ctx: &egui::Context) {
         let zoom = ctx.zoom_factor();
         let set = self.config.gui.scale as f32;
         let alike = |a: f32, b: f32| (a - b).abs() < 0.005;
         match self.scale_shown {
-            // stepped in Settings, which applied it and set it at once
-            Some(shown) if !alike(zoom, shown) && alike(zoom, set) => {}
+            // the setting changed, by Settings, or as the window opens
+            Some(shown) if !alike(set, shown) => ctx.set_zoom_factor(set),
+            None => ctx.set_zoom_factor(set),
+            // what was asked, now applied
+            Some(shown) if alike(zoom, shown) => return,
             // by the keys, Settings open or not
-            Some(shown) if !alike(zoom, shown) => {
+            Some(_) => {
                 let scale = crate::config::rounded_scale(f64::from(zoom));
                 self.save_setting(|gui| gui.scale = scale);
+                self.scale_shown = Some(zoom);
+                return;
             }
-            Some(shown) if alike(set, shown) => return,
-            // as the window opens, or set another way
-            _ => ctx.set_zoom_factor(set),
         }
-        self.scale_shown = Some(ctx.zoom_factor());
+        self.scale_shown = Some(set);
     }
 
     pub(crate) fn style(&self, ctx: &egui::Context) {
