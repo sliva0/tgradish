@@ -952,16 +952,26 @@ mod tests {
     }
 
     #[test]
-    fn leaves_out_what_it_cannot_hold() {
+    fn leaves_out_a_pasted_image_it_has_no_copy_of() {
+        let dir = tempfile::tempdir().unwrap();
+        let fine = dir.path().join("fine.png");
+        let items = [pasted(1, b"one"), Item::new(2, vec![fine], false, Target::Sticker)];
+        let session = session(&items, Some(2));
+        assert!(session.to_json().is_ok());
+        assert_eq!((session.items.len(), session.selected), (1, Some(0)));
+    }
+
+    // only Unix lets a file be named with bytes that aren't UTF-8
+    #[cfg(unix)]
+    #[test]
+    fn leaves_out_a_name_it_cannot_hold() {
         use std::os::unix::ffi::OsStrExt;
         let dir = tempfile::tempdir().unwrap();
         let odd = dir.path().join(std::ffi::OsStr::from_bytes(b"odd\xff.png"));
         let fine = dir.path().join("fine.png");
-        // nor a pasted image that has no copy to open it from
         let items = [
             Item::new(1, vec![odd], false, Target::Sticker),
             Item::new(2, vec![fine], false, Target::Sticker),
-            pasted(3, b"three"),
         ];
         let session = session(&items, Some(2));
         assert!(session.to_json().is_ok());
