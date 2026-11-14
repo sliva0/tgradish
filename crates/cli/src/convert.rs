@@ -8,7 +8,7 @@ use console::style;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use tgradish_core::backend::Backend;
 use tgradish_core::input::Input;
-use tgradish_core::presets::{Format, FormatOptions, Presets};
+use tgradish_core::presets::{Format, FormatOptions, PresetError, Presets};
 use tgradish_core::tgradish_tgs::check::Severity;
 use tgradish_core::webm::{self, Event, Options};
 use tgradish_core::{tgs, webp};
@@ -71,8 +71,35 @@ fn overlay<T: serde::de::DeserializeOwned>(
     json: &serde_json::Map<String, serde_json::Value>,
     format: Format,
 ) -> Result<T> {
-    serde_json::from_value(json.clone().into())
-        .with_context(|| format!("invalid --options-json for {} output", format.name()))
+    serde_json::from_value(json.clone().into()).map_err(|err| {
+        crate::usage(format!("invalid --options-json for {} output: {err}", format.name()))
+    })
+}
+
+/// Checks the options a command converts with, `options`, for values
+/// wrong whatever the input, before any is converted: named by the flag
+/// that gave one, or its key in `--options-json`, both mistakes in the
+/// command line; or else the preset `preset`, which set it.
+fn check_options(
+    options: &impl serde::Serialize,
+    args: &ConversionArgs,
+    json: Option<&serde_json::Map<String, serde_json::Value>>,
+    preset: &str,
+) -> Result<()> {
+    let Err(tgradish_core::Error::InvalidOption { option, reason }) =
+        tgradish_core::options::check(options)
+    else {
+        return Ok(());
+    };
+    let mut flags = tgradish_core::options::set_keys(&args.options.to_options());
+    flags.extend(tgradish_core::options::set_keys(&args.options.to_tgs_options()));
+    if flags.iter().any(|key| key == option) {
+        return Err(crate::usage(format!("--{option} {reason}")));
+    }
+    if json.is_some_and(|json| json.contains_key(option)) {
+        return Err(crate::usage(format!("{option:?} in --options-json {reason}")));
+    }
+    bail!("the preset {preset:?} sets {option}, which {reason}")
 }
 
 /// The format a command converts to: `--format`, or else the extension of
@@ -90,27 +117,28 @@ fn format_of(format: Option<FormatArg>, output: Option<&Path>) -> Format {
 /// make a file that says it is something else.
 fn check_output(output: &Path, format: Format) -> Result<()> {
     if output.is_dir() {
-        bail!(
+        return Err(crate::usage(format!(
             "{} is a directory: -o names the result's file, -O/--output-dir a directory for \
              results",
             output.display()
-        );
+        )));
     }
+    let wrong = |message: String| Err(crate::usage(message));
     match Format::of_path(output) {
         Some(asked) if asked == format => Ok(()),
-        Some(asked) => bail!(
+        Some(asked) => wrong(format!(
             "{} is a .{} file, but this converts to {}: end it .{} or drop --format",
             output.display(),
             asked.extension(),
             format.name(),
             format.extension()
-        ),
-        None => bail!(
+        )),
+        None => wrong(format!(
             "{} doesn't end in .{}, as {} output does; .tgs and .webp ask for those formats",
             output.display(),
             format.extension(),
             format.name()
-        ),
+        )),
     }
 }
 
@@ -123,42 +151,63 @@ impl<'a> Converter<'a> {
         format: Option<FormatArg>,
         output: Option<&Path>,
     ) -> Result<Self> {
-        let presets = Presets::load_user()?;
         let format = format_of(format, output);
         if let Some(output) = output {
             check_output(output, format)?;
         }
-        let invalid_json = || format!("invalid --options-json for {} output", format.name());
         let json = match &args.options_json {
             Some(json) => Some(
-                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(json)
-                    .with_context(invalid_json)?,
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(json).map_err(
+                    |err| crate::usage(format!("--options-json isn't a JSON object: {err}")),
+                )?,
             ),
             None => None,
         };
         let unused = args.options.unused(format, json.as_ref());
         if !unused.is_empty() {
-            bail!("{} can't be used for {} output", unused.join(", "), format.name());
+            let unused = unused.join(", ");
+            return Err(crate::usage(format!(
+                "{unused} can't be used for {} output",
+                format.name()
+            )));
         }
         if args.keep_temp && format != Format::Webm {
-            bail!("--keep-temp is for WebM output, which alone leaves intermediate files");
+            return Err(crate::usage(
+                "--keep-temp is for WebM output, which alone leaves intermediate files",
+            ));
         }
+        let presets = Presets::load_user()?;
         // preset, then --options-json, then flags
         let name = args.preset.as_deref().unwrap_or_else(|| ctx.config.preset_for(format));
         let webm = |mut options: Options| -> Result<Options> {
             if let Some(json) = &json {
                 options = options.merged(&overlay(json, format)?);
             }
-            Ok(options.merged(&args.options.to_options()))
+            let options = options.merged(&args.options.to_options());
+            check_options(&options, args, json.as_ref(), name)?;
+            Ok(options)
         };
-        let options = match presets.resolve(name, format)? {
+        let resolved = presets.resolve(name, format).map_err(|err| match err {
+            tgradish_core::Error::Preset(PresetError::Unknown { known, .. })
+                if args.preset.is_some() =>
+            {
+                crate::usage(format!(
+                    "--preset {name:?} doesn't exist; available: {}",
+                    known.join(", ")
+                ))
+            }
+            err => err.into(),
+        })?;
+        let options = match resolved {
             FormatOptions::Webm(options) => FormatOptions::Webm(webm(options)?),
             FormatOptions::Webp(options) => FormatOptions::Webp(webm(options)?),
             FormatOptions::Tgs(mut options) => {
                 if let Some(json) = &json {
                     options = options.merged(&overlay(json, format)?);
                 }
-                FormatOptions::Tgs(options.merged(&args.options.to_tgs_options()))
+                let options = options.merged(&args.options.to_tgs_options());
+                check_options(&options, args, json.as_ref(), name)?;
+                FormatOptions::Tgs(options)
             }
         };
         let backend = match format {
@@ -349,6 +398,9 @@ fn explain(err: Failed) -> anyhow::Error {
 }
 
 pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
+    if args.output.is_some() && !args.sequence && args.inputs.len() > 1 {
+        return Err(crate::usage("-o/--output names one result: give one input, or --sequence"));
+    }
     let converter = Converter::new(ctx, &args.conversion, args.format, args.output.as_deref())?;
     if args.sequence {
         let input = Input::Sequence(args.inputs.clone());
@@ -375,7 +427,7 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
         args.inputs.clone()
     };
     if args.output.is_some() && inputs.len() > 1 {
-        bail!("--output only works with a single input, or with --sequence");
+        return Err(crate::usage("-o/--output names one result: give one input, or --sequence"));
     }
 
     let (mut failed, mut refused) = (0, false);

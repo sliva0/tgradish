@@ -29,7 +29,8 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
         // what went wrong is about the input, which --json names
         Err(err) if ctx.global.json && err.downcast_ref::<crate::Exit>().is_none() => {
             crate::print_json_error(&err, Some(&args.input));
-            Err(crate::Exit(1).into())
+            let usage = err.downcast_ref::<crate::Usage>().is_some();
+            Err(crate::Exit(if usage { crate::USAGE } else { 1 }).into())
         }
         done => done,
     }
@@ -42,7 +43,8 @@ fn spoof_file(ctx: &Context, args: &SpoofArgs) -> Result<()> {
         (None, false) => args.input.with_extension(&SPOOFED[1..]),
     };
     if output.is_dir() {
-        bail!("{} is a directory: -o names the spoofed file", output.display());
+        let output = output.display();
+        return Err(crate::usage(format!("{output} is a directory: -o names the spoofed file")));
     }
     if !args.in_place && !args.overwrite && output != args.input && output.exists() {
         bail!("{} already exists, use --overwrite to replace it", output.display());

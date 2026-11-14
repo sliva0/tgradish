@@ -78,6 +78,21 @@ pub const REFUSED: u8 = 3;
 #[error("exit with status {0}")]
 pub struct Exit(pub u8);
 
+/// The exit status of a command line that was wrong, as clap exits with.
+pub const USAGE: u8 = 2;
+
+/// A mistake in the command line found once clap had parsed it, as an
+/// output the format can't be written to: said as any error is, and the
+/// command exits with [`USAGE`].
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct Usage(pub String);
+
+/// A [`Usage`] error saying `message`.
+pub fn usage(message: impl Into<String>) -> anyhow::Error {
+    Usage(message.into()).into()
+}
+
 /// The exit status when whoever read stdout stopped reading: 141 on Unix,
 /// as shells show a program SIGPIPE ended, which Rust's programs ignore;
 /// 1 elsewhere, where nothing says otherwise.
@@ -360,7 +375,13 @@ fn report(ran: Result<()>, json: bool) -> ExitCode {
     } else {
         eprintln!("{} {err:#}", ui::error_label());
     }
-    if cancelled { ExitCode::from(130) } else { ExitCode::FAILURE }
+    if cancelled {
+        ExitCode::from(130)
+    } else if err.downcast_ref::<Usage>().is_some() {
+        ExitCode::from(USAGE)
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
 #[cfg(test)]

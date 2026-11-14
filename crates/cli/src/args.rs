@@ -333,22 +333,24 @@ pub struct OptionArgs {
     #[arg(long, value_name = "N", help_heading = "Output")]
     pub exact_scale: Option<ExactScale>,
     /// Seconds to skip at the start of the input.
-    #[arg(short = 's', long, value_name = "SECONDS", help_heading = "Output")]
+    #[arg(short = 's', long, value_name = "SECONDS", value_parser = checked("start"),
+          help_heading = "Output")]
     pub start: Option<f64>,
     /// Seconds of the input to use. [default: the rest of it]
-    #[arg(short = 't', long, value_name = "SECONDS", help_heading = "Output")]
+    #[arg(short = 't', long, value_name = "SECONDS", value_parser = checked("length"),
+          help_heading = "Output")]
     pub length: Option<f64>,
     /// How many times as fast as the input the result plays, 0.1 to 10.
     /// [default: 1 for WebM; for TGS, as fast as fits a long input into 3
     /// seconds; what still lasts longer is cut]
-    #[arg(long, value_name = "TIMES", help_heading = "Output")]
+    #[arg(long, value_name = "TIMES", value_parser = checked("tempo"), help_heading = "Output")]
     pub tempo: Option<f64>,
     /// Frame rate of the result for WebM, at most 60, where more than the
     /// input's at the tempo only repeats its frames [default: the input's
     /// at the tempo, from 1 to 60]. For image sequences, and sprite sheets
     /// for TGS, it is also the rate their pictures are read at, how fast
     /// they play [default: 12].
-    #[arg(long, help_heading = "Output")]
+    #[arg(long, value_parser = checked("fps"), help_heading = "Output")]
     pub fps: Option<f64>,
 
     /// What to tune to get close to the file size limit: 256 KiB for
@@ -356,7 +358,9 @@ pub struct OptionArgs {
     #[arg(long, value_enum, help_heading = "Size fitting")]
     pub fit: Option<FitArg>,
     /// Maximum number of encodes while fitting. [default: 8]
-    #[arg(long, value_name = "N", help_heading = "Size fitting")]
+    #[arg(long, value_name = "N",
+          value_parser = clap::value_parser!(u32).range(1..=i64::from(webm::MAX_ATTEMPTS)),
+          help_heading = "Size fitting")]
     pub attempts: Option<u32>,
     /// Range to search in the unit of the fitted value: kbit/s, CRF, fps or
     /// seconds.
@@ -364,7 +368,8 @@ pub struct OptionArgs {
     pub fit_range: Option<Range>,
 
     /// Target bitrate in kbit/s, when not fitting bitrate.
-    #[arg(short, long, value_name = "KBPS", help_heading = "Encoding")]
+    #[arg(short, long, value_name = "KBPS", value_parser = checked("bitrate"),
+          help_heading = "Encoding")]
     pub bitrate: Option<f64>,
     /// Constant quality, 0 (best) to 63 (worst), when fitting fps or length
     /// or with --fit off. [default: 32]
@@ -400,7 +405,8 @@ pub struct OptionArgs {
     pub spoof: Option<SpoofArg>,
     /// Duration encoded into the metadata when spoofing. [default: a short
     /// one Telegram accepts]
-    #[arg(long, value_name = "SECONDS", help_heading = "Metadata")]
+    #[arg(long, value_name = "SECONDS", value_parser = checked("fake-duration"),
+          help_heading = "Metadata")]
     pub fake_duration: Option<f64>,
     /// Title stored in the file.
     #[arg(long, help_heading = "Metadata")]
@@ -578,6 +584,18 @@ fn parse_interval(text: &str) -> Result<f64, String> {
         return Err("must be from 0.05 to 86400 seconds".into());
     }
     Ok(seconds)
+}
+
+/// A parser of the number the option `key` takes, which refuses what
+/// conversions would, in their words.
+fn checked(key: &'static str) -> impl Fn(&str) -> Result<f64, String> + Clone + Send + Sync {
+    move |text| {
+        let value: f64 = text.parse().map_err(|_| format!("{text} isn't a number"))?;
+        match options::wrong_value(key, value) {
+            Some(reason) => Err(reason),
+            None => Ok(value),
+        }
+    }
 }
 
 /// `NAME=VALUE`, or nothing, which says there are none.

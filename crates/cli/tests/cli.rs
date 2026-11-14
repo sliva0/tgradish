@@ -120,10 +120,11 @@ fn stops_quietly_when_stdout_closes() {
 #[test]
 fn reports_errors_as_json() {
     let output = tgradish(&["--json", "convert", "missing.mp4", "--preset", "nope"]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     let lines = json_lines(&output);
     assert_eq!(lines[0]["event"], "error");
-    assert!(lines[0]["message"].as_str().unwrap().contains("unknown preset"));
+    let message = lines[0]["message"].as_str().unwrap();
+    assert_eq!(message, r#"--preset "nope" doesn't exist; available: balanced, best, fast"#);
 }
 
 #[test]
@@ -140,6 +141,41 @@ fn rejects_bad_flags() {
         assert_eq!(output.status.code(), Some(2));
         assert!(String::from_utf8_lossy(&output.stderr).contains("--json can't be used with gui"));
     }
+}
+
+/// What is wrong with the command line, however it was found, exits 2,
+/// is said once before any input is read, and names the flag.
+#[test]
+fn refuses_mistakes_in_the_command_line_with_2() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a.png"), dir.path().join("b.png"));
+    square_png(&a, [255, 0, 0, 255]);
+    square_png(&b, [0, 255, 0, 255]);
+    let (a, b) = (a.to_str().unwrap(), b.to_str().unwrap());
+    let out = dir.path().join("out.webm");
+    let out = out.to_str().unwrap();
+    for (args, said) in [
+        (&["convert", a, b, "-o", out][..], "-o/--output names one result"),
+        (&["convert", a, "-o", "out.gif"], "out.gif doesn't end in .webm"),
+        (&["convert", a, "--crf", "30", "-f", "tgs"], "--crf can't be used for tgs output"),
+        (&["convert", a, "--keep-temp", "-f", "webp"], "--keep-temp is for WebM output"),
+        (&["convert", a, "--preset", "nope"], r#"--preset "nope" doesn't exist; available: "#),
+        (&["convert", a, "--options-json", "{"], "--options-json isn't a JSON object"),
+        (&["convert", a, "--options-json", r#"{"tempo":50}"#], r#""tempo" in --options-json must"#),
+        (&["convert", a, b, "--tempo", "50"], "must be from 0.1 to 10"),
+        (&["convert", a, b, "--fps", "0"], "must be more than 0 and at most 60"),
+        (&["convert", a, b, "-t", "0"], "must be more than 0 seconds"),
+        (&["convert", a, b, "-f", "tgs", "-s=-1"], "must be 0 or more seconds"),
+        (&["convert", a, "--attempts", "0"], "--attempts"),
+    ] {
+        let output = tgradish(args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(said), "{args:?}: {stderr}");
+        assert_eq!(stderr.matches("error:").count(), 1, "{args:?}: {stderr}");
+        assert!(!stderr.contains("Converting"), "{args:?}: {stderr}");
+    }
+    assert!(!Path::new(out).exists());
 }
 
 #[test]
@@ -451,7 +487,8 @@ fn refuses_outputs_that_cant_hold_the_result() {
     std::fs::create_dir(&outdir).unwrap();
     let refused = |args: &[&str], why: &str| {
         let output = tgradish(args);
-        assert_eq!(output.status.code(), Some(1), "{args:?}");
+        // a mistake in the command line
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains(why), "{args:?}: {stderr}");
         assert!(!stderr.contains("Converting"), "{args:?}: {stderr}");
@@ -536,7 +573,7 @@ fn makes_animated_stickers() {
 
     // WebM flags don't mix with .tgs output, nor the reverse
     let mixed = tgradish(&["convert", a.to_str().unwrap(), "-o", "x.tgs", "--crf", "20"]);
-    assert_eq!(mixed.status.code(), Some(1));
+    assert_eq!(mixed.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&mixed.stderr).contains("--crf"));
 }
 
@@ -970,7 +1007,7 @@ fn makes_image_stickers() {
     for format in ["webp", "image"] {
         let output =
             tgradish(&["convert", input.to_str().unwrap(), "--format", format, "--crf", "30"]);
-        assert!(!output.status.success());
+        assert_eq!(output.status.code(), Some(2));
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("--crf can't be used for webp output"), "{stderr}");
     }
@@ -978,7 +1015,7 @@ fn makes_image_stickers() {
     let json = r#"{"crf":30,"spoof":"always"}"#;
     let output =
         tgradish(&["convert", input.to_str().unwrap(), "--format", "webp", "--options-json", json]);
-    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("\"crf\" in --options-json, \"spoof\" in --options-json"), "{stderr}");
 }
