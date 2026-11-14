@@ -1139,8 +1139,21 @@ pub(crate) fn problems(ui: &mut egui::Ui, problems: &[Problem]) {
     }
 }
 
-/// Draws a checkerboard, so transparency shows.
+/// Draws a checkerboard, so transparency shows, its squares counted from
+/// `rect`'s corner.
 pub(crate) fn checkerboard(painter: &egui::Painter, rect: egui::Rect, square: f32) {
+    checkerboard_from(painter, rect, square, rect.min);
+}
+
+/// A [`checkerboard`] over `rect` whose squares are counted from `origin`
+/// rather than from its corner: a picture that zooms or pans over the
+/// squares of the stage under it, which stay where they are.
+pub(crate) fn checkerboard_from(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    square: f32,
+    origin: egui::Pos2,
+) {
     let (light, dark) = if painter.ctx().global_style().visuals.dark_mode {
         (Color32::from_gray(92), Color32::from_gray(72))
     } else {
@@ -1151,17 +1164,22 @@ pub(crate) fn checkerboard(painter: &egui::Painter, rect: egui::Rect, square: f3
     if clip.width() <= 0.0 || clip.height() <= 0.0 {
         return;
     }
-    // only the squares in view
-    let first_column = ((clip.left() - rect.left()) / square).floor().max(0.0) as i32;
-    let first_row = ((clip.top() - rect.top()) / square).floor().max(0.0) as i32;
-    let columns = ((clip.right() - rect.left()) / square).ceil() as i32;
-    let rows = ((clip.bottom() - rect.top()) / square).ceil() as i32;
+    // on whole screen pixels, so the squares' edges stay sharp
+    let origin = egui::emath::GuiRounding::round_to_pixels(origin, painter.pixels_per_point());
+    // only the squares in view, counted from the origin, which may be
+    // anywhere
+    let first_column = ((clip.left() - origin.x) / square).floor() as i64;
+    let first_row = ((clip.top() - origin.y) / square).floor() as i64;
+    let columns = ((clip.right() - origin.x) / square).ceil() as i64;
+    let rows = ((clip.bottom() - origin.y) / square).ceil() as i64;
     for row in first_row..rows {
-        let start = first_column + (row + first_column) % 2;
+        let start = first_column + (row + first_column).rem_euclid(2);
         for column in (start..columns).step_by(2) {
-            let min = rect.min + egui::vec2(column as f32 * square, row as f32 * square);
+            let min = origin + egui::vec2(column as f32 * square, row as f32 * square);
             let cell = egui::Rect::from_min_size(min, egui::vec2(square, square)).intersect(rect);
-            painter.rect_filled(cell, 0.0, dark);
+            if cell.is_positive() {
+                painter.rect_filled(cell, 0.0, dark);
+            }
         }
     }
 }
