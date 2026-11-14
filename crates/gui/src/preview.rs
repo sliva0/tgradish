@@ -199,15 +199,30 @@ fn preview(
         let button =
             |text: &str| widgets::text_width(ui, text, 2.0 * ui.spacing().button_padding.x) + gap;
         let shows = button(&fl!("show-input")) + button(&fl!("show-result"));
-        let everything = shows
-            + button(&fl!("show-folder"))
-            + button(&fl!("zoom-out"))
-            + ZOOM_LEVEL
-            + gap
-            + button(&fl!("result-preview"));
-        let least = shows + button(&fl!("show-folder", "short"));
-        let least = least + button(&fl!("result-preview", "short"));
-        let compact = ui.available_width() < everything;
+        // room kept for the way back to all of the picture, which comes and
+        // goes with a crop, so nothing else changes as it does
+        let whole = button(&fl!("whole-picture"));
+        let zooming = button(&fl!("zoom-out")) + ZOOM_LEVEL + gap;
+        let (folders, previews) = (
+            [button(&fl!("show-folder")), button(&fl!("show-folder", "short"))],
+            [button(&fl!("result-preview")), button(&fl!("result-preview", "short"))],
+        );
+        let room = ui.available_width();
+        // shorter words first, then zooming's buttons only while zoomed in
+        let fits = |folder: usize, preview: usize, zoom: bool| {
+            let zoom = if zoom { zooming } else { 0.0 };
+            shows + folders[folder] + whole + zoom + previews[preview] <= room
+        };
+        let (short_folder, short_preview, compact) = if fits(0, 0, true) {
+            (false, false, false)
+        } else if fits(1, 0, true) {
+            (true, false, false)
+        } else if fits(1, 1, true) {
+            (true, true, false)
+        } else {
+            (true, true, true)
+        };
+        let least = shows + folders[1] + previews[1];
         let folder = ui.available_width() >= least;
         toggle_below = ui.available_width() < shows + button(&fl!("result-preview", "short"));
         let choices = [
@@ -253,18 +268,15 @@ fn preview(
             }
         };
         if folder {
-            let text = if compact { fl!("show-folder", "short") } else { fl!("show-folder") };
+            let text = if short_folder { fl!("show-folder", "short") } else { fl!("show-folder") };
             ui.menu_button(text, show_folder);
         }
         // what doesn't fit is cut short or left out, the hint first
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if item.view.show == Show::Input && !toggle_below {
-                let full = fl!("result-preview");
-                let room = ui.available_width();
-                let text = if room >= widgets::text_width(ui, &full, 8.0) {
-                    full
-                } else {
-                    fl!("result-preview", "short")
+                let text = match short_preview {
+                    false => fl!("result-preview"),
+                    true => fl!("result-preview", "short"),
                 };
                 toggle(ui, &mut item.view.inset, text);
             }
@@ -283,6 +295,17 @@ fn preview(
                 let level = RichText::new(format!("{:.0}%", zoom.level * 100.0));
                 let level = if zoomed { level } else { level.weak() };
                 ui.add_sized(vec2(ZOOM_LEVEL, 18.0), egui::Label::new(level));
+            }
+            // back to all of the picture from a crop, as under the crop's
+            // fields, for those who crop here: in room kept for it, before
+            // the hint, which gives way to it, so nothing else moves as it
+            // comes and goes; zoomed in, at the narrowest, it gives way too
+            if item.view.show == Show::Input
+                && item.choices.crop.is_some()
+                && ui.available_width() >= whole - gap
+            {
+                let exact = file_settings::exact_of(webm).is_some() && item.format != Format::Tgs;
+                file_settings::whole_picture(ui, item, exact);
             }
             let mark = widgets::text_width(ui, "⚠", 4.0);
             if has_result && !item.result_is_current() && ui.available_width() >= mark {
@@ -644,5 +667,57 @@ mod tests {
         );
         // and the row under the preview stops short of it
         assert!(row.x1 < column.x0, "{row:?} runs into {column:?}");
+    }
+
+    #[test]
+    fn offers_the_whole_picture_over_the_preview_too() {
+        use tgradish_core::options::Crop;
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        // at the narrowest, where there is least room for it
+        for width in [crate::MIN_WIDTH, 1280.0] {
+            let mut harness = Harness::builder()
+                .with_size([width, 820.0])
+                .build_eframe(|_| App::with(Config::default(), None, Presets::builtin()));
+            harness.state_mut().add(vec![art.clone()]);
+            finish(&mut harness);
+            let whole = fl!("whole-picture");
+            let buttons = |harness: &Harness<App>| {
+                let all: Vec<_> = harness.query_all_by_label(&whole).collect();
+                let enabled =
+                    all.iter().filter(|node| !node.accesskit_node().is_disabled()).count();
+                (all.len(), enabled)
+            };
+            // without a crop, only the one under the crop's fields, greyed out
+            assert_eq!(buttons(&harness), (1, 0), "{width}");
+            let zoom = |harness: &Harness<App>| harness.get_by_label(&fl!("zoom-out")).rect();
+            let before = zoom(&harness);
+            harness.state_mut().items[0].choices.crop =
+                Some(Crop { x: 1, y: 1, width: 2, height: 2 });
+            harness.run_steps(2);
+            // with one, over the preview too, nothing else in the bar moved
+            assert_eq!(buttons(&harness), (2, 2), "{width}");
+            assert_eq!(zoom(&harness), before, "{width}");
+            // the one over the preview, the first, takes the crop away, and
+            // the one under the fields follows
+            let first = harness
+                .query_all_by_label(&whole)
+                .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()));
+            first.unwrap().click();
+            harness.run_steps(2);
+            assert_eq!(harness.state().items[0].choices.crop, None, "{width}");
+            assert_eq!(buttons(&harness), (1, 0), "{width}");
+            // and the one under the fields does as it did
+            harness.state_mut().items[0].choices.crop =
+                Some(Crop { x: 1, y: 1, width: 2, height: 2 });
+            harness.run_steps(2);
+            let last = harness
+                .query_all_by_label(&whole)
+                .max_by(|a, b| a.rect().top().total_cmp(&b.rect().top()));
+            last.unwrap().click();
+            harness.run_steps(2);
+            assert_eq!(harness.state().items[0].choices.crop, None, "{width}");
+        }
     }
 }
