@@ -1,6 +1,6 @@
 //! The list of files on the left: a row for each, with its input, its
 //! result and how converting it went, under the buttons that add files,
-//! inspect a sticker, and open the settings.
+//! switch the theme, and open the menu of Settings and the rest.
 
 use std::path::PathBuf;
 
@@ -50,6 +50,28 @@ impl App {
         }
         if ui.button(fl!("add-pasted")).on_hover_text(fl!("add-pasted", "hint")).clicked() {
             self.paste();
+            ui.close();
+        }
+    }
+
+    /// The menu behind the gear over the list: Settings, inspecting a
+    /// sticker, and what isn't about the files at all, feedback and About.
+    fn main_menu(&mut self, ui: &mut egui::Ui) {
+        if ui.button(fl!("menu-settings")).clicked() {
+            self.settings_dialog.open();
+            ui.close();
+        }
+        if ui.button(fl!("inspect")).on_hover_text(fl!("inspect", "hint")).clicked() {
+            self.pick(ui.ctx(), Pick::Inspected);
+            ui.close();
+        }
+        ui.separator();
+        if ui.button(fl!("feedback")).on_hover_text(fl!("feedback", "hint")).clicked() {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(crate::about::FEEDBACK));
+            ui.close();
+        }
+        if ui.button(fl!("about-and-licences")).clicked() {
+            self.about = true;
             ui.close();
         }
     }
@@ -111,15 +133,10 @@ impl App {
         let header = vec2(ui.available_width(), icon_side);
         let layout = egui::Layout::right_to_left(egui::Align::Center);
         ui.allocate_ui_with_layout(header, layout, |ui| {
-            let settings = widgets::named(ui.button("⚙"), &fl!("settings"));
-            if settings.on_hover_text(fl!("settings")).clicked() {
-                self.settings_dialog.open();
-            }
+            let menu = ui.menu_button("⚙", |ui| self.main_menu(ui)).response;
+            let name = fl!("main-menu");
+            widgets::named(menu, &name).on_hover_text(name);
             self.theme_button(ui);
-            let inspect = widgets::named(ui.button("🔬"), &fl!("inspect", "name"));
-            if inspect.on_hover_text(fl!("inspect")).clicked() {
-                self.pick(ui.ctx(), Pick::Inspected);
-            }
             // a split button: files, or the rest from its arrow
             ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.x = 1.0;
@@ -766,6 +783,39 @@ mod tests {
             format!("{:?}", Pick::Files.dialog(rfd::FileDialog::new().set_parent(&window)));
         assert!(dialog.contains("parent: Some(Wayland("), "{dialog}");
         assert!(dialog.contains("parent_display: Some(Wayland("), "{dialog}");
+    }
+
+    #[test]
+    fn opens_settings_and_about_from_the_menu_over_the_list() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut harness = harness(Config::default());
+        let menu = |harness: &mut Harness<App>, item: &str| {
+            harness.get_by_label(&fl!("main-menu")).click();
+            harness.run_steps(2);
+            harness.get_by_label(item).click();
+            harness.run_steps(2);
+        };
+        menu(&mut harness, &fl!("menu-settings"));
+        assert!(harness.state().settings_dialog.is_open());
+        // Settings has no way to About of its own any more
+        assert!(harness.query_by_label(&fl!("about-and-licences")).is_none());
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+        assert!(!harness.state().settings_dialog.is_open());
+        // About, a licence opened in it, and About again: as it first was
+        let notice = crate::about::notices().swap_remove(1);
+        let (title, text) = (notice.title, notice.text.trim().lines().next().unwrap().to_owned());
+        menu(&mut harness, &fl!("about-and-licences"));
+        assert!(harness.state().about);
+        harness.get_by_label(&title).click_accesskit();
+        harness.run_steps(2);
+        harness.get_by_label_contains(&text);
+        harness.get_all_by_label(&fl!("close")).last().unwrap().click_accesskit();
+        harness.run_steps(2);
+        assert!(!harness.state().about);
+        menu(&mut harness, &fl!("about-and-licences"));
+        assert!(harness.query_by_label_contains(&text).is_none());
     }
 
     #[test]

@@ -181,9 +181,19 @@ stickers-filter = Stickers
 settings = Settings
 light-theme = Switch to the light theme
 dark-theme = Switch to the dark theme
-# .name is what screen readers call its button, which shows a microscope.
-inspect = Inspect a sticker: check a file against Telegram's limits
-    .name = Inspect a sticker
+# What screen readers call the button that shows a gear, which opens a menu
+# of Settings, inspecting a sticker, feedback and About.
+main-menu = Settings and more
+# Its items: Settings opens the Settings dialog.
+menu-settings = Settings…
+# .hint is said on hover.
+inspect = Inspect a sticker…
+    .hint = Check a file against Telegram's limits
+# A chat with the author, in Telegram's app where it is installed, else in
+# the browser.
+feedback = Send feedback
+    .hint = Write to the author on Telegram: in its app, where it is installed, or in the browser
+about-and-licences = About and licences…
 add-files = Add files…
 # What screen readers call the arrow beside Add files…, which opens a menu
 # of other ways to add files.
@@ -836,11 +846,6 @@ saved-to = Saved to { $path }
     .kept = Saved to { $path }; the file that couldn't be read is kept as { $kept }
 not-saved = Couldn't save: { $error }
 no-home = There is no home folder to keep settings in
-about-and-licences = About and licences…
-# Beside it: a chat with the author, in Telegram's app where it is
-# installed, else in the browser.
-feedback = Send feedback
-    .hint = Write to the author on Telegram: in its app, where it is installed, or in the browser
 settings-note = Changes apply now; "{ save }" keeps them between restarts
 # Under the ffmpeg heading, when tgradish was started with --ffmpeg or
 # --ffmpeg-from, or with the TGRADISH_FFMPEG environment variable set,

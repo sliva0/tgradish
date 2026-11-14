@@ -65,6 +65,11 @@ pub(crate) fn walk(width: f32, mut visit: impl FnMut(&mut Harness<App>, &str)) {
     visit(&mut harness, "add-menu");
     harness.key_press(egui::Key::Escape);
     settle(&mut harness, None);
+    harness.get_by_label(&fl!("main-menu")).click();
+    settle(&mut harness, None);
+    visit(&mut harness, "main-menu");
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness, None);
 
     // made, with its result's small picture over the input
     convert(&harness);
@@ -161,10 +166,10 @@ fn dialogs(
     settle(harness, None);
     visit(harness, "settings");
     harness.state_mut().settings_dialog = settings_dialog::SettingsDialog::default();
-    harness.state_mut().settings_dialog.about = true;
+    harness.state_mut().about = true;
     settle(harness, None);
     visit(harness, "about");
-    harness.state_mut().settings_dialog.about = false;
+    harness.state_mut().about = false;
     let presets_dir = dir.join("presets");
     let options = (&Default::default(), &Default::default());
     tgradish_core::presets::save(&presets_dir, "my stickers", "Mine", options, false).unwrap();

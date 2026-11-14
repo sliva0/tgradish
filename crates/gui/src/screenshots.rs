@@ -483,6 +483,12 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         save(&mut harness, "add-menu");
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
+        // the menu of Settings and the rest
+        harness.get_by_label(&crate::l10n::fl!("main-menu")).click();
+        harness.run_steps(2);
+        save(&mut harness, "main-menu");
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
         // its short name where longer words leave no room for the long one
         let (full, short) =
             (crate::l10n::fl!("show-folder"), crate::l10n::fl!("show-folder", "short"));
@@ -614,10 +620,10 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     item.job = Some(crate::item::Conversion::of(job, Format::Tgs, item.choices.clone()));
     harness.run_steps(3);
     save(&mut harness, "progress");
-    harness.state_mut().settings_dialog.about = true;
+    harness.state_mut().about = true;
     harness.run_steps(3);
     save(&mut harness, "about");
-    harness.state_mut().settings_dialog.about = false;
+    harness.state_mut().about = false;
     set_theme(&harness.ctx, crate::config::Theme::Light);
     let item = harness.state_mut().items.last_mut().unwrap();
     item.job = None;

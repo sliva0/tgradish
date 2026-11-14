@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn opens_links() {
         let mut harness = harness(Config::default());
-        harness.state_mut().settings_dialog.about = true;
+        harness.state_mut().about = true;
         harness.run_steps(2);
         // a link, a label whose text is its name rather than its value
         let link = egui_kittest::kittest::by()
@@ -452,12 +452,13 @@ mod tests {
         let browsed = BROWSED.lock().unwrap();
         assert!(browsed.iter().any(|url| url == "https://t.me/s0untitled?direct"), "{browsed:?}");
         drop(browsed);
-        // and from Settings, beside the way to About
+        // and from the menu over the list, beside the way to About
         let before = BROWSED.lock().unwrap().len();
-        harness.state_mut().settings_dialog.about = false;
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().about = false;
         harness.run_steps(2);
-        harness.get_by_label("Send feedback").click_accesskit();
+        harness.get_by_label("Settings and more").click();
+        harness.run_steps(2);
+        harness.get_by_label("Send feedback").click();
         harness.run_steps(2);
         let browsed = BROWSED.lock().unwrap();
         assert_eq!(browsed[before..], ["https://t.me/s0untitled?direct"]);
