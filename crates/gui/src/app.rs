@@ -663,7 +663,8 @@ impl eframe::App for App {
                 ui.set_width(600.0);
                 let crossed =
                     widgets::dialog_title(ui, widgets::title_text(ui, fl!("about-title")));
-                about(ui);
+                // its place kept while Settings is open
+                ui.push_id(self.settings_dialog.visit, about);
                 let closed = widgets::dialog_buttons(ui, |ui| {
                     ui.add(widgets::dialog_button(fl!("close"))).clicked()
                 });
