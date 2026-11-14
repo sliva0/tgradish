@@ -28,6 +28,12 @@ use crate::{Animation, DEFAULT_FRAME_DURATION, Error, Frame, Limits, Oversize, R
 thread_local! {
     /// Frames drawn on this thread, for tests of how much drawing does.
     static RENDERED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Steps taken along links on this thread, for tests of how often
+    /// they are followed.
+    static FOLLOWED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Tiles looked at on this thread, for tests of how many drawing
+    /// passes over.
+    static TILES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Groups nested deeper than this are refused; Aseprite's interface makes
@@ -384,6 +390,7 @@ impl Sprite {
         sprite.spent = spent;
         sprite.link_layers()?;
         sprite.check_cels()?;
+        sprite.resolve_links()?;
         let frames = sprite.frames.len() as u32;
         if let Some(tag) = sprite.tags.iter().find(|tag| tag.from > tag.to || tag.to >= frames) {
             return Err(error(format!("tag {:?} has frames outside the file", tag.name)));
@@ -424,19 +431,67 @@ impl Sprite {
         Ok(())
     }
 
-    /// Cels must name existing layers, links lead to image or tilemap
-    /// cels.
+    /// Points each linked cel at the frame whose cel its links lead to,
+    /// through cels that link on, as Aseprite follows them, so drawing
+    /// needn't follow them again. Each cel is followed once, however long
+    /// the chains, which are refused where they lead to nothing or round
+    /// in a loop.
+    fn resolve_links(&mut self) -> Result<()> {
+        let broken = || error("a linked cel leads to nothing, or round in a loop");
+        // for each frame's cels, the frame their links lead to, once known
+        let mut resolved: Vec<Vec<Option<usize>>> =
+            self.frames.iter().map(|(_, cels)| vec![None; cels.len()]).collect();
+        // the cels followed from the one being resolved, as (frame, cel)
+        let mut chain: Vec<(usize, usize)> = Vec::new();
+        for frame in 0..self.frames.len() {
+            for at in 0..self.frames[frame].1.len() {
+                let layer = self.frames[frame].1[at].layer;
+                chain.clear();
+                let (mut from, mut cel) = (frame, at);
+                let target = loop {
+                    if let Some(target) = resolved[from][cel] {
+                        break target;
+                    }
+                    let Content::Linked(next) = self.frames[from].1[cel].content else {
+                        break from;
+                    };
+                    #[cfg(test)]
+                    FOLLOWED.set(FOLLOWED.get() + 1);
+                    // a layer has a cel a frame at most, so a chain longer
+                    // than the frames has come round to one already met
+                    if chain.len() >= self.frames.len() {
+                        return Err(broken());
+                    }
+                    chain.push((from, cel));
+                    let cels = &self.frames.get(next).ok_or_else(broken)?.1;
+                    cel =
+                        cels.binary_search_by_key(&layer, |cel| cel.layer).map_err(|_| broken())?;
+                    from = next;
+                };
+                for &(frame, cel) in &chain {
+                    resolved[frame][cel] = Some(target);
+                }
+                resolved[frame][at] = Some(target);
+            }
+        }
+        for ((_, cels), resolved) in self.frames.iter_mut().zip(resolved) {
+            for (cel, target) in cels.iter_mut().zip(resolved) {
+                if let (Content::Linked(next), Some(target)) = (&mut cel.content, target) {
+                    *next = target;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Cels must name existing layers, and tilemap cels be on tilemap
+    /// layers whose tileset is there.
     fn check_cels(&self) -> Result<()> {
-        for (frame, (_, cels)) in self.frames.iter().enumerate() {
+        for (_, cels) in &self.frames {
             for cel in cels {
                 let layer =
                     self.layers.get(cel.layer).ok_or_else(|| error("a cel's layer is missing"))?;
                 match (&cel.content, layer.kind) {
-                    (Content::Linked(_), _) => {
-                        if self.content(frame, cel.layer).is_none() {
-                            return Err(error("a linked cel leads to nothing, or round in a loop"));
-                        }
-                    }
                     (Content::Tilemap { .. }, LayerKind::Tilemap { tileset }) => {
                         if !self.tilesets.iter().any(|t| t.id == tileset) {
                             return Err(error("a tilemap's tileset is missing"));
@@ -581,17 +636,12 @@ impl Sprite {
     }
 
     /// The pixels of a layer's cel in a frame: its own, or those of the cel
-    /// its links lead to, through cels that link on, as Aseprite follows
-    /// them. None where a link points at nothing, or where links go round
-    /// in a loop, as any chain longer than the frames does.
-    fn content(&self, mut frame: usize, layer: usize) -> Option<&Content> {
-        for _ in 0..=self.frames.len() {
-            match &self.stored_cel(frame, layer)?.content {
-                Content::Linked(target) => frame = *target,
-                content => return Some(content),
-            }
+    /// its links lead to, which reading found ([`Sprite::resolve_links`]).
+    fn content(&self, frame: usize, layer: usize) -> Option<&Content> {
+        match &self.stored_cel(frame, layer)?.content {
+            Content::Linked(target) => Some(&self.stored_cel(*target, layer)?.content),
+            content => Some(content),
         }
-        None
     }
 }
 
@@ -679,6 +729,33 @@ mod tests {
             file(1, 1, 32, 1, &[vec![layer(1, 0, 0, 0, 255), linked(0, 1)], vec![linked(0, 0)]]);
         assert!(decode(&looped).is_err());
         assert!(decode(&frames(linked(0, 2))).is_err());
+    }
+
+    #[test]
+    fn follows_long_chains_of_links_once() {
+        // every frame links to the one before, down to the first, which
+        // has the pixel: following each chain anew for each frame took
+        // half a minute for this 2.6 MB file
+        let frames = u16::MAX;
+        let mut chunks =
+            vec![vec![layer(1, 0, 0, 0, 255), image_cel(0, (0, 0), (1, 1), &RED, true)]];
+        chunks.extend((1..frames).map(|frame| vec![linked_cel(0, frame - 1)]));
+        let bytes = file(1, 1, 32, 1, &chunks);
+        FOLLOWED.set(0);
+        let started = std::time::Instant::now();
+        let animation = decode(&bytes).unwrap();
+        // each linked cel is followed one step, not the whole chain
+        assert_eq!(FOLLOWED.get(), usize::from(frames) - 1);
+        assert_eq!(animation.frames().len(), usize::from(frames));
+        assert_eq!(animation.pixel(usize::from(frames) - 1, 0, 0), Some(RED));
+        // a second in release; generously more for unoptimised builds
+        assert!(started.elapsed() < Duration::from_secs(20), "{:?}", started.elapsed());
+
+        // a long loop is refused, however long it is
+        let mut looped = chunks;
+        looped[0] = vec![layer(1, 0, 0, 0, 255), linked_cel(0, frames - 1)];
+        let refused = decode(&file(1, 1, 32, 1, &looped));
+        assert!(matches!(refused, Err(Error::Decode { .. })), "{refused:?}");
     }
 
     #[test]
