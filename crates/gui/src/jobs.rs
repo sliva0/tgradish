@@ -507,8 +507,17 @@ fn run(
                 preview,
             })
         }
-        Setup::Tgs { options, backend } => {
+        Setup::Tgs { mut options, backend } => {
             let exact = options.exact_or_default();
+            // a sheet of a file of frames of its own, which converting
+            // refuses: read as it is, and said so, as the window shows it
+            if let Some((_, frames)) =
+                crate::media::animated(backend.as_ref(), &input, &options, cancel)
+            {
+                (options.sheet, options.sheet_frames) = (None, None);
+                let said = fl!("sheet-refused", "converted", frames = frames);
+                update(Box::new(move |progress| progress.warnings.push(said)));
+            }
             let request = tgs::Request { input, output, options, overwrite };
             update(Box::new(move |progress| {
                 progress.tgs = Some(TgsStage::Reading);

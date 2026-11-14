@@ -432,6 +432,9 @@ pub(crate) struct Art {
     pub(crate) durations: Vec<f64>,
     /// Where its frames start, when it is animated.
     pub(crate) frames: Option<Arc<cuts::Frames>>,
+    /// How many frames the file has where it was asked to be read as a
+    /// sprite sheet, which is one picture: read as it is instead.
+    pub(crate) sheet_refused: Option<usize>,
 }
 
 impl Art {
@@ -445,8 +448,16 @@ impl Art {
         backend: Option<Backend>,
     ) -> Task<Art> {
         Task::spawn(ctx, move |cancel| {
-            let art = tgs::read_art(backend.as_ref(), &input, &options, cancel)
-                .map_err(|err| failure(&err))?;
+            // a sheet of a file of frames of its own, as a session may
+            // keep: read as it is, and said so, rather than not at all
+            let (art, sheet_refused) =
+                match tgs::read_art(backend.as_ref(), &input, &options, cancel) {
+                    Ok(art) => (art, None),
+                    Err(err) => match animated(backend.as_ref(), &input, &options, cancel) {
+                        Some((art, frames)) => (art, Some(frames)),
+                        None => return Err(failure(&err)),
+                    },
+                };
             if art.frames.is_empty() {
                 return Err(fl!("art-no-frames"));
             }
@@ -462,9 +473,37 @@ impl Art {
             let frames = clip
                 .is_animated()
                 .then(|| Arc::new(cuts::Frames { times: clip.times.clone(), cut: Cut::Art }));
-            Ok(Art { clip, tags, layers, durations, frames })
+            Ok(Art { clip, tags, layers, durations, frames, sheet_refused })
         })
     }
+
+    /// How many frames the file read has, where that is known: as many as
+    /// read as it is, or as it has where it was refused as a sheet; one,
+    /// as a sheet, which is one picture. `reading` is what it was read
+    /// with.
+    pub(crate) fn file_frames(&self, reading: &tgs::Options) -> usize {
+        match (self.sheet_refused, reading.sheet) {
+            (Some(frames), _) => frames,
+            (None, Some(_)) => 1,
+            (None, None) => self.clip.frames.len(),
+        }
+    }
+}
+
+/// `input` read as it is, where reading it as the sprite sheet `options`
+/// ask for can't be, as it has frames of its own, and how many: `None`
+/// where they ask for no sheet, or it has one frame.
+pub(crate) fn animated(
+    backend: Option<&Backend>,
+    input: &Input,
+    options: &tgs::Options,
+    cancel: &CancelToken,
+) -> Option<(tgs::Art, usize)> {
+    options.sheet?;
+    let whole = tgs::Options { sheet: None, sheet_frames: None, ..options.clone() };
+    let art = tgs::read_art(backend, input, &whole, cancel).ok()?;
+    let frames = art.frames.len();
+    (frames > 1).then_some((art, frames))
 }
 
 /// A finished WebM sticker, decoded.
