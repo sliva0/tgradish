@@ -174,6 +174,8 @@ pub(crate) const MARGIN: f32 = 14.0;
 /// How near an edge the pointer grabs it, in points.
 const GRAB: f32 = 7.0;
 const MAX_ZOOM: f32 = 64.0;
+/// Side of the squares that show transparency, in points.
+const CHECKER: f32 = 8.0;
 
 /// Where the picture goes in `rect`, and how many points an input pixel
 /// takes.
@@ -220,7 +222,10 @@ pub(crate) fn show(
     hold(zoom, (rect, fit_in), canvas);
     zoom_and_pan(ui, &response, fit_in, canvas, zoom);
     let (whole, scale) = layout(fit_in, canvas, zoom);
-    widgets::checkerboard(&painter, whole, 8.0);
+    // its squares still on the stage, as the picture zooms and pans over
+    // them: counted from a corner of the picture, they would race along
+    // with it while zooming eases in, all but those near that corner
+    widgets::checkerboard_from(&painter, whole, CHECKER, rect.min);
     let shown = Rect::from_center_size(
         whole.center(),
         vec2(picture.size.0 as f32, picture.size.1 as f32) * scale,
@@ -630,6 +635,90 @@ mod tests {
             last = zoom.centre;
         }
         assert_eq!(zoom.centre, vec2(0.5, 0.5));
+    }
+
+    /// Whether a dark square of the checkerboard is painted at each of
+    /// `points` in what `harness` drew last, at the scale it drew at.
+    fn checked<State>(harness: &egui_kittest::Harness<'_, State>, points: &[Pos2]) -> Vec<bool> {
+        let dark = [Color32::from_gray(72), Color32::from_gray(212)];
+        let shapes = &harness.output().shapes;
+        points
+            .iter()
+            .map(|point| {
+                shapes.iter().any(|clipped| match &clipped.shape {
+                    egui::Shape::Rect(rect) => {
+                        dark.contains(&rect.fill) && rect.rect.contains(*point)
+                    }
+                    _ => false,
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn keeps_the_checkerboard_still_while_zooming_eases_in() {
+        use egui_kittest::Harness;
+        // a transparent picture, zoomed by the wheel as smooth scrolling
+        // eases it in over several frames, at the window's usual scale and
+        // at a fractional one
+        for ppp in [1.0, 1.25] {
+            let clip = Clip {
+                id: 1,
+                width: 64,
+                height: 48,
+                frames: vec![vec![0; 64 * 48 * 4]],
+                times: vec![0.0, 0.1],
+                pixelated: false,
+            };
+            let state = (Screen::default(), Zoom::default(), clip);
+            let mut harness = Harness::builder()
+                .with_size([600.0, 400.0])
+                .with_pixels_per_point(ppp)
+                .build_ui_state(
+                    |ui, (screen, zoom, clip): &mut (Screen, Zoom, Clip)| {
+                        let rect = ui.max_rect();
+                        let picture = Picture { clip, frame: 0, size: (64, 48), square: false };
+                        show(ui, screen, (rect, rect), &picture, zoom, None);
+                    },
+                    state,
+                );
+            harness.run_steps(2);
+            // far from the picture's top left corner, and from the stage's
+            let points = [pos2(500.0, 330.0), pos2(420.0, 250.0), pos2(310.0, 340.0)];
+            let before = checked(&harness, &points);
+            let zoomed_at = pos2(450.0, 300.0);
+            harness.event(egui::Event::PointerMoved(zoomed_at));
+            harness.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, 300.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            });
+            let mut levels = vec![harness.state().1.level];
+            for _ in 0..4 {
+                harness.step();
+                levels.push(harness.state().1.level);
+                assert_eq!(checked(&harness, &points), before, "{ppp}: zoomed to {levels:?}");
+            }
+            // it did zoom, a frame at a time
+            assert!(levels.windows(2).filter(|pair| pair[1] > pair[0]).count() >= 2, "{levels:?}");
+            // panned with the middle button, too
+            let press = |pressed| egui::Event::PointerButton {
+                pos: zoomed_at,
+                button: egui::PointerButton::Middle,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            harness.event(press(true));
+            harness.step();
+            let centre = harness.state().1.centre;
+            harness.event(egui::Event::PointerMoved(zoomed_at - vec2(60.0, 40.0)));
+            harness.step();
+            assert_ne!(harness.state().1.centre, centre);
+            assert_eq!(checked(&harness, &points), before, "{ppp}: panned");
+            harness.event(press(false));
+            harness.step();
+        }
     }
 
     #[test]
