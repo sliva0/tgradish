@@ -862,7 +862,7 @@ theme-dark = Dark
 accent = Accent colour
     .hint = What marks the chosen, the hovered and the focused
 # How large everything in the window is; .keys under it says the keys that
-# change it too, as the system writes them, as Ctrl+=.
+# change it too, as the window writes keys elsewhere, as Ctrl++.
 scale = Scale
     .hint = How large the window's text and controls are
     .keys = { $larger } and { $smaller } change it too; { $reset } is back to 100%

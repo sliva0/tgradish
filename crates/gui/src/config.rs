@@ -108,7 +108,7 @@ pub(crate) struct GuiConfig {
     /// The colour that marks what is chosen, hovered and focused.
     pub(crate) accent: Accent,
     /// How large everything in the window is, 1 as the system has it: as
-    /// Ctrl+= and Ctrl+- change it, from [`SCALES`]'s start to its end.
+    /// Ctrl++ (or Ctrl+=) and Ctrl+- change it, from [`SCALES`]'s start to its end.
     pub(crate) scale: f64,
     /// Start with the files open when the window last closed.
     pub(crate) reopen_files: bool,

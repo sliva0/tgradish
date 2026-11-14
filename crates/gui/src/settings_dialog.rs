@@ -500,11 +500,10 @@ fn ffmpeg_use(ui: &mut egui::Ui, config: &mut Config, builtin: bool) {
 
 /// The window's scale, `scale`, smaller and larger by the steps egui's
 /// keys take, and back to 100%, which the window applies at once, with those keys
-/// under it, as the system writes them. Gives the button that changed it,
+/// under it, as the window's other hints write keys. Gives the button that changed it,
 /// where one did: nowhere for the one back to 100%.
 fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
     use egui::gui_zoom::kb_shortcuts;
-    let ctx = ui.ctx().clone();
     let mut stepped = None;
     // the setting changes, which the window then applies, as it does a
     // theme: kept once saved, like the rest of Settings; egui would only
@@ -542,13 +541,23 @@ fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
     if let Some(changed) = changed {
         *scale = changed;
     }
-    let keys = |shortcut| ctx.format_shortcut(shortcut);
+    // as the window's other hints write keys, Ctrl+V: so Ctrl++, rather
+    // than egui's Ctrl+Plus
+    let keys = |shortcut: &egui::KeyboardShortcut| {
+        let modifiers = egui::ModifierNames::NAMES.format(&shortcut.modifiers, false);
+        let key = match shortcut.logical_key {
+            egui::Key::Minus => "-",
+            key => key.symbol_or_name(),
+        };
+        format!("{modifiers}+{key}")
+    };
     widgets::hint(
         ui,
         fl!(
             "scale",
             "keys",
-            larger = keys(&kb_shortcuts::ZOOM_IN_SECONDARY),
+            // though Ctrl+= does it too
+            larger = keys(&kb_shortcuts::ZOOM_IN),
             smaller = keys(&kb_shortcuts::ZOOM_OUT),
             reset = keys(&kb_shortcuts::ZOOM_RESET)
         ),
@@ -767,6 +776,8 @@ mod tests {
         harness.state_mut().settings_dialog.open();
         settle(&mut harness);
         harness.get_by_label(&fl!("scale-percent", percent = 100));
+        // its keys said as other shortcuts are, Ctrl++ rather than Ctrl+=
+        harness.get_by_label_contains("Ctrl++ and Ctrl+- change it too; Ctrl+0");
         // + clicked again and again where it is on the screen
         let pixel = |harness: &Harness<App>, label: &str| {
             harness.get_by_label(label).rect().center() * harness.ctx.zoom_factor()
@@ -800,6 +811,13 @@ mod tests {
         settle(&mut harness);
         assert_eq!(harness.ctx.zoom_factor(), 1.1);
         assert_eq!(Config::load(&path).unwrap().gui.scale, 1.1);
+        // as by the key the hint names, which + is
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::Plus);
+        settle(&mut harness);
+        assert_eq!(Config::load(&path).unwrap().gui.scale, 1.2);
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::Minus);
+        settle(&mut harness);
+        assert_eq!(harness.ctx.zoom_factor(), 1.1);
         // and read as the window opens again
         let config = Config::load(&path).unwrap();
         let mut again = Harness::builder()

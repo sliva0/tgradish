@@ -315,7 +315,7 @@ impl App {
     /// Keeps the window's scale and its setting together: the setting is
     /// applied as the window opens, and as Settings changes it, which
     /// keeps it once saved, as it does the theme; a change by egui's keys,
-    /// Ctrl+= and Ctrl+- and Ctrl+0, is saved at once, as the theme's button
+    /// Ctrl++ (or Ctrl+=) and Ctrl+- and Ctrl+0, is saved at once, as the theme's button
     /// saves its change. egui applies a scale asked of it from the next
     /// frame, which `scale_shown`, what was last asked or seen, awaits.
     fn follow_scale(&mut self, ctx: &egui::Context) {
