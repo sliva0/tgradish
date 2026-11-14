@@ -149,6 +149,19 @@ fn rejects_bad_flags() {
     let output = tgradish(&["convert", "a.png", "--watermark", "false"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("switches take no value"));
+    // nor is - stdin or stdout, which isn't read or written
+    for args in [
+        &["convert", "-", "-f", "tgs"][..],
+        &["convert", "a.png", "-o", "-"],
+        &["spoof", "-"],
+        &["spoof", "a.webm", "-o", "-"],
+        &["inspect", "a.webm", "-"],
+    ] {
+        let output = tgradish(args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        let said = "error: reading stdin or writing stdout isn't supported: name a file";
+        assert!(String::from_utf8_lossy(&output.stderr).starts_with(said), "{args:?}");
+    }
     // the window prints nothing to read
     if cfg!(feature = "gui") {
         let output = tgradish(&["--json", "gui"]);

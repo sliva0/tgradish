@@ -196,6 +196,27 @@ impl Cli {
         if self.command.is_window() && self.global.json {
             return Some("--json can't be used with gui: the window prints nothing to read".into());
         }
+        // `-`, which other tools read as stdin or stdout, would be a file
+        // named so here
+        let dash = |path: &Option<PathBuf>| path.as_deref() == Some(std::path::Path::new("-"));
+        let paths: Vec<Option<PathBuf>> = match &self.command {
+            Command::Convert(args) => args
+                .inputs
+                .iter()
+                .cloned()
+                .map(Some)
+                .chain([args.output.clone(), args.conversion.output_dir.clone()])
+                .collect(),
+            Command::Watch(args) => {
+                vec![Some(args.dir.clone()), args.conversion.output_dir.clone()]
+            }
+            Command::Spoof(args) => vec![Some(args.input.clone()), args.output.clone()],
+            Command::Inspect(args) => args.files.iter().cloned().map(Some).collect(),
+            _ => Vec::new(),
+        };
+        if paths.iter().any(dash) {
+            return Some("reading stdin or writing stdout isn't supported: name a file".into());
+        }
         let Command::Convert(args) = &self.command else { return None };
         let word = args
             .inputs
