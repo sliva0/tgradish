@@ -103,6 +103,9 @@ pub(crate) struct App {
     /// The window's scale shown last, to apply a change made in Settings
     /// and save one made by egui's keys.
     pub(crate) scale_shown: Option<f32>,
+    /// The scale asked of egui, and the pointer kept where it is on the
+    /// screen as it changes.
+    pub(crate) scaling: crate::scaling::Scaling,
     /// Where the open files are kept between runs; `None` where they
     /// aren't.
     pub(crate) session: Option<session::Store>,
@@ -299,6 +302,7 @@ impl App {
             inspection: None,
             theme_shown: None,
             scale_shown: None,
+            scaling: Default::default(),
             session: None,
             next_save: 0.0,
             fallbacks: fallback::Fallbacks::new(fonts()),
@@ -331,8 +335,8 @@ impl App {
         let alike = |a: f32, b: f32| (a - b).abs() < 0.005;
         match self.scale_shown {
             // the setting changed, by Settings, or as the window opens
-            Some(shown) if !alike(set, shown) => ctx.set_zoom_factor(set),
-            None => ctx.set_zoom_factor(set),
+            Some(shown) if !alike(set, shown) => self.scaling.set(ctx, set),
+            None => self.scaling.set(ctx, set),
             // what was asked, now applied
             Some(shown) if alike(zoom, shown) => return,
             // by the keys, Settings open or not
@@ -805,8 +809,15 @@ impl eframe::App for App {
         }
     }
 
+    /// Says the frame's input at the scale egui applies to it, with the
+    /// pointer where it is on the screen as the scale changes.
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.scaling.follow(ctx, raw_input);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.scaling.begun();
         // file dialogs stay over the window, which they are modal for
         self.file_dialog = rfd::FileDialog::new().set_parent(frame);
         self.take_picked();
@@ -928,6 +939,8 @@ impl eframe::App for App {
             })
         });
         links.iter().for_each(|url| system::browse(url));
+        // last, as egui would take them
+        self.scaling.keys(&ctx);
         // every few seconds, so a crash loses little; what changed is kept
         // even if nothing draws the window again before then
         let now = ctx.input(|input| input.time);

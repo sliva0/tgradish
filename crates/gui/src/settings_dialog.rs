@@ -890,6 +890,104 @@ mod tests {
         assert!(centred(&harness) && harness.state().settings_dialog.returning.is_none());
     }
 
+    /// Settings open at `scale` on a screen `size` pixels large, the
+    /// pointer moved onto `label`'s button and kept there.
+    fn on_the_scale(scale: f64, size: [f32; 2], label: &str) -> crate::testing::Screen {
+        let mut config = Config::default();
+        config.gui.scale = scale;
+        let mut screen = crate::testing::Screen::new(config, size, true);
+        let pixels = screen.pixels(label);
+        screen.move_to(pixels);
+        assert!(screen.on(label));
+        screen
+    }
+
+    #[test]
+    fn takes_clicks_again_and_again_with_the_pointer_kept_on_the_scale() {
+        // as by hand: on − or +, then clicked again and again a moment
+        // apart, without the pointer moving at all, as the button is kept
+        // under it, in a window tall enough for the dialog to stay within
+        // it as it is kept
+        let steps = [
+            (fl!("scale-larger"), [1.1, 1.2, 1.3, 1.4, 1.5]),
+            (fl!("scale-smaller"), [0.9, 0.8, 0.7, 0.6, 0.5]),
+        ];
+        for (label, scales) in steps {
+            let mut screen = on_the_scale(1.0, [1600.0, 1400.0], &label);
+            let under = screen.pixels(&label);
+            for scale in scales {
+                screen.click();
+                screen.frames(4);
+                let app = screen.harness.state();
+                assert_eq!(app.config.gui.scale, scale, "{label}");
+                assert!(app.settings_dialog.pinned.is_some(), "{label} at {scale}");
+                // to a pixel or two, as egui rounds what it lays out to them
+                let now = screen.pixels(&label);
+                assert!((now - under).length() < 2.0, "{label} at {scale}: {now:?}, not {under:?}");
+                // the pointer where it is on the screen, and so on it
+                let pointer = screen.pointer().map(|at| at * screen.harness.ctx.zoom_factor());
+                assert!(pointer.is_some_and(|at| (at - under).length() < 0.01), "{pointer:?}");
+                assert!(screen.on(&label), "{label} at {scale}: the pointer at {pointer:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn stays_where_it_is_at_the_ends_of_the_scale() {
+        // to the least, then − can't be clicked, and nothing else is: the
+        // pointer on it still
+        let smaller = fl!("scale-smaller");
+        let mut screen = on_the_scale(0.4, [1280.0, 900.0], &smaller);
+        for scale in [0.3, 0.2, 0.2, 0.2] {
+            screen.click();
+            screen.frames(4);
+            assert_eq!(screen.harness.state().config.gui.scale, scale);
+            assert!(screen.on(&smaller), "at {scale}");
+        }
+        // and to the most, where + can't be either, on a screen large
+        // enough for the dialog then
+        let larger = fl!("scale-larger");
+        let mut screen = on_the_scale(4.8, [5200.0, 4400.0], &larger);
+        for scale in [4.9, 5.0, 5.0, 5.0] {
+            screen.click();
+            screen.frames(4);
+            assert_eq!(screen.harness.state().config.gui.scale, scale);
+            assert!(screen.on(&larger), "at {scale}");
+        }
+    }
+
+    #[test]
+    fn takes_a_click_where_the_pointer_is_once_back_in_the_middle() {
+        let larger = fl!("scale-larger");
+        let mut screen = on_the_scale(1.0, [1280.0, 900.0], &larger);
+        let under = screen.pixels(&larger);
+        for _ in 0..3 {
+            screen.click();
+            screen.frames(4);
+        }
+        assert_eq!(screen.harness.state().config.gui.scale, 1.3);
+        // a while later, the pointer kept still, the dialog is back in the
+        // middle, and + is no longer under the pointer
+        screen.frames(120);
+        let dialog = &screen.harness.state().settings_dialog;
+        assert!(dialog.pinned.is_none() && dialog.returning.is_none());
+        let middle = screen.harness.ctx.content_rect().center();
+        assert!((dialog.drawn.0.center() - middle).length() < 1.0);
+        assert!((screen.pixels(&larger) - under).length() > 20.0);
+        assert!(!screen.on(&larger));
+        // so clicking there again doesn't scale the window
+        screen.click();
+        screen.frames(4);
+        assert_eq!(screen.harness.state().config.gui.scale, 1.3);
+        // where + now is, it does
+        let now = screen.pixels(&larger);
+        screen.move_to(now);
+        screen.click();
+        screen.frames(4);
+        assert_eq!(screen.harness.state().config.gui.scale, 1.4);
+        assert!(screen.on(&larger));
+    }
+
     #[test]
     fn keeps_a_file_it_cannot_read_beside_the_one_it_saves() {
         let dir = tempfile::tempdir().unwrap();

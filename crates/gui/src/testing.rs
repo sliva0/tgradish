@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::config::Config;
+use eframe::egui;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use tgradish_core::presets::Presets;
@@ -39,6 +40,96 @@ pub(crate) fn harness(config: Config) -> Harness<'static, App> {
     Harness::builder()
         .with_size([1280.0, 820.0])
         .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin()))
+}
+
+/// The window as eframe and egui-winit drive it on a screen, a frame a
+/// moment apart: its size kept in pixels as its scale changes, each
+/// frame's input given to the window's hook first, and the pointer said
+/// as egui-winit says it, where it moves in points at the scale of the
+/// moment, and then, for each press until it moves again, that same place
+/// in points, whatever the scale has become since.
+pub(crate) struct Screen {
+    pub(crate) harness: Harness<'static, App>,
+    /// The window's size in pixels.
+    size: egui::Vec2,
+    /// Where the pointer last moved, in points as egui-winit keeps it.
+    said: Option<egui::Pos2>,
+}
+
+impl Screen {
+    /// The window, `size` pixels large, from `config`, with Settings open
+    /// where `settings` says, once its parts have found their sizes.
+    pub(crate) fn new(config: Config, size: [f32; 2], settings: bool) -> Self {
+        let harness = Harness::builder()
+            .with_size(size)
+            .with_step_dt(1.0 / 60.0)
+            .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin()));
+        let mut screen = Screen { harness, size: size.into(), said: None };
+        if settings {
+            screen.harness.state_mut().settings_dialog.open();
+        }
+        screen.frames(16);
+        screen
+    }
+
+    /// A frame with `events`, as eframe runs one.
+    pub(crate) fn frame(&mut self, events: Vec<egui::Event>) {
+        let zoom = self.harness.ctx.zoom_factor();
+        self.harness.set_size(self.size / zoom);
+        let ctx = self.harness.ctx.clone();
+        let mut input = self.harness.input().clone();
+        input.events.extend(events);
+        eframe::App::raw_input_hook(self.harness.state_mut(), &ctx, &mut input);
+        *self.harness.input_mut() = input;
+        self.harness.step();
+    }
+
+    pub(crate) fn frames(&mut self, frames: usize) {
+        for _ in 0..frames {
+            self.frame(Vec::new());
+        }
+    }
+
+    /// The pointer moved to `pixels`, in a frame.
+    pub(crate) fn move_to(&mut self, pixels: egui::Pos2) {
+        let at = pixels / self.harness.ctx.zoom_factor();
+        self.said = Some(at);
+        self.frame(vec![egui::Event::PointerMoved(at)]);
+    }
+
+    /// The primary button pressed and let go where the pointer is, without
+    /// it moving, a frame each.
+    pub(crate) fn click(&mut self) {
+        let pos = self.said.expect("the pointer is on the window");
+        for pressed in [true, false] {
+            let (button, modifiers) = (egui::PointerButton::Primary, egui::Modifiers::NONE);
+            self.frame(vec![egui::Event::PointerButton { pos, button, pressed, modifiers }]);
+        }
+    }
+
+    /// `key` pressed with the command key, in a frame.
+    pub(crate) fn command(&mut self, key: egui::Key) {
+        let modifiers = egui::Modifiers::COMMAND;
+        let (repeat, physical_key) = (false, None);
+        let pressed = egui::Event::Key { key, physical_key, pressed: true, repeat, modifiers };
+        self.frame(vec![pressed]);
+    }
+
+    /// Where `label`'s middle is on the screen, in pixels.
+    pub(crate) fn pixels(&self, label: &str) -> egui::Pos2 {
+        self.harness.get_by_label(label).rect().center() * self.harness.ctx.zoom_factor()
+    }
+
+    /// Where egui takes the pointer to be, in points.
+    pub(crate) fn pointer(&self) -> Option<egui::Pos2> {
+        self.harness.ctx.input(|input| input.pointer.hover_pos())
+    }
+
+    /// Whether egui takes the pointer to be on `label`.
+    pub(crate) fn on(&self, label: &str) -> bool {
+        let rect = self.harness.get_by_label(label).rect();
+        self.pointer().is_some_and(|at| rect.contains(at))
+    }
 }
 
 /// Everything the window's messages say, each part on a line of its own,

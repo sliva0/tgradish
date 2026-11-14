@@ -36,6 +36,7 @@ mod predict;
 mod preset_dialogs;
 mod preview;
 mod result;
+mod scaling;
 #[cfg(test)]
 mod scenes;
 #[cfg(test)]
