@@ -433,9 +433,11 @@ fn listen_for_cancel(ctx: &Context) {
     });
 }
 
-/// A progress bar on stderr, cargo-like: `verb` coloured on the left.
+/// A progress bar, cargo-like: `verb` coloured on the left. It draws
+/// nothing until [`Bar::show`] puts it on stderr in place of the one
+/// before, as setting its message would draw it over that one.
 fn progress_bar(verb: &str, length: Option<u64>) -> ProgressBar {
-    let bar = ProgressBar::with_draw_target(length, ProgressDrawTarget::stderr());
+    let bar = ProgressBar::with_draw_target(length, ProgressDrawTarget::hidden());
     let template = match length {
         Some(_) => "{prefix:>12.green.bold} {msg} {bar:30.green/dim} {percent:>3}%",
         None => "{prefix:>12.green.bold} {spinner:.green} {msg}",
@@ -447,7 +449,6 @@ fn progress_bar(verb: &str, length: Option<u64>) -> ProgressBar {
             .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ "),
     );
     bar.set_prefix(verb.to_owned());
-    bar.enable_steady_tick(Duration::from_millis(100));
     bar
 }
 
@@ -456,9 +457,12 @@ fn progress_bar(verb: &str, length: Option<u64>) -> ProgressBar {
 struct Bar(Option<ProgressBar>);
 
 impl Bar {
-    /// Shows `bar` in place of the one before.
+    /// Shows `bar` in place of the one before, which is cleared first: a
+    /// bar drawn before then would leave the old one's line behind.
     fn show(&mut self, bar: ProgressBar) {
         self.clear();
+        bar.set_draw_target(ProgressDrawTarget::stderr());
+        bar.enable_steady_tick(Duration::from_millis(100));
         self.0 = Some(bar);
     }
 
@@ -731,5 +735,19 @@ fn reduction_text(reduction: &tgradish_core::tgradish_tgs::reduce::Reduction) ->
             format!("lowered the resolution to {:.0}%", factor * 100.0)
         }
         other => format!("{other:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A bar draws only once shown, so the one it replaces is cleared
+    /// first rather than left on screen above it.
+    #[test]
+    fn draws_a_bar_only_once_shown() {
+        let bar = progress_bar("Converting", None);
+        bar.set_message("to vector");
+        assert!(bar.is_hidden());
     }
 }
