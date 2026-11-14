@@ -257,7 +257,7 @@ impl Format {
             Some(Format::Png)
         } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
             Some(Format::WebP)
-        } else if bytes.get(4..6) == Some(&[0xe0, 0xa5]) {
+        } else if aseprite_header(bytes) {
             Some(Format::Aseprite)
         } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
             Some(Format::Jpeg)
@@ -267,6 +267,18 @@ impl Format {
             None
         }
     }
+}
+
+/// Whether `bytes` start as an Aseprite file's header does: its magic
+/// number at 4, a colour depth of 8, 16 or 32 bits at 12, and the two
+/// DWORDs at 20 and 24 the specification says are 0. The magic number
+/// alone is two bytes where a RIFF file, as an AVI, has its size, so one
+/// in 65536 of them would pass for one.
+fn aseprite_header(bytes: &[u8]) -> bool {
+    let word = |at: usize| bytes.get(at..at + 2).map(|word| u16::from_le_bytes([word[0], word[1]]));
+    word(4) == Some(0xa5e0)
+        && matches!(word(12), Some(8 | 16 | 32))
+        && bytes.get(20..28).is_some_and(|reserved| reserved.iter().all(|&byte| byte == 0))
 }
 
 /// How much decoding may take, so hostile files fail instead of
@@ -489,7 +501,24 @@ mod tests {
         assert_eq!(Format::detect(b"GIF89a..."), Some(Format::Gif));
         assert_eq!(Format::detect(b"\x89PNG\r\n\x1a\n...."), Some(Format::Png));
         assert_eq!(Format::detect(b"RIFF\0\0\0\0WEBPVP8 "), Some(Format::WebP));
-        assert_eq!(Format::detect(b"\0\0\0\0\xe0\xa5"), Some(Format::Aseprite));
+        let mut aseprite = [0; 128];
+        aseprite[4..6].copy_from_slice(&0xa5e0u16.to_le_bytes());
+        aseprite[12] = 32;
+        assert_eq!(Format::detect(&aseprite), Some(Format::Aseprite));
+        // as much as a sniff reads
+        assert_eq!(Format::detect(&aseprite[..28]), Some(Format::Aseprite));
+        // an AVI whose size has the magic number's bytes where an Aseprite
+        // file has it
+        let mut avi = *b"RIFF\xe0\xa5\0\0AVI LIST\x94\x12\0\0hdrlavih8\0\0\0";
+        assert_eq!(Format::detect(&avi), None);
+        // nor one of an unknown depth, or of what must be 0 set
+        aseprite[12] = 24;
+        assert_eq!(Format::detect(&aseprite), None);
+        aseprite[12] = 8;
+        aseprite[24] = 1;
+        assert_eq!(Format::detect(&aseprite), None);
+        avi[12..14].copy_from_slice(&16u16.to_le_bytes());
+        assert_eq!(Format::detect(&avi), None);
         assert_eq!(Format::detect(b"RIFF\0\0\0\0WAVE"), None);
         assert_eq!(
             decode(b"nope", &DecodeOptions::default(), &Limits::default()),
