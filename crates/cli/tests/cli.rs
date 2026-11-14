@@ -219,6 +219,34 @@ fn says_an_input_is_missing_alike_everywhere() {
     }
 }
 
+/// What a format can't use for an input is said to be unused, rather than
+/// dropped quietly, or refused where it never could be.
+#[test]
+fn says_what_goes_unused() {
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("a.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let png = png.to_str().unwrap();
+    let output = tgradish(&["convert", png, "-f", "tgs", "--sheet-frames", "3"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr).trim_end(),
+        "error: --sheet-frames needs --sheet"
+    );
+    // a picture's own times, which a frame rate doesn't change
+    let unused = "--fps only sets how fast image sequences and sprite sheets play for .tgs";
+    let output = tgradish(&["convert", png, "-f", "tgs", "--fps", "30", "-y"]);
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(stderr.matches(unused).count(), 1, "{stderr}");
+    let output = tgradish(&["--json", "convert", png, "-f", "tgs", "--fps", "30", "-y"]);
+    let lines = json_lines(&output);
+    assert!(lines.iter().any(|line| line["event"] == "warning" && line["message"] == unused));
+    // but a sequence's
+    let output = tgradish(&["convert", png, "--sequence", "-f", "tgs", "--fps", "30", "-y"]);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains(unused));
+}
+
 /// A file of the wrong kind is said to be, with what makes the right one.
 #[test]
 fn says_a_file_is_of_the_wrong_kind() {

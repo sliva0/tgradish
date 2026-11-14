@@ -64,6 +64,11 @@ pub struct Converter<'a> {
     /// Outputs written by this command, and their inputs, so two inputs
     /// with the same name never overwrite each other's result.
     written: RefCell<HashMap<PathBuf, PathBuf>>,
+    /// Whether `--fps`, or `--options-json`, set a frame rate: one that
+    /// `.tgs` can't use for an input with times of its own is said to be
+    /// unused, once.
+    fps_given: bool,
+    fps_unused_said: std::cell::Cell<bool>,
 }
 
 /// The options `--options-json` gave, as `format` takes them.
@@ -214,6 +219,13 @@ impl<'a> Converter<'a> {
                 }
                 let options = options.merged(&args.options.to_tgs_options());
                 check_options(&options, args, json.as_ref(), name)?;
+                // how a sheet is read, of a sheet that isn't one
+                if options.sheet_frames.is_some() && options.sheet.is_none() {
+                    return Err(crate::usage(match args.options.sheet_frames {
+                        Some(_) => "--sheet-frames needs --sheet",
+                        None => "\"sheet-frames\" in --options-json needs \"sheet\"",
+                    }));
+                }
                 FormatOptions::Tgs(options)
             }
         };
@@ -233,7 +245,17 @@ impl<'a> Converter<'a> {
         if args.cancel_on_stdin {
             listen_for_cancel(ctx);
         }
-        Ok(Self { ctx, args, options, backend, written: Default::default() })
+        let fps_given = args.options.fps.is_some()
+            || json.as_ref().is_some_and(|json| json.contains_key("fps"));
+        Ok(Self {
+            ctx,
+            args,
+            options,
+            backend,
+            written: Default::default(),
+            fps_given,
+            fps_unused_said: Default::default(),
+        })
     }
 
     /// Where the result for `input` goes, unless `-o` says otherwise: as
@@ -320,6 +342,17 @@ impl<'a> Converter<'a> {
                 !outcome.issues.is_empty()
             }
             FormatOptions::Tgs(options) => {
+                // a frame rate is how fast pictures that have none play
+                let timed = matches!(input, Input::File(_)) && options.sheet.is_none();
+                if timed && self.fps_given && !self.fps_unused_said.replace(true) {
+                    let message =
+                        "--fps only sets how fast image sequences and sprite sheets play for .tgs";
+                    if json {
+                        crate::json_line(&tgs::Event::Warning { message: message.into() });
+                    } else {
+                        eprintln!("{} {message}", ui::warning_label());
+                    }
+                }
                 // only videos need ffmpeg
                 let backend = tgs::needs_ffmpeg(&input).then(|| self.backend()).transpose()?;
                 let exact = options.exact_or_default();

@@ -305,8 +305,9 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     if lossless && !matches!(fit, Fit::Fps | Fit::Length | Fit::Off) {
         return Err(Error::invalid("lossless", "only works with fit fps, length or off"));
     }
+    // lossless encoding where it has no say was refused above
     for (key, why) in super::set_aside(o, o) {
-        if matches!(key, "crf" | "bitrate") {
+        if key != "lossless" {
             warnings.push(format!("{key} is ignored as {why}"));
         }
     }
@@ -446,6 +447,20 @@ mod tests {
         assert_eq!(warned(bitrate), ["crf is ignored as bitrate is set"]);
         let fitted = Options { fit: Some(Fit::Crf), ..Default::default() };
         assert_eq!(warned(fitted), ["crf is ignored as fit is crf"]);
+        // and of fitting's own settings where it is off, and a duration
+        // never written
+        let off = Options {
+            fit: Some(Fit::Off),
+            attempts: Some(3),
+            spoof: Some(Spoof::Never),
+            fake_duration: Some(1.0),
+            ..Default::default()
+        };
+        let warned = plan_with(off).unwrap().1;
+        assert_eq!(
+            warned[warned.len() - 2..],
+            ["attempts is ignored as fit is off", "fake-duration is ignored as spoof is never"]
+        );
     }
 
     #[test]
