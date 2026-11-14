@@ -218,7 +218,8 @@ impl App {
     }
 
     /// Shows `message` over the window, under what it already says there,
-    /// unless it says that already.
+    /// unless it says that already: in the corner over the list where it
+    /// passes, in the banner where it stays.
     pub(crate) fn say(&mut self, message: Message) {
         self.banner.say(message);
     }
@@ -528,7 +529,7 @@ impl App {
     }
 
     /// Takes the files `ids` out of the list, stopping their conversions;
-    /// they are kept, with their settings and results, while the banner
+    /// they are kept, with their settings and results, while a notice
     /// offers to put them back, with those removed just before.
     pub(crate) fn remove_all(&mut self, ids: &[u64]) {
         let selected = self.selected.filter(|id| ids.contains(id));

@@ -95,7 +95,7 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
         harness.run_steps(3);
     };
 
-    // a notice over the bottom of the window
+    // a notice in the corner over the list
     select(&mut harness, 0);
     harness.state_mut().say(crate::banner::Message::info(fl!("files-gone", count = 2)));
     harness.run_steps(2);

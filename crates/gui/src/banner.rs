@@ -1,8 +1,12 @@
-//! The banner over the bottom of the window, where it says what happened
-//! that wasn't asked for, as a file that couldn't be read or saved. Each
-//! message has its row, with what happened first, the file it is about,
-//! what to do and buttons that do it, and what went wrong as the program
-//! said it, folded away when it is long.
+//! What the window says that wasn't asked for. What passes, information
+//! that goes by itself, as files removed with a way back, shows in the
+//! corner over the list of files, mostly empty there, each notice on a
+//! card of its own; what asks for something to be done, as a file that
+//! couldn't be read or saved, stays in the banner over the bottom of the
+//! window, right of the list, until it is. Each message has its row, with
+//! what happened first, the file it is about, what to do and buttons that
+//! do it, and what went wrong as the program said it, folded away when it
+//! is long.
 
 use std::path::{Path, PathBuf};
 
@@ -188,11 +192,23 @@ pub(crate) struct Said {
     pub(crate) flash: Option<(String, f64)>,
 }
 
+impl Said {
+    /// Whether it passes, shown in the corner over the list.
+    fn passes(&self) -> bool {
+        self.message.severity == Severity::Info
+    }
+}
+
 /// The messages the window shows, oldest first.
 #[derive(Default)]
 pub(crate) struct Banner {
     pub(crate) rows: Vec<Said>,
     next_id: u64,
+    /// Where the rows of the list of files are seen, under whose corner
+    /// what passes is shown, as the list last drew it.
+    pub(crate) corner: Option<egui::Rect>,
+    /// When the messages were last drawn: hovering what passes holds it.
+    drawn: Option<f64>,
 }
 
 /// How long information shows unless hovered; warnings stay until
@@ -211,6 +227,16 @@ const ICON: f32 = 16.0;
 const GAP: f32 = 10.0;
 /// The dismiss button's width.
 const DISMISS: f32 = 22.0;
+/// The most notices shown at once in the corner: the oldest goes first.
+const MOST_PASSING: usize = 3;
+/// Room around the notices in the corner, and between them.
+const CORNER_ROOM: f32 = 8.0;
+/// Room inside a notice, around what it says.
+const NOTICE_MARGIN: egui::Margin = egui::Margin { left: 10, right: 8, top: 8, bottom: 9 };
+/// How thick the line is that shortens as a notice's time runs out.
+const COUNTDOWN: f32 = 2.0;
+/// The longest the line goes undrawn as it shortens, a pixel or two.
+const COUNTDOWN_STEP: f64 = 1.0 / 15.0;
 /// The tallest the details get before they scroll.
 const DETAIL_HEIGHT: f32 = 160.0;
 
@@ -244,6 +270,12 @@ impl Banner {
             details_open: false,
             flash: None,
         });
+        // the oldest passing notice goes for the newest
+        if self.rows.iter().filter(|said| said.passes()).count() > MOST_PASSING
+            && let Some(oldest) = self.rows.iter().position(Said::passes)
+        {
+            self.rows.remove(oldest);
+        }
     }
 
     /// Stops showing what was said about `subject`.
@@ -263,42 +295,101 @@ impl Banner {
         }
     }
 
-    /// Draws the banner, if there is anything to say, and takes in its
-    /// dismissals. Gives the actions clicked, with the messages they are
-    /// of, for the window to do.
+    /// Draws the banner, if there is anything to say, and the notices in
+    /// the corner over the list, and takes in their dismissals. Gives the
+    /// actions clicked, with the messages they are of, for the window to
+    /// do.
     pub(crate) fn show(&mut self, ctx: &egui::Context) -> Vec<(Message, Action)> {
         let mut clicked = Vec::new();
-        if self.rows.is_empty() {
-            return clicked;
-        }
-        let now = ctx.input(|input| input.time);
-        let widest = WIDEST.min(ctx.content_rect().width() - 2.0 * SIDE_ROOM).max(200.0);
         let mut dismissed = Vec::new();
+        let now = ctx.input(|input| input.time);
+        let all = self.banner(ctx, now, &mut clicked, &mut dismissed);
+        let held = self.passing(ctx, now, &mut clicked, &mut dismissed);
+        // hovering what passes holds it where it is, for as long
+        let passed = self.drawn.map_or(0.0, |drawn| (now - drawn).max(0.0));
+        self.drawn = Some(now);
+        for said in &mut self.rows {
+            let passes = said.passes();
+            match &mut said.since {
+                None => said.since = Some(now),
+                Some(since) if passes && held => *since += passed,
+                Some(since) if passes && now - *since > SHOWN => dismissed.push(said.id),
+                Some(_) => {}
+            }
+            if said.flash.as_ref().is_some_and(|(_, until)| now > *until) {
+                said.flash = None;
+            }
+        }
+        if all {
+            self.rows.retain(Said::passes);
+        }
+        self.rows.retain(|said| !dismissed.contains(&said.id));
+        // drawn again as the first goes or stops flashing, and as the line
+        // of what passes shortens, and not more often
+        let passing = self.rows.iter().any(Said::passes);
+        let shortens = (passing && !held).then_some(now + COUNTDOWN_STEP);
+        let next = self
+            .rows
+            .iter()
+            .flat_map(|said| {
+                let goes = said.passes().then(|| said.since.map(|since| since + SHOWN)).flatten();
+                goes.into_iter().chain(said.flash.as_ref().map(|(_, until)| *until))
+            })
+            .chain(shortens)
+            .fold(f64::INFINITY, f64::min);
+        if next.is_finite() {
+            // a little after, so it is past by then
+            let wait = (next - now).max(0.0) + 0.05;
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+        }
+        clicked
+    }
+
+    /// Draws the banner of what asks for something to be done, over the
+    /// bottom of the window right of the list, if there is any. Gives
+    /// whether all of it was dismissed at once.
+    fn banner(
+        &mut self,
+        ctx: &egui::Context,
+        now: f64,
+        clicked: &mut Vec<(Message, Action)>,
+        dismissed: &mut Vec<u64>,
+    ) -> bool {
+        let staying = self.rows.iter().filter(|said| !said.passes()).count();
+        if staying == 0 {
+            return false;
+        }
+        // in the middle of what is right of the list
+        let screen = ctx.content_rect();
+        let left = self.corner.map_or(screen.left(), |corner| corner.right()).min(screen.right());
+        let middle = (left + screen.right()) / 2.0;
+        let widest = WIDEST.min(screen.right() - left - 2.0 * SIDE_ROOM).max(200.0);
         let mut all = false;
-        let area = egui::Area::new(egui::Id::new("banner"))
+        egui::Area::new(egui::Id::new("banner"))
             .order(egui::Order::Foreground)
-            .anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -56.0))
+            .anchor(egui::Align2::CENTER_BOTTOM, vec2(middle - screen.center().x, -56.0))
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).inner_margin(egui::Margin::same(12)).show(
                     ui,
                     |ui| {
                         let room = widest - 24.0 - ICON - 2.0 * GAP - DISMISS;
-                        let column =
-                            self.rows.iter().map(|said| needs(ui, said, room)).fold(0.0, f32::max);
+                        let rows = self.rows.iter().filter(|said| !said.passes());
+                        let column = rows.map(|said| needs(ui, said, room)).fold(0.0, f32::max);
                         let column = column.clamp(160.0_f32.min(room), room);
                         ui.set_width(ICON + 2.0 * GAP + column + DISMISS);
-                        for (index, said) in self.rows.iter_mut().enumerate() {
+                        let rows = self.rows.iter_mut().filter(|said| !said.passes());
+                        for (index, said) in rows.enumerate() {
                             if index > 0 {
                                 hairline(ui);
                             }
-                            let row = draw(ui, said, column, now);
+                            let row = draw(ui, said, column, now, false);
                             clicked
                                 .extend(row.actions.into_iter().map(|a| (said.message.clone(), a)));
                             if row.dismissed {
                                 dismissed.push(said.id);
                             }
                         }
-                        if self.rows.len() > 2 {
+                        if staying > 2 {
                             hairline(ui);
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
@@ -310,43 +401,82 @@ impl Banner {
                     },
                 );
             });
-        // hovering keeps information showing
-        let hovered = area.response.contains_pointer();
-        for said in &mut self.rows {
-            match said.since {
-                _ if hovered => said.since = Some(now),
-                None => said.since = Some(now),
-                Some(since) if said.message.severity == Severity::Info && now - since > SHOWN => {
-                    dismissed.push(said.id);
-                }
-                Some(_) => {}
-            }
-            if said.flash.as_ref().is_some_and(|(_, until)| now > *until) {
-                said.flash = None;
-            }
-        }
-        if all {
-            self.rows.clear();
-        }
-        self.rows.retain(|said| !dismissed.contains(&said.id));
-        // drawn again as the first goes or stops flashing, and not before
-        let next = self
-            .rows
-            .iter()
-            .flat_map(|said| {
-                let goes = (said.message.severity == Severity::Info)
-                    .then(|| said.since.map(|since| since + SHOWN))
-                    .flatten();
-                goes.into_iter().chain(said.flash.as_ref().map(|(_, until)| *until))
-            })
-            .fold(f64::INFINITY, f64::min);
-        if next.is_finite() {
-            // a little after, so it is past by then
-            let wait = (next - now).max(0.0) + 0.05;
-            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
-        }
-        clicked
+        all
     }
+
+    /// Draws what passes in the corner over the list, each notice on a
+    /// card of its own, the newest at the bottom. Where they are said is
+    /// there with none, for screen readers to say them as they come. Gives
+    /// whether they are held: hovered, or with the keyboard's focus.
+    fn passing(
+        &mut self,
+        ctx: &egui::Context,
+        now: f64,
+        clicked: &mut Vec<(Message, Action)>,
+        dismissed: &mut Vec<u64>,
+    ) -> bool {
+        let corner = self.corner.unwrap_or_else(|| ctx.content_rect());
+        let width = (corner.width() - 2.0 * CORNER_ROOM).max(160.0);
+        let id = egui::Id::new("notices");
+        let before = egui::AreaState::load(ctx, id).and_then(|state| state.size);
+        let mut focused = false;
+        let area = egui::Area::new(id)
+            .order(egui::Order::Middle)
+            .pivot(egui::Align2::LEFT_BOTTOM)
+            .fixed_pos(egui::pos2(corner.left() + CORNER_ROOM, corner.bottom() - CORNER_ROOM))
+            .show(ctx, |ui| {
+                ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
+                    node.set_live(egui::accesskit::Live::Polite);
+                });
+                ui.spacing_mut().item_spacing.y = CORNER_ROOM;
+                let room = width - NOTICE_MARGIN.sum().x - ICON - 2.0 * GAP - DISMISS;
+                for said in self.rows.iter_mut().filter(|said| said.passes()) {
+                    let card = egui::Frame::new()
+                        .fill(ui.visuals().panel_fill)
+                        .stroke(theme::floating_outline(ui.visuals()))
+                        .corner_radius(ui.visuals().window_corner_radius)
+                        .shadow(theme::floating_shadow(ui.visuals()))
+                        .inner_margin(NOTICE_MARGIN)
+                        .show(ui, |ui| {
+                            ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
+                                node.set_role(egui::accesskit::Role::Status);
+                            });
+                            ui.set_width(width - NOTICE_MARGIN.sum().x);
+                            draw(ui, said, room, now, true)
+                        });
+                    let row = card.inner;
+                    focused |= row.focused;
+                    clicked.extend(row.actions.into_iter().map(|a| (said.message.clone(), a)));
+                    if row.dismissed {
+                        dismissed.push(said.id);
+                    }
+                    // the time left, held while hovered
+                    let left = said.since.map_or(1.0, |since| (1.0 - (now - since) / SHOWN) as f32);
+                    countdown(ui, card.response.rect, left.clamp(0.0, 1.0));
+                }
+            });
+        // drawn again at once where the notices take more room or less
+        // than last time, as they are laid out from where they end
+        if before.is_some_and(|before| before != area.response.rect.size()) {
+            ctx.request_discard("notices resized");
+        }
+        // over the list's bar where they are taller than the list: the
+        // oldest goes, until they fit or one is left
+        let tall = area.response.rect.height() > corner.height() - 2.0 * CORNER_ROOM;
+        if tall && self.rows.iter().filter(|said| said.passes()).count() > 1 {
+            dismissed.extend(self.rows.iter().find(|said| said.passes()).map(|said| said.id));
+        }
+        area.response.contains_pointer() || focused
+    }
+}
+
+/// A line along the bottom of `card`, as long as the `left` of its time.
+fn countdown(ui: &egui::Ui, card: egui::Rect, left: f32) {
+    let inset = f32::from(ui.visuals().window_corner_radius.sw).max(4.0);
+    let full = card.width() - 2.0 * inset;
+    let at = egui::pos2(card.left() + inset, card.bottom() - 1.0 - COUNTDOWN);
+    let line = egui::Rect::from_min_size(at, vec2(full * left, COUNTDOWN));
+    ui.painter().rect_filled(line, COUNTDOWN / 2.0, theme::mark(ui.visuals()));
 }
 
 impl crate::app::App {
@@ -430,6 +560,8 @@ pub(crate) fn copied_path(file: &Path) -> String {
 struct Row {
     actions: Vec<Action>,
     dismissed: bool,
+    /// Whether one of them has the keyboard's focus.
+    focused: bool,
 }
 
 /// A line across the banner between rows.
@@ -518,9 +650,15 @@ fn needs(ui: &egui::Ui, said: &Said, room: f32) -> f32 {
     widest.min(room)
 }
 
-fn draw(ui: &mut egui::Ui, said: &mut Said, column: f32, now: f64) -> Row {
-    let mut row = Row { actions: Vec::new(), dismissed: false };
-    let line = ui.text_style_height(&TextStyle::Body);
+/// Draws a row, its text `column` wide; with `inline`, on one line with
+/// its buttons where they fit beside its headline, as a notice's Undo.
+fn draw(ui: &mut egui::Ui, said: &mut Said, column: f32, now: f64, inline: bool) -> Row {
+    let mut row = Row { actions: Vec::new(), dismissed: false, focused: false };
+    let inline = inline && fits_inline(ui, said, column);
+    // the icon and the dismiss button level with the headline's first
+    // line, or with the middle of the buttons beside it
+    let line =
+        if inline { ui.spacing().interact_size.y } else { ui.text_style_height(&TextStyle::Body) };
     let top_left = ui.cursor().min;
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -530,7 +668,11 @@ fn draw(ui: &mut egui::Ui, said: &mut Said, column: f32, now: f64) -> Row {
         ui.vertical(|ui| {
             ui.set_width(column);
             ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
-            text(ui, said, column, now, &mut row);
+            if inline {
+                headline_and_buttons(ui, said, column, &mut row);
+            } else {
+                text(ui, said, column, now, &mut row);
+            }
         });
         ui.add_space(GAP + DISMISS);
     });
@@ -549,8 +691,67 @@ fn draw(ui: &mut egui::Ui, said: &mut Said, column: f32, now: f64) -> Row {
     };
     let cross = egui::FontId::proportional(11.0);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "✖", cross, colour);
+    row.focused |= response.has_focus();
     row.dismissed = response.on_hover_text(dismiss).clicked();
     row
+}
+
+/// The room between buttons on their line.
+const BUTTON_GAP: f32 = 12.0;
+
+/// Whether a row says no more than its headline, with buttons that fit on
+/// its line `column` wide.
+fn fits_inline(ui: &egui::Ui, said: &Said, column: f32) -> bool {
+    let message = &said.message;
+    if message.actions.is_empty()
+        || message.file.is_some()
+        || message.note.is_some()
+        || message.detail.is_some()
+        || said.flash.is_some()
+    {
+        return false;
+    }
+    let painter = ui.painter();
+    let body = TextStyle::Body.resolve(ui.style());
+    let headline = painter.layout_job(headline(ui, said, f32::INFINITY)).size().x;
+    let buttons: f32 = message
+        .actions
+        .iter()
+        .map(|action| {
+            let label = painter.layout_no_wrap(action.label(), body.clone(), Color32::WHITE);
+            let padding = if action.primary() { 2.0 * ui.spacing().button_padding.x } else { 0.0 };
+            BUTTON_GAP + label.size().x + padding
+        })
+        .sum();
+    headline + buttons <= column
+}
+
+/// A row's headline and its buttons, on one line: the buttons at its end.
+fn headline_and_buttons(ui: &mut egui::Ui, said: &Said, column: f32, row: &mut Row) {
+    ui.horizontal(|ui| {
+        ui.add(egui::Label::new(headline(ui, said, column)));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = BUTTON_GAP;
+            for &action in said.message.actions.iter().rev() {
+                action_button(ui, action, row);
+            }
+        });
+    });
+}
+
+/// The button of `action`, taking in what it did into `row`.
+fn action_button(ui: &mut egui::Ui, action: Action, row: &mut Row) {
+    let label = action.label();
+    let response = if action.primary() {
+        let button = egui::Button::new(label).stroke(theme::on_outline(ui.visuals()));
+        ui.add(button)
+    } else {
+        link_button(ui, label)
+    };
+    row.focused |= response.has_focus();
+    if response.on_hover_text(action.hint()).clicked() {
+        row.actions.push(action);
+    }
 }
 
 /// The text column of a row: headline, file, note, buttons and details.
@@ -570,18 +771,9 @@ fn text(ui: &mut egui::Ui, said: &mut Said, column: f32, now: f64, row: &mut Row
     if !message.actions.is_empty() || long {
         ui.add_space(2.0);
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(12.0, 6.0);
+            ui.spacing_mut().item_spacing = vec2(BUTTON_GAP, 6.0);
             for &action in &message.actions {
-                let label = action.label();
-                let response = if action.primary() {
-                    let button = egui::Button::new(label).stroke(theme::on_outline(ui.visuals()));
-                    ui.add(button)
-                } else {
-                    link_button(ui, label)
-                };
-                if response.on_hover_text(action.hint()).clicked() {
-                    row.actions.push(action);
-                }
+                action_button(ui, action, row);
             }
             if long {
                 disclosure(ui, &mut said.details_open, &fl!("details"));
@@ -849,11 +1041,72 @@ mod tests {
         let left: Vec<_> =
             harness.state().banner.rows.iter().map(|said| &said.message.headline).collect();
         assert_eq!(left, ["First", "Third"]);
-        // two left: no more dismissing them all at once
+        // two left: no more dismissing them all at once, nor with what
+        // passes in the corner, which goes by itself
         assert!(harness.query_by_label(&fl!("dismiss", "all")).is_none());
-        harness.state_mut().say(Message::info("Fourth"));
+        harness.state_mut().say(Message::info("Passing"));
+        harness.run_steps(2);
+        assert!(harness.query_by_label(&fl!("dismiss", "all")).is_none());
+        harness.state_mut().say(Message::warning("Fourth"));
         harness.run_steps(2);
         click(&mut harness, &fl!("dismiss", "all"));
+        let left: Vec<_> =
+            harness.state().banner.rows.iter().map(|said| &said.message.headline).collect();
+        assert_eq!(left, ["Passing"]);
+    }
+
+    #[test]
+    fn says_what_passes_in_the_corner_over_the_list() {
+        use egui::accesskit::{Live, Role};
+        use egui_kittest::kittest::{NodeT, by};
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = crate::testing::harness(Config::default());
+        let art = dir.path().join("art.png");
+        crate::testing::square(&art, [200, 80, 0, 255]);
+        harness.state_mut().add(vec![art]);
+        harness.state_mut().say(Message::warning("Stays"));
+        for headline in ["First", "Second", "Third", "Fourth"] {
+            harness.state_mut().say(Message::info(headline));
+        }
+        harness.run_steps(2);
+        // the oldest gone for the newest
+        let rows = &harness.state().banner.rows;
+        let left: Vec<_> = rows.iter().map(|said| &said.message.headline).collect();
+        assert_eq!(left, ["Stays", "Second", "Third", "Fourth"]);
+        // in the corner over the list, over its footer, the newest at the
+        // bottom; the banner right of the list
+        let corner = harness.state().banner.corner.expect("drawn");
+        let place = |label: &str| harness.get_by_label(label).rect();
+        for label in ["Second", "Third", "Fourth"] {
+            assert!(corner.contains_rect(place(label)), "{label}: {:?}", place(label));
+        }
+        assert!(place("Second").bottom() < place("Third").top());
+        assert!(place("Third").bottom() < place("Fourth").top());
+        let remove_all = place(&fl!("remove-all"));
+        assert!(place("Fourth").bottom() < remove_all.top());
+        assert!(place("Stays").left() > corner.right());
+        // each a status, where screen readers say what comes
+        let statuses: Vec<_> = harness.query_all(by().role(Role::Status)).collect();
+        assert_eq!(statuses.len(), 3);
+        assert!(statuses.iter().all(|node| node.accesskit_node().live() == Live::Polite));
+        assert_eq!(harness.get_by_label("Fourth").accesskit_node().live(), Live::Polite);
+        assert_eq!(harness.get_by_label("Stays").accesskit_node().live(), Live::Off);
+    }
+
+    #[test]
+    fn holds_what_passes_while_it_is_hovered() {
+        let mut harness = crate::testing::harness(Config::default());
+        harness.state_mut().say(Message::info("Passing"));
+        harness.run_steps(2);
+        let at = harness.get_by_label("Passing").rect().center();
+        harness.event(egui::Event::PointerMoved(at));
+        // four steps a second
+        harness.run_steps(4 * (SHOWN as usize + 2));
+        assert_eq!(harness.state().banner.rows.len(), 1);
+        harness.event(egui::Event::PointerGone);
+        harness.run_steps(4 * (SHOWN as usize - 2));
+        assert_eq!(harness.state().banner.rows.len(), 1);
+        harness.run_steps(4 * 3);
         assert!(harness.state().banner.rows.is_empty());
     }
 

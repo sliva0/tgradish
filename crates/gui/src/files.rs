@@ -228,6 +228,9 @@ impl App {
             }
         }
 
+        // under the bar and over the footer: what passes is said in its
+        // corner, mostly empty
+        self.banner.corner = Some(ui.available_rect_before_wrap());
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             if self.items.is_empty() {
                 ui.vertical_centered(|ui| {

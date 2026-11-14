@@ -52,7 +52,7 @@ impl App {
         if ctx.text_edit_focused() || self.dialog_open() {
             return;
         }
-        // while the banner offers it, as after a row with the focus was
+        // while a notice offers it, as after a row with the focus was
         // removed by its key
         if undo {
             self.undo_removing();

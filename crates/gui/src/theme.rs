@@ -347,6 +347,21 @@ pub(crate) fn on_outline(visuals: &egui::Visuals) -> Stroke {
     Stroke::new(1.0, towards(half, scheme.text, &[scheme.window, scheme.window_alternate], SEEN))
 }
 
+/// The outline of what floats over the window, as a notice over the list:
+/// the frames' colour, or as much nearer the text as it takes to be seen
+/// on the window and on what it floats over.
+pub(crate) fn floating_outline(visuals: &egui::Visuals) -> Stroke {
+    let scheme = scheme(visuals);
+    let frame = visuals.widgets.noninteractive.bg_stroke.color;
+    Stroke::new(1.0, towards(frame, scheme.text, &[scheme.window, scheme.window_alternate], SEEN))
+}
+
+/// The soft shadow under what floats over the window.
+pub(crate) fn floating_shadow(visuals: &egui::Visuals) -> egui::Shadow {
+    let alpha = if visuals.dark_mode { 120 } else { 40 };
+    egui::Shadow { offset: [0, 2], blur: 10, spread: 0, color: Color32::from_black_alpha(alpha) }
+}
+
 /// What a bar lays over the part of it that is used, as the timeline lays
 /// it over its track: half of [`mark`], over the window.
 pub(crate) fn span(visuals: &egui::Visuals) -> Color32 {

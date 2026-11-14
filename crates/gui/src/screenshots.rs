@@ -70,6 +70,95 @@ fn state_screenshots() {
     });
 }
 
+/// Only the pictures of [`notices`], to `$TGRADISH_SCREENSHOTS` as
+/// [`screenshots`] makes them.
+#[test]
+#[ignore]
+fn notice_screenshots() {
+    let out =
+        PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
+    crate::l10n::choose(None);
+    notices(&mut |harness: &mut Harness<App>, name: &str| {
+        let image = harness.render().expect("rendering needs a GPU");
+        image.save(out.join(format!("tgradish-{name}.png"))).unwrap();
+    });
+}
+
+/// What passes in the corner over the list, and what stays over the
+/// window: files removed, with a short list and a full one; two and more
+/// at once; and one beside the banner saying ffmpeg is missing, at the
+/// usual size and the smallest, in both themes. Needs ffmpeg.
+fn notices(save: &mut impl FnMut(&mut Harness<App>, &str)) {
+    use crate::banner::Message;
+    use crate::config::Theme;
+    use crate::l10n::fl;
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::default();
+    config.gui.output_dir = Some(dir.path().join("out"));
+    config.ffmpeg.choice = FfmpegChoice::System;
+    let arts: Vec<PathBuf> = (0..24)
+        .map(|n| {
+            let art = dir.path().join(format!("sticker {n:02}.png"));
+            square(&art, [10 * n as u8, 160, 200 - 8 * n as u8, 255]);
+            art
+        })
+        .collect();
+    let Some(clip) = video(dir.path(), "640x360") else { return };
+    let shot =
+        |harness: &mut Harness<App>, save: &mut dyn FnMut(&mut Harness<App>, &str), name: &str| {
+            // the pointer away from what it would hover
+            harness.event(egui::Event::PointerGone);
+            for item in &mut harness.state_mut().items {
+                item.view.playing = false;
+            }
+            harness.run_steps(3);
+            save(harness, name);
+        };
+    let sizes =
+        [("wide", egui::vec2(1280.0, 820.0)), ("small", egui::vec2(crate::MIN_WIDTH, 560.0))];
+    for (size_name, size) in sizes {
+        for theme in [Theme::Dark, Theme::Light] {
+            let theme_name = if theme == Theme::Dark { "dark" } else { "light" };
+            let name = |scene: &str| format!("notice-{scene}-{size_name}-{theme_name}");
+            let mut harness = window(config.clone(), size);
+            set_theme(&harness.ctx, theme);
+            // a short list, one of it removed
+            harness.state_mut().add(arts[..3].to_vec());
+            finish(&mut harness);
+            let first = harness.state().items[0].id;
+            harness.state_mut().remove(first);
+            shot(&mut harness, save, &name("one-short"));
+            // two at once, and more than are shown
+            harness.state_mut().say(Message::info(fl!("files-gone", count = 2)));
+            shot(&mut harness, save, &name("two"));
+            let settings = dir.path().join("config.toml");
+            harness.state_mut().say(Message::info(fl!("settings-read")).file(settings));
+            let session = dir.path().join("session.json.unreadable");
+            let unreadable = Message::info(fl!("files-unreadable", count = 3)).file(session);
+            let show = [crate::banner::Action::ShowInFolder];
+            harness.state_mut().say(unreadable.actions(&show));
+            shot(&mut harness, save, &name("many"));
+            // a list longer than the window, one removed
+            harness.state_mut().banner = Default::default();
+            harness.state_mut().add(arts[3..].to_vec());
+            finish(&mut harness);
+            let some = harness.state().items[5].id;
+            harness.state_mut().remove(some);
+            shot(&mut harness, save, &name("one-full"));
+            // beside what stays until it is dealt with: no ffmpeg
+            let mut config = config.clone();
+            config.ffmpeg.path = Some(dir.path().join("no-ffmpeg-here"));
+            let mut harness = window(config, size);
+            set_theme(&harness.ctx, theme);
+            harness.state_mut().add(vec![arts[0].clone(), arts[1].clone(), clip.clone()]);
+            finish(&mut harness);
+            let first = harness.state().items[0].id;
+            harness.state_mut().remove(first);
+            shot(&mut harness, save, &name("banner"));
+        }
+    }
+}
+
 /// The timeline of a video whose used part runs past Telegram's 3
 /// seconds, and of one within them, in each of Plasma's accents and two of
 /// one's own, a light and a dark one, in both themes, to
@@ -735,7 +824,8 @@ fn edges(save: &mut impl FnMut(&mut Harness<App>, &str)) {
 /// The banner of messages over the bottom of the window: a settings file
 /// of an older version that can't be read, its details folded and open,
 /// in the light theme, the dark one and the narrowest window; a line of
-/// information; three messages; and one said three times.
+/// information, which passes in the corner over the list; three messages;
+/// and one said three times.
 fn banners(
     harness: &mut Harness<App>,
     save: &mut impl FnMut(&mut Harness<App>, &str),
