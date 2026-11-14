@@ -67,6 +67,17 @@ fn exit_status_help() -> String {
     sections(&[("Exit status", EXIT_STATUS)])
 }
 
+/// What `--version` says, `-V` saying the version alone: how this build
+/// was made, with which ffmpeg and whether it has the window.
+fn long_version() -> &'static str {
+    static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TEXT.get_or_init(|| {
+        let ffmpeg = if cfg!(feature = "linked") { "ffmpeg built in" } else { "system ffmpeg" };
+        let window = if cfg!(feature = "gui") { "with the window" } else { "no window" };
+        format!("{} ({ffmpeg}; {window})", env!("CARGO_PKG_VERSION"))
+    })
+}
+
 const TGS: &str = "Animated stickers (TGS)";
 const ASEPRITE: &str = "Aseprite files";
 
@@ -76,8 +87,8 @@ const ASEPRITE: &str = "Aseprite files";
 /// Video stickers can run past Telegram's 3 seconds by spoofing the
 /// duration they say they last.
 #[derive(Debug, Parser)]
-#[command(version, max_term_width = 100, styles = crate::ui::help_styles(),
-          after_help = top_help())]
+#[command(version, long_version = long_version(), max_term_width = 100,
+          styles = crate::ui::help_styles(), after_help = top_help())]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -814,6 +825,21 @@ mod tests {
     #[test]
     fn cli_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    /// `-V` is the version alone, and `--version` how it was built.
+    #[test]
+    fn says_how_it_was_built() {
+        let version = |flag: &str| {
+            let err = Cli::try_parse_from(["tgradish", flag]).unwrap_err();
+            assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
+            err.to_string()
+        };
+        assert_eq!(version("-V").trim_end(), format!("tgradish {}", env!("CARGO_PKG_VERSION")));
+        let long = version("--version");
+        let window = if cfg!(feature = "gui") { "with the window" } else { "no window" };
+        assert!(long.trim_end().ends_with(&format!("; {window})")), "{long}");
+        assert!(long.contains("ffmpeg built in") == cfg!(feature = "linked"), "{long}");
     }
 
     /// Every default is said once, at the end of its option's help, and
