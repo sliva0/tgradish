@@ -368,7 +368,19 @@ fn bar(
     let (from, to) = ends(*start, *used);
     let painter = ui.painter_at(rect);
     let visuals = ui.visuals();
-    painter.rect_filled(track, 3.0, theme::tint(theme::mark(visuals), 0.5));
+    painter.rect_filled(track, 3.0, theme::span(visuals));
+    // Telegram plays 3 seconds; longer stickers are spoofed, sped up or cut:
+    // where they end, marked from the start of the used part while it is
+    // on the bar, and the used part past it hatched, in stripes that stay
+    // where they are as its ends move
+    let over = to - from > limit + 1e-3;
+    let limit_x = (from + limit < length).then(|| x_of(from + limit));
+    if let Some(x) = limit_x
+        && over
+    {
+        let past = Rect::from_min_max(pos2(x, track.top()), pos2(x_of(to), track.bottom()));
+        widgets::hatch(&painter, past, track.left(), theme::past_limit(visuals));
+    }
     // the unused parts, dimmed
     painter.rect_filled(
         Rect::from_min_max(track.min, pos2(x_of(from), track.max.y)),
@@ -390,20 +402,30 @@ fn bar(
             painter.line_segment([pos2(x, track.top()), pos2(x, track.bottom())], gap);
         }
     }
-    // Telegram plays 3 seconds; longer stickers are spoofed, sped up or cut
-    if to - from > limit + 1e-3 {
-        let x = x_of(from + limit);
-        painter.line_segment(
-            [pos2(x, track.top()), pos2(x, track.bottom())],
-            Stroke::new(1.5, theme::NEUTRAL),
-        );
-        painter.text(
-            pos2(x + 3.0, rect.top()),
-            egui::Align2::LEFT_TOP,
-            format!("{} s", tgradish_core::telegram::MAX_SECONDS),
-            egui::FontId::proportional(10.5),
-            theme::warn(ui.visuals()),
-        );
+    // the limit: a tick that shows on the accent of any hue, and its
+    // label over the bar, a warning only while the used part runs past it
+    if let Some(x) = limit_x {
+        let ends = (track.top() - 2.0, track.bottom() + 2.0);
+        let (left, right) = widgets::tick(&painter, visuals, x, ends);
+        let colour = if over { theme::warn(visuals) } else { visuals.weak_text_color() };
+        let text = format!("{} s", tgradish_core::telegram::MAX_SECONDS);
+        let galley = painter.layout_no_wrap(text, egui::FontId::proportional(10.5), colour);
+        // its baseline a point over the track, after the tick, or before it
+        // where there is no room after
+        let baseline = galley
+            .rows
+            .first()
+            .and_then(|row| row.row.glyphs.first().map(|glyph| row.pos.y + glyph.pos.y));
+        let y = track.top() - 1.0 - baseline.unwrap_or(galley.size().y);
+        let gap = 2.0;
+        let x = if right + gap + galley.size().x <= rect.right() {
+            right + gap
+        } else {
+            left - gap - galley.size().x
+        };
+        // over the bar's top, which the label's tallest glyphs reach past
+        let above = Rect::from_min_max(pos2(rect.left(), rect.top() - 3.0), rect.max);
+        ui.painter().with_clip_rect(above).galley(pos2(x, y), galley, colour);
     }
     // brackets at both ends of the used part
     let marks = ui.visuals().strong_text_color();
@@ -461,7 +483,7 @@ pub(crate) fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &m
         let x = track.left() + (*time / length) as f32 * track.width();
         let played = Rect::from_min_max(track.min, pos2(x, track.max.y));
         // clipped rather than shrunk, so the start of the bar keeps its shape
-        ui.painter_at(played).rect_filled(track, 3.0, theme::tint(theme::mark(visuals), 0.5));
+        ui.painter_at(played).rect_filled(track, 3.0, theme::span(visuals));
         painter.circle_filled(pos2(x, track.center().y), 6.0, visuals.strong_text_color());
         ui.label(text);
     });
@@ -554,10 +576,10 @@ pub(crate) fn frame_picker(
                 painter.line_segment([pos2(x, track.top()), pos2(x, track.bottom())], gap);
             }
         }
-        // the frame a click picks
+        // the frame a click picks, outlined so it shows on the frame lit,
+        // which is the accent at its strongest, too
         if let Some(hovered) = hovered {
-            let outline = Stroke::new(1.0, visuals.strong_text_color());
-            painter.rect_stroke(span(hovered), 2.0, outline, egui::StrokeKind::Inside);
+            widgets::cased_outline(&painter, visuals, span(hovered), 2.0);
         }
     });
     if alone {

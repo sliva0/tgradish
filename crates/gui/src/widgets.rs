@@ -1370,6 +1370,78 @@ pub(crate) fn checkerboard_from(
     }
 }
 
+/// A tick across a bar at `x`, from `top` to `bottom`, that shows on
+/// whatever is under it, the accent of any hue among it: a core two
+/// points wide, cased a point wide all round, as [`theme::over_fill`]
+/// colours them, on whole screen pixels so it stays sharp. Gives the
+/// tick's outer edges, left and right.
+pub(crate) fn tick(
+    painter: &egui::Painter,
+    visuals: &egui::Visuals,
+    x: f32,
+    (top, bottom): (f32, f32),
+) -> (f32, f32) {
+    let cased = theme::over_fill(visuals);
+    let ppp = painter.pixels_per_point();
+    let pixels = |points: f32| (points * ppp).round().max(1.0);
+    let (core, casing) = (pixels(2.0), pixels(1.0));
+    // the core's left edge on a whole pixel, as near the middle as it goes
+    let left = (x * ppp - core / 2.0).round();
+    let rect = |left: f32, right: f32, grow: f32| {
+        egui::Rect::from_min_max(
+            egui::pos2(left / ppp, ((top * ppp).round() - grow) / ppp),
+            egui::pos2(right / ppp, ((bottom * ppp).round() + grow) / ppp),
+        )
+    };
+    let outer = rect(left - casing, left + core + casing, casing);
+    painter.rect_filled(outer, 0.0, cased.casing);
+    painter.rect_filled(rect(left, left + core, 0.0), 0.0, cased.core);
+    (outer.left(), outer.right())
+}
+
+/// An outline of `rect` that shows on whatever is in it and around it, the
+/// accent of any hue among it: a line of [`theme::over_fill`]'s core,
+/// cased inside.
+pub(crate) fn cased_outline(
+    painter: &egui::Painter,
+    visuals: &egui::Visuals,
+    rect: egui::Rect,
+    radius: f32,
+) {
+    let cased = theme::over_fill(visuals);
+    let line = |colour| egui::Stroke::new(1.0, colour);
+    painter.rect_stroke(rect, radius, line(cased.core), egui::StrokeKind::Inside);
+    let inner = rect.shrink(1.0);
+    if inner.is_positive() {
+        let radius = (radius - 1.0).max(0.0);
+        painter.rect_stroke(inner, radius, line(cased.casing), egui::StrokeKind::Inside);
+    }
+}
+
+/// Hatches `rect` with stripes of `colour` leaning right, as wide as the
+/// gaps between them, counted from `origin`, so that they stay where they
+/// are as `rect`'s edges move over them.
+pub(crate) fn hatch(painter: &egui::Painter, rect: egui::Rect, origin: f32, colour: Color32) {
+    /// How far apart the stripes are, along the bar.
+    const PERIOD: f32 = 6.0;
+    let clip = painter.clip_rect().intersect(rect);
+    if !clip.is_positive() {
+        return;
+    }
+    let painter = painter.with_clip_rect(clip);
+    // at 45°, half of each period across the stripes
+    let stroke = egui::Stroke::new(PERIOD / 2.0 / std::f32::consts::SQRT_2, colour);
+    let rise = rect.height();
+    let first = ((clip.left() - rise - origin) / PERIOD).floor() as i64;
+    let last = ((clip.right() - origin) / PERIOD).ceil() as i64;
+    for stripe in first..=last {
+        let x = origin + stripe as f32 * PERIOD;
+        let from = egui::pos2(x, rect.bottom() + 1.0);
+        let to = egui::pos2(x + rise + 2.0, rect.top() - 1.0);
+        painter.line_segment([from, to], stroke);
+    }
+}
+
 /// Gives a test's bare `harness` the window's fonts. egui's own are left
 /// out of the build, and text without glyphs has no place for a cursor but
 /// its start, so what is typed would go in backwards.

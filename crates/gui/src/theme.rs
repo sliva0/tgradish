@@ -347,6 +347,35 @@ pub(crate) fn on_outline(visuals: &egui::Visuals) -> Stroke {
     Stroke::new(1.0, towards(half, scheme.text, &[scheme.window, scheme.window_alternate], SEEN))
 }
 
+/// What a bar lays over the part of it that is used, as the timeline lays
+/// it over its track: half of [`mark`], over the window.
+pub(crate) fn span(visuals: &egui::Visuals) -> Color32 {
+    tint(mark(visuals), 0.5)
+}
+
+/// The colours of a mark drawn over what the accent fills, as a tick
+/// across a bar: its `core` in the text colour, `cased` in the colour
+/// furthest from it, the view's, on either side. Whatever the accent, one
+/// of them stands out of it, so the mark never rests on its hue.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Cased {
+    pub(crate) core: Color32,
+    pub(crate) casing: Color32,
+}
+
+/// The colours of a mark over the accent: see [`Cased`].
+pub(crate) fn over_fill(visuals: &egui::Visuals) -> Cased {
+    let scheme = scheme(visuals);
+    Cased { core: scheme.text, casing: scheme.view }
+}
+
+/// What a bar's used part is hatched with past a limit, over [`span`]:
+/// the view's colour, which the bar's unused part is filled with, so it
+/// reads as used only in part, whatever the accent's hue.
+pub(crate) fn past_limit(visuals: &egui::Visuals) -> Color32 {
+    scheme(visuals).view
+}
+
 /// The background of stages pictures are shown on.
 pub(crate) fn stage(dark: bool) -> Color32 {
     if dark { DARK.header } else { LIGHT.header }
@@ -592,10 +621,9 @@ mod tests {
         assert!((lightness(Color32::from_gray(119)) - 50.0).abs() < 0.5);
     }
 
-    #[test]
-    fn keeps_any_accent_readable_seen_and_apart() {
-        // Plasma's, and those no scheme suits: as light or as dark as the
-        // window, grey, and a yellow that is light at full strength
+    /// Plasma's accents, and those no scheme suits: as light or as dark as
+    /// the window, grey, and a yellow that is light at full strength.
+    fn every_accent() -> impl Iterator<Item = Color32> {
         let hostile = [
             Color32::WHITE,
             Color32::BLACK,
@@ -604,8 +632,12 @@ mod tests {
             LIGHT.window,
             DARK.window,
         ];
-        let accents = ACCENTS.iter().map(|(_, colour)| *colour).chain(hostile);
-        for given in accents {
+        ACCENTS.iter().map(|(_, colour)| *colour).chain(hostile)
+    }
+
+    #[test]
+    fn keeps_any_accent_readable_seen_and_apart() {
+        for given in every_accent() {
             for (dark, scheme) in [(false, &LIGHT), (true, &DARK)] {
                 let visuals = visuals(dark, given);
                 assert_eq!(accent(&visuals), given);
@@ -668,6 +700,45 @@ mod tests {
                 reads(accent_text(&visuals), scheme.window, "accent text");
                 // outlines and the keyboard's focus, seen on the window
                 seen(mark(&visuals), "outline");
+            }
+        }
+    }
+
+    #[test]
+    fn shows_marks_over_any_accent() {
+        for given in every_accent() {
+            for (dark, scheme) in [(false, &LIGHT), (true, &DARK)] {
+                let visuals = visuals(dark, given);
+                let seen = |a: Color32, b: Color32, what: &str| {
+                    let ratio = contrast(a, b);
+                    assert!(ratio >= SEEN, "{what} with {given:?}, dark {dark}: {ratio}");
+                };
+                // the timeline's used part, over the window, and its
+                // unused part, the track
+                let used = over(scheme.window, span(&visuals));
+                let track = visuals.extreme_bg_color;
+                let Cased { core, casing } = over_fill(&visuals);
+                // a tick's core, as the playhead and the ends of the used
+                // part, seen on either, and on the stripes past the limit
+                seen(core, used, "a tick on the used part");
+                seen(core, track, "a tick on the track");
+                seen(core, past_limit(&visuals), "a tick on the part past the limit");
+                // the part past the limit is half striped in the track's
+                // colour: the stripes twice the step that sets a chosen
+                // segment apart, so even blurred to their average, as fine
+                // stripes are seen from afar, it stands as far apart from
+                // the part within it
+                let apart = (lightness(past_limit(&visuals)) - lightness(used)).abs();
+                assert!(apart >= 2.0 * CHOSEN_STEP, "stripes with {given:?}, dark {dark}: {apart}");
+                // an outline over the accent at its strongest, as the frame
+                // a click picks over the frame picked: its casing seen on
+                // it, its core on the track
+                seen(casing, mark(&visuals), "the casing of a mark on the accent");
+                // the limit's label, beside the bar, on the window
+                for label in [scheme.inactive, scheme.neutral] {
+                    let ratio = contrast(label, scheme.window);
+                    assert!(ratio >= READABLE, "the limit's label, dark {dark}: {ratio}");
+                }
             }
         }
     }

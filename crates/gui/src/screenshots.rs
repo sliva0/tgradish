@@ -70,6 +70,49 @@ fn state_screenshots() {
     });
 }
 
+/// The timeline of a video whose used part runs past Telegram's 3
+/// seconds, and of one within them, in each of Plasma's accents and two of
+/// one's own, a light and a dark one, in both themes, to
+/// `$TGRADISH_SCREENSHOTS` as [`screenshots`] makes them. Needs ffmpeg.
+#[test]
+#[ignore]
+fn limit_screenshots() {
+    use crate::config::{Accent, Theme};
+    let out =
+        PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
+    crate::l10n::choose(None);
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::default();
+    config.gui.output_dir = Some(dir.path().join("out"));
+    config.ffmpeg.choice = FfmpegChoice::System;
+    let mut harness = window(config, egui::vec2(1280.0, 820.0));
+    let Some(clip) = crate::testing::video_of(dir.path(), "640x360", 6) else { return };
+    harness.state_mut().add(vec![clip]);
+    finish(&mut harness);
+    let own = |r, g, b| Accent::Own(egui::Color32::from_rgb(r, g, b));
+    let accents = crate::theme::ACCENTS
+        .iter()
+        .map(|(name, _)| (*name, Accent::Named(name)))
+        .chain([("own-light", own(246, 240, 170)), ("own-dark", own(28, 36, 64))]);
+    for (name, accent) in accents {
+        harness.state_mut().config.gui.accent = accent;
+        // from half a second to five, and to three, the playhead in it
+        for (part, used) in [("over", 4.5), ("within", 2.5)] {
+            let item = &mut harness.state_mut().items[0];
+            (item.choices.start, item.choices.length) = (Some(0.5), Some(used));
+            (item.view.time, item.view.playing, item.view.show) = (1.5, false, Show::Input);
+            for theme in [Theme::Dark, Theme::Light] {
+                set_theme(&harness.ctx, theme);
+                harness.event(egui::Event::PointerGone);
+                harness.run_steps(3);
+                let theme = if theme == Theme::Dark { "dark" } else { "light" };
+                let image = harness.render().expect("rendering needs a GPU");
+                image.save(out.join(format!("limit-{part}-{name}-{theme}.png"))).unwrap();
+            }
+        }
+    }
+}
+
 /// A window drawn as the screenshots draw it, of `config`, `size` large.
 fn window(config: Config, size: egui::Vec2) -> Harness<'static, App> {
     // filtering as the window does it, so pixel art stays sharp
