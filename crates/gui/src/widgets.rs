@@ -376,6 +376,15 @@ fn broken_as(text: &str, like: &str, breaks: &[usize]) -> String {
     broken
 }
 
+/// What keeps a file from being converted, said under the setting it is
+/// of, in the warning colour, with a button that puts it right, named
+/// `fix` and explained by `hint`: true once clicked.
+pub(crate) fn attention(ui: &mut egui::Ui, text: &str, fix: &str, hint: &str) -> bool {
+    let warning = RichText::new(format!("⚠ {text}")).color(theme::warn(ui.visuals()));
+    ui.add(egui::Label::new(warning).wrap());
+    ui.button(fix).on_hover_text(hint).clicked()
+}
+
 /// The label column of a grid, explained on hover.
 pub(crate) fn label(ui: &mut egui::Ui, text: &str, hint: &str) {
     let label = ui.label(text);

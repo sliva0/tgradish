@@ -119,7 +119,7 @@ pub enum Error {
         first_height: u32,
     },
     /// A sprite sheet that doesn't divide into the [`Sheet`]'s cells.
-    #[error("{width}x{height} doesn't split into {columns} columns and {rows} rows")]
+    #[error("{width}x{height} doesn't split into {columns}x{rows} equal cells")]
     SheetGrid {
         /// The sheet's width.
         width: u32,

@@ -168,7 +168,9 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     // an exact scale holds the crop to the size it takes: this is where a
     // crop is kept to it, as the scale or the crop change, and the small
     // picture of the result counts on that from the next frame
-    if let (Some(exact), Some(size)) = (exact, size) {
+    // not a crop outside the picture, which is left to be put right
+    let outside = |size: (u32, u32)| item.choices.crop.is_some_and(|c| !c.fits(size.0, size.1));
+    if let (Some(exact), Some(size)) = (exact, size.filter(|&size| !outside(size))) {
         let full = Crop::whole(size);
         let ratio = ratio(item.view.aspect, size);
         let start = (Keep::Start, Keep::Start);
@@ -320,69 +322,91 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
         return;
     };
     let full = Crop::whole((width, height));
-    // one of another picture, as before the file changed, isn't kept
-    let crop = item.choices.crop.filter(|crop| crop.fits(width, height)).unwrap_or(full);
+    // one of another picture, as before the file changed, is shown as it
+    // is, greyed out, said to be outside the picture, until put right
+    let fits = item.choices.crop.is_none_or(|crop| crop.fits(width, height));
+    let crop = item.choices.crop.unwrap_or(full);
     let mut edited = None;
+    let (across, down) = (i64::from(width), i64::from(height));
+    let (x, y) = (i64::from(crop.x), i64::from(crop.y));
+    let (right, bottom) = (across - x - i64::from(crop.width), down - y - i64::from(crop.height));
     // as wide for any number the picture takes, so they don't move as
-    // the crop changes
-    let digits = DIGITS.max(width.max(height).to_string().len());
+    // the crop changes, and for those of a crop outside it
+    let digits = [across, down, x, y, right, bottom]
+        .iter()
+        .map(|value| value.to_string().len())
+        .fold(DIGITS, usize::max);
     ui.horizontal_top(|ui| {
-        let field = |ui: &mut egui::Ui, value: u32, most: u32, hint: &str| {
+        let field = |ui: &mut egui::Ui, value: i64, most: i64, hint: &str| {
             let mut value = value;
-            let field = egui::DragValue::new(&mut value).range(0..=most).suffix(" px");
-            ui.add(field).on_hover_text(hint).changed().then_some(value)
+            let field = egui::DragValue::new(&mut value)
+                .range(0..=most.max(0))
+                .suffix(" px")
+                .clamp_existing_to_range(fits);
+            ui.add(field).on_hover_text(hint).changed().then(|| value.max(0) as u32)
         };
-        let (right, bottom) = (width - crop.x - crop.width, height - crop.y - crop.height);
-        widgets::steady_numbers(ui, digits, " px", |ui| {
-            let wide = ui.spacing().interact_size.x;
-            egui::Grid::new(("crop", item.id)).spacing([4.0, 2.0]).show(ui, |ui| {
-                ui.label("");
-                ui.vertical_centered(|ui| {
-                    let most = height - bottom - 1;
-                    let hint = fl!("margin-top");
-                    edited = edited.or(field(ui, crop.y, most, &hint).map(|v| (Side::Top, v)));
+        ui.add_enabled_ui(fits, |ui| {
+            widgets::steady_numbers(ui, digits, " px", |ui| {
+                let wide = ui.spacing().interact_size.x;
+                egui::Grid::new(("crop", item.id)).spacing([4.0, 2.0]).show(ui, |ui| {
+                    ui.label("");
+                    ui.vertical_centered(|ui| {
+                        let most = down - bottom - 1;
+                        let hint = fl!("margin-top");
+                        edited = edited.or(field(ui, y, most, &hint).map(|v| (Side::Top, v)));
+                    });
+                    ui.end_row();
+                    // beside the picture, halfway down it
+                    let beside = egui::Layout::left_to_right(egui::Align::Center);
+                    ui.allocate_ui_with_layout(egui::vec2(wide, SKETCH), beside, |ui| {
+                        let most = across - right - 1;
+                        let hint = fl!("margin-left");
+                        edited = edited.or(field(ui, x, most, &hint).map(|v| (Side::Left, v)));
+                    });
+                    sketch(ui, (width, height), crop, wide);
+                    ui.allocate_ui_with_layout(egui::vec2(wide, SKETCH), beside, |ui| {
+                        let most = across - x - 1;
+                        let hint = fl!("margin-right");
+                        edited = edited.or(field(ui, right, most, &hint).map(|v| (Side::Right, v)));
+                    });
+                    ui.end_row();
+                    ui.label("");
+                    ui.vertical_centered(|ui| {
+                        let most = down - y - 1;
+                        let hint = fl!("margin-bottom");
+                        edited =
+                            edited.or(field(ui, bottom, most, &hint).map(|v| (Side::Bottom, v)));
+                    });
+                    ui.end_row();
                 });
-                ui.end_row();
-                // beside the picture, halfway down it
-                let beside = egui::Layout::left_to_right(egui::Align::Center);
-                ui.allocate_ui_with_layout(egui::vec2(wide, SKETCH), beside, |ui| {
-                    let most = width - right - 1;
-                    let hint = fl!("margin-left");
-                    edited = edited.or(field(ui, crop.x, most, &hint).map(|v| (Side::Left, v)));
-                });
-                sketch(ui, (width, height), crop, wide);
-                ui.allocate_ui_with_layout(egui::vec2(wide, SKETCH), beside, |ui| {
-                    let most = width - crop.x - 1;
-                    let hint = fl!("margin-right");
-                    edited = edited.or(field(ui, right, most, &hint).map(|v| (Side::Right, v)));
-                });
-                ui.end_row();
-                ui.label("");
-                ui.vertical_centered(|ui| {
-                    let most = height - crop.y - 1;
-                    let hint = fl!("margin-bottom");
-                    edited = edited.or(field(ui, bottom, most, &hint).map(|v| (Side::Bottom, v)));
-                });
-                ui.end_row();
             });
         });
         ui.add_space(14.0);
         ui.vertical(|ui| {
-            egui::Grid::new(("crop size", item.id)).spacing([6.0, 4.0]).show(ui, |ui| {
-                ui.label(fl!("width"));
-                let mut across = crop.width;
-                let field = egui::DragValue::new(&mut across).range(1..=width).suffix(" px");
-                if widgets::steady_numbers(ui, digits, " px", |ui| ui.add(field)).changed() {
-                    edited = Some((Side::Width, across));
-                }
-                ui.end_row();
-                ui.label(fl!("height"));
-                let mut down = crop.height;
-                let field = egui::DragValue::new(&mut down).range(1..=height).suffix(" px");
-                if widgets::steady_numbers(ui, digits, " px", |ui| ui.add(field)).changed() {
-                    edited = Some((Side::Height, down));
-                }
-                ui.end_row();
+            ui.add_enabled_ui(fits, |ui| {
+                let grid = egui::Grid::new(("crop size", item.id)).spacing([6.0, 4.0]);
+                grid.show(ui, |ui| {
+                    let side = |ui: &mut egui::Ui, value: u32, most: u32| {
+                        let mut value = value;
+                        let field = egui::DragValue::new(&mut value)
+                            .range(1..=most)
+                            .suffix(" px")
+                            .clamp_existing_to_range(fits);
+                        let changed =
+                            widgets::steady_numbers(ui, digits, " px", |ui| ui.add(field));
+                        changed.changed().then_some(value)
+                    };
+                    ui.label(fl!("width"));
+                    if let Some(value) = side(ui, crop.width, width) {
+                        edited = Some((Side::Width, value));
+                    }
+                    ui.end_row();
+                    ui.label(fl!("height"));
+                    if let Some(value) = side(ui, crop.height, height) {
+                        edited = Some((Side::Height, value));
+                    }
+                    ui.end_row();
+                });
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
@@ -404,6 +428,21 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
             });
         });
     });
+    if !fits {
+        let text = fl!(
+            "crop-outside",
+            width = crop.width,
+            height = crop.height,
+            left = crop.x,
+            top = crop.y,
+            across = width,
+            down = height
+        );
+        if widgets::attention(ui, &text, &fl!("use-whole"), &fl!("use-whole", "hint")) {
+            item.choices.crop = None;
+        }
+        return;
+    }
     let Some((side, value)) = edited else { return };
     let ratio = ratio(item.view.aspect, (width, height));
     let mut crop = edit_crop(crop, side, value, ratio, (width, height));
@@ -688,6 +727,10 @@ pub(crate) fn whole_picture(ui: &mut egui::Ui, item: &mut Item, exact: bool) -> 
 /// Gives the item's crop the shape its aspect keeps.
 fn keep_aspect(item: &mut Item, size: Option<(u32, u32)>, exact: Option<Exact>) {
     let Some(size) = size else { return };
+    // a crop outside the picture is left to be put right where it is said
+    if item.choices.crop.is_some_and(|crop| !crop.fits(size.0, size.1)) {
+        return;
+    }
     let Some(r) = ratio(item.view.aspect, size) else { return };
     let full = Crop::whole(size);
     let mut cut = to_ratio(item.choices.crop.unwrap_or(full), r, size);

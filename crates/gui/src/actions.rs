@@ -105,7 +105,18 @@ impl App {
                     } else {
                         fl!("convert-again", "changed")
                     };
-                    if widgets::primary(ui, true, button).on_hover_text(hint).clicked() {
+                    // what keeps it from being converted, said on it and
+                    // beside it, under what it is of too
+                    let blocked = item
+                        .blockers
+                        .first()
+                        .map(|blocker| fl!("blocked", reason = blocker.reason()));
+                    let response = widgets::primary(ui, blocked.is_none(), button);
+                    let response = match &blocked {
+                        Some(blocked) => response.on_disabled_hover_text(blocked),
+                        None => response.on_hover_text(hint),
+                    };
+                    if response.clicked() {
                         convert = true;
                     }
                     if presets_kept {
@@ -126,7 +137,13 @@ impl App {
                             );
                         }
                     }
-                    if let Some(failed) = &item.failed {
+                    if let Some(blocked) = blocked {
+                        let text =
+                            RichText::new(format!("⚠ {blocked}")).color(theme::warn(ui.visuals()));
+                        let room = ui.available_width() - keep;
+                        within(ui, room, |ui| ui.add(egui::Label::new(text).truncate()))
+                            .on_hover_text(blocked);
+                    } else if let Some(failed) = &item.failed {
                         match &failed.job.status {
                             Status::Failed(message) => {
                                 // cut short, said in full on hover and

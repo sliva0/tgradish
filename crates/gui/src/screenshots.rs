@@ -145,6 +145,37 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().items[0].format = Format::Webm;
     finish(&mut harness);
     harness.set_size(egui::vec2(1280.0, 820.0));
+    harness.ctx.memory_mut(|memory| memory.reset_areas());
+    // what keeps files from being converted, said before converting: a
+    // crop kept from a larger file
+    harness.state_mut().items[0].choices.crop =
+        Some(Crop { x: 700, y: 400, width: 40, height: 40 });
+    shot(&mut harness, save, "state-blocked-crop");
+    harness.state_mut().items[0].choices.crop = None;
+    // a sprite sheet whose cells don't divide it
+    let art = dir.path().join("sheet.png");
+    square(&art, [220, 30, 60, 255]);
+    harness.state_mut().add(vec![art]);
+    let item = harness.state_mut().items.last_mut().unwrap();
+    (item.format, item.format_guessed) = (Format::Tgs, false);
+    item.choices.tgs.sheet = "3x1".parse().ok();
+    finish(&mut harness);
+    shot(&mut harness, save, "state-blocked-sheet");
+    // a tag and a layer an Aseprite file no longer has
+    let walker = tgradish_corpus::sprite("walker_2x");
+    let bytes = tgradish_corpus::encode::aseprite_with(&walker, &[("idle", 0, 1)], &[]);
+    let ase = dir.path().join("walker.ase");
+    std::fs::write(&ase, bytes).unwrap();
+    harness.state_mut().add(vec![ase]);
+    let item = harness.state_mut().items.last_mut().unwrap();
+    item.choices.tag = Some("gone".into());
+    item.choices.hide_layers = Some(vec!["sketch".into()]);
+    item.choices.target = tgradish_core::telegram::Target::Emoji;
+    finish(&mut harness);
+    shot(&mut harness, save, "state-blocked-tag");
+    harness.set_size(egui::vec2(1280.0, 1300.0));
+    shot(&mut harness, save, "state-blocked-tag-tall");
+    harness.set_size(egui::vec2(1280.0, 820.0));
 }
 
 /// Takes the window through each state worth a picture, handing each to

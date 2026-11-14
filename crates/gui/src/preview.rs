@@ -117,6 +117,7 @@ impl App {
                                 widgets::settings_spacing(ui);
                                 ui.add_space(6.0);
                                 file_settings::make(ui, item, &context);
+                                file_settings::blocked(ui, item);
                                 // what converting did, where the eye is once
                                 // Convert is pressed, before the plan, which
                                 // matters most before there is a result
@@ -605,6 +606,10 @@ fn tgs_bounds(
 /// "Result": its size, which `.tgs` results, vectors, have none of in
 /// pixels. `None` while its size isn't known.
 fn inset_label(item: &Item, size: (u32, u32), webm: &Options) -> Option<Option<String>> {
+    // nothing to show of a crop outside the picture
+    if item.choices.crop.is_some_and(|crop| !crop.fits(size.0, size.1)) {
+        return None;
+    }
     match item.format {
         Format::Webm | Format::Webp => {
             let full = Crop::whole(size);

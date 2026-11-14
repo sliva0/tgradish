@@ -18,7 +18,7 @@ use tgradish_core::presets::{BUILTIN, Format, Presets};
 use tgradish_core::telegram::Target;
 
 use crate::config::Config;
-use crate::item::{Item, Kind};
+use crate::item::{Blocker, Item, Kind};
 use crate::l10n::fl;
 use crate::preset_dialogs::{self, Ask, is_users};
 use crate::theme;
@@ -35,7 +35,7 @@ pub(crate) use picture::{
     exact_of, keep_square, keeps_crop_shape, ratio, resize_of, square_choices, webm_sizes,
     whole_picture,
 };
-pub(crate) use plan::plan;
+pub(crate) use plan::{blocked, plan};
 pub(crate) use webm::{fit_of, follow_fit};
 
 /// What the settings depend on besides the item.
@@ -133,6 +133,12 @@ pub(crate) fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         && item.art.ready().is_some_and(|art| !art.clip.looks_like_pixel_art());
     if not_art {
         ui.colored_label(theme::warn(ui.visuals()), format!("⚠ {}", fl!("not-pixel-art")));
+    }
+    if item.blockers.contains(&Blocker::NeedsFfmpeg) {
+        let fix = (fl!("choose-ffmpeg"), fl!("choose-ffmpeg", "hint"));
+        if widgets::attention(ui, &fl!("needs-ffmpeg"), &fix.0, &fix.1) {
+            crate::banner::ask(ui.ctx(), crate::banner::Action::ChooseFfmpeg);
+        }
     }
 
     // presets say how to encode videos and animations; a picture takes

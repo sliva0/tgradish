@@ -14,6 +14,7 @@ use crate::app::App;
 use crate::files::THUMB;
 use crate::item::{Conversion, Item, Kind, Recipe, Show};
 use crate::jobs::{Done, Setup, Status};
+use crate::l10n::fl;
 use crate::media::{self, Art, Clip, Load, Task, Video};
 use crate::outputs::Written;
 
@@ -62,12 +63,17 @@ impl App {
                 still.poll();
             }
             item.result_clip.poll();
+            let tgs = item.format == Format::Tgs;
+            if finished || item.facts.as_ref().is_none_or(|facts| facts.art() != tgs) {
+                item.take_facts();
+            }
             if finished {
                 settle(ctx, item);
                 if !kept {
                     release(item);
                 }
             }
+            item.find_blockers(backend.is_ok());
             if item.result_thumb.is_none()
                 && let Some(clip) = item.result_clip.ready()
             {
@@ -234,6 +240,16 @@ impl App {
         }
         while let Some(id) = self.queue.pop_front() {
             let Some(item) = self.item(id) else { continue };
+            // found, once read, to ask for what its input hasn't
+            if let Some(blocker) = item.blockers.first() {
+                let why = fl!("blocked", reason = blocker.reason());
+                let item = self.item_mut(id).expect("found above");
+                if let Some(conversion) = &mut item.job {
+                    conversion.job.status = Status::Failed(why);
+                }
+                ctx.request_repaint();
+                continue;
+            }
             let Some(Conversion { format, choices: Some(choices), .. }) = &item.job else {
                 continue;
             };
@@ -322,8 +338,9 @@ fn settled(
     settled
 }
 
-/// Makes the input thumbnail, settles the guessed format and drops a crop
-/// that doesn't fit once an input is read.
+/// Makes the input thumbnail and settles the guessed format once an input
+/// is read. A crop that doesn't fit, as kept from when the file was another,
+/// larger one, is kept, and said to keep it from being converted.
 fn settle(ctx: &egui::Context, item: &mut Item) {
     if item.format_guessed
         && let Some(art) = item.art.ready()
@@ -335,12 +352,6 @@ fn settle(ctx: &egui::Context, item: &mut Item) {
             // a photo or a drawing stays a picture
             item.format = Format::Webp;
         }
-    }
-    // kept from when the file was another, larger one: it can't be made
-    if let (Some(crop), Some((width, height))) = (item.choices.crop, item.input_size())
-        && !crop.fits(width, height)
-    {
-        item.choices.crop = None;
     }
     if item.input_thumb.is_none()
         && let Some(clip) = item.input_clip()
@@ -444,6 +455,7 @@ mod tests {
     use tgradish_core::telegram;
 
     use super::*;
+    use crate::item::Blocker;
     use crate::testing::{
         convert, corpus, finish, harness, has_ffmpeg, made_job, square, video, video_of,
         walking_video,
@@ -656,9 +668,8 @@ mod tests {
         harness.run_steps(2);
         finish(&mut harness);
         assert!(harness.state().items[0].result_is_current());
-        // a crop outside the picture fails
-        harness.state_mut().items[0].choices.crop =
-            Some(Crop { x: 10, y: 10, width: 4, height: 4 });
+        // a preset that isn't there fails
+        harness.state_mut().items[0].choices.preset = Some("no such preset".into());
         harness.run_steps(2);
         convert(&harness);
         harness.run_steps(2);
@@ -689,7 +700,7 @@ mod tests {
     }
 
     #[test]
-    fn drops_a_crop_the_input_has_no_room_for() {
+    fn keeps_a_crop_the_input_has_no_room_for_until_it_is_put_right() {
         let dir = tempfile::tempdir().unwrap();
         let art = dir.path().join("art.png");
         square(&art, [255, 0, 0, 255]);
@@ -699,19 +710,83 @@ mod tests {
         }
         let mut config = Config::default();
         config.ffmpeg.choice = FfmpegChoice::System;
+        config.gui.output_dir = Some(dir.path().join("out"));
         for (input, outside) in inputs {
             // as a session keeps it, for a file since replaced by a smaller one
-            for (crop, kept) in [(outside, None), (Crop::whole((4, 4)), Some(Crop::whole((4, 4))))]
-            {
-                let mut harness = harness(config.clone());
-                harness.state_mut().add(vec![input.clone()]);
-                harness.state_mut().items[0].choices.crop = Some(crop);
-                finish(&mut harness);
-                let item = &harness.state().items[0];
-                assert!(item.input_size().is_some(), "{input:?}");
-                assert_eq!(item.choices.crop, kept, "{input:?}");
-            }
+            let mut harness = harness(config.clone());
+            harness.state_mut().add(vec![input.clone()]);
+            harness.state_mut().items[0].choices.crop = Some(outside);
+            finish(&mut harness);
+            let item = &harness.state().items[0];
+            assert!(item.input_size().is_some(), "{input:?}");
+            assert_eq!(item.choices.crop, Some(outside), "{input:?}");
+            assert_eq!(item.blockers, [Blocker::CropOutside], "{input:?}");
+            // said before converting, which can't start
+            let reason = fl!("blocked", reason = fl!("blocked-crop"));
+            harness.get_all_by_label_contains(&reason).next().expect("said");
+            harness.get_all_by_label_contains(&fl!("row-attention")).next().expect("said");
+            convert(&harness);
+            harness.run_steps(2);
+            let item = &harness.state().items[0];
+            assert!(item.job.is_none() && harness.state().queue.is_empty(), "{input:?}");
+            // the way out, under the crop
+            harness.get_by_label(&fl!("use-whole")).click_accesskit();
+            harness.run_steps(2);
+            let item = &harness.state().items[0];
+            assert_eq!((item.choices.crop, item.blocked()), (None, false), "{input:?}");
         }
+    }
+
+    #[test]
+    fn says_what_an_aseprite_file_lacks_and_shows_what_it_has() {
+        let dir = tempfile::tempdir().unwrap();
+        let ase = corpus(dir.path(), "walker_2x.ase", "walker.ase");
+        let mut harness = harness(Config::default());
+        harness.state_mut().add(vec![ase]);
+        let choices = &mut harness.state_mut().items[0].choices;
+        choices.tag = Some("gone".into());
+        choices.hide_layers = Some(vec!["art".into(), "lost".into()]);
+        finish(&mut harness);
+        let item = &harness.state().items[0];
+        assert_eq!(
+            item.blockers,
+            [Blocker::TagMissing("gone".into()), Blocker::LayerMissing(vec!["lost".into()])]
+        );
+        // read as the file has it, its tags and layers there to pick
+        assert!(item.input_error().is_none() && item.input_clip().is_some());
+        harness.get_by_label("idle");
+        harness.get_all_by_label_contains(&fl!("blocked", "heading")).next().expect("said");
+        // the way out under the tags, after theirs
+        harness.get_all_by_label(&fl!("all-frames")).last().unwrap().click_accesskit();
+        harness.run_steps(2);
+        assert_eq!(harness.state().items[0].choices.tag, None);
+        harness.get_by_label(&fl!("layers-as-file")).click_accesskit();
+        finish(&mut harness);
+        let item = &harness.state().items[0];
+        assert_eq!((&item.choices.hide_layers, item.blocked()), (&None, false));
+    }
+
+    #[test]
+    fn offers_the_nearest_sheet_that_divides_the_picture() {
+        assert_eq!(crate::item::dividing_sheet(4, 4, 3, 1), "4x1".parse().unwrap());
+        assert_eq!(crate::item::dividing_sheet(96, 32, 5, 2), "6x2".parse().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("sheet.png");
+        square(&art, [255, 0, 0, 255]);
+        let mut harness = harness(Config::default());
+        harness.state_mut().add(vec![art]);
+        let item = &mut harness.state_mut().items[0];
+        (item.format, item.format_guessed) = (Format::Tgs, false);
+        item.choices.tgs.sheet = "3x1".parse().ok();
+        finish(&mut harness);
+        let uneven = Blocker::SheetUneven { width: 4, height: 4, columns: 3, rows: 1 };
+        assert_eq!(harness.state().items[0].blockers, [uneven]);
+        let nearest = fl!("sheet-nearest", columns = 4, rows = 1);
+        harness.get_by_label(&nearest).click_accesskit();
+        finish(&mut harness);
+        let item = &harness.state().items[0];
+        assert_eq!((item.choices.tgs.sheet, item.blocked()), ("4x1".parse().ok(), false));
+        assert_eq!(item.input_size(), Some((1, 4)));
     }
 
     #[test]

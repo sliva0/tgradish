@@ -92,7 +92,16 @@ impl App {
             Ok(Some(Picked::Folder(dir))) => self.add(vec![dir]),
             Ok(Some(Picked::Frames(files))) => self.add_frames(files),
             Ok(Some(Picked::Inspected(inspection))) => self.inspection = Some(*inspection),
-            Ok(Some(Picked::Ffmpeg(file))) => self.config.ffmpeg.path = Some(file),
+            // for Settings, which keeps it once saved; else, as a message
+            // or a file's settings asked, kept at once, and used over one
+            // given as the window was started
+            Ok(Some(Picked::Ffmpeg(file))) if self.settings_dialog.is_open() => {
+                self.config.ffmpeg.path = Some(file)
+            }
+            Ok(Some(Picked::Ffmpeg(file))) => {
+                self.ffmpeg_override = (None, None);
+                self.save_config_setting(|config| config.ffmpeg.path = Some(file.clone()));
+            }
             Ok(Some(Picked::OutputDir(dir))) => self.config.gui.output_dir = Some(dir),
             Ok(None) => {}
             Err(message) => self.say(crate::banner::Message::warning(message)),
@@ -143,8 +152,11 @@ impl App {
         ui.add_space(4.0);
         ui.separator();
 
-        let changed =
-            self.items.iter().filter(|item| !item.is_busy() && !item.result_is_current()).count();
+        // what Convert all converts, and what it leaves out
+        let convertible =
+            |item: &Item| !item.is_busy() && !item.result_is_current() && !item.blocked();
+        let changed = self.items.iter().filter(|item| convertible(item)).count();
+        let attention = self.items.iter().filter(|item| !item.is_busy() && item.blocked()).count();
         // without files there is nothing to convert or remove, and the way
         // to add them, beside the list, is the one thing to do
         if !self.items.is_empty() {
@@ -163,7 +175,7 @@ impl App {
                         let ids: Vec<u64> = self
                             .items
                             .iter()
-                            .filter(|item| !item.is_busy() && !item.result_is_current())
+                            .filter(|item| convertible(item))
                             .map(|item| item.id)
                             .collect();
                         for id in ids {
@@ -175,6 +187,11 @@ impl App {
                         for id in ids {
                             self.remove(id);
                         }
+                    }
+                    if attention > 0 {
+                        let text = format!("⚠ {}", fl!("need-attention", count = attention));
+                        ui.colored_label(theme::warn(ui.visuals()), text)
+                            .on_hover_text(fl!("row-attention", "hint"));
                     }
                 });
                 ui.add_space(4.0);
@@ -345,7 +362,7 @@ fn row(
             let font = FontId::proportional(12.0);
             ui.painter().text(result.center(), egui::Align2::CENTER_CENTER, name, font, colour);
         }
-        if stale && !item.is_busy() {
+        if stale && !item.is_busy() && !item.blocked() {
             let badge =
                 egui::Rect::from_min_size(result.right_top() - vec2(20.0, 0.0), vec2(20.0, 20.0));
             let button = egui::Button::new(RichText::new("⟳").size(13.0).color(Color32::BLACK))
@@ -421,9 +438,9 @@ fn row(
 
 /// Whether a row has a button to convert where its result would be: until
 /// there is a result, or one of an earlier run, and not while one is
-/// being made.
+/// being made, or while something keeps it from being converted.
 fn offers_convert(item: &Item) -> bool {
-    item.last_result().is_none() && !item.is_busy()
+    item.last_result().is_none() && !item.is_busy() && !item.blocked()
 }
 
 /// A thumbnail in `rect`, marked when it is out of date.
@@ -462,6 +479,13 @@ fn thumb(
 fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
     let small = |text: String| RichText::new(text).small();
     let job = item.job.as_ref().map(|conversion| &conversion.job);
+    // what keeps it from being converted, said where its settings are
+    if job.is_none() && item.blocked() {
+        let text = small(format!("⚠ {}", fl!("row-attention")));
+        ui.colored_label(theme::warn(ui.visuals()), text)
+            .on_hover_text(fl!("row-attention", "hint"));
+        return;
+    }
     match (job, item.failed.as_ref().or(item.made.as_ref())) {
         (Some(job), _) if job.is_running() => {
             ui.add_space(3.0);

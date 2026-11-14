@@ -267,6 +267,16 @@ pub(crate) struct Video {
     pub(crate) frames: Option<Arc<cuts::Frames>>,
 }
 
+/// Whether reading pixel art chooses what of the file is read, by a `tag`
+/// or layers shown or hidden, which the file may not have.
+fn chooses_art(
+    tag: &Option<String>,
+    show: &Option<Vec<String>>,
+    hide: &Option<Vec<String>>,
+) -> bool {
+    tag.is_some() || show.is_some() || hide.is_some()
+}
+
 /// Most bytes of drawn frames shown as they are, rather than read again
 /// through ffmpeg like a video.
 const DRAWN_BYTES: usize = 256 << 20;
@@ -281,8 +291,23 @@ impl Video {
         drawing: Options,
     ) -> Task<Video> {
         Task::spawn(ctx, move |cancel| {
-            let mut readable =
-                drawn::readable(&input, &drawing, cancel).map_err(|err| failure(&err))?;
+            // where the item's tag or layers aren't the file's, as after it
+            // was edited, all of it, as the file has it, so what it has
+            // shows, for the item to say what it lacks
+            let mut readable = match drawn::readable(&input, &drawing, cancel) {
+                Ok(readable) => readable,
+                Err(err)
+                    if chooses_art(&drawing.tag, &drawing.show_layers, &drawing.hide_layers) =>
+                {
+                    let plain =
+                        Options { tag: None, show_layers: None, hide_layers: None, ..drawing };
+                    match drawn::readable(&input, &plain, cancel) {
+                        Ok(readable) => readable,
+                        Err(_) => return Err(failure(&err)),
+                    }
+                }
+                Err(err) => return Err(failure(&err)),
+            };
             // pixel art drawn here, shown as it was drawn, without ffmpeg
             if let Some((animation, still)) = readable.take_drawn() {
                 let bytes = animation.frames().iter().map(|frame| frame.rgba.len()).sum::<usize>();
@@ -435,6 +460,9 @@ pub(crate) struct Art {
     /// How many frames the file has where it was asked to be read as a
     /// sprite sheet, which is one picture: read as it is instead.
     pub(crate) sheet_refused: Option<usize>,
+    /// Read with the item's tag, layers and sheet; else as the file has
+    /// it, as it lacks them, or its sheet doesn't split.
+    pub(crate) as_chosen: bool,
 }
 
 impl Art {
@@ -450,12 +478,18 @@ impl Art {
         Task::spawn(ctx, move |cancel| {
             // a sheet of a file of frames of its own, as a session may
             // keep: read as it is, and said so, rather than not at all
-            let (art, sheet_refused) =
+            let (art, sheet_refused, as_chosen) =
                 match tgs::read_art(backend.as_ref(), &input, &options, cancel) {
-                    Ok(art) => (art, None),
+                    Ok(art) => (art, None, true),
                     Err(err) => match animated(backend.as_ref(), &input, &options, cancel) {
-                        Some((art, frames)) => (art, Some(frames)),
-                        None => return Err(failure(&err)),
+                        Some((art, frames)) => (art, Some(frames), true),
+                        // a tag, layers or a sheet the file hasn't, or that
+                        // doesn't split: all of it, as the file has it, so
+                        // what it has shows, for the item to say what it lacks
+                        None => match as_it_is(backend.as_ref(), &input, &options, cancel) {
+                            Some(art) => (art, None, false),
+                            None => return Err(failure(&err)),
+                        },
                     },
                 };
             if art.frames.is_empty() {
@@ -473,7 +507,7 @@ impl Art {
             let frames = clip
                 .is_animated()
                 .then(|| Arc::new(cuts::Frames { times: clip.times.clone(), cut: Cut::Art }));
-            Ok(Art { clip, tags, layers, durations, frames, sheet_refused })
+            Ok(Art { clip, tags, layers, durations, frames, sheet_refused, as_chosen })
         })
     }
 
@@ -507,6 +541,29 @@ pub(crate) fn animated(
     let art = tgs::read_art(backend, input, &whole, cancel).ok()?;
     let frames = art.frames.len().max(art.durations.len());
     (frames > 1).then_some((art, frames))
+}
+
+/// `input` read as the file has it, without the tag, layers or sheet of
+/// `options`, where they choose any; `None` where it can't be either.
+fn as_it_is(
+    backend: Option<&Backend>,
+    input: &Input,
+    options: &tgs::Options,
+    cancel: &CancelToken,
+) -> Option<tgs::Art> {
+    let choosing = chooses_art(&options.tag, &options.show_layers, &options.hide_layers);
+    if !choosing && options.sheet.is_none() {
+        return None;
+    }
+    let plain = tgs::Options {
+        tag: None,
+        show_layers: None,
+        hide_layers: None,
+        sheet: None,
+        sheet_frames: None,
+        ..options.clone()
+    };
+    tgs::read_art(backend, input, &plain, cancel).ok()
 }
 
 /// A finished WebM sticker, decoded.

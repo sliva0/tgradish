@@ -41,6 +41,23 @@ pub(crate) enum Action {
     CopyPath,
     /// Opens the folder of the message's file, the file selected.
     ShowInFolder,
+    /// Asks for the ffmpeg program, and keeps it in the settings.
+    ChooseFfmpeg,
+}
+
+fn asked_id() -> egui::Id {
+    egui::Id::new("asked action")
+}
+
+/// Asks the window to do `action`, as a message's button would, from
+/// where the window itself isn't at hand.
+pub(crate) fn ask(ctx: &egui::Context, action: Action) {
+    ctx.data_mut(|data| data.insert_temp(asked_id(), Some(action)));
+}
+
+/// What [`ask`] asked for, once.
+pub(crate) fn asked(ctx: &egui::Context) -> Option<Action> {
+    ctx.data_mut(|data| data.remove_temp::<Option<Action>>(asked_id())).flatten()
 }
 
 impl Action {
@@ -50,6 +67,7 @@ impl Action {
             Action::ReadSettingsAgain | Action::ReadPresetsAgain => fl!("read-again"),
             Action::CopyPath => fl!("copy-path"),
             Action::ShowInFolder => fl!("folder-of"),
+            Action::ChooseFfmpeg => fl!("choose-ffmpeg"),
         }
     }
 
@@ -59,12 +77,13 @@ impl Action {
             Action::ReadSettingsAgain | Action::ReadPresetsAgain => fl!("read-again", "hint"),
             Action::CopyPath => fl!("copy-path", "hint"),
             Action::ShowInFolder => fl!("folder-of", "hint"),
+            Action::ChooseFfmpeg => fl!("choose-ffmpeg", "hint"),
         }
     }
 
     /// The way out most people want, a button among links.
     fn primary(self) -> bool {
-        self == Action::FreshSettings
+        matches!(self, Action::FreshSettings | Action::ChooseFfmpeg)
     }
 }
 
@@ -344,6 +363,7 @@ impl crate::app::App {
                     }
                 }
             }
+            Action::ChooseFfmpeg => self.pick(ctx, crate::files::Pick::Ffmpeg),
             Action::ReadPresetsAgain => {
                 if !self.reload_presets() {
                     self.banner.flash(message, fl!("read-again", "failed"), now);

@@ -454,7 +454,8 @@ impl App {
 
     /// Queues the item for converting with its settings as they are now.
     pub(crate) fn enqueue(&mut self, id: u64) {
-        let Some(item) = self.item(id) else { return };
+        // not while something keeps it from being converted as it is
+        let Some(item) = self.item(id).filter(|item| !item.blocked()) else { return };
         // as things are now, not as they were when the frame started
         let output = self.work_out_output(item);
         let item = self.item_mut(id).expect("found above");
@@ -708,6 +709,9 @@ impl eframe::App for App {
         }
         for (message, action) in self.banner.show(&ctx) {
             self.act(&ctx, &message, action);
+        }
+        if let Some(action) = crate::banner::asked(&ctx) {
+            self.act(&ctx, &Message::info(""), action);
         }
         theme::focus_ring(&ctx);
         if self.hovering {

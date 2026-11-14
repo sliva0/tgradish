@@ -8,7 +8,7 @@ use tgradish_core::presets::Format;
 use tgradish_core::tgradish_tgs::frames::aseprite::{Direction, LayerInfo, Tag};
 
 use crate::cuts::{Cut, Frames};
-use crate::item::{Choices, Item};
+use crate::item::{Blocker, Choices, Item, quoted};
 use crate::l10n::fl;
 use crate::widgets::{self, row, section, section_with};
 
@@ -54,7 +54,18 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item) {
     let (tags, layers, frames) = &*read;
     // a hidden layer, even the only one, is one to show
     let listed = layers.len() >= 2 || layers.iter().any(|layer| !layer.visible);
-    if tags.is_empty() && !listed {
+    // chosen, but not the file's, as after it was edited
+    let tag_missing = item.blockers.iter().find_map(|blocker| match blocker {
+        Blocker::TagMissing(tag) => Some(tag.clone()),
+        _ => None,
+    });
+    let layers_missing = item.blockers.iter().find_map(|blocker| match blocker {
+        Blocker::LayerMissing(layers) => Some(layers.clone()),
+        _ => None,
+    });
+    let tagged = !tags.is_empty() || tag_missing.is_some();
+    let layered = listed || layers_missing.is_some();
+    if !tagged && !layered {
         return;
     }
     // with a sign that it is being read again
@@ -66,14 +77,31 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item) {
     });
     let format = item.format;
     let choices = &mut item.choices;
-    if !tags.is_empty() {
+    if tagged {
         row(ui, &fl!("tag"), &fl!("tag", "hint"), Ok(()), |ui| {
-            tag_row(ui, choices, tags, frames, format)
+            tag_row(ui, choices, tags, frames, format);
+            if let Some(tag) = &tag_missing {
+                let text = fl!("tag-missing", tag = tag.as_str());
+                if widgets::attention(ui, &text, &fl!("all-frames"), &fl!("all-frames", "hint")) {
+                    choices.tag = None;
+                    (choices.start, choices.length) = (None, None);
+                }
+            }
         });
     }
-    if listed {
+    if layered {
         row(ui, &fl!("layers"), &fl!("layers", "hint"), Ok(()), |ui| {
-            layer_list(ui, choices, layers)
+            if listed {
+                layer_list(ui, choices, layers);
+            }
+            if let Some(missing) = &layers_missing {
+                let (count, names) = (missing.len(), quoted(missing));
+                let text = fl!("layers-missing", count = count, layers = names);
+                let fix = (fl!("layers-as-file"), fl!("layers-as-file", "hint"));
+                if widgets::attention(ui, &text, &fix.0, &fix.1) {
+                    (choices.show_layers, choices.hide_layers) = (None, None);
+                }
+            }
         });
     }
 }

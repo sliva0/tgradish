@@ -666,6 +666,52 @@ ffmpeg-arguments = ffmpeg arguments
     .system = Only with the system's ffmpeg, which "{ settings }" can pick
 
 
+## What keeps a file from being converted as it is, and the ways out
+
+# First over what converting will do, and on the hover and the note of the
+# Convert button it greys out, before each reason as one of those below.
+blocked = Can't convert yet: { $reason }
+    .heading = Can't convert yet
+blocked-crop = the crop is outside the picture
+blocked-sheet = the sprite sheet's cells don't divide the picture
+blocked-tag = the file has no tag "{ $tag }"
+# The layers, each in quotes, apart by commas.
+blocked-layers = { $count ->
+    [one] the file has no layer { $layers }
+   *[other] the file has no layers { $layers }
+}
+blocked-ffmpeg = ffmpeg wasn't found
+# Under the crop's fields, where the crop kept, as of another file of the
+# same name, doesn't fit the picture read now.
+crop-outside = The crop, { $width } × { $height } from { $left }, { $top }, is outside this { $across } × { $down } picture
+use-whole = Use whole picture
+    .hint = Crop nothing, keeping all of the picture
+# Under the sprite sheet's cells, where they don't divide its picture.
+sheet-uneven = The picture, { $width } × { $height }, doesn't split into { $columns } × { $rows } equal cells
+sheet-nearest = Nearest that divides: { $columns } × { $rows }
+    .hint = The layout nearest this one whose cells divide the picture
+# Under the tags and layers, where the file has no longer what was chosen.
+tag-missing = This file has no tag "{ $tag }"
+layers-missing = { $count ->
+    [one] This file has no layer { $layers }
+   *[other] This file has no layers { $layers }
+}
+layers-as-file = Show layers as in the file
+    .hint = Show and hide the layers as the file does
+# Under what to make, where it needs ffmpeg, which isn't there.
+needs-ffmpeg = This needs ffmpeg, which wasn't found
+choose-ffmpeg = Choose ffmpeg…
+    .hint = Pick the ffmpeg program, or a folder with ffmpeg and ffprobe
+# A file's state in the list, in place of its Convert button.
+row-attention = needs attention
+    .hint = Something keeps it from being converted: see its settings
+# Beside Convert all, of the files it leaves out.
+need-attention = { $count ->
+    [one] 1 needs attention
+   *[other] { $count } need attention
+}
+
+
 ## What converting will do, beside the preview, step by step
 
 plan-video = The video will be:

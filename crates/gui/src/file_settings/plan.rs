@@ -14,14 +14,20 @@ use tgradish_core::webm::Options;
 use tgradish_core::tgradish_tgs::frames::aseprite::Direction;
 
 use super::Context;
-use crate::item::{Item, Kind};
+use crate::item::{Blocker, Item, Kind};
 use crate::l10n::fl;
-use crate::{cuts, widgets};
+use crate::{cuts, theme, widgets};
 
 /// The steps, under a heading naming what the input is.
 pub(crate) fn plan(ui: &mut egui::Ui, item: &Item, context: &Context) {
+    // what it can't do yet is said in its place, higher up
+    if item.blocked() {
+        return;
+    }
     let animated = item.input_length().is_some();
     let title = match (item.kind, animated) {
+        // what a video is, while it can't be read
+        (Kind::Video, false) if item.input_size().is_none() => fl!("plan-video"),
         (Kind::Video, true) => fl!("plan-video"),
         (Kind::Video | Kind::Image, false) => fl!("plan-picture"),
         (Kind::Image, true) => fl!("plan-animation"),
@@ -34,6 +40,32 @@ pub(crate) fn plan(ui: &mut egui::Ui, item: &Item, context: &Context) {
             ui.spacing_mut().item_spacing.x = 6.0;
             ui.label("•");
             ui.add(egui::Label::new(step).wrap());
+        });
+    }
+}
+
+/// What keeps the item from being converted, if anything does: in a line,
+/// or a line each where more does. In place of what converting will do,
+/// under what to make, where it is seen before the rest.
+pub(crate) fn blocked(ui: &mut egui::Ui, item: &Item) {
+    if !item.blocked() {
+        return;
+    }
+    widgets::section_rule(ui);
+    let warn = theme::warn(ui.visuals());
+    let reasons: Vec<String> = item.blockers.iter().map(Blocker::reason).collect();
+    if let [reason] = &reasons[..] {
+        let text = format!("⚠ {}", fl!("blocked", reason = reason.as_str()));
+        ui.add(egui::Label::new(egui::RichText::new(text).color(warn)).wrap());
+        return;
+    }
+    let heading = format!("⚠ {}", fl!("blocked", "heading"));
+    ui.label(widgets::medium(ui, heading, widgets::HEADING).color(warn));
+    for reason in reasons {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.colored_label(warn, "•");
+            ui.add(egui::Label::new(egui::RichText::new(reason).color(warn)).wrap());
         });
     }
 }

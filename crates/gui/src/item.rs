@@ -6,7 +6,7 @@ use crate::config::Config;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use tgradish_core::input::{self, FileKind, Input};
-use tgradish_core::options::{Crop, Resize, Scaling};
+use tgradish_core::options::{Crop, Resize, Scaling, Sheet};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::Target;
 use tgradish_core::tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
@@ -433,6 +433,116 @@ impl Framing {
     }
 }
 
+/// What reading an item's input found that its choices must agree with,
+/// kept once the frames read are let go of.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Facts {
+    /// Read for a `.tgs`, as pixel art, rather than for ffmpeg.
+    art: bool,
+    /// The picture's size: a sprite sheet's cell's, where it was read as
+    /// one.
+    size: (u32, u32),
+    /// An Aseprite file's tags and layers, by name.
+    tags: Vec<String>,
+    layers: Vec<String>,
+    /// Read as one picture, as the sprite sheet chosen doesn't split it:
+    /// then `size` is all of it.
+    unsplit: bool,
+}
+
+impl Facts {
+    /// Whether it was read for a `.tgs`, as pixel art.
+    pub(crate) fn art(&self) -> bool {
+        self.art
+    }
+
+    /// What the input as read for the item's format says, once it is.
+    fn of(item: &Item) -> Option<Facts> {
+        let size = item.input_size()?;
+        let (tags, layers) = match item.aseprite() {
+            Some((tags, layers, _)) => (
+                tags.iter().map(|tag| tag.name.clone()).collect(),
+                layers.iter().map(|layer| layer.name.clone()).collect(),
+            ),
+            None => (Vec::new(), Vec::new()),
+        };
+        let (art, unsplit) = match item.format {
+            Format::Tgs => {
+                let art = item.art.ready()?;
+                let sheet = item.art_reading.sheet.is_some();
+                (true, sheet && !art.as_chosen && art.sheet_refused.is_none())
+            }
+            Format::Webm | Format::Webp => (false, false),
+        };
+        Some(Facts { art, size, tags, layers, unsplit })
+    }
+}
+
+/// What keeps an item from being converted as it is: its choices ask for
+/// what its input hasn't, or for ffmpeg, which isn't there. Each has a way
+/// out where it is chosen.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Blocker {
+    /// The crop, kept from another picture, is outside this one.
+    CropOutside,
+    /// The sprite sheet's cells don't divide its picture, `width` by
+    /// `height`.
+    SheetUneven { width: u32, height: u32, columns: u32, rows: u32 },
+    /// An Aseprite file without the tag chosen.
+    TagMissing(String),
+    /// An Aseprite file without the layers shown or hidden.
+    LayerMissing(Vec<String>),
+    /// ffmpeg reads the input or makes the result, and isn't there.
+    NeedsFfmpeg,
+}
+
+impl Blocker {
+    /// What it is, as the rest of "Can't convert yet: " says it.
+    pub(crate) fn reason(&self) -> String {
+        match self {
+            Blocker::CropOutside => fl!("blocked-crop"),
+            Blocker::SheetUneven { .. } => fl!("blocked-sheet"),
+            Blocker::TagMissing(tag) => fl!("blocked-tag", tag = tag.as_str()),
+            Blocker::LayerMissing(layers) => {
+                fl!("blocked-layers", count = layers.len(), layers = quoted(layers))
+            }
+            Blocker::NeedsFfmpeg => fl!("blocked-ffmpeg"),
+        }
+    }
+}
+
+/// Names each in quotes, apart by commas: "sketch", "shadow".
+pub(crate) fn quoted(names: &[String]) -> String {
+    names.iter().map(|name| format!("\"{name}\"")).collect::<Vec<_>>().join(", ")
+}
+
+/// The layout of a sprite sheet nearest `columns` by `rows` whose cells
+/// divide a `width` by `height` picture.
+pub(crate) fn dividing_sheet(width: u32, height: u32, columns: u32, rows: u32) -> Sheet {
+    let nearest = |side: u32, cells: u32| {
+        (1..=side.clamp(1, 256))
+            .filter(|count| side.is_multiple_of(*count))
+            // the more cells of two as near
+            .min_by_key(|count| (count.abs_diff(cells), std::cmp::Reverse(*count)))
+            .unwrap_or(1)
+    };
+    Sheet { columns: nearest(width, columns), rows: nearest(height, rows) }
+}
+
+/// What the blockers of an item were worked out from, so they are worked
+/// out again only when it changes.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Blocking {
+    format: Format,
+    kind: Kind,
+    crop: Option<Crop>,
+    tag: Option<String>,
+    layers: (Option<Vec<String>>, Option<Vec<String>>),
+    sheet: Option<Sheet>,
+    facts: Option<Facts>,
+    ffmpeg: bool,
+}
+
 /// A conversion of an item: the job and what it is made from. As
 /// [`Item::job`] it waits or runs; as [`Item::made`] its status is always
 /// [`crate::jobs::Status::Done`]; as [`Item::failed`], never.
@@ -513,6 +623,11 @@ pub(crate) struct Item {
     /// What converting would make now, worked out each frame, as presets
     /// and the default ones may change too; `None` where it can't.
     pub(crate) recipe: Option<Recipe>,
+    /// What reading the input last found.
+    pub(crate) facts: Option<Facts>,
+    /// What keeps it from being converted, worked out from `blocking`.
+    pub(crate) blockers: Vec<Blocker>,
+    pub(crate) blocking: Option<Blocking>,
 }
 
 impl Item {
@@ -546,6 +661,9 @@ impl Item {
             result_clip: Load::Idle,
             result_thumb: None,
             recipe: None,
+            facts: None,
+            blockers: Vec::new(),
+            blocking: None,
         }
     }
 
@@ -698,6 +816,89 @@ impl Item {
 
     pub(crate) fn is_busy(&self) -> bool {
         self.job.is_some()
+    }
+
+    /// Whether ffmpeg reads its input or makes its result: every WebM and
+    /// picture, and a `.tgs` of a video.
+    pub(crate) fn needs_ffmpeg(&self) -> bool {
+        self.format != Format::Tgs || self.kind == Kind::Video
+    }
+
+    /// Whether something keeps it from being converted as it is.
+    pub(crate) fn blocked(&self) -> bool {
+        !self.blockers.is_empty()
+    }
+
+    /// Takes in what reading its input found, once it is read.
+    pub(crate) fn take_facts(&mut self) {
+        if let Some(facts) = Facts::of(self) {
+            self.facts = Some(facts);
+        }
+    }
+
+    /// Works out what keeps it from being converted, where its choices,
+    /// what its input was found to be, or whether there is ffmpeg, as
+    /// `ffmpeg` says, changed.
+    pub(crate) fn find_blockers(&mut self, ffmpeg: bool) {
+        let choices = &self.choices;
+        // what was found of the input as it is read for this format
+        let art = self.format == Format::Tgs;
+        let facts = self.facts.clone().filter(|facts| facts.art == art);
+        let blocking = Blocking {
+            format: self.format,
+            kind: self.kind,
+            crop: choices.crop,
+            tag: choices.tag.clone(),
+            layers: (choices.show_layers.clone(), choices.hide_layers.clone()),
+            sheet: choices.tgs.sheet.filter(|_| art),
+            facts,
+            ffmpeg,
+        };
+        if self.blocking.as_ref() == Some(&blocking) {
+            return;
+        }
+        let mut blockers = Vec::new();
+        if let Some(facts) = &blocking.facts {
+            if let (Some(sheet), true) = (blocking.sheet, facts.unsplit) {
+                let (width, height) = facts.size;
+                if !width.is_multiple_of(sheet.columns) || !height.is_multiple_of(sheet.rows) {
+                    let (columns, rows) = (sheet.columns, sheet.rows);
+                    blockers.push(Blocker::SheetUneven { width, height, columns, rows });
+                }
+            }
+            // of a cell, which can't be told while the sheet doesn't split
+            let unsplit = blocking.sheet.is_some() && facts.unsplit;
+            if let Some(crop) = blocking.crop
+                && !unsplit
+                && !crop.fits(facts.size.0, facts.size.1)
+            {
+                blockers.push(Blocker::CropOutside);
+            }
+            if self.kind == Kind::Aseprite {
+                if let Some(tag) = &blocking.tag
+                    && !facts.tags.contains(tag)
+                {
+                    blockers.push(Blocker::TagMissing(tag.clone()));
+                }
+                let (show, hide) = &blocking.layers;
+                let mut missing: Vec<String> = show
+                    .iter()
+                    .chain(hide)
+                    .flatten()
+                    .filter(|name| !facts.layers.contains(name))
+                    .cloned()
+                    .collect();
+                missing.dedup();
+                if !missing.is_empty() {
+                    blockers.push(Blocker::LayerMissing(missing));
+                }
+            }
+        }
+        if !ffmpeg && self.needs_ffmpeg() {
+            blockers.push(Blocker::NeedsFfmpeg);
+        }
+        self.blockers = blockers;
+        self.blocking = Some(blocking);
     }
 
     /// Which picture the preview shows: the one chosen, though the input

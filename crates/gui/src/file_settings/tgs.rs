@@ -7,7 +7,7 @@ use tgradish_core::options::{Sheet, Speed};
 use tgradish_core::tgradish_tgs::reduce::{self, Kind as Reduction};
 
 use super::Context;
-use crate::item::{Item, Kind};
+use crate::item::{Blocker, Item, Kind, dividing_sheet};
 use crate::l10n::fl;
 use crate::widgets::{self, Choice, chosen_hint, flag, preset_segments, row, section};
 
@@ -112,6 +112,12 @@ pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item) {
     let refused =
         frames.filter(|&frames| frames > 1).map(|frames| fl!("sheet-refused", frames = frames));
     let allowed = refused.as_deref().map_or(Ok(()), Err);
+    let uneven = item.blockers.iter().find_map(|blocker| match *blocker {
+        Blocker::SheetUneven { width, height, columns, rows } => {
+            Some((width, height, columns, rows))
+        }
+        _ => None,
+    });
     let options = &mut item.choices.tgs;
     row(ui, &fl!("sprite-sheet"), &fl!("sprite-sheet", "hint"), allowed, |ui| {
         // greyed out unticked, though a session may keep it ticked, which
@@ -152,6 +158,17 @@ pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item) {
                 );
             });
         });
+        // cells that don't divide the picture, and the nearest that do
+        if let Some((width, height, columns, rows)) = uneven {
+            let text =
+                fl!("sheet-uneven", width = width, height = height, columns = columns, rows = rows);
+            let near = dividing_sheet(width, height, columns, rows);
+            let fix = fl!("sheet-nearest", columns = near.columns, rows = near.rows);
+            if widgets::attention(ui, &text, &fix, &fl!("sheet-nearest", "hint")) {
+                options.sheet = Some(near);
+                options.sheet_frames = None;
+            }
+        }
     });
 }
 
