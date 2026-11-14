@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Result, bail};
 
 use crate::Context;
 use crate::args::WatchArgs;
@@ -188,11 +188,16 @@ fn warn(ctx: &Context, message: String) {
 /// Watches until stopped, by Ctrl-C or `--cancel-on-stdin`, which ends it
 /// as done, whether it was waiting or converting then.
 pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
-    if !args.dir.is_dir() {
-        bail!("{} is not a directory", args.dir.display());
+    let dir = args.dir.display();
+    if !args.dir.exists() {
+        bail!("{dir}: no such directory");
     }
-    std::fs::read_dir(&args.dir)
-        .with_context(|| format!("couldn't read {}", args.dir.display()))?;
+    if !args.dir.is_dir() {
+        bail!("{dir} isn't a directory: watch watches one");
+    }
+    std::fs::read_dir(&args.dir).map_err(|err| {
+        anyhow::anyhow!("couldn't read {dir}: {}", tgradish_core::io_reason(&err))
+    })?;
     let converter = Converter::new(ctx, &args.conversion, args.format, None)?;
     let output_for =
         |path: &Path| converter.output_for(&Input::File(path.to_path_buf()), Some(&args.dir));
@@ -226,6 +231,7 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
             scan.unreadable.iter().map(|(p, _)| p.clone()).collect();
         for (path, err) in &scan.unreadable {
             if !unreadable.contains(path) {
+                let err = tgradish_core::io_reason(err);
                 warn(ctx, format!("couldn't read {}: {err}", path.display()));
             }
         }

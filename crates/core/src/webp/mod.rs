@@ -69,6 +69,15 @@ impl Request {
 #[schemars(rename = "StillEvent")]
 #[non_exhaustive]
 pub enum Event {
+    /// The input was read, and the picture is about to be made.
+    Started {
+        /// The input, the first picture of a sequence.
+        #[serde(serialize_with = "crate::protocol::serialize_path")]
+        input: PathBuf,
+        /// Where the picture goes.
+        #[serde(serialize_with = "crate::protocol::serialize_path")]
+        output: PathBuf,
+    },
     /// The picture is written.
     Finished(Outcome),
     /// Something worth knowing: about the picture, as options that were
@@ -204,6 +213,8 @@ pub fn convert(
         _ => Vec::new(),
     };
     let (mut plan, warnings) = plan(request, source, &starts)?;
+    let input_name = request.input.first().to_path_buf();
+    on_event(Event::Started { input: input_name, output: plan.output.clone() });
     for message in warnings {
         on_event(Event::Warning { message });
     }

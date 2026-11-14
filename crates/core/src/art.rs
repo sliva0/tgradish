@@ -59,7 +59,16 @@ pub(crate) fn read(path: &Path, most: u64) -> Result<Vec<u8>> {
             let size = std::fs::metadata(path).map_or(most + 1, |found| found.len());
             Err(unreadable(path, format!("it has {size} bytes, more than the {most} read of it")))
         }
-        Err(err) => Err(unreadable(path, err)),
+        Err(err) => Err(read_failed(path, err)),
+    }
+}
+
+/// An input at `path` that couldn't be read for `err`: one that isn't
+/// there is [`Error::NoSuchFile`], said the same wherever it is found.
+pub(crate) fn read_failed(path: &Path, err: std::io::Error) -> Error {
+    match err.kind() {
+        std::io::ErrorKind::NotFound => Error::NoSuchFile(path.to_path_buf()),
+        _ => unreadable(path, crate::io_reason(&err)),
     }
 }
 
@@ -97,7 +106,7 @@ pub(crate) fn sequence_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>> {
         if input.is_dir() {
             let mut found: Vec<PathBuf> = std::fs::read_dir(input)
                 .and_then(|entries| entries.map(|entry| entry.map(|entry| entry.path())).collect())
-                .map_err(|err| unreadable(input, err))?;
+                .map_err(|err| read_failed(input, err))?;
             found.retain(|path| path.is_file() && crate::input::is_frame(path));
             files.extend(found);
         } else {

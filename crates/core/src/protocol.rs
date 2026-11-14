@@ -6,7 +6,8 @@
 //! - Every `--json` output is JSON Lines: one compact object per line.
 //!   `convert` and `watch` print an event a line, as the description's
 //!   schemas give them, `inspect` a file a line, `preset list` a preset a
-//!   line, `licenses` a notice a line, and other commands one line.
+//!   line, `licenses` a notice a line, `spoof` one event, a [`SpoofEvent`],
+//!   and other commands one line.
 //! - A tagged union names its tag by what it distinguishes: `event` for
 //!   events, `format` for what `inspect` found, `kind` for issues,
 //!   encodings and ffmpeg backends, `mode` for an encode's rate control.
@@ -56,6 +57,32 @@ pub struct Description {
     pub formats: Vec<FormatDescription>,
     /// Every preset, built in or the user's, broken ones too.
     pub presets: Vec<PresetDescription>,
+    /// JSON Schema of what `spoof --json` prints: a [`SpoofEvent`].
+    pub spoof_events: Schema,
+}
+
+/// What `spoof --json` prints, one line: the file it wrote, or why it
+/// couldn't, as conversions' events say it.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(tag = "event", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
+#[non_exhaustive]
+pub enum SpoofEvent {
+    /// The spoofed file is written.
+    Finished {
+        /// The WebM spoofed.
+        #[serde(serialize_with = "crate::protocol::serialize_path")]
+        input: PathBuf,
+        /// Where the spoofed copy went.
+        #[serde(serialize_with = "crate::protocol::serialize_path")]
+        output: PathBuf,
+        /// What was changed.
+        report: crate::webm::container::PatchReport,
+        /// What Telegram would still refuse: a duration longer than it
+        /// takes.
+        issues: Vec<crate::telegram::Issue>,
+    },
+    /// Spoofing failed.
+    Error(Failure),
 }
 
 /// A format, as [`Description`] tells of it.
@@ -238,6 +265,7 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
             },
         ],
         presets,
+        spoof_events: printed::<SpoofEvent>(),
     }
 }
 
@@ -289,6 +317,7 @@ mod tests {
             Event::Warning { message: "a warning".into() },
             Event::Log { line: "a line".into() },
             Event::Finished {
+                input: "in.mp4".into(),
                 output: "in.sticker.webm".into(),
                 bytes: 250_000,
                 attempt: 2,
@@ -322,6 +351,7 @@ mod tests {
             tgs::Event::Packing,
             tgs::Event::Warning { message: "a warning".into() },
             tgs::Event::Finished {
+                input: "art.gif".into(),
                 output: "art.sticker.tgs".into(),
                 bytes: 60_000,
                 json_bytes: 300_000,
@@ -335,6 +365,7 @@ mod tests {
         ]
         .map(|event| serde_json::to_value(event).unwrap());
         let still = [
+            webp::Event::Started { input: "in.png".into(), output: "in.sticker.webp".into() },
             webp::Event::Finished(Outcome {
                 input: "in.png".into(),
                 output: "in.sticker.webp".into(),
@@ -396,11 +427,18 @@ mod tests {
         };
         let capabilities =
             crate::ffmpeg::Capabilities { version: "ffmpeg 8".into(), libvpx_vp9: true };
+        let spoofed = SpoofEvent::Finished {
+            input: "in.webm".into(),
+            output: "in.spoofed.webm".into(),
+            report: report.clone(),
+            issues: vec![Issue::TooLong { seconds: 5.0, max: 3.0 }],
+        };
         vec![
             serde_json::to_value(inspected).unwrap(),
             serde_json::to_value(report).unwrap(),
             serde_json::to_value(crate::backend::BackendInfo::Process { ffmpeg }).unwrap(),
             serde_json::to_value(capabilities).unwrap(),
+            serde_json::to_value(spoofed).unwrap(),
         ]
     }
 
@@ -449,6 +487,18 @@ mod tests {
         }
     }
 
+    /// `spoof --json` says what it wrote as conversions do, with the issue
+    /// that makes it exit 3.
+    #[test]
+    fn prints_what_spoofing_did_as_an_event() {
+        let line = serde_json::to_string(other_samples().last().unwrap()).unwrap();
+        let start =
+            r#"{"event":"finished","input":"in.webm","output":"in.spoofed.webm","report":{"#;
+        assert!(line.starts_with(start), "{line}");
+        let issues = r#""issues":[{"kind":"too-long","seconds":5.0,"max":3.0,"severity":"error","message":"metadata duration is 5.000 s, limit is 3 s"}]}"#;
+        assert!(line.ends_with(issues), "{line}");
+    }
+
     #[test]
     fn describes_exactly_the_options_each_format_takes() {
         let description = describe(&Presets::builtin(), &Config::default());
@@ -484,8 +534,10 @@ mod tests {
             schema_names(&format["events"], &mut names);
         }
         // the description itself, as presets, and what each stream prints
+        schema_names(&description["spoof-events"], &mut names);
         let mut described = json!({ "description": description });
         described["description"]["formats"] = json!([]);
+        described["description"]["spoof-events"] = json!({});
         keys(&described, &mut names);
         for sample in samples().into_iter().chain(other_samples()) {
             keys(&sample, &mut names);
@@ -523,7 +575,7 @@ mod tests {
             Some(r#"{"event":"warning","message":"a warning"}"#),
             Some(r#"{"event":"log","line":"a line"}"#),
             Some(
-                r#"{"event":"finished","output":"in.sticker.webm","bytes":250000,"attempt":2,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"crf","crf":32}},"spoofed":false,"issues":[{"kind":"too-big","bytes":300000,"max":262144,"severity":"error","message":"file is 300000 bytes, limit is 262144"}],"temp-dir":"/tmp/tgradish-x"}"#,
+                r#"{"event":"finished","input":"in.mp4","output":"in.sticker.webm","bytes":250000,"attempt":2,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"crf","crf":32}},"spoofed":false,"issues":[{"kind":"too-big","bytes":300000,"max":262144,"severity":"error","message":"293.0 KiB, over the 256 KiB limit"}],"temp-dir":"/tmp/tgradish-x"}"#,
             ),
             Some(r#"{"event":"error","message":"it failed","input":"in.mp4"}"#),
             None,
@@ -534,11 +586,12 @@ mod tests {
             Some(r#"{"event":"packing"}"#),
             Some(r#"{"event":"warning","message":"a warning"}"#),
             Some(
-                r#"{"event":"finished","output":"art.sticker.tgs","bytes":60000,"json-bytes":300000,"changed":true,"steps":[{"reduction":"despeckle","bytes":60000,"distortion":0.01}],"layers":3,"rectangles":40,"issues":[]}"#,
+                r#"{"event":"finished","input":"art.gif","output":"art.sticker.tgs","bytes":60000,"json-bytes":300000,"changed":true,"steps":[{"reduction":"despeckle","bytes":60000,"distortion":0.01}],"layers":3,"rectangles":40,"issues":[]}"#,
             ),
             Some(r#"{"event":"error","message":"it failed","input":null}"#),
+            Some(r#"{"event":"started","input":"in.png","output":"in.sticker.webp"}"#),
             Some(
-                r#"{"event":"finished","input":"in.png","output":"in.sticker.webp","bytes":100000,"width":512,"height":384,"encoding":{"kind":"lossy","quality":80},"issues":[{"kind":"wrong-size","width":512,"height":384,"side":100,"exact":true,"severity":"error","message":"size is 512x384, expected 100x100"}]}"#,
+                r#"{"event":"finished","input":"in.png","output":"in.sticker.webp","bytes":100000,"width":512,"height":384,"encoding":{"kind":"lossy","quality":80},"issues":[{"kind":"wrong-size","width":512,"height":384,"side":100,"exact":true,"severity":"error","message":"size is 512×384, expected 100×100"}]}"#,
             ),
             Some(r#"{"event":"warning","message":"a warning"}"#),
             Some(r#"{"event":"error","message":"it failed","input":null}"#),

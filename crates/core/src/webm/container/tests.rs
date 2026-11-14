@@ -412,7 +412,7 @@ fn reads_no_more_of_large_files_than_it_needs() {
         path
     };
     let video = sparse("video.mp4", b"\x00\x00\x00\x18ftypisom");
-    let not_ebml = |result| matches!(result, Err(Error::Webm(WebmError::NotEbml)));
+    let not_ebml = |result| matches!(result, Err(Error::NotWebm(_)));
     assert!(not_ebml(inspect_file(&video).map(drop)));
     assert!(not_ebml(head_file(&video).map(drop)));
     let long = sparse("long.webm", &Fixture::default().build());

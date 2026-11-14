@@ -50,6 +50,11 @@ env:
 
 jobs:
   build:
+    # the Rust releases are built with, over rust-toolchain.toml's newest
+    # stable, so that building a tag again makes the same binaries; raise
+    # it as a release is prepared, see CONTRIBUTING.md
+    env:
+      RUSTUP_TOOLCHAIN: "1.99.0"
     strategy:
       fail-fast: false
       matrix:
@@ -133,7 +138,9 @@ jobs:
             linux-musl-*) sudo apt-get install -y musl-tools ;;
           esac
 
-      - run: rustup target add ${{ matrix.triple }}
+      - run: |
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+          rustup target add ${{ matrix.triple }}
       # ffmpeg-sys-next packs the static libraries into its rlib, and
       # `xtask ffmpeg` only makes cargo build it again in a run that builds
       # them: a build cache from before a new ffmpeg recipe, beside a cache
@@ -456,12 +463,39 @@ jobs:
           cp target/ffmpeg/ffmpeg-*-sources.tar artifacts/
           ls -l artifacts
 
+      # one list to check everything by, `sha256sum -c SHA256SUMS`, beside
+      # each file's own
+      - name: Sum every file in one list
+        working-directory: artifacts
+        run: |
+          find . -maxdepth 1 -type f ! -name '*.sha256' -printf '%f\n' | LC_ALL=C sort \
+            | xargs -d '\n' sha256sum -- > SHA256SUMS
+          cat SHA256SUMS
+
       # archives already, which compressing again only slows
       - uses: actions/upload-artifact@v7
         with:
           name: draft
           path: artifacts/*
           compression-level: 0
+          if-no-files-found: error
+
+      # the release's notes: CHANGELOG.md's section for Cargo.toml's
+      # version, which the tag is; fails where there is none
+      - name: Take the notes from the changelog
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          mkdir notes
+          awk -v heading="## [$version]" '
+            /^## \[/ { if (on) exit; on = index($0, heading) == 1; next }
+            on
+          ' CHANGELOG.md > notes/notes.md
+          grep -q . notes/notes.md || { echo "CHANGELOG.md has no $version"; exit 1; }
+          cat notes/notes.md
+      - uses: actions/upload-artifact@v7
+        with:
+          name: notes
+          path: notes/notes.md
           if-no-files-found: error
 
   # drafts the release from what assemble gathered, on a tag pushed: the
@@ -478,12 +512,17 @@ jobs:
         with:
           name: draft
           path: artifacts
+      - uses: actions/download-artifact@v8
+        with:
+          name: notes
+          path: notes
 
+      # the changelog's section, then what GitHub lists of the changes
       - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: >
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag
-          --title "tgradish $GITHUB_REF_NAME" --generate-notes
-          artifacts/*
+          --title "tgradish $GITHUB_REF_NAME" --notes-file notes/notes.md
+          --generate-notes artifacts/*

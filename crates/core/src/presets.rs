@@ -218,13 +218,32 @@ impl Preset {
             PresetError::Broken(format!("{place}: {}", err.to_string().trim_end()))
         };
         let file: PresetFile = toml::from_str(text).map_err(|err| broken(&err))?;
-        for (table, options) in [("webm", &file.webm), ("tgs", &file.tgs)] {
+        for (table, format, options) in
+            [("webm", Format::Webm, &file.webm), ("tgs", Format::Tgs, &file.tgs)]
+        {
             if let Some(key) = options.keys().find(|key| PER_FILE.contains(&key.as_str())) {
                 return Err(PresetError::PerFile { place, key: format!("{table}.{key}") });
             }
+            // said here, as serde would list the options of one file among
+            // those it takes, which a preset doesn't
+            if let Some(key) = options.keys().find(|key| !format.uses(key)) {
+                let known = preset_keys(format).join(", ");
+                return Err(broken(&format_args!(
+                    "[{table}] {key} isn't an option a preset sets; those are: {known}"
+                )));
+            }
         }
-        let webm = file.webm.try_into().map_err(|err| broken(&format_args!("[webm]: {err}")))?;
-        let tgs = file.tgs.try_into().map_err(|err| broken(&format_args!("[tgs]: {err}")))?;
+        // serde says which value is wrong on a line of its own
+        let value = |table: &str, err: toml::de::Error| {
+            let text = err.to_string();
+            let text = text.trim_end();
+            match text.rsplit_once("\nin `") {
+                Some((why, key)) => format!("[{table}] {}: {why}", key.trim_end_matches('`')),
+                None => format!("[{table}]: {text}"),
+            }
+        };
+        let webm = file.webm.try_into().map_err(|err| broken(&value("webm", err)))?;
+        let tgs = file.tgs.try_into().map_err(|err| broken(&value("tgs", err)))?;
         Ok(Preset {
             name: name.to_owned(),
             description: file.description,
@@ -234,6 +253,19 @@ impl Preset {
             path: Some(path.to_path_buf()),
         })
     }
+}
+
+/// The options a preset's table for `format` can set, in the order of
+/// their fields: all that `format` takes but [`PER_FILE`].
+fn preset_keys(format: Format) -> Vec<String> {
+    let schema = match format {
+        Format::Tgs => schemars::schema_for!(tgs::Options),
+        Format::Webm | Format::Webp => schemars::schema_for!(Options),
+    };
+    let schema = serde_json::to_value(schema).unwrap_or_default();
+    let keys = schema["properties"].as_object().map(|keys| keys.keys().cloned().collect());
+    let keys: Vec<String> = keys.unwrap_or_default();
+    keys.into_iter().filter(|key| !PER_FILE.contains(&key.as_str())).collect()
 }
 
 fn table(options: &impl Serialize) -> toml::Table {
@@ -280,7 +312,7 @@ fn builtin() -> Vec<Preset> {
 #[non_exhaustive]
 pub enum PresetError {
     /// No preset has the name; `known` are those that do.
-    #[error("unknown preset {name:?}, available: {}", known.join(", "))]
+    #[error("preset {name:?} doesn't exist; available: {}", known.join(", "))]
     Unknown {
         /// The name asked for.
         name: String,
@@ -291,9 +323,10 @@ pub enum PresetError {
     /// names it and says why.
     #[error("broken preset {0}")]
     Broken(String),
-    /// The presets the one named extends lead back to it.
-    #[error("preset {0:?} extends itself")]
-    ExtendsItself(String),
+    /// Presets that extend each other, in a loop: each extends the next,
+    /// and the last is the first again.
+    #[error("{}", extends_loop(.0))]
+    ExtendsInLoop(Vec<String>),
     /// A name too short, too long or starting with a space.
     #[error("a preset's name has 1 to {LONGEST_NAME} characters, not starting with a space")]
     NameLength,
@@ -316,6 +349,15 @@ pub enum PresetError {
         /// The option, as its table names it.
         key: String,
     },
+}
+
+/// What [`PresetError::ExtendsInLoop`] says: "a extends itself", or "a →
+/// b → a extend each other".
+fn extends_loop(names: &[String]) -> String {
+    match names {
+        [one, _] => format!("{one} extends itself"),
+        names => format!("{} extend each other", names.join(" → ")),
+    }
 }
 
 /// All presets, by name. Broken preset files are kept as errors so that
@@ -410,8 +452,11 @@ impl Presets {
     fn chain(&self, name: &str) -> Result<Vec<&Preset>> {
         let mut chain = vec![self.get(name)?];
         while let Some(base) = &chain.last().unwrap().extends {
-            if chain.iter().any(|p| &p.name == base) {
-                return Err(PresetError::ExtendsItself(name.to_owned()).into());
+            if let Some(start) = chain.iter().position(|p| &p.name == base) {
+                let mut names: Vec<String> =
+                    chain[start..].iter().map(|p| p.name.clone()).collect();
+                names.push(base.clone());
+                return Err(PresetError::ExtendsInLoop(names).into());
             }
             chain.push(self.get(base)?);
         }
@@ -844,6 +889,9 @@ mod tests {
 
         let broken = presets.webm("broken").unwrap_err().to_string();
         assert!(broken.contains("broken.toml") && broken.contains("fsp"), "{broken}");
+        // naming only what a preset may set, not what one file chooses
+        assert!(broken.contains("fsp isn't an option a preset sets; those are: "), "{broken}");
+        assert!(broken.contains(" fps,") && !broken.contains("target"), "{broken}");
         // a file broken in one table is broken as a whole
         assert!(presets.tgs("broken").is_err());
         for (name, key) in [("emoji", "webm.target"), ("sheet", "tgs.sheet")] {
@@ -853,7 +901,8 @@ mod tests {
                 "{err}"
             );
         }
-        assert!(presets.webm("loop-a").unwrap_err().to_string().contains("extends itself"));
+        let looped = presets.webm("loop-a").unwrap_err().to_string();
+        assert!(looped.ends_with(" extend each other") && looped.contains(" → "), "{looped}");
         // crf isn't a .tgs option
         assert!(presets.tgs("wrong").unwrap_err().to_string().contains("crf"));
         assert!(presets.get("old").is_err());

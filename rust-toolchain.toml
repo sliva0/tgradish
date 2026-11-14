@@ -2,6 +2,8 @@
 # tgradish with the stable Rust they ship, and CI following the newest
 # finds what a new release breaks before they do. The oldest release that
 # builds it is `rust-version` in Cargo.toml, which CI checks with too.
+# Release builds pin theirs, as RUSTUP_TOOLCHAIN in
+# .github/workflows/release.yml.
 [toolchain]
 channel = "stable"
 components = ["clippy", "rustfmt"]

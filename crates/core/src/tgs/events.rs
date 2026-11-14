@@ -44,6 +44,10 @@ pub enum Event {
     },
     /// The sticker is written.
     Finished {
+        /// The input, the first picture of a sequence, as every format's
+        /// result names it.
+        #[serde(serialize_with = "crate::protocol::serialize_path")]
+        input: PathBuf,
         /// Where.
         #[serde(serialize_with = "crate::protocol::serialize_path")]
         output: PathBuf,

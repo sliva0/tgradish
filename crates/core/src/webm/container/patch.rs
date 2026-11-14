@@ -36,7 +36,7 @@ pub struct Patch {
 }
 
 /// What [`patch`] changed.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct PatchReport {
@@ -375,7 +375,10 @@ pub fn patch_file(
     changes: &Patch,
     replace: bool,
 ) -> crate::Result<PatchReport> {
+    super::inspect::starts_as_webm(input)?;
     let mut buf = crate::art::read(input, super::MAX_INSPECTED_BYTES)?;
+    crate::fsutil::check_writable(output)
+        .map_err(crate::Error::io(crate::FileAction::Write, output))?;
     let report = patch(&mut buf, changes)?;
     crate::fsutil::write_output(output, &buf, replace)?;
     Ok(report)

@@ -28,8 +28,17 @@ pub enum Error {
         /// The last of what it wrote to stderr.
         stderr: String,
     },
-    /// An input that couldn't be read: missing, of a kind nothing here
-    /// reads, or broken.
+    /// A file read as WebM, as one spoofed or inspected, that isn't one.
+    #[error("{} isn't a WebM file", .0.display())]
+    NotWebm(PathBuf),
+    /// A file inspected that is no kind of sticker.
+    #[error("{} isn't a WebM, WebP or .tgs file", .0.display())]
+    NotSticker(PathBuf),
+    /// An input that isn't there: said the same whatever was to read it.
+    #[error("{}: no such file", .0.display())]
+    NoSuchFile(PathBuf),
+    /// An input that couldn't be read: of a kind nothing here reads,
+    /// broken, or not to be opened.
     #[error("couldn't read {}: {message}", path.display())]
     Unreadable {
         /// The input.
@@ -123,8 +132,8 @@ pub enum Error {
     #[error("couldn't encode the WebP: {0}")]
     Webp(String),
     /// Something done to a file failed, as writing the result: `action`
-    /// says what, and `error` why.
-    #[error("couldn't {action} {}: {error}", path.display())]
+    /// says what, and `error` why, said as [`io_reason`] says it.
+    #[error("couldn't {action} {}: {}", path.display(), io_reason(error))]
     Io {
         /// What was being done.
         action: FileAction,
@@ -133,6 +142,29 @@ pub enum Error {
         /// What the system said.
         error: std::io::Error,
     },
+}
+
+/// Why `error` happened, as words to follow a colon: the system's, in
+/// lower case, without the "(os error 13)" Rust adds, nor what a library
+/// adds after it, as tempfile does the temporary file's path.
+pub fn io_reason(error: &std::io::Error) -> String {
+    let mut text = error.to_string();
+    if let Some(end) = text.find(" (os error ") {
+        text.truncate(end);
+    }
+    lower_first(&text)
+}
+
+/// `text` with its first letter in lower case, unless it starts a word in
+/// capitals, as "UTF-8".
+pub(crate) fn lower_first(text: &str) -> String {
+    let mut chars = text.chars();
+    match (chars.next(), chars.next()) {
+        (Some(first), second) if !second.is_some_and(char::is_uppercase) => {
+            first.to_lowercase().chain(text[first.len_utf8()..].chars()).collect()
+        }
+        _ => text.to_owned(),
+    }
 }
 
 impl Error {
@@ -191,7 +223,7 @@ impl std::fmt::Display for FileAction {
 #[non_exhaustive]
 pub enum FfmpegMissing {
     /// There is no ffmpeg, or ffprobe, where a path said.
-    #[error("{} does not exist", .0.display())]
+    #[error("{} doesn't exist", .0.display())]
     NoProgram(PathBuf),
     /// There is no ffprobe beside the ffmpeg a path gave.
     #[error("ffprobe is missing, expected it at {}", .0.display())]

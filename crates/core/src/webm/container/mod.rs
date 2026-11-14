@@ -34,9 +34,11 @@ const DEFAULT_TIMESTAMP_SCALE: u64 = 1_000_000;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum WebmError {
-    /// Its EBML doesn't parse.
+    /// Its EBML doesn't parse. Not `#[from]`, which would make it the
+    /// source too, and the message say it twice where its chain is
+    /// printed.
     #[error("malformed WebM: {0}")]
-    Ebml(#[from] EbmlError),
+    Ebml(EbmlError),
     /// It doesn't start with an EBML header.
     #[error("not a WebM file: no EBML header")]
     NotEbml,
@@ -80,6 +82,12 @@ pub enum WebmError {
     /// Larger than [`MAX_INSPECTED_BYTES`], which isn't read.
     #[error("it has more than {} MiB, far more than a sticker", MAX_INSPECTED_BYTES >> 20)]
     TooLarge,
+}
+
+impl From<EbmlError> for WebmError {
+    fn from(err: EbmlError) -> WebmError {
+        WebmError::Ebml(err)
+    }
 }
 
 /// What reading and patching WebM return.

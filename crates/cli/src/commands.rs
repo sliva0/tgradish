@@ -29,20 +29,22 @@ pub fn spoof(ctx: &Context, args: SpoofArgs) -> Result<()> {
         // what went wrong is about the input, which --json names
         Err(err) if ctx.global.json && err.downcast_ref::<crate::Exit>().is_none() => {
             crate::print_json_error(&err, Some(&args.input));
-            Err(crate::Exit(1).into())
+            let usage = err.downcast_ref::<crate::Usage>().is_some();
+            Err(crate::Exit(if usage { crate::USAGE } else { 1 }).into())
         }
         done => done,
     }
 }
 
 fn spoof_file(ctx: &Context, args: &SpoofArgs) -> Result<()> {
-    let output = match (&args.output, args.in_place) {
+    let output = match (&args.output(), args.in_place) {
         (_, true) => args.input.clone(),
         (Some(output), false) => output.clone(),
         (None, false) => args.input.with_extension(&SPOOFED[1..]),
     };
     if output.is_dir() {
-        bail!("{} is a directory: -o names the spoofed file", output.display());
+        let output = output.display();
+        return Err(crate::usage(format!("{output} is a directory: -o names the spoofed file")));
     }
     if !args.in_place && !args.overwrite && output != args.input && output.exists() {
         bail!("{} already exists, use --overwrite to replace it", output.display());
@@ -56,14 +58,34 @@ fn spoof_file(ctx: &Context, args: &SpoofArgs) -> Result<()> {
         ..Default::default()
     };
     let replace = args.overwrite || output == args.input;
-    let report = container::patch_file(&args.input, &output, &changes, replace)
-        .with_context(|| format!("couldn't spoof {}", args.input.display()))?;
+    let report =
+        container::patch_file(&args.input, &output, &changes, replace).map_err(
+            |err| match err {
+                tgradish_core::Error::NotWebm(path) => {
+                    let path = path.display();
+                    anyhow::anyhow!("{path} isn't a WebM file: tgradish convert {path} makes one")
+                }
+                // these name the file themselves
+                tgradish_core::Error::NoSuchFile(_)
+                | tgradish_core::Error::Unreadable { .. }
+                | tgradish_core::Error::Io { .. } => crate::explain(err),
+                err => anyhow::Error::from(err)
+                    .context(format!("couldn't spoof {}", args.input.display())),
+            },
+        )?;
 
     // a duration Telegram doesn't take makes a file it refuses
-    let refused = args.fake_duration > telegram::MAX_SECONDS;
+    let refused = telegram::too_long(args.fake_duration);
     let done = || if refused { Err(crate::Exit(crate::REFUSED).into()) } else { Ok(()) };
     if ctx.global.json {
-        crate::json_line(&json!({ "output": output.to_string_lossy(), "report": report }));
+        let too_long =
+            telegram::Issue::TooLong { seconds: args.fake_duration, max: telegram::MAX_SECONDS };
+        crate::json_line(&protocol::SpoofEvent::Finished {
+            input: args.input.clone(),
+            output,
+            report,
+            issues: refused.then_some(too_long).into_iter().collect(),
+        });
         return done();
     }
     if refused {
@@ -104,7 +126,7 @@ fn print_image(
     let alpha = if info.alpha { ", transparent" } else { "" };
     outln!(
         "{}",
-        ui::field("picture", format!("WebP {}x{}, {kind}{alpha}", info.width, info.height))
+        ui::field("picture", format!("WebP {}×{}, {kind}{alpha}", info.width, info.height))
     );
     if let Some(tool) = &info.made_with {
         outln!("{}", ui::field("made", format!("with {tool}")));
@@ -134,8 +156,8 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target, issues: &
             let fps = info.fps().map(ui::fps).unwrap_or_else(|| "unknown fps".into());
             let alpha = if video.alpha { ", transparent" } else { "" };
             format!(
-                "{} {}x{}, {fps}, {}{alpha}",
-                video.codec_id,
+                "{} {}×{}, {fps}, {}{alpha}",
+                codec_name(&video.codec_id),
                 video.width,
                 video.height,
                 ui::count(info.video_frames, "frame")
@@ -177,7 +199,7 @@ fn print_failure(ctx: &Context, path: &std::path::Path, err: &impl std::fmt::Dis
     if ctx.global.json {
         crate::print_json_error(&anyhow::anyhow!("{err}"), Some(path));
     } else {
-        eprintln!("{} {}: {err}", ui::error_label(), path.display());
+        eprintln!("{} {}", ui::error_label(), ui::about(path, &err.to_string()));
     }
 }
 
@@ -249,6 +271,50 @@ pub fn licenses(ctx: &Context) {
         outln!("{}\n", "=".repeat(notice.title.chars().count()));
         outln!("{}", notice.text.trim_end());
     }
+}
+
+/// Prints the script that completes tgradish in `shell`.
+pub fn completions(shell: crate::args::ShellArg) {
+    use clap::CommandFactory;
+    let mut script = Vec::new();
+    let shell: clap_complete::Shell = shell.into();
+    clap_complete::generate(shell, &mut crate::args::Cli::command(), "tgradish", &mut script);
+    out!("{}", String::from_utf8_lossy(&script));
+}
+
+/// Writes the man pages into `dir`: `tgradish.1`, and a page for each
+/// command, as `tgradish-convert.1`, without the colours of the help. For
+/// packages, by `tgradish __man DIR`.
+pub fn man(dir: &std::path::Path) -> Result<()> {
+    use clap::CommandFactory;
+    std::fs::create_dir_all(dir).map_err(|err| {
+        anyhow::anyhow!("couldn't create {}: {}", dir.display(), tgradish_core::io_reason(&err))
+    })?;
+    let command = plain(crate::args::Cli::command().name("tgradish"));
+    clap_mangen::generate_to(command, dir).map_err(|err| {
+        anyhow::anyhow!(
+            "couldn't write the man pages into {}: {}",
+            dir.display(),
+            tgradish_core::io_reason(&err)
+        )
+    })?;
+    Ok(())
+}
+
+/// `command`, and the commands in it, with the text after their options
+/// without the colours it has on a terminal, which a man page would show
+/// as they are.
+fn plain(mut command: clap::Command) -> clap::Command {
+    if let Some(after) = command.get_after_help() {
+        let text = console::strip_ansi_codes(&after.ansi().to_string()).into_owned();
+        command = command.after_help(text);
+    }
+    let names: Vec<String> =
+        command.get_subcommands().map(|sub| sub.get_name().to_owned()).collect();
+    for name in names {
+        command = command.mut_subcommand(name, plain);
+    }
+    command
 }
 
 pub fn describe(ctx: &Context) -> Result<()> {
@@ -340,6 +406,10 @@ pub fn preset(ctx: &Context, command: PresetCommand) -> Result<()> {
 
 pub fn config(ctx: &Context, command: ConfigCommand, path: Option<PathBuf>) -> Result<()> {
     match command {
+        ConfigCommand::Example if ctx.global.json => {
+            crate::json_line(&json!({ "text": tgradish_core::config::starting_example() }));
+        }
+        ConfigCommand::Example => out!("{}", tgradish_core::config::starting_example()),
         ConfigCommand::Path => {
             let path = path.context("no home directory found")?;
             if ctx.global.json {
@@ -350,12 +420,21 @@ pub fn config(ctx: &Context, command: ConfigCommand, path: Option<PathBuf>) -> R
                 outln!("{}", path.display());
             }
         }
-        ConfigCommand::Show if ctx.global.json => crate::json_line(&ctx.config),
         ConfigCommand::Show => {
-            if ctx.config == Config::default() {
-                eprintln!("# no config file, using defaults");
+            // what is used, the presets too where the file names none
+            let effective = Config {
+                preset: Some(ctx.config.preset_for(Format::Webm).to_owned()),
+                tgs_preset: Some(ctx.config.preset_for(Format::Tgs).to_owned()),
+                ..ctx.config.clone()
+            };
+            if ctx.global.json {
+                crate::json_line(&effective);
+            } else {
+                if path.as_deref().is_none_or(|path| !path.exists()) {
+                    eprintln!("# no config file, using defaults");
+                }
+                out!("{}", toml::to_string(&effective)?);
             }
-            out!("{}", toml::to_string(&ctx.config)?);
         }
     }
     Ok(())
@@ -364,33 +443,78 @@ pub fn config(ctx: &Context, command: ConfigCommand, path: Option<PathBuf>) -> R
 pub fn ffmpeg(ctx: &Context, command: FfmpegCommand) -> Result<()> {
     match command {
         FfmpegCommand::Status => {
-            let backend = ctx.backend().map_err(crate::explain)?;
+            let backend = ctx.backend().map_err(|err| ctx.explain(err))?;
             let caps = backend.capabilities(&ctx.cancel)?;
+            let info = backend.info();
+            // who chose it: a path given, or else where it was found
+            let (from, from_text) = match (&info, ctx.ffmpeg_path()) {
+                (BackendInfo::Process { .. }, Some((_, named))) => {
+                    let key = match named {
+                        crate::FfmpegNamed::Flag => "flag",
+                        crate::FfmpegNamed::Env => "environment",
+                        crate::FfmpegNamed::Config => "config",
+                    };
+                    (key, format!("from {}", ctx.ffmpeg_named_by(named)))
+                }
+                (BackendInfo::Process { .. }, None) => ("path", "found on PATH".to_owned()),
+                _ => ("built-in", String::new()),
+            };
             if ctx.global.json {
-                crate::json_line(&json!({ "ffmpeg": backend.info(), "capabilities": caps }));
+                let line = json!({ "ffmpeg": info, "from": from, "capabilities": caps });
+                crate::json_line(&line);
                 if !caps.libvpx_vp9 {
                     return Err(crate::Exit(1).into());
                 }
+                return Ok(());
+            }
+            match &info {
+                BackendInfo::Process { ffmpeg } => {
+                    outln!(
+                        "{}",
+                        fact("ffmpeg", format!("{} ({from_text})", ffmpeg.ffmpeg.display()))
+                    );
+                    outln!("{}", fact("ffprobe", ffmpeg.ffprobe.display()));
+                }
+                BackendInfo::Builtin => outln!("{}", fact("ffmpeg", "built into tgradish")),
+                // a kind core has that this command line doesn't word yet
+                _ => outln!("{}", fact("ffmpeg", "shown with --json")),
+            }
+            outln!("{}", fact("version", short_version(&caps.version)));
+            if caps.libvpx_vp9 {
+                outln!(
+                    "{}",
+                    fact("libvpx", format!("{}, can make video stickers", style("yes").green()))
+                );
             } else {
-                match backend.info() {
-                    BackendInfo::Process { ffmpeg } => {
-                        outln!("ffmpeg   {}", ffmpeg.ffmpeg.display());
-                        outln!("ffprobe  {}", ffmpeg.ffprobe.display());
-                        outln!("source   {}", ui::name(&ffmpeg.source));
-                    }
-                    BackendInfo::Builtin => outln!("ffmpeg   built into tgradish"),
-                    other => outln!("ffmpeg   {other:?}"),
-                }
-                outln!("version  {}", caps.version);
-                let vp9 = if caps.libvpx_vp9 { style("yes").green() } else { style("no").red() };
-                outln!("libvpx-vp9 encoder  {vp9}");
-                if !caps.libvpx_vp9 {
-                    bail!("this ffmpeg can't encode VP9 with libvpx, stickers need it");
-                }
+                let no = style("no").red();
+                outln!("{}", fact("libvpx", format!("{no}, can't make video stickers")));
+                bail!(
+                    "this ffmpeg has no libvpx-vp9 encoder, which video stickers need: install \
+                     one built with it, or use --ffmpeg-from builtin where this build has it"
+                );
             }
         }
     }
     Ok(())
+}
+
+/// A codec as people name it: `VP9` for Matroska's `V_VP9`.
+fn codec_name(id: &str) -> &str {
+    id.strip_prefix("V_").or_else(|| id.strip_prefix("A_")).unwrap_or(id)
+}
+
+/// A line of `ffmpeg`'s status, its key coloured and the values lined up.
+fn fact(key: &str, value: impl std::fmt::Display) -> String {
+    format!("{} {value}", style(format!("{key:<9}")).cyan())
+}
+
+/// The version in the first line `ffmpeg -version` prints, as `n9.0.2`
+/// of "ffmpeg version n9.0.2 Copyright (c) 2000-2026 the FFmpeg
+/// developers", or the line as it is where it says otherwise.
+fn short_version(line: &str) -> &str {
+    line.strip_prefix("ffmpeg version ")
+        .and_then(|rest| rest.split_whitespace().next())
+        .unwrap_or(line)
 }
 
 fn print_sticker(path: &std::path::Path, stats: &check::Stats, issues: &[check::Issue]) {
@@ -407,7 +531,7 @@ fn print_sticker(path: &std::path::Path, stats: &check::Stats, issues: &[check::
     };
     outln!("{}", ui::field("size", size));
     let animation = format!(
-        "{}x{}, {} fps, {} ({})",
+        "{}×{}, {} fps, {} ({})",
         stats.width,
         stats.height,
         stats.fps,

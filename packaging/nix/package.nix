@@ -1,7 +1,9 @@
 {
   lib,
   rustPlatform,
+  stdenv,
   makeWrapper,
+  installShellFiles,
   ffmpeg,
   dbus,
   libGL,
@@ -56,12 +58,24 @@ rustPlatform.buildRustPackage {
     "--package=tgradish"
   ];
 
-  nativeBuildInputs = [ makeWrapper ];
+  nativeBuildInputs = [
+    makeWrapper
+    installShellFiles
+  ];
   nativeCheckInputs = [ ffmpeg ];
 
   postInstall = ''
     install -Dm644 crates/cli/assets/tgradish.desktop -t $out/share/applications
     cp -r crates/cli/assets/icons $out/share/
+  ''
+  # written by the program, which a cross build can't run
+  + lib.optionalString (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''
+    installShellCompletion --cmd tgradish \
+      --bash <($out/bin/tgradish completions bash) \
+      --zsh <($out/bin/tgradish completions zsh) \
+      --fish <($out/bin/tgradish completions fish)
+    $out/bin/tgradish __man man
+    installManPage man/*.1
   '';
 
   # after the fixup phase has shrunk the rpath to what is linked

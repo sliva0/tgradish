@@ -22,8 +22,9 @@ homepage = "https://github.com/sliva0/tgradish"
 # Cargo.lock, so a looser requirement could pair crates never built as one.
 [workspace.dependencies]
 tgradish-core = { path = "crates/core", version = "=2.0.0" }
-# synthetic test art, unpublished
-tgradish-corpus = { path = "crates/corpus" }
+# synthetic test art, the libraries' dev-dependency: published, as
+# packages keep only dev-dependencies that are on crates.io
+tgradish-corpus = { path = "crates/corpus", version = "=0.1.0" }
 tgradish-frames = { path = "crates/frames", version = "=0.1.0" }
 tgradish-gui = { path = "crates/gui", version = "=2.0.0" }
 tgradish-tgs = { path = "crates/tgs", version = "=0.1.0" }
@@ -31,6 +32,9 @@ tgradish-tgs = { path = "crates/tgs", version = "=0.1.0" }
 anyhow = "1.0.104"
 arboard = { version = "3.6.1", features = ["wayland-data-control"] }
 clap = { version = "4.6.7", features = ["derive", "env", "wrap_help"] }
+# `tgradish completions` and the man pages, which must move with clap
+clap_complete = "4.6.11"
+clap_mangen = "0.3.3"
 console = "0.16.6"
 ctrlc = "3.5.2"
 directories = "6.0.0"

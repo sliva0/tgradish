@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use super::ebml::{self, Element, ids};
 use super::{DEFAULT_TIMESTAMP_SCALE, EbmlError, Result, SIGNATURE_PREFIX, WebmError};
-use crate::art::unreadable;
+use crate::art::read_failed;
 
 /// A WebM's video track, as its `TrackEntry` says.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -479,23 +479,23 @@ pub const MAX_INSPECTED_BYTES: u64 = 256 << 20;
 pub fn inspect_file(path: &Path) -> crate::Result<WebmInfo> {
     starts_as_webm(path)?;
     let bytes = crate::fsutil::read_at_most(path, MAX_INSPECTED_BYTES)
-        .map_err(|err| unreadable(path, err))?
+        .map_err(|err| read_failed(path, err))?
         .ok_or(WebmError::TooLarge)?;
     Ok(inspect(&bytes)?)
 }
 
 /// Fails unless the file at `path` starts with the EBML header's ID.
-fn starts_as_webm(path: &Path) -> crate::Result<()> {
+pub(crate) fn starts_as_webm(path: &Path) -> crate::Result<()> {
     let mut start = [0u8; 4];
     let read = std::fs::File::open(path)
         .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut start));
     match read {
         Ok(()) if start == EBML_MAGIC => Ok(()),
-        Ok(()) => Err(WebmError::NotEbml.into()),
+        Ok(()) => Err(crate::Error::NotWebm(path.to_path_buf())),
         Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
-            Err(WebmError::NotEbml.into())
+            Err(crate::Error::NotWebm(path.to_path_buf()))
         }
-        Err(err) => Err(unreadable(path, err)),
+        Err(err) => Err(read_failed(path, err)),
     }
 }
 
@@ -521,7 +521,7 @@ pub(crate) fn head_file(path: &Path) -> crate::Result<Head> {
         .and_then(|file| {
             std::io::Read::read_to_end(&mut std::io::Read::take(file, HEAD_BYTES), &mut bytes)
         })
-        .map_err(|err| unreadable(path, err))?;
+        .map_err(|err| read_failed(path, err))?;
     Ok(head(&bytes)?)
 }
 

@@ -9,7 +9,7 @@ use serde::Serialize;
 use tgradish_tgs::check;
 
 use crate::error::Result;
-use crate::input::{FileKind, sniff};
+use crate::input::{FileKind, sniff_readable};
 use crate::telegram::{self, Target};
 use crate::webm::container::{self, WebmInfo};
 use crate::{tgs, webp};
@@ -61,9 +61,10 @@ impl Inspected {
 }
 
 /// What the sticker at `path` holds, judged as `target`, or else as what
-/// its size says it is.
+/// its size says it is. A file of no kind a sticker is, as a GIF, is
+/// [`Error::NotSticker`](crate::Error::NotSticker).
 pub fn inspect(path: &Path, target: Option<Target>) -> Result<Inspected> {
-    Ok(match sniff(path) {
+    Ok(match sniff_readable(path)? {
         FileKind::Webp { .. } => {
             let info = webp::inspect_file(path)?;
             let target = target.unwrap_or_else(|| info.target());
@@ -74,12 +75,12 @@ pub fn inspect(path: &Path, target: Option<Target>) -> Result<Inspected> {
             let (info, issues) = tgs::inspect_file(path)?;
             Inspected::Tgs { info: Box::new(info), issues }
         }
-        // anything else is taken for WebM, which says what it isn't
-        _ => {
+        FileKind::Webm => {
             let info = container::inspect_file(path)?;
             let target = target.unwrap_or_else(|| info.target());
             let issues = telegram::check(&info, target);
             Inspected::Webm { target, info: Box::new(info), issues }
         }
+        _ => return Err(crate::Error::NotSticker(path.to_path_buf())),
     })
 }

@@ -53,6 +53,12 @@
 //! `CARGO_HOME` to a directory outside it. `cargo xtask ffmpeg` keeps
 //! `crates/core/licenses/ffmpeg` up to date the same way.
 //!
+//! `cargo xtask man [DIR]` writes tgradish's man pages, `tgradish.1` and
+//! one for each command, into `target/man` or DIR, with clap_mangen, by
+//! `tgradish __man DIR`, which no help names; `tgradish completions SHELL` prints the
+//! shells' completion scripts. Release archives and packages for Linux
+//! have both (`package`).
+//!
 //! `cargo xtask icons [--check]` makes the icons for menus and the Windows
 //! executable from the window's own, `crates/gui/assets/icon.png`;
 //! `--check` fails if they are out of date.
@@ -87,6 +93,7 @@ fn main() -> Result<()> {
         Some("icons") => icons::icons(&args[1..]),
         Some("local-release") => release::local_release(&args[1..]),
         Some("strings") => strings::strings(&args[1..]),
+        Some("man") => man(&args[1..]),
         _ => bail!(
             "usage: cargo xtask ffmpeg [--target TARGET] [--no-asm] [--force]\n       \
              cargo xtask ffmpeg-sources\n       \
@@ -95,11 +102,29 @@ fn main() -> Result<()> {
              cargo xtask licenses [--check]\n       \
              cargo xtask icons [--check]\n       \
              cargo xtask local-release [--targets TARGET,...] [--no-asm]\n       \
-             cargo xtask strings [--no-pictures]\n\
+             cargo xtask strings [--no-pictures]\n       \
+             cargo xtask man [DIR]\n\
              targets: {}",
             Target::names()
         ),
     }
+}
+
+/// The `man` task: the man pages, as `tgradish __man` writes them, into
+/// `target/man` or the directory given.
+fn man(args: &[String]) -> Result<()> {
+    let root = workspace_root();
+    let dir = match args {
+        [] => root.join("target/man"),
+        [dir] => PathBuf::from(dir),
+        _ => bail!("usage: cargo xtask man [DIR]"),
+    };
+    run(cargo()
+        .current_dir(root)
+        .args(["run", "--quiet", "--locked", "-p", "tgradish", "--", "__man"])
+        .arg(&dir))?;
+    println!("{}", dir.display());
+    Ok(())
 }
 
 /// Where the notices binaries carry are kept, from the repository's top:

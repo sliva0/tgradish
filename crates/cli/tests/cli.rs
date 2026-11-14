@@ -12,9 +12,20 @@ fn tgradish(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(args)
         // don't pick up the developer's own config
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .output()
         .unwrap()
+}
+
+/// An empty config file, for TGRADISH_CONFIG: the defaults, rather than
+/// the developer's own config.
+fn no_config() -> &'static Path {
+    static FILE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    FILE.get_or_init(|| {
+        let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join("empty-config.toml");
+        std::fs::write(&path, "").unwrap();
+        path
+    })
 }
 
 fn json_lines(output: &Output) -> Vec<Value> {
@@ -62,6 +73,9 @@ fn describes_protocol() {
     assert_eq!(preset("fast")["tgs"]["speed"], "fast");
     assert!(preset("best")["webm"]["target"].is_null());
     assert!(preset("best")["error"].is_null());
+    // what spoof prints, an event as conversions' are
+    let spoof = serde_json::to_string(&description["spoof-events"]).unwrap();
+    assert!(spoof.contains("\"finished\"") && spoof.contains("\"error\""), "{spoof}");
 }
 
 #[test]
@@ -92,6 +106,33 @@ fn carries_licences() {
     }
 }
 
+/// Completion scripts for each shell, and man pages without the help's
+/// colours, a page for each command.
+#[test]
+fn writes_completions_and_man_pages() {
+    for (shell, marker) in [
+        ("bash", "complete -F"),
+        ("zsh", "#compdef tgradish"),
+        ("fish", "complete -c tgradish"),
+        ("powershell", "Register-ArgumentCompleter"),
+    ] {
+        let output = tgradish(&["completions", shell]);
+        assert!(output.status.success(), "{shell}");
+        let script = String::from_utf8(output.stdout).unwrap();
+        assert!(script.contains(marker) && script.contains("convert"), "{shell}");
+        assert!(!script.contains("__man") && !script.contains(" man "), "{shell}");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let output = tgradish(&["__man", dir.path().to_str().unwrap()]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    for page in ["tgradish.1", "tgradish-convert.1", "tgradish-config-example.1"] {
+        let text = std::fs::read_to_string(dir.path().join(page)).unwrap();
+        assert!(text.starts_with(".ie") || text.contains(".TH"), "{page}");
+        assert!(!text.contains('\x1b'), "{page} has the help's colours");
+    }
+    assert!(!dir.path().join("tgradish-__man.1").exists());
+}
+
 /// A reader that stops early, as `tgradish licenses | head -2`, ends the
 /// command without a panic's message.
 #[test]
@@ -102,7 +143,7 @@ fn stops_quietly_when_stdout_closes() {
     for args in [&["licenses"][..], &["--json", "describe"], &["preset", "list"]] {
         let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
             .args(args)
-            .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+            .env("TGRADISH_CONFIG", no_config())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -120,10 +161,11 @@ fn stops_quietly_when_stdout_closes() {
 #[test]
 fn reports_errors_as_json() {
     let output = tgradish(&["--json", "convert", "missing.mp4", "--preset", "nope"]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     let lines = json_lines(&output);
     assert_eq!(lines[0]["event"], "error");
-    assert!(lines[0]["message"].as_str().unwrap().contains("unknown preset"));
+    let message = lines[0]["message"].as_str().unwrap();
+    assert_eq!(message, r#"--preset "nope" doesn't exist; available: balanced, best, fast"#);
 }
 
 #[test]
@@ -134,12 +176,201 @@ fn rejects_bad_flags() {
     let output = tgradish(&["convert", "a.png", "--watermark", "false"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("switches take no value"));
+    // nor is - stdin or stdout, which isn't read or written
+    for args in [
+        &["convert", "-", "-f", "tgs"][..],
+        &["convert", "a.png", "-o", "-"],
+        &["spoof", "-"],
+        &["spoof", "a.webm", "-o", "-"],
+        &["inspect", "a.webm", "-"],
+    ] {
+        let output = tgradish(args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        let said = "error: reading stdin or writing stdout isn't supported: name a file";
+        assert!(String::from_utf8_lossy(&output.stderr).starts_with(said), "{args:?}");
+    }
     // the window prints nothing to read
     if cfg!(feature = "gui") {
         let output = tgradish(&["--json", "gui"]);
         assert_eq!(output.status.code(), Some(2));
         assert!(String::from_utf8_lossy(&output.stderr).contains("--json can't be used with gui"));
     }
+}
+
+/// Without a display the window says so plainly, and tgradish alone, which
+/// would have opened it, says what it is instead.
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn says_when_there_is_no_display() {
+    if !cfg!(feature = "gui") {
+        return;
+    }
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_tgradish"))
+            .args(args)
+            .env("TGRADISH_CONFIG", no_config())
+            .env_remove("WAYLAND_DISPLAY")
+            .env_remove("WAYLAND_SOCKET")
+            .env_remove("DISPLAY")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+    };
+    let gui = run(&["gui"]);
+    assert_eq!(gui.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&gui.stderr).trim_end(),
+        "error: the window can't open: no display (neither WAYLAND_DISPLAY nor DISPLAY is set)"
+    );
+    let alone = run(&[]);
+    assert_eq!(alone.status.code(), Some(2));
+    assert!(alone.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&alone.stderr);
+    assert!(stderr.contains("tgradish gui") && stderr.contains("Usage:"), "{stderr}");
+}
+
+/// An input that isn't there is said to be so in the same words whatever
+/// was to read it, its name once.
+#[test]
+fn says_an_input_is_missing_alike_everywhere() {
+    let dir = tempfile::tempdir().unwrap();
+    for (name, args) in [
+        ("nope.mp4", &["convert"][..]),
+        ("nope.mp4", &["convert", "-f", "tgs"]),
+        ("nope.png", &["convert", "-f", "tgs"]),
+        ("nope.mp4", &["convert", "-f", "webp"]),
+        ("nope.webm", &["inspect"]),
+        ("nope.webm", &["spoof"]),
+    ] {
+        let missing = dir.path().join(name);
+        let missing = missing.to_str().unwrap();
+        let mut args = args.to_vec();
+        args.push(missing);
+        let output = tgradish(&args);
+        assert_eq!(output.status.code(), Some(1), "{args:?}");
+        let stderr =
+            console::strip_ansi_codes(&String::from_utf8_lossy(&output.stderr)).into_owned();
+        let said = format!("{missing}: no such file\n");
+        assert!(stderr.ends_with(&said), "{args:?}: {stderr}");
+        assert_eq!(stderr.matches(missing).count(), 1, "{args:?}: {stderr}");
+        args.insert(0, "--json");
+        let json = json_lines(&tgradish(&args));
+        assert_eq!(json[0]["message"], format!("{missing}: no such file"), "{args:?}");
+    }
+}
+
+/// What a format can't use for an input is said to be unused, rather than
+/// dropped quietly, or refused where it never could be.
+#[test]
+fn says_what_goes_unused() {
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("a.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let png = png.to_str().unwrap();
+    let output = tgradish(&["convert", png, "-f", "tgs", "--sheet-frames", "3"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr).trim_end(),
+        "error: --sheet-frames needs --sheet"
+    );
+    // a picture's own times, which a frame rate doesn't change
+    let unused = "--fps only sets how fast image sequences and sprite sheets play for .tgs";
+    let output = tgradish(&["convert", png, "-f", "tgs", "--fps", "30", "-y"]);
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(stderr.matches(unused).count(), 1, "{stderr}");
+    let output = tgradish(&["--json", "convert", png, "-f", "tgs", "--fps", "30", "-y"]);
+    let lines = json_lines(&output);
+    assert!(lines.iter().any(|line| line["event"] == "warning" && line["message"] == unused));
+    // but a sequence's
+    let output = tgradish(&["convert", png, "--sequence", "-f", "tgs", "--fps", "30", "-y"]);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains(unused));
+}
+
+/// A file of the wrong kind is said to be, with what makes the right one.
+#[test]
+fn says_a_file_is_of_the_wrong_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("a.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let png = png.to_str().unwrap();
+    let stderr = |args: &[&str]| {
+        let output = tgradish(args);
+        assert_eq!(output.status.code(), Some(1), "{args:?}");
+        String::from_utf8_lossy(&output.stderr).trim_end().to_owned()
+    };
+    assert_eq!(stderr(&["inspect", png]), format!("error: {png} isn't a WebM, WebP or .tgs file"));
+    assert_eq!(
+        stderr(&["spoof", png]),
+        format!("error: {png} isn't a WebM file: tgradish convert {png} makes one")
+    );
+    // one that starts as WebM, and breaks, says why once
+    let broken = dir.path().join("broken.webm");
+    std::fs::write(&broken, b"\x1a\x45\xdf\xa3\x00\x00").unwrap();
+    let said = stderr(&["spoof", broken.to_str().unwrap()]);
+    let why = said.rsplit(": ").next().unwrap();
+    assert_eq!(said.matches(why).count(), 1, "{said}");
+}
+
+/// A folder that can't be written to is found before converting, and said
+/// without the temporary file's path or the OS's number.
+#[cfg(unix)]
+#[test]
+fn says_when_the_output_cant_be_written() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("a.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let locked = dir.path().join("ro");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let out = locked.join("a.sticker.tgs");
+    let output = tgradish(&["convert", png.to_str().unwrap(), "-o", out.to_str().unwrap()]);
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // root writes anywhere
+    if output.status.success() {
+        return;
+    }
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let expected = format!("couldn't write {}: permission denied\n", out.display());
+    assert!(stderr.ends_with(&expected), "{stderr}");
+    assert!(!stderr.contains("Converting"), "{stderr}");
+}
+
+/// What is wrong with the command line, however it was found, exits 2,
+/// is said once before any input is read, and names the flag.
+#[test]
+fn refuses_mistakes_in_the_command_line_with_2() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a.png"), dir.path().join("b.png"));
+    square_png(&a, [255, 0, 0, 255]);
+    square_png(&b, [0, 255, 0, 255]);
+    let (a, b) = (a.to_str().unwrap(), b.to_str().unwrap());
+    let out = dir.path().join("out.webm");
+    let out = out.to_str().unwrap();
+    for (args, said) in [
+        (&["convert", a, b, "-o", out][..], "-o/--output names one result"),
+        (&["convert", a, "-o", "out.gif"], "out.gif doesn't end in .webm"),
+        (&["convert", a, "--crf", "30", "-f", "tgs"], "--crf can't be used for tgs output"),
+        (&["convert", a, "--keep-temp", "-f", "webp"], "--keep-temp is for WebM output"),
+        (&["convert", a, "--preset", "nope"], r#"--preset "nope" doesn't exist; available: "#),
+        (&["convert", a, "--options-json", "{"], "--options-json isn't a JSON object"),
+        (&["convert", a, "--options-json", r#"{"tempo":50}"#], r#""tempo" in --options-json must"#),
+        (&["convert", a, b, "--tempo", "50"], "must be from 0.1 to 10"),
+        (&["convert", a, b, "--fps", "0"], "must be more than 0 and at most 60"),
+        (&["convert", a, b, "-t", "0"], "must be more than 0 seconds"),
+        (&["convert", a, b, "-f", "tgs", "-s=-1"], "must be 0 or more seconds"),
+        (&["convert", a, "--attempts", "0"], "--attempts"),
+    ] {
+        let output = tgradish(args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(said), "{args:?}: {stderr}");
+        assert_eq!(stderr.matches("error:").count(), 1, "{args:?}: {stderr}");
+        assert!(!stderr.contains("Converting"), "{args:?}: {stderr}");
+    }
+    assert!(!Path::new(out).exists());
 }
 
 #[test]
@@ -169,6 +400,8 @@ fn converts_with_json_events() {
     assert_eq!(plan["title"], "from flag", "flags win over --options-json");
     let finished = events.last().unwrap();
     assert_eq!(finished["event"], "finished");
+    // every format's result names its input
+    assert!(finished["input"].is_string(), "{finished}");
     assert_eq!(finished["issues"], Value::Array(vec![]));
 
     let inspected = tgradish(&["--json", "inspect", out.to_str().unwrap()]);
@@ -195,7 +428,7 @@ fn stops_cleanly_when_stdout_closes() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["--ffmpeg-from", "system", "--json", "convert", input.to_str().unwrap(), "-o"])
         .arg(&out)
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .env("TMPDIR", &temp)
         .stdout(Stdio::piped())
         .spawn()
@@ -230,7 +463,7 @@ fn cancels_from_stdin() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["--json", "convert", input.to_str().unwrap(), "-o", out.to_str().unwrap()])
         .arg("--cancel-on-stdin")
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -268,7 +501,7 @@ fn leaves_stdin_alone() {
     let output = Command::new("sh")
         .args(["-c", script, env!("CARGO_BIN_EXE_tgradish")])
         .arg(dir.path().join("list"))
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .output()
         .unwrap();
     let finished = json_lines(&output).iter().filter(|e| e["event"] == "finished").count();
@@ -436,6 +669,11 @@ fn reports_results_on_stdout() {
             assert_eq!(stdout.lines().count(), 1, "{format}: {stdout}");
             let stderr = String::from_utf8_lossy(&output.stderr);
             assert!(!quiet || stderr.is_empty(), "{format}: {stderr}");
+            // every format starts alike, saying what goes where
+            let start = stderr.lines().next().unwrap_or_default();
+            let said = start.contains("Converting")
+                && start.contains(&format!("→ {}", dir.path().join(&line).display()));
+            assert!(quiet || said, "{format}: {stderr}");
         }
     }
 }
@@ -451,7 +689,8 @@ fn refuses_outputs_that_cant_hold_the_result() {
     std::fs::create_dir(&outdir).unwrap();
     let refused = |args: &[&str], why: &str| {
         let output = tgradish(args);
-        assert_eq!(output.status.code(), Some(1), "{args:?}");
+        // a mistake in the command line
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains(why), "{args:?}: {stderr}");
         assert!(!stderr.contains("Converting"), "{args:?}: {stderr}");
@@ -495,7 +734,7 @@ fn keeps_only_a_square_tgs_as_it_is() {
     let refused = convert("4x3+0+0");
     assert_eq!(refused.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&refused.stderr);
-    assert!(stderr.contains("contain keeps the shape of the part used, 4x3"), "{stderr}");
+    assert!(stderr.contains("contain keeps the shape of the part used, 4×3"), "{stderr}");
 }
 
 #[test]
@@ -527,6 +766,7 @@ fn makes_animated_stickers() {
         (Some("finished"), Some(false))
     );
     assert_eq!(finished["issues"], serde_json::json!([]));
+    assert_eq!(finished["input"], lines[0]["input"]);
 
     let inspected = tgradish(&["--json", "inspect", out.to_str().unwrap()]);
     let lines = json_lines(&inspected);
@@ -536,7 +776,7 @@ fn makes_animated_stickers() {
 
     // WebM flags don't mix with .tgs output, nor the reverse
     let mixed = tgradish(&["convert", a.to_str().unwrap(), "-o", "x.tgs", "--crf", "20"]);
-    assert_eq!(mixed.status.code(), Some(1));
+    assert_eq!(mixed.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&mixed.stderr).contains("--crf"));
 }
 
@@ -640,6 +880,18 @@ fn status_without_vp9_is_one_document() {
     let status: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(status["capabilities"]["libvpx-vp9"], false);
     assert_eq!(status["capabilities"]["version"], "ffmpeg version fake");
+    assert_eq!(status["from"], "flag");
+    // as text, lined up, with who chose it and a plain no
+    let text = tgradish(&["--ffmpeg", dir.path().to_str().unwrap(), "ffmpeg"]);
+    assert_eq!(text.status.code(), Some(1));
+    let ffmpeg = dir.path().join("ffmpeg");
+    let expected = format!(
+        "ffmpeg    {} (from --ffmpeg)\nffprobe   {}\nversion   fake\nlibvpx    no, can't make video \
+         stickers\n",
+        ffmpeg.display(),
+        dir.path().join("ffprobe").display()
+    );
+    assert_eq!(String::from_utf8_lossy(&text.stdout), expected);
 }
 
 /// Which ffmpeg is used: either flag, which can't be given together, over
@@ -675,9 +927,28 @@ fn ranks_where_ffmpeg_comes_from() {
     // the variable over the config file
     let (_, line) = status(Some(dir.path()), &[]);
     assert_eq!(used(&line), fake, "{line}");
-    // the config's path alone, which isn't there
+    assert_eq!(line["from"], "environment");
+    // the config's path alone, which isn't there, and says where it came
+    // from, as each place does
     let (code, line) = status(None, &[]);
     assert_eq!((code, line["event"].as_str()), (Some(1), Some("error")), "{line}");
+    let nowhere = dir.path().join("nowhere");
+    let said = format!(
+        "ffmpeg not found: {}, from {} [ffmpeg] path, doesn't exist: point it at ffmpeg or its \
+         folder",
+        nowhere.display(),
+        config.display()
+    );
+    assert_eq!(line["message"], said);
+    let (_, line) = status(Some(&nowhere), &[]);
+    let said = format!(
+        "ffmpeg not found: {}, from TGRADISH_FFMPEG, doesn't exist: unset it or point it at \
+         ffmpeg or its folder",
+        nowhere.display()
+    );
+    assert_eq!(line["message"], said);
+    let (_, line) = status(None, &["--ffmpeg", nowhere.to_str().unwrap()]);
+    assert!(line["message"].as_str().unwrap().contains(", from --ffmpeg, doesn't exist"), "{line}");
     if tgradish_corpus::ffmpeg_on_path() {
         // a flag over the variable
         let (code, line) = status(Some(dir.path()), &["--ffmpeg-from", "system"]);
@@ -710,7 +981,7 @@ fn watch_converts_new_files() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["--json", "watch", dir.path().to_str().unwrap(), "--interval", "0.2", "-r"])
         .args(["--output-dir", out.to_str().unwrap(), "--preset", "fast", "--length", "0.5"])
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
@@ -762,7 +1033,7 @@ impl Watching {
         let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
             .args(["--json", "watch", dir.to_str().unwrap(), "--interval", "0.1"])
             .args(args)
-            .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+            .env("TGRADISH_CONFIG", no_config())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -894,7 +1165,7 @@ fn watch_stops_as_done() {
     // and says so
     let child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["watch", dir.path().to_str().unwrap(), "--interval", "0.1"])
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
@@ -960,7 +1231,12 @@ fn makes_image_stickers() {
         "1",
     ]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let event: Value = serde_json::from_slice(&output.stdout).unwrap();
+    // started, as every format's conversion is, then finished
+    let events = json_lines(&output);
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["event"], "started");
+    assert_eq!(events[0]["output"].as_str(), out.to_str());
+    let event = &events[1];
     assert_eq!(event["event"], "finished");
     assert_eq!((event["width"].as_u64(), event["height"].as_u64()), (Some(512), Some(512)));
     assert_eq!(event["encoding"]["kind"], "lossless");
@@ -970,7 +1246,7 @@ fn makes_image_stickers() {
     for format in ["webp", "image"] {
         let output =
             tgradish(&["convert", input.to_str().unwrap(), "--format", format, "--crf", "30"]);
-        assert!(!output.status.success());
+        assert_eq!(output.status.code(), Some(2));
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("--crf can't be used for webp output"), "{stderr}");
     }
@@ -978,7 +1254,7 @@ fn makes_image_stickers() {
     let json = r#"{"crf":30,"spoof":"always"}"#;
     let output =
         tgradish(&["convert", input.to_str().unwrap(), "--format", "webp", "--options-json", json]);
-    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("\"crf\" in --options-json, \"spoof\" in --options-json"), "{stderr}");
 }
@@ -996,7 +1272,7 @@ fn names_files_whose_names_are_not_unicode() {
     let output = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["--json", "convert", "--format", "tgs"])
         .arg(&input)
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .output()
         .unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -1010,7 +1286,7 @@ fn names_files_whose_names_are_not_unicode() {
     let output = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["convert", "--format", "tgs", "-y"])
         .arg(&input)
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .output()
         .unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -1039,7 +1315,7 @@ fn names_files_whose_names_are_not_unicode() {
 fn with_presets(dir: &std::path::Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(args)
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .env("XDG_CONFIG_HOME", dir)
         .output()
         .unwrap()
@@ -1195,12 +1471,76 @@ fn spoofs_durations() {
     let output = tgradish(&["--json", "spoof", input, "-y"]);
     let lines = json_lines(&output);
     assert_eq!(lines.len(), 1);
+    assert_eq!(
+        (lines[0]["event"].as_str(), lines[0]["input"].as_str()),
+        (Some("finished"), Some(input))
+    );
     assert!(lines[0]["output"].as_str().unwrap().ends_with("square.spoofed.webm"));
     assert_eq!(lines[0]["report"]["old-duration"], 1.0);
+    assert_eq!(lines[0]["issues"], serde_json::json!([]));
     // a duration Telegram refuses is written, and refused
     let output = tgradish(&["spoof", input, "-y", "-d", "5"]);
     assert_eq!(output.status.code(), Some(3));
     assert!(String::from_utf8_lossy(&output.stderr).contains("Telegram will still refuse it"));
+    // saying why as JSON too
+    let output = tgradish(&["--json", "spoof", input, "-y", "-d", "5"]);
+    assert_eq!(output.status.code(), Some(3));
+    let issues = &json_lines(&output)[0]["issues"];
+    assert_eq!(
+        (issues[0]["kind"].as_str(), issues[0]["severity"].as_str()),
+        (Some("too-long"), Some("error"))
+    );
+    assert!(issues[0]["message"].is_string());
+}
+
+/// A config is read only by what uses it, and one named that isn't there
+/// is a mistake, not the defaults.
+#[test]
+fn reads_the_config_only_where_used() {
+    let dir = tempfile::tempdir().unwrap();
+    let broken = dir.path().join("config.toml");
+    std::fs::write(&broken, "presett = 'fast'\n").unwrap();
+    let broken = broken.to_str().unwrap();
+    let run = |args: &[&str], env: Option<&str>| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_tgradish"));
+        command.args(args).env_remove("TGRADISH_CONFIG");
+        if let Some(env) = env {
+            command.env("TGRADISH_CONFIG", env);
+        }
+        command.output().unwrap()
+    };
+    for args in [&["config", "path"][..], &["licenses"], &["preset", "path"]] {
+        let output = run(args, Some(broken));
+        assert!(output.status.success(), "{args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    }
+    let shown = run(&["config", "show"], Some(broken));
+    assert_eq!(shown.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&shown.stderr).contains("presett"));
+    // named and missing
+    let missing = dir.path().join("missing.toml");
+    let missing = missing.to_str().unwrap();
+    let flag = run(&["--config", missing, "config", "show"], None);
+    assert_eq!(flag.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&flag.stderr);
+    assert_eq!(stderr.trim_end(), format!("error: --config {missing} doesn't exist"));
+    let env = run(&["describe"], Some(missing));
+    let stderr = String::from_utf8_lossy(&env.stderr);
+    assert_eq!(stderr.trim_end(), format!("error: {missing}, from TGRADISH_CONFIG, doesn't exist"));
+    // the flag beats the variable
+    let flag_wins = run(&["--config", no_config().to_str().unwrap(), "describe"], Some(missing));
+    assert!(flag_wins.status.success());
+    // a preset the config names that isn't there says it was the config's
+    let config = dir.path().join("nope.toml");
+    std::fs::write(&config, "tgs-preset = 'nope'\n").unwrap();
+    let png = dir.path().join("a.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let output = run(&["convert", png.to_str().unwrap(), "-f", "tgs"], config.to_str());
+    assert_eq!(output.status.code(), Some(1));
+    let expected = format!(
+        "the config's tgs-preset \"nope\" doesn't exist ({}: tgs-preset); available: ",
+        config.display()
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains(&expected));
 }
 
 #[test]
@@ -1222,11 +1562,27 @@ fn shows_presets_and_the_config() {
     let text = console::strip_ansi_codes(&String::from_utf8_lossy(&listed.stdout)).into_owned();
     assert!(text.contains("fast  ") && text.contains("built-in"), "{text}");
 
-    // no config file: the defaults, which say so
+    // an empty config: the defaults, the presets used among them
     let shown = tgradish(&["config", "show"]);
     assert!(shown.status.success());
-    assert!(String::from_utf8_lossy(&shown.stderr).contains("no config file"));
     let defaults: toml::Table = toml::from_str(&String::from_utf8(shown.stdout).unwrap()).unwrap();
+    assert_eq!(defaults["preset"].as_str(), Some("balanced"));
+    assert_eq!(defaults["tgs-preset"].as_str(), Some("best"));
+    assert_eq!(json_lines(&tgradish(&["--json", "config", "show"]))[0]["preset"], "balanced");
+    // and no file at all, which it says
+    #[cfg(target_os = "linux")]
+    {
+        let home = tempfile::tempdir().unwrap();
+        let shown = Command::new(env!("CARGO_BIN_EXE_tgradish"))
+            .args(["config", "show"])
+            .env_remove("TGRADISH_CONFIG")
+            .env("XDG_CONFIG_HOME", home.path())
+            .output()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&shown.stderr).contains("no config file"));
+        let read: toml::Table = toml::from_str(&String::from_utf8(shown.stdout).unwrap()).unwrap();
+        assert_eq!(read, defaults);
+    }
     // and one that says something
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join("config.toml");
@@ -1238,6 +1594,18 @@ fn shows_presets_and_the_config() {
     assert_ne!(read, defaults);
     let json = json_lines(&tgradish(&["--json", "--config", config, "config", "show"]));
     assert_eq!(json[0]["preset"], "fast");
+    // an example to start one from, which reads as one
+    let example = tgradish(&["config", "example"]);
+    assert!(example.status.success());
+    let example = String::from_utf8(example.stdout).unwrap();
+    assert!(example.contains("# preset used when none is given"), "{example}");
+    let written = dir.path().join("example.toml");
+    std::fs::write(&written, &example).unwrap();
+    let shown = tgradish(&["--config", written.to_str().unwrap(), "--json", "config", "show"]);
+    assert!(shown.status.success(), "{}", String::from_utf8_lossy(&shown.stderr));
+    assert!(json_lines(&shown)[0]["ffmpeg"]["path"].is_null());
+    let help = String::from_utf8(tgradish(&["config", "--help"]).stdout).unwrap();
+    assert!(help.contains("tgradish config example > "), "{help}");
     let path = json_lines(&tgradish(&["--json", "--config", config, "config", "path"]));
     assert_eq!((path[0]["path"].as_str(), path[0]["exists"].as_bool()), (Some(config), Some(true)));
 }
@@ -1255,7 +1623,7 @@ fn cancels_text_conversions_with_130() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
         .args(["--ffmpeg-from", "system", "convert", input.to_str().unwrap()])
         .args(["-o", out.to_str().unwrap()])
-        .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+        .env("TGRADISH_CONFIG", no_config())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
@@ -1285,7 +1653,7 @@ fn exits_as_stdout_closed_when_only_the_error_finds_it() {
         drop(reader);
         let status = Command::new(env!("CARGO_BIN_EXE_tgradish"))
             .args(args)
-            .env("TGRADISH_CONFIG", "/nonexistent/tgradish-config.toml")
+            .env("TGRADISH_CONFIG", no_config())
             .stdout(writer)
             .stderr(std::process::Stdio::null())
             .status()

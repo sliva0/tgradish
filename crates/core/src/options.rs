@@ -211,7 +211,7 @@ impl Crop {
         if self.fits(width, height) {
             Ok(())
         } else {
-            let reason = format!("{self} is not within the {width}x{height} input");
+            let reason = format!("{self} is not within the {width}×{height} input");
             Err(crate::Error::invalid("crop", reason))
         }
     }
@@ -534,11 +534,96 @@ pub fn flags(options: &impl Serialize) -> Vec<String> {
 /// The slowest and fastest tempos, for WebM and .tgs alike.
 pub const TEMPOS: std::ops::RangeInclusive<f64> = tgradish_tgs::normalise::TEMPOS;
 
+/// The numeric options [`check`] holds to what [`wrong_value`] says.
+const CHECKED: [&str; 8] =
+    ["start", "length", "tempo", "fps", "bitrate", "crf", "attempts", "fake-duration"];
+
+/// Why `value` can't be the option `key`'s whatever the input is, as
+/// "must be from 0.1 to 10", or `None` when it can be, or `key` is no
+/// number [`check`] knows: what a front-end checks a value by as it is
+/// typed, in the words conversions would refuse it in.
+pub fn wrong_value(key: &str, value: f64) -> Option<String> {
+    let max_seconds = crate::telegram::MAX_SECONDS;
+    let max_fps = crate::telegram::MAX_FPS;
+    let ok = match key {
+        "start" => value >= 0.0 && value.is_finite(),
+        "length" => value > 0.0 && value.is_finite(),
+        "tempo" => TEMPOS.contains(&value),
+        "fps" => value > 0.0 && value <= max_fps,
+        "bitrate" => value >= 1.0 && value.is_finite(),
+        "crf" => value >= f64::from(*CRFS.start()) && value <= f64::from(*CRFS.end()),
+        "attempts" => value >= 1.0 && value <= f64::from(crate::webm::MAX_ATTEMPTS),
+        "fake-duration" => value > 0.0 && value <= max_seconds,
+        _ => true,
+    };
+    if ok {
+        return None;
+    }
+    Some(match key {
+        "start" => "must be 0 or more seconds".into(),
+        "length" => "must be more than 0 seconds".into(),
+        "tempo" => format!("must be from {} to {}", TEMPOS.start(), TEMPOS.end()),
+        "fps" => format!("must be more than 0 and at most {max_fps}"),
+        "bitrate" => "must be at least 1 kbit/s".into(),
+        "crf" => format!("must be from {} to {}", CRFS.start(), CRFS.end()),
+        "attempts" => format!("must be from 1 to {}", crate::webm::MAX_ATTEMPTS),
+        _ => format!("must be more than 0 and at most {max_seconds} seconds"),
+    })
+}
+
+/// Checks the values `options` sets that are wrong whatever the input:
+/// numbers out of their range, as [`wrong_value`] says, and a fit range
+/// that isn't finite or runs backwards. What depends on the input, as a
+/// start past its end, is checked as it is converted.
+pub fn check(options: &impl Serialize) -> crate::Result<()> {
+    let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(options) else {
+        return Ok(());
+    };
+    for key in CHECKED {
+        let value = fields.get(key).and_then(serde_json::Value::as_f64);
+        if let Some(reason) = value.and_then(|value| wrong_value(key, value)) {
+            return Err(crate::Error::invalid(key, reason));
+        }
+    }
+    let range = fields.get("fit-range").and_then(|range| Range::deserialize(range).ok());
+    if let Some(range) = range {
+        if !(range.min.is_finite() && range.max.is_finite()) {
+            return Err(crate::Error::invalid("fit-range", format!("{range} must be finite")));
+        }
+        if range.min > range.max {
+            let reason = format!("{range} must have MIN <= MAX");
+            return Err(crate::Error::invalid("fit-range", reason));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::telegram::Target;
     use crate::webm::Options;
+
+    #[test]
+    fn checks_values_whatever_the_input() {
+        let invalid = |checked: crate::Result<()>| match checked {
+            Err(crate::Error::InvalidOption { option, reason }) => format!("{option} {reason}"),
+            other => panic!("{other:?}"),
+        };
+        let webm = Options { tempo: Some(50.0), ..Default::default() };
+        assert_eq!(invalid(check(&webm)), "tempo must be from 0.1 to 10");
+        let tgs = crate::tgs::Options { fps: Some(0.0), ..Default::default() };
+        assert_eq!(invalid(check(&tgs)), "fps must be more than 0 and at most 60");
+        let range = Options { fit_range: Some(Range { min: 4.0, max: 1.0 }), ..Default::default() };
+        assert_eq!(invalid(check(&range)), "fit-range 4..1 must have MIN <= MAX");
+        let length = Options { length: Some(0.0), ..Default::default() };
+        assert_eq!(invalid(check(&length)), "length must be more than 0 seconds");
+        let fine =
+            Options { start: Some(0.0), crf: Some(63), attempts: Some(1), ..Default::default() };
+        assert!(check(&fine).is_ok());
+        assert_eq!(wrong_value("start", f64::NAN).unwrap(), "must be 0 or more seconds");
+        assert!(wrong_value("title", -1.0).is_none());
+    }
 
     #[test]
     fn flags_print_numbers_plainly() {

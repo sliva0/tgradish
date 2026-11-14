@@ -13,6 +13,24 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, FileAction, Result};
 use crate::ffmpeg::FfmpegChoice;
 
+/// A config file setting everything there is to set, each explained, as
+/// these docs show it.
+pub const EXAMPLE: &str = include_str!("config.example.toml");
+
+/// [`EXAMPLE`] to start a config file from: what only the machine it was
+/// written on has, as a path to ffmpeg or a folder for results, left
+/// there as comments, and the rest as it is.
+pub fn starting_example() -> String {
+    let machines_own = ["path = ", "output-dir = "];
+    EXAMPLE
+        .lines()
+        .map(|line| match machines_own.iter().any(|key| line.starts_with(key)) {
+            true => format!("# {line}\n"),
+            false => format!("{line}\n"),
+        })
+        .collect()
+}
+
 /// The user's settings, from `config.toml` ([`Config::default_path`]).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
@@ -97,6 +115,15 @@ mod tests {
         let presets = crate::presets::Presets::builtin();
         assert!(presets.webm(example.preset.as_deref().unwrap()).is_ok());
         assert!(presets.tgs(example.tgs_preset.as_deref().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn starts_from_the_example_without_another_machines_paths() {
+        let example: Config = toml::from_str(&starting_example()).unwrap();
+        assert_eq!(example.ffmpeg.path, None);
+        assert!(!example.gui.contains_key("output-dir"));
+        assert_eq!(example.preset.as_deref(), Some("balanced"));
+        assert!(starting_example().contains("# path = "));
     }
 
     #[test]

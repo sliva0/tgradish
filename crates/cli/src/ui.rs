@@ -38,12 +38,16 @@ pub fn dim(text: impl std::fmt::Display) -> String {
     style(text).dim().to_string()
 }
 
-/// What `tgradish` alone prints: a note on the window above the help.
-pub fn introduce() {
+/// What `tgradish` alone prints: a note on the window above the help,
+/// which goes to stdout unless `to_stderr`, as where it stands in for the
+/// window, which couldn't open.
+pub fn introduce(to_stderr: bool) {
     use clap::CommandFactory;
     let window = cfg!(feature = "gui");
     if window {
-        let line = "─".repeat(66);
+        // as wide as the note, or the terminal where that is narrower
+        let width = console::Term::stderr().size_checked().map_or(66, |(_, columns)| columns);
+        let line = "─".repeat(usize::from(width).min(66));
         eprintln!("{}", style(&line).cyan());
         eprintln!(
             "  {} {} {}",
@@ -58,7 +62,28 @@ pub fn introduce() {
         eprintln!("{}", style(&line).cyan());
         eprintln!();
     }
-    let _ = crate::args::Cli::command().print_help();
+    if to_stderr {
+        let help = crate::args::Cli::command().render_help();
+        if console::colors_enabled_stderr() {
+            eprint!("{}", help.ansi());
+        } else {
+            eprint!("{help}");
+        }
+    } else {
+        let _ = crate::args::Cli::command().print_help();
+    }
+}
+
+/// `message` about the file at `path`, put after its name, linked: once,
+/// where the message starts with the name already, as "nope.mp4: no such
+/// file" and "a.gif isn't a WebM file" do.
+pub fn about(path: &std::path::Path, message: &str) -> String {
+    let name = path.display().to_string();
+    let link = crate::term::link(&name, path);
+    match message.strip_prefix(&name) {
+        Some(rest) if rest.starts_with([' ', ':']) => format!("{link}{rest}"),
+        _ => format!("{link}: {message}"),
+    }
 }
 
 pub fn error_label() -> console::StyledObject<&'static str> {
