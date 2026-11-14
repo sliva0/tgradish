@@ -16,6 +16,8 @@ exclude = ["/readme-art"]
 
 [dependencies]
 tgradish-core = { workspace = true, features = ["clipboard"] }
+# a result copied as a file, for pasting into Telegram; core pastes with it
+arboard.workspace = true
 
 eframe.workspace = true
 i18n-embed.workspace = true

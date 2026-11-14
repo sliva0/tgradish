@@ -44,8 +44,16 @@ impl App {
         let queued = self.queue.iter().position(|&other| other == id);
         let presets_kept = self.presets_dir.is_some();
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
+        // the result made, there still, which can be copied as a file, and
+        // whether it is where the next goes, made as it would be made now
+        let made = item.made.as_ref().and_then(|made| match &made.job.status {
+            Status::Done(done) => Some(done.output.clone()).filter(|output| output.exists()),
+            _ => None,
+        });
+        let saved = item.result_is_current() && made.is_some() && made == output;
         let mut convert = false;
         let mut replace = None;
+        let mut copy = None;
         // the room goes to the progress, and the column beside the preview
         // already names the file
         let converting = item.job.as_ref().is_some_and(|conversion| conversion.job.is_running());
@@ -53,10 +61,9 @@ impl App {
         // as it needs, but where something is said on its left, no more
         // than its share
         let fallbacks = &self.fallbacks;
-        let right = output
-            .as_ref()
-            .filter(|_| !converting)
-            .map(|output| Right::of(ui, fallbacks, output, replaces.as_deref()));
+        let right = output.as_ref().filter(|_| !converting).map(|output| {
+            Right::of(ui, fallbacks, (output, made.clone(), saved), replaces.as_deref())
+        });
         let gap = ui.spacing().item_spacing.x;
         let bar = ui.available_width();
         let keep = right.as_ref().map_or(0.0, |right| right.width.min(bar * RIGHT) + gap);
@@ -95,8 +102,9 @@ impl App {
                 }
                 None => {
                     let current = item.result_is_current();
-                    let text =
-                        if item.made.is_some() { fl!("convert-again") } else { fl!("convert") };
+                    // again only where there is a result of this format
+                    let again = item.made.as_ref().is_some_and(|made| made.format == item.format);
+                    let text = if again { fl!("convert-again") } else { fl!("convert") };
                     let button = egui::Button::new(widgets::medium(ui, text, 15.0))
                         .min_size(vec2(140.0, 32.0))
                         .shortcut_text(fl!("convert-keys"));
@@ -168,10 +176,15 @@ impl App {
             }
             if let Some(right) = right {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    right.show(ui, fallbacks);
+                    copy = right.show(ui, fallbacks);
                 });
             }
         });
+        if let Some(path) = copy {
+            let now = ui.input(|input| input.time);
+            let copied = self.clipboard.copy_file(&path);
+            ui.data_mut(|data| data.insert_temp(egui::Id::new(COPIED), (now, copied)));
+        }
         let shortcut = !self.dialog_open()
             && ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::Enter));
         // the user lets this item replace the file that is there now
@@ -187,10 +200,18 @@ impl App {
     }
 }
 
-/// The right of the bar: where the result goes, its name, and the button
-/// that shows its folder, laid out as they would be drawn whole.
+/// What copying the result last did, and when, kept under this name.
+const COPIED: &str = "result copied";
+/// How long what copying did is said on its button.
+const COPIED_SHOWN: f64 = 2.0;
+
+/// The right of the bar: where the result goes, its name, and the buttons
+/// that copy the result made and show its folder, laid out as they would be
+/// drawn whole.
 struct Right<'a> {
     output: &'a std::path::Path,
+    /// The result made, which can be copied.
+    made: Option<std::path::PathBuf>,
     name: egui::text::LayoutJob,
     /// Characters of the name no font has.
     missing: Vec<char>,
@@ -204,7 +225,7 @@ impl<'a> Right<'a> {
     fn of(
         ui: &egui::Ui,
         fallbacks: &crate::fallback::Fallbacks,
-        output: &'a std::path::Path,
+        (output, made, saved): (&'a std::path::Path, Option<std::path::PathBuf>, bool),
         replaces: Option<&str>,
     ) -> Right<'a> {
         let name = output.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -213,7 +234,13 @@ impl<'a> Right<'a> {
         let (name, missing) = drawable(ui, fallbacks, &name, strong);
         let weak = text_format(ui, ui.visuals().weak_text_color());
         let folder = format!("{folder}{}", std::path::MAIN_SEPARATOR);
-        let saves = drawable(ui, fallbacks, &fl!("saves-to", folder = folder), weak).0;
+        // made there, as it would be made now, or to be
+        let saves = if saved {
+            fl!("result-saved-to", folder = folder)
+        } else {
+            fl!("saves-to", folder = folder)
+        };
+        let saves = drawable(ui, fallbacks, &saves, weak).0;
         let replaces = replaces.map(|replaces| format!("⚠ {replaces}"));
         let gap = ui.spacing().item_spacing.x;
         let measure = |job: &egui::text::LayoutJob| ui.painter().layout_job(job.clone()).size().x;
@@ -222,16 +249,23 @@ impl<'a> Right<'a> {
         if output.exists() {
             width += gap + widgets::text_width(ui, &fl!("show-in-folder"), padding);
         }
+        if made.is_some() {
+            width += gap + widgets::text_width(ui, &fl!("copy-result"), padding);
+        }
         if let Some(replaces) = &replaces {
             width += gap + widgets::text_width(ui, replaces, 0.0);
         }
-        Right { output, name, missing, saves, replaces, width }
+        Right { output, made, name, missing, saves, replaces, width }
     }
 
     /// Draws it, from the right, its words cut short where it has less
-    /// room than it would take.
-    fn show(self, ui: &mut egui::Ui, fallbacks: &crate::fallback::Fallbacks) {
-        let Right { output, name, missing, saves, replaces, .. } = self;
+    /// room than it would take. Gives the result to copy, once asked.
+    fn show(
+        self,
+        ui: &mut egui::Ui,
+        fallbacks: &crate::fallback::Fallbacks,
+    ) -> Option<std::path::PathBuf> {
+        let Right { output, made, name, missing, saves, replaces, .. } = self;
         // the button's short name where the long one leaves the name no
         // room, as in narrow windows or long words
         let named = ui.painter().layout_job(name.clone()).size().x;
@@ -241,6 +275,33 @@ impl<'a> Right<'a> {
         let text = if fits { full } else { fl!("show-folder", "short") };
         if output.exists() && ui.button(text).clicked() {
             system::reveal(output);
+        }
+        let mut copy = None;
+        if let Some(made) = made {
+            // what copying did, said on the button a moment
+            let now = ui.input(|input| input.time);
+            let copied: Option<(f64, Result<(), String>)> =
+                ui.data(|data| data.get_temp(egui::Id::new(COPIED)));
+            let (text, hint) = match copied.filter(|(when, _)| now - when < COPIED_SHOWN) {
+                Some((when, Ok(()))) => {
+                    ui.ctx().request_repaint_after_secs((COPIED_SHOWN - (now - when)) as f32);
+                    (format!("✔ {}", fl!("copy-result", "done")), fl!("copy-result", "hint"))
+                }
+                Some((when, Err(why))) => {
+                    ui.ctx().request_repaint_after_secs((COPIED_SHOWN - (now - when)) as f32);
+                    (fl!("copy-result", "failed"), why)
+                }
+                None => (fl!("copy-result"), fl!("copy-result", "hint")),
+            };
+            // as wide whatever it says, so nothing beside it moves
+            let widest = [fl!("copy-result"), format!("✔ {}", fl!("copy-result", "done"))]
+                .iter()
+                .map(|text| widgets::text_width(ui, text, 2.0 * ui.spacing().button_padding.x))
+                .fold(0.0, f32::max);
+            let button = egui::Button::new(text).min_size(vec2(widest, 0.0));
+            if ui.add(button).on_hover_text(hint).clicked() {
+                copy = Some(made);
+            }
         }
         if let Some(replaces) = replaces {
             let room = ui.available_width() / 2.0;
@@ -259,6 +320,7 @@ impl<'a> Right<'a> {
             }
         });
         ui.add(egui::Label::new(saves).truncate()).on_hover_text(fl!("saves-to", "hint"));
+        copy
     }
 }
 
@@ -266,7 +328,7 @@ impl<'a> Right<'a> {
 mod tests {
     use crate::config::Config;
     use egui_kittest::Harness;
-    use egui_kittest::kittest::Queryable;
+    use egui_kittest::kittest::{NodeT, Queryable};
     use tgradish_core::ffmpeg::FfmpegChoice;
 
     use super::*;
@@ -367,6 +429,38 @@ mod tests {
         assert!(matches!(failed, Some(Status::Cancelled)), "{failed:?}");
         assert!(item.made.is_none());
         harness.get_by_label("Stopped");
+    }
+
+    #[test]
+    fn says_where_a_result_is_saved_and_copies_it() {
+        use tgradish_core::presets::Format;
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = with_art(dir.path(), 1);
+        let folder = format!("{}{}", dir.path().join("out").display(), std::path::MAIN_SEPARATOR);
+        harness.get_by_label(&fl!("saves-to", folder = folder.as_str()));
+        assert!(harness.query_by_label(&fl!("copy-result")).is_none());
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        harness.get_by_label(&fl!("result-saved-to", folder = folder.as_str()));
+        harness.get_by_label(&fl!("copy-result")).click();
+        harness.run_steps(2);
+        let output = made_job(&harness.state().items[0]).output.clone();
+        assert!(crate::system::COPIED.lock().unwrap().contains(&output));
+        harness.get_by_label(&format!("✔ {}", fl!("copy-result", "done")));
+        // another format: none made of it yet, to be saved, and made first
+        harness.state_mut().items[0].format = Format::Webp;
+        harness.run_steps(2);
+        harness.get_by_label(&fl!("saves-to", folder = folder.as_str()));
+        let keys = fl!("convert-keys");
+        let button = harness.get(egui_kittest::kittest::by().label_contains(&keys));
+        let label = button.accesskit_node().label().unwrap_or_default();
+        assert!(
+            label.starts_with(&fl!("convert")) && !label.contains(&fl!("convert-again")),
+            "{label}"
+        );
+        // the one made still there to copy
+        harness.get_by_label(&format!("✔ {}", fl!("copy-result", "done")));
     }
 
     #[test]

@@ -101,6 +101,8 @@ pub(crate) struct App {
     pub(crate) banner: Banner,
     /// Files removed a moment ago, which may be put back.
     pub(crate) removed: Option<Removed>,
+    /// The clipboard results are copied to, as files.
+    pub(crate) clipboard: system::Clipboard,
     /// What Ctrl+V has done so far.
     pub(crate) paste_key: crate::keys::PasteKey,
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -269,6 +271,7 @@ impl App {
             fallbacks: fallback::Fallbacks::new(fonts()),
             banner: Banner::default(),
             removed: None,
+            clipboard: system::Clipboard::default(),
             paste_key: crate::keys::PasteKey::default(),
             #[cfg(all(unix, not(target_os = "macos")))]
             drops: None,

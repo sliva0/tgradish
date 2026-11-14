@@ -235,6 +235,14 @@ show-in-folder = Show in folder
 # Before the folder a file's result goes to.
 saves-to = Saves to { $folder }
     .hint = Where results go is set in "{ settings }"
+# Before the folder of a result made as the settings are now.
+result-saved-to = Saved to { $folder }
+# Beside Show in folder, once there is a result: copies it as a file, to
+# paste into Telegram's chat.
+copy-result = Copy
+    .hint = Copy the sticker as a file, to paste into a chat in Telegram
+    .done = Copied
+    .failed = Not copied
 # Beside the name of the result to be made, where a file is there that
 # converting will replace: one tgradish made at another time, or with the
 # setting to replace any, another file.

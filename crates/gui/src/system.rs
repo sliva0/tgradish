@@ -299,6 +299,39 @@ fn windows_takes_tg() -> bool {
 }
 
 /// Web addresses tests asked to open, rather than opening them.
+/// The clipboard, kept while the window is open: on Linux what is copied
+/// is there only while the program that copied it holds it.
+#[derive(Default)]
+pub(crate) struct Clipboard(Option<arboard::Clipboard>);
+
+impl Clipboard {
+    /// Puts the file at `path` on the clipboard as a file, as a file
+    /// manager copies one, for pasting into Telegram or a folder: a list of
+    /// its URI on Linux, a drop of it on Windows, its URL on macOS.
+    pub(crate) fn copy_file(&mut self, path: &Path) -> Result<(), String> {
+        let path = std::path::absolute(path).map_err(|err| err.to_string())?;
+        #[cfg(test)]
+        {
+            let _ = &mut self.0;
+            COPIED.lock().unwrap().push(path);
+            Ok(())
+        }
+        #[cfg(not(test))]
+        {
+            let clipboard = match &mut self.0 {
+                Some(clipboard) => clipboard,
+                None => self.0.insert(arboard::Clipboard::new().map_err(|err| err.to_string())?),
+            };
+            clipboard.set().file_list(&[path]).map_err(|err| err.to_string())
+        }
+    }
+}
+
+/// The files the tests' windows copied.
+#[cfg(test)]
+pub(crate) static COPIED: std::sync::Mutex<Vec<std::path::PathBuf>> =
+    std::sync::Mutex::new(Vec::new());
+
 #[cfg(test)]
 pub(crate) static BROWSED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
