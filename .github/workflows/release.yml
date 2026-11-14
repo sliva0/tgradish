@@ -268,6 +268,10 @@ jobs:
           bin=$(echo "$PWD"/tgradish-*/tgradish)
           "$bin" --version
           "$bin" ffmpeg status
+          # the man pages and completions, which packaging leaves out of a
+          # musl archive where it can't run the build: a release's has them
+          test -f "${bin%/tgradish}/man/tgradish.1.gz"
+          test -f "${bin%/tgradish}/completions/tgradish.nu"
           # a 16 x 16 PNG: a red square in a transparent border
           echo iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGF7gjobGf2LwqAGjBtDWgKEJAGe22M1pQ+POAAAAAElFTkSuQmCC | base64 -d > input.png
           "$bin" convert input.png -o still.webm --length 1 --preset fast
