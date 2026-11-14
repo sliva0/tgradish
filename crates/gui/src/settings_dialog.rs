@@ -986,12 +986,51 @@ mod tests {
         assert!(centred(&harness) && harness.state().settings_dialog.returning.is_none());
     }
 
+    /// How far `label`'s button is out of what shows of the settings, in
+    /// points: below it, or above it where less than nothing, and nothing
+    /// where it shows, to a pixel. Scrolled out of sight, a click there
+    /// goes to whatever is drawn there instead.
+    fn out_of_sight(screen: &crate::testing::Screen, label: &str) -> f32 {
+        let dialog = &screen.harness.state().settings_dialog;
+        let top = dialog.drawn.0.top() + dialog.scrolled.top;
+        let button = screen.harness.get_by_label(label).rect();
+        let below = button.bottom() - (top + dialog.scrolled.shown);
+        let above = button.top() - top;
+        let pixel = 1.0 / screen.harness.ctx.pixels_per_point();
+        if below > pixel {
+            below
+        } else if above < -pixel {
+            above
+        } else {
+            0.0
+        }
+    }
+
     /// Settings open at `scale` on a screen `size` pixels large, the
-    /// pointer moved onto `label`'s button and kept there.
+    /// pointer moved onto `label`'s button and kept there. Where the button
+    /// is out of sight at first, as below the settings that show in a
+    /// window they hardly fit, they are scrolled with the wheel, as by
+    /// hand, just as far as it shows.
     fn on_the_scale(scale: f64, size: [f32; 2], label: &str) -> crate::testing::Screen {
         let mut config = Config::default();
         config.gui.scale = scale;
         let mut screen = crate::testing::Screen::new(config, size, true);
+        for _ in 0..10 {
+            let out = out_of_sight(&screen, label);
+            if out == 0.0 {
+                break;
+            }
+            // the wheel turned over the middle of the settings
+            let dialog = &screen.harness.state().settings_dialog;
+            let middle = dialog.drawn.0.center_top()
+                + egui::vec2(0.0, dialog.scrolled.top + dialog.scrolled.shown / 2.0);
+            screen.move_to(middle * screen.harness.ctx.zoom_factor());
+            let (unit, phase) = (egui::MouseWheelUnit::Point, egui::TouchPhase::Move);
+            let (delta, modifiers) = (egui::vec2(0.0, -out), egui::Modifiers::NONE);
+            screen.frame(vec![egui::Event::MouseWheel { unit, delta, phase, modifiers }]);
+            screen.frames(16);
+        }
+        assert_eq!(out_of_sight(&screen, label), 0.0, "{label} at {scale}");
         let pixels = screen.pixels(label);
         screen.move_to(pixels);
         assert!(screen.on(label));
