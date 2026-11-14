@@ -33,8 +33,16 @@ use crate::{dnd, toplevel_icon};
 
 /// How many items keep their big frames: the selected one and the last few.
 const FRAMES_HELD: usize = 3;
-/// How wide the list of files starts.
+/// How wide the list of files starts, and the least it narrows to.
 const FILES_WIDTH: f32 = 410.0;
+pub(crate) const NARROWEST_LIST: f32 = 260.0;
+/// The share of the height beside the list the preview starts with.
+pub(crate) const PREVIEW_SHARE: f32 = 0.56;
+
+/// Where the session is kept, if anywhere.
+pub(crate) fn session_path() -> Option<PathBuf> {
+    paths::state_dir().map(|dir| dir.join("session.json"))
+}
 
 pub(crate) struct App {
     pub(crate) config_path: Option<PathBuf>,
@@ -122,6 +130,9 @@ pub(crate) struct App {
     pub(crate) hovering: bool,
     /// Share of the main panel's height the preview takes.
     pub(crate) preview_share: f32,
+    /// How the window is laid out, kept in the session: as it was last
+    /// time until it is drawn.
+    pub(crate) window: Option<session::Window>,
     /// The system's accent colour, as it changes.
     pub(crate) accent: Option<accent::Accent>,
     /// The accent the window's look was made with last: the one chosen, or
@@ -141,8 +152,8 @@ impl App {
         let mut app = App::with(config, config_path, Presets::builtin());
         app.ffmpeg_override = (launch.ffmpeg_choice, launch.ffmpeg_path);
         app.start(unreadable, tgradish_core::presets::user_dir());
-        if let Some(dir) = paths::state_dir() {
-            app.reopen(dir.join("session.json"));
+        if let Some(path) = session_path() {
+            app.reopen(path);
         }
         app
     }
@@ -163,6 +174,11 @@ impl App {
     /// none.
     pub(crate) fn reopen(&mut self, path: PathBuf) {
         let Some(mut store) = session::Store::open(path) else { return };
+        // laid out as last time, whether or not its files are opened again
+        if let Some(window) = session::window(store.path()) {
+            self.preview_share = window.preview;
+            self.window = Some(window);
+        }
         // with the setting off, the first save empties what is there
         if self.config.gui.reopen_files {
             let loaded = match store.read() {
@@ -237,6 +253,7 @@ impl App {
             &[]
         };
         let session = session::Session::of(items, self.selected, &self.written);
+        let session = session.with_window(self.window);
         if let Err(err) = store.save(&session) {
             let message = Message::warning(fl!("session-unsaved"));
             let message = message.file(store.path()).detail(err.to_string());
@@ -288,7 +305,8 @@ impl App {
             #[cfg(all(unix, not(target_os = "macos")))]
             _toplevel_icon: None,
             hovering: false,
-            preview_share: 0.56,
+            preview_share: PREVIEW_SHARE,
+            window: None,
             accent: None,
             applied_accent: None,
         }
@@ -337,6 +355,41 @@ impl App {
             ]
             .into();
         });
+    }
+
+    /// Keeps how the window is laid out, for the session: its size and
+    /// place while it is neither maximised nor full screen, and the width
+    /// of the list, `list`, where it isn't narrowed by a small window.
+    fn follow_window(&mut self, ctx: &egui::Context, list: Option<f32>) {
+        let zoom = ctx.zoom_factor();
+        let (inner, outer, maximized, other) = ctx.input(|input| {
+            let viewport = input.viewport();
+            let other = viewport.minimized == Some(true) || viewport.fullscreen == Some(true);
+            (viewport.inner_rect, viewport.outer_rect, viewport.maximized == Some(true), other)
+        });
+        let window = self.window.get_or_insert(session::Window {
+            size: [1280.0, 820.0],
+            position: None,
+            maximized: false,
+            list: FILES_WIDTH,
+            preview: PREVIEW_SHARE,
+        });
+        // in the system's points, whole, so it stays the same as the
+        // window does
+        let whole = |value: egui::Vec2| [(value.x * zoom).round(), (value.y * zoom).round()];
+        if !maximized && !other {
+            if let Some(inner) = inner {
+                window.size = whole(inner.size());
+            }
+            window.position = outer.map(|outer| whole(outer.min.to_vec2()));
+        }
+        if !other {
+            window.maximized = maximized;
+        }
+        if let Some(list) = list {
+            window.list = list.round();
+        }
+        window.preview = self.preview_share;
     }
 
     /// Makes the window's look again when the accent chosen, or the
@@ -760,14 +813,21 @@ impl eframe::App for App {
         let widest = (window * 0.5).min(window - crate::preview::NARROWEST_MAIN).max(260.0);
         // apart from the width it has in a small window, or that would stay
         // once the window grows again
-        let id = if widest < FILES_WIDTH { "files-small" } else { "files" };
-        egui::Panel::left(id)
+        let small = widest < FILES_WIDTH;
+        let id = if small { "files-small" } else { "files" };
+        // as wide as last time
+        let width = match self.window {
+            Some(window) if !small => window.list,
+            _ => FILES_WIDTH,
+        };
+        let list = egui::Panel::left(id)
             .resizable(true)
-            .default_size(FILES_WIDTH)
-            .size_range(260.0..=widest)
+            .default_size(width)
+            .size_range(NARROWEST_LIST..=widest)
             .show(ui, |ui| {
                 self.files_panel(ui);
             });
+        self.follow_window(&ctx, (!small).then(|| list.response.rect.width()));
         egui::CentralPanel::default().show(ui, |ui| self.main_panel(ui));
         let ffmpeg_given = self.ffmpeg_override != (None, None);
         settings_dialog::show(
@@ -1165,6 +1225,51 @@ mod tests {
         assert!(harness.state().banner.rows.is_empty());
         assert!(std::fs::read_to_string(&state).unwrap().contains(r#""items":[]"#));
         assert!(std::fs::read_to_string(&aside).unwrap().contains("a later tgradish"));
+    }
+
+    #[test]
+    fn lays_the_window_out_as_last_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state").join("session.json");
+        let mut first = harness(Config::default());
+        first.state_mut().reopen(state.clone());
+        first.state_mut().preview_share = 0.4;
+        first.run_steps(2);
+        // the list made wider, by its edge
+        let edge = first.state().window.unwrap().list;
+        let drag = |pos| egui::Event::PointerMoved(pos);
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let (from, to) = (egui::pos2(edge, 300.0), egui::pos2(edge + 60.0, 300.0));
+        for event in [drag(from), press(from, true), drag(to), press(to, false)] {
+            first.event(event);
+            first.step();
+        }
+        first.run_steps(2);
+        let window = first.state().window.unwrap();
+        assert!((window.list - (edge + 60.0)).abs() <= 2.0, "{} from {edge}", window.list);
+        first.state_mut().save_session();
+        drop(first);
+
+        // as it was, whatever the setting of opening files again
+        let mut config = Config::default();
+        config.gui.reopen_files = false;
+        // read before the window is first drawn, as it opens
+        let session = state.clone();
+        let mut second =
+            egui_kittest::Harness::builder().with_size([1280.0, 820.0]).build_eframe(move |_| {
+                let mut app = App::with(config.clone(), None, Presets::builtin());
+                app.reopen(session.clone());
+                app
+            });
+        second.run_steps(2);
+        assert_eq!(second.state().preview_share, 0.4);
+        assert_eq!(second.state().window.unwrap().list, window.list);
+        assert_eq!(session::window(&state).map(|window| window.list), Some(window.list));
     }
 
     #[test]

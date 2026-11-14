@@ -65,6 +65,8 @@ use crate::app::App;
 /// The narrowest the window goes, which holds the list of files, the preview
 /// and the column beside it.
 pub(crate) const MIN_WIDTH: f32 = 920.0;
+/// The lowest it goes.
+pub(crate) const MIN_HEIGHT: f32 = 560.0;
 
 /// How the window starts, from the command line: by default with the
 /// user's own config and the ffmpeg it chooses.
@@ -113,16 +115,21 @@ impl std::error::Error for Error {
 /// Opens the window and runs until it is closed.
 pub fn run(launch: Launch) -> Result<(), Error> {
     tgradish_core::mark::set_client(tgradish_core::mark::Client::Window);
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("tgradish")
-            .with_app_id("tgradish")
-            .with_icon(std::sync::Arc::new(icon::window()))
-            .with_inner_size([1280.0, 820.0])
-            .with_min_inner_size([MIN_WIDTH, 560.0])
-            .with_drag_and_drop(true),
-        ..Default::default()
-    };
+    // as it was last time, where the session says
+    let window = app::session_path().and_then(|path| session::window(&path));
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("tgradish")
+        .with_app_id("tgradish")
+        .with_icon(std::sync::Arc::new(icon::window()))
+        .with_inner_size(window.map_or([1280.0, 820.0], |window| window.size))
+        .with_min_inner_size([MIN_WIDTH, MIN_HEIGHT])
+        .with_maximized(window.is_some_and(|window| window.maximized))
+        .with_drag_and_drop(true);
+    // where the system lets a window say where it goes, as Wayland doesn't
+    if let Some(position) = window.and_then(|window| window.position) {
+        viewport = viewport.with_position(position);
+    }
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native(
         "tgradish",
         options,

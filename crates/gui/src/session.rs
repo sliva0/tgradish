@@ -34,6 +34,8 @@ struct Read {
     version: u32,
     items: Vec<serde_json::Value>,
     selected: Option<usize>,
+    #[serde(default)]
+    window: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -43,6 +45,67 @@ pub(crate) struct Session {
     items: Vec<Saved>,
     /// Which of them is selected.
     selected: Option<usize>,
+    /// How the window was laid out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    window: Option<Window>,
+}
+
+/// How the window was laid out, to open it so again: its size and place,
+/// and where the lines between its parts were. Sizes are in points as the
+/// system counts them, without the window's own scale.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct Window {
+    /// Its size within its frame, as it was when last not maximised.
+    pub(crate) size: [f32; 2],
+    /// Where its frame's corner was then, where the system says.
+    pub(crate) position: Option<[f32; 2]>,
+    pub(crate) maximized: bool,
+    /// How wide the list of files was, in the window's own points.
+    pub(crate) list: f32,
+    /// The share of the height beside the list the preview took.
+    pub(crate) preview: f32,
+}
+
+/// The most a size or place may be, past any screen.
+const FARTHEST: f32 = 32768.0;
+
+impl Window {
+    /// As it may be used: no smaller than the window goes, nor larger than
+    /// any screen, the preview's share as the line under it may put it, and
+    /// its place, where it is anywhere a screen may be.
+    pub(crate) fn clamped(self) -> Window {
+        let within = |value: f32, least: f32, most: f32| {
+            if value.is_finite() { value.clamp(least, most) } else { least }
+        };
+        let place = self.position.filter(|[x, y]| {
+            [x, y].iter().all(|value| value.is_finite() && value.abs() <= FARTHEST)
+        });
+        Window {
+            size: [
+                within(self.size[0], crate::MIN_WIDTH, FARTHEST),
+                within(self.size[1], crate::MIN_HEIGHT, FARTHEST),
+            ],
+            position: place,
+            maximized: self.maximized,
+            list: within(self.list, crate::app::NARROWEST_LIST, FARTHEST),
+            preview: if self.preview.is_finite() {
+                self.preview.clamp(crate::preview::LEAST_SHARE, crate::preview::MOST_SHARE)
+            } else {
+                crate::app::PREVIEW_SHARE
+            },
+        }
+    }
+}
+
+/// How the window was laid out as the session at `path` keeps it, if it
+/// does and can be read: to open the window so, before anything else of
+/// the session is read.
+pub(crate) fn window(path: &Path) -> Option<Window> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let mut read: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let window = serde_json::from_value::<Window>(read.get_mut("window")?.take()).ok()?;
+    Some(window.clamped())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -398,7 +461,9 @@ fn copies_named(bytes: &[u8]) -> Option<HashSet<String>> {
 fn parse(text: &str) -> Option<(Session, usize)> {
     let read: Read =
         serde_json::from_str(text).ok().filter(|read: &Read| read.version == VERSION)?;
-    let mut session = Session { version: VERSION, items: Vec::new(), selected: None };
+    // a window it can't read is left out alone
+    let window = read.window.and_then(|window| serde_json::from_value(window).ok());
+    let mut session = Session { version: VERSION, items: Vec::new(), selected: None, window };
     let mut unread = 0;
     for (index, item) in read.items.into_iter().enumerate() {
         match serde_json::from_value(item) {
@@ -462,7 +527,12 @@ impl Session {
             })
             .collect();
         let selected = selected.and_then(|id| kept.iter().position(|item| item.id == id));
-        Session { version: VERSION, items: saved, selected }
+        Session { version: VERSION, items: saved, selected, window: None }
+    }
+
+    /// The session with how the window is laid out.
+    pub(crate) fn with_window(self, window: Option<Window>) -> Session {
+        Session { window, ..self }
     }
 
     pub(crate) fn to_json(&self) -> serde_json::Result<String> {
@@ -835,6 +905,41 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn keeps_how_the_window_was_laid_out_within_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let window = Window {
+            size: [1500.0, 900.0],
+            position: Some([40.0, 30.0]),
+            maximized: true,
+            list: 380.0,
+            preview: 0.5,
+        };
+        let mut store = Store::open(path.clone()).unwrap();
+        store.save(&session(&[], None).with_window(Some(window))).unwrap();
+        assert_eq!(super::window(&path), Some(window));
+        // sizes no window could have, and a place off any screen
+        let odd = Window {
+            size: [10.0, f32::NAN],
+            position: Some([1e9, 0.0]),
+            maximized: false,
+            list: 1.0,
+            preview: 5.0,
+        };
+        let clamped = odd.clamped();
+        assert_eq!(clamped.size, [crate::MIN_WIDTH, crate::MIN_HEIGHT]);
+        assert_eq!((clamped.position, clamped.preview), (None, crate::preview::MOST_SHARE));
+        assert_eq!(clamped.list, crate::app::NARROWEST_LIST);
+        // one it can't read is left out alone, and the files read
+        let text = r#"{"version":1,"items":[],"selected":null,"window":{"size":"large"}}"#;
+        std::fs::write(&path, text).unwrap();
+        assert_eq!(super::window(&path), None);
+        drop(store);
+        let loaded = Store::open(path.clone()).unwrap().read().unwrap();
+        assert!(loaded.unreadable.is_none());
+    }
+
     #[test]
     fn leaves_out_what_it_cannot_hold() {
         use std::os::unix::ffi::OsStrExt;

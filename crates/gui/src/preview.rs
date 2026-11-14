@@ -40,6 +40,12 @@ const TGS_INSET: usize = 256;
 /// high as a button, and the space around it.
 const TIMELINE: f32 = 38.0;
 
+/// The least and most of the height beside the list the preview takes, as
+/// the line under it is dragged: never so small it is no use, nor so large
+/// the settings below lose their first row.
+pub(crate) const LEAST_SHARE: f32 = 0.2;
+pub(crate) const MOST_SHARE: f32 = 0.85;
+
 /// Width of the zoom level, as 400%, beside Zoom out.
 const ZOOM_LEVEL: f32 = 42.0;
 
@@ -136,8 +142,8 @@ impl App {
         // never so small the preview is no use, nor so large the settings
         // below lose their first row
         if response.dragged() {
-            self.preview_share =
-                ((preview_height + response.drag_delta().y) / height).clamp(0.2, 0.85);
+            self.preview_share = ((preview_height + response.drag_delta().y) / height)
+                .clamp(LEAST_SHARE, MOST_SHARE);
         }
         let colour = if response.hovered() || response.dragged() {
             ui.visuals().widgets.hovered.fg_stroke.color
