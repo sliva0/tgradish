@@ -960,13 +960,15 @@ mod tests {
             share: impl Fn(f64, f64) -> f64 + 'static,
             alike: impl Fn(f64, f64) -> f64 + 'static,
         ) -> Self {
+            let token = crate::CancelToken::new();
+            token.begin_fitting();
             Self {
                 calls: Vec::new(),
                 scored: 0,
                 decisions: Vec::new(),
                 share: Box::new(share),
                 alike: Box::new(alike),
-                token: crate::CancelToken::new(),
+                token,
                 settle: None,
                 settled: None,
             }

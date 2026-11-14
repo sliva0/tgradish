@@ -246,8 +246,6 @@ pub fn convert(
     cancel: &CancelToken,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Outcome> {
-    // nothing settles until one of this conversion's encodes fits
-    cancel.end_fitting();
     request.input.check_output(&request.output(), request.overwrite)?;
     // pixel art, drawn for ffmpeg
     let mut readable = crate::drawn::readable(&request.input, &request.options, cancel)?;
@@ -327,6 +325,8 @@ fn encode_in(
     cancel: &CancelToken,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Outcome> {
+    // nothing settles until one of this conversion's encodes fits
+    cancel.begin_fitting();
     let _fitting = EndFitting(cancel);
     let mut encoder = BackendEncoder {
         backend,
