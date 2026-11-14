@@ -170,6 +170,10 @@ fn dialogs(
     settle(harness, None);
     visit(harness, "about");
     harness.state_mut().about = false;
+    harness.state_mut().shortcuts = true;
+    settle(harness, None);
+    visit(harness, "shortcuts");
+    harness.state_mut().shortcuts = false;
     let presets_dir = dir.join("presets");
     let options = (&Default::default(), &Default::default());
     tgradish_core::presets::save(&presets_dir, "my stickers", "Mine", options, false).unwrap();
@@ -254,7 +258,8 @@ fn lays_the_lists_bars_level_with_those_beside_them() {
             let (add, input) = (fl!("add-files"), fl!("show-input"));
             assert_eq!(place(harness, by().label(&add)), place(harness, by().label(&input)));
             // those under them about the same middle, Convert being taller
-            let (remove, keys) = (fl!("remove-all"), fl!("convert-keys"));
+            let (remove, keys) =
+                (fl!("remove-all"), crate::keys::keys_text(crate::keys::Command::Convert));
             let all = place(harness, by().label(&remove));
             let convert = place(harness, by().label_contains(&keys));
             assert_eq!(all.0 + all.1, convert.0 + convert.1, "{all:?} {convert:?}");

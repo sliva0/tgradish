@@ -55,7 +55,8 @@ impl App {
     }
 
     /// The menu behind the gear over the list: Settings, inspecting a
-    /// sticker, and what isn't about the files at all, feedback and About.
+    /// sticker, the keyboard's shortcuts, and what isn't about the files at
+    /// all, feedback and About.
     fn main_menu(&mut self, ui: &mut egui::Ui) {
         if ui.button(fl!("menu-settings")).clicked() {
             self.settings_dialog.open();
@@ -63,6 +64,11 @@ impl App {
         }
         if ui.button(fl!("inspect")).on_hover_text(fl!("inspect", "hint")).clicked() {
             self.pick(ui.ctx(), Pick::Inspected);
+            ui.close();
+        }
+        let keys = crate::keys::keys_text(crate::keys::Command::Shortcuts);
+        if ui.add(egui::Button::new(fl!("shortcuts")).shortcut_text(keys)).clicked() {
+            self.shortcuts = true;
             ui.close();
         }
         ui.separator();
@@ -256,9 +262,8 @@ impl App {
             let mut again = None;
             // Delete or Backspace on the row with the keyboard's focus,
             // which a text field with the focus would take instead
-            let delete = ui.input(|input| {
-                input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace)
-            });
+            use crate::keys::{Command, pressed};
+            let delete = ui.input(|input| pressed(input, Command::Remove).is_some());
             let mut focus_next = None;
             for (index, item) in self.items.iter().enumerate() {
                 let selected = self.selected == Some(item.id);

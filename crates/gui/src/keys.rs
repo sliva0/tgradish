@@ -11,12 +11,272 @@ use crate::app::App;
 #[cfg(all(unix, not(target_os = "macos")))]
 use crate::dnd;
 use crate::item::{Item, Show};
+use crate::l10n::fl;
+use crate::widgets;
+
+/// What the window's keys do. Each is listed in [`SHORTCUTS`], which both
+/// the keys' handling and the dialog that lists them read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Command {
+    Paste,
+    Convert,
+    Remove,
+    UndoRemoving,
+    Play,
+    /// A frame back or on, ten with Shift.
+    Step,
+    /// The first or the last frame used.
+    Ends,
+    /// The used part to start, or end, at the frame shown.
+    CutHere,
+    /// The used part's start a frame back or on, ten with Shift.
+    MoveStart,
+    /// Its end, likewise.
+    MoveEnd,
+    /// The window's scale, which [`crate::scaling::Scaling::keys`] takes
+    /// by these keys, in place of egui.
+    ScaleUp,
+    ScaleDown,
+    ScaleReset,
+    /// Escape, which egui's dialogs and menus take.
+    Close,
+    Shortcuts,
+}
+
+/// How the dialog of shortcuts groups them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Group {
+    Files,
+    Playing,
+    Window,
+}
+
+/// A command, and the keys that ask for it: where it goes two ways, back
+/// and on, the first goes back.
+pub(crate) struct Shortcut {
+    pub(crate) command: Command,
+    pub(crate) group: Group,
+    pub(crate) keys: &'static [egui::KeyboardShortcut],
+    /// Whether it is pressed with Shift held too: for ten frames at a
+    /// time, or for a key typed with Shift, as `?` is on many keyboards.
+    pub(crate) with_shift: bool,
+}
+
+const fn key(modifiers: egui::Modifiers, key: egui::Key) -> egui::KeyboardShortcut {
+    egui::KeyboardShortcut::new(modifiers, key)
+}
+
+const fn shortcut(
+    command: Command,
+    group: Group,
+    keys: &'static [egui::KeyboardShortcut],
+    with_shift: bool,
+) -> Shortcut {
+    Shortcut { command, group, keys, with_shift }
+}
+
+/// Every shortcut of the window, in the order the dialog lists them.
+pub(crate) const SHORTCUTS: &[Shortcut] = {
+    use egui::Key;
+    use egui::Modifiers as M;
+    use egui::gui_zoom::kb_shortcuts as zoom;
+    use {Command as C, Group as G};
+    &[
+        shortcut(C::Paste, G::Files, &[key(M::COMMAND, Key::V)], false),
+        shortcut(C::Convert, G::Files, &[key(M::COMMAND, Key::Enter)], false),
+        shortcut(
+            C::Remove,
+            G::Files,
+            &[key(M::NONE, Key::Delete), key(M::NONE, Key::Backspace)],
+            false,
+        ),
+        shortcut(C::UndoRemoving, G::Files, &[key(M::COMMAND, Key::Z)], false),
+        shortcut(C::Play, G::Playing, &[key(M::NONE, Key::Space)], false),
+        shortcut(
+            C::Step,
+            G::Playing,
+            &[key(M::NONE, Key::ArrowLeft), key(M::NONE, Key::ArrowRight)],
+            true,
+        ),
+        shortcut(C::Ends, G::Playing, &[key(M::NONE, Key::Home), key(M::NONE, Key::End)], false),
+        shortcut(
+            C::CutHere,
+            G::Playing,
+            &[key(M::NONE, Key::OpenBracket), key(M::NONE, Key::CloseBracket)],
+            false,
+        ),
+        shortcut(
+            C::MoveStart,
+            G::Playing,
+            &[key(M::COMMAND, Key::ArrowLeft), key(M::COMMAND, Key::ArrowRight)],
+            true,
+        ),
+        shortcut(
+            C::MoveEnd,
+            G::Playing,
+            &[key(M::ALT, Key::ArrowLeft), key(M::ALT, Key::ArrowRight)],
+            true,
+        ),
+        shortcut(C::ScaleUp, G::Window, &[zoom::ZOOM_IN, zoom::ZOOM_IN_SECONDARY], false),
+        shortcut(C::ScaleDown, G::Window, &[zoom::ZOOM_OUT], false),
+        shortcut(C::ScaleReset, G::Window, &[zoom::ZOOM_RESET], false),
+        shortcut(
+            C::Shortcuts,
+            G::Window,
+            &[key(M::NONE, Key::Questionmark), key(M::NONE, Key::F1)],
+            true,
+        ),
+        shortcut(C::Close, G::Window, &[key(M::NONE, Key::Escape)], false),
+    ]
+};
+
+/// The shortcut of `command`.
+pub(crate) fn shortcut_of(command: Command) -> &'static Shortcut {
+    let mut all = SHORTCUTS.iter();
+    all.find(|shortcut| shortcut.command == command).expect("every command is listed")
+}
+
+/// Which of `command`'s keys was pressed this frame, by its place in its
+/// [`Shortcut::keys`], and whether Shift was held.
+pub(crate) fn pressed(input: &egui::InputState, command: Command) -> Option<(usize, bool)> {
+    let shortcut = shortcut_of(command);
+    let held = input.modifiers;
+    let at = shortcut.keys.iter().position(|key| {
+        let shifted =
+            shortcut.with_shift && held.matches_exact(key.modifiers | egui::Modifiers::SHIFT);
+        (held.matches_exact(key.modifiers) || shifted) && input.key_pressed(key.logical_key)
+    });
+    at.map(|at| (at, held.shift))
+}
+
+/// `key` as the window writes keys, in its language: Ctrl+Enter.
+pub(crate) fn key_text(key: &egui::KeyboardShortcut) -> String {
+    use egui::Key;
+    let mac = cfg!(target_os = "macos");
+    let held = key.modifiers;
+    let mut parts = Vec::new();
+    if held.ctrl && mac {
+        parts.push(fl!("key-ctrl"));
+    }
+    if held.command || held.mac_cmd || (held.ctrl && !mac) {
+        parts.push(if mac { fl!("key-cmd") } else { fl!("key-ctrl") });
+    }
+    if held.alt {
+        parts.push(fl!("key-alt"));
+    }
+    if held.shift {
+        parts.push(fl!("key-shift"));
+    }
+    parts.push(match key.logical_key {
+        Key::Enter => fl!("key-enter"),
+        Key::Space => fl!("key-space"),
+        Key::Delete => fl!("key-delete"),
+        Key::Backspace => fl!("key-backspace"),
+        Key::Home => fl!("key-home"),
+        Key::End => fl!("key-end"),
+        Key::Escape => fl!("key-escape"),
+        Key::ArrowLeft => fl!("key-left"),
+        Key::ArrowRight => fl!("key-right"),
+        // a hyphen, as typed, rather than egui's minus sign
+        Key::Minus => "-".to_owned(),
+        other => other.symbol_or_name().to_owned(),
+    });
+    parts.join("+")
+}
+
+/// The keys of `command`, as the window writes them: one, or each of them
+/// apart by a slash.
+pub(crate) fn keys_text(command: Command) -> String {
+    let keys: Vec<String> = shortcut_of(command).keys.iter().map(key_text).collect();
+    keys.join(" / ")
+}
+
+/// What `command` does, as the dialog of shortcuts says it.
+fn what(command: Command) -> String {
+    match command {
+        Command::Paste => fl!("shortcut-paste"),
+        Command::Convert => fl!("shortcut-convert"),
+        Command::Remove => fl!("shortcut-remove"),
+        Command::UndoRemoving => fl!("shortcut-undo"),
+        Command::Play => fl!("shortcut-play"),
+        Command::Step => fl!("shortcut-step"),
+        Command::Ends => fl!("shortcut-ends"),
+        Command::CutHere => fl!("shortcut-cut-here"),
+        Command::MoveStart => fl!("shortcut-move-start"),
+        Command::MoveEnd => fl!("shortcut-move-end"),
+        Command::ScaleUp => fl!("shortcut-scale-up"),
+        Command::ScaleDown => fl!("shortcut-scale-down"),
+        Command::ScaleReset => fl!("shortcut-scale-reset"),
+        Command::Close => fl!("shortcut-close"),
+        Command::Shortcuts => fl!("shortcut-shortcuts"),
+    }
+}
+
+impl App {
+    /// The dialog that lists every shortcut, while it is open.
+    pub(crate) fn shortcuts_dialog(&mut self, ctx: &egui::Context) {
+        if !self.shortcuts {
+            return;
+        }
+        let modal = widgets::dialog(ctx, "shortcuts").show(ctx, |ui| {
+            ui.set_width(560.0);
+            let crossed = widgets::dialog_title(ui, widgets::title_text(ui, fl!("shortcuts")));
+            // the dialog fits the window, the list scrolling within
+            let room = (ctx.content_rect().height() - 160.0).max(200.0);
+            // that there is more below shows, as in Settings
+            ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+            egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
+                widgets::settings_spacing(ui);
+                let groups = [
+                    (Group::Files, fl!("shortcuts-files")),
+                    (Group::Playing, fl!("shortcuts-playing")),
+                    (Group::Window, fl!("shortcuts-window")),
+                ];
+                for (group, title) in groups {
+                    let rows = SHORTCUTS.iter().filter(|shortcut| shortcut.group == group);
+                    let rows =
+                        rows.map(|shortcut| (keys_text(shortcut.command), what(shortcut.command)));
+                    shortcut_rows(ui, &title, rows.collect());
+                }
+                // what the mouse does over the preview, which no key does
+                let mouse = vec![
+                    (fl!("mouse-drag"), fl!("mouse-drag", "does")),
+                    (fl!("mouse-double-click"), fl!("mouse-double-click", "does")),
+                    (fl!("mouse-wheel"), fl!("mouse-wheel", "does")),
+                    (fl!("mouse-pan"), fl!("mouse-pan", "does")),
+                ];
+                shortcut_rows(ui, &fl!("shortcuts-mouse"), mouse);
+            });
+            let closed = widgets::dialog_buttons(ui, |ui| {
+                ui.add(widgets::dialog_button(fl!("close"))).clicked()
+            });
+            crossed || closed
+        });
+        if modal.inner || modal.should_close() {
+            self.shortcuts = false;
+        }
+    }
+}
+
+/// A group of shortcuts under `title`: each one's keys, and what they do.
+fn shortcut_rows(ui: &mut egui::Ui, title: &str, rows: Vec<(String, String)>) {
+    widgets::section(ui, title);
+    // lines of text, closer than rows of controls
+    let grid = egui::Grid::new(("shortcuts", title)).num_columns(2).min_row_height(0.0);
+    grid.spacing(vec2(16.0, 6.0)).min_col_width(widgets::LABELS).show(ui, |ui| {
+        for (keys, does) in rows {
+            ui.label(egui::RichText::new(keys).strong());
+            ui.label(does);
+            ui.end_row();
+        }
+    });
+}
 
 impl App {
     /// Files dropped on the window, pasted, and keys.
     pub(crate) fn take_input(&mut self, ctx: &egui::Context) {
         let paste = ctx.input(|input| self.paste_key.read(&input.events));
-        let (dropped, hovered, space, delete, undo) = ctx.input(|input| {
+        let (dropped, hovered) = ctx.input(|input| {
             let dropped: Vec<PathBuf> = input
                 .raw
                 .dropped_files
@@ -24,16 +284,16 @@ impl App {
                 .map(|file| file.path().to_path_buf())
                 .filter(|path| !path.as_os_str().is_empty())
                 .collect();
-            (
-                dropped,
-                !input.raw.hovered_files.is_empty(),
-                input.key_pressed(egui::Key::Space),
-                input.key_pressed(egui::Key::Delete),
-                input.modifiers.command
-                    && !input.modifiers.shift
-                    && input.key_pressed(egui::Key::Z),
-            )
+            (dropped, !input.raw.hovered_files.is_empty())
         });
+        let asked = |command| ctx.input(|input| pressed(input, command));
+        let (space, delete, undo, shortcuts) = (
+            asked(Command::Play).is_some(),
+            // Delete alone, as Backspace is for the row with the focus
+            asked(Command::Remove).is_some_and(|(at, _)| at == 0),
+            asked(Command::UndoRemoving).is_some(),
+            asked(Command::Shortcuts).is_some(),
+        );
         self.hovering = hovered || self.hovering;
         if !dropped.is_empty() {
             self.add(dropped);
@@ -52,6 +312,10 @@ impl App {
         if ctx.text_edit_focused() || self.dialog_open() {
             return;
         }
+        if shortcuts {
+            self.shortcuts = true;
+            return;
+        }
         // while a notice offers it, as after a row with the focus was
         // removed by its key
         if undo {
@@ -67,29 +331,24 @@ impl App {
         {
             item.view.playing = !item.view.playing;
         }
-        let keys = ctx.input(|input| {
-            let pressed = |key| input.key_pressed(key);
-            let step = if input.modifiers.shift { 10 } else { 1 };
-            let by = if pressed(egui::Key::ArrowLeft) {
-                -step
-            } else if pressed(egui::Key::ArrowRight) {
-                step
-            } else {
-                0
-            };
-            // as the keys lie, left to right: with Ctrl the used part's
-            // start moves, with Alt its end
-            let (start, end) = (input.modifiers.command, input.modifiers.alt);
-            Keys {
-                by: if end || start { 0 } else { by },
-                move_start: if start { by } else { 0 },
-                move_end: if end && !start { by } else { 0 },
-                first: pressed(egui::Key::Home),
-                last: pressed(egui::Key::End),
-                start_here: pressed(egui::Key::OpenBracket),
-                end_here: pressed(egui::Key::CloseBracket),
-            }
-        });
+        // back is the first of each pair of keys, on the second; with
+        // Shift, ten frames at a time
+        let by = |command| {
+            asked(command).map_or(0, |(at, shift)| {
+                let step = if shift { 10 } else { 1 };
+                if at == 0 { -step } else { step }
+            })
+        };
+        let (ends, cut) = (asked(Command::Ends), asked(Command::CutHere));
+        let keys = Keys {
+            by: by(Command::Step),
+            move_start: by(Command::MoveStart),
+            move_end: by(Command::MoveEnd),
+            first: ends.is_some_and(|(at, _)| at == 0),
+            last: ends.is_some_and(|(at, _)| at == 1),
+            start_here: cut.is_some_and(|(at, _)| at == 0),
+            end_here: cut.is_some_and(|(at, _)| at == 1),
+        };
         if keys != Keys::default()
             && let Some(id) = self.selected
             && let Some(item) = self.item_mut(id)
@@ -123,6 +382,7 @@ impl PasteKey {
     /// or a dialog too, which take a paste themselves, so V going down
     /// there isn't taken for Ctrl+V once it comes up outside.
     fn read(&mut self, events: &[egui::Event]) -> bool {
+        let v = shortcut_of(Command::Paste).keys[0].logical_key;
         let mut paste = false;
         for event in events {
             match event {
@@ -130,12 +390,12 @@ impl PasteKey {
                     paste = true;
                     self.read = true;
                 }
-                egui::Event::Key { key: egui::Key::V, pressed: true, modifiers, .. } => {
+                egui::Event::Key { key, pressed: true, modifiers, .. } if *key == v => {
                     self.plain = !modifiers.command;
                 }
                 // went down as Ctrl+V where egui-winit passed nothing on,
                 // whether Ctrl is still held or let go first
-                egui::Event::Key { key: egui::Key::V, pressed: false, .. } => {
+                egui::Event::Key { key, pressed: false, .. } if *key == v => {
                     paste |= !self.plain && !self.read;
                     *self = PasteKey::default();
                 }
@@ -304,6 +564,53 @@ mod tests {
         assert_eq!(pastes(&[vec![v(true, none)], vec![v(false, ctrl)]]), [false, false]);
         // where a backend passes Ctrl+V on as a key, it is pasted all the same
         assert_eq!(pastes(&[vec![v(true, ctrl)], vec![v(false, none)]]), [false, true]);
+    }
+
+    #[test]
+    fn lists_every_shortcut_it_takes_once() {
+        use crate::l10n::fl;
+        use egui_kittest::kittest::Queryable;
+        // no keys ask for two things
+        let keys: Vec<_> = SHORTCUTS.iter().flat_map(|shortcut| shortcut.keys).collect();
+        for (at, key) in keys.iter().enumerate() {
+            assert!(!keys[..at].contains(key), "{key:?} twice");
+        }
+        assert_eq!(keys_text(Command::Convert), "Ctrl+Enter");
+        assert_eq!(keys_text(Command::Step), "Left / Right");
+        assert_eq!(keys_text(Command::ScaleUp), "Ctrl++ / Ctrl+=");
+        assert_eq!(keys_text(Command::ScaleDown), "Ctrl+-");
+        // F1 and ?, typed with Shift, open the list, which has them all
+        let mut harness = harness(Config::default());
+        for (modifiers, key) in [
+            (egui::Modifiers::NONE, egui::Key::F1),
+            (egui::Modifiers::SHIFT, egui::Key::Questionmark),
+        ] {
+            harness.key_press_modifiers(modifiers, key);
+            harness.run_steps(2);
+            assert!(harness.state().shortcuts, "{key:?}");
+            for shortcut in SHORTCUTS {
+                harness.get_by_label(&keys_text(shortcut.command));
+                harness.get_by_label(&what(shortcut.command));
+            }
+            harness.get_by_label(&fl!("mouse-wheel", "does"));
+            harness.key_press(egui::Key::Escape);
+            harness.run_steps(2);
+            assert!(!harness.state().shortcuts);
+        }
+        // from the menu too
+        harness.get_by_label(&fl!("main-menu")).click();
+        harness.run_steps(2);
+        harness.get_by_label_contains(&fl!("shortcuts")).click();
+        harness.run_steps(2);
+        assert!(harness.state().shortcuts);
+        // and not while another dialog is open, whose keys they are
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(2);
+        harness.key_press(egui::Key::F1);
+        harness.run_steps(2);
+        assert!(!harness.state().shortcuts);
     }
 
     #[test]

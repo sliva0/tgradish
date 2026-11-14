@@ -103,6 +103,8 @@ pub(crate) struct App {
     /// How many times About was closed, which it starts afresh by: how
     /// far it is scrolled and which licences are open are forgotten.
     pub(crate) about_visit: u64,
+    /// Whether the dialog that lists the keyboard's shortcuts is open.
+    pub(crate) shortcuts: bool,
     /// The theme Settings showed last, to apply a change made there.
     pub(crate) theme_shown: Option<crate::config::Theme>,
     /// The window's scale shown last, to apply a change made in Settings
@@ -308,6 +310,7 @@ impl App {
             inspection: None,
             about: false,
             about_visit: 0,
+            shortcuts: false,
             theme_shown: None,
             scale_shown: None,
             scaling: Default::default(),
@@ -670,6 +673,7 @@ impl App {
         self.picking.is_some()
             || self.settings_dialog.is_open()
             || self.about
+            || self.shortcuts
             || self.inspection.is_some()
             || self.preset_dialog.is_some()
     }
@@ -888,6 +892,7 @@ impl eframe::App for App {
         }
         self.follow_scale(&ctx);
         self.inspection_dialog(&ctx);
+        self.shortcuts_dialog(&ctx);
         self.preset_dialogs(&ctx);
         if self.about {
             let modal = widgets::dialog(&ctx, "about").show(&ctx, |ui| {

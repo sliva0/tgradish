@@ -624,6 +624,10 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     harness.run_steps(3);
     save(&mut harness, "about");
     harness.state_mut().about = false;
+    harness.state_mut().shortcuts = true;
+    harness.run_steps(3);
+    save(&mut harness, "shortcuts");
+    harness.state_mut().shortcuts = false;
     set_theme(&harness.ctx, crate::config::Theme::Light);
     let item = harness.state_mut().items.last_mut().unwrap();
     item.job = None;

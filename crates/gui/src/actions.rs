@@ -131,7 +131,7 @@ impl App {
                     let text = if again { fl!("convert-again") } else { fl!("convert") };
                     let button = egui::Button::new(widgets::medium(ui, text, 15.0))
                         .min_size(vec2(140.0, BAR_ROW))
-                        .shortcut_text(fl!("convert-keys"));
+                        .shortcut_text(crate::keys::keys_text(crate::keys::Command::Convert));
                     let hint = if current {
                         fl!("convert-again", "hint")
                     } else {
@@ -203,7 +203,9 @@ impl App {
             ui.data_mut(|data| data.insert_temp(egui::Id::new(COPIED), (now, copied)));
         }
         let shortcut = !self.dialog_open()
-            && ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::Enter));
+            && ui.input(|input| {
+                crate::keys::pressed(input, crate::keys::Command::Convert).is_some()
+            });
         // the user lets this item replace the file that is there now
         if let Some(path) = replace {
             if let Some(written) = Written::of(id, &path) {
@@ -629,7 +631,7 @@ mod tests {
         harness.state_mut().add(vec![art]);
         finish(&mut harness);
         let name = format!("{long}.sticker.tgs");
-        let keys = fl!("convert-keys");
+        let keys = crate::keys::keys_text(crate::keys::Command::Convert);
         let button = harness.get(egui_kittest::kittest::by().label_contains(&keys)).rect();
         // the name whole, on a line under Convert, its folder cut short
         let shown = harness.get_by_label(&name).rect();
@@ -808,7 +810,7 @@ mod tests {
         harness.state_mut().items[0].format = Format::Webp;
         harness.run_steps(2);
         harness.get_by_label(&fl!("saves-to", folder = folder.as_str()));
-        let keys = fl!("convert-keys");
+        let keys = crate::keys::keys_text(crate::keys::Command::Convert);
         let button = harness.get(egui_kittest::kittest::by().label_contains(&keys));
         let label = button.accesskit_node().label().unwrap_or_default();
         assert!(

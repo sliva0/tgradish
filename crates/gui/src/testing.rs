@@ -142,7 +142,7 @@ pub(crate) fn said(app: &App) -> String {
 /// Clicks the selected item's Convert button, which shows its shortcut,
 /// in whichever language the window is in.
 pub(crate) fn convert(harness: &Harness<App>) {
-    let keys = crate::l10n::fl!("convert-keys");
+    let keys = crate::keys::keys_text(crate::keys::Command::Convert);
     harness.get(egui_kittest::kittest::by().label_contains(&keys)).click();
 }
 

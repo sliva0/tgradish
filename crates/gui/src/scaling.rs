@@ -33,22 +33,26 @@ impl Scaling {
         ctx.set_zoom_factor(zoom);
     }
 
-    /// Takes Ctrl++ (or Ctrl+=), Ctrl+- and Ctrl+0 as egui would at the end
-    /// of the frame, which leaves them to the window, so the scale they ask
-    /// for is known.
+    /// Takes the scale's keys as the window's shortcuts list them, Ctrl++
+    /// (or Ctrl+=), Ctrl+- and Ctrl+0, as egui would at the end of the
+    /// frame, which leaves them to the window, so the scale they ask for is
+    /// known.
     pub(crate) fn keys(&mut self, ctx: &egui::Context) {
-        use egui::gui_zoom::kb_shortcuts as keys;
+        use crate::keys::{Command, shortcut_of};
         if ctx.options(|options| options.zoom_with_keyboard) {
             ctx.options_mut(|options| options.zoom_with_keyboard = false);
         }
-        let consume = |shortcut| ctx.input_mut(|input| input.consume_shortcut(shortcut));
+        let consume = |command| {
+            let keys = shortcut_of(command).keys;
+            ctx.input_mut(|input| keys.iter().any(|key| input.consume_shortcut(key)))
+        };
         let zoom = f64::from(ctx.zoom_factor());
-        let to = if consume(&keys::ZOOM_RESET) {
+        let to = if consume(Command::ScaleReset) {
             Some(1.0)
         } else {
-            let larger = consume(&keys::ZOOM_IN) || consume(&keys::ZOOM_IN_SECONDARY);
+            let larger = consume(Command::ScaleUp);
             // both from the scale there is, Ctrl+- the later, as egui has it
-            match (consume(&keys::ZOOM_OUT), larger) {
+            match (consume(Command::ScaleDown), larger) {
                 (true, _) => Some(crate::config::scale_step(zoom, -1)),
                 (false, true) => Some(crate::config::scale_step(zoom, 1)),
                 (false, false) => None,

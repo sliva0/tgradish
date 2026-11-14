@@ -578,7 +578,7 @@ fn ffmpeg_use(ui: &mut egui::Ui, config: &mut Config, builtin: bool) {
 /// under it, as the window's other hints write keys. Gives the button that changed it,
 /// where one did: nowhere for the one back to 100%.
 fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
-    use egui::gui_zoom::kb_shortcuts;
+    use crate::keys::{Command, key_text, shortcut_of};
     let mut stepped = None;
     // the setting changes, which the window then applies, as it does a
     // theme: kept once saved, like the rest of Settings; egui would only
@@ -618,23 +618,17 @@ fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
     }
     // as the window's other hints write keys, Ctrl+V: so Ctrl++, rather
     // than egui's Ctrl+Plus
-    let keys = |shortcut: &egui::KeyboardShortcut| {
-        let modifiers = egui::ModifierNames::NAMES.format(&shortcut.modifiers, false);
-        let key = match shortcut.logical_key {
-            egui::Key::Minus => "-",
-            key => key.symbol_or_name(),
-        };
-        format!("{modifiers}+{key}")
-    };
+    // the first of each, as the window's shortcuts list them, though
+    // Ctrl+= does it too
+    let keys = |command| key_text(&shortcut_of(command).keys[0]);
     widgets::hint(
         ui,
         fl!(
             "scale",
             "keys",
-            // though Ctrl+= does it too
-            larger = keys(&kb_shortcuts::ZOOM_IN),
-            smaller = keys(&kb_shortcuts::ZOOM_OUT),
-            reset = keys(&kb_shortcuts::ZOOM_RESET)
+            larger = keys(Command::ScaleUp),
+            smaller = keys(Command::ScaleDown),
+            reset = keys(Command::ScaleReset)
         ),
     );
     stepped

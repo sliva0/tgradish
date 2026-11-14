@@ -194,6 +194,8 @@ inspect = Inspect a sticker…
 feedback = Send feedback
     .hint = Write to the author on Telegram: in its app, where it is installed, or in the browser
 about-and-licences = About and licences…
+# Opens the dialog of keyboard shortcuts; its keys are shown beside it.
+shortcuts = Keyboard shortcuts
 add-files = Add files…
 # What screen readers call the arrow beside Add files…, which opens a menu
 # of other ways to add files.
@@ -269,8 +271,6 @@ waiting-for = Waiting for { $ahead } more
 convert-again = Convert again
     .changed = Outdated: make it again with the current settings
     .hint = Make it again with the same settings
-# The keys that convert the file picked, shown on its Convert button.
-convert-keys = Ctrl+Enter
 -save-settings = Save current settings as preset
 save-preset = { -save-settings }…
     .hint = Keep them as a preset of your own, for any file to start from
@@ -1164,3 +1164,54 @@ send-feedback = Send feedback on Telegram
 # English.
 about-notices = tgradish is built from other people's work too. Their licences ask for these notices to go with every copy, so the program carries them:
 ffmpeg-sources = The exact sources of the ffmpeg built in, with this release
+
+
+## The dialog of keyboard shortcuts, opened from the menu or by ? or F1
+
+# The names of keys, as keyboards print them: shortcuts are written as
+# Ctrl+Enter; Left and Right are the arrow keys. Others are written as
+# their sign.
+key-ctrl = Ctrl
+key-cmd = Cmd
+key-alt = Alt
+key-shift = Shift
+key-enter = Enter
+key-space = Space
+key-delete = Delete
+key-backspace = Backspace
+key-home = Home
+key-end = End
+key-escape = Esc
+key-left = Left
+key-right = Right
+# Its groups.
+shortcuts-files = Files
+shortcuts-playing = The preview and its timeline
+shortcuts-window = The window
+shortcuts-mouse = The mouse, over the preview
+# What each does. Where there are two keys, the first goes back and the
+# second on, or the first to the start and the second to the end.
+shortcut-paste = Add the files or the image on the clipboard
+shortcut-convert = Convert the file picked
+shortcut-remove = Remove the file picked, or the one whose row has the focus
+shortcut-undo = Put back the files just removed
+shortcut-play = Play or pause
+shortcut-step = A frame back or on; with Shift, ten
+shortcut-ends = The first or the last frame used
+shortcut-cut-here = Start or end the part used at the frame shown
+shortcut-move-start = Move the start of the part used; with Shift, by ten frames
+shortcut-move-end = Move the end of the part used; with Shift, by ten frames
+shortcut-scale-up = Make everything larger
+shortcut-scale-down = Make everything smaller
+shortcut-scale-reset = Back to 100%
+shortcut-shortcuts = This list
+shortcut-close = Close a dialog or a menu
+# Ways of using the mouse, and what each does.
+mouse-drag = Drag
+    .does = Crop, or move the crop or its edges
+mouse-double-click = Double-click
+    .does = Back to the whole picture
+mouse-wheel = Wheel
+    .does = Zoom in or out
+mouse-pan = Right or middle drag
+    .does = Pan, when zoomed in
