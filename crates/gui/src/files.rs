@@ -160,15 +160,34 @@ impl App {
         // without files there is nothing to convert or remove, and the way
         // to add them, beside the list, is the one thing to do
         if !self.items.is_empty() {
+            let mut stop = false;
             egui::Panel::bottom("files-footer").show(ui, |ui| {
                 ui.add_space(6.0);
+                // converting: how far it got of all asked for, and a way to
+                // stop it all, each where it stays as the numbers change
+                if let Some((current, total)) = self.batch_progress() {
+                    ui.horizontal(|ui| {
+                        let text = fl!("converting-batch", current = current, total = total);
+                        let widest = fl!("converting-batch", current = total, total = total);
+                        let width = widgets::text_width(ui, &widgets::zeros(&widest), 0.0);
+                        let row = vec2(width.ceil() + 1.0, crate::theme::CONTROL);
+                        let layout = egui::Layout::left_to_right(egui::Align::Center);
+                        ui.allocate_ui_with_layout(row, layout, |ui| ui.label(text));
+                        let hint = fl!("stop-all", "hint");
+                        stop = ui.button(fl!("stop-all")).on_hover_text(hint).clicked();
+                    });
+                    ui.add_space(2.0);
+                }
                 // onto a second line where longer words leave no room
                 ui.horizontal_wrapped(|ui| {
+                    // as wide for any count, so what follows stays put
+                    let widest = fl!("convert-all", count = self.items.len());
+                    let padding = 2.0 * ui.spacing().button_padding.x;
+                    let width = widgets::text_width(ui, &widgets::zeros(&widest), padding);
+                    let all = egui::Button::new(fl!("convert-all", count = changed))
+                        .min_size(vec2(width.ceil(), 0.0));
                     if ui
-                        .add_enabled(
-                            changed > 0,
-                            egui::Button::new(fl!("convert-all", count = changed)),
-                        )
+                        .add_enabled(changed > 0, all)
                         .on_hover_text(fl!("convert-all", "hint"))
                         .clicked()
                     {
@@ -182,7 +201,7 @@ impl App {
                             self.enqueue(id);
                         }
                     }
-                    if !self.items.is_empty() && ui.button(fl!("remove-all")).clicked() {
+                    if ui.button(fl!("remove-all")).clicked() {
                         let ids: Vec<u64> = self.items.iter().map(|item| item.id).collect();
                         self.remove_all(&ids);
                     }
@@ -194,6 +213,9 @@ impl App {
                 });
                 ui.add_space(4.0);
             });
+            if stop {
+                self.stop_all();
+            }
         }
 
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -234,6 +256,21 @@ impl App {
                 self.enqueue(id);
             }
         });
+    }
+
+    /// How far converting got, while it is under way: the one at work, or
+    /// the last begun, counted from the first asked for since nothing was
+    /// converting, of all asked for since.
+    pub(crate) fn batch_progress(&self) -> Option<(usize, usize)> {
+        let jobs = self.items.iter().filter_map(|item| item.job.as_ref());
+        let (busy, waiting) = jobs.fold((0, 0), |(busy, waiting), conversion| {
+            (busy + 1, waiting + usize::from(conversion.job.is_waiting()))
+        });
+        if busy == 0 {
+            return None;
+        }
+        let total = self.batch.max(busy);
+        Some(((total - waiting).clamp(1, total), total))
     }
 
     pub(crate) fn empty(&mut self, ui: &mut egui::Ui) {

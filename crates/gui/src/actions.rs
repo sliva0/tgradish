@@ -594,6 +594,35 @@ mod tests {
     }
 
     #[test]
+    fn says_how_far_converting_all_got_and_stops_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = with_art(dir.path(), 4);
+        let all = |harness: &Harness<App>| harness.get_by_label_contains("Convert all").rect();
+        let before = all(&harness);
+        harness.get_by_label_contains("Convert all").click();
+        harness.run_steps(1);
+        assert_eq!(harness.state().batch_progress(), Some((1, 4)));
+        harness.run_steps(1);
+        harness.get_by_label(&fl!("converting-batch", current = 1, total = 4));
+        // its button as wide and where it was along, though it counts fewer
+        // now, under the line that says how far it got
+        let after = all(&harness);
+        assert_eq!((after.left(), after.width()), (before.left(), before.width()));
+        harness.get_by_label(&fl!("stop-all")).click_accesskit();
+        harness.run_steps(2);
+        finish(&mut harness);
+        let app = harness.state();
+        assert!(app.queue.is_empty() && app.batch_progress().is_none());
+        // the one at work stopped, the rest never begun
+        let made = app.items.iter().filter(|item| item.made.is_some() || item.failed.is_some());
+        assert!(made.count() <= 1);
+        // and counted afresh next time
+        let id = app.items[3].id;
+        harness.state_mut().enqueue(id);
+        assert_eq!(harness.state().batch_progress(), Some((1, 1)));
+    }
+
+    #[test]
     fn takes_a_file_out_of_the_queue() {
         let dir = tempfile::tempdir().unwrap();
         let mut harness = with_art(dir.path(), 2);

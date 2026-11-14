@@ -219,6 +219,32 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
     harness.state_mut().remove_all(&ids);
     shot(&mut harness, save, "state-undo");
+    // a batch at work: one converting, the rest waiting
+    let mut harness = window(Config::default(), egui::vec2(1280.0, 820.0));
+    let arts: Vec<PathBuf> = (0..5)
+        .map(|n| {
+            let art = dir.path().join(format!("frame {n}.png"));
+            square(&art, [40 * n as u8, 160, 60, 255]);
+            art
+        })
+        .collect();
+    harness.state_mut().add(arts);
+    finish(&mut harness);
+    let state = harness.state_mut();
+    for (index, item) in state.items.iter_mut().enumerate() {
+        let mut job = Job::waiting(dir.path().join(format!("frame {index}.sticker.tgs")));
+        if index == 0 {
+            job.status = Status::Running;
+        } else {
+            state.queue.push_back(item.id);
+        }
+        item.job = Some(crate::item::Conversion::of(job, Format::Tgs, item.choices.clone()));
+    }
+    state.batch = 12;
+    shot(&mut harness, save, "state-queue");
+    harness.set_size(egui::vec2(crate::MIN_WIDTH, 640.0));
+    harness.ctx.memory_mut(|memory| memory.reset_areas());
+    shot(&mut harness, save, "state-queue-narrow");
 }
 
 /// Takes the window through each state worth a picture, handing each to

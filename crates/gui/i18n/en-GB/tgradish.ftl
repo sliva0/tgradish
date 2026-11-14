@@ -177,6 +177,10 @@ convert-all = { $count ->
 }
     .hint = Convert every file without an up-to-date result
 remove-all = Remove all
+# Over Convert all while files convert: the one at work, of all asked for.
+converting-batch = Converting { $current } of { $total }
+stop-all = Stop all
+    .hint = Stop converting, and take the files waiting out of the queue
 no-files = Files you add show up here
 remove = Remove
 remove-file = Remove it from the list

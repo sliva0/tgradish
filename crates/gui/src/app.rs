@@ -50,6 +50,8 @@ pub(crate) struct App {
     pub(crate) recent: VecDeque<u64>,
     /// Items waiting to be converted, in order.
     pub(crate) queue: VecDeque<u64>,
+    /// How many were asked to be converted since nothing was.
+    pub(crate) batch: usize,
     /// Results this window wrote, which it replaces when making them again.
     pub(crate) written: HashMap<PathBuf, Written>,
     /// Files found in the way, by their size and time: whether tgradish
@@ -250,6 +252,7 @@ impl App {
             selected: None,
             recent: VecDeque::new(),
             queue: VecDeque::new(),
+            batch: 0,
             written: HashMap::new(),
             made_by_tgradish: Default::default(),
             outputs: Default::default(),
@@ -521,13 +524,32 @@ impl App {
         let Some(item) = self.item(id).filter(|item| !item.blocked()) else { return };
         // as things are now, not as they were when the frame started
         let output = self.work_out_output(item);
-        let item = self.item_mut(id).expect("found above");
-        if let Some(conversion) = &item.job {
-            conversion.job.cancel();
+        // counted from the first while nothing else converts
+        if self.items.iter().all(|item| item.job.is_none()) {
+            self.batch = 0;
         }
+        let item = self.item_mut(id).expect("found above");
+        let again = item.job.as_ref().inspect(|conversion| conversion.job.cancel()).is_some();
         item.job = Some(Conversion::of(Job::waiting(output), item.format, item.choices.clone()));
+        if !again {
+            self.batch += 1;
+        }
         self.queue.retain(|&other| other != id);
         self.queue.push_back(id);
+    }
+
+    /// Stops every conversion, and takes what waits out of the queue.
+    pub(crate) fn stop_all(&mut self) {
+        for item in &mut self.items {
+            let Some(conversion) = &item.job else { continue };
+            conversion.job.cancel();
+            // waiting, it is as if never asked for; running, it stops and
+            // says so
+            if conversion.job.is_waiting() {
+                item.job = None;
+            }
+        }
+        self.queue.clear();
     }
 
     /// Changes a setting of the window, and keeps that change in the config
