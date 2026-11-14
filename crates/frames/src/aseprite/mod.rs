@@ -261,7 +261,7 @@ impl Sprite {
             n => usize::from(n),
         };
         if width == 0 || height == 0 {
-            return Err(error(format!("the canvas is {width}x{height}")));
+            return Err(error(format!("the canvas is {width}×{height}")));
         }
         if width.max(height) > limits.max_dimension {
             return Err(limits.dimension(Oversize::Canvas { width, height }));

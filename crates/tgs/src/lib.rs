@@ -101,7 +101,7 @@ pub enum Error {
     Invisible,
     /// A crop that reaches outside the input.
     #[error(
-        "the crop {}x{}+{}+{} is not within the {width}x{height} input",
+        "the crop {}x{}+{}+{} is not within the {width}×{height} input",
         crop.width, crop.height, crop.x, crop.y
     )]
     CropOutside {

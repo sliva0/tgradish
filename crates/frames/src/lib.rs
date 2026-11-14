@@ -51,7 +51,7 @@ pub enum Error {
     #[error("the animation has no frames")]
     Empty,
     /// A width or height of 0, or a frame too large to address.
-    #[error("{width}x{height} is not a usable size")]
+    #[error("{width}×{height} is not a usable size")]
     BadSize {
         /// The width given.
         width: u32,
@@ -59,7 +59,7 @@ pub enum Error {
         height: u32,
     },
     /// A frame of another size than its animation's.
-    #[error("frame {index} has {len} bytes, a {width}x{height} RGBA frame has {expected}")]
+    #[error("frame {index} has {len} bytes, a {width}×{height} RGBA frame has {expected}")]
     FrameSize {
         /// Which frame, from 0.
         index: usize,
@@ -106,7 +106,7 @@ pub enum Error {
     #[error("layers only exist in Aseprite files")]
     LayersWithoutAseprite,
     /// An image of a [`sequence`] of another size than the first.
-    #[error("image {index} is {width}x{height}, the first one is {first_width}x{first_height}")]
+    #[error("image {index} is {width}×{height}, the first one is {first_width}×{first_height}")]
     SequenceSize {
         /// Which image, from 0.
         index: usize,
@@ -120,7 +120,7 @@ pub enum Error {
         first_height: u32,
     },
     /// A sprite sheet that doesn't divide into the [`Sheet`]'s cells.
-    #[error("{width}x{height} doesn't split into {columns}x{rows} equal cells")]
+    #[error("{width}×{height} doesn't split into {columns}x{rows} equal cells")]
     SheetGrid {
         /// The sheet's width.
         width: u32,
@@ -203,10 +203,10 @@ pub enum Limit {
 fn oversize_text(what: &Oversize, limit: &Limit) -> String {
     match (what, limit) {
         (Oversize::Frames { frames, width, height }, _) => {
-            format!("{frames} frames of {width}x{height}")
+            format!("{frames} frames of {width}×{height}")
         }
-        (Oversize::Image { width, height }, _) => format!("a {width}x{height} image"),
-        (Oversize::Canvas { width, height }, _) => format!("the canvas is {width}x{height}"),
+        (Oversize::Image { width, height }, _) => format!("a {width}×{height} image"),
+        (Oversize::Canvas { width, height }, _) => format!("the canvas is {width}×{height}"),
         (Oversize::Decoding, Limit::Bytes(bytes)) => {
             format!("decoding needs more than {bytes} bytes")
         }

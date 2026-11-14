@@ -306,7 +306,7 @@ fn rules(stats: &Stats) -> Vec<Issue> {
     if (stats.width, stats.height) != (canvas, canvas) {
         fail(
             IssueKind::Canvas,
-            format!("the canvas is {}x{}, stickers are 512x512", stats.width, stats.height),
+            format!("the canvas is {}×{}, stickers are 512×512", stats.width, stats.height),
         );
     }
     // 30 fps was accepted too, and the limit is in seconds
@@ -741,7 +741,7 @@ mod tests {
             .map(|issue| issue.message.as_str())
             .collect();
         for expected in
-            ["512x256", "25 fps", "200 frames at 25 fps last 8.00 s", "70000 bytes", "165389"]
+            ["512×256", "25 fps", "200 frames at 25 fps last 8.00 s", "70000 bytes", "165389"]
         {
             assert!(errors.iter().any(|e| e.contains(expected)), "{expected} in {errors:?}");
         }
