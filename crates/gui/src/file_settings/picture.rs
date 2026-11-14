@@ -5,12 +5,13 @@
 use eframe::egui;
 use tgradish_core::options::{Crop, ExactScale, Resize, Scaling};
 use tgradish_core::picture;
-use tgradish_core::presets::Format;
+use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::Target;
 use tgradish_core::webm::Options;
 
 use super::Context;
 use crate::canvas::{Exact, Keep};
+use crate::config::Config;
 use crate::item::{Aspect, Item, Recipe};
 use crate::l10n::fl;
 use crate::widgets::{
@@ -176,17 +177,11 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         }
     }
     // how a .tgs becomes square, its preset's or else the default, which
-    // keeps the crop's shape square while it is "Off"
+    // keeps the crop's shape square while it is "Off", as the window keeps
+    // it for every file, shown or not
     let tgs_base = (item.format == Format::Tgs)
         .then(|| item.choices.tgs_base(presets, config).unwrap_or_default().resize_or_default());
-    if let Some(base) = tgs_base
-        && keeps_shape(item, base)
-    {
-        if size.is_some_and(|size| ratio(item.view.aspect, size) != Some(1.0)) {
-            item.view.aspect = SQUARE;
-        }
-        keep_aspect(item, size, None);
-    }
+    keep_square(item, presets, config);
     row(ui, &fl!("crop"), &fl!("crop", "hint"), Ok(()), |ui| crop_box(ui, item, size, exact));
 
     row(ui, &fl!("aspect-ratio"), &fl!("aspect-ratio", "hint"), Ok(()), |ui| {
@@ -506,6 +501,55 @@ fn sketch(ui: &mut egui::Ui, (width, height): (u32, u32), crop: Crop, wide: f32)
 
 /// The aspect of a square crop.
 const SQUARE: Aspect = Aspect::Ratio(1.0, 1.0);
+
+/// Keeps the crop of an item made a `.tgs` that keeps the crop's shape, as
+/// its own choice, its preset's or the default's says, square, and its
+/// aspect ratio 1:1, once its size is known: however the choice came, by a
+/// preset, the defaults, a session, the format changed or Settings, and
+/// whether its settings are shown or not. The window keeps every file so,
+/// each frame, and as it is queued to convert.
+pub(crate) fn keep_square(item: &mut Item, presets: &Presets, config: &Config) {
+    if item.format != Format::Tgs {
+        return;
+    }
+    let base = item.choices.tgs_base(presets, config).unwrap_or_default().resize_or_default();
+    if !keeps_shape(item, base) {
+        return;
+    }
+    let size = item.input_size();
+    if size.is_some_and(|size| ratio(item.view.aspect, size) != Some(1.0)) {
+        item.view.aspect = SQUARE;
+    }
+    keep_aspect(item, size, None);
+}
+
+/// `choices`' crop of a `size` input made square, where they keep the
+/// crop's shape for a `.tgs`, as [`keep_square`] keeps an item's: for a
+/// conversion queued before its file was shown.
+pub(crate) fn square_choices(
+    choices: &mut crate::item::Choices,
+    size: (u32, u32),
+    presets: &Presets,
+    config: &Config,
+) {
+    if !keeps_crop_shape(choices, presets, config) {
+        return;
+    }
+    let full = Crop::whole(size);
+    let square = to_ratio(choices.crop.unwrap_or(full), 1.0, size);
+    choices.crop = (square != full).then_some(square);
+}
+
+/// Whether `choices`, for a `.tgs`, keep the crop's shape, as their own
+/// choice, their preset's or the default's says.
+pub(crate) fn keeps_crop_shape(
+    choices: &crate::item::Choices,
+    presets: &Presets,
+    config: &Config,
+) -> bool {
+    let base = choices.tgs_base(presets, config).unwrap_or_default().resize_or_default();
+    choices.tgs.resize.unwrap_or(base) == Resize::Contain
+}
 
 /// Whether the item, made a `.tgs`, keeps the crop's shape, rather than
 /// forcing it into square: then the crop must be square already. `base` is
@@ -961,5 +1005,53 @@ mod tests {
         finish(&mut harness);
         let made = harness.state().items[0].made.as_ref().expect("made");
         assert!(matches!(made.job.status, crate::jobs::Status::Done(_)), "{:?}", made.job.status);
+    }
+
+    #[test]
+    fn keeps_unshown_tgs_files_square_when_a_preset_keeps_their_shape() {
+        use egui_kittest::kittest::Queryable;
+        use tgradish_core::presets::Format;
+
+        // a default preset for TGS that keeps the crop's shape, and pictures
+        // wider and taller than square, none of them shown before Convert
+        // all, pressed as soon as they are added
+        let dir = tempfile::tempdir().unwrap();
+        let presets_dir = dir.path().join("presets");
+        std::fs::create_dir(&presets_dir).unwrap();
+        std::fs::write(presets_dir.join("as is.toml"), "[tgs]\nresize = 'contain'\n").unwrap();
+        let mut files = Vec::new();
+        for (index, (width, height)) in [(40, 24), (24, 40), (30, 31)].into_iter().enumerate() {
+            let mut art = image::RgbaImage::new(width, height);
+            for (x, y, pixel) in art.enumerate_pixels_mut() {
+                *pixel = image::Rgba([(x * 6) as u8, (y * 6) as u8, 90, 255]);
+            }
+            let path = dir.path().join(format!("art {index}.png"));
+            art.save(&path).unwrap();
+            files.push(path);
+        }
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        config.tgs_preset = Some("as is".into());
+        let mut harness = harness(config);
+        let state = harness.state_mut();
+        state.presets = Presets::load(Some(&presets_dir)).unwrap();
+        state.add(files);
+        for item in &mut state.items {
+            (item.format, item.format_guessed) = (Format::Tgs, false);
+        }
+        harness.step();
+        let all = fl!("convert-all", count = 3);
+        harness.get_by_label(&all).click_accesskit();
+        harness.run_steps(2);
+        finish(&mut harness);
+        for item in &harness.state().items {
+            let failed = item.failed.as_ref().map(|failed| format!("{:?}", failed.job.status));
+            let made = item.made.as_ref().unwrap_or_else(|| panic!("{failed:?}"));
+            assert!(matches!(made.job.status, crate::jobs::Status::Done(_)), "{}", item.name());
+            let crop = made.choices.as_ref().and_then(|choices| choices.crop);
+            let size = item.input_size().unwrap();
+            let (width, height) = crop.map_or(size, |crop| (crop.width, crop.height));
+            assert_eq!(width, height, "{}", item.name());
+        }
     }
 }
