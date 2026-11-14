@@ -372,13 +372,10 @@ fn run(cli: Cli) -> Result<()> {
     // the window never reads the token, so Ctrl-C there ends it as usual
     if !cli.command.is_window() {
         // convert's first Ctrl-C keeps the best WebM encode so far, where
-        // one fits: ffmpeg is kept from the terminal's Ctrl-C, so that it
-        // isn't stopped before that is decided, and is stopped through
-        // the token either way
+        // one fits. ffmpeg, in the terminal's process group, gets Ctrl-C
+        // too, and stops at once; core waits a moment for what it meant,
+        // decided here on the signal's thread, so promptly
         let settles = matches!(cli.command, Command::Convert(_));
-        if settles {
-            cancel.take_interrupts();
-        }
         let settled_at = std::sync::Mutex::new(None::<std::time::Instant>);
         ctrlc::set_handler({
             let cancel = cancel.clone();

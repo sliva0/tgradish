@@ -27,8 +27,6 @@ struct Inner {
     /// only for the fitting it was checked against, never for the next
     /// conversion's, which may start while it is asked.
     state: Mutex<State>,
-    /// Its owner takes Ctrl-C for the processes it starts.
-    takes_interrupts: AtomicBool,
     /// Runs as a settle has been taken and not yet acted on.
     #[cfg(test)]
     settle_hook: hook::Hook,
@@ -62,22 +60,6 @@ impl CancelToken {
     /// A token nothing has cancelled yet.
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Says that its owner takes Ctrl-C itself, deciding what it means,
-    /// as settling or cancelling, and stopping ffmpeg through the token:
-    /// ffmpeg processes started for the work are then kept out of the
-    /// terminal's process group, on Unix, so that Ctrl-C there doesn't
-    /// reach them before the owner has decided. Elsewhere it changes
-    /// nothing: on Windows they have no console to get Ctrl-C from.
-    pub fn take_interrupts(&self) {
-        self.inner.takes_interrupts.store(true, Ordering::SeqCst);
-    }
-
-    /// Whether [`CancelToken::take_interrupts`] was called.
-    #[cfg(unix)]
-    pub(crate) fn takes_interrupts(&self) -> bool {
-        self.inner.takes_interrupts.load(Ordering::SeqCst)
     }
 
     /// What it knows of fitting and the process at work: poisoning is
@@ -145,6 +127,22 @@ impl CancelToken {
     /// An error where the step at work is to stop, cancelled or settling.
     pub(crate) fn check(&self) -> Result<()> {
         if self.interrupted() { Err(Error::Cancelled) } else { Ok(()) }
+    }
+
+    /// Waits up to `most` for the work to be cancelled or asked to settle,
+    /// giving whether it was: a process interrupted as Ctrl-C reaches it
+    /// may end before the one who pressed it has said what it means.
+    pub(crate) fn await_interruption(&self, most: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + most;
+        loop {
+            if self.interrupted() {
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
 
     /// A conversion starts fitting: nothing fits yet, and nothing was

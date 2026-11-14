@@ -485,10 +485,14 @@ fn cancels_from_stdin() {
 }
 
 /// `convert` of `inputs`, fitting the bitrate from far under the limit so
-/// that fitting goes on, events as JSON, stdin and stdout piped.
+/// that fitting goes on, events as JSON, stdin and stdout piped. On Unix,
+/// in a process group of its own, as a shell starts a command, which what
+/// it starts shares: a signal to the group reaches them all, as Ctrl-C in
+/// a terminal does.
 fn fitting(inputs: &[&Path], dir: &Path, args: &[&str]) -> std::process::Child {
     use std::process::Stdio;
-    Command::new(env!("CARGO_BIN_EXE_tgradish"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tgradish"));
+    command
         .args(["--json", "convert", "-y", "-t", "2", "--fit", "bitrate", "-b", "50"])
         .args(["--speed", "fast", "-O"])
         .arg(dir)
@@ -496,9 +500,44 @@ fn fitting(inputs: &[&Path], dir: &Path, args: &[&str]) -> std::process::Child {
         .args(args)
         .env("TGRADISH_CONFIG", no_config())
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap()
+        .stdout(Stdio::piped());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    command.spawn().unwrap()
+}
+
+/// Sends `signal` to the process group of `child`, which leads it, as a
+/// terminal sends Ctrl-C to all that runs in it.
+#[cfg(unix)]
+fn signal_group(child: &std::process::Child, signal: &str) {
+    let group = format!("-{}", child.id());
+    let sent = Command::new("kill").args([&format!("-{signal}"), "--", &group]).status();
+    assert!(sent.unwrap().success());
+}
+
+/// What still runs in the process group `child` led, as `pid command`,
+/// once it is given a few seconds to end.
+#[cfg(target_os = "linux")]
+fn left_in_group(child: &std::process::Child) -> Vec<String> {
+    let group = child.id().to_string();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let mut left = Vec::new();
+        for process in std::fs::read_dir("/proc").unwrap().filter_map(Result::ok) {
+            let Ok(stat) = std::fs::read_to_string(process.path().join("stat")) else { continue };
+            // after the command's name, in parentheses: state, parent, group
+            let Some((_, rest)) = stat.rsplit_once(") ") else { continue };
+            if rest.split(' ').nth(2) == Some(group.as_str()) {
+                let command = std::fs::read(process.path().join("cmdline")).unwrap_or_default();
+                let pid = process.file_name().to_string_lossy().into_owned();
+                left.push(format!("{pid} {}", String::from_utf8_lossy(&command)));
+            }
+        }
+        if left.is_empty() || std::time::Instant::now() > deadline {
+            return left;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 #[test]
@@ -530,8 +569,9 @@ fn keeps_the_best_so_far_when_asked_on_stdin() {
 }
 
 /// The first Ctrl-C where an encode fits keeps the best so far and goes
-/// on to the next input; one where nothing fits yet cancels.
-#[cfg(unix)]
+/// on to the next input; one where nothing fits yet cancels. Each reaches
+/// ffmpeg too, as in a terminal, which stops at once, and none is left.
+#[cfg(target_os = "linux")]
 #[test]
 fn keeps_the_best_so_far_on_ctrl_c() {
     use std::io::{BufRead, BufReader};
@@ -543,10 +583,7 @@ fn keeps_the_best_so_far_on_ctrl_c() {
     std::fs::copy(&input, &second).unwrap();
     let out = dir.path().join("out");
     let mut child = fitting(&[&first, &second], &out, &[]);
-    let interrupt = |child: &std::process::Child| {
-        let pid = child.id().to_string();
-        assert!(Command::new("kill").args(["-INT", &pid]).status().unwrap().success());
-    };
+    let interrupt = |child: &std::process::Child| signal_group(child, "INT");
     let stdout = BufReader::new(child.stdout.take().unwrap());
     let (mut settled, mut cancelled, mut finished) = (false, false, Vec::new());
     for line in stdout.lines() {
@@ -571,6 +608,64 @@ fn keeps_the_best_so_far_on_ctrl_c() {
     assert!(out.join("first.sticker.webm").exists());
     assert!(!out.join("second.sticker.webm").exists());
     assert_eq!(status.code(), Some(130));
+    assert_eq!(left_in_group(&child), Vec::<String>::new());
+}
+
+/// Ctrl-C in the terminal reaches ffmpeg as it reaches tgradish: once an
+/// encode fits, the one interrupted is given up and the best so far kept,
+/// with nothing left running.
+#[cfg(target_os = "linux")]
+#[test]
+fn keeps_the_best_so_far_as_ctrl_c_reaches_ffmpeg_too() {
+    use std::io::{BufRead, BufReader};
+
+    let Some(input) = clip(Clip::Square) else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = fitting(&[&input], dir.path(), &[]);
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let (mut sent, mut last) = (false, Value::Null);
+    for line in stdout.lines() {
+        last = serde_json::from_str(&line.unwrap()).unwrap();
+        // while the next attempt encodes, ffmpeg at work
+        let encoding = last["fraction"].as_f64().is_some_and(|done| done > 0.0 && done < 1.0);
+        if last["event"] == "progress" && last["can-settle"] == true && encoding && !sent {
+            signal_group(&child, "INT");
+            sent = true;
+        }
+    }
+    let status = child.wait().unwrap();
+    assert!(sent);
+    assert_eq!((&last["event"], &last["settled"]), (&"finished".into(), &true.into()), "{last}");
+    assert_eq!(status.code(), Some(0));
+    assert_eq!(left_in_group(&child), Vec::<String>::new());
+}
+
+/// Ended by a signal to all that runs in the terminal, as when it closes,
+/// tgradish leaves no ffmpeg behind, the signal reaching it too.
+#[cfg(target_os = "linux")]
+#[test]
+fn leaves_no_ffmpeg_when_the_terminal_ends_it() {
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::process::ExitStatusExt;
+
+    let Some(input) = clip(Clip::Square) else { return };
+    for (signal, number) in [("TERM", 15), ("HUP", 1)] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut child = fitting(&[&input], dir.path(), &[]);
+        let stdout = BufReader::new(child.stdout.take().unwrap());
+        for line in stdout.lines() {
+            let event: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            // ffmpeg at work
+            let encoding = event["fraction"].as_f64().is_some_and(|done| done > 0.0 && done < 1.0);
+            if event["event"] == "progress" && encoding {
+                signal_group(&child, signal);
+                break;
+            }
+        }
+        let status = child.wait().unwrap();
+        assert_eq!(status.signal(), Some(number), "{signal}");
+        assert_eq!(left_in_group(&child), Vec::<String>::new(), "{signal}");
+    }
 }
 
 /// Without `--cancel-on-stdin`, stdin is the caller's: a loop reading
