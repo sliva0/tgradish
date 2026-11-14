@@ -239,15 +239,9 @@ impl Corner {
         matches!(self, Corner::TopLeft | Corner::TopRight)
     }
 
-    /// The corner on the `left` or right, at the `top` or bottom.
-    pub(crate) fn at(left: bool, top: bool) -> Corner {
-        match (left, top) {
-            (true, true) => Corner::TopLeft,
-            (false, true) => Corner::TopRight,
-            (true, false) => Corner::BottomLeft,
-            (false, false) => Corner::BottomRight,
-        }
-    }
+    /// Every corner.
+    pub(crate) const ALL: [Corner; 4] =
+        [Corner::TopLeft, Corner::TopRight, Corner::BottomLeft, Corner::BottomRight];
 }
 
 /// The window's colours.

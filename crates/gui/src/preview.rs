@@ -390,12 +390,7 @@ fn preview(
                 // the result's small picture beside the input, not over it,
                 // with room for its longest label, eased into place when it
                 // is turned on or off, resized or moved
-                let widest = match item.format {
-                    Format::Webm | Format::Webp => {
-                        format!("{}\n{}", fl!("inset-label", scale = 100), "512 × 512 px")
-                    }
-                    Format::Tgs => fl!("inset-label", "plain"),
-                };
+                let widest = inset::widest_label(item.format != Format::Tgs);
                 let text = ui.visuals().text_color();
                 let label = ui.painter().layout_no_wrap(widest, inset::INSET_LABEL, text);
                 // the setting counts sizes from 1, for people

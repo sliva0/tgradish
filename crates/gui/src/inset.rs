@@ -30,6 +30,9 @@ pub(crate) struct Inset {
     dragged: Option<Vec2>,
     /// The room the small picture was let go of in, to ease from there.
     dropped: Option<Rect>,
+    /// The corner the small picture goes to if let go of now, while it is
+    /// dragged, which is outlined.
+    aimed: Option<Corner>,
 }
 
 /// What the layout of the input and the small picture is made of: whether
@@ -169,13 +172,12 @@ impl Inset {
             None => fl!("inset-label", "plain"),
         };
         let galley = painter.layout_no_wrap(label, INSET_LABEL, Color32::PLACEHOLDER);
-        let boxed = label_box(galley.size());
-        // the label over the picture's left edge, or further left where it
-        // would stick out
-        let label_at = |frame: Rect| {
-            let left = frame.left().min(view.right() - MARGIN - boxed.x).max(view.left() + 3.0);
-            pos2(left, frame.top() - boxed.y - 8.0)
-        };
+        // as wide as its widest, so the buttons at its end stay put as the
+        // scale or the size in it changes
+        let widest = widest_label(details.is_some());
+        let widest = painter.layout_no_wrap(widest, INSET_LABEL, Color32::PLACEHOLDER);
+        let boxed = label_box(galley.size().max(widest.size()));
+        let label_at = label_place(view, boxed, corner);
         // the size buttons at the end of the label at `at`
         let buttons_at = |at: Pos2| {
             Rect::from_min_max(
@@ -185,8 +187,8 @@ impl Inset {
         };
 
         // dragged by the picture or its label, which keep the crop under
-        // them from being dragged, towards another corner, which the
-        // pointer's quarter of the view picks
+        // them from being dragged, towards the corner whose place the
+        // picture is nearest
         let mut change = None;
         let mut frame = docked.translate(self.dragged.unwrap_or_default());
         let mut dragging = false;
@@ -217,15 +219,16 @@ impl Inset {
             } else if held.iter().any(|held| held.hovered()) && !on_buttons {
                 ui.ctx().set_cursor_icon(CursorIcon::Grab);
             }
-            // let go of: eased from where it was to its corner, the same
-            // one or another
+            let places = places(view, shown, boxed.y);
+            self.aimed = dragging.then(|| nearest(frame, &places));
+            // let go of: eased from where it was to the corner whose place
+            // it is nearest, the same one or another, by where the picture
+            // is rather than the pointer, which may be on its label
             if held.iter().any(|held| held.drag_stopped())
                 && let Some(by) = self.dragged.take()
             {
                 self.dropped = Some(room.translate(by));
-                let to = pointer.map_or(corner, |pointer| {
-                    Corner::at(pointer.x < view.center().x, pointer.y < view.center().y)
-                });
+                let to = nearest(frame, &places);
                 if to != corner {
                     change = Some(InsetChange::Corner(to));
                 }
@@ -238,23 +241,14 @@ impl Inset {
             (Color32::from_white_alpha(230), Color32::from_gray(20))
         };
         let edge = ui.visuals().widgets.noninteractive.bg_stroke;
-        if dragging {
-            // the corners it can go to, under its label at the top
+        if let Some(aimed) = self.aimed {
+            // the places it can go to, the one it goes to if let go of now
+            // outlined in the accent
             let stroke = Stroke::new(1.0, edge.color.gamma_multiply(0.8));
-            for corner in
-                [Corner::TopLeft, Corner::TopRight, Corner::BottomLeft, Corner::BottomRight]
-            {
-                let x = if corner.left() { view.left() + MARGIN } else { view.right() - MARGIN };
-                let y = if corner.top() {
-                    view.top() + MARGIN + boxed.y + LABEL_GAP
-                } else {
-                    view.bottom() - MARGIN
-                };
-                let at = pos2(if corner.left() { x } else { x - shown.x }, {
-                    if corner.top() { y } else { y - shown.y }
-                });
-                let target = Rect::from_min_size(at, shown).expand(4.0);
-                painter.rect_stroke(target, 4.0, stroke, egui::StrokeKind::Outside);
+            let chosen = Stroke::new(2.0, crate::theme::mark(ui.visuals()));
+            for (corner, place) in places(view, shown, boxed.y) {
+                let stroke = if corner == aimed { chosen } else { stroke };
+                painter.rect_stroke(place.expand(4.0), 4.0, stroke, egui::StrokeKind::Outside);
             }
         }
         painter.rect(frame.expand(4.0), 4.0, back, edge, egui::StrokeKind::Outside);
@@ -318,8 +312,11 @@ const SIZE_BUTTON: f32 = 24.0;
 const SIZE_BUTTONS: f32 = 2.0 * SIZE_BUTTON + 2.0;
 /// The width of the grip before the label's text.
 const GRIP: f32 = 12.0;
-/// Height the label takes over the small picture, besides its text.
+/// Height the label takes over or under the small picture, besides its
+/// text.
 const LABEL_GAP: f32 = 12.0;
+/// Space between the label and the small picture's frame.
+const LABEL_SPACE: f32 = 8.0;
 /// The frame around the small picture, beyond it.
 const FRAME: f32 = 5.0;
 /// The smallest the small picture gets beside the input, on its longer
@@ -332,6 +329,63 @@ const LEAST_SHARE: f32 = 0.75;
 /// the grip before it and the buttons after it.
 pub(crate) fn label_box(text: Vec2) -> Vec2 {
     vec2(GRIP + text.x + 6.0 + SIZE_BUTTONS, text.y.max(SIZE_BUTTON))
+}
+
+/// The longest the small picture's label gets, with the result's scale and
+/// size in it, `detailed`, or without: as wide as any it shows, as its
+/// digits are all as wide as each other.
+pub(crate) fn widest_label(detailed: bool) -> String {
+    match detailed {
+        true => format!("{}\n{}", fl!("inset-label", scale = 100), "512 × 512 px"),
+        false => fl!("inset-label", "plain"),
+    }
+}
+
+/// Where the label of a box `boxed` large goes by a small picture docked
+/// in `corner` of `view`, which is at its first argument: at the picture's
+/// edge towards the view's edge, above it in a top corner and under it in
+/// a bottom one, and at its side towards the view's side. That corner of
+/// the picture is the one that stays put as the picture changes size, so
+/// the buttons at the label's end do too.
+fn label_place(view: Rect, boxed: Vec2, corner: Corner) -> impl Fn(Rect) -> Pos2 {
+    move |frame: Rect| {
+        let x = if corner.left() { frame.left() } else { frame.right() - boxed.x };
+        let y = if corner.top() {
+            frame.top() - boxed.y - LABEL_SPACE
+        } else {
+            frame.bottom() + LABEL_SPACE
+        };
+        // within the view, where the picture is dragged near its edge
+        let x = x.min(view.right() - MARGIN - boxed.x).max(view.left() + 3.0);
+        pos2(x, y.min(view.bottom() - boxed.y - 3.0).max(view.top() + 3.0))
+    }
+}
+
+/// Where a small picture `size` large goes in each corner of `view`, with
+/// room for a label `label_height` high between it and the view's edge.
+fn places(view: Rect, size: Vec2, label_height: f32) -> [(Corner, Rect); 4] {
+    Corner::ALL.map(|corner| (corner, docked(view, size, label_height + LABEL_GAP, corner)))
+}
+
+/// Where something `size` large goes in `corner` of `view`, `label_height`
+/// apart from its top or bottom edge, for a label.
+fn docked(view: Rect, size: Vec2, label_height: f32, corner: Corner) -> Rect {
+    let x = if corner.left() { view.left() + MARGIN } else { view.right() - MARGIN - size.x };
+    let y = if corner.top() {
+        view.top() + MARGIN + label_height
+    } else {
+        view.bottom() - MARGIN - label_height - size.y
+    };
+    Rect::from_min_size(pos2(x, y), size)
+}
+
+/// The corner of `places` whose place `frame` is nearest, by their middles.
+fn nearest(frame: Rect, places: &[(Corner, Rect); 4]) -> Corner {
+    let distance = |place: &Rect| (place.center() - frame.center()).length_sq();
+    places
+        .iter()
+        .min_by(|a, b| distance(&a.1).total_cmp(&distance(&b.1)))
+        .map_or(Corner::BottomRight, |(corner, _)| *corner)
 }
 
 /// Where the input and the result's small picture go in `view`. The small
@@ -358,13 +412,7 @@ pub(crate) fn split(
     let largest =
         (view.width() - 2.0 * MARGIN - FRAME).min(view.height() - 2.0 * MARGIN - label_height);
     let side = (view.size().min_elem() * share).max(SMALLEST_INSET).min(largest).max(0.0);
-    let x = if corner.left() { view.left() + MARGIN } else { view.right() - MARGIN - side };
-    let y = if corner.top() {
-        view.top() + MARGIN + label_height
-    } else {
-        view.bottom() - MARGIN - side
-    };
-    let room = Rect::from_min_size(pos2(x, y), Vec2::splat(side));
+    let room = docked(view, Vec2::splat(side), label_height, corner);
 
     let input = vec2(input.0.max(1) as f32, input.1.max(1) as f32);
     let fit =
@@ -429,7 +477,8 @@ mod tests {
         // a square input in a wide view: a strip on the side of the corner
         let wide = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 400.0));
         let (input, room) = split(wide, (100, 100), label, INSET_SIZES[2], Corner::BottomRight);
-        assert_eq!((room.right(), room.bottom(), room.width()), (786.0, 386.0, 136.0));
+        // under it, room for its label
+        assert_eq!((room.right(), room.bottom(), room.width()), (786.0, 344.0, 136.0));
         assert!(input.left() == 0.0 && input.right() <= room.left(), "{input:?} {room:?}");
         let (input, room) = split(wide, (100, 100), label, INSET_SIZES[2], Corner::TopLeft);
         assert_eq!(room.min, pos2(MARGIN, MARGIN + label.y + LABEL_GAP));
@@ -497,6 +546,97 @@ mod tests {
         assert_eq!(harness.state().1, Some(InsetChange::Corner(Corner::TopLeft)));
         let dropped = harness.state().0.dropped.unwrap();
         assert!(dropped.center().x < start.x - 100.0, "{dropped:?}");
+    }
+
+    /// What [`shown_in`] shows: the small picture, the change asked for,
+    /// its corner and size, and the rooms it would have in each corner.
+    struct Shown {
+        inset: Inset,
+        change: Option<InsetChange>,
+        corner: Corner,
+        size: usize,
+        rooms: [Rect; 4],
+    }
+
+    /// A harness showing a 512 × 288 result's small picture in a view of
+    /// `view` size, in its `corner` at its `size`, as the preview lays it
+    /// out.
+    fn shown_in(view: Vec2, corner: Corner, size: usize) -> egui_kittest::Harness<'static, Shown> {
+        let show = |ui: &mut egui::Ui, shown: &mut Shown| {
+            let view = ui.max_rect();
+            let widest =
+                ui.painter().layout_no_wrap(widest_label(true), INSET_LABEL, Color32::WHITE);
+            let label = label_box(widest.size());
+            let share = INSET_SIZES[shown.size];
+            shown.rooms = Corner::ALL.map(|corner| split(view, (640, 360), label, share, corner).1);
+            let corner = shown.corner;
+            let room = shown.rooms[Corner::ALL.iter().position(|c| *c == corner).unwrap()];
+            let align = vec2(!corner.left() as u8 as f32, !corner.top() as u8 as f32);
+            let red = |_| egui::ColorImage::filled([8, 8], Color32::RED);
+            let place = (corner, shown.size, true);
+            let (details, result) = (Some("512 × 288 px"), vec2(512.0, 288.0));
+            let change = shown.inset.show(ui, (view, room, align), place, 1, details, result, red);
+            shown.change = change.or(shown.change);
+        };
+        let rooms = [Rect::NOTHING; 4];
+        let state = Shown { inset: Inset::default(), change: None, corner, size, rooms };
+        let mut harness =
+            egui_kittest::Harness::builder().with_size(view).build_ui_state(show, state);
+        widgets::test_fonts(&harness);
+        harness.run_steps(2);
+        harness
+    }
+
+    #[test]
+    fn keeps_the_size_buttons_still_as_the_small_picture_changes_size() {
+        use egui_kittest::kittest::Queryable;
+        // in every corner, its label at the picture's edge towards the
+        // view's, so they stay as the picture grows and shrinks from there
+        for corner in Corner::ALL {
+            let mut harness = shown_in(vec2(1000.0, 700.0), corner, 0);
+            let mut seen = None;
+            for size in 0..INSET_SIZES.len() {
+                harness.state_mut().size = size;
+                harness.run_steps(2);
+                let buttons = (harness.get_by_label("−").rect(), harness.get_by_label("+").rect());
+                assert_eq!(*seen.get_or_insert(buttons), buttons, "{corner:?} at {size}");
+            }
+        }
+    }
+
+    #[test]
+    fn goes_where_the_small_picture_is_let_go_of_not_the_pointer() {
+        use egui_kittest::kittest::Queryable;
+        // a large one at the top left, dragged down by its label, which is
+        // above it: the picture over the place at the bottom left, the
+        // pointer, on the label, in the top half of the view still
+        let view = vec2(600.0, 340.0);
+        let mut harness = shown_in(view, Corner::TopLeft, 4);
+        let grip = harness.get_by_label("−").rect().left_center() - vec2(30.0, 0.0);
+        let [top, _, bottom, _] = harness.state().rooms;
+        // the picture's height in its room, landscape
+        let high = top.width() * 288.0 / 512.0;
+        let to = grip + vec2(4.0, bottom.bottom() - high - top.top() - 6.0);
+        assert!(to.y < view.y / 2.0, "{to:?}");
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        harness.event(egui::Event::PointerMoved(grip));
+        harness.event(button(grip, true));
+        harness.run();
+        for step in 1..=4 {
+            harness.event(egui::Event::PointerMoved(grip.lerp(to, step as f32 / 4.0)));
+            harness.run();
+        }
+        // outlined as where it goes, while dragged, and let go of there
+        assert_eq!(harness.state().inset.aimed, Some(Corner::BottomLeft));
+        harness.event(button(to, false));
+        harness.run();
+        assert_eq!(harness.state().change, Some(InsetChange::Corner(Corner::BottomLeft)));
+        assert_eq!(harness.state().inset.aimed, None);
     }
 
     #[test]
