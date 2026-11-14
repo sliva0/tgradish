@@ -17,8 +17,11 @@ pub enum Error {
     FfmpegNotFound(FfmpegMissing),
     #[error("{program} failed ({status}):\n{stderr}")]
     Ffmpeg { program: &'static str, status: String, stderr: String },
-    /// An input that couldn't be read: missing, of a kind nothing here
-    /// reads, or broken.
+    /// An input that isn't there: said the same whatever was to read it.
+    #[error("{}: no such file", .0.display())]
+    NoSuchFile(PathBuf),
+    /// An input that couldn't be read: of a kind nothing here reads,
+    /// broken, or not to be opened.
     #[error("couldn't read {}: {message}", path.display())]
     Unreadable { path: PathBuf, message: String },
     #[error("{} has no video stream", .0.display())]

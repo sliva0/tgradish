@@ -68,7 +68,12 @@ impl Input {
     /// be written at all, its folder being read-only. Every conversion
     /// asks this first.
     pub(crate) fn check_output(&self, output: &Path, overwrite: bool) -> Result<()> {
-        if self.files()?.iter().any(|input| same_file(input, output)) {
+        let files = self.files()?;
+        // as each reader would say, ffmpeg in its own words otherwise
+        if let Some(missing) = files.iter().find(|file| !file.exists()) {
+            return Err(Error::NoSuchFile(missing.clone()));
+        }
+        if files.iter().any(|input| same_file(input, output)) {
             return Err(Error::OutputIsInput(output.to_path_buf()));
         }
         if !overwrite && output.exists() {
@@ -182,7 +187,7 @@ pub(crate) fn sniff_readable(path: &Path) -> Result<FileKind> {
         .and_then(|file| {
             std::io::Read::read_to_end(&mut std::io::Read::take(file, START_BYTES), &mut start)
         })
-        .map_err(|err| crate::art::unreadable(path, err))?;
+        .map_err(|err| crate::art::read_failed(path, err))?;
     Ok(FileKind::of_start(&start).unwrap_or_else(|| FileKind::of_name(path)))
 }
 

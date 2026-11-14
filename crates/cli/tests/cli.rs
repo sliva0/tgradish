@@ -186,6 +186,36 @@ fn says_when_there_is_no_display() {
     assert!(stderr.contains("tgradish gui") && stderr.contains("Usage:"), "{stderr}");
 }
 
+/// An input that isn't there is said to be so in the same words whatever
+/// was to read it, its name once.
+#[test]
+fn says_an_input_is_missing_alike_everywhere() {
+    let dir = tempfile::tempdir().unwrap();
+    for (name, args) in [
+        ("nope.mp4", &["convert"][..]),
+        ("nope.mp4", &["convert", "-f", "tgs"]),
+        ("nope.png", &["convert", "-f", "tgs"]),
+        ("nope.mp4", &["convert", "-f", "webp"]),
+        ("nope.webm", &["inspect"]),
+        ("nope.webm", &["spoof"]),
+    ] {
+        let missing = dir.path().join(name);
+        let missing = missing.to_str().unwrap();
+        let mut args = args.to_vec();
+        args.push(missing);
+        let output = tgradish(&args);
+        assert_eq!(output.status.code(), Some(1), "{args:?}");
+        let stderr =
+            console::strip_ansi_codes(&String::from_utf8_lossy(&output.stderr)).into_owned();
+        let said = format!("{missing}: no such file\n");
+        assert!(stderr.ends_with(&said), "{args:?}: {stderr}");
+        assert_eq!(stderr.matches(missing).count(), 1, "{args:?}: {stderr}");
+        args.insert(0, "--json");
+        let json = json_lines(&tgradish(&args));
+        assert_eq!(json[0]["message"], format!("{missing}: no such file"), "{args:?}");
+    }
+}
+
 /// A folder that can't be written to is found before converting, and said
 /// without the temporary file's path or the OS's number.
 #[cfg(unix)]

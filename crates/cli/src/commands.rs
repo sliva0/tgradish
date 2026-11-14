@@ -58,8 +58,17 @@ fn spoof_file(ctx: &Context, args: &SpoofArgs) -> Result<()> {
         ..Default::default()
     };
     let replace = args.overwrite || output == args.input;
-    let report = container::patch_file(&args.input, &output, &changes, replace)
-        .with_context(|| format!("couldn't spoof {}", args.input.display()))?;
+    let report =
+        container::patch_file(&args.input, &output, &changes, replace).map_err(
+            |err| match err {
+                // these name the file themselves
+                tgradish_core::Error::NoSuchFile(_)
+                | tgradish_core::Error::Unreadable { .. }
+                | tgradish_core::Error::Io { .. } => crate::explain(err),
+                err => anyhow::Error::from(err)
+                    .context(format!("couldn't spoof {}", args.input.display())),
+            },
+        )?;
 
     // a duration Telegram doesn't take makes a file it refuses
     let refused = args.fake_duration > telegram::MAX_SECONDS;
@@ -179,7 +188,7 @@ fn print_failure(ctx: &Context, path: &std::path::Path, err: &impl std::fmt::Dis
     if ctx.global.json {
         crate::print_json_error(&anyhow::anyhow!("{err}"), Some(path));
     } else {
-        eprintln!("{} {}: {err}", ui::error_label(), path.display());
+        eprintln!("{} {}", ui::error_label(), ui::about(path, &err.to_string()));
     }
 }
 

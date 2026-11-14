@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use super::ebml::{self, Element, ids};
 use super::{DEFAULT_TIMESTAMP_SCALE, EbmlError, Result, SIGNATURE_PREFIX, WebmError};
-use crate::art::unreadable;
+use crate::art::read_failed;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -458,7 +458,7 @@ pub const MAX_INSPECTED_BYTES: u64 = 256 << 20;
 pub fn inspect_file(path: &Path) -> crate::Result<WebmInfo> {
     starts_as_webm(path)?;
     let bytes = crate::fsutil::read_at_most(path, MAX_INSPECTED_BYTES)
-        .map_err(|err| unreadable(path, err))?
+        .map_err(|err| read_failed(path, err))?
         .ok_or(WebmError::TooLarge)?;
     Ok(inspect(&bytes)?)
 }
@@ -474,7 +474,7 @@ fn starts_as_webm(path: &Path) -> crate::Result<()> {
         Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
             Err(WebmError::NotEbml.into())
         }
-        Err(err) => Err(unreadable(path, err)),
+        Err(err) => Err(read_failed(path, err)),
     }
 }
 
@@ -500,7 +500,7 @@ pub(crate) fn head_file(path: &Path) -> crate::Result<Head> {
         .and_then(|file| {
             std::io::Read::read_to_end(&mut std::io::Read::take(file, HEAD_BYTES), &mut bytes)
         })
-        .map_err(|err| unreadable(path, err))?;
+        .map_err(|err| read_failed(path, err))?;
     Ok(head(&bytes)?)
 }
 

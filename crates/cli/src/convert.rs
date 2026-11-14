@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Result, bail};
 use console::style;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use tgradish_core::backend::Backend;
@@ -222,8 +222,13 @@ impl<'a> Converter<'a> {
             Format::Tgs => None,
         };
         if let Some(dir) = &args.output_dir {
-            std::fs::create_dir_all(dir)
-                .with_context(|| format!("couldn't create {}", dir.display()))?;
+            std::fs::create_dir_all(dir).map_err(|err| {
+                anyhow::anyhow!(
+                    "couldn't create {}: {}",
+                    dir.display(),
+                    tgradish_core::io_reason(&err)
+                )
+            })?;
         }
         if args.cancel_on_stdin {
             listen_for_cancel(ctx);
@@ -390,8 +395,7 @@ impl<'a> Converter<'a> {
         if self.ctx.global.json {
             crate::print_json_error(&err, Some(input));
         } else {
-            let input = term::link(input.display(), input);
-            eprintln!("{}", ui::status_bad("Failed", format!("{input}: {err:#}")));
+            eprintln!("{}", ui::status_bad("Failed", ui::about(input, &format!("{err:#}"))));
         }
     }
 }

@@ -72,6 +72,15 @@ pub fn introduce(to_stderr: bool) {
     }
 }
 
+/// `message` about the file at `path`, put after its name, linked: once,
+/// where the message starts with the name already, as "nope.mp4: no such
+/// file" does.
+pub fn about(path: &std::path::Path, message: &str) -> String {
+    let name = path.display().to_string();
+    let message = message.strip_prefix(&format!("{name}: ")).unwrap_or(message);
+    format!("{}: {message}", crate::term::link(&name, path))
+}
+
 pub fn error_label() -> console::StyledObject<&'static str> {
     style("error:").red().bold()
 }

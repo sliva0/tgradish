@@ -41,7 +41,16 @@ pub(crate) fn aseprite(
 
 /// The bytes of the file at `path`, failing as an unreadable input.
 pub(crate) fn read(path: &Path) -> Result<Vec<u8>> {
-    std::fs::read(path).map_err(|err| unreadable(path, err))
+    std::fs::read(path).map_err(|err| read_failed(path, err))
+}
+
+/// An input at `path` that couldn't be read for `err`: one that isn't
+/// there is [`Error::NoSuchFile`], said the same wherever it is found.
+pub(crate) fn read_failed(path: &Path, err: std::io::Error) -> Error {
+    match err.kind() {
+        std::io::ErrorKind::NotFound => Error::NoSuchFile(path.to_path_buf()),
+        _ => unreadable(path, crate::io_reason(&err)),
+    }
 }
 
 /// `path` couldn't be read for `err`.
@@ -70,7 +79,7 @@ pub(crate) fn sequence_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>> {
         if input.is_dir() {
             let mut found: Vec<PathBuf> = std::fs::read_dir(input)
                 .and_then(|entries| entries.map(|entry| entry.map(|entry| entry.path())).collect())
-                .map_err(|err| unreadable(input, err))?;
+                .map_err(|err| read_failed(input, err))?;
             found.retain(|path| path.is_file() && crate::input::is_frame(path));
             files.extend(found);
         } else {
