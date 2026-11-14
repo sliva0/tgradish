@@ -408,6 +408,10 @@ fn converts_with_json_events() {
     let info = &json_lines(&inspected)[0];
     assert_eq!(info["info"]["title"], "from flag");
     assert_eq!(info["issues"], Value::Array(vec![]));
+    // the video track as it is, but not its UID
+    let video = &info["info"]["video"];
+    assert_eq!(video["codec-id"], "V_VP9", "{info}");
+    assert!(video.get("uid").is_none(), "{info}");
 }
 
 /// Closing stdout mid-conversion stops it as cancelling does, leaving no

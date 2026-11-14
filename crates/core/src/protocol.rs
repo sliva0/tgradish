@@ -415,7 +415,7 @@ mod tests {
                 height: 512,
                 alpha: true,
                 default_duration_ns: Some(33_333_333),
-                uid: Some(1),
+                uid: None,
             }),
             video_frames: 150,
             audio_tracks: 0,

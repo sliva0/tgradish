@@ -27,7 +27,8 @@ pub struct VideoTrack {
     pub alpha: bool,
     /// Frame duration declared by the track, in nanoseconds.
     pub default_duration_ns: Option<u64>,
-    /// The track's UID.
+    /// The track's UID. Left out of what `inspect` prints.
+    #[serde(skip)]
     pub uid: Option<u64>,
 }
 

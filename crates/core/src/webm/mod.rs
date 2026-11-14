@@ -435,7 +435,10 @@ mod tests {
             let made = made.unwrap();
             let info = container::inspect(&bytes).unwrap();
             // the mark always fits; the name never does here
-            assert_eq!(info.video.unwrap().uid, Some(mark));
+            assert_eq!(info.video.as_ref().unwrap().uid, Some(mark));
+            // which inspect doesn't print
+            let printed = serde_json::to_value(&info).unwrap();
+            assert!(printed["video"].get("uid").is_none(), "{printed}");
             assert_eq!((info.muxing_app.as_deref(), made.muxing_app), (Some("Lavf"), None));
             // a duration there is written over, one that isn't needs room
             assert_eq!(made.duration.is_some(), duration);
