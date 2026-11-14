@@ -125,7 +125,6 @@ fn remapped_paths(root: &Path) -> Vec<String> {
     flags
 }
 
-
 /// A folder whose `libgcc_s.so` names Rust's own static libunwind for
 /// `target`. Rust's std links libgcc's unwinder when musl is linked
 /// dynamically, and Ubuntu has none built for musl; found here first, this

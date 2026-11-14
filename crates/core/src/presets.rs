@@ -891,7 +891,9 @@ mod tests {
         assert!(broken.contains("broken.toml") && broken.contains("fsp"), "{broken}");
         // naming only what a preset may set, not what one file chooses
         assert!(broken.contains("fsp isn't an option a preset sets; those are: "), "{broken}");
-        assert!(broken.contains(" fps,") && !broken.contains("target"), "{broken}");
+        // of the options, not of where the file is, which may be anywhere
+        let options = broken.split("those are: ").nth(1).unwrap_or_default();
+        assert!(options.contains(" fps,") && !options.contains("target"), "{broken}");
         // a file broken in one table is broken as a whole
         assert!(presets.tgs("broken").is_err());
         for (name, key) in [("emoji", "webm.target"), ("sheet", "tgs.sheet")] {
