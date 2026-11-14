@@ -369,7 +369,8 @@ impl App {
                         let cross =
                             RichText::new("✖").size(12.0).color(ui.visuals().weak_text_color());
                         let delete = egui::Button::new(cross).frame(false);
-                        if ui.add(delete).on_hover_text(fl!("delete-it")).clicked() {
+                        let delete = widgets::named(ui.add(delete), &fl!("delete-it"));
+                        if delete.on_hover_text(fl!("delete-it")).clicked() {
                             changes.push(Change::Delete(row.id));
                         }
                         ui.end_row();

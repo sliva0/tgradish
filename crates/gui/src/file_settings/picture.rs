@@ -798,7 +798,8 @@ fn integer_scale(
             ui.spacing_mut().item_spacing.x = 3.0;
             let current = scale_step(scale.unwrap_or(guess));
             let mut step = current;
-            if ui.small_button("−").on_hover_text(fl!("smaller")).clicked() {
+            let smaller = widgets::named(ui.small_button("−"), &fl!("smaller"));
+            if smaller.on_hover_text(fl!("smaller")).clicked() {
                 step -= 1;
             }
             // as wide as the widest scale, so + stays under the pointer
@@ -820,7 +821,8 @@ fn integer_scale(
             })
             .on_hover_text(fl!("scale-field"))
             .on_disabled_hover_text(fl!("scale-field", "pick"));
-            if ui.small_button("+").on_hover_text(fl!("larger")).clicked() {
+            let larger = widgets::named(ui.small_button("+"), &fl!("larger"));
+            if larger.on_hover_text(fl!("larger")).clicked() {
                 step += 1;
             }
             let step = step.clamp(lowest, highest);

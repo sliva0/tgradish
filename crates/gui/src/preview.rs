@@ -686,7 +686,8 @@ mod tests {
         assert!(row.x1 < column.x0, "{row:?} runs into {column:?}");
         // the unit's segments under the bar, rather than leaving it narrow,
         // ending where the field before them does
-        let play = harness.get_by_label("⏸").accesskit_node().bounding_box().unwrap();
+        let play =
+            harness.get_by_label(&fl!("play", "pause")).accesskit_node().bounding_box().unwrap();
         assert!(row.y0 >= play.y1, "{row:?} beside {play:?}");
         let spin = egui_kittest::kittest::by().role(egui::accesskit::Role::SpinButton);
         let fields: Vec<_> = harness

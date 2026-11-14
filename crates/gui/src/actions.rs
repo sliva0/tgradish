@@ -150,7 +150,8 @@ impl App {
                         };
                         let hint = fl!("save-preset", "hint");
                         let save = save.min_size(vec2(32.0, 32.0));
-                        if ui.add(save).on_hover_text(hint).clicked() {
+                        let save = widgets::named(ui.add(save), &fl!("save-preset"));
+                        if save.on_hover_text(hint).clicked() {
                             crate::preset_dialogs::ask(
                                 ui.ctx(),
                                 crate::preset_dialogs::Ask::Save(id),

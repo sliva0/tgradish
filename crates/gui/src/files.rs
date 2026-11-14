@@ -32,7 +32,7 @@ impl App {
         } else {
             ("🌓", fl!("dark-theme"), crate::config::Theme::Dark)
         };
-        if !ui.button(icon).on_hover_text(hint).clicked() {
+        if !widgets::named(ui.button(icon), &hint).on_hover_text(hint).clicked() {
             return;
         }
         set_theme(ui.ctx(), theme);
@@ -115,17 +115,20 @@ impl App {
         let header = vec2(ui.available_width(), icon_side);
         let layout = egui::Layout::right_to_left(egui::Align::Center);
         ui.allocate_ui_with_layout(header, layout, |ui| {
-            if ui.button("⚙").on_hover_text(fl!("settings")).clicked() {
+            let settings = widgets::named(ui.button("⚙"), &fl!("settings"));
+            if settings.on_hover_text(fl!("settings")).clicked() {
                 self.settings_dialog.open();
             }
             self.theme_button(ui);
-            if ui.button("🔬").on_hover_text(fl!("inspect")).clicked() {
+            let inspect = widgets::named(ui.button("🔬"), &fl!("inspect", "name"));
+            if inspect.on_hover_text(fl!("inspect")).clicked() {
                 self.pick(ui.ctx(), Pick::Inspected);
             }
             // a split button: files, or the rest from its arrow
             ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.x = 1.0;
-                ui.menu_button("⏷", |ui| self.add_menu(ui));
+                let more = ui.menu_button("⏷", |ui| self.add_menu(ui)).response;
+                widgets::named(more, &fl!("add-more"));
                 if ui.button(fl!("add-files")).clicked() {
                     self.pick(ui.ctx(), Pick::Files);
                 }
@@ -371,6 +374,11 @@ fn row(
 ) -> (egui::Response, Option<RowAction>) {
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(vec2(width, THUMB + 12.0), egui::Sense::click());
+    // read out as a choice of the list, by its file's name
+    let name = item.name();
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, &name)
+    });
     let visuals = ui.visuals();
     // as Breeze marks items: the accent let through, more for the
     // selected one, which is outlined in it too, yet little enough that
@@ -408,7 +416,8 @@ fn row(
                 .fill(theme::NEUTRAL)
                 .corner_radius(4.0);
             // placed, so the rows below don't move
-            if ui.place(badge, button).on_hover_text(fl!("row-convert-again")).clicked() {
+            let again = widgets::named(ui.place(badge, button), &fl!("row-convert-again"));
+            if again.on_hover_text(fl!("row-convert-again")).clicked() {
                 action = Some(RowAction::Convert);
             }
         }
@@ -420,7 +429,7 @@ fn row(
         let framed = response.contains_pointer();
         // placed, so the rows below don't move
         let button = egui::Button::new("").min_size(result.size()).frame(framed);
-        let button = ui.place(result, button);
+        let button = widgets::named(ui.place(result, button), &fl!("convert"));
         let colour = ui.style().interact(&button).text_color();
         let font = FontId::proportional(18.0);
         ui.painter().text(result.center(), egui::Align2::CENTER_CENTER, "▶", font, colour);
@@ -437,11 +446,8 @@ fn row(
             egui::Rect::from_min_size(egui::pos2(text.max.x - 20.0, text.min.y), vec2(20.0, 20.0));
         text.max.x = button.min.x - 4.0;
         // placed, so the rows below don't move
-        if ui
-            .place(button, egui::Button::new("✖").small().frame(false))
-            .on_hover_text(fl!("remove-file"))
-            .clicked()
-        {
+        let remove = ui.place(button, egui::Button::new("✖").small().frame(false));
+        if widgets::named(remove, &fl!("remove")).on_hover_text(fl!("remove-file")).clicked() {
             action = Some(RowAction::Remove);
         }
     }
@@ -454,7 +460,7 @@ fn row(
     // the file's name in the headings' weight, over what is said of it
     let mut strong = text_format(&child, child.visuals().strong_text_color());
     strong.font_id.family = crate::fonts::medium_in(child.ctx());
-    let (name, _) = drawable(&child, fallbacks, &item.name(), strong);
+    let (name, _) = drawable(&child, fallbacks, &name, strong);
     child.add(egui::Label::new(name).truncate());
     let what = kind(item.format, item.choices.target);
     child.add(egui::Label::new(RichText::new(what).small().weak()));

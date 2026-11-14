@@ -109,7 +109,7 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     // made larger by its buttons, the pointer gone from them since: back
     // in the middle
     for _ in 0..2 {
-        let plus = harness.get_by_label("+").rect().center();
+        let plus = harness.get_by_label(&crate::l10n::fl!("scale-larger")).rect().center();
         harness.event(egui::Event::PointerMoved(plus));
         for pressed in [true, false] {
             let (button, modifiers) = (egui::PointerButton::Primary, egui::Modifiers::NONE);
@@ -284,7 +284,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         harness.run_steps(3);
         save(&mut harness, "video");
         // the menus of adding files and of the folders
-        harness.get_by_label("⏷").click();
+        harness.get_by_label(&crate::l10n::fl!("add-more")).click();
         harness.run_steps(2);
         save(&mut harness, "add-menu");
         harness.key_press(egui::Key::Escape);
@@ -613,7 +613,7 @@ fn edges(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     finish(&mut harness);
     pause(&mut harness);
     shot(&mut harness, save, "edge-made");
-    harness.get_by_label("☀").focus();
+    harness.get_by_label(&crate::l10n::fl!("light-theme")).focus();
     shot(&mut harness, save, "edge-focus");
     harness.ctx.memory_mut(|memory| {
         if let Some(id) = memory.focused() {
@@ -932,7 +932,8 @@ fn accents(save: &mut impl FnMut(&mut Harness<App>, &str)) {
         ("dark", own(28, 36, 64)),
     ] {
         harness.state_mut().config.gui.accent = accent;
-        for (theme, switch) in [(Theme::Dark, "☀"), (Theme::Light, "🌓")] {
+        let (light, dark) = (crate::l10n::fl!("light-theme"), crate::l10n::fl!("dark-theme"));
+        for (theme, switch) in [(Theme::Dark, &light), (Theme::Light, &dark)] {
             set_theme(&harness.ctx, theme);
             harness.run_steps(2);
             // the switch of themes with the keyboard's focus, the other

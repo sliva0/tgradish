@@ -160,8 +160,13 @@ drop-to-add = Drop to add
 settings = Settings
 light-theme = Switch to the light theme
 dark-theme = Switch to the dark theme
+# .name is what screen readers call its button, which shows a microscope.
 inspect = Inspect a sticker: check a file against Telegram's limits
+    .name = Inspect a sticker
 add-files = Add files…
+# What screen readers call the arrow beside Add files…, which opens a menu
+# of other ways to add files.
+add-more = More ways to add files
 # The menu beside Add files…
 add-folder = A folder of frames…
     .hint = In name order, as one animation
@@ -312,6 +317,10 @@ reading = Reading…
 
 ## The timeline under the preview
 
+# What screen readers call the play button, which shows ▶; .pause while it
+# plays, when it shows ⏸.
+play = Play
+    .pause = Pause
 # The play button's hover: the keys that work over the preview. A line
 # can't start with [, so it is written {"["} there.
 play-keys =

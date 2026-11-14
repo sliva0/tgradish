@@ -483,7 +483,7 @@ mod tests {
         harness.state_mut().items[0].choices.webm.exact_scale = Some(scale);
         harness.run_steps(3);
         harness.get(by().value("×3"));
-        harness.get_by_label("⟲").click();
+        harness.get_by_label(&fl!("back-to-preset")).click();
         harness.run_steps(3);
         assert_eq!(harness.state().items[0].choices.webm.exact_scale, None);
         harness.get(by().value("×2"));

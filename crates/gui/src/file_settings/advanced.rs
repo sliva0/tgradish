@@ -109,7 +109,8 @@ fn encoder_rows(
                         .desired_width(150.0),
                 )
                 .changed();
-            if ui.small_button("✖").on_hover_text(fl!("remove")).clicked() {
+            let cross = widgets::named(ui.small_button("✖"), &fl!("remove"));
+            if cross.on_hover_text(fl!("remove")).clicked() {
                 remove = Some(index);
             }
         });
@@ -291,7 +292,7 @@ mod tests {
         assert_eq!(fields(&harness), ["qmax", "50", "qmax-alpha", "40", "", "", ""]);
         assert_eq!(options(&harness), [pair("qmax", "50"), pair("qmax-alpha", "40")]);
         // removed, the rows under it stay
-        harness.query_all_by_label("✖").next().unwrap().click();
+        harness.query_all_by_label(&fl!("remove")).next().unwrap().click();
         harness.run_steps(2);
         assert_eq!(fields(&harness), ["qmax-alpha", "40", "", "", ""]);
         assert_eq!(options(&harness), [pair("qmax-alpha", "40")]);
@@ -316,13 +317,13 @@ mod tests {
         assert_eq!(own(&harness).encoder_options, Some(both.into_iter().collect()));
         // all removed, the item uses none, over the preset's
         for _ in 0..2 {
-            harness.query_all_by_label("✖").next().unwrap().click();
+            harness.query_all_by_label(&fl!("remove")).next().unwrap().click();
             harness.run_steps(2);
         }
         assert_eq!(own(&harness).encoder_options, Some(BTreeMap::new()));
         assert_eq!(fields(&harness), ["-qmin 4"]);
         // and back to the preset's
-        harness.get_by_label("⟲").click();
+        harness.get_by_label(&fl!("back-to-preset")).click();
         harness.run_steps(2);
         assert_eq!(own(&harness).encoder_options, None);
         assert_eq!(fields(&harness), ["aq-mode", "2", "-qmin 4"]);

@@ -516,7 +516,8 @@ fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
         let side = ui.spacing().interact_size.y;
         let button = |text| egui::Button::new(text).min_size(egui::vec2(side, side));
         let least = *scale <= *config::SCALES.start() + 1e-6;
-        let smaller = ui.add_enabled(!least, button("−")).on_hover_text(fl!("scale-smaller"));
+        let smaller = widgets::named(ui.add_enabled(!least, button("−")), &fl!("scale-smaller"))
+            .on_hover_text(fl!("scale-smaller"));
         if smaller.clicked() {
             changed = Some(config::scale_step(*scale, -1));
             stepped = Some(smaller.rect);
@@ -527,7 +528,8 @@ fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
         let width = widgets::text_width(ui, &widgets::zeros(&widest), 4.0);
         ui.add_sized(egui::vec2(width, side), egui::Label::new(percent));
         let most = *scale >= *config::SCALES.end() - 1e-6;
-        let larger = ui.add_enabled(!most, button("+")).on_hover_text(fl!("scale-larger"));
+        let larger = widgets::named(ui.add_enabled(!most, button("+")), &fl!("scale-larger"))
+            .on_hover_text(fl!("scale-larger"));
         if larger.clicked() {
             changed = Some(config::scale_step(*scale, 1));
             stepped = Some(larger.rect);
@@ -693,7 +695,7 @@ mod tests {
         harness.get_by_label_contains("Saved to");
         // closing keeps what changed
         harness.state_mut().config.gui.reopen_files = false;
-        harness.get_by_label("✖").click_accesskit();
+        harness.get_all_by_label(&fl!("close")).last().unwrap().click_accesskit();
         harness.run_steps(2);
         assert!(
             !harness.state().settings_dialog.is_open() && !harness.state().config.gui.reopen_files
@@ -732,7 +734,7 @@ mod tests {
         harness.get_by_label_contains(&text);
         back(&mut harness);
         // Settings closed and opened again: About as it first was
-        harness.get_by_label(&fl!("close")).click_accesskit();
+        harness.get_all_by_label(&fl!("close")).last().unwrap().click_accesskit();
         harness.run_steps(2);
         assert!(!harness.state().settings_dialog.is_open());
         harness.state_mut().settings_dialog.open();
@@ -769,12 +771,12 @@ mod tests {
         let pixel = |harness: &Harness<App>, label: &str| {
             harness.get_by_label(label).rect().center() * harness.ctx.zoom_factor()
         };
-        let under = pixel(&harness, "+");
+        let under = pixel(&harness, &fl!("scale-larger"));
         for percent in [110, 120, 130] {
-            harness.get_by_label("+").click_accesskit();
+            harness.get_by_label(&fl!("scale-larger")).click_accesskit();
             settle(&mut harness);
             harness.get_by_label(&fl!("scale-percent", percent = percent));
-            let now = pixel(&harness, "+");
+            let now = pixel(&harness, &fl!("scale-larger"));
             assert!((now - under).length() < 1.5, "at {percent}%: {now:?}, not {under:?}");
         }
         assert_eq!((harness.state().config.gui.scale, harness.ctx.zoom_factor()), (1.3, 1.3));
@@ -787,10 +789,10 @@ mod tests {
         assert_eq!(Config::load(&path).unwrap().gui.scale, 1.3);
         // back to 100%, and closed without saving: as it is until the
         // window closes, as a theme chosen is, and not kept
-        harness.get_by_label("⟲").click_accesskit();
+        harness.get_by_label(&fl!("scale-reset")).click_accesskit();
         settle(&mut harness);
         assert_eq!((harness.state().config.gui.scale, harness.ctx.zoom_factor()), (1.0, 1.0));
-        harness.get_by_label("✖").click_accesskit();
+        harness.get_all_by_label(&fl!("close")).last().unwrap().click_accesskit();
         settle(&mut harness);
         assert_eq!((harness.ctx.zoom_factor(), on_disk()), (1.0, 1.3));
         // by the keys, with Settings closed: kept at once
@@ -856,7 +858,7 @@ mod tests {
             }
         };
         for _ in 0..2 {
-            let plus = harness.get_by_label("+").rect().center();
+            let plus = harness.get_by_label(&fl!("scale-larger")).rect().center();
             click(&mut harness, plus);
             settle(&mut harness, 4);
         }

@@ -26,7 +26,7 @@ fn code(ui: &mut egui::Ui, text: &str) {
                 .desired_rows(1)
                 .desired_width(width),
         );
-        if ui.button("🗐").on_hover_text(fl!("copy")).clicked() {
+        if widgets::named(ui.button("🗐"), &fl!("copy")).on_hover_text(fl!("copy")).clicked() {
             ui.ctx().copy_text(text.to_owned());
         }
     });

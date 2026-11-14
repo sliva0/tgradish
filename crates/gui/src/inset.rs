@@ -286,10 +286,13 @@ impl Inset {
         row.spacing_mut().interact_size = Vec2::splat(SIZE_BUTTON);
         let button = |text| egui::Button::new(text).min_size(vec2(SIZE_BUTTON, SIZE_BUTTON));
         let last = INSET_SIZES.len() - 1;
-        if row.add_enabled(size > 0, button("−")).on_hover_text(fl!("inset-smaller")).clicked() {
+        let smaller = widgets::named(row.add_enabled(size > 0, button("−")), &fl!("inset-smaller"));
+        if smaller.on_hover_text(fl!("inset-smaller")).clicked() {
             change = Some(InsetChange::Size(size - 1));
         }
-        if row.add_enabled(size < last, button("+")).on_hover_text(fl!("inset-larger")).clicked() {
+        let larger =
+            widgets::named(row.add_enabled(size < last, button("+")), &fl!("inset-larger"));
+        if larger.on_hover_text(fl!("inset-larger")).clicked() {
             change = Some(InsetChange::Size(size + 1));
         }
         change
@@ -519,7 +522,7 @@ mod tests {
             *change = inset.show(ui, room, place, 1, None, vec2(8.0, 8.0), red).or(*change);
         };
         let mut harness = egui_kittest::Harness::new_ui_state(show, (Inset::default(), None, 2));
-        harness.get_by_label("+").click();
+        harness.get_by_label(&fl!("inset-larger")).click();
         harness.run();
         assert_eq!(harness.state().1, Some(InsetChange::Size(3)));
         // a click is no drag
@@ -527,12 +530,12 @@ mod tests {
         // the smallest has none smaller
         harness.state_mut().2 = 0;
         harness.run();
-        let disabled = |label| harness.get_by_label(label).accesskit_node().is_disabled();
-        assert!(disabled("−") && !disabled("+"));
+        let disabled = |label: String| harness.get_by_label(&label).accesskit_node().is_disabled();
+        assert!(disabled(fl!("inset-smaller")) && !disabled(fl!("inset-larger")));
         // dragged to the top left, by a button on its label, which keeps
         // the drag from what is under it, it goes there, from where it was
         // let go of
-        let start = harness.get_by_label("+").rect().center();
+        let start = harness.get_by_label(&fl!("inset-larger")).rect().center();
         let button = |pos, pressed| egui::Event::PointerButton {
             pos,
             button: egui::PointerButton::Primary,
@@ -603,7 +606,10 @@ mod tests {
             for size in 0..INSET_SIZES.len() {
                 harness.state_mut().size = size;
                 harness.run_steps(2);
-                let buttons = (harness.get_by_label("−").rect(), harness.get_by_label("+").rect());
+                let buttons = (
+                    harness.get_by_label(&fl!("inset-smaller")).rect(),
+                    harness.get_by_label(&fl!("inset-larger")).rect(),
+                );
                 assert_eq!(*seen.get_or_insert(buttons), buttons, "{corner:?} at {size}");
             }
         }
@@ -617,7 +623,8 @@ mod tests {
         // pointer, on the label, in the top half of the view still
         let view = vec2(600.0, 340.0);
         let mut harness = shown_in(view, Corner::TopLeft, 4);
-        let grip = harness.get_by_label("−").rect().left_center() - vec2(30.0, 0.0);
+        let grip =
+            harness.get_by_label(&fl!("inset-smaller")).rect().left_center() - vec2(30.0, 0.0);
         let [top, _, bottom, _] = harness.state().rooms;
         // the picture's height in its room, landscape
         let high = top.width() * 288.0 / 512.0;

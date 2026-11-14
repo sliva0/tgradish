@@ -37,6 +37,8 @@ mod preset_dialogs;
 mod preview;
 mod result;
 #[cfg(test)]
+mod scenes;
+#[cfg(test)]
 mod screenshots;
 mod session;
 mod settings_dialog;

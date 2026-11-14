@@ -487,7 +487,7 @@ pub(crate) fn frame_picker(
         let step = |ui: &mut egui::Ui, icon: &str, enabled: bool, hint: String, end: String| {
             let button =
                 egui::Button::new(egui::RichText::new(icon).size(15.0)).min_size(vec2(BUTTON, 0.0));
-            ui.add_enabled(enabled, button)
+            widgets::named(ui.add_enabled(enabled, button), &hint)
                 .on_hover_text(hint)
                 .on_disabled_hover_text(end)
                 .clicked()
@@ -566,12 +566,10 @@ pub(crate) fn frame_picker(
 }
 
 fn play_button(ui: &mut egui::Ui, playing: &mut bool) {
-    let icon = if *playing { "⏸" } else { "▶" };
-    if ui
-        .add(egui::Button::new(egui::RichText::new(icon).size(15.0)).min_size(vec2(BUTTON, 0.0)))
-        .on_hover_text(fl!("play-keys"))
-        .clicked()
-    {
+    let (icon, name) = if *playing { ("⏸", fl!("play", "pause")) } else { ("▶", fl!("play")) };
+    let button =
+        egui::Button::new(egui::RichText::new(icon).size(15.0)).min_size(vec2(BUTTON, 0.0));
+    if widgets::named(ui.add(button), &name).on_hover_text(fl!("play-keys")).clicked() {
         *playing = !*playing;
     }
 }

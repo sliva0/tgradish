@@ -385,6 +385,14 @@ pub(crate) fn attention(ui: &mut egui::Ui, text: &str, fix: &str, hint: &str) ->
     ui.button(fix).on_hover_text(hint).clicked()
 }
 
+/// `response`, a button that shows a symbol rather than words, named
+/// `name` for screen readers, which would otherwise say the symbol.
+pub(crate) fn named(response: egui::Response, name: &str) -> egui::Response {
+    let enabled = response.enabled();
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name));
+    response
+}
+
 /// The label column of a grid, explained on hover.
 pub(crate) fn label(ui: &mut egui::Ui, text: &str, hint: &str) {
     let label = ui.label(text);
@@ -439,7 +447,7 @@ pub(crate) fn dialog_title(ui: &mut egui::Ui, title: impl Into<egui::WidgetText>
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let side = ui.spacing().interact_size.y;
             let cross = egui::Button::new("✖").frame(false).min_size(vec2(side, side));
-            let closed = ui.add(cross).on_hover_text(fl!("close")).clicked();
+            let closed = named(ui.add(cross), &fl!("close")).on_hover_text(fl!("close")).clicked();
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.add(egui::Label::new(title).truncate());
             });
@@ -1074,9 +1082,8 @@ pub(crate) fn reset_to(ui: &mut egui::Ui, shown: bool, hint: &str) -> bool {
         return false;
     }
     let glyph = RichText::new("⟲").size(13.0).color(theme::accent_text(ui.visuals()));
-    ui.add(egui::Button::new(glyph).small().frame(false).min_size(size))
-        .on_hover_text(hint)
-        .clicked()
+    let button = ui.add(egui::Button::new(glyph).small().frame(false).min_size(size));
+    named(button, hint).on_hover_text(hint).clicked()
 }
 
 /// A checkbox for a flag a preset may set.
