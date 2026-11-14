@@ -228,6 +228,7 @@ convert-keys = Ctrl+Enter
 save-preset = { -save-settings }…
     .hint = Keep them as a preset of your own, for any file to start from
 failed = Failed: { $error }
+    .short = Failed — see details
 in-the-way = A file not from tgradish is in the way:
 replace-it = Replace it
 stopped = Stopped

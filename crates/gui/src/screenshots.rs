@@ -152,6 +152,20 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
         Some(Crop { x: 700, y: 400, width: 40, height: 40 });
     shot(&mut harness, save, "state-blocked-crop");
     harness.state_mut().items[0].choices.crop = None;
+    // converting failed, said in short on the bar and in full beside it
+    harness.state_mut().items[0].choices.preset = Some("gone".into());
+    // the bar back on one line, Convert where it stays
+    harness.run_steps(4);
+    convert(&harness);
+    harness.run_steps(2);
+    finish(&mut harness);
+    shot(&mut harness, save, "state-failed");
+    harness.set_size(egui::vec2(crate::MIN_WIDTH, 820.0));
+    harness.ctx.memory_mut(|memory| memory.reset_areas());
+    shot(&mut harness, save, "state-failed-narrow");
+    harness.set_size(egui::vec2(1280.0, 820.0));
+    harness.ctx.memory_mut(|memory| memory.reset_areas());
+    harness.state_mut().items[0].choices.preset = None;
     // a sprite sheet whose cells don't divide it
     let art = dir.path().join("sheet.png");
     square(&art, [220, 30, 60, 255]);
@@ -176,6 +190,21 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     harness.set_size(egui::vec2(1280.0, 1300.0));
     shot(&mut harness, save, "state-blocked-tag-tall");
     harness.set_size(egui::vec2(1280.0, 820.0));
+    // a long name, to a folder deep down, at the narrowest: where it goes
+    // on a line of its own
+    let long = "holiday at the seaside with the whole family, the long cut, final edit (2)";
+    let art = dir.path().join(format!("{long}.png"));
+    square(&art, [30, 160, 60, 255]);
+    harness.state_mut().config.gui.output_dir =
+        Some(dir.path().join("out").join("for the family").join("Stickers"));
+    harness.state_mut().add(vec![art]);
+    finish(&mut harness);
+    harness.set_size(egui::vec2(crate::MIN_WIDTH, 820.0));
+    harness.ctx.memory_mut(|memory| memory.reset_areas());
+    shot(&mut harness, save, "state-bar-two-lines");
+    harness.set_size(egui::vec2(1280.0, 820.0));
+    harness.ctx.memory_mut(|memory| memory.reset_areas());
+    shot(&mut harness, save, "state-bar-one-line");
     // no ffmpeg, a video and pixel art open
     let clip = harness.state().items[0].inputs[0].clone();
     let mut config = config.clone();
