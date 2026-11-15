@@ -1,7 +1,7 @@
 # tgradish-core
 
 What the command line and the GUI of
-[tgradish](https://github.com/sliva0/tgradish) share: Telegram video, image
+[tgradish](https://github.com/sliva0/tgradish) share: Telegram video, static
 and animated stickers and emoji made from videos, pictures and pixel art,
 fitted to Telegram's limits. ffmpeg runs as the `ffmpeg` and `ffprobe`
 programs, or with the `linked` feature as its libraries.

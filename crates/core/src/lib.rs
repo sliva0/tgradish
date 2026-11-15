@@ -16,7 +16,7 @@
 //! says unless a request names it; [`input::sniff`] tells kinds of file
 //! apart. The rest:
 //!
-//! - [`picture`]: where a picture lands in a WebM or image sticker, and
+//! - [`picture`]: where a picture lands in a WebM or static sticker, and
 //!   telling pixel art, which auto scaling keeps sharp;
 //! - [`backend`] and [`ffmpeg`]: ffmpeg, which reads videos and encodes
 //!   WebM, as the `ffmpeg` and `ffprobe` programs or with the `linked`

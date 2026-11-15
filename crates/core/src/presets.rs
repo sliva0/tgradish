@@ -52,10 +52,11 @@ pub enum Format {
     Webm,
     /// Animated stickers, from pixel art.
     Tgs,
-    /// Image stickers and emoji: one frame of a video, or an image, as
+    /// Static stickers and emoji: one frame of a video, or an image, as
     /// WebP. They take WebM's options where a still picture has them.
-    /// Read as `image` too, the kind of sticker it makes.
-    #[serde(alias = "image")]
+    /// Read as `static` too, the kind of sticker it makes, and as `image`,
+    /// as it once was.
+    #[serde(alias = "static", alias = "image")]
     Webp,
 }
 
@@ -826,9 +827,9 @@ mod tests {
     }
 
     #[test]
-    fn names_the_image_format_webp() {
+    fn names_the_static_format_webp() {
         assert_eq!(serde_json::to_value(Format::Webp).unwrap(), "webp");
-        for name in ["\"webp\"", "\"image\""] {
+        for name in ["\"webp\"", "\"static\"", "\"image\""] {
             assert_eq!(serde_json::from_str::<Format>(name).unwrap(), Format::Webp, "{name}");
         }
         assert_eq!(Format::of_path(Path::new("a.WebP")), Some(Format::Webp));

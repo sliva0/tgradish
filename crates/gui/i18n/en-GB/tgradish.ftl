@@ -32,8 +32,8 @@ webm-sticker = WebM sticker
 webm-emoji = WebM emoji
 tgs-sticker = TGS sticker
 tgs-emoji = TGS emoji
-image-sticker = Image sticker
-image-emoji = Image emoji
+image-sticker = Static sticker
+image-emoji = Static emoji
 # Counts, as parts of longer messages.
 count-colours = { $count ->
     [one] { $count } colour
@@ -246,7 +246,7 @@ row-exists = a file is in the way
 row-stopped = stopped
 # The large area shown while no files are open.
 drop-here = Drop videos, GIFs, images or Aseprite files here
-drop-here-note = To convert into a video, animated or image sticker or emoji
+drop-here-note = To convert into a video, animated or static sticker or emoji
 paste = Paste
 # A file's name in the list when it is more than its first input.
 name-pasted = pasted image
@@ -414,9 +414,9 @@ frame-picked = The frame
 make = Make
 format-video = Video
     .hint = A video sticker or emoji: VP9 in WebM, from any video or picture
-format-animation = Animation
+format-animation = Animated
     .hint = An animated sticker or emoji: TGS file. This option is meant for pixel art: TGS is a vector format, so it stays crisp at any size. Best for custom emoji, which are only 100 × 100 px. Not for ordinary video or photos: use "{ format-video }" for those
-format-image = Image
+format-image = Static
     .hint = A static sticker or emoji: WebP, from any picture or one frame of a video
 target-sticker = Sticker
 target-emoji = Custom emoji
@@ -429,7 +429,7 @@ needs-image-emoji = WebP, 100 × 100 px, up to 512 KiB
 not-pixel-art = "{ format-animation }" is meant for pixel art, converted to vector so it stays crisp. This doesn't look like pixel art: "{ format-video }" suits it better
 preset = Preset
     .hint = How hard to work on the result; your own values below go on top
-    .image = A picture takes only the preset's picture settings, how it is squared and scaled: it is saved lossless where that fits, otherwise at the best quality which still fits
+    .image = A static sticker takes only the preset's picture settings, how it is squared and scaled: it is saved lossless where that fits, otherwise at the best quality which still fits
     .broken = This preset's file is broken
     .missing = There is no preset "{ $name }" any more: pick another
 manage-presets = Manage…
@@ -1060,7 +1060,7 @@ decided-lowers-to-fit = Trying { $fps } fps: nothing fit at { $from } fps
 decided-lowers-for-looks = Trying { $fps } fps: encode { $number } at { $from } fps looks only { $alike } like the input
 decided-settled = Stopped early: kept encode { $number }
 decided-lower-no-better =Stopped: { $fps } fps looks { $alike } like the input, no more than encode { $kept } at { $kept_fps } fps with { $kept_alike }
-# Telegram's problems with a WebM or image result.
+# Telegram's problems with a WebM or static result.
 issue-not-webm = Its container is { $container }, not WebM
 issue-no-video = It has no video track
 issue-not-vp9 = Its codec is { $codec }, not VP9
@@ -1070,7 +1070,7 @@ issue-size = Its size is { $width } × { $height } px, where Telegram takes { $s
 issue-too-big = It is { $size }, over the limit of { $limit }
 issue-too-long = Its metadata says it lasts { $seconds }, over the limit of { $limit }
 issue-too-many-fps = Its frame rate is { $fps } fps, over the limit of { $limit } fps
-issue-animated = It is animated, where image stickers are one picture
+issue-animated = It is animated, where static stickers are one picture
 
 
 ## Inspecting a sticker
@@ -1078,8 +1078,8 @@ issue-animated = It is animated, where image stickers are one picture
 inspect-another = Inspect another…
 inspect-webm-sticker = A video sticker
 inspect-webm-emoji = A video emoji
-inspect-image-sticker = An image sticker
-inspect-image-emoji = An image emoji
+inspect-image-sticker = A static sticker
+inspect-image-emoji = A static emoji
 inspect-tgs = A vector animation, { $width } × { $height } at { $fps } fps
 # A kind of sticker this version of tgradish can't show yet.
 inspect-unknown = A kind of sticker this version can't show

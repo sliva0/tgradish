@@ -7,7 +7,7 @@ pub const TICKS: f64 = 60.0;
 /// Frames of a sticker as straight RGBA, each with how many 60 fps frames
 /// ([`TICKS`]) it shows for. `.tgs` previews have a pixel per art pixel
 /// ([`crate::tgs`]), WebM previews fit the size asked for
-/// ([`crate::backend::Backend::preview`]), and image stickers are one
+/// ([`crate::backend::Backend::preview`]), and static stickers are one
 /// frame ([`crate::webp::preview`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]

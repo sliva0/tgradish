@@ -603,7 +603,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         harness.set_size(egui::vec2(1280.0, 820.0));
         let item = &mut harness.state_mut().items[0];
         (item.view.aspect, item.choices.webm) = (item::Aspect::Free, Default::default());
-        // a frame of it as an image sticker, picked on the bar
+        // a frame of it as a static sticker, picked on the bar
         (item.format, item.choices.frame) = (Format::Webp, Some(0.5));
         harness.run_steps(3);
         for _ in 0..100 {

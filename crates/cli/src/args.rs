@@ -17,7 +17,7 @@ const EXAMPLES: &str =
     "  tgradish convert clip.mp4                 a video sticker, clip.sticker.webm
   tgradish convert clip.mp4 --target emoji  an emoji, clip.emoji.webm
   tgradish convert walk.ase -f tgs          an animated sticker, walk.sticker.tgs
-  tgradish convert photo.jpg -f webp        an image sticker, photo.sticker.webp
+  tgradish convert photo.jpg -f webp        a static sticker, photo.sticker.webp
   tgradish watch ~/Videos -O ~/Stickers     each new video or picture as it comes
   tgradish inspect clip.sticker.webm        what Telegram would say of it
   tgradish inspect clip.mp4                 its size, frames, length and frame rate";
@@ -99,7 +99,7 @@ fn long_version() -> &'static str {
 const TGS: &str = "Animated stickers (TGS)";
 const ASEPRITE: &str = "Aseprite files";
 
-/// Telegram video, image and animated stickers and emoji from videos,
+/// Telegram video, static and animated stickers and emoji from videos,
 /// images or pixel art.
 ///
 /// Video stickers can run past Telegram's 3 seconds by spoofing the
@@ -364,8 +364,8 @@ pub struct ConvertArgs {
     pub sequence: bool,
     /// What to make: webm (video sticker or emoji: VP9 in WebM, from any
     /// video or picture), tgs (animated sticker or emoji: TGS, meant for
-    /// pixel art, or a video of it) or webp (image sticker or emoji, from
-    /// any picture or the frame at --start; image works too).
+    /// pixel art, or a video of it) or webp (static sticker or emoji, from
+    /// any picture or the frame at --start; static or image work too).
     /// [default: by the -o file's extension, then webm]
     #[arg(short, long, value_enum)]
     pub format: Option<FormatArg>,
@@ -390,8 +390,8 @@ pub struct WatchArgs {
     pub interval: f64,
     /// What to make: webm (video sticker or emoji: VP9 in WebM, from any
     /// video or picture), tgs (animated sticker or emoji: TGS, meant for
-    /// pixel art, or a video of it) or webp (image sticker or emoji, from
-    /// any picture or the frame at --start; image works too).
+    /// pixel art, or a video of it) or webp (static sticker or emoji, from
+    /// any picture or the frame at --start; static or image work too).
     /// [default: webm]
     #[arg(short, long, value_enum)]
     pub format: Option<FormatArg>,
@@ -761,13 +761,13 @@ value_enum!(FitArg => options::Fit { Auto, Bitrate, Crf, Fps, Length, Off });
 value_enum!(SpeedArg => options::Speed { Fast, Balanced, Best });
 value_enum!(SpoofArg => options::Spoof { Auto, Always, Never });
 
-/// [`Format`] for clap, which also takes `image` for WebP: the kind of
-/// sticker it makes.
+/// [`Format`] for clap, which also takes `static`, and `image` as it once
+/// did, for WebP: the kind of sticker it makes.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum FormatArg {
     Webm,
     Tgs,
-    #[value(alias = "image")]
+    #[value(aliases = ["static", "image"])]
     Webp,
 }
 

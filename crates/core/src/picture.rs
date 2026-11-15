@@ -1,4 +1,4 @@
-//! Where a picture lands in a WebM or image sticker, as the options scale,
+//! Where a picture lands in a WebM or static sticker, as the options scale,
 //! crop and pad it, and telling pixel art, which auto scaling keeps sharp,
 //! from filmed pictures.
 

@@ -1,7 +1,7 @@
 //! Inputs tgradish's own pixel art reader reads, for every kind of
 //! result: the frames of one animation in several image files, and
 //! Aseprite files, with the tags, layers and frame times they tell of.
-//! `.tgs` stickers are made of what it reads, and WebM and image stickers
+//! `.tgs` stickers are made of what it reads, and WebM and static stickers
 //! of it drawn for ffmpeg, which reads neither.
 
 use std::path::{Path, PathBuf};

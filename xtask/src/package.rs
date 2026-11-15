@@ -176,7 +176,7 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
     if !target.is_windows() {
         shell_files(&binary, &stage, target)?;
     }
-    // libwebp, which every build has for image stickers
+    // libwebp, which every build has for static stickers
     std::fs::create_dir_all(stage.join("licenses"))?;
     for file in ["COPYING", "PATENTS"] {
         let to = stage.join("licenses").join(format!("libwebp-{file}"));
@@ -202,7 +202,7 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
             sources = sources_archive(),
         )
     };
-    let libwebp = "\nIt includes libwebp (BSD 3-Clause), for image stickers: its licence and\n\
+    let libwebp = "\nIt includes libwebp (BSD 3-Clause), for static stickers: its licence and\n\
                    patent grant are licenses/libwebp-COPYING and licenses/libwebp-PATENTS.\n";
     std::fs::write(
         stage.join("THIRD-PARTY.txt"),
@@ -585,7 +585,7 @@ mod tests {
             .find_map(|line| line.strip_prefix("description = \"")?.strip_suffix('"'))
             .unwrap();
         // the summary is the sentence without the kinds of sticker
-        assert_eq!(sentence.replacen(" video, image and animated", "", 1), SUMMARY);
+        assert_eq!(sentence.replacen(" video, static and animated", "", 1), SUMMARY);
         for (path, line) in [
             ("flake.nix", format!("  description = \"{sentence}\";")),
             ("packaging/nix/package.nix", format!("    description = \"{sentence}\";")),

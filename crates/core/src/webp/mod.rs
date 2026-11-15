@@ -1,4 +1,4 @@
-//! Image stickers and emoji: one frame of a video, or a picture, as a
+//! Static stickers and emoji: one frame of a video, or a picture, as a
 //! WebP, which @Stickers takes for its static sets as it takes PNG:
 //! lossless where that fits the size limit, otherwise lossy at the best
 //! quality that does.
@@ -191,7 +191,7 @@ pub fn plan(
     Ok((plan, warnings))
 }
 
-/// Makes an image sticker or emoji from the frame at `start`.
+/// Makes a static sticker or emoji from the frame at `start`.
 pub fn convert(
     backend: &Backend,
     request: &Request,

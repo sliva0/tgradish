@@ -88,7 +88,7 @@ pub(crate) struct Choices {
     pub(crate) crop: Option<Crop>,
     pub(crate) start: Option<f64>,
     pub(crate) length: Option<f64>,
-    /// Seconds into the input of the frame an image sticker is made of.
+    /// Seconds into the input of the frame a static sticker is made of.
     pub(crate) frame: Option<f64>,
     /// Values set over the preset's, for WebM and `.tgs` results; images
     /// take WebM's.

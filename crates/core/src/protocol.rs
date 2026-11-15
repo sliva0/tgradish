@@ -257,7 +257,7 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
             },
             FormatDescription {
                 format: Format::Webp,
-                description: "Image sticker or emoji, from one frame of a video or an image: \
+                description: "Static sticker or emoji, from one frame of a video or an image: \
                               WebM's options where a still picture has them, start being \
                               the frame's time",
                 output_extension: Format::Webp.extension(),

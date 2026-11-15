@@ -1159,7 +1159,7 @@ fn counts_time_from_where_the_video_starts() {
 }
 
 #[test]
-fn makes_image_stickers_from_a_frame() {
+fn makes_static_stickers_from_a_frame() {
     let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     let mut pictures = Vec::new();
     for backend in &backends {

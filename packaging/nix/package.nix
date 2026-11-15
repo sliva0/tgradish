@@ -88,7 +88,7 @@ rustPlatform.buildRustPackage {
   passthru = { inherit guiLibraries; };
 
   meta = {
-    description = "Telegram video, image and animated stickers and emoji from videos, images or pixel art";
+    description = "Telegram video, static and animated stickers and emoji from videos, images or pixel art";
     homepage = "https://github.com/sliva0/tgradish";
     # libwebp is in every build
     license = [

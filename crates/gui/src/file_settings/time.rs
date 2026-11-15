@@ -272,7 +272,7 @@ fn used_part(ui: &mut egui::Ui, item: &mut Item, length: f64, in_frames: bool) {
     }
 }
 
-/// Which frame of a video an image sticker is made of, as the timeline
+/// Which frame of a video a static sticker is made of, as the timeline
 /// counts: by its number, or where it starts, with the other under it.
 pub(super) fn frame(ui: &mut egui::Ui, item: &mut Item, in_frames: bool) {
     let Some(length) = item.input_length() else { return };

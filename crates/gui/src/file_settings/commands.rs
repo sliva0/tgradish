@@ -146,7 +146,7 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
         }
         tgradish_core::options::flags(&options)
     };
-    // image stickers take their picture settings from the preset too;
+    // static stickers take their picture settings from the preset too;
     // named unless it is the format's own, as the GUI's settings may
     // choose another than the config file
     let preset = choices.preset_name(item.format, config);

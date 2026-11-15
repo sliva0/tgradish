@@ -25,7 +25,7 @@ that makes every kind of Telegram sticker and emoji.
 - Animated stickers and emoji as `.tgs` (`-f tgs`), drawn from pixel art:
   GIF, PNG and APNG, WebP, Aseprite files, sprite sheets, image sequences
   and videos of pixel art, fitted into 64 KiB.
-- Image stickers and emoji as WebP (`-f webp`).
+- Static stickers and emoji as WebP (`-f webp`).
 - Emoji (`--target emoji`) beside stickers.
 - Presets (`--preset fast|balanced|best`, and your own), and a config file
   in the user's config folder (`tgradish config path`, `config show`,

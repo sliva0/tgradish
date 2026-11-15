@@ -31,7 +31,7 @@ pub fn creator_tool(webp: &[u8]) -> Option<String> {
     None
 }
 
-/// What an image sticker is, for inspecting it.
+/// What a static sticker is, for inspecting it.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
@@ -53,7 +53,7 @@ pub struct Info {
 }
 
 impl Info {
-    /// What it would be: emoji are the only image stickers of their box's
+    /// What it would be: emoji are the only static stickers of their box's
     /// size, square 100 px.
     pub fn target(&self) -> Target {
         if (self.width, self.height) == Target::Emoji.box_size() {

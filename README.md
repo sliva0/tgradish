@@ -1,10 +1,10 @@
 # tgradish
 
-Telegram video, image and animated stickers and emoji from videos, images or pixel art, in a GUI or on the command line:
+Telegram video, static and animated stickers and emoji from videos, images or pixel art, in a GUI or on the command line:
 
 - video stickers and emoji (WebM) from any video, GIF, picture, Aseprite file or folder of frames;
 - animated stickers and emoji (.tgs) from pixel art: GIF, APNG, WebP, Aseprite, a sprite sheet, a folder of frames, or a video of it;
-- image stickers and emoji (WebP) from a picture, or a frame of a video or animation.
+- static stickers and emoji (WebP) from a picture, or a frame of a video or animation.
 
 Video stickers and emoji can run past Telegram's 3 second limit: tgradish spoofs the duration written in the file so Telegram accepts them.
 
@@ -43,7 +43,7 @@ The Python version, 1.x, is on the [`1.x`](https://github.com/sliva0/tgradish/tr
 
 ## Dependencies
 
-Video and image stickers are made with ffmpeg, as are .tgs stickers from videos; those from pixel art, `tgradish spoof` and `tgradish inspect` work without it.
+Video and static stickers are made with ffmpeg, as are .tgs stickers from videos; those from pixel art, `tgradish spoof` and `tgradish inspect` work without it.
 
 Builds with ffmpeg built in need no separate ffmpeg. The rest use `ffmpeg` and `ffprobe` from PATH, with libvpx; the Nix package brings its own. Which one is used can be changed in Settings or with `--ffmpeg-from` and `--ffmpeg`, and `tgradish ffmpeg` shows which it is and whether it can make stickers.
 
@@ -56,7 +56,7 @@ Builds with ffmpeg built in need no separate ffmpeg. The rest use `ffmpeg` and `
 tgradish convert clip.mp4                  # a video sticker, clip.sticker.webm
 tgradish convert clip.mp4 --target emoji   # an emoji, clip.emoji.webm
 tgradish convert walk.ase -f tgs           # an animated sticker, walk.sticker.tgs
-tgradish convert photo.jpg -f webp         # an image sticker, photo.sticker.webp
+tgradish convert photo.jpg -f webp         # a static sticker, photo.sticker.webp
 tgradish watch ~/Videos -O ~/Stickers      # each new video or picture as it comes
 tgradish inspect clip.sticker.webm         # what Telegram would say of it
 tgradish spoof ready.webm long.webm        # a WebM made elsewhere, spoofed into long.webm

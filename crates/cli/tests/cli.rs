@@ -1029,7 +1029,7 @@ fn makes_animated_stickers() {
 }
 
 #[test]
-fn makes_video_and_image_stickers_of_sequences() {
+fn makes_video_and_static_stickers_of_sequences() {
     if !tgradish_corpus::ffmpeg_on_path() {
         return;
     }
@@ -1462,7 +1462,7 @@ fn refuses_to_merge_outputs_of_same_named_inputs() {
 }
 
 #[test]
-fn makes_image_stickers() {
+fn makes_static_stickers() {
     let Some(input) = clip(Clip::Square) else { return };
     let dir = tempfile::tempdir().unwrap();
     // the output's extension asks for an image
@@ -1491,7 +1491,7 @@ fn makes_image_stickers() {
     assert!(event["issues"].as_array().unwrap().is_empty());
     assert_eq!(&std::fs::read(&out).unwrap()[8..12], b"WEBP");
     // what an image doesn't use is refused, asked for by its kind too
-    for format in ["webp", "image"] {
+    for format in ["webp", "static", "image"] {
         let output =
             tgradish(&["convert", input.to_str().unwrap(), "--format", format, "--crf", "30"]);
         assert_eq!(output.status.code(), Some(2));

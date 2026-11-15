@@ -249,7 +249,7 @@ impl Backend {
     }
 
     /// The planned frame at the plan's start, cropped, scaled and padded as
-    /// the plan says: straight RGBA of the plan's size, for image stickers.
+    /// the plan says: straight RGBA of the plan's size, for static stickers.
     pub fn still(&self, plan: &Plan, cancel: &CancelToken) -> Result<Vec<u8>> {
         let read = reading_absolute(plan);
         let still = match self {

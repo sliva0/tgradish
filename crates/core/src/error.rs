@@ -137,7 +137,7 @@ pub enum Error {
     /// A `.tgs` couldn't be made.
     #[error(transparent)]
     Tgs(#[from] tgradish_tgs::Error),
-    /// libwebp couldn't encode an image sticker: what failed.
+    /// libwebp couldn't encode a static sticker: what failed.
     #[error("couldn't encode the WebP: {0}")]
     Webp(String),
     /// Something done to a file failed, as writing the result: `action`

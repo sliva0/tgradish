@@ -1,4 +1,4 @@
-//! WebM's options, which image stickers take the picture options of.
+//! WebM's options, which static stickers take the picture options of.
 
 use std::collections::BTreeMap;
 

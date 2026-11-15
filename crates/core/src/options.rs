@@ -1,5 +1,5 @@
 //! The values conversion options take, shared by every format's options:
-//! [`webm::Options`](crate::webm::Options), which image stickers take too,
+//! [`webm::Options`](crate::webm::Options), which static stickers take too,
 //! and [`tgs::Options`](crate::tgs::Options); and how options are
 //! layered and written as flags.
 //!

@@ -32,7 +32,7 @@ pub(crate) enum Setup {
         /// ffmpeg, which reads videos.
         backend: Option<Backend>,
     },
-    /// An image sticker: WebM's options, `start` the frame's time.
+    /// A static sticker: WebM's options, `start` the frame's time.
     Image {
         options: Options,
         backend: Backend,

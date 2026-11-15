@@ -1,4 +1,4 @@
-//! Telegram requirements for video and image stickers and emoji.
+//! Telegram requirements for video and static stickers and emoji.
 //!
 //! Source: <https://core.telegram.org/stickers>, checked 2026-10-08, and
 //! uploads to @Stickers, which found the exact limits.
@@ -13,7 +13,7 @@ use tgradish_tgs::check::Severity;
 pub const MAX_STICKER_BYTES: u64 = 256 * 1024;
 /// Largest video emoji @Stickers accepts, in bytes; one more is "too big".
 pub const MAX_EMOJI_BYTES: u64 = 64 * 1024;
-/// Largest image sticker or emoji, PNG or WebP, in bytes.
+/// Largest static sticker or emoji, PNG or WebP, in bytes.
 pub const MAX_STILL_BYTES: u64 = 512 * 1024;
 /// Longest allowed duration in seconds, as read from the file header.
 pub const MAX_SECONDS: f64 = 3.0;
@@ -127,7 +127,7 @@ pub enum Issue {
         /// The most Telegram takes.
         max: f64,
     },
-    /// An animated image, where image stickers are one picture.
+    /// An animated image, where static stickers are one picture.
     Animated,
 }
 
@@ -169,7 +169,7 @@ enum Found {
     TooLong { seconds: f64, max: f64 },
     /// More than `max` frames a second.
     TooManyFps { fps: f64, max: f64 },
-    /// An animated image, where image stickers are one picture.
+    /// An animated image, where static stickers are one picture.
     Animated,
 }
 
@@ -217,7 +217,7 @@ impl std::fmt::Display for Issue {
             Issue::TooManyFps { fps, max } => {
                 write!(f, "frame rate is {fps:.2} fps, limit is {max}")
             }
-            Issue::Animated => write!(f, "it is animated; image stickers are one picture"),
+            Issue::Animated => write!(f, "it is animated; static stickers are one picture"),
         }
     }
 }
@@ -236,7 +236,7 @@ fn size_issue(width: u64, height: u64, target: Target) -> Option<Issue> {
     (!size_ok).then_some(Issue::WrongSize { width, height, side: box_w, exact })
 }
 
-/// Lists everything that would make Telegram reject an image sticker or
+/// Lists everything that would make Telegram reject a static sticker or
 /// emoji of `bytes` bytes, `width` by `height` pixels, as `target`.
 pub(crate) fn check_still(width: u32, height: u32, bytes: u64, target: Target) -> Vec<Issue> {
     let mut issues: Vec<Issue> =

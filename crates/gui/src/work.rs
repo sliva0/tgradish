@@ -480,7 +480,7 @@ mod tests {
         assert_eq!((item.kind, item.format), (Kind::Frames, Format::Tgs));
         assert!(item.input_thumb.is_some());
         // a folder can't be a video
-        harness.get_by_label("Animation");
+        harness.get_by_label("Animated");
         convert(&harness);
         harness.run_steps(2);
         finish(&mut harness);
@@ -533,7 +533,7 @@ mod tests {
     }
 
     #[test]
-    fn makes_image_stickers_from_a_frame() {
+    fn makes_static_stickers_from_a_frame() {
         let dir = tempfile::tempdir().unwrap();
         let Some(video) = video_of(dir.path(), "320x240", 2) else { return };
         let mut config = Config::default();
@@ -542,7 +542,7 @@ mod tests {
         let mut harness = harness(config);
         harness.state_mut().add(vec![video]);
         finish(&mut harness);
-        harness.get_by_label("Image").click();
+        harness.get_by_label("Static").click();
         harness.run_steps(2);
         // the frame at a second, which the preview stops at
         harness.state_mut().items[0].choices.frame = Some(1.0);
