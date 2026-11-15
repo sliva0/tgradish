@@ -1100,11 +1100,13 @@ fn readme_screenshot() {
     // said to go where pictures usually do, rather than to the test's
     // temporary folder
     harness.state_mut().config.gui.output_dir = Some("/home/user/Pictures/Stickers".into());
-    // the frog chosen, its idle tag, with the result's small picture
+    // the frog chosen, its idle tag, cropped to the frog and a little
+    // around it, 4:3, with the result's small picture
     let frog = harness.state().items[0].id;
     harness.state_mut().select(frog);
     let item = &mut harness.state_mut().items[0];
     item.choices.tag = Some("idle".into());
+    item.choices.crop = Some(Crop { x: 1, y: 5, width: 32, height: 24 });
     item.view.inset = true;
     finish(&mut harness);
     let item = &mut harness.state_mut().items[0];
