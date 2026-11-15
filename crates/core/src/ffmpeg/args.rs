@@ -191,7 +191,7 @@ fn scale_filters(plan: &Plan) -> Vec<String> {
             }
             filters
         }
-        Scaling::PixelPerfect => vec![format!("scale={sw}:{sh}:flags=neighbor")],
+        Scaling::Integer => vec![format!("scale={sw}:{sh}:flags=neighbor")],
     }
 }
 

@@ -874,7 +874,9 @@ mod tests {
         write(dir.path(), "emoji", "[webm]\ntarget = 'emoji'\n");
         write(dir.path(), "sheet", "[tgs]\neffort = 'fast'\nsheet = '4x1'\n");
         // as it was once named
-        write(dir.path(), "renamed", "[webm]\nspeed = 'best'\n[tgs]\nspeed = 'fast'\n");
+        let renamed = "[webm]\nspeed = 'best'\nscaling = 'pixel-perfect'\nexact-scale = '3'\n\
+                       [tgs]\nspeed = 'fast'\n";
+        write(dir.path(), "renamed", renamed);
         write(dir.path(), "unreadable", "[webm\n");
         std::fs::write(dir.path().join("notes.txt"), "ignored").unwrap();
 
@@ -890,7 +892,12 @@ mod tests {
         );
         let pixels = presets.tgs("pixels").unwrap();
         assert_eq!((pixels.keep_canvas, pixels.effort), (Some(true), Some(Effort::Best)));
-        assert_eq!(presets.webm("renamed").unwrap().effort, Some(Effort::Best));
+        let renamed = presets.webm("renamed").unwrap();
+        assert_eq!(
+            (renamed.effort, renamed.scaling),
+            (Some(Effort::Best), Some(crate::options::Scaling::Integer))
+        );
+        assert_eq!(renamed.integer_scale, "3".parse().ok());
         assert_eq!(presets.tgs("renamed").unwrap().effort, Some(Effort::Fast));
 
         let broken = presets.webm("broken").unwrap_err().to_string();

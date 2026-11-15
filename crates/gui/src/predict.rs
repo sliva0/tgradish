@@ -123,7 +123,7 @@ pub(crate) fn webm(frame: &[u8], width: u32, part: Part, sizes: &Sizes) -> egui:
                 }
                 let per = used / scaled;
                 Some(match sizes.scaling {
-                    Scaling::PixelPerfect => {
+                    Scaling::Integer => {
                         let i = (from + ((at + 0.5) * per).floor()).min(size as f64 - 1.0);
                         (i.max(0.0) as usize, vec![1.0])
                     }

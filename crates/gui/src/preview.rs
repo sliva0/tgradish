@@ -408,7 +408,7 @@ fn preview(
                         Format::Webm | Format::Webp => {
                             let used = crop.map_or(size, |crop| (crop.width, crop.height));
                             let full = Crop::whole(size);
-                            // a crop that doesn't suit the exact scale yet is made to
+                            // a crop that doesn't suit the integer scale yet is made to
                             // fit on the next frame
                             if let Some(mut sizes) =
                                 file_settings::webm_sizes(webm, crop.unwrap_or(full))

@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::options::{Crop, Effort, ExactScale, Fit, Range, Resize, Scaling, Spoof, layered};
+use crate::options::{Crop, Effort, Fit, IntegerScale, Range, Resize, Scaling, Spoof, layered};
 use crate::telegram::Target;
 
 /// Settings for one conversion. `None` means "use the default".
@@ -37,11 +37,13 @@ pub struct Options {
     /// auto, sharp for pixel art made at least twice as large.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scaling: Option<Scaling>,
-    /// Scale by exactly this much, so input and result pixels line up. The
-    /// crop must fit the result at this scale; transparent margins fill the
-    /// rest. Overrides `scaling`, and `resize` must be contain or pad.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub exact_scale: Option<ExactScale>,
+    /// Scale by a whole number, or one over it, so input and result pixels
+    /// line up. The crop must fit the result at this scale; transparent
+    /// margins fill the rest. Overrides `scaling`, and `resize` must be
+    /// contain or pad.
+    // read as `exact-scale` too, as it was once named
+    #[serde(alias = "exact-scale", skip_serializing_if = "Option::is_none")]
+    pub integer_scale: Option<IntegerScale>,
     /// What to tune to get close to the file size limit: 256 KiB for
     /// stickers, 64 KiB for emoji. Default: auto.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -137,7 +139,7 @@ layered!(Options {
     crop,
     resize,
     scaling,
-    exact_scale,
+    integer_scale,
     fit,
     attempts,
     fit_range,
@@ -192,18 +194,18 @@ impl Options {
     }
 
     /// Whether how pixels are scaled is left to the input: auto, with no
-    /// exact scale, which places pixels itself.
+    /// integer scale, which places pixels itself.
     pub fn auto_scaling(&self) -> bool {
-        self.scaling_or_default() == Scaling::Auto && self.exact_scale().is_none()
+        self.scaling_or_default() == Scaling::Auto && self.integer_scale().is_none()
     }
 
-    /// The exact scale to scale by, if any: not [`ExactScale::NONE`].
-    pub fn exact_scale(&self) -> Option<ExactScale> {
-        self.exact_scale.filter(|&scale| scale != ExactScale::NONE)
+    /// The integer scale to scale by, if any: not [`IntegerScale::NONE`].
+    pub fn integer_scale(&self) -> Option<IntegerScale> {
+        self.integer_scale.filter(|&scale| scale != IntegerScale::NONE)
     }
 
     /// Returns `self` with every value set in `overlay` replacing its own,
-    /// [`ExactScale::NONE`] clearing an exact scale.
+    /// [`IntegerScale::NONE`] clearing an integer scale.
     /// A range to fit within belongs to the way of fitting it was written
     /// for: when `overlay` fits in another unit, as a bitrate where `self`
     /// fits a quality, and sets no range of its own, `self`'s is dropped
@@ -215,8 +217,8 @@ impl Options {
             merged.fit_range = None;
         }
         // no scale, over one below, leaves none
-        if merged.exact_scale == Some(ExactScale::NONE) {
-            merged.exact_scale = None;
+        if merged.integer_scale == Some(IntegerScale::NONE) {
+            merged.integer_scale = None;
         }
         merged
     }

@@ -4,7 +4,7 @@
 //! quality that does.
 //!
 //! The picture is planned like a WebM sticker's, from the options a still
-//! picture has: target, crop, resize, scaling and exact scale, `start`,
+//! picture has: target, crop, resize, scaling and integer scale, `start`,
 //! where the frame is, and an Aseprite file's tag and layers.
 
 mod encode;
@@ -128,7 +128,7 @@ pub const PICTURE_OPTIONS: [&str; 11] = [
     "crop",
     "resize",
     "scaling",
-    "exact-scale",
+    "integer-scale",
     "start",
     "title",
     "watermark",

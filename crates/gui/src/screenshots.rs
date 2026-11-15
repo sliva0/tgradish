@@ -588,8 +588,8 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         // typed shape, a fixed integer scale, and a faster tempo
         let item = &mut harness.state_mut().items[0];
         item.view.aspect = item::Aspect::Ratio(4.0, 3.0);
-        item.choices.webm.scaling = Some(Scaling::PixelPerfect);
-        item.choices.webm.exact_scale = Some("1/2".parse().unwrap());
+        item.choices.webm.scaling = Some(Scaling::Integer);
+        item.choices.webm.integer_scale = Some("1/2".parse().unwrap());
         item.choices.webm.tempo = Some(2.0);
         harness.set_size(egui::vec2(1280.0, 1500.0));
         harness.run_steps(3);

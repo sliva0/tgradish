@@ -44,7 +44,9 @@ pub enum Scaling {
     Sharp,
     /// Each pixel becomes the same whole number of output pixels, and
     /// transparent margins fill the rest of the box.
-    PixelPerfect,
+    // read as `pixel-perfect` too, as it was once named
+    #[serde(alias = "pixel-perfect")]
+    Integer,
 }
 
 /// What to tune so the file ends up just under the file size limit.
@@ -305,33 +307,33 @@ impl JsonSchema for Sheet {
 /// result pixels for each input pixel (`2`), or the other way round
 /// (`1/2`). Written as `N`, `1/N` or a decimal like `0.5`; reading it, as
 /// from a preset, refuses anything else, zero included, but for nothing at
-/// all, which is [`ExactScale::NONE`].
+/// all, which is [`IntegerScale::NONE`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-pub struct ExactScale {
+pub struct IntegerScale {
     /// Result pixels along an input pixel; 1 when shrinking. Never 0, but
-    /// in [`ExactScale::NONE`].
+    /// in [`IntegerScale::NONE`].
     pub up: u32,
     /// Input pixels along a result pixel; 1 when growing. Never 0, but in
-    /// [`ExactScale::NONE`].
+    /// [`IntegerScale::NONE`].
     pub down: u32,
 }
 
-impl ExactScale {
+impl IntegerScale {
     /// Not a scale, but what clears one: options layered over a preset or
     /// the config file can't otherwise say that the scale below has no
-    /// say, as leaving it out keeps it. Written as nothing: `--exact-scale=`,
-    /// `exact-scale = ''` or `"exact-scale": ""`. `merged` leaves no scale
+    /// say, as leaving it out keeps it. Written as nothing: `--integer-scale=`,
+    /// `integer-scale = ''` or `"integer-scale": ""`. `merged` leaves no scale
     /// in its place, so presets, the command line and the GUI never hand
     /// it on; and where options holding it aren't merged, the options'
-    /// `exact_scale()` leaves it out, so it scales as no scale does.
-    pub const NONE: ExactScale = ExactScale { up: 0, down: 0 };
+    /// `integer_scale()` leaves it out, so it scales as no scale does.
+    pub const NONE: IntegerScale = IntegerScale { up: 0, down: 0 };
 
     /// The largest scale either way: a pixel to a whole sticker side.
     pub const MAX: u32 = 512;
 
     /// Whether it scales by anything: a scale made in code with a side of
-    /// 0 makes no pixels, and planning refuses it. [`ExactScale::NONE`]
+    /// 0 makes no pixels, and planning refuses it. [`IntegerScale::NONE`]
     /// isn't valid either, as it is no scale, which planning never sees as
     /// one.
     pub fn is_valid(self) -> bool {
@@ -353,30 +355,31 @@ impl ExactScale {
     }
 }
 
-impl std::str::FromStr for ExactScale {
+impl std::str::FromStr for IntegerScale {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let invalid = || {
             format!(
                 "{s:?}: expected a whole number like 2, or 1/N like 1/2, up to {}",
-                ExactScale::MAX
+                IntegerScale::MAX
             )
         };
         if s.trim().is_empty() {
-            return Ok(ExactScale::NONE);
+            return Ok(IntegerScale::NONE);
         }
         let text = s.trim().trim_end_matches(['x', '×']);
-        let whole =
-            |v: &str| v.trim().parse::<u32>().ok().filter(|&n| (1..=ExactScale::MAX).contains(&n));
+        let whole = |v: &str| {
+            v.trim().parse::<u32>().ok().filter(|&n| (1..=IntegerScale::MAX).contains(&n))
+        };
         if let Some((one, n)) = text.split_once('/') {
             return match (whole(one), whole(n)) {
-                (Some(1), Some(n)) => Ok(ExactScale { up: 1, down: n }),
+                (Some(1), Some(n)) => Ok(IntegerScale { up: 1, down: n }),
                 _ => Err(invalid()),
             };
         }
         if let Some(n) = whole(text) {
-            return Ok(ExactScale { up: n, down: 1 });
+            return Ok(IntegerScale { up: n, down: 1 });
         }
         // a decimal: whole, or one over a whole number
         let value: f64 = text.parse().map_err(|_| invalid())?;
@@ -384,16 +387,17 @@ impl std::str::FromStr for ExactScale {
             return Err(invalid());
         }
         let down = (1.0 / value).round();
-        if value < 1.0 && down <= f64::from(ExactScale::MAX) && (1.0 / down - value).abs() < 1e-3 {
-            return Ok(ExactScale { up: 1, down: down as u32 });
+        if value < 1.0 && down <= f64::from(IntegerScale::MAX) && (1.0 / down - value).abs() < 1e-3
+        {
+            return Ok(IntegerScale { up: 1, down: down as u32 });
         }
         Err(invalid())
     }
 }
 
-impl std::fmt::Display for ExactScale {
+impl std::fmt::Display for IntegerScale {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if *self == ExactScale::NONE {
+        if *self == IntegerScale::NONE {
             return Ok(());
         }
         match self.down {
@@ -403,22 +407,22 @@ impl std::fmt::Display for ExactScale {
     }
 }
 
-impl TryFrom<String> for ExactScale {
+impl TryFrom<String> for IntegerScale {
     type Error = String;
     fn try_from(value: String) -> Result<Self, Self::Error> {
         value.parse()
     }
 }
 
-impl From<ExactScale> for String {
-    fn from(value: ExactScale) -> String {
+impl From<IntegerScale> for String {
+    fn from(value: IntegerScale) -> String {
         value.to_string()
     }
 }
 
-impl JsonSchema for ExactScale {
+impl JsonSchema for IntegerScale {
     fn schema_name() -> std::borrow::Cow<'static, str> {
-        "ExactScale".into()
+        "IntegerScale".into()
     }
 
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -455,7 +459,7 @@ pub(crate) use layered;
 
 /// Options renamed since they were first named, each old key with the key
 /// it has now: files, JSON and flags still read the old ones.
-pub const RENAMED: [(&str, &str); 1] = [("speed", "effort")];
+pub const RENAMED: [(&str, &str); 2] = [("speed", "effort"), ("exact-scale", "integer-scale")];
 
 /// The key an option named `key` has now: `key`, unless it was renamed
 /// since, as [`RENAMED`] says.
@@ -814,40 +818,40 @@ mod tests {
     #[test]
     fn reads_no_scale_of_zero() {
         for text in ["0", "1/0", "0/1", "0/0", "0.0", "0x", "-1", "1/-2", "513", "1/513"] {
-            assert!(text.parse::<ExactScale>().is_err(), "{text}");
-            let preset = format!("exact-scale = '{text}'");
+            assert!(text.parse::<IntegerScale>().is_err(), "{text}");
+            let preset = format!("integer-scale = '{text}'");
             assert!(toml::from_str::<Options>(&preset).is_err(), "{text}");
         }
         // as code can still make one, and none is no scale either
-        let zeros = [ExactScale { up: 0, down: 1 }, ExactScale { up: 1, down: 0 }];
-        for zero in zeros.into_iter().chain([ExactScale::NONE]) {
+        let zeros = [IntegerScale { up: 0, down: 1 }, IntegerScale { up: 1, down: 0 }];
+        for zero in zeros.into_iter().chain([IntegerScale::NONE]) {
             assert!(!zero.is_valid());
             assert_eq!((zero.apply(4), zero.most_input(512)), (None, 0), "{zero:?}");
         }
-        let half: ExactScale = "1/2".parse().unwrap();
+        let half: IntegerScale = "1/2".parse().unwrap();
         assert!(half.is_valid() && half.apply(4) == Some(2) && half.most_input(512) == 1024);
         // nothing is none, which planning never sees
-        assert_eq!("".parse(), Ok(ExactScale::NONE));
-        assert!(!ExactScale::NONE.is_valid() && ExactScale::NONE.to_string().is_empty());
+        assert_eq!("".parse(), Ok(IntegerScale::NONE));
+        assert!(!IntegerScale::NONE.is_valid() && IntegerScale::NONE.to_string().is_empty());
     }
 
-    /// `--exact-scale=` clears a preset's scale, as flags write it.
+    /// `--integer-scale=` clears a preset's scale, as flags write it.
     #[test]
-    fn clears_an_exact_scale() {
-        let preset = Options { exact_scale: "2".parse().ok(), ..Default::default() };
-        let none = Options { exact_scale: Some(ExactScale::NONE), ..Default::default() };
-        assert_eq!(preset.clone().merged(&none).exact_scale, None);
-        assert_eq!(Options::default().merged(&none).exact_scale, None);
-        assert_eq!(none.clone().merged(&Options::default()).exact_scale, None);
-        assert_eq!(flags(&none), ["--exact-scale="]);
-        let read: Options = toml::from_str("exact-scale = ''").unwrap();
+    fn clears_an_integer_scale() {
+        let preset = Options { integer_scale: "2".parse().ok(), ..Default::default() };
+        let none = Options { integer_scale: Some(IntegerScale::NONE), ..Default::default() };
+        assert_eq!(preset.clone().merged(&none).integer_scale, None);
+        assert_eq!(Options::default().merged(&none).integer_scale, None);
+        assert_eq!(none.clone().merged(&Options::default()).integer_scale, None);
+        assert_eq!(flags(&none), ["--integer-scale="]);
+        let read: Options = toml::from_str("integer-scale = ''").unwrap();
         assert_eq!(read, none);
         // and in JSON, as --options-json takes it and describe prints it
-        let json = serde_json::json!({ "exact-scale": "" });
+        let json = serde_json::json!({ "integer-scale": "" });
         assert_eq!(serde_json::from_value::<Options>(json.clone()).unwrap(), none);
         assert_eq!(serde_json::to_value(&none).unwrap(), json);
         // what isn't merged scales as none does, not as a scale
-        assert_eq!(none.exact_scale(), None);
+        assert_eq!(none.integer_scale(), None);
         assert!(none.auto_scaling());
         let sizes = |options: &Options| crate::picture::picture_sizes(options, (8, 8)).unwrap();
         assert_eq!(sizes(&none), sizes(&Options::default()));
@@ -858,13 +862,21 @@ mod tests {
     /// session have it, but is written by its name now.
     #[test]
     fn reads_options_by_their_old_names() {
-        let toml: Options = toml::from_str("speed = 'best'").unwrap();
+        let toml: Options =
+            toml::from_str("speed = 'best'\nscaling = 'pixel-perfect'\nexact-scale = '2'").unwrap();
         assert_eq!(toml.effort, Some(Effort::Best));
-        let json: Options = serde_json::from_value(serde_json::json!({ "speed": "fast" })).unwrap();
+        assert_eq!(toml.scaling, Some(Scaling::Integer));
+        assert_eq!(toml.integer_scale, Some(IntegerScale { up: 2, down: 1 }));
+        let json =
+            serde_json::json!({ "speed": "fast", "scaling": "pixel-perfect", "exact-scale": "" });
+        let json: Options = serde_json::from_value(json).unwrap();
         assert_eq!(json.effort, Some(Effort::Fast));
+        assert_eq!(json.scaling, Some(Scaling::Integer));
+        assert_eq!(json.integer_scale, Some(IntegerScale::NONE));
+        assert_eq!(serde_json::to_value(Scaling::Integer).unwrap(), "integer");
         let tgs: crate::tgs::Options = toml::from_str("speed = 'fast'").unwrap();
         assert_eq!(tgs.effort, Some(Effort::Fast));
-        assert_eq!(set_keys(&json), ["effort"]);
+        assert_eq!(set_keys(&json), ["scaling", "integer-scale", "effort"]);
         assert_eq!(flags(&tgs), ["--effort=fast"]);
         for (old, new) in RENAMED {
             assert_eq!((current_key(old), current_key(new)), (new, new));
@@ -874,6 +886,7 @@ mod tests {
         use crate::presets::Format;
         assert!(Format::Webm.uses("speed") && Format::Tgs.uses("speed"));
         assert!(!Format::Webp.uses("speed"));
+        assert!(Format::Webp.uses("exact-scale") && !Format::Tgs.uses("exact-scale"));
     }
 
     #[test]

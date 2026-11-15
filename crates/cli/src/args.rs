@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use tgradish_core::ffmpeg::FfmpegChoice;
-use tgradish_core::options::{self, Crop, ExactScale, Range};
+use tgradish_core::options::{self, Crop, IntegerScale, Range};
 use tgradish_core::presets::Format;
 use tgradish_core::telegram::Target;
 use tgradish_core::tgradish_tgs::reduce;
@@ -452,17 +452,17 @@ pub struct OptionArgs {
     #[arg(long, value_enum, help_heading = "Output")]
     pub resize: Option<ResizeArg>,
     /// How pixels are scaled: smooth, sharp blocks for pixel art, or
-    /// pixel-perfect whole multiples with transparent margins. [default:
-    /// auto, sharp for pixel art made at least twice as large]
+    /// integer, whole multiples with transparent margins. [default: auto,
+    /// sharp for pixel art made at least twice as large]
     #[arg(long, value_enum, help_heading = "Output")]
     pub scaling: Option<ScalingArg>,
-    /// Scale by exactly N (or 1/N), so input pixels line up with the
+    /// Scale by a whole N (or 1/N), so input pixels line up with the
     /// result's; transparent margins fill the rest. The crop must fit: with
     /// 3, at most 170 pixels on the longer side for stickers, 33 for emoji.
-    /// --exact-scale= with nothing after sets none, over a preset's.
+    /// --integer-scale= with nothing after sets none, over a preset's.
     /// [default: none]
-    #[arg(long, value_name = "N", help_heading = "Output")]
-    pub exact_scale: Option<ExactScale>,
+    #[arg(long, value_name = "N", alias = "exact-scale", help_heading = "Output")]
+    pub integer_scale: Option<IntegerScale>,
     /// Seconds to skip at the start of the input; for WebP, the time of the
     /// frame to use. [default: 0]
     #[arg(short = 's', long, value_name = "SECONDS", value_parser = checked("start"),
@@ -658,7 +658,7 @@ impl OptionArgs {
             crop: self.crop,
             resize: self.resize.map(Into::into),
             scaling: self.scaling.map(Into::into),
-            exact_scale: self.exact_scale,
+            integer_scale: self.integer_scale,
             fit: self.fit.map(Into::into),
             attempts: self.attempts,
             fit_range: self.fit_range,
@@ -742,9 +742,9 @@ fn parse_option_pair(text: &str) -> Result<Option<(String, String)>, String> {
 
 /// Mirrors a core enum as a clap value enum.
 macro_rules! value_enum {
-    ($name:ident => $core:path { $($variant:ident),* $(,)? }) => {
+    ($name:ident => $core:path { $($(#[$meta:meta])* $variant:ident),* $(,)? }) => {
         #[derive(Debug, Clone, Copy, ValueEnum)]
-        pub enum $name { $($variant),* }
+        pub enum $name { $($(#[$meta])* $variant),* }
 
         impl From<$name> for $core {
             fn from(value: $name) -> Self {
@@ -756,7 +756,13 @@ macro_rules! value_enum {
 
 value_enum!(TargetArg => Target { Sticker, Emoji });
 value_enum!(ResizeArg => options::Resize { Contain, Pad, Crop, Stretch });
-value_enum!(ScalingArg => options::Scaling { Auto, Smooth, Sharp, PixelPerfect });
+value_enum!(ScalingArg => options::Scaling {
+    Auto,
+    Smooth,
+    Sharp,
+    #[value(alias = "pixel-perfect")]
+    Integer,
+});
 value_enum!(FitArg => options::Fit { Auto, Bitrate, Crf, Fps, Length, Off });
 value_enum!(EffortArg => options::Effort { Fast, Balanced, Best });
 value_enum!(SpoofArg => options::Spoof { Auto, Always, Never });
@@ -1160,8 +1166,8 @@ mod tests {
             hide_layers: Some(vec!["Back ground".into(), "--old".into()]),
             crop: Some(Crop { x: 1, y: 2, width: 30, height: 40 }),
             resize: Some(options::Resize::Pad),
-            scaling: Some(options::Scaling::PixelPerfect),
-            exact_scale: Some("1/2".parse().unwrap()),
+            scaling: Some(options::Scaling::Integer),
+            integer_scale: Some("1/2".parse().unwrap()),
             fit: Some(options::Fit::Crf),
             attempts: Some(5),
             fit_range: Some(Range { min: 4.0, max: 40.5 }),
@@ -1209,13 +1215,17 @@ mod tests {
     /// Flags renamed since keep their old names, hidden.
     #[test]
     fn reads_flags_by_their_old_names() {
-        let options = parsed(vec!["--speed=best".into()]);
+        let old = ["--speed=best", "--scaling=pixel-perfect", "--exact-scale=2"];
+        let options = parsed(old.map(String::from).to_vec());
         assert_eq!(options.to_options().effort, Some(options::Effort::Best));
         assert_eq!(options.to_tgs_options().effort, Some(options::Effort::Best));
+        assert_eq!(options.to_options().scaling, Some(options::Scaling::Integer));
+        assert_eq!(options.to_options().integer_scale, "2".parse().ok());
         let convert = Cli::command().find_subcommand("convert").unwrap().clone();
         let help = convert.clone().render_long_help().to_string();
         for (old, new) in options::RENAMED {
             assert!(!help.contains(&format!("--{old}")), "--{old} shows: {help}");
+            assert!(!help.contains("pixel-perfect"), "{help}");
             let arg = convert.get_arguments().find(|arg| arg.get_long() == Some(new)).unwrap();
             assert!(arg.get_all_aliases().unwrap_or_default().contains(&old), "--{old}");
         }
@@ -1242,9 +1252,9 @@ mod tests {
         let none = Options { encoder_options: Some(Default::default()), ..Options::default() };
         assert_eq!(options::flags(&none), ["--encoder-options="]);
         assert_eq!(parsed(options::flags(&none)).to_options(), none);
-        // and no exact scale, over a preset's
-        let none = Options { exact_scale: Some(ExactScale::NONE), ..Options::default() };
-        assert_eq!(options::flags(&none), ["--exact-scale="]);
+        // and no integer scale, over a preset's
+        let none = Options { integer_scale: Some(IntegerScale::NONE), ..Options::default() };
+        assert_eq!(options::flags(&none), ["--integer-scale="]);
         assert_eq!(parsed(options::flags(&none)).to_options(), none);
     }
 }

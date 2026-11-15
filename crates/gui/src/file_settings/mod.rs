@@ -466,7 +466,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let Some(video) = video(dir.path(), "64x48") else { return };
         let preset = "[webm]\nfit = 'off'\nbitrate = 300.0\nfps = 24.0\n\
-                      scaling = 'pixel-perfect'\nexact-scale = '2'\n";
+                      scaling = 'integer'\ninteger-scale = '2'\n";
         std::fs::write(dir.path().join("mine.toml"), preset).unwrap();
         let mut config = Config::default();
         config.ffmpeg.choice = FfmpegChoice::System;
@@ -486,13 +486,13 @@ mod tests {
         let largest = fl!("scale-largest");
         assert!(harness.get_by_label(&largest).accesskit_node().is_disabled());
         // one of the item's own goes over it, with a way back
-        let scale = tgradish_core::options::ExactScale { up: 3, down: 1 };
-        harness.state_mut().items[0].choices.webm.exact_scale = Some(scale);
+        let scale = tgradish_core::options::IntegerScale { up: 3, down: 1 };
+        harness.state_mut().items[0].choices.webm.integer_scale = Some(scale);
         harness.run_steps(3);
         harness.get(by().value("×3"));
         harness.get_by_label(&fl!("back-to-preset")).click();
         harness.run_steps(3);
-        assert_eq!(harness.state().items[0].choices.webm.exact_scale, None);
+        assert_eq!(harness.state().items[0].choices.webm.integer_scale, None);
         harness.get(by().value("×2"));
     }
 

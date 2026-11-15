@@ -284,9 +284,9 @@ impl Recipe {
 pub(crate) fn shown(options: Options, effective: &Options) -> Options {
     let mut options = tgradish_core::webm::in_effect(options, effective);
     // a scale of whole multiples, which keeps the whole picture
-    if effective.scaling != Some(Scaling::PixelPerfect) {
-        options.exact_scale = None;
-    } else if effective.exact_scale.is_some()
+    if effective.scaling != Some(Scaling::Integer) {
+        options.integer_scale = None;
+    } else if effective.integer_scale.is_some()
         && matches!(effective.resize, Some(Resize::Crop | Resize::Stretch))
     {
         options.resize = None;
@@ -411,7 +411,7 @@ impl Framing {
             webm: Options {
                 resize: webm.resize,
                 scaling: webm.scaling,
-                exact_scale: webm.exact_scale,
+                integer_scale: webm.integer_scale,
                 tempo: webm.tempo,
                 // the rate a sequence's pictures are read at, as .tgs's is,
                 // which draws its frames again; a video's is only the rate
@@ -957,7 +957,7 @@ mod tests {
         let webm_framing = json!({
             "resize": "pad",
             "scaling": "sharp",
-            "exact-scale": "2",
+            "integer-scale": "2",
             "tempo": 2.0,
         });
         let webm_other = [

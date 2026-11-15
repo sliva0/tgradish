@@ -5,7 +5,7 @@
 use eframe::egui::{
     self, Color32, CursorIcon, PointerButton, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2,
 };
-use tgradish_core::options::{Crop, ExactScale};
+use tgradish_core::options::{Crop, IntegerScale};
 use tgradish_core::telegram::Target;
 
 use crate::item::Zoom;
@@ -65,7 +65,7 @@ pub(crate) struct Cropping<'a> {
     pub(crate) ratio: Option<f64>,
     /// What of the crop the result keeps, cutting off the rest.
     pub(crate) kept: Option<Kept>,
-    /// The size an exact scale holds the crop to.
+    /// The size an integer scale holds the crop to.
     pub(crate) exact: Option<Exact>,
 }
 
@@ -87,7 +87,7 @@ pub(crate) enum Keep {
     Middle,
 }
 
-/// A crop held to an exact scale: its longer side at most `long` input
+/// A crop held to an integer scale: its longer side at most `long` input
 /// pixels, the most the scale fits into the result, and its sides whole
 /// blocks of `step` pixels, which shrinking averages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,7 +99,7 @@ pub(crate) struct Exact {
 impl Exact {
     /// The crop `scale` takes for `target`, if a pixel at that scale isn't
     /// larger than the result.
-    pub(crate) fn of(scale: ExactScale, target: Target) -> Option<Exact> {
+    pub(crate) fn of(scale: IntegerScale, target: Target) -> Option<Exact> {
         let (width, height) = target.box_size();
         let long = scale.most_input(width.max(height));
         (long > 0).then_some(Exact { long, step: scale.down })
@@ -333,7 +333,7 @@ pub(crate) fn show(
     if response.drag_stopped() {
         ui.data_mut(|data| data.remove::<Drag>(id));
     }
-    // all of the picture, or as much of it as the exact scale takes
+    // all of the picture, or as much of it as the integer scale takes
     let whole_picture = |crop: &mut Option<Crop>| {
         let middle = (Keep::Middle, Keep::Middle);
         *crop = match cropping.exact {
@@ -783,7 +783,7 @@ mod tests {
     }
 
     #[test]
-    fn holds_crops_to_an_exact_scale() {
+    fn holds_crops_to_an_integer_scale() {
         let size = (1920, 1080);
         // twice as large: at most 256 on the longer side
         let twice = Exact::of("2".parse().unwrap(), Target::Sticker).unwrap();
@@ -822,6 +822,6 @@ mod tests {
         );
         assert_eq!(quarter.fit(crop, start, None, (3, 600)), None);
         // no pixel larger than the result
-        assert!(Exact::of(ExactScale { up: 513, down: 1 }, Target::Sticker).is_none());
+        assert!(Exact::of(IntegerScale { up: 513, down: 1 }, Target::Sticker).is_none());
     }
 }

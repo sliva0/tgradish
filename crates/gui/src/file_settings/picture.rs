@@ -3,7 +3,7 @@
 //! too, so what it shows is what converting makes.
 
 use eframe::egui;
-use tgradish_core::options::{Crop, ExactScale, Resize, Scaling};
+use tgradish_core::options::{Crop, IntegerScale, Resize, Scaling};
 use tgradish_core::picture;
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::Target;
@@ -99,12 +99,12 @@ fn scalings() -> [Choice<Scaling>; 4] {
         (Scaling::Auto, fl!("scaling-auto"), fl!("scaling-auto", "hint")),
         (Scaling::Smooth, fl!("scaling-smooth"), fl!("scaling-smooth", "hint")),
         (Scaling::Sharp, fl!("scaling-sharp"), fl!("scaling-sharp", "hint")),
-        (Scaling::PixelPerfect, fl!("scaling-integer"), fl!("scaling-integer", "hint")),
+        (Scaling::Integer, fl!("scaling-integer"), fl!("scaling-integer", "hint")),
     ]
 }
 
 /// Where a `crop` of the input lands in a WebM or image result made with
-/// `options`, everything the conversion gets; `None` when its exact scale
+/// `options`, everything the conversion gets; `None` when its integer scale
 /// can't make it.
 pub(crate) fn webm_sizes(options: &Options, crop: Crop) -> Option<picture::Sizes> {
     picture::picture_sizes(options, (crop.width, crop.height)).ok()
@@ -115,43 +115,43 @@ pub(crate) fn resize_of(options: &Options) -> Resize {
     options.resize.unwrap_or(picture::default_resize(options.target.unwrap_or_default()))
 }
 
-/// The size an exact scale holds the crop to, for a WebM or image result
+/// The size an integer scale holds the crop to, for a WebM or image result
 /// made with `options`.
 pub(crate) fn exact_of(options: &Options) -> Option<Exact> {
-    Exact::of(options.exact_scale?, options.target.unwrap_or_default())
+    Exact::of(options.integer_scale?, options.target.unwrap_or_default())
 }
 
 /// Integer scales as whole steps: 0 is 1x, 1 is 2x, -1 is 1/2.
-fn scale_step(scale: ExactScale) -> i64 {
+fn scale_step(scale: IntegerScale) -> i64 {
     if scale.down > 1 { 1 - i64::from(scale.down) } else { i64::from(scale.up) - 1 }
 }
 
-fn step_scale(step: i64) -> ExactScale {
+fn step_scale(step: i64) -> IntegerScale {
     if step < 0 {
-        ExactScale { up: 1, down: (1 - step) as u32 }
+        IntegerScale { up: 1, down: (1 - step) as u32 }
     } else {
-        ExactScale { up: (step + 1) as u32, down: 1 }
+        IntegerScale { up: (step + 1) as u32, down: 1 }
     }
 }
 
-fn scale_text(scale: ExactScale) -> String {
+fn scale_text(scale: IntegerScale) -> String {
     format!("×{scale}")
 }
 
 /// A scale typed as `3`, `x3`, `×3`, `1/3` or `0.5`.
-fn parse_scale(text: &str) -> Option<ExactScale> {
+fn parse_scale(text: &str) -> Option<IntegerScale> {
     let text = text.trim();
     text.strip_prefix(['×', 'x', 'X', '*']).unwrap_or(text).trim().parse().ok()
 }
 
 /// The whole scale that makes the most of a `used` picture for `target`.
-fn largest_scale(target: Target, used: (u32, u32)) -> ExactScale {
+fn largest_scale(target: Target, used: (u32, u32)) -> IntegerScale {
     let (width, height) = target.box_size();
     let (room, long) = (width.max(height), used.0.max(used.1).max(1));
     if long <= room {
-        ExactScale { up: room / long, down: 1 }
+        IntegerScale { up: room / long, down: 1 }
     } else {
-        ExactScale { up: 1, down: long.div_ceil(room) }
+        IntegerScale { up: 1, down: long.div_ceil(room) }
     }
 }
 
@@ -165,7 +165,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let effective =
         item.choices.webm_options(presets, config).unwrap_or_else(|_| item.choices.webm.clone());
     let exact = exact_of(&effective).filter(|_| item.format != Format::Tgs);
-    // an exact scale holds the crop to the size it takes: this is where a
+    // an integer scale holds the crop to the size it takes: this is where a
     // crop is kept to it, as the scale or the crop change, and the small
     // picture of the result counts on that from the next frame
     // not a crop outside the picture, which is left to be put right
@@ -195,7 +195,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             let target = item.choices.target;
             row(ui, &fl!("square"), &fl!("square", "hint"), Ok(()), |ui| {
                 let squares = squares();
-                // cropping or stretching, which an exact scale sets aside:
+                // cropping or stretching, which an integer scale sets aside:
                 // shown as what is made instead, and kept until changed
                 let default = picture::default_resize(target);
                 let made = |resize: Resize| match resize {
@@ -226,10 +226,10 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                 let scaling = item.choices.webm.scaling.unwrap_or(preset);
                 chosen_hint(ui, scaling, &scalings);
             });
-            let integer = effective.scaling == Some(Scaling::PixelPerfect);
+            let integer = effective.scaling == Some(Scaling::Integer);
             let only = fl!("integer-scale", "only");
             let allowed = if integer { Ok(()) } else { Err(only.as_str()) };
-            let preset = base.exact_scale;
+            let preset = base.integer_scale;
             row(ui, &fl!("integer-scale"), &fl!("integer-scale", "hint"), allowed, |ui| {
                 integer_scale(ui, item, size, (integer, preset), &effective)
             });
@@ -411,7 +411,7 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 whole_picture(ui, item, exact.is_some());
-                // with an exact scale, as much of its middle as that takes
+                // with an integer scale, as much of its middle as that takes
                 if let Some(exact) = exact {
                     let middle = (Keep::Middle, Keep::Middle);
                     let ratio = ratio(item.view.aspect, (width, height));
@@ -764,7 +764,7 @@ fn integer_scale(
     ui: &mut egui::Ui,
     item: &mut Item,
     size: Option<(u32, u32)>,
-    (integer, preset): (bool, Option<ExactScale>),
+    (integer, preset): (bool, Option<IntegerScale>),
     effective: &Options,
 ) {
     let full = size.map(Crop::whole);
@@ -773,7 +773,7 @@ fn integer_scale(
         return;
     };
     let target = item.choices.target;
-    let scale = item.choices.webm.exact_scale.or(preset);
+    let scale = item.choices.webm.integer_scale.or(preset);
     let guess = largest_scale(target, (crop.width, crop.height));
     let (box_w, box_h) = target.box_size();
     // a pixel at most the result's size, and a whole block of the input
@@ -830,14 +830,14 @@ fn integer_scale(
                 chosen = Some(step_scale(step));
             }
         });
-        let own = preset.is_some() && item.choices.webm.exact_scale.is_some();
+        let own = preset.is_some() && item.choices.webm.integer_scale.is_some();
         if widgets::reset(ui, own) {
             chosen = preset;
         }
     });
     // greyed out, the scale is only shown, and kept for integer scaling
     if integer && chosen != scale {
-        item.choices.webm.exact_scale = chosen.filter(|&chosen| Some(chosen) != preset);
+        item.choices.webm.integer_scale = chosen.filter(|&chosen| Some(chosen) != preset);
         return;
     }
     if !integer {
@@ -868,7 +868,7 @@ fn integer_scale(
         ui,
         match scale {
             Some(scale) => makes(scale_text(scale)),
-            None if sizes.scaling == Scaling::PixelPerfect => {
+            None if sizes.scaling == Scaling::Integer => {
                 makes(multiples(&sizes, (crop.width, crop.height)))
             }
             None => fl!("scale-shrinks"),
@@ -936,20 +936,20 @@ mod tests {
         let scales: Vec<String> = (-3..=2).map(|step| scale_text(step_scale(step))).collect();
         assert_eq!(scales, ["×1/4", "×1/3", "×1/2", "×1", "×2", "×3"]);
         for text in ["3", "x3", "×3", " 3 "] {
-            assert_eq!(parse_scale(text), Some(ExactScale { up: 3, down: 1 }), "{text}");
+            assert_eq!(parse_scale(text), Some(IntegerScale { up: 3, down: 1 }), "{text}");
         }
         assert_eq!(parse_scale("1/3").map(scale_step), Some(-2));
         assert_eq!(parse_scale("0.5").map(scale_step), Some(-1));
         assert_eq!(parse_scale("2/3"), None);
         // as large as the result takes
-        assert_eq!(largest_scale(Target::Sticker, (64, 40)), ExactScale { up: 8, down: 1 });
-        assert_eq!(largest_scale(Target::Emoji, (64, 40)), ExactScale { up: 1, down: 1 });
-        assert_eq!(largest_scale(Target::Sticker, (1920, 1080)), ExactScale { up: 1, down: 4 });
+        assert_eq!(largest_scale(Target::Sticker, (64, 40)), IntegerScale { up: 8, down: 1 });
+        assert_eq!(largest_scale(Target::Emoji, (64, 40)), IntegerScale { up: 1, down: 1 });
+        assert_eq!(largest_scale(Target::Sticker, (1920, 1080)), IntegerScale { up: 1, down: 4 });
         // stretched, each way by its own multiple
-        let padded = picture::sizes(Target::Sticker, Resize::Pad, Scaling::PixelPerfect, (64, 40));
+        let padded = picture::sizes(Target::Sticker, Resize::Pad, Scaling::Integer, (64, 40));
         assert_eq!(multiples(&padded, (64, 40)), "×8");
         let stretched =
-            picture::sizes(Target::Sticker, Resize::Stretch, Scaling::PixelPerfect, (64, 40));
+            picture::sizes(Target::Sticker, Resize::Stretch, Scaling::Integer, (64, 40));
         assert_eq!(multiples(&stretched, (64, 40)), fl!("scale-each-way", across = 8, down = 12));
     }
 
@@ -965,15 +965,15 @@ mod tests {
         // more than an emoji takes, kept for when integer scaling is back
         let scale = Some("200".parse().unwrap());
         let item = &mut harness.state_mut().items[0];
-        item.choices.webm.exact_scale = scale;
+        item.choices.webm.integer_scale = scale;
         item.choices.webm.scaling = Some(Scaling::Smooth);
         item.choices.target = telegram::Target::Emoji;
         harness.run_steps(3);
-        assert_eq!(harness.state().items[0].choices.webm.exact_scale, scale);
+        assert_eq!(harness.state().items[0].choices.webm.integer_scale, scale);
     }
 
     #[test]
-    fn shows_a_square_an_exact_scale_sets_aside_as_what_is_made() {
+    fn shows_a_square_an_integer_scale_sets_aside_as_what_is_made() {
         use egui_kittest::kittest::{NodeT, Queryable};
 
         let dir = tempfile::tempdir().unwrap();
@@ -985,8 +985,8 @@ mod tests {
         finish(&mut harness);
         let item = &mut harness.state_mut().items[0];
         item.choices.webm.resize = Some(Resize::Crop);
-        item.choices.webm.scaling = Some(Scaling::PixelPerfect);
-        item.choices.webm.exact_scale = Some(ExactScale { up: 2, down: 1 });
+        item.choices.webm.scaling = Some(Scaling::Integer);
+        item.choices.webm.integer_scale = Some(IntegerScale { up: 2, down: 1 });
         harness.run_steps(3);
         // the sticker keeps the crop's shape, as cropping is set aside
         let lit = |harness: &egui_kittest::Harness<crate::app::App>, text: &str| {

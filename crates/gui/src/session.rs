@@ -898,9 +898,9 @@ mod tests {
     fn names_everything_as_the_options_within_are_named() {
         let mut item = Item::new(1, vec![PathBuf::from("/a.png")], false, Target::Sticker);
         item.choices.show_layers = Some(vec!["sketch".into()]);
-        item.choices.webm.exact_scale = "2".parse().ok();
+        item.choices.webm.integer_scale = "2".parse().ok();
         let json = session(&[item], None).to_json().unwrap();
-        for name in ["format-guessed", "show-layers", "exact-scale"] {
+        for name in ["format-guessed", "show-layers", "integer-scale"] {
             assert!(json.contains(&format!("\"{name}\":")), "{name} in {json}");
         }
         assert!(!json.contains('_'), "{json}");
@@ -909,13 +909,19 @@ mod tests {
     /// Options renamed since a session was kept read by their old names.
     #[test]
     fn reads_options_by_their_old_names() {
-        use tgradish_core::options::Effort;
+        use tgradish_core::options::{Effort, Scaling};
         let mut item = Item::new(1, vec![PathBuf::from("/a.png")], false, Target::Sticker);
         item.choices.webm.effort = Some(Effort::Best);
         item.choices.tgs.effort = Some(Effort::Fast);
+        item.choices.webm.scaling = Some(Scaling::Integer);
+        item.choices.webm.integer_scale = "2".parse().ok();
         let json = session(&[item], None).to_json().unwrap();
-        let old = json.replace("\"effort\":", "\"speed\":");
+        let old = json
+            .replace("\"effort\":", "\"speed\":")
+            .replace("\"integer\"", "\"pixel-perfect\"")
+            .replace("\"integer-scale\":", "\"exact-scale\":");
         assert_eq!(old.matches("\"speed\":").count(), 2, "{old}");
+        assert!(old.contains("\"pixel-perfect\"") && old.contains("\"exact-scale\":"), "{old}");
         let (read, unread) = parse(&old).unwrap();
         assert_eq!(unread, 0);
         let choices = &read.items[0].choices;
@@ -923,6 +929,8 @@ mod tests {
             (choices.webm.effort, choices.tgs.effort),
             (Some(Effort::Best), Some(Effort::Fast))
         );
+        assert_eq!(choices.webm.scaling, Some(Scaling::Integer));
+        assert_eq!(choices.webm.integer_scale, "2".parse().ok());
     }
 
     #[test]

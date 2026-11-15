@@ -1571,12 +1571,12 @@ fn with_presets(dir: &std::path::Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-/// `--exact-scale=`, and nothing for it in `--options-json`, clear a
-/// preset's exact scale, as a preset extending it can, and none of them
+/// `--integer-scale=`, and nothing for it in `--options-json`, clear a
+/// preset's integer scale, as a preset extending it can, and none of them
 /// is ever printed as a scale.
 #[cfg(target_os = "linux")]
 #[test]
-fn clears_a_presets_exact_scale() {
+fn clears_a_presets_integer_scale() {
     if !tgradish_corpus::ffmpeg_on_path() {
         return;
     }
@@ -1584,8 +1584,8 @@ fn clears_a_presets_exact_scale() {
     let presets = dir.path().join("tgradish").join("presets");
     std::fs::create_dir_all(&presets).unwrap();
     // a third of 4 pixels is no whole pixel, so the scale is refused
-    std::fs::write(presets.join("third.toml"), "[webm]\nexact-scale = '1/3'\n").unwrap();
-    let cleared = "extends = 'third'\n[webm]\nexact-scale = ''\n";
+    std::fs::write(presets.join("third.toml"), "[webm]\ninteger-scale = '1/3'\n").unwrap();
+    let cleared = "extends = 'third'\n[webm]\ninteger-scale = ''\n";
     std::fs::write(presets.join("cleared.toml"), cleared).unwrap();
     let input = dir.path().join("square.png");
     square_png(&input, [255, 0, 0, 255]);
@@ -1598,10 +1598,17 @@ fn clears_a_presets_exact_scale() {
     let refused = convert("third", &[]);
     let stderr = String::from_utf8_lossy(&refused.stderr);
     assert!(!refused.status.success() && stderr.contains("multiples of 3"), "{stderr}");
-    let json = r#"{"exact-scale":""}"#;
-    for (preset, more) in
-        [("third", &["--exact-scale="][..]), ("third", &["--options-json", json]), ("cleared", &[])]
-    {
+    assert!(stderr.contains("integer-scale"), "{stderr}");
+    let json = r#"{"integer-scale":""}"#;
+    // and by the name it once had
+    let old_json = r#"{"exact-scale":""}"#;
+    for (preset, more) in [
+        ("third", &["--integer-scale="][..]),
+        ("third", &["--options-json", json]),
+        ("third", &["--exact-scale="]),
+        ("third", &["--options-json", old_json]),
+        ("cleared", &[]),
+    ] {
         let made = convert(preset, more);
         assert!(
             made.status.success(),
@@ -1611,15 +1618,15 @@ fn clears_a_presets_exact_scale() {
     }
     let shown = with_presets(dir.path(), &["--json", "preset", "show", "cleared"]);
     let shown: Value = serde_json::from_slice(&shown.stdout).unwrap();
-    assert!(shown["webm"].get("exact-scale").is_none(), "{shown}");
+    assert!(shown["webm"].get("integer-scale").is_none(), "{shown}");
     let described = with_presets(dir.path(), &["describe"]);
     let described: Value = serde_json::from_slice(&described.stdout).unwrap();
     let preset = |name: &str| {
         let presets = described["presets"].as_array().unwrap();
         presets.iter().find(|preset| preset["name"] == name).unwrap()["webm"].clone()
     };
-    assert_eq!(preset("third")["exact-scale"], "1/3");
-    assert!(preset("cleared").get("exact-scale").is_none(), "{}", preset("cleared"));
+    assert_eq!(preset("third")["integer-scale"], "1/3");
+    assert!(preset("cleared").get("integer-scale").is_none(), "{}", preset("cleared"));
 }
 
 #[cfg(target_os = "linux")]

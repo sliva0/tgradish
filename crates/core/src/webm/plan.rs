@@ -444,7 +444,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
 mod tests {
     use super::*;
     use crate::input::Input;
-    use crate::options::ExactScale;
+    use crate::options::IntegerScale;
     use crate::picture::{exact_sizes, sizes};
     use crate::webm::Options;
 
@@ -651,18 +651,14 @@ mod tests {
         assert_eq!(auto.scaling, Scaling::Smooth);
         assert!(auto.enlarges(used) > 10.0);
         // ten times, with transparent margins up to the sticker's size
-        let whole = sizes(Resize::Contain, Scaling::PixelPerfect);
+        let whole = sizes(Resize::Contain, Scaling::Integer);
         assert_eq!((whole.scaled, whole.width, whole.height), ((500, 300), 512, 308));
         assert!(whole.pads());
-        let filled = sizes(Resize::Crop, Scaling::PixelPerfect);
+        let filled = sizes(Resize::Crop, Scaling::Integer);
         assert_eq!((filled.scaled, filled.width, filled.height), ((900, 540), 512, 512));
         // nothing to make whole when the picture shrinks
-        let large = crate::picture::sizes(
-            Target::Sticker,
-            Resize::Contain,
-            Scaling::PixelPerfect,
-            (900, 600),
-        );
+        let large =
+            crate::picture::sizes(Target::Sticker, Resize::Contain, Scaling::Integer, (900, 600));
         assert_eq!(large.scaling, Scaling::Sharp);
 
         let crop = Some(Crop { x: 0, y: 0, width: 50, height: 30 });
@@ -672,7 +668,7 @@ mod tests {
         // 11 times as blocks, then down to 512 x 308 blending only edges
         assert!(filter.contains("scale=550:330:flags=neighbor,format=gbrp16le"), "{filter}");
         assert!(filter.contains("scale=512:308:flags=area"), "{filter}");
-        let options = Options { crop, scaling: Some(Scaling::PixelPerfect), ..Default::default() };
+        let options = Options { crop, scaling: Some(Scaling::Integer), ..Default::default() };
         let (plan, _) = plan_with(options).unwrap();
         assert!(plan.alpha);
         let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuva420p");
@@ -686,20 +682,20 @@ mod tests {
 
     #[test]
     fn scales_exactly() {
-        let half: ExactScale = "1/2".parse().unwrap();
-        let twice: ExactScale = "2".parse().unwrap();
-        assert_eq!("0.5".parse::<ExactScale>(), Ok(half));
-        assert_eq!("2x".parse::<ExactScale>(), Ok(twice));
-        assert!("1.5".parse::<ExactScale>().is_err() && "2/3".parse::<ExactScale>().is_err());
-        assert!("4294967295".parse::<ExactScale>().is_err());
-        let huge = ExactScale { up: u32::MAX, down: 1 };
+        let half: IntegerScale = "1/2".parse().unwrap();
+        let twice: IntegerScale = "2".parse().unwrap();
+        assert_eq!("0.5".parse::<IntegerScale>(), Ok(half));
+        assert_eq!("2x".parse::<IntegerScale>(), Ok(twice));
+        assert!("1.5".parse::<IntegerScale>().is_err() && "2/3".parse::<IntegerScale>().is_err());
+        assert!("4294967295".parse::<IntegerScale>().is_err());
+        let huge = IntegerScale { up: u32::MAX, down: 1 };
         let exact = |target, used, scale| exact_sizes(target, Resize::Contain, used, scale);
         assert!(exact(Target::Sticker, (2, 2), huge).is_err());
         // made in code, with nothing to scale by
-        for zero in [ExactScale { up: 0, down: 1 }, ExactScale { up: 1, down: 0 }] {
+        for zero in [IntegerScale { up: 0, down: 1 }, IntegerScale { up: 1, down: 0 }] {
             let wrong = exact(Target::Sticker, (4, 4), zero).unwrap_err();
             assert!(wrong.to_string().contains("side of 0"), "{wrong}");
-            assert!(matches!(wrong, Error::InvalidOption { option: "exact-scale", .. }));
+            assert!(matches!(wrong, Error::InvalidOption { option: "integer-scale", .. }));
         }
         assert_eq!((half.to_string(), twice.to_string()), ("1/2".into(), "2".into()));
 
@@ -708,9 +704,9 @@ mod tests {
         assert_eq!((sizes.scaled, sizes.width, sizes.height), ((512, 288), 512, 288));
         assert_eq!(sizes.scaling, Scaling::Sharp);
         let grown = exact(Target::Sticker, (256, 100), twice).unwrap();
-        assert_eq!((grown.width, grown.height, grown.scaling), (512, 200, Scaling::PixelPerfect));
+        assert_eq!((grown.width, grown.height, grown.scaling), (512, 200, Scaling::Integer));
         // scales that don't make 512 leave transparent margins
-        let thrice: ExactScale = "3".parse().unwrap();
+        let thrice: IntegerScale = "3".parse().unwrap();
         let margins = exact(Target::Sticker, (170, 101), thrice).unwrap();
         assert_eq!((margins.scaled, margins.width, margins.height), ((510, 303), 512, 304));
         assert!(margins.pads());
@@ -726,9 +722,9 @@ mod tests {
         assert!(exact_sizes(Target::Sticker, Resize::Crop, (256, 100), twice).is_err());
 
         let crop = Some(Crop { x: 0, y: 0, width: 256, height: 144 });
-        let options = Options { crop, exact_scale: Some(twice), ..Default::default() };
+        let options = Options { crop, integer_scale: Some(twice), ..Default::default() };
         let (plan, _) = plan_with(options).unwrap();
-        assert_eq!((plan.width, plan.height, plan.scaling), (512, 288, Scaling::PixelPerfect));
+        assert_eq!((plan.width, plan.height, plan.scaling), (512, 288, Scaling::Integer));
         let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuv420p");
         assert!(filter.contains("scale=512:288:flags=neighbor") && !filter.contains("pad="));
     }

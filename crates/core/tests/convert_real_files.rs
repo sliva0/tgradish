@@ -528,7 +528,7 @@ fn pads_pictures_of_odd_size_whole() {
         let request = Request {
             output: Some(output.clone()),
             options: Options {
-                scaling: Some(Scaling::PixelPerfect),
+                scaling: Some(Scaling::Integer),
                 length: Some(0.2),
                 lossless: Some(true),
                 ..fast(Fit::Off)

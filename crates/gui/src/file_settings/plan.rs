@@ -232,7 +232,7 @@ fn length_step(played: f64, spoof: Spoof) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tgradish_core::options::{ExactScale, Scaling};
+    use tgradish_core::options::{IntegerScale, Scaling};
     use tgradish_core::telegram::Target;
 
     #[test]
@@ -241,8 +241,8 @@ mod tests {
         assert_eq!(picture(&Options::default(), (64, 40)), ["Scaled to 512 × 320"]);
         // a whole scale pads a sticker, though it keeps its shape
         let exact = Options {
-            scaling: Some(Scaling::PixelPerfect),
-            exact_scale: Some(ExactScale { up: 2, down: 1 }),
+            scaling: Some(Scaling::Integer),
+            integer_scale: Some(IntegerScale { up: 2, down: 1 }),
             ..Options::default()
         };
         let steps = picture(&exact, (64, 40));

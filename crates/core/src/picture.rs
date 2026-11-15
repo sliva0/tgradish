@@ -5,7 +5,7 @@
 use crate::CancelToken;
 use crate::backend::{Backend, FramesRequest};
 use crate::error::{Error, Result};
-use crate::options::{Crop, ExactScale, Resize, Scaling};
+use crate::options::{Crop, IntegerScale, Resize, Scaling};
 use crate::telegram::{self, Target};
 use crate::webm::Options;
 use crate::webm::Plan;
@@ -26,7 +26,7 @@ pub struct Sizes {
     /// The result's height, as the width.
     pub height: u32,
     /// The scaling used: [`Scaling::Auto`] is smooth until the picture
-    /// turns out to be pixel art, and pixel-perfect needs room to grow.
+    /// turns out to be pixel art, and integer scaling needs room to grow.
     pub scaling: Scaling,
 }
 
@@ -66,7 +66,7 @@ pub fn sizes(target: Target, resize: Resize, scaling: Scaling, used: (u32, u32))
         Resize::Crop => (fill >= 1.0).then(|| (fill.ceil(), fill.ceil())),
         Resize::Stretch => Some(((box_wf / src_w).floor(), (box_hf / src_h).floor())),
     }
-    .filter(|&(x, y)| scaling == Scaling::PixelPerfect && x >= 1.0 && y >= 1.0);
+    .filter(|&(x, y)| scaling == Scaling::Integer && x >= 1.0 && y >= 1.0);
     let (scaled, (width, height)) = match (whole, resize) {
         (Some((x, y)), _) => {
             let scaled = ((src_w * x) as u32, (src_h * y) as u32);
@@ -80,7 +80,7 @@ pub fn sizes(target: Target, resize: Resize, scaling: Scaling, used: (u32, u32))
         (None, Resize::Stretch) => (boxed, boxed),
     };
     let scaling = match scaling {
-        Scaling::PixelPerfect if whole.is_none() => Scaling::Sharp,
+        Scaling::Integer if whole.is_none() => Scaling::Sharp,
         Scaling::Auto => Scaling::Smooth,
         other => other,
     };
@@ -95,13 +95,13 @@ pub fn exact_sizes(
     target: Target,
     resize: Resize,
     used: (u32, u32),
-    scale: ExactScale,
+    scale: IntegerScale,
 ) -> Result<Sizes> {
     let (box_w, box_h) = target.box_size();
-    let invalid = |reason: String| Error::invalid("exact-scale", reason);
+    let invalid = |reason: String| Error::invalid("integer-scale", reason);
     if !scale.is_valid() {
         // written out, as none is written as nothing
-        let ExactScale { up, down } = scale;
+        let IntegerScale { up, down } = scale;
         return Err(invalid(format!("{up}/{down} has a side of 0: use N or 1/N")));
     }
     let (Some(width), Some(height)) = (scale.apply(used.0), scale.apply(used.1)) else {
@@ -120,7 +120,7 @@ pub fn exact_sizes(
     let even = |side: u32| side.next_multiple_of(2);
     let result = match resize {
         Resize::Crop | Resize::Stretch => {
-            let reason = "keeps the picture whole with an exact-scale: use contain or pad";
+            let reason = "keeps the picture whole with an integer scale: use contain or pad";
             let name = if resize == Resize::Crop { "crop" } else { "stretch" };
             return Err(Error::invalid("resize", format!("{name} {reason}")));
         }
@@ -130,7 +130,7 @@ pub fn exact_sizes(
         Resize::Contain => (even(width), box_h),
     };
     // growing makes whole blocks; shrinking averages whole blocks
-    let scaling = if scale.up > 1 { Scaling::PixelPerfect } else { Scaling::Sharp };
+    let scaling = if scale.up > 1 { Scaling::Integer } else { Scaling::Sharp };
     Ok(Sizes { scaled: (width, height), width: result.0, height: result.1, scaling })
 }
 
@@ -187,7 +187,7 @@ pub fn default_resize(target: Target) -> Resize {
 pub fn picture_sizes(options: &Options, used: (u32, u32)) -> Result<Sizes> {
     let target = options.target.unwrap_or_default();
     let resize = options.resize.unwrap_or(default_resize(target));
-    match options.exact_scale() {
+    match options.integer_scale() {
         Some(scale) => exact_sizes(target, resize, used, scale),
         None => Ok(sizes(target, resize, options.scaling_or_default(), used)),
     }

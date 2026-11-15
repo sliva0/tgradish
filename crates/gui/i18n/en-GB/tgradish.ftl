@@ -524,9 +524,9 @@ smaller = Smaller
 larger = Larger
 scale-field = Type 3 for three times as large, or 1/3 for a third
     .pick = Pick "{ scale-fixed }" to choose a scale
-scale-unused = Whole scales apply with "{ scaling-integer }" scaling only
+scale-unused = Integer scales apply with "{ scaling-integer }" scaling only
 scale-unsuited = The crop doesn't suit this scale yet
-# What a whole scale, as ×3 or ×1/2, makes of the crop; then, if the result
+# What an integer scale, as ×3 or ×1/2, makes of the crop; then, if the result
 # has transparent margins, the size of the whole result.
 scale-makes = { $scale } makes the crop { $width } × { $height } px
 scale-makes-padded = { $scale } makes the crop { $width } × { $height } px; transparent margins fill the rest of the { $box_width } × { $box_height }

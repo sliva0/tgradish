@@ -5,7 +5,7 @@
 use crate::config::Config;
 use eframe::egui;
 use tgradish_core::ffmpeg::FfmpegChoice;
-use tgradish_core::options::{ExactScale, Scaling};
+use tgradish_core::options::{IntegerScale, Scaling};
 use tgradish_core::picture;
 use tgradish_core::presets::Format;
 use tgradish_core::webm::Options;
@@ -138,11 +138,11 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
     if base.resize.is_some() && effective.resize.is_none() {
         webm.resize = Some(picture::default_resize(choices.target));
     }
-    // and an exact scale, which no value sets aside but nothing does
-    let no_scale = base.exact_scale.is_some() && effective.exact_scale.is_none();
+    // and an integer scale, which no value sets aside but nothing does
+    let no_scale = base.integer_scale.is_some() && effective.integer_scale.is_none();
     let flags = |mut options: Options| {
         if no_scale {
-            options.exact_scale = Some(ExactScale::NONE);
+            options.integer_scale = Some(IntegerScale::NONE);
         }
         tgradish_core::options::flags(&options)
     };
@@ -297,12 +297,12 @@ mod tests {
 
     #[test]
     fn sets_aside_what_the_gui_does() {
-        use tgradish_core::options::{ExactScale, Fit, Scaling};
+        use tgradish_core::options::{Fit, IntegerScale, Scaling};
         use tgradish_core::presets::Presets;
         use tgradish_core::telegram::Target;
 
         let dir = tempfile::tempdir().unwrap();
-        let preset = "[webm]\nfit = 'off'\nlossless = true\nexact-scale = '2'\n";
+        let preset = "[webm]\nfit = 'off'\nlossless = true\ninteger-scale = '2'\n";
         std::fs::write(dir.path().join("still.toml"), preset).unwrap();
         let presets = Presets::load(Some(dir.path())).unwrap();
         let config = Config::default();
@@ -320,7 +320,7 @@ mod tests {
         let mut item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
         item.format = Format::Webm;
         item.choices.preset = Some("still".into());
-        item.choices.webm.scaling = Some(Scaling::PixelPerfect);
+        item.choices.webm.scaling = Some(Scaling::Integer);
         // fitting a bitrate greys out lossless, which the command line
         // would take up from the preset and refuse
         item.choices.webm.fit = Some(Fit::Auto);
@@ -330,9 +330,12 @@ mod tests {
         // command line is told by a scale of nothing
         item.choices.webm.scaling = Some(Scaling::Smooth);
         let line = command_line(&item, &context);
-        assert!(line.contains(&"--exact-scale=".to_owned()), "{line:?}");
+        assert!(line.contains(&"--integer-scale=".to_owned()), "{line:?}");
         assert!(line.join(" ").contains("--preset still"), "{line:?}");
-        assert_eq!(presets.webm("still").unwrap().exact_scale, Some(ExactScale { up: 2, down: 1 }));
+        assert_eq!(
+            presets.webm("still").unwrap().integer_scale,
+            Some(IntegerScale { up: 2, down: 1 })
+        );
 
         // encoder options all removed: none, over the preset's
         let preset = "[webm]\nencoder-options = { aq-mode = '2' }\n";
