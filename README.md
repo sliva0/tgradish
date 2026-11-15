@@ -1,6 +1,6 @@
 # tgradish
 
-Telegram video, image and animated stickers and emoji from videos, pictures and pixel art, in a GUI or on the command line:
+Telegram video, image and animated stickers and emoji from videos, images or pixel art, in a GUI or on the command line:
 
 - video stickers and emoji (WebM) from any video, GIF, picture, Aseprite file or folder of frames;
 - animated stickers and emoji (.tgs) from pixel art: GIF, APNG, WebP, Aseprite, a sprite sheet, a folder of frames, or a video of it;
