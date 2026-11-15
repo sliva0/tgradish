@@ -18,7 +18,6 @@
 //! opened by one GUI at most, and never by both: the one byte is either
 //! written, and the started GUI ends, or isn't, and it opens them itself.
 
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, OnceLock};
@@ -270,11 +269,15 @@ pub(crate) trait Link {
 }
 
 /// Writes all of `buf` to `link`, by `deadline`.
-fn write_all_by(link: &mut impl Link, mut buf: &[u8], deadline: Instant) -> std::io::Result<()> {
+fn write_all_by(link: &mut dyn Link, mut buf: &[u8], deadline: Instant) -> std::io::Result<()> {
     while !buf.is_empty() {
         match link.write_by(buf, deadline)? {
             0 => return Err(std::io::ErrorKind::WriteZero.into()),
             written => buf = &buf[written..],
+        }
+        // one that reads a little at a time gets no more time for it
+        if !buf.is_empty() && Instant::now() >= deadline {
+            return Err(std::io::ErrorKind::TimedOut.into());
         }
     }
     Ok(())
@@ -282,7 +285,7 @@ fn write_all_by(link: &mut impl Link, mut buf: &[u8], deadline: Instant) -> std:
 
 /// Fills `buf` from `link`, by `deadline`.
 fn read_exact_by(
-    link: &mut impl Link,
+    link: &mut dyn Link,
     mut buf: &mut [u8],
     deadline: Instant,
 ) -> std::io::Result<()> {
@@ -291,8 +294,70 @@ fn read_exact_by(
             0 => return Err(std::io::ErrorKind::UnexpectedEof.into()),
             read => buf = &mut buf[read..],
         }
+        if !buf.is_empty() && Instant::now() >= deadline {
+            return Err(std::io::ErrorKind::TimedOut.into());
+        }
     }
     Ok(())
+}
+
+/// How many GUIs are served at once at most, so one that keeps its
+/// connection open holds back no other, and many that do take no more
+/// than this; any beyond them are let go of unread.
+#[cfg_attr(not(unix), allow(dead_code))]
+const AT_ONCE: usize = 4;
+/// How long a GUI is served from its connecting, to read its message,
+/// answer it and read that it leaves the files: a while longer than it
+/// waits itself, from before it connected, so what it says in time is
+/// read in time.
+const SERVING: Duration = ANSWER.saturating_add(Duration::from_millis(250));
+
+/// What serves a GUI on `link`, by the deadline it is given.
+type Serve = dyn Fn(&mut dyn Link, Instant) + Send + Sync;
+
+/// Serves the GUIs that connect, each on a thread of its own, no more
+/// than [`AT_ONCE`] at once, and each by [`SERVING`] after it connected.
+#[cfg_attr(not(unix), allow(dead_code))]
+struct Workers {
+    serve: Box<Serve>,
+    /// How many are being served.
+    busy: std::sync::atomic::AtomicUsize,
+}
+
+/// One GUI being served, which it no longer is as this goes.
+#[cfg_attr(not(unix), allow(dead_code))]
+struct Busy(Arc<Workers>);
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        self.0.busy.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
+#[cfg_attr(not(unix), allow(dead_code))]
+impl Workers {
+    fn new(serve: impl Fn(&mut dyn Link, Instant) + Send + Sync + 'static) -> Arc<Workers> {
+        Arc::new(Workers { serve: Box::new(serve), busy: 0.into() })
+    }
+
+    /// Serves `link`, which connected just now, on a thread of its own,
+    /// and closes it then; where as many are served as may be, or there
+    /// is no thread for it, closes it at once.
+    fn take(self: &Arc<Self>, link: impl Link + Send + 'static) {
+        let deadline = Instant::now() + SERVING;
+        let before = self.busy.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        let busy = Busy(self.clone());
+        if before >= AT_ONCE {
+            return;
+        }
+        // where there is no thread, both go with the closure unserved
+        let _ = std::thread::Builder::new().name("other instance".into()).spawn(move || {
+            let mut link = link;
+            (busy.0.serve)(&mut link, deadline);
+            drop(link);
+            drop(busy);
+        });
+    }
 }
 
 /// How long is left until `deadline`, though never nothing, so what has
@@ -359,7 +424,9 @@ impl Listener {
         let (sender, receiver) = channel();
         let shared = Arc::new(Shared::default());
         let serving = shared.clone();
-        let bound = transport::listen(address, move |stream| serve(stream, &serving, &sender))?;
+        let bound = transport::listen(address, move |link, deadline| {
+            serve(link, deadline, &serving, &sender);
+        })?;
         Ok(Listener { receiver, shared, _bound: bound })
     }
 
@@ -390,35 +457,33 @@ impl Listener {
     }
 }
 
-/// Reads one GUI's message from `stream`, answers it, and passes it on
-/// once that GUI says it leaves the files to this one; anything else is
-/// let go of unanswered.
-fn serve(stream: &mut (impl Read + Write), shared: &Shared, sender: &Sender<Handed>) {
-    let Some(line) = read_line(stream) else { return };
+/// Reads one GUI's message from `link`, answers it, and passes it on
+/// once that GUI says it leaves the files to this one, all by `deadline`;
+/// anything else is let go of unanswered.
+fn serve(link: &mut dyn Link, deadline: Instant, shared: &Shared, sender: &Sender<Handed>) {
+    let Some(line) = read_line(link, deadline) else { return };
     let Some(request) = Request::decode(&line) else { return };
-    if stream.write_all(ACCEPTED).and_then(|()| stream.flush()).is_err() {
+    if write_all_by(link, ACCEPTED, deadline).is_err() {
         return;
     }
     // one that gave up waiting, as it may have just as the answer came,
     // says nothing more, and opens the files itself
     let mut confirmed = [0; CONFIRMED.len()];
-    if stream.read_exact(&mut confirmed).is_err() || confirmed != CONFIRMED {
+    if read_exact_by(link, &mut confirmed, deadline).is_err() || confirmed != CONFIRMED {
         return;
     }
     shared.deliver(sender, request);
 }
 
-/// A line from `stream`, without its newline: `None` where it ends first,
-/// or is longer than [`LONGEST`].
-fn read_line(stream: &mut impl Read) -> Option<Vec<u8>> {
+/// A line from `link`, without its newline: `None` where it ends first,
+/// or is longer than [`LONGEST`], or isn't whole by `deadline`.
+fn read_line(link: &mut dyn Link, deadline: Instant) -> Option<Vec<u8>> {
     let mut line = Vec::new();
     let mut chunk = [0; 16 * 1024];
     loop {
-        let read = match stream.read(&mut chunk) {
-            Ok(0) => return None,
+        let read = match link.read_by(&mut chunk, deadline) {
+            Ok(0) | Err(_) => return None,
             Ok(read) => read,
-            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(_) => return None,
         };
         let start = line.len();
         line.extend_from_slice(&chunk[..read]);
@@ -426,7 +491,8 @@ fn read_line(stream: &mut impl Read) -> Option<Vec<u8>> {
             line.truncate(start + end);
             return (line.len() < LONGEST).then_some(line);
         }
-        if line.len() >= LONGEST {
+        // one that says a little at a time gets no more time for it
+        if line.len() >= LONGEST || Instant::now() >= deadline {
             return None;
         }
     }
@@ -443,13 +509,9 @@ pub(crate) mod transport {
     use std::path::{Path, PathBuf};
     use std::time::Instant;
 
-    use super::{AGAIN, ANSWER, Link, Refused, left};
+    use super::{AGAIN, Link, Refused, Workers, left};
 
     pub(crate) type Address = PathBuf;
-
-    /// How long a GUI that connected is given to say what it wants, and
-    /// to read the answer.
-    const READING: std::time::Duration = ANSWER;
 
     /// Where the GUI that keeps the session at `session` listens, if its
     /// folder is the user's own: one that isn't may hold another's socket.
@@ -509,12 +571,13 @@ pub(crate) mod transport {
         }
     }
 
-    /// Listens at `path`, giving each connection to `serve` in turn. A
-    /// socket left there by a GUI that ended without removing it is
-    /// removed first: the session's lock says none listens on it.
+    /// Listens at `path`, giving each connection to `serve` as
+    /// [`Workers`] do. A socket left there by a GUI that ended without
+    /// removing it is removed first: the session's lock says none listens
+    /// on it.
     pub(crate) fn listen(
         path: &Address,
-        serve: impl Fn(&mut UnixStream) + Send + 'static,
+        serve: impl Fn(&mut dyn Link, Instant) + Send + Sync + 'static,
     ) -> std::io::Result<Bound> {
         if let Ok(meta) = std::fs::symlink_metadata(path)
             && meta.file_type().is_socket()
@@ -526,15 +589,11 @@ pub(crate) mod transport {
         // the folder's own permissions may let others in; the socket's
         // don't, and a socket that can't be made the user's alone goes
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        let workers = Workers::new(serve);
         std::thread::Builder::new().name("other instances".into()).spawn(move || {
             for stream in listener.incoming() {
                 match stream {
-                    Ok(mut stream) => {
-                        // one that says nothing holds the others back no longer
-                        let _ = stream.set_read_timeout(Some(READING));
-                        let _ = stream.set_write_timeout(Some(READING));
-                        serve(&mut stream);
-                    }
+                    Ok(stream) => workers.take(stream),
                     // as when files run out, which may pass
                     Err(_) => std::thread::sleep(AGAIN),
                 }
@@ -656,8 +715,9 @@ pub(crate) mod transport {
     /// thread of its own, as one that says nothing never ends.
     pub(crate) fn listen(
         name: &Address,
-        serve: impl Fn(&mut std::fs::File) + Send + Sync + 'static,
+        serve: impl Fn(&mut dyn Link, Instant) + Send + Sync + 'static,
     ) -> std::io::Result<Bound> {
+        let serve = move |pipe: &mut std::fs::File| serve(pipe, Instant::now() + super::SERVING);
         let name = wide(name);
         let mut pipe = create(&name, true)?;
         let serve = std::sync::Arc::new(serve);
@@ -696,6 +756,17 @@ pub(crate) mod transport {
     fn answer(pipe: &mut std::fs::File, serve: &dyn Fn(&mut std::fs::File)) {
         serve(pipe);
         let _ = pipe.sync_all();
+    }
+
+    /// A pipe used synchronously, which waits as long as it takes.
+    impl Link for std::fs::File {
+        fn read_by(&mut self, buf: &mut [u8], _: Instant) -> std::io::Result<usize> {
+            std::io::Read::read(self, buf)
+        }
+
+        fn write_by(&mut self, buf: &[u8], _: Instant) -> std::io::Result<usize> {
+            std::io::Write::write(self, buf)
+        }
     }
 
     /// An end of a pipe opened for overlapped I/O, which is waited for as
@@ -974,7 +1045,7 @@ mod tests {
         let _store = Store::open(path.clone()).unwrap();
         let address = transport::address(&path).unwrap();
         // listening, but never reading or answering
-        let _bound = transport::listen(&address, |_| {
+        let _bound = transport::listen(&address, |_, _| {
             loop {
                 std::thread::park();
             }
@@ -994,9 +1065,9 @@ mod tests {
         let (sender, receiver) = channel();
         let shared = Arc::new(Shared::default());
         // one that serves each GUI only once that GUI has given up waiting
-        let _bound = transport::listen(&address, move |stream| {
+        let _bound = transport::listen(&address, move |link, _| {
             std::thread::sleep(ANSWER + ANSWER / 2);
-            serve(stream, &shared, &sender);
+            serve(link, Instant::now() + SERVING, &shared, &sender);
         })
         .unwrap();
         let started = Instant::now();
@@ -1031,6 +1102,59 @@ mod tests {
     }
 
     #[test]
+    fn serves_others_beside_one_that_trickles_and_lets_it_go_in_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = session(dir.path());
+        let (_store, listener) = first(&path);
+        let address = transport::address(&path).unwrap();
+        let trickling = std::thread::spawn(move || {
+            let started = Instant::now();
+            let mut link = transport::connect(&address, started + ANSWER).unwrap();
+            // a byte at a time, never a whole line, for as long as it is let
+            while started.elapsed() < ANSWER * 5 {
+                if write_all_by(&mut link, b" ", Instant::now() + ANSWER).is_err() {
+                    break;
+                }
+                std::thread::sleep(ANSWER / 10);
+            }
+            started.elapsed()
+        });
+        std::thread::sleep(ANSWER / 4);
+        let request = files(dir.path());
+        let started = Instant::now();
+        assert!(matches!(start(path, &request), Start::HandedOver));
+        assert!(started.elapsed() < ANSWER / 2, "{:?}", started.elapsed());
+        assert_eq!(handed(&listener)[0].files, request.files);
+        // and the one that trickles is let go of once its time is up
+        let trickled = trickling.join().unwrap();
+        assert!(trickled < ANSWER * 2, "{trickled:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lets_go_of_more_than_it_serves_at_once_and_of_those_in_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = session(dir.path());
+        let (_store, listener) = first(&path);
+        let address = transport::address(&path).unwrap();
+        let connect = || transport::connect(&address, Instant::now() + ANSWER).unwrap();
+        // as many as are served at once, which say nothing
+        let silent: Vec<_> = (0..AT_ONCE).map(|_| connect()).collect();
+        std::thread::sleep(ANSWER / 10);
+        let started = Instant::now();
+        assert!(answer(&mut connect()).is_empty());
+        assert!(started.elapsed() < ANSWER / 2, "{:?}", started.elapsed());
+        // and once their time is up, they go, and the next is served
+        for mut link in silent {
+            assert!(answer(&mut link).is_empty());
+        }
+        assert!(started.elapsed() < SERVING + ANSWER / 2, "{:?}", started.elapsed());
+        let request = files(dir.path());
+        assert!(matches!(start(path, &request), Start::HandedOver));
+        assert_eq!(handed(&listener)[0].files, request.files);
+    }
+
+    #[test]
     fn opens_beside_a_gui_that_does_not_listen() {
         let dir = tempfile::tempdir().unwrap();
         let path = session(dir.path());
@@ -1060,7 +1184,7 @@ mod tests {
         #[cfg(unix)]
         {
             let mut stream = transport::connect(&address, Instant::now() + ANSWER).unwrap();
-            stream.write_all(&relative[..relative.len() - 1]).unwrap();
+            std::io::Write::write_all(&mut stream, &relative[..relative.len() - 1]).unwrap();
             stream.shutdown(std::net::Shutdown::Write).unwrap();
             let answer = answer(&mut stream);
             assert!(answer.is_empty(), "{:?}", String::from_utf8_lossy(&answer));
