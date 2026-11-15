@@ -1,21 +1,13 @@
 [package]
 name = "tgradish-corpus"
 description = "Synthetic test inputs for tgradish's crates: pixel art drawn in code, and video clips made with ffmpeg"
-# published so the other crates' tests build from their packages, which
-# keep only dev-dependencies that are on crates.io; a version of its own,
-# as the libraries have, raised when what it draws changes
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
-readme = "README.md"
-keywords = ["test-data", "pixel-art", "tgradish"]
-categories = ["development-tools::testing"]
-# the code that draws it, and nothing made from it
-include = ["src/**/*.rs", "Cargo.toml", "README.md", "LICENSE.txt"]
+publish = false
 
 [dependencies]
 flate2.workspace = true

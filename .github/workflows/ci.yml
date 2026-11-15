@@ -68,7 +68,7 @@ jobs:
       # the libraries packaged as crates.io would get them, and built from
       # those packages, each against the others', in the order they depend
       # on each other
-      - run: cargo publish --dry-run --locked -p tgradish-corpus -p tgradish-frames -p tgradish-tgs -p tgradish-core
+      - run: cargo publish --dry-run --locked -p tgradish-frames -p tgradish-tgs -p tgradish-core
         if: runner.os == 'Linux'
 
       # binaries carry the licences of their crates; they must list today's
