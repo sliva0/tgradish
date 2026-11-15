@@ -546,7 +546,10 @@ fn signal_group(child: &std::process::Child, signal: &str) {
 }
 
 /// What still runs in the process group `child` led, as `pid command`,
-/// once it is given a few seconds to end.
+/// once it is given a few seconds to end. A process that has ended but
+/// is not yet reaped, a zombie, runs no more and isn't counted: one whose
+/// parent, tgradish, ended first is reaped by init, and in a container
+/// whose first process reaps nothing, as GitHub's job containers, never.
 #[cfg(target_os = "linux")]
 fn left_in_group(child: &std::process::Child) -> Vec<String> {
     let group = child.id().to_string();
@@ -557,7 +560,9 @@ fn left_in_group(child: &std::process::Child) -> Vec<String> {
             let Ok(stat) = std::fs::read_to_string(process.path().join("stat")) else { continue };
             // after the command's name, in parentheses: state, parent, group
             let Some((_, rest)) = stat.rsplit_once(") ") else { continue };
-            if rest.split(' ').nth(2) == Some(group.as_str()) {
+            let fields: Vec<&str> = rest.split(' ').collect();
+            let ended = matches!(fields.first(), Some(&"Z" | &"X"));
+            if fields.get(2) == Some(&group.as_str()) && !ended {
                 let command = std::fs::read(process.path().join("cmdline")).unwrap_or_default();
                 let pid = process.file_name().to_string_lossy().into_owned();
                 left.push(format!("{pid} {}", String::from_utf8_lossy(&command)));
