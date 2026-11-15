@@ -7,12 +7,13 @@ use anyhow::{Result, bail};
 use console::style;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use tgradish_core::backend::Backend;
+use tgradish_core::convert::{self, needs_backend};
 use tgradish_core::events::{Details, StartDetails};
 use tgradish_core::input::Input;
 use tgradish_core::presets::{Format, FormatOptions, PresetError, Presets};
-use tgradish_core::webm::{self, Options};
+use tgradish_core::webm::Options;
+use tgradish_core::webp;
 use tgradish_core::{Event, Outcome, Started};
-use tgradish_core::{tgs, webp};
 
 use crate::Context;
 use crate::args::{ConversionArgs, ConvertArgs, FormatArg};
@@ -320,37 +321,31 @@ impl<'a> Converter<'a> {
                 printer.event(event);
             }
         };
-        let (made, backend) = match &self.options {
-            FormatOptions::Webm(options) => {
-                let backend = self.backend()?;
-                let options = options.clone();
-                let keep_temp = self.args.keep_temp;
-                let request = webm::Request { input, output, options, overwrite, keep_temp };
-                (webm::convert(&backend, &request, cancel, &mut on_event), Some(backend))
-            }
-            FormatOptions::Tgs(options) => {
-                // a frame rate is how fast pictures that have none play
-                let timed = matches!(input, Input::File(_)) && options.sheet.is_none();
-                if timed && self.fps_given && !self.fps_unused_said.replace(true) {
-                    let message =
-                        "--fps only sets how fast image sequences and sprite sheets play for .tgs";
-                    if json {
-                        crate::json_line(&Event::Warning { message: message.into() });
-                    } else {
-                        eprintln!("{} {message}", ui::warning_label());
-                    }
-                }
-                // only videos need ffmpeg
-                let backend = tgs::needs_ffmpeg(&input).then(|| self.backend()).transpose()?;
-                let request = tgs::Request { input, output, options: options.clone(), overwrite };
-                (tgs::convert(backend.as_ref(), &request, cancel, &mut on_event), backend)
-            }
-            FormatOptions::Webp(options) => {
-                let backend = self.backend()?;
-                let request = webp::Request { input, output, options: options.clone(), overwrite };
-                (webp::convert(&backend, &request, cancel, &mut on_event), Some(backend))
-            }
+        let request = convert::Request {
+            input,
+            output,
+            options: self.options.clone(),
+            overwrite,
+            keep_temp: self.args.keep_temp,
         };
+        // a frame rate is how fast pictures that have none play
+        if let FormatOptions::Tgs(options) = &self.options
+            && matches!(request.input, Input::File(_))
+            && options.sheet.is_none()
+            && self.fps_given
+            && !self.fps_unused_said.replace(true)
+        {
+            let message =
+                "--fps only sets how fast image sequences and sprite sheets play for .tgs";
+            if json {
+                crate::json_line(&Event::Warning { message: message.into() });
+            } else {
+                eprintln!("{} {message}", ui::warning_label());
+            }
+        }
+        // a .tgs needs ffmpeg only for videos
+        let backend = needs_backend(&request).then(|| self.backend()).transpose()?;
+        let made = convert::convert(backend.as_ref(), &request, cancel, &mut on_event);
         if !json {
             printer.bar.finish();
         }

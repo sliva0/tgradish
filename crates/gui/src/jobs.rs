@@ -7,37 +7,29 @@ use std::sync::mpsc::{Receiver, channel};
 use eframe::egui;
 use tgradish_core::CancelToken;
 use tgradish_core::backend::Backend;
+use tgradish_core::convert;
 use tgradish_core::events::{Details, StartDetails};
 use tgradish_core::input::Input;
 use tgradish_core::presets::Format;
+use tgradish_core::presets::FormatOptions;
 use tgradish_core::preview::Preview;
 use tgradish_core::tgradish_tgs::check::Severity;
 use tgradish_core::tgradish_tgs::normalise::Report;
 use tgradish_core::tgradish_tgs::sticker::Step;
 use tgradish_core::tgs;
-use tgradish_core::webm::{self, Decision, Options, Params};
+use tgradish_core::webm::{Decision, Params};
 use tgradish_core::webp;
 use tgradish_core::{Error, Event, FfmpegMissing, Outcome, Started, telegram};
 
 use crate::l10n::fl;
 use crate::widgets;
 
-/// What a job converts with, fixed when it starts.
-pub(crate) enum Setup {
-    Webm {
-        options: Options,
-        backend: Backend,
-    },
-    Tgs {
-        options: tgs::Options,
-        /// ffmpeg, which reads videos.
-        backend: Option<Backend>,
-    },
-    /// A static sticker: WebM's options, `start` the frame's time.
-    Image {
-        options: Options,
-        backend: Backend,
-    },
+/// What a job converts with, fixed when it starts: what to make and how,
+/// and ffmpeg, which WebM and static stickers need, and `.tgs` only to
+/// read videos.
+pub(crate) struct Setup {
+    pub(crate) options: FormatOptions,
+    pub(crate) backend: Option<Backend>,
 }
 
 /// One encode while fitting a WebM sticker.
@@ -430,7 +422,7 @@ impl Job {
         self.messages = Some(receiver);
         self.status = Status::Running;
         self.progress = Progress::default();
-        self.settles = matches!(&setup, Setup::Webm { options, .. }
+        self.settles = matches!(&setup.options, FormatOptions::Webm(options)
             if options.fit_or_default() != tgradish_core::options::Fit::Off);
         let output = self.output.clone();
         let cancel = self.cancel.clone();
@@ -542,38 +534,32 @@ fn run(
             error,
         })?;
     }
-    let output = Some(output);
-    let on_event = &mut |event| follow(event, update);
-    match setup {
-        Setup::Webm { options, backend } => {
-            let request = webm::Request { input, output, options, overwrite, keep_temp: false };
-            Ok(Done::of(webm::convert(&backend, &request, cancel, on_event)?))
+    let Setup { mut options, backend } = setup;
+    if let FormatOptions::Tgs(options) = &mut options {
+        let exact = options.exact_or_default();
+        // a sheet of a file of frames of its own, which converting
+        // refuses: read as it is, and said so, as the GUI shows it
+        if let Some((_, frames)) = crate::media::animated(backend.as_ref(), &input, options, cancel)
+        {
+            (options.sheet, options.sheet_frames) = (None, None);
+            let said = fl!("sheet-refused", "converted", frames = frames);
+            update(Box::new(move |progress| progress.warnings.push(said)));
         }
-        Setup::Image { options, backend } => {
-            let request = webp::Request { input, output, options, overwrite };
-            let outcome = webp::convert(&backend, &request, cancel, on_event)?;
-            let preview = webp::preview(&outcome.output).ok();
-            Ok(Done { preview, ..Done::of(outcome) })
-        }
-        Setup::Tgs { mut options, backend } => {
-            let exact = options.exact_or_default();
-            // a sheet of a file of frames of its own, which converting
-            // refuses: read as it is, and said so, as the GUI shows it
-            if let Some((_, frames)) =
-                crate::media::animated(backend.as_ref(), &input, &options, cancel)
-            {
-                (options.sheet, options.sheet_frames) = (None, None);
-                let said = fl!("sheet-refused", "converted", frames = frames);
-                update(Box::new(move |progress| progress.warnings.push(said)));
-            }
-            let request = tgs::Request { input, output, options, overwrite };
-            update(Box::new(move |progress| {
-                progress.tgs = Some(TgsStage::Reading);
-                progress.tgs_exact = exact;
-            }));
-            Ok(Done::of(tgs::convert(backend.as_ref(), &request, cancel, on_event)?))
-        }
+        update(Box::new(move |progress| {
+            progress.tgs = Some(TgsStage::Reading);
+            progress.tgs_exact = exact;
+        }));
     }
+    let request =
+        convert::Request { input, output: Some(output), options, overwrite, keep_temp: false };
+    let outcome =
+        convert::convert(backend.as_ref(), &request, cancel, &mut |event| follow(event, update))?;
+    let mut done = Done::of(outcome);
+    // a picture is small enough to read again at once
+    if request.options.format() == Format::Webp {
+        done.preview = webp::preview(&done.output).ok();
+    }
+    Ok(done)
 }
 
 /// Takes in what a conversion of any format says as it goes.

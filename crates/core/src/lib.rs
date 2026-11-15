@@ -47,6 +47,7 @@ mod cancel;
 #[cfg_attr(docsrs, doc(cfg(feature = "clipboard")))]
 pub mod clipboard;
 pub mod config;
+pub mod convert;
 pub mod drawn;
 mod error;
 pub mod events;

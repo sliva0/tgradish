@@ -6,7 +6,7 @@
 
 use eframe::egui;
 use tgradish_core::backend::Backend;
-use tgradish_core::presets::Format;
+use tgradish_core::presets::{Format, FormatOptions};
 use tgradish_core::webm::Options;
 use tgradish_core::{tgs, webp};
 
@@ -277,14 +277,19 @@ impl App {
                 continue;
             };
             let recipe = choices.recipe(*format, &self.presets, &self.config);
-            let setup = recipe.clone().and_then(|recipe| match recipe {
-                Recipe::Webm(options) => {
-                    backend.clone().map(|backend| Setup::Webm { options, backend })
-                }
-                // ffmpeg, for videos
-                Recipe::Tgs(options) => Ok(Setup::Tgs { options, backend: backend.clone().ok() }),
-                Recipe::Webp(options) => {
-                    backend.clone().map(|backend| Setup::Image { options, backend })
+            let setup = recipe.clone().and_then(|recipe| {
+                let options = match recipe {
+                    Recipe::Webm(options) => FormatOptions::Webm(options),
+                    Recipe::Tgs(options) => FormatOptions::Tgs(options),
+                    Recipe::Webp(options) => FormatOptions::Webp(options),
+                };
+                match backend.clone() {
+                    Ok(backend) => Ok(Setup { options, backend: Some(backend) }),
+                    // which a .tgs needs only for videos
+                    Err(_) if options.format() == Format::Tgs => {
+                        Ok(Setup { options, backend: None })
+                    }
+                    Err(why) => Err(why),
                 }
             });
             let overwrite = self.may_replace(id, &job.output);

@@ -246,6 +246,11 @@ pub enum FfmpegMissing {
     /// A video was to be read, but no ffmpeg was given to read it.
     #[error("{} is a video, which ffmpeg reads", .0.display())]
     ForVideo(PathBuf),
+    /// A result of a format ffmpeg makes was asked for, but no ffmpeg was
+    /// given to make it: WebM, or WebP, which ffmpeg reads the picture
+    /// for.
+    #[error("{} results are made with ffmpeg", .0.name())]
+    ForFormat(crate::presets::Format),
 }
 
 /// Why nothing could be pasted, said to follow "couldn't paste from the
