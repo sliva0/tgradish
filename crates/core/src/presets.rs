@@ -14,7 +14,7 @@
 //! crf = 40          # where a still picture has them
 //!
 //! [tgs]             # options for TGS results
-//! speed = "balanced"
+//! effort = "balanced"
 //! ```
 //!
 //! Either table can be left out. A user preset with the name of a built-in
@@ -29,7 +29,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, FileAction, Result};
-use crate::options::{Fit, Speed};
+use crate::options::{Effort, Fit};
 use crate::telegram::Target;
 use crate::tgs;
 use crate::webm::Options;
@@ -90,10 +90,11 @@ impl Format {
     }
 
     /// Whether this format uses the option `key`, as files, JSON and flags
-    /// name it: WebM all of [`Options`], `.tgs` all of [`tgs::Options`], and
-    /// images those of WebM's a still picture has,
-    /// [`crate::webp::PICTURE_OPTIONS`].
+    /// name it, or once named it: WebM all of [`Options`], `.tgs` all of
+    /// [`tgs::Options`], and static stickers those of WebM's a still
+    /// picture has, [`crate::webp::PICTURE_OPTIONS`].
     pub fn uses(self, key: &str) -> bool {
+        let key = crate::options::current_key(key);
         static WEBM: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
         static TGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
         let known = |keys: &std::sync::OnceLock<Vec<String>>, schema: fn() -> schemars::Schema| {
@@ -282,28 +283,28 @@ fn builtin() -> Vec<Preset> {
         tgs,
         path: None,
     };
-    let speed = |speed| tgs::Options { speed: Some(speed), ..Default::default() };
+    let effort = |effort| tgs::Options { effort: Some(effort), ..Default::default() };
     vec![
         preset(
             "fast",
             "WebM fits only the bitrate, with the fast encoder: takes seconds, but blurrier. TGS \
              takes under a second, a few percent larger",
-            Options { fit: Some(Fit::Bitrate), speed: Some(Speed::Fast), ..Default::default() },
-            speed(Speed::Fast),
+            Options { fit: Some(Fit::Bitrate), effort: Some(Effort::Fast), ..Default::default() },
+            effort(Effort::Fast),
         ),
         preset(
             "balanced",
             "WebM fits the bitrate, and tries lower frame rates where they could look better. \
              TGS is between fast and best",
-            Options { fit: Some(Fit::Auto), speed: Some(Speed::Balanced), ..Default::default() },
-            speed(Speed::Balanced),
+            Options { fit: Some(Fit::Auto), effort: Some(Effort::Balanced), ..Default::default() },
+            effort(Effort::Balanced),
         ),
         preset(
             "best",
             "WebM is like balanced, with the slowest encoder: takes minutes for long videos. TGS \
              takes a few seconds, the smallest file",
-            Options { fit: Some(Fit::Auto), speed: Some(Speed::Best), ..Default::default() },
-            speed(Speed::Best),
+            Options { fit: Some(Fit::Auto), effort: Some(Effort::Best), ..Default::default() },
+            effort(Effort::Best),
         ),
     ]
 }
@@ -746,7 +747,7 @@ mod tests {
             ..Options::default()
         };
         let tgs = tgs::Options {
-            speed: Some(Speed::Fast),
+            effort: Some(Effort::Fast),
             exact: Some(false),
             pixel_scale: Some(2),
             // one file's: left out
@@ -841,10 +842,10 @@ mod tests {
         let presets = Presets::builtin();
         let fast = presets.webm("fast").unwrap();
         assert_eq!(
-            (fast.fit, fast.speed, fast.target),
-            (Some(Fit::Bitrate), Some(Speed::Fast), None)
+            (fast.fit, fast.effort, fast.target),
+            (Some(Fit::Bitrate), Some(Effort::Fast), None)
         );
-        assert_eq!(presets.tgs("fast").unwrap().speed, Some(Speed::Fast));
+        assert_eq!(presets.tgs("fast").unwrap().effort, Some(Effort::Fast));
         assert!(matches!(presets.resolve("best", Format::Tgs), Ok(FormatOptions::Tgs(_))));
         assert!(presets.webm("nope").is_err());
         for format in [Format::Webm, Format::Tgs] {
@@ -871,22 +872,26 @@ mod tests {
         write(dir.path(), "old", "format = 'tgs'\n[options]\nspeed = 'fast'\n");
         // what one file has is no preset's to say
         write(dir.path(), "emoji", "[webm]\ntarget = 'emoji'\n");
-        write(dir.path(), "sheet", "[tgs]\nspeed = 'fast'\nsheet = '4x1'\n");
+        write(dir.path(), "sheet", "[tgs]\neffort = 'fast'\nsheet = '4x1'\n");
+        // as it was once named
+        write(dir.path(), "renamed", "[webm]\nspeed = 'best'\n[tgs]\nspeed = 'fast'\n");
         write(dir.path(), "unreadable", "[webm\n");
         std::fs::write(dir.path().join("notes.txt"), "ignored").unwrap();
 
         let presets = Presets::load(Some(dir.path())).unwrap();
         let tiny = presets.webm("tiny").unwrap();
-        assert_eq!((tiny.fps, tiny.speed), (Some(10.0), Some(Speed::Fast)));
+        assert_eq!((tiny.fps, tiny.effort), (Some(10.0), Some(Effort::Fast)));
         // only WebM options were set, the rest comes from the base
-        assert_eq!(presets.tgs("tiny").unwrap().speed, Some(Speed::Fast));
+        assert_eq!(presets.tgs("tiny").unwrap().effort, Some(Effort::Fast));
         // the user file replaced the built-in preset
         assert_eq!(
             presets.webm("balanced").unwrap(),
             Options { crf: Some(20), ..Default::default() }
         );
         let pixels = presets.tgs("pixels").unwrap();
-        assert_eq!((pixels.keep_canvas, pixels.speed), (Some(true), Some(Speed::Best)));
+        assert_eq!((pixels.keep_canvas, pixels.effort), (Some(true), Some(Effort::Best)));
+        assert_eq!(presets.webm("renamed").unwrap().effort, Some(Effort::Best));
+        assert_eq!(presets.tgs("renamed").unwrap().effort, Some(Effort::Fast));
 
         let broken = presets.webm("broken").unwrap_err().to_string();
         assert!(broken.contains("broken.toml") && broken.contains("fsp"), "{broken}");
@@ -914,6 +919,6 @@ mod tests {
             let err = presets.get(name).unwrap_err().to_string();
             assert!(err.starts_with("broken preset ") && err.trim_end() == err, "{err:?}");
         }
-        assert_eq!(presets.iter().count(), 13);
+        assert_eq!(presets.iter().count(), 14);
     }
 }

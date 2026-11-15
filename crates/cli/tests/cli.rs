@@ -68,9 +68,9 @@ fn describes_protocol() {
     let presets = description["presets"].as_array().unwrap();
     let preset = |name: &str| presets.iter().find(|p| p["name"] == name).unwrap();
     // presets say how, for both formats, and nothing about the target
-    assert_eq!(preset("fast")["webm"]["speed"], "fast");
+    assert_eq!(preset("fast")["webm"]["effort"], "fast");
     assert_eq!(preset("fast")["webm"]["fit"], "bitrate");
-    assert_eq!(preset("fast")["tgs"]["speed"], "fast");
+    assert_eq!(preset("fast")["tgs"]["effort"], "fast");
     assert!(preset("best")["webm"]["target"].is_null());
     assert!(preset("best")["error"].is_null());
     // what spoof prints, an event as conversions' are
@@ -387,7 +387,8 @@ fn converts_with_json_events() {
         "--preset",
         "fast",
         "--options-json",
-        r#"{"length": 1.5, "title": "from json"}"#,
+        // effort by the name it once had
+        r#"{"length": 1.5, "title": "from json", "speed": "balanced"}"#,
         "--title",
         "from flag",
     ]);
@@ -398,6 +399,7 @@ fn converts_with_json_events() {
     let plan = &events[0]["plan"];
     assert_eq!(plan["length"], 1.5);
     assert_eq!(plan["title"], "from flag", "flags win over --options-json");
+    assert_eq!(plan["effort"], "balanced");
     let finished = events.last().unwrap();
     assert_eq!(finished["event"], "finished");
     // every format's result names its input
@@ -498,7 +500,7 @@ fn fitting(inputs: &[&Path], dir: &Path, args: &[&str]) -> std::process::Child {
     let mut command = Command::new(env!("CARGO_BIN_EXE_tgradish"));
     command
         .args(["--json", "convert", "-y", "-t", "2", "--fit", "bitrate", "-b", "50"])
-        .args(["--speed", "fast", "-O"])
+        .args(["--effort", "fast", "-O"])
         .arg(dir)
         .args(inputs)
         .args(args)
@@ -745,7 +747,7 @@ fn exits_3_when_telegram_would_refuse_a_result() {
     let tgs = dir.path().join("noise.tgs");
     let made = |extra: &[&str]| {
         let mut args = vec!["convert", art.to_str().unwrap(), "--sequence"];
-        args.extend(["-o", tgs.to_str().unwrap(), "-y", "--speed", "fast", "--fps", "24"]);
+        args.extend(["-o", tgs.to_str().unwrap(), "-y", "--effort", "fast", "--fps", "24"]);
         args.extend(extra);
         tgradish(&args)
     };
@@ -820,7 +822,7 @@ fn exits_3_for_webm_over_the_limit() {
         "0",
         "--length",
         "1",
-        "--speed",
+        "--effort",
         "fast",
     ]);
     assert_eq!(output.status.code(), Some(3), "{}", String::from_utf8_lossy(&output.stderr));
@@ -1401,9 +1403,9 @@ fn watch_stops_as_done() {
     let stopped = watching.stop();
     assert_eq!(stopped.status.code(), Some(0));
 
-    // converting, which takes long enough with --speed best
+    // converting, which takes long enough with --effort best
     let art = noise(dir.path(), 24);
-    let watching = Watching::start(dir.path(), &["--format", "tgs", "--speed", "best"]);
+    let watching = Watching::start(dir.path(), &["--format", "tgs", "--effort", "best"]);
     std::fs::rename(art.join("0.png"), dir.path().join("slow.png")).unwrap();
     watching.until(|e| named(e, "started", "slow.png"));
     let stopped = watching.stop();
@@ -1647,7 +1649,7 @@ fn shows_a_preset_as_a_file_could_hold_it() {
     };
     assert_eq!(json("copy"), json("mine"));
     assert_eq!(json("mine")["webm"]["fit-range"]["max"], 40.0);
-    assert_eq!(json("mine")["webm"]["speed"], "fast");
+    assert_eq!(json("mine")["webm"]["effort"], "fast");
 
     // each preset says which formats it is the default for
     let listed = with_presets(dir.path(), &["preset", "list"]);
@@ -1797,8 +1799,8 @@ fn shows_presets_and_the_config() {
     let shown = tgradish(&["preset", "show", "fast"]);
     assert!(shown.status.success());
     let file: toml::Table = toml::from_str(&String::from_utf8(shown.stdout).unwrap()).unwrap();
-    assert_eq!(file["webm"]["speed"].as_str(), Some("fast"));
-    assert_eq!(file["tgs"]["speed"].as_str(), Some("fast"));
+    assert_eq!(file["webm"]["effort"].as_str(), Some("fast"));
+    assert_eq!(file["tgs"]["effort"].as_str(), Some("fast"));
     assert_eq!(tgradish(&["preset", "show", "nope"]).status.code(), Some(1));
     // each preset, a line of JSON each
     let listed = json_lines(&tgradish(&["--json", "preset", "list"]));

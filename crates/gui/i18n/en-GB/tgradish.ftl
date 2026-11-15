@@ -623,7 +623,7 @@ fit-length = Length
     .hint = Fits the length at constant quality, cutting the end
 fit-off = Off
     .hint = Encodes once with the values below, even if it comes out too large
-encoder = VP9 encoder
+encoder = Encoder effort
     .hint = Faster encoding looks worse at the same size
 encoder-fast = Fast
     .hint = Takes seconds, but visibly worse at the same size
@@ -668,7 +668,7 @@ bitrate-auto = From the file size limit
 
 ## Settings: size and quality of a TGS animation
 
-tgs-encoder = TGS encoder
+tgs-encoder = Encoder effort
     .hint = How hard to look for a small encoding
 tgs-fast = Fast
     .hint = Takes under a second, a few percent larger

@@ -3,7 +3,7 @@
 //! up is the user's to choose.
 
 use eframe::egui;
-use tgradish_core::options::{Sheet, Speed};
+use tgradish_core::options::{Effort, Sheet};
 use tgradish_core::tgradish_tgs::reduce::{self, Kind as Reduction};
 
 use super::Context;
@@ -11,11 +11,11 @@ use crate::item::{Blocker, Item, Kind, dividing_sheet};
 use crate::l10n::fl;
 use crate::widgets::{self, Choice, chosen_hint, flag, preset_segments, row, section};
 
-fn tgs_speeds() -> [Choice<Speed>; 3] {
+fn tgs_efforts() -> [Choice<Effort>; 3] {
     [
-        (Speed::Fast, fl!("tgs-fast"), fl!("tgs-fast", "hint")),
-        (Speed::Balanced, fl!("tgs-balanced"), String::new()),
-        (Speed::Best, fl!("tgs-best"), fl!("tgs-best", "hint")),
+        (Effort::Fast, fl!("tgs-fast"), fl!("tgs-fast", "hint")),
+        (Effort::Balanced, fl!("tgs-balanced"), String::new()),
+        (Effort::Best, fl!("tgs-best"), fl!("tgs-best", "hint")),
     ]
 }
 
@@ -43,9 +43,9 @@ pub(super) fn tgs_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context)
     let base = item.choices.tgs_base(context.presets, context.config).unwrap_or_default();
     let options = &mut item.choices.tgs;
     row(ui, &fl!("tgs-encoder"), &fl!("tgs-encoder", "hint"), Ok(()), |ui| {
-        let speeds = tgs_speeds();
-        preset_segments(ui, &mut options.speed, base.speed_or_default(), &speeds);
-        chosen_hint(ui, base.clone().merged(options).speed_or_default(), &speeds);
+        let efforts = tgs_efforts();
+        preset_segments(ui, &mut options.effort, base.effort_or_default(), &efforts);
+        chosen_hint(ui, base.clone().merged(options).effort_or_default(), &efforts);
     });
     row(ui, &fl!("too-large"), &fl!("too-large", "hint"), Ok(()), |ui| {
         let text = fl!("never-change");

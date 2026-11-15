@@ -5,14 +5,14 @@ use std::time::Duration;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tgradish_tgs::encode::Effort;
+use tgradish_tgs::encode;
 use tgradish_tgs::frames::Sheet;
 use tgradish_tgs::normalise;
 use tgradish_tgs::reduce::{Compromise, Kind};
 use tgradish_tgs::sticker::{self, Fit};
 
 use crate::error::{Error, Result};
-use crate::options::{Crop, Resize, Speed, TEMPOS};
+use crate::options::{Crop, Effort, Resize, TEMPOS};
 use crate::telegram::{self, Target};
 
 /// Options for `.tgs` output. Like the WebM [`Options`](crate::webm::Options),
@@ -42,8 +42,9 @@ pub struct Options {
     pub tempo: Option<f64>,
     /// How hard to look for a small encoding; best takes a few seconds.
     /// Default: best.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub speed: Option<Speed>,
+    // read as `speed` too, as it was once named
+    #[serde(alias = "speed", skip_serializing_if = "Option::is_none")]
+    pub effort: Option<Effort>,
     /// Never change the pixel art to make it fit; a sticker that is too
     /// large is reported instead. Set it to false to let fitting change it.
     /// Default: true.
@@ -115,7 +116,7 @@ crate::options::layered!(Options {
     start,
     length,
     tempo,
-    speed,
+    effort,
     exact,
     reductions,
     compromise,
@@ -143,8 +144,8 @@ impl Options {
 
     /// How hard to look for a small encoding: the best, which takes
     /// seconds.
-    pub fn speed_or_default(&self) -> Speed {
-        self.speed.unwrap_or(Speed::Best)
+    pub fn effort_or_default(&self) -> Effort {
+        self.effort.unwrap_or(Effort::Best)
     }
 
     /// Whether the input's canvas is kept: no, the art is cropped to what
@@ -235,10 +236,10 @@ impl Options {
                     Resize::Stretch => normalise::Square::Stretch,
                 },
             },
-            effort: match self.speed_or_default() {
-                Speed::Fast => Effort::Fast,
-                Speed::Balanced => Effort::Balanced,
-                Speed::Best => Effort::Best,
+            effort: match self.effort_or_default() {
+                Effort::Fast => encode::Effort::Fast,
+                Effort::Balanced => encode::Effort::Balanced,
+                Effort::Best => encode::Effort::Best,
             },
             fit: if self.exact_or_default() { Fit::Exact } else { Fit::Auto },
             reductions: self.reductions.clone().unwrap_or_else(|| Kind::ALL.to_vec()),
@@ -266,12 +267,12 @@ mod tests {
     fn says_its_defaults_once() {
         let unset = Options::default();
         assert_eq!(
-            (unset.resize_or_default(), unset.speed_or_default()),
-            (Resize::Pad, Speed::Best)
+            (unset.resize_or_default(), unset.effort_or_default()),
+            (Resize::Pad, Effort::Best)
         );
         assert!(unset.exact_or_default() && !unset.keep_canvas_or_default());
         let settings = unset.sticker_options().unwrap();
-        assert_eq!((settings.effort, settings.fit), (Effort::Best, Fit::Exact));
+        assert_eq!((settings.effort, settings.fit), (encode::Effort::Best, Fit::Exact));
         // a long part plays as fast as fits it into 3 s, a short one as it is
         assert_eq!(
             (unset.tempo_or_default(Some(6.0)), unset.tempo_or_default(Some(2.0))),
@@ -291,15 +292,15 @@ mod tests {
 
     #[test]
     fn layers_options() {
-        let preset = Options { speed: Some(Speed::Fast), fps: Some(5.0), ..Default::default() };
+        let preset = Options { effort: Some(Effort::Fast), fps: Some(5.0), ..Default::default() };
         let flags = Options { fps: Some(12.0), exact: Some(true), ..Default::default() };
         let merged = preset.merged(&flags);
         assert_eq!(
-            (merged.speed, merged.fps, merged.exact),
-            (Some(Speed::Fast), Some(12.0), Some(true))
+            (merged.effort, merged.fps, merged.exact),
+            (Some(Effort::Fast), Some(12.0), Some(true))
         );
         let settings = merged.sticker_options().unwrap();
-        assert_eq!((settings.effort, settings.fit), (Effort::Fast, Fit::Exact));
+        assert_eq!((settings.effort, settings.fit), (encode::Effort::Fast, Fit::Exact));
         let sheet = Options { sheet: "4x2".parse().ok(), ..Default::default() };
         let layout = sheet.sheet_layout().unwrap().unwrap();
         assert_eq!(

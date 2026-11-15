@@ -10,7 +10,7 @@ use serde::Serialize;
 use super::Request;
 use crate::error::{Error, Result};
 use crate::ffmpeg::Probe;
-use crate::options::{self, Crop, Fit, FitUnit, Range, Resize, Scaling, Speed, Spoof};
+use crate::options::{self, Crop, Effort, Fit, FitUnit, Range, Resize, Scaling, Spoof};
 use crate::picture::{default_resize, picture_sizes};
 use crate::telegram::{self, Target};
 
@@ -73,8 +73,8 @@ pub struct Plan {
     pub constant_quality: bool,
     /// Encode losslessly.
     pub lossless: bool,
-    /// The encoder's speed.
-    pub speed: Speed,
+    /// How hard the encoder works.
+    pub effort: Effort,
     /// Encode with an alpha channel.
     pub alpha: bool,
     /// When the duration in the header is spoofed.
@@ -427,7 +427,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         crf,
         constant_quality: o.crf.is_some() && o.bitrate.is_none(),
         lossless,
-        speed: o.speed_or_default(),
+        effort: o.effort_or_default(),
         alpha: source.alpha || sizes.pads(),
         spoof,
         fake_duration,

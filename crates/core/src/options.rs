@@ -109,12 +109,12 @@ impl Fit {
     }
 }
 
-/// Encoder speed. Faster settings produce worse looking stickers at the same
-/// size.
+/// How hard the encoder works. Less effort is faster, and makes worse
+/// looking stickers at the same size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
-pub enum Speed {
+pub enum Effort {
     /// `-cpu-used 4`.
     Fast,
     /// `-cpu-used 2`.
@@ -123,13 +123,13 @@ pub enum Speed {
     Best,
 }
 
-impl Speed {
+impl Effort {
     /// libvpx-vp9 `-cpu-used` value for the "good" deadline.
     pub fn cpu_used(self) -> u8 {
         match self {
-            Speed::Fast => 4,
-            Speed::Balanced => 2,
-            Speed::Best => 0,
+            Effort::Fast => 4,
+            Effort::Balanced => 2,
+            Effort::Best => 0,
         }
     }
 }
@@ -452,6 +452,16 @@ macro_rules! layered {
     };
 }
 pub(crate) use layered;
+
+/// Options renamed since they were first named, each old key with the key
+/// it has now: files, JSON and flags still read the old ones.
+pub const RENAMED: [(&str, &str); 1] = [("speed", "effort")];
+
+/// The key an option named `key` has now: `key`, unless it was renamed
+/// since, as [`RENAMED`] says.
+pub fn current_key(key: &str) -> &str {
+    RENAMED.iter().find(|(old, _)| *old == key).map_or(key, |(_, new)| new)
+}
 
 /// The keys of the values `options` sets, as files, JSON and flags name
 /// them, in the order of its fields.
@@ -841,6 +851,29 @@ mod tests {
         assert!(none.auto_scaling());
         let sizes = |options: &Options| crate::picture::picture_sizes(options, (8, 8)).unwrap();
         assert_eq!(sizes(&none), sizes(&Options::default()));
+    }
+
+    /// What was once named otherwise reads by its old name too, in a
+    /// preset's TOML and in JSON, as `--options-json` and the GUI's
+    /// session have it, but is written by its name now.
+    #[test]
+    fn reads_options_by_their_old_names() {
+        let toml: Options = toml::from_str("speed = 'best'").unwrap();
+        assert_eq!(toml.effort, Some(Effort::Best));
+        let json: Options = serde_json::from_value(serde_json::json!({ "speed": "fast" })).unwrap();
+        assert_eq!(json.effort, Some(Effort::Fast));
+        let tgs: crate::tgs::Options = toml::from_str("speed = 'fast'").unwrap();
+        assert_eq!(tgs.effort, Some(Effort::Fast));
+        assert_eq!(set_keys(&json), ["effort"]);
+        assert_eq!(flags(&tgs), ["--effort=fast"]);
+        for (old, new) in RENAMED {
+            assert_eq!((current_key(old), current_key(new)), (new, new));
+        }
+        assert_eq!(current_key("crf"), "crf");
+        // and what a format uses
+        use crate::presets::Format;
+        assert!(Format::Webm.uses("speed") && Format::Tgs.uses("speed"));
+        assert!(!Format::Webp.uses("speed"));
     }
 
     #[test]

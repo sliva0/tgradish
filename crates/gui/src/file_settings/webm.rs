@@ -3,7 +3,7 @@
 //! for some ways of fitting, so the rest is greyed out rather than hidden.
 
 use eframe::egui;
-use tgradish_core::options::{Fit, FitUnit, Range, Speed};
+use tgradish_core::options::{Effort, Fit, FitUnit, Range};
 use tgradish_core::webm::{
     CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, HIGHEST_BITRATE, MAX_ATTEMPTS, Options,
 };
@@ -31,11 +31,11 @@ fn fits() -> [Choice<Fit>; 6] {
     ]
 }
 
-fn webm_speeds() -> [Choice<Speed>; 3] {
+fn webm_efforts() -> [Choice<Effort>; 3] {
     [
-        (Speed::Fast, fl!("encoder-fast"), fl!("encoder-fast", "hint")),
-        (Speed::Balanced, fl!("encoder-balanced"), String::new()),
-        (Speed::Best, fl!("encoder-best"), fl!("encoder-best", "hint")),
+        (Effort::Fast, fl!("encoder-fast"), fl!("encoder-fast", "hint")),
+        (Effort::Balanced, fl!("encoder-balanced"), String::new()),
+        (Effort::Best, fl!("encoder-best"), fl!("encoder-best", "hint")),
     ]
 }
 
@@ -84,8 +84,8 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
         chosen_hint(ui, chosen, &fits);
     });
     row(ui, &fl!("encoder"), &fl!("encoder", "hint"), Ok(()), |ui| {
-        let base = base.speed_or_default();
-        preset_segments(ui, &mut options.speed, base, &webm_speeds());
+        let base = base.effort_or_default();
+        preset_segments(ui, &mut options.effort, base, &webm_efforts());
     });
 
     // every row stays, greyed out where this way of fitting has no use

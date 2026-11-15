@@ -966,7 +966,7 @@ mod tests {
             "fit-range",
             "bitrate",
             "crf",
-            "speed",
+            "effort",
             "lossless",
             "spoof",
             "fake-duration",
@@ -987,7 +987,7 @@ mod tests {
             "fps": 5.0,
             "tempo": 2.0,
         });
-        let tgs_other = ["speed", "exact", "reductions", "compromise", "title", "watermark"];
+        let tgs_other = ["effort", "exact", "reductions", "compromise", "title", "watermark"];
         let described = serde_json::to_value(tgradish_core::protocol::describe(
             &Presets::builtin(),
             &Default::default(),
@@ -1118,7 +1118,7 @@ mod tests {
         choices.start = Some(1.0);
         let options = choices.webm_options(&presets, &config).unwrap();
         assert_eq!(options.target, Some(Target::Emoji));
-        assert_eq!(options.speed, presets.webm("fast").unwrap().speed);
+        assert_eq!(options.effort, presets.webm("fast").unwrap().effort);
         // fast fits the bitrate, which hides the quality: it has no say
         assert_eq!((options.crf, options.start), (None, Some(1.0)));
         choices.webm.fit = Some(Fit::Length);

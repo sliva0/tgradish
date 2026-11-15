@@ -506,11 +506,11 @@ pub struct OptionArgs {
     /// or with --fit off. [default: 32]
     #[arg(long, value_parser = clap::value_parser!(u8).range(0..=63), help_heading = "Encoding")]
     pub crf: Option<u8>,
-    /// Encoder speed. Faster looks worse at the same size for WebM, and
-    /// comes out larger for TGS. [default: the preset's: balanced for WebM,
-    /// best for TGS]
-    #[arg(long, value_enum, help_heading = "Encoding")]
-    pub speed: Option<SpeedArg>,
+    /// How hard the encoder works. Less effort is faster, but looks worse
+    /// at the same size for WebM, and comes out larger for TGS. [default:
+    /// the preset's: balanced for WebM, best for TGS]
+    #[arg(long, value_enum, alias = "speed", help_heading = "Encoding")]
+    pub effort: Option<EffortArg>,
     /// Lossless encoding, only small for tiny or still pictures;
     /// --no-lossless turns a preset's off. [default: off]
     #[arg(long, overrides_with = "no_lossless", help_heading = "Encoding")]
@@ -629,7 +629,7 @@ impl OptionArgs {
             start: self.start,
             length: self.length,
             tempo: self.tempo,
-            speed: self.speed.map(Into::into),
+            effort: self.effort.map(Into::into),
             exact: switch(self.exact, self.no_exact),
             reductions: (!self.reductions.is_empty())
                 .then(|| self.reductions.iter().map(|&kind| kind.into()).collect()),
@@ -668,7 +668,7 @@ impl OptionArgs {
             fps: self.fps,
             bitrate: self.bitrate,
             crf: self.crf,
-            speed: self.speed.map(Into::into),
+            effort: self.effort.map(Into::into),
             lossless: switch(self.lossless, self.no_lossless),
             spoof: self.spoof.map(Into::into),
             fake_duration: self.fake_duration,
@@ -758,7 +758,7 @@ value_enum!(TargetArg => Target { Sticker, Emoji });
 value_enum!(ResizeArg => options::Resize { Contain, Pad, Crop, Stretch });
 value_enum!(ScalingArg => options::Scaling { Auto, Smooth, Sharp, PixelPerfect });
 value_enum!(FitArg => options::Fit { Auto, Bitrate, Crf, Fps, Length, Off });
-value_enum!(SpeedArg => options::Speed { Fast, Balanced, Best });
+value_enum!(EffortArg => options::Effort { Fast, Balanced, Best });
 value_enum!(SpoofArg => options::Spoof { Auto, Always, Never });
 
 /// [`Format`] for clap, which also takes `static`, and `image` as it once
@@ -1171,7 +1171,7 @@ mod tests {
             fps: Some(24.0),
             bitrate: Some(600.0),
             crf: Some(30),
-            speed: Some(options::Speed::Best),
+            effort: Some(options::Effort::Best),
             lossless: Some(false),
             spoof: Some(options::Spoof::Never),
             fake_duration: Some(0.5),
@@ -1186,7 +1186,7 @@ mod tests {
             start: Some(0.5),
             length: Some(1.5),
             tempo: Some(0.5),
-            speed: Some(options::Speed::Fast),
+            effort: Some(options::Effort::Fast),
             exact: Some(true),
             reductions: Some(vec![reduce::Kind::MergeColours, reduce::Kind::DropFrames]),
             compromise: Some(reduce::Compromise::Detail),
@@ -1204,6 +1204,21 @@ mod tests {
             watermark: Some(true),
         };
         assert_eq!(parsed(options::flags(&tgs)).to_tgs_options(), tgs);
+    }
+
+    /// Flags renamed since keep their old names, hidden.
+    #[test]
+    fn reads_flags_by_their_old_names() {
+        let options = parsed(vec!["--speed=best".into()]);
+        assert_eq!(options.to_options().effort, Some(options::Effort::Best));
+        assert_eq!(options.to_tgs_options().effort, Some(options::Effort::Best));
+        let convert = Cli::command().find_subcommand("convert").unwrap().clone();
+        let help = convert.clone().render_long_help().to_string();
+        for (old, new) in options::RENAMED {
+            assert!(!help.contains(&format!("--{old}")), "--{old} shows: {help}");
+            let arg = convert.get_arguments().find(|arg| arg.get_long() == Some(new)).unwrap();
+            assert!(arg.get_all_aliases().unwrap_or_default().contains(&old), "--{old}");
+        }
     }
 
     #[test]

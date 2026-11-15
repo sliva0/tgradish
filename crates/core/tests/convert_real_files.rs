@@ -15,7 +15,7 @@ use tgradish_core::backend::{Backend, FramesRequest};
 use tgradish_core::ffmpeg;
 use tgradish_core::input::Input;
 use tgradish_core::mark::made_by_tgradish;
-use tgradish_core::options::{Crop, Fit, Resize, Scaling, Speed};
+use tgradish_core::options::{Crop, Effort, Fit, Resize, Scaling};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::webm::Options;
 use tgradish_core::webm::container;
@@ -40,7 +40,7 @@ fn still(
 }
 
 fn fast(fit: Fit) -> Options {
-    Options { fit: Some(fit), speed: Some(Speed::Fast), ..Default::default() }
+    Options { fit: Some(fit), effort: Some(Effort::Fast), ..Default::default() }
 }
 
 /// First decoded frame as RGBA, using the libvpx decoder to keep alpha.

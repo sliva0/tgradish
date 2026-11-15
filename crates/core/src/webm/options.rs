@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::options::{Crop, ExactScale, Fit, Range, Resize, Scaling, Speed, Spoof, layered};
+use crate::options::{Crop, Effort, ExactScale, Fit, Range, Resize, Scaling, Spoof, layered};
 use crate::telegram::Target;
 
 /// Settings for one conversion. `None` means "use the default".
@@ -89,9 +89,11 @@ pub struct Options {
     #[schemars(range(min = 0, max = 63))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crf: Option<u8>,
-    /// Encoder speed. Default: balanced.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub speed: Option<Speed>,
+    /// How hard the encoder works: fast, balanced or best, the slowest.
+    /// Default: balanced.
+    // read as `speed` too, as it was once named
+    #[serde(alias = "speed", skip_serializing_if = "Option::is_none")]
+    pub effort: Option<Effort>,
     /// Lossless encoding. Only small for tiny or still pictures. Default:
     /// false.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -145,7 +147,7 @@ layered!(Options {
     fps,
     bitrate,
     crf,
-    speed,
+    effort,
     lossless,
     spoof,
     fake_duration,
@@ -163,9 +165,9 @@ impl Options {
         self.fit.unwrap_or(Fit::Auto)
     }
 
-    /// The encoder's speed: balanced.
-    pub fn speed_or_default(&self) -> Speed {
-        self.speed.unwrap_or(Speed::Balanced)
+    /// How hard the encoder works: balanced.
+    pub fn effort_or_default(&self) -> Effort {
+        self.effort.unwrap_or(Effort::Balanced)
     }
 
     /// How pixels are scaled: auto, by the input.
@@ -388,8 +390,8 @@ mod tests {
     fn says_its_defaults_once() {
         let unset = Options::default();
         assert_eq!(
-            (unset.fit_or_default(), unset.speed_or_default(), unset.scaling_or_default()),
-            (Fit::Auto, Speed::Balanced, Scaling::Auto)
+            (unset.fit_or_default(), unset.effort_or_default(), unset.scaling_or_default()),
+            (Fit::Auto, Effort::Balanced, Scaling::Auto)
         );
         assert_eq!((unset.spoof_or_default(), unset.lossless_or_default()), (Spoof::Auto, false));
         let set = Options { fit: Some(Fit::Crf), lossless: Some(true), ..unset };

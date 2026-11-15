@@ -93,7 +93,7 @@ that makes every kind of Telegram sticker and emoji.
 | `--bitrate`, `-bt` | `--bitrate`, `-b` |
 | `-crf` | `--crf` |
 | `--lossless`, `-ll` | `--lossless` |
-| `--best_quality`, `-bq` | `--speed best`, or `--preset best` |
+| `--best_quality`, `-bq` | `--effort best`, or `--preset best` |
 | `--scaling squared`, `-sc squared` | `--resize stretch` |
 | `--verbosity` | `-v`, `-vv` or `-q` |
 | `tgradish config showpath` | `tgradish config path` |

@@ -238,7 +238,7 @@ pub(crate) fn encode_args(
         Rate::Crf(crf) => push(&["-crf", &crf.to_string(), "-b:v", "0"]),
         Rate::Lossless => push(&["-lossless", "1"]),
     }
-    push(&["-deadline", "good", "-cpu-used", &plan.speed.cpu_used().to_string(), "-row-mt", "1"]);
+    push(&["-deadline", "good", "-cpu-used", &plan.effort.cpu_used().to_string(), "-row-mt", "1"]);
     if plan.watermark {
         // stored as WritingApp by ffmpeg's Matroska muxer
         push(&["-metadata", &format!("encoding_tool={}", crate::TOOL_ID)]);

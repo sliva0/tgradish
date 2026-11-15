@@ -6,7 +6,7 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use tgradish_core::options::{Fit, Speed};
+use tgradish_core::options::{Effort, Fit};
 
 use tgradish_core::input::Input;
 use tgradish_core::webm::{Options, Request, convert};
@@ -38,7 +38,7 @@ fn reads_names_that_look_like_urls_and_options() {
             assert!(starts.len() > 1, "{label}: {starts:?}");
             // a video sticker, beside it, and the frame at a time as a picture
             let options =
-                Options { fit: Some(Fit::Off), speed: Some(Speed::Fast), ..Options::default() };
+                Options { fit: Some(Fit::Off), effort: Some(Effort::Fast), ..Options::default() };
             let request =
                 Request { options, overwrite: true, ..Request::new(Input::File(input.clone())) };
             let made = convert(backend, &request, &cancel, &mut |_| {});

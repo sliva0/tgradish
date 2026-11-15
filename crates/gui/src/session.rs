@@ -906,6 +906,25 @@ mod tests {
         assert!(!json.contains('_'), "{json}");
     }
 
+    /// Options renamed since a session was kept read by their old names.
+    #[test]
+    fn reads_options_by_their_old_names() {
+        use tgradish_core::options::Effort;
+        let mut item = Item::new(1, vec![PathBuf::from("/a.png")], false, Target::Sticker);
+        item.choices.webm.effort = Some(Effort::Best);
+        item.choices.tgs.effort = Some(Effort::Fast);
+        let json = session(&[item], None).to_json().unwrap();
+        let old = json.replace("\"effort\":", "\"speed\":");
+        assert_eq!(old.matches("\"speed\":").count(), 2, "{old}");
+        let (read, unread) = parse(&old).unwrap();
+        assert_eq!(unread, 0);
+        let choices = &read.items[0].choices;
+        assert_eq!(
+            (choices.webm.effort, choices.tgs.effort),
+            (Some(Effort::Best), Some(Effort::Fast))
+        );
+    }
+
     #[test]
     fn names_results_by_their_recipes_alone() {
         let mut item = Item::new(1, vec![PathBuf::from("/a.png")], false, Target::Sticker);

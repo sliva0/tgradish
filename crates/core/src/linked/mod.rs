@@ -350,7 +350,7 @@ impl Encoder {
         // the ffmpeg command line does this too; the library default is one thread
         options.set("threads", "auto");
         options.set("deadline", "good");
-        options.set("cpu-used", &plan.speed.cpu_used().to_string());
+        options.set("cpu-used", &plan.effort.cpu_used().to_string());
         options.set("row-mt", "1");
         match params.rate {
             Rate::Bitrate(kbps) => encoder.set_bit_rate((kbps * 1000.0).round() as usize),

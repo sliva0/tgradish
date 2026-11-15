@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn reads_back_what_converting_drew() {
-        use crate::options::{Crop, Resize, Speed};
+        use crate::options::{Crop, Effort, Resize};
         use crate::tgs::{Options, Request, convert};
         let dir = tempfile::tempdir().unwrap();
         let mut read = 0;
@@ -94,7 +94,7 @@ mod tests {
             for (index, options) in options.into_iter().enumerate() {
                 let request = Request {
                     output: Some(dir.path().join(format!("{}.{index}.tgs", file.name))),
-                    options: Options { speed: Some(Speed::Fast), ..options },
+                    options: Options { effort: Some(Effort::Fast), ..options },
                     overwrite: true,
                     ..Request::new(crate::input::Input::File(input.clone()))
                 };
