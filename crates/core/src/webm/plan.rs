@@ -133,6 +133,58 @@ pub fn read_from(start: f64, previous: f64) -> f64 {
     start - ((start - previous) / 4.0).min(1e-3)
 }
 
+/// How near where a frame starts or ends a cut is taken as there, in
+/// seconds, as normalising takes it for `.tgs` stickers (see
+/// [`tgradish_tgs::normalise::CUT_LEEWAY`]), at most a quarter of the
+/// frames on either side (see [`edge_leeway`]).
+pub const CUT_LEEWAY: f64 = tgradish_tgs::normalise::CUT_LEEWAY.as_secs_f64();
+
+/// How near `times[index]` a cut is taken as there, where `times` are
+/// where frames start, in order, and maybe then where the last ends:
+/// [`CUT_LEEWAY`], or a quarter of the frames on either side where less.
+pub fn edge_leeway(times: &[f64], index: usize) -> f64 {
+    let before = index.checked_sub(1).map(|before| times[index] - times[before]);
+    let after = times.get(index + 1).map(|after| after - times[index]);
+    before.into_iter().chain(after).fold(CUT_LEEWAY, |leeway, frame| leeway.min(frame / 4.0))
+}
+
+/// Which of `times`, where frames start, in order, and maybe then where
+/// the last ends, `time` is within [`edge_leeway`] of: the one a cut at
+/// `time` is meant for, written with fewer digits or rounded on its way.
+pub fn frame_edge(time: f64, times: &[f64]) -> Option<usize> {
+    let after = times.partition_point(|&edge| edge < time);
+    [after.checked_sub(1), Some(after)]
+        .into_iter()
+        .flatten()
+        .filter(|&index| index < times.len())
+        .filter(|&index| (time - times[index]).abs() <= edge_leeway(times, index))
+        .min_by(|&a, &b| (time - times[a]).abs().total_cmp(&(time - times[b]).abs()))
+}
+
+/// `options` for frames drawn for ffmpeg, which start at `times`, in
+/// order, then end where the last ends, as converting keeps the frames a
+/// cut near where they start or end is meant for: a start within
+/// [`edge_leeway`] of where a frame starts is read from a hair before it,
+/// as [`read_from`] says, and a length that ends within it of where a frame
+/// ends counts the frames up to there. Cuts elsewhere are kept as they are.
+pub fn drawn_cut(options: &super::Options, times: &[f64]) -> super::Options {
+    let mut cut = options.clone();
+    let Some(last) = times.len().checked_sub(1).filter(|&last| last > 0) else { return cut };
+    let asked = options.start.unwrap_or(0.0);
+    let first = frame_edge(asked, times).filter(|&first| first < last);
+    if let Some(first) = first {
+        let from = if first == 0 { 0.0 } else { read_from(times[first], times[first - 1]) };
+        cut.start = options.start.map(|_| from);
+    }
+    let from = first.map_or(asked, |first| times[first]);
+    if let Some(length) = options.length
+        && let Some(end) = frame_edge(asked + length, times).filter(|&end| times[end] > from)
+    {
+        cut.length = Some(times[end] - from);
+    }
+    cut
+}
+
 /// What fitting searches where no range is asked for, for a result of
 /// `fps` frames a second, `length` seconds long: bitrates from what still
 /// makes a picture to far past any sticker, libvpx's CRF short of its
@@ -500,6 +552,59 @@ mod tests {
         let tiny = Options { fit: Some(Fit::Length), length: Some(0.04), ..Default::default() };
         let (plan, _) = plan_with(tiny).unwrap();
         assert!(plan.fit_range.min <= plan.fit_range.max);
+    }
+
+    #[test]
+    fn cuts_drawn_frames_where_a_time_near_them_is_meant() {
+        // frames of a third of a second, 33 ms, a sixtieth and others
+        let durations = [1.0 / 3.0, 0.033, 1.0 / 60.0, 1.0 / 60.0, 0.1, 1.0 / 12.0, 0.007];
+        let mut times = vec![0.0];
+        for duration in durations {
+            times.push(times.last().unwrap() + duration);
+        }
+        let last = durations.len();
+        // as a number with `digits` decimals reads back
+        let written =
+            |seconds: f64, digits: usize| -> f64 { format!("{seconds:.digits$}").parse().unwrap() };
+        for first in 0..last {
+            for after in first + 1..=last {
+                for digits in [5, 6, 9, 17] {
+                    let options = Options {
+                        start: (first > 0).then(|| written(times[first], digits)),
+                        length: (after < last)
+                            .then(|| written(times[after] - times[first], digits)),
+                        ..Options::default()
+                    };
+                    let cut = drawn_cut(&options, &times);
+                    let what = format!("{first}..{after} with {digits} digits: {cut:?}");
+                    match first {
+                        0 => assert_eq!(cut.start, None, "{what}"),
+                        _ => {
+                            let from = read_from(times[first], times[first - 1]);
+                            assert!((cut.start.unwrap() - from).abs() < 1e-12, "{what}");
+                        }
+                    }
+                    if let Some(length) = cut.length {
+                        let frames = times[after] - times[first];
+                        assert!((length - frames).abs() < 1e-12, "{what}");
+                    }
+                }
+            }
+        }
+        // a cut into a frame is as asked, and so is what isn't drawn
+        let into = Options { start: Some(0.2), length: Some(0.15), ..Options::default() };
+        assert_eq!(drawn_cut(&into, &times), into);
+        let exact = Options { start: Some(times[1]), ..Options::default() };
+        assert_eq!(drawn_cut(&exact, &[]), exact);
+        // which edge is the nearest, within a quarter of the frames beside
+        assert_eq!(frame_edge(0.36633, &times), Some(2));
+        assert_eq!(frame_edge(0.3, &times), None);
+        assert_eq!(frame_edge(-0.00001, &times), Some(0));
+        assert_eq!(frame_edge(times[last] + 0.00002, &times), Some(last));
+        let short = [0.0, 0.1, 0.1002, 0.2];
+        assert!((edge_leeway(&short, 1) - 0.00005).abs() < 1e-12);
+        assert_eq!(edge_leeway(&short, 0), CUT_LEEWAY);
+        assert_eq!(frame_edge(0.10006, &short), None);
     }
 
     #[test]

@@ -571,7 +571,7 @@ impl Keys {
                 if moves {
                     let at =
                         step(frames.at(item.choices.frame.unwrap_or(0.0)), 0, frames.count() - 1);
-                    item.choices.frame = (at > 0).then_some(frames.times[at]);
+                    item.choices.frame = frames.start_of(at);
                 }
             }
             Show::Input => {

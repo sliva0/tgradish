@@ -141,17 +141,21 @@ pub fn picture_options(options: &Options) -> Options {
     table.try_into().expect("options read back with fewer set")
 }
 
-/// Where to start reading for the frame that shows at `time`. `starts`
-/// are where frames start, in order; without them, frames come every
-/// `1 / fps` seconds.
+/// Where to start reading for the frame that shows at `time`, or that
+/// starts within [`webm::edge_leeway`] after it, as a time written with a
+/// few digits is meant. `starts` are where frames start, in order; without
+/// them, frames come every `1 / fps` seconds.
 pub fn frame_start(time: f64, starts: &[f64], fps: f64) -> f64 {
     let (start, previous) = if starts.is_empty() {
-        let index = (time * fps + 1e-6).floor();
+        let nearest = (time * fps).round();
+        let on_edge = (time - nearest / fps).abs() <= webm::CUT_LEEWAY.min(0.25 / fps);
+        let index = if on_edge { nearest } else { (time * fps).floor() };
         (index / fps, (index - 1.0) / fps)
     } else {
-        match starts.partition_point(|&start| start <= time + 1e-6) {
-            0 | 1 => return 0.0,
-            after => (starts[after - 1], starts[after - 2]),
+        let shown = starts.partition_point(|&start| start <= time).saturating_sub(1);
+        match webm::frame_edge(time, starts).unwrap_or(shown) {
+            0 => return 0.0,
+            index => (starts[index], starts[index - 1]),
         }
     };
     if start <= 0.0 { 0.0 } else { webm::read_from(start, previous) }
@@ -258,8 +262,15 @@ mod tests {
         assert_eq!(frame_start(0.0, &[], 10.0), 0.0);
         assert_eq!(frame_start(0.05, &[], 10.0), 0.0);
         assert!(close(frame_start(0.25, &[], 10.0), 0.199));
-        // on a frame's start, which float error leaves a hair short of
+        // on a frame's start, which float error or few digits leave a
+        // hair short of
         assert!(close(frame_start(0.3 - 1e-9, &[], 10.0), 0.299));
+        assert!(close(frame_start(0.29996, &[], 10.0), 0.299));
+        assert!(close(frame_start(0.2998, &[], 10.0), 0.199));
+        let thirds = [0.0, 1.0 / 3.0, 2.0 / 3.0];
+        assert!(close(frame_start(0.33333, &thirds, 3.0), 1.0 / 3.0 - 1e-3));
+        assert!(close(frame_start(0.33333, &[], 3.0), 1.0 / 3.0 - 1e-3));
+        assert!(close(frame_start(0.3332, &thirds, 3.0), 0.0));
         // where frames start: the first, and short and long frames
         let starts = [0.0, 0.1, 0.1002, 0.7];
         assert_eq!(frame_start(0.05, &starts, 10.0), 0.0);

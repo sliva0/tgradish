@@ -372,13 +372,15 @@ impl Video {
         Video { probe, overview, starts, readable, complete: true, frames: None }.timed()
     }
 
-    /// With [`Video::frames`] worked out.
+    /// With [`Video::frames`] worked out: cut as pixel art where it was
+    /// drawn for ffmpeg, as converting cuts it where its frames are.
     fn timed(mut self) -> Video {
         let length = self.probe.duration.filter(|_| !self.probe.still_image);
+        let cut = if self.readable.is_drawn() { Cut::Art } else { Cut::Video };
         let frames = length.and_then(|length| {
-            cuts::Frames::starting(&self.starts, length, Cut::Video).or_else(|| {
+            cuts::Frames::starting(&self.starts, length, cut).or_else(|| {
                 let fps = self.probe.fps.or(self.probe.base_fps)?;
-                cuts::Frames::even(length, fps, Cut::Video)
+                cuts::Frames::even(length, fps, cut)
             })
         });
         self.frames = frames.map(Arc::new);

@@ -19,7 +19,7 @@ use crate::error::{Error, FileAction, Result};
 use crate::ffmpeg::Probe;
 use crate::input::{FileKind, Input, sniff};
 use crate::tgs::DEFAULT_FPS;
-use crate::webm::Options;
+use crate::webm::{self, Options};
 
 /// An input as ffmpeg reads it: the file itself, or pixel art drawn into a
 /// temporary PNG, which lasts as long as this does.
@@ -34,6 +34,9 @@ pub struct Readable {
     /// How long a sequence plays, in seconds, its frame rate and its base
     /// frame rate (see [`sequence_timing`]).
     sequence: Option<(f64, f64, f64)>,
+    /// Where the frames drawn start, in seconds, then where the last ends:
+    /// none for a still picture, or what isn't drawn.
+    times: Vec<f64>,
 }
 
 impl Readable {
@@ -87,6 +90,13 @@ impl Readable {
     /// Whether it is pixel art, drawn.
     pub fn is_drawn(&self) -> bool {
         self.dir.is_some()
+    }
+
+    /// `options` with their start and length as ffmpeg reads the frames
+    /// drawn, from a cut near where they start or end, written with a few
+    /// digits, as the frames it is meant for (see [`webm::drawn_cut`]).
+    pub fn cut(&self, options: &Options) -> Options {
+        webm::drawn_cut(options, &self.times)
     }
 
     /// The frames drawn, each lasting its own time, and whether they are a
@@ -170,7 +180,8 @@ pub fn readable(input: &Input, options: &Options, cancel: &CancelToken) -> Resul
         }
         Input::File(path) => {
             let (path, aseprite) = (path.clone(), Aseprite::default());
-            return Ok(Readable { path, dir: None, aseprite, drawn: None, sequence: None });
+            let times = Vec::new();
+            return Ok(Readable { path, dir: None, aseprite, drawn: None, sequence: None, times });
         }
     };
     cancel.check()?;
@@ -186,8 +197,17 @@ pub fn readable(input: &Input, options: &Options, cancel: &CancelToken) -> Resul
     write_png(&path, &animation, animated)
         .map_err(|err| Error::io(FileAction::Write, &path)(std::io::Error::other(err)))?;
     let rate = sequence.then(|| sequence_timing(&animation, options.fps.unwrap_or(DEFAULT_FPS)));
+    let mut times = Vec::new();
+    if animated {
+        let mut at = std::time::Duration::ZERO;
+        times.push(0.0);
+        for frame in animation.frames() {
+            at = at.saturating_add(frame.duration);
+            times.push(at.as_secs_f64());
+        }
+    }
     let drawn = Some((animation, !animated));
-    Ok(Readable { path, dir: Some(dir), aseprite, drawn, sequence: rate })
+    Ok(Readable { path, dir: Some(dir), aseprite, drawn, sequence: rate, times })
 }
 
 /// How long a sequence of `animation`'s frames plays, in seconds, its

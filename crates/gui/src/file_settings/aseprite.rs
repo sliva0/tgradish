@@ -107,14 +107,13 @@ pub(super) fn aseprite(ui: &mut egui::Ui, item: &mut Item) {
 }
 
 /// The frames of an Aseprite file that shows each for `durations`, as the
-/// timeline cuts them for `format`: drawn for ffmpeg, as a video's.
-fn frames_of(durations: &[f64], format: Format) -> Option<Frames> {
+/// timeline cuts them, whatever they are made into.
+fn frames_of(durations: &[f64]) -> Option<Frames> {
     let mut times = vec![0.0];
     for duration in durations {
         times.push(times.last().unwrap() + duration);
     }
-    let cut = if format == Format::Tgs { Cut::Art } else { Cut::Video };
-    (times.len() >= 2).then_some(Frames { times, cut })
+    (times.len() >= 2).then_some(Frames { times, cut: Cut::Art })
 }
 
 /// How high a layer's row is, less the space between them.
@@ -134,7 +133,7 @@ fn tag_row(
     durations: &[f64],
     format: Format,
 ) {
-    let Some(frames) = frames_of(durations, format) else { return };
+    let Some(frames) = frames_of(durations) else { return };
     let total = frames.times[frames.count()];
     let count = frames.count();
     // as boundaries: its first frame and the one after its last
@@ -180,7 +179,7 @@ fn tag_row(
                 false => {
                     choices.tag = None;
                     match picture {
-                        true => choices.frame = (from > 0).then_some(frames.times[from]),
+                        true => choices.frame = frames.start_of(from),
                         false => {
                             frames.set_part((from, after), &mut choices.start, &mut choices.length)
                         }
@@ -352,16 +351,17 @@ mod tests {
             toggled == Some(egui::accesskit::Toggled::True)
         };
         for format in [Format::Webm, Format::Tgs] {
-            // written as the timeline writes the frames, so converting keeps
-            // them, and still picked once the timeline writes them again
+            // written as the timeline writes the frames, where they start
+            // and end, and still picked once the timeline writes them again
             let mut harness = run(Choices::new(Target::Sticker), format);
             harness.get_by_label("walk").click();
             harness.run_steps(2);
-            let frames = frames_of(&durations, format).unwrap();
+            let frames = frames_of(&durations).unwrap();
             let (mut start, mut length) = (None, None);
             frames.set_part((2, 6), &mut start, &mut length);
             let choices = harness.state();
             assert_eq!((choices.start, choices.length), (start, length), "{format:?}");
+            assert_eq!((start, length), (Some(0.2), Some(0.4)));
             assert_eq!(frames.part(0.8, start, length), (2, 6));
             assert!(picked(&harness, "walk") && !picked(&harness, "idle"));
         }
@@ -369,9 +369,135 @@ mod tests {
         let mut harness = run(Choices::new(Target::Sticker), Format::Webp);
         harness.get_by_label("walk").click();
         harness.run_steps(2);
-        let frames = frames_of(&durations, Format::Webp).unwrap();
-        assert_eq!(harness.state().frame, Some(frames.times[2]));
+        assert_eq!(harness.state().frame, Some(0.2));
         assert!(picked(&harness, "walk"));
+    }
+
+    #[test]
+    fn a_tag_picked_is_converted_as_its_flags_say() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        use std::time::Duration;
+        use tgradish_core::input::Input;
+        use tgradish_core::options::flags;
+        use tgradish_core::tgradish_tgs::frames::Animation;
+        use tgradish_core::webm::{self, read_from};
+
+        // frames of awkward lengths, each its own colour, in an Aseprite
+        // file with tags over them
+        let delays = [33, 17, 33, 100, 7, 250, 16, 17, 80];
+        let colours: Vec<[u8; 4]> = (0..delays.len()).map(|i| [10 + i as u8, 0, 0, 255]).collect();
+        let frames = colours
+            .iter()
+            .map(|&colour| {
+                let mut canvas = tgradish_corpus::Canvas::new(4, 4);
+                canvas.rect(0, 0, 4, 4, colour);
+                canvas
+            })
+            .collect();
+        let sprite = tgradish_corpus::Sprite {
+            name: "awkward",
+            about: "frames of awkward lengths",
+            frames,
+            delays: delays.to_vec(),
+            scale: 1,
+            likely_scale: None,
+        };
+        let spans = [("a", 0, 0), ("b", 1, 3), ("c", 2, 6), ("d", 4, 4), ("e", 5, 8), ("f", 0, 7)];
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("awkward.ase");
+        std::fs::write(&path, tgradish_corpus::encode::aseprite(&sprite, &spans)).unwrap();
+        let options = webm::Options::default();
+        let cancel = tgradish_core::CancelToken::new();
+        let mut readable =
+            tgradish_core::drawn::readable(&Input::File(path), &options, &cancel).unwrap();
+        let (tags, durations) = (readable.tags().to_vec(), readable.durations().to_vec());
+        let (animation, _) = readable.take_drawn().unwrap();
+        // which frames a .tgs normalised from `start` for `length` keeps
+        let normalised = |start: Duration, length: Option<Duration>| {
+            let mut normalise = tgradish_core::tgs::Options::default().sticker_options().unwrap();
+            (normalise.normalise.start, normalise.normalise.length) = (start, length);
+            let normalise = normalise.normalise;
+            let (kept, report) =
+                tgradish_core::tgradish_tgs::normalise(Animation::clone(&animation), &normalise)
+                    .unwrap();
+            let frames: Vec<_> = kept
+                .frames()
+                .iter()
+                .map(|frame| (kept.palette()[usize::from(frame.pixels[0])], frame.ticks))
+                .collect();
+            (frames, report.dropped_frames)
+        };
+        let ms = |count: u32| f64::from(count) / 1000.0;
+        for format in [Format::Tgs, Format::Webm, Format::Webp] {
+            for (name, from, to) in spans {
+                let mut harness = Harness::new_ui_state(
+                    |ui, choices: &mut Choices| tag_row(ui, choices, &tags, &durations, format),
+                    Choices::new(Target::Sticker),
+                );
+                harness.run_steps(2);
+                harness.get_by_label(name).click();
+                harness.run_steps(2);
+                let choices = harness.state().clone();
+                let what = format!("{format:?} {name}: {choices:?}");
+                let (from, after) = (usize::from(from), usize::from(to) + 1);
+                let start_ms: u32 = delays[..from].iter().sum();
+                let length_ms: u32 = delays[from..after].iter().sum();
+                // the flags of the command line, read back as it reads them
+                let shown = flags(&tgradish_core::tgs::Options {
+                    start: choices.start.or(choices.frame),
+                    length: choices.length,
+                    ..Default::default()
+                });
+                let read = |name: &str| -> Option<f64> {
+                    let text = shown.iter().find_map(|flag| flag.strip_prefix(name))?;
+                    Some(text.parse().unwrap())
+                };
+                let (start, length) = (read("--start="), read("--length="));
+                // whole milliseconds, as the file times them
+                let mut expected = Vec::new();
+                if from > 0 {
+                    expected.push(format!("--start={}", ms(start_ms)));
+                }
+                if after < delays.len() && format != Format::Webp {
+                    expected.push(format!("--length={}", ms(length_ms)));
+                }
+                assert_eq!(shown, expected, "{what}");
+                let times: Vec<f64> =
+                    (0..=delays.len()).map(|i| ms(delays[..i].iter().sum())).collect();
+                match format {
+                    // the tag's frames, as if cut at them exactly
+                    Format::Tgs => {
+                        let exactly = |ms: u32| Duration::from_millis(u64::from(ms));
+                        let tag = normalised(exactly(start_ms), Some(exactly(length_ms)));
+                        let seconds = |value: Option<f64>| value.map(Duration::from_secs_f64);
+                        let cut = normalised(seconds(start).unwrap_or_default(), seconds(length));
+                        assert_eq!(cut, tag, "{what}");
+                        let kept: Vec<[u8; 4]> = cut.0.iter().map(|&(colour, _)| colour).collect();
+                        assert!(kept.iter().all(|colour| colours[from..after].contains(colour)));
+                    }
+                    // read from a hair before the first, for the frames' length
+                    Format::Webm => {
+                        let cut = readable.cut(&webm::Options { start, length, ..options.clone() });
+                        let first = (from > 0).then(|| read_from(times[from], times[from - 1]));
+                        assert_eq!(cut.start.is_some(), first.is_some(), "{what}");
+                        let near = |a: f64, b: f64| (a - b).abs() < 1e-12;
+                        assert!(cut.start.zip(first).is_none_or(|(a, b)| near(a, b)), "{what}");
+                        let frames = times[after] - times[from];
+                        assert!(cut.length.is_none_or(|cut| near(cut, frames)), "{what}");
+                    }
+                    // the tag's first frame
+                    Format::Webp => {
+                        let starts = &times[..delays.len()];
+                        let at =
+                            tgradish_core::webp::frame_start(start.unwrap_or(0.0), starts, 25.0);
+                        let first =
+                            if from > 0 { read_from(times[from], times[from - 1]) } else { 0.0 };
+                        assert!((at - first).abs() < 1e-12, "{what}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

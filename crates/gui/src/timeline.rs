@@ -614,7 +614,7 @@ pub(crate) fn frame_picker(
         });
         if let Some(picked) = picked {
             index = picked;
-            *frame = (picked > 0).then_some(frames.times[picked]);
+            *frame = frames.start_of(picked);
         }
         if !alone {
             unit(ui, in_frames, true, unit_room);

@@ -23,6 +23,13 @@ const NANOS: u64 = 1_000_000_000;
 /// than 3 seconds as fast as fits it into them, which for one longer than
 /// 30 seconds is faster than may be asked for.
 pub const TEMPOS: std::ops::RangeInclusive<f64> = 0.1..=10.0;
+/// How near where a frame starts or ends [`Options::start`] and the end of
+/// [`Options::length`] are taken as there, so that a time written with few
+/// digits, or rounded on its way, cuts between the frames meant rather
+/// than a hair into the one beside them: a tenth of a millisecond, a tenth
+/// of the shortest frame Aseprite, GIF or WebP times, and at most a quarter
+/// of the frames on either side.
+pub const CUT_LEEWAY: Duration = Duration::from_micros(100);
 /// Longest stretch Telegram allows, in nanoseconds.
 const MAX_NANOS: u64 = MAX_FRAMES as u64 * NANOS / FPS as u64;
 /// Largest pixel scale looked for when the art isn't exactly on a grid.
@@ -56,9 +63,11 @@ pub struct Options {
     /// Size of one art pixel in input pixels. Detected when not given;
     /// forcing one moves pixels that are off its grid onto it (lossy).
     pub pixel_scale: Option<u32>,
-    /// Where in the input to start.
+    /// Where in the input to start; within [`CUT_LEEWAY`] of where a frame
+    /// starts, there.
     pub start: Duration,
-    /// How much of the input to use, from `start`.
+    /// How much of the input to use, from `start`; ending within
+    /// [`CUT_LEEWAY`] of where a frame ends, there.
     pub length: Option<Duration>,
     /// How many times as fast as the input it plays. When `None`, inputs
     /// longer than 3 seconds play as fast as fits them in. Whatever still
@@ -284,6 +293,29 @@ fn nanos(duration: Duration) -> u64 {
     u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
 }
 
+/// `at`, or where one of frames lasting `durations` starts, or with `ends`
+/// where one ends, if `at` is within [`CUT_LEEWAY`] of it, and of a
+/// quarter of the frames on either side; all in nanoseconds.
+fn on_edge(at: u64, durations: &[u64], ends: bool) -> u64 {
+    let leeway = nanos(CUT_LEEWAY);
+    let mut edge = 0u64;
+    for index in 0..=durations.len() {
+        if edge > at.saturating_add(leeway) {
+            break;
+        }
+        let before = index.checked_sub(1).map(|before| durations[before]);
+        let after = durations.get(index).copied();
+        // a start is where a frame starts, an end where one ends
+        let side = if ends { before } else { after };
+        let reach = before.into_iter().chain(after).min().unwrap_or(0) / 4;
+        if side.is_some() && at.abs_diff(edge) <= leeway.min(reach) {
+            return edge;
+        }
+        edge = edge.saturating_add(after.unwrap_or(0));
+    }
+    at
+}
+
 /// Packs each pixel of `area`, in RGBA `width` pixels wide, into a `u32`
 /// with every fully transparent pixel as 0.
 fn pack(rgba: &[u8], width: u32, area: Rect) -> Vec<u32> {
@@ -378,14 +410,18 @@ pub fn normalise(animation: Animation, options: &Options) -> Result<(PixelAnim, 
         animation.frames().iter().map(|frame| nanos(frame.duration)).collect();
     let input_length =
         durations.iter().fold(0u64, |total, &duration| total.saturating_add(duration));
-    let start = nanos(options.start);
+    let asked = nanos(options.start);
+    let start = on_edge(asked, &durations, false);
     if start >= input_length {
         let length = Duration::from_nanos(input_length);
         return Err(Error::StartPastEnd { start: options.start, length });
     }
     let end = match options.length {
         Some(length) if length.is_zero() => return Err(Error::ZeroLength),
-        Some(length) => start.saturating_add(nanos(length)).min(input_length),
+        Some(length) => {
+            let end = asked.saturating_add(nanos(length)).min(input_length);
+            Some(on_edge(end, &durations, true)).filter(|&edge| edge > start).unwrap_or(end)
+        }
         None => input_length,
     };
     let (input_width, input_height) = (animation.width(), animation.height());
@@ -985,6 +1021,54 @@ mod tests {
         assert!(matches!(normalise(input.clone(), &late), Err(Error::StartPastEnd { .. })));
         let empty = Options { length: Some(Duration::ZERO), ..Options::default() };
         assert_eq!(normalise(input.clone(), &empty), Err(Error::ZeroLength));
+    }
+
+    #[test]
+    fn cuts_between_frames_a_time_near_them_is_meant_for() {
+        // a third of a second each, as a frame folder at 3 fps times them
+        let third = Duration::from_secs_f64(1.0 / 3.0);
+        let input = flat(&[(RED, third), (GREEN, third), (BLUE, third)]);
+        let used = |start: f64, length: f64| {
+            let window = Options {
+                start: Duration::from_secs_f64(start),
+                length: Some(Duration::from_secs_f64(length)),
+                ..Options::default()
+            };
+            let (anim, _) = normalise(input.clone(), &window).unwrap();
+            let colours =
+                anim.frames().iter().map(|frame| anim.palette()[frame.pixels[0] as usize]);
+            (colours.collect::<Vec<_>>(), anim.ticks())
+        };
+        // the second frame alone, whole, however its times were written
+        for (start, length) in [
+            (1.0 / 3.0, 1.0 / 3.0),
+            (0.333333, 0.333333),
+            (0.33333, 0.33334),
+            (0.3334, 0.3332),
+            // as the GUI once wrote them, a hair inside
+            (1.0 / 3.0 + 1e-6, 1.0 / 3.0 - 2e-6),
+        ] {
+            assert_eq!(used(start, length), (vec![GREEN], 20), "{start} {length}");
+        }
+        // and the first two, from the start
+        assert_eq!(used(0.00004, 0.66663), (vec![RED, GREEN], 40));
+        // further off is a cut into a frame, as asked
+        assert_eq!(used(0.3, 0.4).0, [RED, GREEN, BLUE]);
+
+        // no more than a quarter of the frames beside a cut
+        let short = flat(&[(RED, ms(100)), (GREEN, Duration::from_micros(200)), (BLUE, ms(100))]);
+        let near = |at: u64, ends| {
+            let durations: Vec<u64> = short.frames().iter().map(|f| nanos(f.duration)).collect();
+            on_edge(at, &durations, ends)
+        };
+        assert_eq!(near(100_040_000, false), 100_000_000);
+        assert_eq!(near(99_960_000, true), 100_000_000);
+        assert_eq!(near(100_060_000, false), 100_060_000);
+        assert_eq!(near(99_920_000, false), 99_920_000);
+        // the end is no frame's start, nor the start any frame's end
+        assert_eq!(near(200_200_000 - 50_000, false), 200_150_000);
+        assert_eq!(near(30_000, true), 30_000);
+        assert_eq!(near(30_000, false), 0);
     }
 
     #[test]
