@@ -7,7 +7,7 @@
 //! client, so this one takes nothing from the clipboard's.
 
 use std::collections::HashMap;
-use std::io::Read;
+use std::io::{PipeReader, PipeWriter, Read, Write};
 use std::os::fd::AsFd;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -41,6 +41,8 @@ pub(crate) struct Drops {
     /// Tells the worker to stop, which it must before winit closes its
     /// connection.
     stop: Arc<AtomicBool>,
+    /// Wakes the worker from waiting for events, to see it should stop.
+    wake: PipeWriter,
     worker: Option<JoinHandle<()>>,
 }
 
@@ -63,6 +65,7 @@ impl Drops {
         let device = manager.get_data_device(&seat, &handle, ());
         let (sender, receiver) = channel();
         let stop = Arc::new(AtomicBool::new(false));
+        let (woken, wake) = std::io::pipe().ok()?;
         let mut state = State {
             connection,
             sender,
@@ -75,9 +78,9 @@ impl Drops {
         let stopped = stop.clone();
         let worker = std::thread::Builder::new()
             .name("drag and drop".into())
-            .spawn(move || listen(&mut queue, &mut state, &stopped))
+            .spawn(move || listen(&mut queue, &mut state, &stopped, &woken))
             .ok()?;
-        Some(Drops { receiver, stop, worker: Some(worker) })
+        Some(Drops { receiver, stop, wake, worker: Some(worker) })
     }
 
     pub(crate) fn poll(&self) -> Vec<Dropped> {
@@ -88,6 +91,7 @@ impl Drops {
     pub(crate) fn stop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(worker) = self.worker.take() {
+            let _ = self.wake.write(&[0]);
             let _ = worker.join();
         }
     }
@@ -99,7 +103,8 @@ impl Drop for Drops {
     }
 }
 
-/// How long the worker waits for events before looking whether to stop.
+/// How long reading a drop waits for its source before looking whether
+/// to stop.
 const WAKE: rustix::time::Timespec = rustix::time::Timespec { tv_sec: 0, tv_nsec: 100_000_000 };
 
 /// How many [`WAKE`]s a drop's source may stay silent before reading its
@@ -107,8 +112,9 @@ const WAKE: rustix::time::Timespec = rustix::time::Timespec { tv_sec: 0, tv_nsec
 const SILENCE: u32 = 50;
 
 /// Dispatches events until told to stop or the connection breaks. Waits
-/// with a timeout rather than blocking, so it notices the stop.
-fn listen(queue: &mut EventQueue<State>, state: &mut State, stop: &AtomicBool) {
+/// for events or for a byte from `woken`, which comes with the stop,
+/// rather than waking now and then to look for it.
+fn listen(queue: &mut EventQueue<State>, state: &mut State, stop: &AtomicBool, woken: &PipeReader) {
     use rustix::event::{PollFd, PollFlags};
     while !stop.load(Ordering::Relaxed) {
         if queue.dispatch_pending(state).is_err() {
@@ -116,9 +122,14 @@ fn listen(queue: &mut EventQueue<State>, state: &mut State, stop: &AtomicBool) {
         }
         let _ = queue.flush();
         let Some(guard) = queue.prepare_read() else { continue };
-        let mut fds = [PollFd::from_borrowed_fd(guard.connection_fd(), PollFlags::IN)];
-        match rustix::event::poll(&mut fds, Some(&WAKE)) {
-            Ok(0) | Err(rustix::io::Errno::INTR) => drop(guard),
+        let mut fds = [
+            PollFd::from_borrowed_fd(guard.connection_fd(), PollFlags::IN),
+            PollFd::new(woken, PollFlags::IN),
+        ];
+        match rustix::event::poll(&mut fds, None) {
+            // woken, to stop
+            Ok(_) if fds[0].revents().is_empty() => drop(guard),
+            Err(rustix::io::Errno::INTR) => drop(guard),
             Ok(_) => match guard.read() {
                 Ok(_) => {}
                 // another thread read them first
