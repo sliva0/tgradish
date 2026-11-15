@@ -1,6 +1,6 @@
-//! RGBA animations with frame durations, and pure-Rust decoders for them:
-//! GIF, PNG and APNG, WebP, JPEG, BMP, Aseprite, sprite sheets and image
-//! sequences.
+//! Decodes animated and still images into RGBA frames with durations, in
+//! pure Rust: GIF, PNG and APNG, WebP, JPEG, BMP and Aseprite files, and
+//! animations put together from sprite sheets and image sequences.
 //!
 //! Builds for `wasm32-unknown-unknown`, so everything works on bytes: no
 //! filesystem, processes or threads. What decoding may allocate is bounded

@@ -1,5 +1,6 @@
-//! Telegram animated stickers (`.tgs`, gzipped Lottie JSON) from pixel art
-//! animations: the art is read on its own pixel grid ([`normalise()`]),
+//! Turns pixel art animations into Telegram animated stickers (`.tgs`,
+//! gzipped Lottie JSON), checks `.tgs` files, and previews its own. The
+//! art is read on its own pixel grid ([`normalise()`]),
 //! drawn as rectangles in layers, reduced until it fits Telegram's 64 KiB
 //! when that is allowed ([`reduce`]), packed, and checked against
 //! Telegram's limits ([`check`]). [`make`] does all of it:
@@ -18,8 +19,10 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! What a sticker shows is drawn for previews by [`picture`], from the art
-//! it is made of or, the same, from the Lottie of a `.tgs` tgradish wrote.
+//! [`check`] checks any Lottie against Telegram's limits too, as a `.tgs`
+//! unpacks by [`file::unpack`]. What a sticker shows is drawn for previews
+//! by [`picture`], from the art it is made of or, the same, from the Lottie
+//! of a `.tgs` tgradish wrote.
 //!
 //! Pure Rust that builds for `wasm32-unknown-unknown`: no ffmpeg,
 //! processes, filesystem or `tgradish-core`. The `threads` feature tries

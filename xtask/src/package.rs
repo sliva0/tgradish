@@ -435,7 +435,7 @@ fn linux_packages(
          maintainer: {maintainer:?}\n\
          description: |-\n  \
            {SUMMARY}\n  \
-           Makes video (WebM) and image (WebP) stickers and custom emoji from any\n  \
+           Makes video (WebM) and static (WebP) stickers and custom emoji from any\n  \
            video or picture, and animated (TGS) stickers from pixel art, fitted to\n  \
            Telegram's limits. It has ffmpeg built in.\n\
          homepage: {homepage:?}\n\

@@ -1,8 +1,9 @@
 # tgradish-frames
 
-RGBA animations with frame durations, and pure-Rust decoders for them: GIF,
-PNG and APNG, WebP, JPEG, BMP, Aseprite files, sprite sheets and image
-sequences. It works on bytes alone, with no files, processes or threads, so
+Decodes animated and still images into RGBA frames with durations, in pure
+Rust: GIF, PNG and APNG, WebP, JPEG, BMP and Aseprite files, and
+animations put together from sprite sheets and image sequences. It works
+on bytes alone, with no files, processes or threads, so
 it builds for `wasm32-unknown-unknown`, and what decoding may allocate is
 bounded, so hostile files fail rather than exhaust memory.
 
