@@ -4,6 +4,8 @@
 
 use eframe::egui::{self, RichText, vec2};
 
+use tgradish_core::licenses::{Kind, Notice};
+
 use crate::l10n::fl;
 use crate::{icon, widgets};
 
@@ -37,10 +39,10 @@ pub(crate) fn about(ui: &mut egui::Ui) {
                 .clone()
         });
         for notice in notices.iter() {
-            egui::CollapsingHeader::new(&notice.title).id_salt(("notice", &notice.title)).show(
+            egui::CollapsingHeader::new(title(notice.kind)).id_salt(("notice", notice.kind)).show(
                 ui,
                 |ui| {
-                    if notice.title == tgradish_core::licenses::FFMPEG_SOURCES {
+                    if matches!(notice.kind, Kind::Sources { of: "ffmpeg" }) {
                         widgets::link(
                             ui,
                             fl!("ffmpeg-sources"),
@@ -86,30 +88,48 @@ pub(crate) fn about(ui: &mut egui::Ui) {
 }
 
 /// The licence notices of this build: tgradish's, its fonts', and those
-/// [`tgradish_core::licenses`] has.
-pub fn notices() -> Vec<tgradish_core::licenses::Notice> {
-    use tgradish_core::licenses::{CRATES, Notice};
+/// [`tgradish_core::licenses`] has. Their titles are in English, as the
+/// command line prints them; About words them in the GUI's language.
+pub fn notices() -> Vec<Notice> {
     let fonts = [
         (
-            "Font: Ubuntu Light and Medium derivative tgradish, subsets",
+            Kind::Font { name: "Ubuntu Light and Medium derivative tgradish", subsets: 2 },
             include_str!("../assets/fonts/Ubuntu-LICENCE.txt"),
         ),
         (
-            "Font: JetBrains Mono NL, a subset",
+            Kind::Font { name: "JetBrains Mono NL", subsets: 1 },
             include_str!("../assets/fonts/JetBrainsMono-OFL.txt"),
         ),
         (
-            "Font: emoji-icon-font, a subset",
+            Kind::Font { name: "emoji-icon-font", subsets: 1 },
             include_str!("../assets/fonts/emoji-icon-font-LICENSE.txt"),
         ),
     ];
     let mut notices = tgradish_core::licenses::notices();
     // before the long list of crates
-    let at = notices.iter().position(|notice| notice.title == CRATES).unwrap_or(notices.len());
-    for (offset, (title, text)) in fonts.into_iter().enumerate() {
-        notices.insert(at + offset, Notice::new(title, text));
+    let at = notices.iter().position(|notice| notice.kind == Kind::Crates).unwrap_or(notices.len());
+    for (offset, (kind, text)) in fonts.into_iter().enumerate() {
+        notices.insert(at + offset, Notice::new(kind, text));
     }
     notices
+}
+
+/// A notice's title in the GUI's language, the names in it as they are.
+pub(crate) fn title(kind: Kind) -> String {
+    match kind {
+        Kind::Tgradish => "tgradish".to_owned(),
+        Kind::Licence { of } => fl!("notice-licence", name = of),
+        Kind::NamedLicence { of, licence } => {
+            fl!("notice-named-licence", name = of, licence = licence)
+        }
+        Kind::LicenceNotes { of } => fl!("notice-licence-notes", name = of),
+        Kind::PatentGrant { of } => fl!("notice-patent-grant", name = of),
+        Kind::Sources { of } => fl!("notice-sources", name = of),
+        Kind::Crates => fl!("notice-crates"),
+        Kind::Font { name, subsets } => fl!("notice-font", name = name, subsets = subsets),
+        // a kind core has gained since, in English until the GUI words it
+        _ => kind.to_string(),
+    }
 }
 
 /// A licence's section named after the crates it covers, as many as
@@ -120,9 +140,13 @@ fn licence_title(licence: &str, head: &str) -> String {
         head.lines().skip(1).filter_map(|line| line.split_whitespace().next()).collect();
     match crates.as_slice() {
         [] => licence.to_owned(),
-        [_] | [_, _] | [_, _, _] => format!("{licence}: {}", crates.join(", ")),
+        [_] | [_, _] | [_, _, _] => {
+            fl!("notice-crates-licence", licence = licence, crates = crates.join(", "))
+        }
         [first @ .., _] => {
-            format!("{licence}: {} and {} more", first[..3].join(", "), crates.len() - 3)
+            let more = crates.len() - 3;
+            let crates = first[..3].join(", ");
+            fl!("notice-crates-licence", "more", licence = licence, crates = crates, more = more)
         }
     }
 }
@@ -194,6 +218,29 @@ mod tests {
         assert_eq!(licence_title("MIT License", head), "MIT License: anyhow, arboard");
         let many = "MIT License, used by:\n  a 1\n  b 1\n  c 1\n  d 1\n  e 1";
         assert_eq!(licence_title("MIT License", many), "MIT License: a, b, c and 2 more");
+    }
+
+    /// Every notice's title, and each section's of the crates' licences,
+    /// is worded by a message, as the GUI's other words are; tgradish's
+    /// alone is just its name. In English, each reads as the command line
+    /// prints it.
+    #[test]
+    fn words_every_notices_title_by_a_message() {
+        use crate::l10n::record;
+        let notices = notices();
+        for notice in &notices {
+            record::start();
+            let title = title(notice.kind);
+            assert_eq!(record::take().is_empty(), notice.kind == Kind::Tgradish, "{title}");
+            assert_eq!(title, notice.title());
+        }
+        let crates = notices.iter().find(|notice| notice.kind == Kind::Crates).unwrap();
+        let rule = format!("\n{}\n", "-".repeat(80));
+        let head = crates.text.split(rule.as_str()).nth(1).unwrap().split("\n\n").next().unwrap();
+        let name = head.lines().next().unwrap().trim_end_matches(", used by:");
+        record::start();
+        licence_title(name, head);
+        assert_eq!(record::take().len(), 1);
     }
 
     #[test]

@@ -3,25 +3,47 @@
 //! ffmpeg's and its libraries'. Packed into the binary (see `build.rs`), so
 //! it carries them wherever it is copied.
 
+use std::fmt;
 use std::io::Read;
 
-include!("notice_titles.rs");
+include!("notices.rs");
 
 /// One licence notice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Notice {
     /// What it is the licence of.
-    pub title: String,
+    pub kind: Kind,
     /// The licence, as its authors wrote it.
     pub text: String,
 }
 
 impl Notice {
-    /// A notice of `text` titled `title`, for front-ends that show more
-    /// than the build's, as the licences of fonts.
-    pub fn new(title: impl Into<String>, text: impl Into<String>) -> Notice {
-        Notice { title: title.into(), text: text.into() }
+    /// A notice of `text`, which is `kind`'s, for front-ends that show
+    /// more than the build's, as the licences of fonts.
+    pub fn new(kind: Kind, text: impl Into<String>) -> Notice {
+        Notice { kind, text: text.into() }
+    }
+
+    /// Its title, in English, as the command line shows it.
+    pub fn title(&self) -> String {
+        self.kind.to_string()
+    }
+}
+
+impl fmt::Display for Kind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Kind::Tgradish => write!(f, "tgradish"),
+            Kind::Licence { of } => write!(f, "{of}: licence"),
+            Kind::NamedLicence { of, licence } => write!(f, "{of}: {licence}"),
+            Kind::LicenceNotes { of } => write!(f, "{of}: licence notes"),
+            Kind::PatentGrant { of } => write!(f, "{of}: patent grant"),
+            Kind::Sources { of } => write!(f, "{of}: what is built in, and its sources"),
+            Kind::Crates => write!(f, "Rust crates"),
+            Kind::Font { name, subsets: 1 } => write!(f, "Font: {name}, a subset"),
+            Kind::Font { name, .. } => write!(f, "Font: {name}, subsets"),
+        }
     }
 }
 
@@ -34,7 +56,10 @@ pub fn notices() -> Vec<Notice> {
         .expect("the build packs valid text");
     text.split_terminator('\u{1e}')
         .filter_map(|record| record.split_once('\u{1f}'))
-        .map(|(title, text)| Notice { title: title.to_owned(), text: text.to_owned() })
+        .map(|(index, text)| {
+            let index: usize = index.parse().expect("the build packs each notice's place");
+            Notice::new(FILES[index].2, text)
+        })
         .collect()
 }
 
@@ -45,15 +70,21 @@ mod tests {
     #[test]
     fn carries_every_notice() {
         let notices = notices();
-        assert_eq!(notices[0].title, "tgradish");
+        assert_eq!(notices[0].kind, Kind::Tgradish);
+        assert_eq!(notices[0].title(), "tgradish");
         assert!(notices[0].text.contains("MIT License"));
-        let crates = notices.iter().find(|notice| notice.title == CRATES).unwrap();
+        let crates = notices.iter().find(|notice| notice.kind == Kind::Crates).unwrap();
+        assert_eq!(crates.title(), "Rust crates");
         assert!(crates.text.contains("used by:"));
+        let webp = Kind::Licence { of: "libwebp" };
+        assert!(notices.iter().any(|notice| notice.kind == webp));
+        assert_eq!(webp.to_string(), "libwebp: licence");
         // of the static build alone: linked to a distribution's ffmpeg, the
         // binary holds none of it
-        let ffmpeg = notices.iter().any(|notice| notice.title.starts_with("ffmpeg"));
+        let ffmpeg = notices.iter().any(|notice| notice.title().starts_with("ffmpeg"));
         assert_eq!(ffmpeg, cfg!(feature = "linked-static"));
-        let sources = notices.iter().any(|notice| notice.title == FFMPEG_SOURCES);
-        assert_eq!(sources, ffmpeg);
+        let sources = Kind::Sources { of: "ffmpeg" };
+        assert_eq!(notices.iter().any(|notice| notice.kind == sources), ffmpeg);
+        assert_eq!(sources.to_string(), "ffmpeg: what is built in, and its sources");
     }
 }

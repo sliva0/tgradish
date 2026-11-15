@@ -1197,6 +1197,31 @@ send-feedback = Send feedback on Telegram
 # Over the licences' notices, which are shown as they are written, in
 # English.
 about-notices = tgradish is built from other people's work too. Their licences ask for these notices to go with every copy, so the program carries them:
+# The notices' titles, each over its notice. { $name } is the name of what
+# it is the licence of, as libvpx, and { $licence } a licence's name, as
+# GNU Lesser General Public License 2.1: both are shown as they are.
+notice-licence = { $name }: licence
+notice-named-licence = { $name }: { $licence }
+notice-licence-notes = { $name }: licence notes
+notice-patent-grant = { $name }: patent grant
+notice-sources = { $name }: what is built in, and its sources
+# The licence of a font of which tgradish has a subset built in, or more
+# than one: of Ubuntu Light and of Ubuntu Medium.
+notice-font = { $subsets ->
+    [one] Font: { $name }, a subset
+   *[other] Font: { $name }, subsets
+}
+notice-crates = Rust crates
+# Within the notice of the Rust crates, the title of each licence's part: the
+# licence's name, as MIT License, then the crates it covers, as
+# "anyhow, arboard"; where there are more than three, three of them and how
+# many more.
+notice-crates-licence = { $licence }: { $crates }
+    .more = { $more ->
+        [one] { $licence }: { $crates } and { $more } more
+       *[other] { $licence }: { $crates } and { $more } more
+    }
+# In the notice of ffmpeg's sources, a link to them.
 ffmpeg-sources = The exact sources of the ffmpeg built in, with this release
 
 

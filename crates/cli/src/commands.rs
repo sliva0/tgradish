@@ -308,7 +308,7 @@ pub fn licenses(ctx: &Context) {
     let notices = tgradish_core::licenses::notices();
     if ctx.global.json {
         for notice in &notices {
-            crate::json_line(&json!({ "title": notice.title, "text": notice.text }));
+            crate::json_line(&json!({ "title": notice.title(), "text": notice.text }));
         }
         return;
     }
@@ -316,8 +316,9 @@ pub fn licenses(ctx: &Context) {
         if index > 0 {
             outln!();
         }
-        outln!("{}", style(&notice.title).bold());
-        outln!("{}\n", "=".repeat(notice.title.chars().count()));
+        let title = notice.title();
+        outln!("{}", style(&title).bold());
+        outln!("{}\n", "=".repeat(title.chars().count()));
         outln!("{}", notice.text.trim_end());
     }
 }

@@ -845,7 +845,8 @@ mod tests {
         assert!(!harness.state().settings_dialog.is_open());
         // About, a licence opened in it, and About again: as it first was
         let notice = crate::about::notices().swap_remove(1);
-        let (title, text) = (notice.title, notice.text.trim().lines().next().unwrap().to_owned());
+        let title = crate::about::title(notice.kind);
+        let text = notice.text.trim().lines().next().unwrap().to_owned();
         menu(&mut harness, &fl!("about-and-licences"));
         assert!(harness.state().about);
         harness.get_by_label(&title).click_accesskit();
