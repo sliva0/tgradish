@@ -648,9 +648,12 @@ mod tests {
         assert!((row.x1 - end.x1).abs() < 1.0, "{row:?} under {end:?}");
     }
 
+    /// Its words whole in British English; another language's, often
+    /// longer, may be cut short in a narrow window.
     #[test]
-    fn keeps_the_bar_whole_and_still_as_zoom_and_result_change() {
+    fn keeps_the_english_bar_whole_and_still_as_zoom_and_result_change() {
         use tgradish_core::options::Crop;
+        crate::l10n::english();
         let dir = tempfile::tempdir().unwrap();
         let art = dir.path().join("art.png");
         square(&art, [255, 0, 0, 255]);

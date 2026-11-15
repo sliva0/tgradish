@@ -102,7 +102,10 @@ another's words, as `{ save }`, needs that one translated too. The GUI
 follows the system's language, or the one picked in Settings;
 `TGRADISH_LANG=de` picks one for a run, and `TGRADISH_LANG=pseudo` shows
 English with longer, accented words, to see where text won't fit. The
-screenshots test takes `TGRADISH_LANG` too. The tests check every file
+tests hold British English alone to fitting: no button's words are cut
+short in the narrowest window, 920 points wide, or a wider one. Other
+languages' may be where there is little room. The screenshots test takes
+`TGRADISH_LANG` too. The tests check every file
 reads as Fluent, that translations only take the arguments English does and
 put in only messages they have, and that the GUI's fonts draw them: a
 script they lack, as Chinese or Arabic, needs a font added first, and egui

@@ -113,6 +113,16 @@ fn pseudo_text(text: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
+/// Shows the GUI in British English, its own language, for the tests that
+/// hold English's words to fitting where other languages' may not.
+#[cfg(test)]
+pub(crate) fn english() {
+    let english = LOADER.fallback_language().clone();
+    LOADER.load_languages(&Files, &[english]).expect("English is built in");
+    settle(&LOADER, false);
+    assert_eq!(LOADER.current_language().to_string(), "en-GB");
+}
+
 /// `text`, noted as shown for `id` while `seen` records, for the pictures
 /// of where each message is shown.
 #[cfg(not(test))]

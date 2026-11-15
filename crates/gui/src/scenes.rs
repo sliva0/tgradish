@@ -1,7 +1,7 @@
 //! The GUI's main scenes, drawn without a GPU, for tests that look over
 //! all of them at once: that every button has a name screen readers can
-//! say, that no button's words are cut short, and that the list's bars
-//! are level with those beside them.
+//! say, that no button's words are cut short in English, and that the
+//! list's bars are level with those beside them.
 
 use std::path::Path;
 
@@ -269,8 +269,12 @@ fn lays_the_lists_bars_level_with_those_beside_them() {
     assert_eq!(seen, 2);
 }
 
+/// In British English, no button's words are cut short, at the narrowest
+/// the GUI goes or wider. The rule is English's alone: other languages'
+/// words, often longer, may be cut short where there is little room.
 #[test]
-fn cuts_no_buttons_words_short() {
+fn cuts_no_buttons_english_words_short() {
+    crate::l10n::english();
     let mut cut = Vec::new();
     for width in [crate::MIN_WIDTH, 1280.0] {
         walk(width, |harness, scene| {
