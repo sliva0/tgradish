@@ -483,7 +483,7 @@ fn linux_packages(
         // the workspace's, which xtask shares; the first author keeps the
         // packages
         maintainer = env!("CARGO_PKG_AUTHORS").split(':').next().unwrap_or_default(),
-        homepage = env!("CARGO_PKG_HOMEPAGE"),
+        homepage = env!("CARGO_PKG_REPOSITORY"),
         contents = contents.join("\n"),
         debs = list(debs),
         rpms = list(rpms),
@@ -512,7 +512,7 @@ fn debian_copyright(stage: &Path) -> Result<String> {
         .replace("see LICENSE.txt", "below")
         .replace("licenses/", "/usr/share/licenses/tgradish/")
         .replace("THIRD-PARTY-CRATES.txt", "/usr/share/doc/tgradish/THIRD-PARTY-CRATES.txt");
-    Ok(format!("tgradish\n{}\n\n{third_party}\n{licence}", env!("CARGO_PKG_HOMEPAGE")))
+    Ok(format!("tgradish\n{}\n\n{third_party}\n{licence}", env!("CARGO_PKG_REPOSITORY")))
 }
 
 /// What a musl build may be linked to: musl alone, by the name musl-gcc

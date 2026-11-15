@@ -8,7 +8,6 @@ license.workspace = true
 # the packages' maintainer and home page, and where releases are, which
 # the notice of ffmpeg's sources says
 authors.workspace = true
-homepage.workspace = true
 repository.workspace = true
 publish = false
 

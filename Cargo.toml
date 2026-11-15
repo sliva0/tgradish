@@ -15,7 +15,6 @@ rust-version = "1.95"
 license = "MIT"
 authors = ["sliva0 <sliva0mk@gmail.com>"]
 repository = "https://github.com/sliva0/tgradish"
-homepage = "https://github.com/sliva0/tgradish"
 
 # The workspace's own crates ask for each other's exact versions: they are
 # released together, and `cargo install` resolves afresh rather than read

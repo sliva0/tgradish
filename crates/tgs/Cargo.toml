@@ -8,7 +8,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
 readme = "README.md"
 keywords = ["telegram", "sticker", "tgs", "lottie", "pixel-art"]
 categories = ["multimedia::images", "multimedia::encoding", "wasm"]
