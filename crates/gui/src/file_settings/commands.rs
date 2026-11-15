@@ -35,7 +35,15 @@ fn code(ui: &mut egui::Ui, text: &str) {
 /// `args` as the shell commands are written for takes them: PowerShell on
 /// Windows, a POSIX shell elsewhere.
 fn shell_line<S: AsRef<str>>(args: &[S]) -> String {
-    let word = if cfg!(windows) { powershell_word } else { posix_word };
+    if cfg!(windows) { joined(args, powershell_word) } else { posix_line(args) }
+}
+
+/// `args` as a POSIX shell takes them.
+fn posix_line<S: AsRef<str>>(args: &[S]) -> String {
+    joined(args, posix_word)
+}
+
+fn joined<S: AsRef<str>>(args: &[S], word: fn(&str) -> String) -> String {
     args.iter().map(|arg| word(arg.as_ref())).collect::<Vec<_>>().join(" ")
 }
 
@@ -355,6 +363,7 @@ mod tests {
     }
 
     /// Words no shell may take for anything but themselves.
+    #[cfg(unix)]
     const NASTY: &[&str] = &[
         "",
         " ",
@@ -413,7 +422,7 @@ mod tests {
     #[test]
     fn quotes_words_for_a_posix_shell() {
         // what reads as plain, plain; the rest quoted
-        let line = shell_line(&[
+        let line = posix_line(&[
             "tgradish",
             "convert",
             "my stickers/pig.ase",
@@ -437,6 +446,9 @@ mod tests {
         }
     }
 
+    // elsewhere the `sh` found takes its arguments through the system's
+    // own quoting, so what it reads back is not what this rule wrote
+    #[cfg(unix)]
     #[test]
     fn posix_words_read_back_as_themselves() {
         use std::io::Write;
@@ -452,7 +464,7 @@ mod tests {
             ("zsh", &["-f", "-c"]),
             ("zsh", &["-f", "-o", "extendedglob", "-o", "braceccl", "-c"]),
         ];
-        let script = format!("printf '%s\\0' {}\n", shell_line(NASTY));
+        let script = format!("printf '%s\\0' {}\n", posix_line(NASTY));
         let mut ran = 0;
         for (shell, flags) in shells {
             let read_in = flags.last() == Some(&"-s");
@@ -479,8 +491,6 @@ mod tests {
             assert_eq!(read, NASTY, "{shell} {flags:?}");
         }
         // a POSIX system has at least its sh
-        if cfg!(unix) {
-            assert!(ran > 0);
-        }
+        assert!(ran > 0);
     }
 }
