@@ -86,8 +86,10 @@ fn notice_screenshots() {
 
 /// What passes in the corner over the list, and what stays at the
 /// bottom: files removed, with a short list and a full one; two and more
-/// at once; and one beside the banner saying ffmpeg is missing, at the
-/// usual size and the smallest, in both themes. Needs ffmpeg.
+/// at once; nothing to paste, and the open files not kept, which say why
+/// in tgradish's words and in the system's; and one beside the banner
+/// saying ffmpeg is missing, at the usual size and the smallest, in both
+/// themes. Needs ffmpeg.
 fn notices(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     use crate::banner::Message;
     use crate::config::Theme;
@@ -145,6 +147,18 @@ fn notices(save: &mut impl FnMut(&mut Harness<App>, &str)) {
             let some = harness.state().items[5].id;
             harness.state_mut().remove(some);
             shot(&mut harness, save, &name("one-full"));
+            // why in tgradish's words: nothing to paste
+            harness.state_mut().banner = Default::default();
+            let empty = tgradish_core::Error::Clipboard(tgradish_core::ClipboardError::Empty);
+            harness.state_mut().say(crate::app::not_pasted(&empty));
+            shot(&mut harness, save, &name("paste"));
+            // and as the system said it: permission denied, on Linux
+            harness.state_mut().banner = Default::default();
+            let session = dir.path().join("session.json");
+            let denied = std::io::Error::from_raw_os_error(13);
+            harness.state_mut().say(crate::app::session_unsaved(&session, &denied));
+            shot(&mut harness, save, &name("session"));
+            harness.state_mut().banner = Default::default();
             // beside what stays until it is dealt with: no ffmpeg
             let mut config = config.clone();
             config.ffmpeg.path = Some(dir.path().join("no-ffmpeg-here"));
@@ -963,12 +977,12 @@ fn banners(
     let state = home.join(".local").join("state").join("tgradish").join("session.json");
     let unsaved = Message::warning(fl!("session-unsaved"))
         .file(state)
-        .detail("Permission denied (os error 13)");
+        .literal("Permission denied (os error 13)");
     let gone = Message::info(fl!("files-gone", count = 1));
     show(harness, &[unreadable.clone(), unsaved, gone]);
     save(harness, "banner-stacked");
-    let pasted = Message::warning(fl!("paste-failed"))
-        .detail("The clipboard holds neither files nor an image");
+    let empty = tgradish_core::Error::Clipboard(tgradish_core::ClipboardError::Empty);
+    let pasted = crate::app::not_pasted(&empty);
     show(harness, &[pasted.clone(), pasted.clone(), pasted]);
     save(harness, "banner-repeated");
     set_theme(&harness.ctx, Theme::Dark);

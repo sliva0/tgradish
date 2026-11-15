@@ -150,8 +150,15 @@ files-unreadable = { $count ->
 # The files open now couldn't be saved to be opened again next time; the
 # file they are kept in and why under it.
 session-unsaved = The open files couldn't be kept for next time
-# Pasting failed, why under it.
-paste-failed = Nothing could be pasted
+# Pasting found nothing on the clipboard to add; .why under it.
+nothing-to-paste = Nothing to paste
+    .why = The clipboard has no files, file paths or image
+# Pasting failed: the clipboard couldn't be read, or .image, the image on
+# it couldn't be saved as a file; what the system said under it.
+paste-failed = The clipboard couldn't be read
+    .image = The pasted image couldn't be saved
+# The system's file dialog, or reading the file chosen in it, crashed.
+pick-failed = The file dialog crashed, so nothing was chosen
 
 
 ## Dropping files
@@ -1168,7 +1175,7 @@ deleted = Deleted "{ $name }"
 undo = Undo
     .hint = Put it back
 # A message: the preset deleted couldn't be put back, why under it.
-not-put-back = It couldn't be put back
+not-put-back = The preset "{ $name }" couldn't be put back
 
 
 ## About and licences

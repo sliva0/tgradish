@@ -3,7 +3,7 @@
 use std::io::BufWriter;
 use std::path::PathBuf;
 
-use crate::{Error, FileAction, Result};
+use crate::{ClipboardError, Error, FileAction, Result};
 
 /// Name a pasted image is saved under, so its result is
 /// `clipboard.sticker.webm`.
@@ -84,7 +84,8 @@ pub fn paths_in_text(text: &str, windows: bool) -> Vec<PathBuf> {
 /// files that exist, else an image, saved as [`PASTED_IMAGE_NAME`] in a
 /// temporary directory.
 pub fn paste() -> Result<Pasted> {
-    let failed = |err: arboard::Error| Error::Clipboard(err.to_string());
+    let failed =
+        |err: arboard::Error| Error::Clipboard(ClipboardError::Unreadable(err.to_string()));
     let mut clipboard = arboard::Clipboard::new().map_err(failed)?;
 
     if let Ok(files) = clipboard.get().file_list()
@@ -99,7 +100,7 @@ pub fn paste() -> Result<Pasted> {
         }
     }
     let Ok(image) = clipboard.get_image() else {
-        return Err(Error::Clipboard("it has no files, file paths or image".into()));
+        return Err(Error::Clipboard(ClipboardError::Empty));
     };
     let dir = tempfile::Builder::new()
         .prefix("tgradish-clipboard-")
@@ -107,7 +108,7 @@ pub fn paste() -> Result<Pasted> {
         .map_err(Error::io(FileAction::Create, std::env::temp_dir()))?;
     let path = dir.path().join(PASTED_IMAGE_NAME);
     let not_saved =
-        |err: png::EncodingError| Error::Clipboard(format!("couldn't save the image: {err}"));
+        |err: png::EncodingError| Error::Clipboard(ClipboardError::ImageUnsaved(err.to_string()));
     let file = std::fs::File::create(&path).map_err(Error::io(FileAction::Write, &path))?;
     let mut encoder =
         png::Encoder::new(BufWriter::new(file), image.width as u32, image.height as u32);

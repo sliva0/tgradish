@@ -207,11 +207,10 @@ impl App {
                 true
             }
             Err(err) => {
-                let (file, detail) = crate::app::error_parts(&err);
-                let message = Message::warning(fl!("presets-unreadable")).detail(detail);
-                let message = match file.or_else(|| self.presets_dir.clone()) {
-                    Some(file) => message.file(file),
-                    None => message,
+                let message = Message::warning(fl!("presets-unreadable"));
+                let message = match (&self.presets_dir, crate::app::told(message, &err)) {
+                    (Some(dir), message) if message.file.is_none() => message.file(dir),
+                    (_, message) => message,
                 };
                 let actions = [Action::ReadPresetsAgain, Action::CopyPath, Action::ShowInFolder];
                 self.say(message.actions(&actions).about(Subject::Presets));
@@ -500,8 +499,8 @@ impl App {
                         return;
                     }
                     Err(err) => {
-                        let message = Message::warning(fl!("not-put-back"));
-                        self.say(message.detail(failure(&err)));
+                        let message = fl!("not-put-back", name = deleted.name.as_str());
+                        self.say(crate::app::told(Message::warning(message), &err));
                     }
                 }
             }

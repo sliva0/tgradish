@@ -222,7 +222,8 @@ pub(crate) fn failure(err: &Error) -> String {
             let (smallest, limit) = sizes(smallest, limit);
             fl!("nothing-fits", limit = limit, smallest = smallest)
         }
-        Error::Clipboard(details) => fl!("clipboard-failed", details = details.as_str()),
+        Error::Clipboard(tgradish_core::ClipboardError::Empty) => fl!("nothing-to-paste", "why"),
+        Error::Clipboard(details) => fl!("clipboard-failed", details = details.to_string()),
         Error::OutputIsInput(path) => fl!("output-is-input", name = name(path)),
         Error::NothingToConvert => fl!("nothing-to-convert"),
         // as a preset's settings are wrong: what is wrong, as core says it

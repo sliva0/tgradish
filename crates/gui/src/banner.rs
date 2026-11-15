@@ -4,9 +4,9 @@
 //! card of its own; what asks for something to be done, as a file that
 //! couldn't be read or saved, stays in the banner along the bottom,
 //! right of the list, until it is. Each message has its row, with
-//! what happened first, the file it is about, what to do and buttons that
-//! do it, and what went wrong as the program said it, folded away when it
-//! is long.
+//! what happened first, the file it is about, why and what to do in
+//! tgradish's words, buttons that do it, and what a program or the system
+//! said, as it said it, folded away when it is long.
 
 use std::path::{Path, PathBuf};
 
@@ -117,11 +117,14 @@ pub(crate) struct Message {
     pub(crate) headline: String,
     /// The file it is about.
     pub(crate) file: Option<PathBuf>,
+    /// Why, in tgradish's own words, in a line of its own.
+    pub(crate) reason: Option<String>,
     /// What it means or what can be done, in a line of its own.
     pub(crate) note: Option<String>,
-    /// What went wrong as the program said it, shown in its own lines and
-    /// columns.
-    pub(crate) detail: Option<String>,
+    /// What a program or the system said, as it said it, in monospace
+    /// and in its own lines and columns: never tgradish's own words,
+    /// which are the reason's.
+    pub(crate) literal: Option<String>,
     /// Buttons that do something about it, the way out most want first.
     pub(crate) actions: Vec<Action>,
     pub(crate) subject: Option<Subject>,
@@ -141,8 +144,9 @@ impl Message {
             severity,
             headline,
             file: None,
+            reason: None,
             note: None,
-            detail: None,
+            literal: None,
             actions: Vec::new(),
             subject: None,
         }
@@ -152,14 +156,19 @@ impl Message {
         Message { file: Some(file.into()), ..self }
     }
 
+    pub(crate) fn reason(self, reason: impl Into<String>) -> Message {
+        Message { reason: Some(reason.into()), ..self }
+    }
+
     pub(crate) fn note(self, note: impl Into<String>) -> Message {
         Message { note: Some(note.into()), ..self }
     }
 
-    /// With `detail`, the blank lines and spaces at its end left out.
-    pub(crate) fn detail(self, detail: impl AsRef<str>) -> Message {
-        let detail = detail.as_ref().trim_end();
-        Message { detail: (!detail.is_empty()).then(|| detail.to_owned()), ..self }
+    /// With `literal`, what a program or the system said, the blank lines
+    /// and spaces at its end left out.
+    pub(crate) fn literal(self, literal: impl AsRef<str>) -> Message {
+        let literal = literal.as_ref().trim_end();
+        Message { literal: (!literal.is_empty()).then(|| literal.to_owned()), ..self }
     }
 
     /// With the buttons `actions`; those about a file only if it has one.
@@ -178,7 +187,7 @@ impl Message {
     /// Everything it says, for finding fonts for it.
     pub(crate) fn texts(&self) -> impl Iterator<Item = String> + '_ {
         let file = self.file.as_ref().map(|file| file.display().to_string());
-        let parts = [&self.note, &self.detail].into_iter().flatten().cloned();
+        let parts = [&self.reason, &self.note, &self.literal].into_iter().flatten().cloned();
         std::iter::once(self.headline.clone()).chain(file).chain(parts)
     }
 }
@@ -570,9 +579,11 @@ impl crate::app::App {
                     None => message.file(path),
                 });
             }
-            Err(error) => {
-                let message = Message::warning(fl!("fresh-settings", "failed"));
-                self.say(message.file(path).detail(error));
+            Err(err) => {
+                // about the file that couldn't be read or written, where
+                // that is the copy of the old one rather than the new
+                let message = Message::warning(fl!("fresh-settings", "failed")).file(path);
+                self.say(crate::app::told(message, &err));
             }
         }
     }
@@ -648,8 +659,8 @@ fn needs(ui: &egui::Ui, said: &Said, room: f32) -> f32 {
     let body = TextStyle::Body.resolve(ui.style());
     let message = &said.message;
     let mut widest = painter.layout_job(headline(ui, said, room)).size().x;
-    if let Some(note) = &message.note {
-        let job = egui::text::LayoutJob::simple(note.clone(), body.clone(), Color32::WHITE, room);
+    for line in [&message.reason, &message.note].into_iter().flatten() {
+        let job = egui::text::LayoutJob::simple(line.clone(), body.clone(), Color32::WHITE, room);
         widest = widest.max(painter.layout_job(job).size().x);
     }
     if let Some(file) = &message.file {
@@ -665,12 +676,12 @@ fn needs(ui: &egui::Ui, said: &Said, room: f32) -> f32 {
             painter.layout_no_wrap(action.label(), body.clone(), Color32::WHITE).size().x + padding
         })
         .sum();
-    if message.detail.as_deref().is_some_and(|detail| !short(detail)) {
+    if message.literal.as_deref().is_some_and(|detail| !short(detail)) {
         buttons += painter.layout_no_wrap(fl!("details"), body, Color32::WHITE).size().x + 20.0;
     }
     widest = widest.max(buttons);
-    let open = said.details_open || message.detail.as_deref().is_some_and(short);
-    if let Some(detail) = message.detail.as_deref().filter(|_| open) {
+    let open = said.details_open || message.literal.as_deref().is_some_and(short);
+    if let Some(detail) = message.literal.as_deref().filter(|_| open) {
         let block = painter.layout_job(detail_job(ui, detail, f32::INFINITY)).size().x;
         widest = widest.max(block + DETAIL_MARGIN.sum().x + ui.spacing().scroll.bar_width);
     }
@@ -732,8 +743,9 @@ fn fits_inline(ui: &egui::Ui, said: &Said, column: f32) -> bool {
     let message = &said.message;
     if message.actions.is_empty()
         || message.file.is_some()
+        || message.reason.is_some()
         || message.note.is_some()
-        || message.detail.is_some()
+        || message.literal.is_some()
         || said.flash.is_some()
     {
         return false;
@@ -781,7 +793,8 @@ fn action_button(ui: &mut egui::Ui, action: Action, row: &mut Row) {
     }
 }
 
-/// The text column of a row: headline, file, note, buttons and details.
+/// The text column of a row: headline, file, reason, note, buttons and
+/// details.
 fn text(ui: &mut egui::Ui, said: &mut Said, column: f32, now: f64, row: &mut Row) {
     let message = &said.message;
     ui.add(egui::Label::new(headline(ui, said, column)).wrap());
@@ -791,10 +804,10 @@ fn text(ui: &mut egui::Ui, said: &mut Said, column: f32, now: f64, row: &mut Row
         let label = egui::RichText::new(shown).color(ui.visuals().weak_text_color());
         ui.add(egui::Label::new(label).extend()).on_hover_text(file.display().to_string());
     }
-    if let Some(note) = &message.note {
-        ui.add(egui::Label::new(note.as_str()).wrap());
+    for line in [&message.reason, &message.note].into_iter().flatten() {
+        ui.add(egui::Label::new(line.as_str()).wrap());
     }
-    let long = message.detail.as_deref().is_some_and(|detail| !short(detail));
+    let long = message.literal.as_deref().is_some_and(|detail| !short(detail));
     if !message.actions.is_empty() || long {
         ui.add_space(2.0);
         ui.horizontal_wrapped(|ui| {
@@ -815,7 +828,7 @@ fn text(ui: &mut egui::Ui, said: &mut Said, column: f32, now: f64, row: &mut Row
         });
     }
     let message = &said.message;
-    if let Some(detail) = message.detail.as_deref().filter(|_| !long || said.details_open) {
+    if let Some(detail) = message.literal.as_deref().filter(|_| !long || said.details_open) {
         ui.add_space(2.0);
         detail_block(ui, detail, column, said.id);
     }
@@ -1010,14 +1023,14 @@ mod tests {
         assert_eq!(banner.rows[0].count, 3);
         // about a subject, once however often, and in the place of the old
         let about = |detail: &str| {
-            Message::warning("Unreadable").detail(detail).about(Subject::SettingsFile)
+            Message::warning("Unreadable").literal(detail).about(Subject::SettingsFile)
         };
         banner.say(about("line 2"));
         banner.say(about("line 2"));
         assert_eq!(banner.rows[2].count, 1);
         banner.say(about("line 3\n"));
         assert_eq!(banner.rows.len(), 3);
-        assert_eq!(banner.rows[2].message.detail.as_deref(), Some("line 3"));
+        assert_eq!(banner.rows[2].message.literal.as_deref(), Some("line 3"));
         banner.forget(Subject::SettingsFile);
         assert_eq!(banner.rows.len(), 2);
     }
@@ -1049,10 +1062,10 @@ mod tests {
     fn shows_what_is_said_again_once() {
         let mut harness = crate::testing::harness(Config::default());
         for _ in 0..2 {
-            harness.state_mut().say(Message::warning("Nothing could be pasted"));
+            harness.state_mut().say(Message::warning("Nothing to paste"));
         }
         harness.run_steps(2);
-        assert_eq!(harness.get_all_by_label_contains("Nothing could be pasted").count(), 1);
+        assert_eq!(harness.get_all_by_label_contains("Nothing to paste").count(), 1);
         harness.get_by_label_contains(&fl!("said-times", count = 2));
     }
 
@@ -1179,7 +1192,7 @@ mod tests {
         assert_eq!((said.count, message.severity), (1, Severity::Warning));
         assert_eq!(message.file.as_deref(), Some(path.as_path()));
         // core's message, without the file it names, or its last line break
-        let detail = message.detail.as_deref().unwrap();
+        let detail = message.literal.as_deref().unwrap();
         assert!(detail.starts_with("TOML parse error at line 2"), "{detail}");
         assert!(detail.ends_with("expected `from` or `path`"), "{detail}");
         assert!(!message.headline.contains("config.toml"));
@@ -1196,8 +1209,8 @@ mod tests {
     fn folds_long_details_away() {
         let mut harness = crate::testing::harness(Config::default());
         let detail = "TOML parse error\n  |\n2 | use\n  | ^^^\nunknown field `use`";
-        harness.state_mut().say(Message::warning("Unreadable").detail(detail));
-        harness.state_mut().say(Message::warning("Short").detail("Permission denied"));
+        harness.state_mut().say(Message::warning("Unreadable").literal(detail));
+        harness.state_mut().say(Message::warning("Short").literal("Permission denied"));
         harness.run_steps(2);
         // the short shown, the long only once asked for
         harness.get_by_label("Permission denied");
@@ -1206,6 +1219,36 @@ mod tests {
         harness.get_by_label_contains("unknown field");
         click(&mut harness, &fl!("details"));
         assert!(harness.query_by_label_contains("unknown field").is_none());
+    }
+
+    /// Why, in tgradish's words, is a line of its own; what the system or
+    /// a program said is apart, as it said it.
+    #[test]
+    fn says_why_apart_from_what_was_said() {
+        use tgradish_core::{ClipboardError, Error};
+        let empty = crate::app::not_pasted(&Error::Clipboard(ClipboardError::Empty));
+        assert_eq!(empty.headline, fl!("nothing-to-paste"));
+        assert_eq!(empty.reason, Some(fl!("nothing-to-paste", "why")));
+        assert_eq!(empty.literal, None);
+        let said = ClipboardError::Unreadable("Unknown error while interacting".into());
+        let unreadable = crate::app::not_pasted(&Error::Clipboard(said));
+        assert_eq!(unreadable.reason, None);
+        assert_eq!(unreadable.literal.as_deref(), Some("Unknown error while interacting"));
+        let denied = std::io::Error::from_raw_os_error(13);
+        let unsaved = crate::app::session_unsaved(Path::new("session.json"), &denied);
+        assert_eq!(unsaved.literal, Some(denied.to_string()));
+        let failed = Error::Ffmpeg {
+            program: "ffmpeg",
+            status: "exit status: 1".into(),
+            stderr: "Invalid data found\n".into(),
+        };
+        let failed = crate::app::told(Message::warning("Failed"), &failed);
+        assert!(failed.reason.as_deref().is_some_and(|reason| reason.starts_with("ffmpeg failed")));
+        assert_eq!(failed.literal.as_deref(), Some("Invalid data found"));
+        let mut harness = crate::testing::harness(Config::default());
+        harness.state_mut().say(empty);
+        harness.run_steps(2);
+        harness.get_by_label(&fl!("nothing-to-paste", "why"));
     }
 
     #[test]
@@ -1246,6 +1289,13 @@ mod tests {
             headlines,
             [fl!("setting-unsaved", "unreadable"), fl!("fresh-settings", "failed")]
         );
+        // about the folder in the copy's way, as the system said
+        let failed = &harness.state().banner.rows[1].message;
+        assert_eq!(
+            failed.file.as_deref(),
+            Some(dir.path().join("config.toml.unreadable").as_path())
+        );
+        assert!(failed.reason.is_none() && failed.literal.is_some());
     }
 
     #[test]

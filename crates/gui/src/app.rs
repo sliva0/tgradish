@@ -207,11 +207,7 @@ impl App {
             let loaded = match store.read() {
                 Ok(loaded) => loaded,
                 // not to be written over, then
-                Err(err) => {
-                    let message = Message::warning(fl!("session-unsaved"));
-                    return self
-                        .say(message.file(store.path()).detail(tgradish_core::io_reason(&err)));
-                }
+                Err(err) => return self.say(session_unsaved(store.path(), &err)),
             };
             if let Some(unreadable) = loaded.unreadable {
                 let message = Message::info(match unreadable.files {
@@ -254,8 +250,7 @@ impl App {
             match store.copy_pasted(item.id, image) {
                 Ok(name) => item.pasted_copy = Some(name),
                 Err(err) => {
-                    let message = Message::warning(fl!("session-unsaved"));
-                    let message = message.file(store.path()).detail(tgradish_core::io_reason(&err));
+                    let message = session_unsaved(store.path(), &err);
                     self.session = None;
                     return self.say(message);
                 }
@@ -283,8 +278,7 @@ impl App {
         let session = session::Session::of(items, self.selected, &self.written);
         let session = session.with_window(self.window);
         if let Err(err) = store.save(&session, held) {
-            let message = Message::warning(fl!("session-unsaved"));
-            let message = message.file(store.path()).detail(tgradish_core::io_reason(&err));
+            let message = session_unsaved(store.path(), &err);
             // once is enough
             self.session = None;
             self.say(message);
@@ -529,10 +523,7 @@ impl App {
         match tgradish_core::clipboard::paste() {
             Ok(Pasted { files, image_dir: None }) => self.add(files),
             Ok(Pasted { files, image_dir: Some(dir) }) => self.add_pasted(files, dir),
-            Err(tgradish_core::Error::Clipboard(details)) => {
-                self.say(Message::warning(fl!("paste-failed")).detail(details));
-            }
-            Err(err) => self.say(Message::warning(fl!("paste-failed")).detail(failure(&err))),
+            Err(err) => self.say(not_pasted(&err)),
         }
     }
 
@@ -714,14 +705,7 @@ impl App {
             Err(err @ tgradish_core::Error::Config { .. }) => {
                 self.say(settings_unreadable(fl!("setting-unsaved", "unreadable"), &err));
             }
-            Err(err) => {
-                let (file, detail) = error_parts(&err);
-                let message = Message::warning(fl!("setting-unsaved")).detail(detail);
-                self.say(match file {
-                    Some(file) => message.file(file),
-                    None => message,
-                });
-            }
+            Err(err) => self.say(told(Message::warning(fl!("setting-unsaved")), &err)),
         }
     }
 
@@ -781,12 +765,8 @@ fn load_config(path: &Path) -> (Config, Option<tgradish_core::Error>) {
 /// hand or by another version, it can be replaced; read again, once it is
 /// put right; and found, by those who would put it right.
 pub(crate) fn settings_unreadable(headline: String, err: &tgradish_core::Error) -> Message {
-    let (file, detail) = error_parts(err);
-    let message = Message::warning(headline).detail(detail).about(Subject::SettingsFile);
-    let message = match file {
-        Some(file) => message.file(std::path::absolute(&file).unwrap_or(file)),
-        None => message,
-    };
+    let mut message = told(Message::warning(headline), err).about(Subject::SettingsFile);
+    message.file = message.file.map(|file| std::path::absolute(&file).unwrap_or(file));
     match err {
         tgradish_core::Error::Config { .. } => message.note(fl!("settings-file-note")).actions(&[
             Action::FreshSettings,
@@ -798,16 +778,47 @@ pub(crate) fn settings_unreadable(headline: String, err: &tgradish_core::Error) 
     }
 }
 
-/// The file `err` is about, if it names one, and what is wrong with it as
-/// the error says it, apart from the file: shown apart in a message.
-pub(crate) fn error_parts(err: &tgradish_core::Error) -> (Option<PathBuf>, String) {
+/// `message` with what `err` says: the file it is about, where it names
+/// one; why, in the GUI's words; and what a program or the system said,
+/// as it said it, as what is wrong in a settings file.
+pub(crate) fn told(message: Message, err: &tgradish_core::Error) -> Message {
     use tgradish_core::Error;
     match err {
-        Error::Config { path, message } | Error::Unreadable { path, message } => {
-            (Some(path.clone()), message.clone())
+        Error::Config { path, message: said } | Error::Unreadable { path, message: said } => {
+            message.file(path).literal(said)
         }
-        Error::Io { path, error, .. } => (Some(path.clone()), tgradish_core::io_reason(error)),
-        _ => (None, failure(err)),
+        Error::Io { path, error, .. } => message.file(path).literal(error.to_string()),
+        Error::Ffmpeg { program, status, stderr } => {
+            let program = program.to_string();
+            let failed = fl!("program-failed", program = program, status = status.as_str());
+            message.reason(failed).literal(stderr)
+        }
+        err => message.reason(failure(err)),
+    }
+}
+
+/// What to say of the open files that couldn't be kept at `path` for
+/// next time, as the system said why.
+pub(crate) fn session_unsaved(path: &Path, err: &std::io::Error) -> Message {
+    Message::warning(fl!("session-unsaved")).file(path).literal(err.to_string())
+}
+
+/// What to say when nothing was pasted, as `err` says why: the clipboard
+/// held nothing to add, or it, or the image on it, couldn't be read.
+pub(crate) fn not_pasted(err: &tgradish_core::Error) -> Message {
+    use tgradish_core::{ClipboardError, Error};
+    match err {
+        Error::Clipboard(ClipboardError::Empty) => {
+            Message::warning(fl!("nothing-to-paste")).reason(fl!("nothing-to-paste", "why"))
+        }
+        Error::Clipboard(ClipboardError::Unreadable(said)) => {
+            Message::warning(fl!("paste-failed")).literal(said)
+        }
+        Error::Clipboard(ClipboardError::ImageUnsaved(said)) => {
+            Message::warning(fl!("paste-failed", "image")).literal(said)
+        }
+        // making the image's file
+        err => told(Message::warning(fl!("paste-failed", "image")), err),
     }
 }
 
@@ -816,9 +827,14 @@ pub(crate) fn error_parts(err: &tgradish_core::Error) -> (Option<PathBuf>, Strin
 /// where. A copy kept earlier of something else is never written over:
 /// this one goes to `config.toml.unreadable-2` and on, unless one of them
 /// holds the same already.
-pub(crate) fn keep_aside(path: &Path) -> std::io::Result<PathBuf> {
+pub(crate) fn keep_aside(path: &Path) -> tgradish_core::Result<PathBuf> {
     use std::io::{ErrorKind, Write};
-    let bytes = std::fs::read(path)?;
+    use tgradish_core::{Error, FileAction};
+    let failed = |action: FileAction, path: &Path| {
+        let path = path.to_path_buf();
+        move |error| Error::Io { action, path, error }
+    };
+    let bytes = std::fs::read(path).map_err(failed(FileAction::Read, path))?;
     for number in 1..=999 {
         let extension = match number {
             1 => "toml.unreadable".to_owned(),
@@ -829,16 +845,20 @@ pub(crate) fn keep_aside(path: &Path) -> std::io::Result<PathBuf> {
             Ok(kept) if kept == bytes => return Ok(aside),
             Ok(_) => continue,
             Err(err) if err.kind() == ErrorKind::NotFound => {}
-            Err(err) => return Err(err),
+            Err(err) => return Err(failed(FileAction::Read, &aside)(err)),
         }
         // not even a copy another instance made meanwhile is written over
         match std::fs::File::create_new(&aside) {
-            Ok(mut file) => return file.write_all(&bytes).map(|()| aside),
+            Ok(mut file) => {
+                file.write_all(&bytes).map_err(failed(FileAction::Write, &aside))?;
+                return Ok(aside);
+            }
             Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
-            Err(err) => return Err(err),
+            Err(err) => return Err(failed(FileAction::Create, &aside)(err)),
         }
     }
-    Err(std::io::Error::other("too many copies of unreadable settings are kept"))
+    let many = std::io::Error::other("too many copies of unreadable settings are kept");
+    Err(failed(FileAction::Create, &path.with_extension("toml.unreadable"))(many))
 }
 
 /// How long the GUI waits as it closes for conversions to stop, so they take
