@@ -9,7 +9,6 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use tgradish_core::backend::Backend;
 use tgradish_core::input::Input;
 use tgradish_core::presets::{Format, FormatOptions, PresetError, Presets};
-use tgradish_core::tgradish_tgs::check::Severity;
 use tgradish_core::webm::{self, Event, Options};
 use tgradish_core::{tgs, webp};
 
@@ -45,8 +44,10 @@ pub enum Verdict {
 }
 
 impl Verdict {
-    fn of(refused: bool) -> Verdict {
-        if refused { Verdict::Refused } else { Verdict::Accepted }
+    /// What Telegram would say of a result with `issues`, as
+    /// [`telegram::refuses`] them.
+    fn of(issues: &[tgradish_core::telegram::Issue]) -> Verdict {
+        if tgradish_core::telegram::refuses(issues) { Verdict::Refused } else { Verdict::Accepted }
     }
 }
 
@@ -307,7 +308,7 @@ impl<'a> Converter<'a> {
         let cancel = &self.ctx.cancel;
         let json = self.ctx.global.json;
         let (input, output) = (input.clone(), Some(output));
-        let refused = match &self.options {
+        let verdict = match &self.options {
             FormatOptions::Webm(options) => {
                 let backend = self.backend()?;
                 let options = options.clone();
@@ -339,7 +340,7 @@ impl<'a> Converter<'a> {
                 {
                     show_result(&preview);
                 }
-                !outcome.issues.is_empty()
+                Verdict::of(&outcome.issues)
             }
             FormatOptions::Tgs(options) => {
                 // a frame rate is how fast pictures that have none play
@@ -373,7 +374,7 @@ impl<'a> Converter<'a> {
                     }
                     outcome
                 };
-                tgradish_core::telegram::refuses(&outcome.issues)
+                Verdict::of(&outcome.issues)
             }
             FormatOptions::Webp(options) => {
                 let backend = self.backend()?;
@@ -397,11 +398,11 @@ impl<'a> Converter<'a> {
                     self.print_still(&outcome);
                     outcome
                 };
-                !outcome.issues.is_empty()
+                Verdict::of(&outcome.issues)
             }
         };
         self.written.borrow_mut().insert(key, input_key);
-        Ok(Verdict::of(refused))
+        Ok(verdict)
     }
 
     /// What an image came out as, with what Telegram would refuse: the
@@ -418,9 +419,7 @@ impl<'a> Converter<'a> {
             line.push_str(&format!(", lossy at quality {quality} to fit"));
         }
         finished(self.ctx.global.quiet, &outcome.output, line);
-        for issue in &outcome.issues {
-            eprintln!("{} Telegram will refuse it: {issue}", ui::warning_label());
-        }
+        print_issues(&outcome.issues);
         if !self.ctx.global.quiet
             && term::shows_pictures()
             && let Ok(preview) = webp::preview(&outcome.output)
@@ -683,9 +682,7 @@ impl Printer {
                     ui::params(&params),
                 );
                 finished(self.quiet, &output, line);
-                for issue in issues {
-                    eprintln!("{} Telegram will refuse it: {issue}", ui::warning_label());
-                }
+                print_issues(&issues);
             }
             _ => {}
         }
@@ -699,6 +696,14 @@ fn finished(quiet: bool, output: &Path, line: String) {
         outln!("{}", output.display());
     } else {
         outln!("{}", ui::status("Finished", line));
+    }
+}
+
+/// What Telegram would have a problem with in a result, under its line,
+/// on stderr.
+fn print_issues(issues: &[tgradish_core::telegram::Issue]) {
+    for issue in issues {
+        eprintln!("{}", ui::issue(issue));
     }
 }
 
@@ -827,13 +832,7 @@ impl TgsPrinter {
                 let line =
                     format!("{output_text} {}{changed}", ui::size_within(bytes, tgs::MAX_BYTES));
                 finished(self.quiet, &output, line);
-                for issue in issues {
-                    let label = match issue.severity() {
-                        Severity::Error => ui::error_label(),
-                        _ => ui::warning_label(),
-                    };
-                    eprintln!("{label} {issue}");
-                }
+                print_issues(&issues);
             }
             _ => {}
         }

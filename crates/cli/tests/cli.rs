@@ -1918,3 +1918,218 @@ fn exits_as_stdout_closed_when_only_the_error_finds_it() {
         assert_eq!(status.code(), Some(141), "{args:?}");
     }
 }
+
+/// What a run printed as text, its exit status, stdout and stderr, with
+/// `dir` for the directory it ran in, `/` between folders, and `#` for
+/// each run of digits: what sizes and settings come to may differ between
+/// ffmpeg builds, while the words may not.
+fn as_text(output: &Output, dir: &Path) -> String {
+    let all = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let all = all.replace(&dir.display().to_string(), "dir").replace('\\', "/");
+    let mut text = format!("exit {:?}\n", output.status.code());
+    for c in all.chars() {
+        match c {
+            '0'..='9' if text.ends_with('#') => {}
+            '0'..='9' => text.push('#'),
+            c => text.push(c),
+        }
+    }
+    text
+}
+
+/// What conversions and `inspect` print as text, of every format: each
+/// line of it, its words pinned.
+#[test]
+fn prints_conversions_and_inspections_as_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = |name: &str| dir.path().join(name).to_str().unwrap().to_owned();
+    let png = dir.path().join("dot.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let art = noise(dir.path(), 24);
+    let run = |args: &[&str]| as_text(&tgradish(args), dir.path());
+    let png = png.to_str().unwrap();
+    let mut printed = vec![
+        run(&["convert", png, "--format", "tgs", "-y", "--preset", "fast", "-o", &path("dot.tgs")]),
+        // too large as it is, and kept so
+        run(&[
+            "convert",
+            art.to_str().unwrap(),
+            "--sequence",
+            "--fps",
+            "24",
+            "--effort",
+            "fast",
+            "-y",
+            "-o",
+            &path("exact.tgs"),
+        ]),
+        // fitted
+        run(&[
+            "convert",
+            art.to_str().unwrap(),
+            "--sequence",
+            "--fps",
+            "24",
+            "--effort",
+            "fast",
+            "--no-exact",
+            "-y",
+            "-o",
+            &path("fitted.tgs"),
+        ]),
+        run(&["inspect", &path("dot.tgs"), &path("exact.tgs"), png]),
+    ];
+    let mut expected = [
+        r#"exit Some(0)
+    Finished dir/dot.tgs #.# KiB (#.#%), exact
+  Converting dir/dot.png → dir/dot.tgs
+        Read #×# cells at #x, # colour, # frame, #.# s
+"#,
+        r#"exit Some(3)
+    Finished dir/exact.tgs #.# KiB (#.#%), exact
+  Converting dir/noise → dir/exact.tgs
+        Read #×# cells, # colours, # frames, #.# s
+warning: about #.# KiB (#.#%) as it is, too large; --no-exact lets fitting change the art
+error: the file is # bytes, at most # are allowed
+error: # shapes in # layers count #, a layer as #; Telegram takes at most #
+"#,
+        r#"exit Some(0)
+    Finished dir/fitted.tgs #.# KiB (#.#%), changed to fit
+  Converting dir/noise → dir/fitted.tgs
+        Read #×# cells, # colours, # frames, #.# s
+     Fitting about #.# KiB (#.#%) as it is, too large
+     Reduced dropped #% of frames → about #.# KiB
+     Reduced merged colours closer than #.# → about #.# KiB
+     Reduced merged colours closer than #.# → about #.# KiB
+     Reduced merged colours closer than #.# → about #.# KiB
+"#,
+        r#"exit Some(3)
+dir/dot.tgs
+  name        made with tgradish #.#.#
+  size        #.# KiB (#.#%), #.# KiB of JSON
+  animation   #×#, # fps, # frames (#.# s)
+  drawing     # layer, up to # shapes and # fill in one; cost # of #
+  telegram    ✔ accepts it
+
+dir/exact.tgs
+  name        made with tgradish #.#.#
+  size        #.# KiB (#.#%), #.# KiB of JSON
+  animation   #×#, # fps, # frames (#.# s)
+  drawing     # layers, up to # shapes and # fills in one; cost # of #
+  error: the file is # bytes, at most # are allowed
+  error: # shapes in # layers count #, a layer as #; Telegram takes at most #
+
+dir/dot.png
+  kind        a picture, not a sticker yet
+  size        #.# KiB
+  picture     #×#, transparent
+  frames      #
+  telegram    ✖ refuses it as it is: tgradish convert dir/dot.png makes one
+              a sticker keeping its size and length would be refused too:
+              - size is #×#, expected one side # px, the other at most # px
+"#,
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    if let Some(clip) = clip(Clip::Square) {
+        // named in what is printed, so where the test runs
+        let square = dir.path().join("square.mp4");
+        std::fs::copy(clip, &square).unwrap();
+        let ffmpeg = ["--ffmpeg-from", "system"];
+        let with_ffmpeg = |args: &[&str]| run(&[&ffmpeg[..], args].concat());
+        printed.extend([
+            with_ffmpeg(&["convert", png, "--format", "webp", "-y", "-o", &path("dot.webp")]),
+            with_ffmpeg(&[
+                "-v",
+                "convert",
+                png,
+                "--preset",
+                "fast",
+                "--fit",
+                "off",
+                "-y",
+                "-o",
+                &path("dot.webm"),
+            ]),
+            // too large, as nothing fits it
+            with_ffmpeg(&[
+                "convert",
+                square.to_str().unwrap(),
+                "--target",
+                "emoji",
+                "--fit",
+                "off",
+                "--crf",
+                "0",
+                "--length",
+                "1",
+                "--effort",
+                "fast",
+                "-y",
+                "-o",
+                &path("big.webm"),
+            ]),
+            with_ffmpeg(&["inspect", &path("dot.webp"), &path("dot.webm")]),
+            with_ffmpeg(&["inspect", "--target", "emoji", &path("dot.webp"), &path("big.webm")]),
+        ]);
+        expected.extend(
+            [
+                r#"exit Some(0)
+    Finished dir/dot.webp #.# KiB (#.#%), #×#
+  Converting dir/dot.png → dir/dot.webp
+"#,
+                r#"exit Some(0)
+    Finished dir/dot.webm #.# KiB (#.#%), # fps, #.# s, #.# kbit/s
+  Converting dir/dot.png → dir/dot.webm
+     Planned sticker #×#, # fps, #.# s, fit off
+     Encoded #: # fps, #.# s, #.# kbit/s → #.# KiB (#.#%), fits
+"#,
+                r#"exit Some(3)
+    Finished dir/big.webm #.# KiB (#.#%), # fps, #.# s, crf #
+  Converting dir/square.mp# → dir/big.webm
+     Planned emoji #×#, # fps, #.# s, fit off
+     Encoded #: # fps, #.# s, crf # → #.# KiB (#.#%), too large
+warning: Telegram will refuse it: #.# KiB, over the # KiB limit
+"#,
+                r#"exit Some(0)
+dir/dot.webp
+  size        #.# KiB (#.#%)
+  picture     WebP #×#, lossless, transparent
+  made        with tgradish #.#.#
+  telegram    ✔ accepts it as sticker
+
+dir/dot.webm
+  size        #.# KiB (#.#%)
+  video       VP# #×#, # fps, # frames, transparent
+  duration    #.# s in metadata, #.# s of video
+  made        written by tgradish #.#.#, muxed by tgradish #.#.#
+  signature   tgradish #.#.# https://github.com/sliva#/tgradish
+  telegram    ✔ accepts it as sticker
+"#,
+                r#"exit Some(3)
+dir/dot.webp
+  size        #.# KiB (#.#%)
+  picture     WebP #×#, lossless, transparent
+  made        with tgradish #.#.#
+  telegram    ✖ refuses it as emoji:
+              - size is #×#, expected #×#
+
+dir/big.webm
+  size        #.# KiB (#.#%)
+  video       VP# #×#, # fps, # frames
+  duration    #.# s in metadata, #.# s of video
+  made        written by tgradish #.#.#, muxed by tgradish #.#.#
+  signature   tgradish #.#.# https://github.com/sliva#/tgradish
+  telegram    ✖ refuses it as emoji:
+              - #.# KiB, over the # KiB limit
+"#,
+            ]
+            .map(str::to_owned),
+        );
+    }
+    assert_eq!(printed, expected, "{}", printed.join("\n=====\n"));
+}

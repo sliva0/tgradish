@@ -131,20 +131,14 @@ fn print_image(
     if let Some(tool) = &info.made_with {
         outln!("{}", ui::field("made", format!("with {tool}")));
     }
-    print_verdict(issues, target);
+    print_verdict(issues, Some(target));
 }
 
-/// What Telegram would say about a sticker.
-fn print_verdict(issues: &[telegram::Issue], target: Target) {
-    if issues.is_empty() {
-        let accepted = format!("{} as {}", style("✔ accepts it").green(), target.name());
-        outln!("{}", ui::field("telegram", accepted));
-    } else {
-        let refused = format!("{} as {}:", style("✖ refuses it").red(), target.name());
-        outln!("{}", ui::field("telegram", refused));
-        for issue in issues {
-            outln!("              {} {issue}", style("-").red());
-        }
+/// What Telegram would say about a sticker, judged as `target` where it
+/// was judged as one.
+fn print_verdict(issues: &[telegram::Issue], target: Option<Target>) {
+    for line in ui::verdict(issues, target) {
+        outln!("{line}");
     }
 }
 
@@ -240,7 +234,7 @@ fn print_info(path: &std::path::Path, info: &WebmInfo, target: Target, issues: &
         outln!("  {}", style("the file is truncated").red());
     }
 
-    print_verdict(issues, target);
+    print_verdict(issues, Some(target));
 }
 
 /// Says a file couldn't be inspected, and goes on to the rest.
@@ -615,14 +609,6 @@ fn print_sticker(path: &std::path::Path, stats: &check::Stats, issues: &[telegra
         let features: Vec<&str> = stats.features.iter().copied().collect();
         outln!("{}", ui::field("uses", features.join(", ")));
     }
-    if issues.is_empty() {
-        outln!("{}", ui::field("telegram", style("✔ accepts it").green()));
-    }
-    for issue in issues {
-        let label = match issue.severity() {
-            check::Severity::Error => ui::error_label(),
-            _ => ui::warning_label(),
-        };
-        outln!("  {label} {issue}");
-    }
+    // the same for stickers and emoji
+    print_verdict(issues, None);
 }

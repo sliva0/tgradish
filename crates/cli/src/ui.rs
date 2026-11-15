@@ -2,6 +2,7 @@
 //! stdout.
 
 use console::style;
+use tgradish_core::telegram::{Issue, Severity, Target};
 use tgradish_core::webm::{Params, Rate};
 
 /// A line like cargo's: `verb`, coloured and right-aligned in 12 columns,
@@ -103,6 +104,49 @@ pub fn error_label() -> console::StyledObject<&'static str> {
 
 pub fn warning_label() -> console::StyledObject<&'static str> {
     style("warning:").yellow().bold()
+}
+
+/// The label of what is said with `severity`: an error, or a warning.
+fn severity_label(severity: Severity) -> console::StyledObject<&'static str> {
+    match severity {
+        Severity::Error => error_label(),
+        _ => warning_label(),
+    }
+}
+
+/// An issue a result has, as a line on stderr under it: what only a
+/// `.tgs` is checked for labelled by its severity, and the kinds every
+/// format has as what Telegram refuses.
+pub fn issue(issue: &Issue) -> String {
+    match issue {
+        Issue::Lottie(_) => format!("{} {issue}", severity_label(issue.severity())),
+        _ => format!("{} Telegram will refuse it: {issue}", warning_label()),
+    }
+}
+
+/// What Telegram would say of a file with `issues`, as `inspect` prints it
+/// under what it holds: that it takes it, as `target` where the file was
+/// judged as one; or else, of the kinds every format has, that it refuses
+/// it and why, and what only a `.tgs` is checked for, each labelled by its
+/// severity.
+pub fn verdict(issues: &[Issue], target: Option<Target>) -> Vec<String> {
+    let named = target.map_or(String::new(), |target| format!(" as {}", target.name()));
+    if issues.is_empty() {
+        return vec![field("telegram", format!("{}{named}", style("✔ accepts it").green()))];
+    }
+    let (lottie, shared): (Vec<&Issue>, Vec<&Issue>) =
+        issues.iter().partition(|issue| matches!(issue, Issue::Lottie(_)));
+    let mut lines = Vec::new();
+    if !shared.is_empty() {
+        lines.push(field("telegram", format!("{}{named}:", style("✖ refuses it").red())));
+        lines.extend(
+            shared.iter().map(|issue| format!("              {} {issue}", style("-").red())),
+        );
+    }
+    lines.extend(
+        lottie.iter().map(|issue| format!("  {} {issue}", severity_label(issue.severity()))),
+    );
+    lines
 }
 
 /// A size, and how much of `limit` it uses, like `252.4 KiB (98.6%)`.
