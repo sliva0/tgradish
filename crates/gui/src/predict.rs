@@ -288,6 +288,7 @@ pub(crate) fn tgs(
 mod tests {
     use super::*;
     use tgradish_core::options::Resize;
+    use tgradish_core::presets::Format;
     use tgradish_core::telegram::Target;
 
     /// 2x1: red, then blue, opaque.
@@ -296,7 +297,7 @@ mod tests {
     }
 
     fn sizes(scaling: Scaling) -> Sizes {
-        tgradish_core::picture::sizes(Target::Emoji, Resize::Pad, scaling, (2, 1))
+        tgradish_core::picture::sizes(Format::Webm, Target::Emoji, Resize::Pad, scaling, (2, 1))
     }
 
     #[test]
@@ -322,8 +323,13 @@ mod tests {
         // red, blue, green: the blue one alone, grown, stays blue
         let row = vec![255, 0, 0, 255, 0, 0, 255, 255, 0, 255, 0, 255];
         let part = Part { x: 1.0, y: 0.0, width: 1.0, height: 1.0 };
-        let sizes =
-            tgradish_core::picture::sizes(Target::Emoji, Resize::Pad, Scaling::Smooth, (1, 1));
+        let sizes = tgradish_core::picture::sizes(
+            Format::Webm,
+            Target::Emoji,
+            Resize::Pad,
+            Scaling::Smooth,
+            (1, 1),
+        );
         let image = webm(&row, 3, part, &sizes);
         for x in [0, 50, 99] {
             assert_eq!(image.pixels[50 * 100 + x].to_srgba_unmultiplied(), [0, 0, 255, 255]);

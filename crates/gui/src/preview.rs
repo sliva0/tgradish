@@ -411,7 +411,7 @@ fn preview(
                             // a crop that doesn't suit the integer scale yet is made to
                             // fit on the next frame
                             if let Some(mut sizes) =
-                                file_settings::webm_sizes(webm, crop.unwrap_or(full))
+                                file_settings::webm_sizes(item.format, webm, crop.unwrap_or(full))
                             {
                                 let start = webm.start.unwrap_or(0.0);
                                 let art_key = inset_key((clip.id, where_, start.to_bits()));
@@ -565,7 +565,8 @@ fn inset_label(item: &Item, size: (u32, u32), webm: &Options) -> Option<Option<S
     match item.format {
         Format::Webm | Format::Webp => {
             let full = Crop::whole(size);
-            let sizes = file_settings::webm_sizes(webm, item.choices.crop.unwrap_or(full))?;
+            let sizes =
+                file_settings::webm_sizes(item.format, webm, item.choices.crop.unwrap_or(full))?;
             Some(Some(format!("{} × {} px", sizes.width, sizes.height)))
         }
         Format::Tgs => Some(None),

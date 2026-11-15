@@ -853,7 +853,9 @@ mod tests {
         // what isn't merged scales as none does, not as a scale
         assert_eq!(none.integer_scale(), None);
         assert!(none.auto_scaling());
-        let sizes = |options: &Options| crate::picture::picture_sizes(options, (8, 8)).unwrap();
+        let sizes = |options: &Options| {
+            crate::picture::picture_sizes(crate::presets::Format::Webm, options, (8, 8)).unwrap()
+        };
         assert_eq!(sizes(&none), sizes(&Options::default()));
     }
 

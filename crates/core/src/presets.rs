@@ -90,6 +90,14 @@ impl Format {
         }
     }
 
+    /// Whether its pictures' sides are even. A WebM's VP9 keeps colour in
+    /// 4:2:0, a sample to each 2 × 2 pixels, which an odd side doesn't
+    /// divide into; a WebP is encoded from full colour, of any size, and
+    /// Telegram takes any within the box. A `.tgs` is drawn in vectors.
+    pub fn even_sides(self) -> bool {
+        matches!(self, Format::Webm)
+    }
+
     /// The format a file name asks for, by its extension.
     pub fn of_path(path: &Path) -> Option<Format> {
         match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {

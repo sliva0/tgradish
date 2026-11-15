@@ -103,11 +103,11 @@ fn scalings() -> [Choice<Scaling>; 4] {
     ]
 }
 
-/// Where a `crop` of the input lands in a WebM or static result made with
-/// `options`, everything the conversion gets; `None` when its integer scale
-/// can't make it.
-pub(crate) fn webm_sizes(options: &Options, crop: Crop) -> Option<picture::Sizes> {
-    picture::picture_sizes(options, (crop.width, crop.height)).ok()
+/// Where a `crop` of the input lands in a WebM or static (`format`) result
+/// made with `options`, everything the conversion gets; `None` when its
+/// integer scale can't make it.
+pub(crate) fn webm_sizes(format: Format, options: &Options, crop: Crop) -> Option<picture::Sizes> {
+    picture::picture_sizes(format, options, (crop.width, crop.height)).ok()
 }
 
 /// How a WebM or static result made with `options` fills its box.
@@ -685,7 +685,7 @@ fn aspect_ratio(
             }
             // the result's size, where the result takes the crop's shape:
             // not squared, nor with margins
-            let sizes = crop.and_then(|crop| webm_sizes(effective, crop));
+            let sizes = crop.and_then(|crop| webm_sizes(item.format, effective, crop));
             let follows =
                 resize_of(effective) == Resize::Contain && sizes.is_some_and(|s| !s.pads());
             let (box_w, box_h) = item.choices.target.box_size();
@@ -844,7 +844,7 @@ fn integer_scale(
         widgets::hint(ui, fl!("scale-unused"));
         return;
     }
-    let Some(sizes) = webm_sizes(effective, crop) else {
+    let Some(sizes) = webm_sizes(item.format, effective, crop) else {
         widgets::hint(ui, fl!("scale-unsuited"));
         return;
     };
@@ -946,10 +946,16 @@ mod tests {
         assert_eq!(largest_scale(Target::Emoji, (64, 40)), IntegerScale { up: 1, down: 1 });
         assert_eq!(largest_scale(Target::Sticker, (1920, 1080)), IntegerScale { up: 1, down: 4 });
         // stretched, each way by its own multiple
-        let padded = picture::sizes(Target::Sticker, Resize::Pad, Scaling::Integer, (64, 40));
+        let padded =
+            picture::sizes(Format::Webm, Target::Sticker, Resize::Pad, Scaling::Integer, (64, 40));
         assert_eq!(multiples(&padded, (64, 40)), "×8");
-        let stretched =
-            picture::sizes(Target::Sticker, Resize::Stretch, Scaling::Integer, (64, 40));
+        let stretched = picture::sizes(
+            Format::Webm,
+            Target::Sticker,
+            Resize::Stretch,
+            Scaling::Integer,
+            (64, 40),
+        );
         assert_eq!(multiples(&stretched, (64, 40)), fl!("scale-each-way", across = 8, down = 12));
     }
 

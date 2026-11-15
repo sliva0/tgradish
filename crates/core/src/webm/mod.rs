@@ -37,7 +37,7 @@ pub use plan::{
     CUT_LEEWAY, Plan, default_fit_range, drawn_cut, edge_leeway, frame_count, frame_edge, plan,
     played_fps, read_from,
 };
-pub(crate) use plan::{encoded_length, estimate_bitrate};
+pub(crate) use plan::{encoded_length, estimate_bitrate, plan_for};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

@@ -126,7 +126,7 @@ pub fn plan(
         overwrite: request.overwrite,
         keep_temp: false,
     };
-    let (mut plan, warnings) = webm::plan(&request, source)?;
+    let (mut plan, warnings) = webm::plan_for(Format::Webp, &request, source)?;
     // one frame
     plan.length = 1.0 / plan.fps;
     Ok((plan, warnings))

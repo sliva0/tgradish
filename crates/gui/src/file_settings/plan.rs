@@ -98,7 +98,7 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
             read(item, &used, &mut steps);
             if let Some((width, height)) = item.input_size() {
                 let crop = options.crop.unwrap_or(Crop::whole((width, height)));
-                steps.extend(picture(&options, (crop.width, crop.height)));
+                steps.extend(picture(item.format, &options, (crop.width, crop.height)));
             }
             if item.format == Format::Webm {
                 let tempo = options.tempo_or_default();
@@ -150,9 +150,9 @@ fn read(item: &Item, used: &Used, steps: &mut Vec<String>) {
 }
 
 /// How a `used` picture is scaled, stretched, cut and padded into a WebM
-/// or static result.
-fn picture(options: &Options, used: (u32, u32)) -> Vec<String> {
-    let Ok(sizes) = picture::picture_sizes(options, used) else { return Vec::new() };
+/// or static (`format`) result.
+fn picture(format: Format, options: &Options, used: (u32, u32)) -> Vec<String> {
+    let Ok(sizes) = picture::picture_sizes(format, options, used) else { return Vec::new() };
     let mut steps = Vec::new();
     let scaled = sizes.scaled;
     if scaled != used {
@@ -238,25 +238,39 @@ mod tests {
     #[test]
     fn says_how_the_picture_fits() {
         // scaled to fill the longer side
-        assert_eq!(picture(&Options::default(), (64, 40)), ["Scaled to 512 × 320"]);
+        assert_eq!(picture(Format::Webm, &Options::default(), (64, 40)), ["Scaled to 512 × 320"]);
         // a whole scale pads a sticker, though it keeps its shape
         let exact = Options {
             scaling: Some(Scaling::Integer),
             integer_scale: Some(IntegerScale { up: 2, down: 1 }),
             ..Options::default()
         };
-        let steps = picture(&exact, (64, 40));
+        let steps = picture(Format::Webm, &exact, (64, 40));
         assert_eq!(steps, ["Scaled to 128 × 80", "Padded to 512 × 80"]);
         // stretched to a square
         let stretched = Options { resize: Some(Resize::Stretch), ..Options::default() };
-        assert_eq!(picture(&stretched, (64, 40)), ["Scaled to 512 × 512", "Stretched ×1.6 down"]);
+        assert_eq!(
+            picture(Format::Webm, &stretched, (64, 40)),
+            ["Scaled to 512 × 512", "Stretched ×1.6 down"]
+        );
         // an emoji, its middle cut to a square
         let cut = Options {
             target: Some(Target::Emoji),
             resize: Some(Resize::Crop),
             ..Options::default()
         };
-        assert_eq!(picture(&cut, (64, 40)), ["Scaled to 160 × 100", "Middle cut to 100 × 100"]);
+        assert_eq!(
+            picture(Format::Webm, &cut, (64, 40)),
+            ["Scaled to 160 × 100", "Middle cut to 100 × 100"]
+        );
+    }
+
+    #[test]
+    fn says_a_static_picture_keeps_odd_sides() {
+        // the crop's size already: nothing to scale, as a WebM would by a pixel
+        assert!(picture(Format::Webp, &Options::default(), (325, 512)).is_empty());
+        let scaled = fl!("plan-scaled", width = 326, height = 512);
+        assert_eq!(picture(Format::Webm, &Options::default(), (325, 512)), [scaled]);
     }
 
     #[test]

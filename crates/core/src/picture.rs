@@ -6,12 +6,18 @@ use crate::CancelToken;
 use crate::backend::{Backend, FramesRequest};
 use crate::error::{Error, Result};
 use crate::options::{Crop, IntegerScale, Resize, Scaling};
+use crate::presets::Format;
 use crate::telegram::{self, Target};
 use crate::webm::Options;
 use crate::webm::Plan;
 
-fn even(value: f64) -> u32 {
-    ((value / 2.0).round() as u32 * 2).max(2)
+/// The nearest side to `value` that `format` takes: even for WebM, as
+/// [`Format::even_sides`] says why, and any but none for a picture.
+fn side(format: Format, value: f64) -> u32 {
+    match format.even_sides() {
+        true => ((value / 2.0).round() as u32 * 2).max(2),
+        false => (value.round() as u32).max(1),
+    }
 }
 
 /// How a picture lands in the result.
@@ -50,9 +56,16 @@ impl Sizes {
     }
 }
 
-/// Where a `used` picture (the crop, or all of the input) lands in a result
-/// for `target`, as `resize` and `scaling` place it.
-pub fn sizes(target: Target, resize: Resize, scaling: Scaling, used: (u32, u32)) -> Sizes {
+/// Where a `used` picture (the crop, or all of the input) lands in a
+/// `format` result for `target`, as `resize` and `scaling` place it.
+pub fn sizes(
+    format: Format,
+    target: Target,
+    resize: Resize,
+    scaling: Scaling,
+    used: (u32, u32),
+) -> Sizes {
+    let even = |value: f64| side(format, value);
     let (box_w, box_h) = target.box_size();
     let (src_w, src_h) = (f64::from(used.0.max(1)), f64::from(used.1.max(1)));
     let (box_wf, box_hf) = (f64::from(box_w), f64::from(box_h));
@@ -90,8 +103,9 @@ pub fn sizes(target: Target, resize: Resize, scaling: Scaling, used: (u32, u32))
 /// Where a `used` picture lands at an exact `scale`, which must keep it
 /// within the box. Transparent margins fill the rest of what `target` and
 /// `resize` need: the box for emoji and padded stickers, otherwise 512 on
-/// the longer side and even sides, as the video's colour planes need.
+/// the longer side, with even sides where `format` has them.
 pub fn exact_sizes(
+    format: Format,
     target: Target,
     resize: Resize,
     used: (u32, u32),
@@ -117,7 +131,7 @@ pub fn exact_sizes(
             most => format!("{scale} takes a crop of at most {most} pixels on its longer side"),
         }));
     }
-    let even = |side: u32| side.next_multiple_of(2);
+    let even = |side: u32| if format.even_sides() { side.next_multiple_of(2) } else { side };
     let result = match resize {
         Resize::Crop | Resize::Stretch => {
             let reason = "keeps the picture whole with an integer scale: use contain or pad";
@@ -181,15 +195,15 @@ pub fn default_resize(target: Target) -> Resize {
     if target.requires_exact_size() { Resize::Pad } else { Resize::Contain }
 }
 
-/// The sizes a WebM or static result of a `used` part of the input has, as
-/// `options` ask. Planning a conversion uses this, and so can front-ends
-/// showing what it will make, so the two can't disagree.
-pub fn picture_sizes(options: &Options, used: (u32, u32)) -> Result<Sizes> {
+/// The sizes a WebM or static (`format`) result of a `used` part of the
+/// input has, as `options` ask. Planning a conversion uses this, and so
+/// can front-ends showing what it will make, so the two can't disagree.
+pub fn picture_sizes(format: Format, options: &Options, used: (u32, u32)) -> Result<Sizes> {
     let target = options.target.unwrap_or_default();
     let resize = options.resize.unwrap_or(default_resize(target));
     match options.integer_scale() {
-        Some(scale) => exact_sizes(target, resize, used, scale),
-        None => Ok(sizes(target, resize, options.scaling_or_default(), used)),
+        Some(scale) => exact_sizes(format, target, resize, used, scale),
+        None => Ok(sizes(format, target, resize, options.scaling_or_default(), used)),
     }
 }
 
@@ -251,6 +265,32 @@ fn looks_like_pixel_art(backend: &Backend, plan: &Plan, cancel: &CancelToken) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keeps_odd_sides_where_the_format_takes_them() {
+        let contained = |format, used| {
+            let sizes = sizes(format, Target::Sticker, Resize::Contain, Scaling::Auto, used);
+            (sizes.scaled, (sizes.width, sizes.height))
+        };
+        // a WebP keeps the crop's size where it fits, and its shape
+        assert_eq!(contained(Format::Webp, (325, 512)), ((325, 512), (325, 512)));
+        assert_eq!(contained(Format::Webp, (101, 51)), ((512, 259), (512, 259)));
+        assert_eq!(contained(Format::Webp, (1, 1000)), ((1, 512), (1, 512)));
+        // a WebM's colour planes need even sides
+        assert_eq!(contained(Format::Webm, (325, 512)), ((326, 512), (326, 512)));
+        assert_eq!(contained(Format::Webm, (101, 51)), ((512, 258), (512, 258)));
+        assert_eq!(contained(Format::Webm, (1, 1000)), ((2, 512), (2, 512)));
+        let filled =
+            sizes(Format::Webp, Target::Emoji, Resize::Crop, Scaling::Smooth, (101, 51)).scaled;
+        assert_eq!(filled, (198, 100));
+        let thrice = IntegerScale { up: 3, down: 1 };
+        let exact = |format| {
+            let sizes =
+                exact_sizes(format, Target::Sticker, Resize::Contain, (170, 101), thrice).unwrap();
+            (sizes.width, sizes.height)
+        };
+        assert_eq!((exact(Format::Webp), exact(Format::Webm)), ((512, 303), (512, 304)));
+    }
 
     #[test]
     fn tells_pixel_art_by_its_colours() {

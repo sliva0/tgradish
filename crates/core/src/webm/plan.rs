@@ -12,6 +12,7 @@ use crate::error::{Error, Result};
 use crate::ffmpeg::Probe;
 use crate::options::{self, Crop, Effort, Fit, FitUnit, Range, Resize, Scaling, Spoof};
 use crate::picture::{default_resize, picture_sizes};
+use crate::presets::Format;
 use crate::telegram::{self, Target};
 
 /// Every setting of a conversion, after defaults and input properties are
@@ -281,6 +282,16 @@ pub(crate) fn estimate_bitrate(length: f64, limit: u64) -> f64 {
 /// Resolves options against the probed input. Returns the plan and warnings
 /// about options that were adjusted or ignored.
 pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
+    plan_for(Format::Webm, request, source)
+}
+
+/// [`plan`] of a `format` result: a static one is planned as a WebM is, of
+/// one frame, in sizes of its own.
+pub(crate) fn plan_for(
+    format: Format,
+    request: &Request,
+    source: Probe,
+) -> Result<(Plan, Vec<String>)> {
     let o = &request.options;
     let mut warnings = Vec::new();
 
@@ -402,7 +413,7 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
         crop.check(source.width, source.height)?;
     }
     let used = o.crop.map_or((source.width, source.height), |crop| (crop.width, crop.height));
-    let sizes = picture_sizes(o, used)?;
+    let sizes = picture_sizes(format, o, used)?;
 
     let plan = Plan {
         input: request.input.first().to_path_buf(),
@@ -644,7 +655,7 @@ mod tests {
     #[test]
     fn keeps_pixels_whole() {
         let used = (50, 30);
-        let sizes = |resize, scaling| sizes(Target::Sticker, resize, scaling, used);
+        let sizes = |resize, scaling| sizes(Format::Webm, Target::Sticker, resize, scaling, used);
         // auto is smooth until the picture turns out to be pixel art
         let auto = sizes(Resize::Contain, Scaling::Auto);
         assert_eq!((auto.scaled, auto.width, auto.height), ((512, 308), 512, 308));
@@ -657,8 +668,13 @@ mod tests {
         let filled = sizes(Resize::Crop, Scaling::Integer);
         assert_eq!((filled.scaled, filled.width, filled.height), ((900, 540), 512, 512));
         // nothing to make whole when the picture shrinks
-        let large =
-            crate::picture::sizes(Target::Sticker, Resize::Contain, Scaling::Integer, (900, 600));
+        let large = crate::picture::sizes(
+            Format::Webm,
+            Target::Sticker,
+            Resize::Contain,
+            Scaling::Integer,
+            (900, 600),
+        );
         assert_eq!(large.scaling, Scaling::Sharp);
 
         let crop = Some(Crop { x: 0, y: 0, width: 50, height: 30 });
@@ -689,7 +705,8 @@ mod tests {
         assert!("1.5".parse::<IntegerScale>().is_err() && "2/3".parse::<IntegerScale>().is_err());
         assert!("4294967295".parse::<IntegerScale>().is_err());
         let huge = IntegerScale { up: u32::MAX, down: 1 };
-        let exact = |target, used, scale| exact_sizes(target, Resize::Contain, used, scale);
+        let exact =
+            |target, used, scale| exact_sizes(Format::Webm, target, Resize::Contain, used, scale);
         assert!(exact(Target::Sticker, (2, 2), huge).is_err());
         // made in code, with nothing to scale by
         for zero in [IntegerScale { up: 0, down: 1 }, IntegerScale { up: 1, down: 0 }] {
@@ -710,7 +727,8 @@ mod tests {
         let margins = exact(Target::Sticker, (170, 101), thrice).unwrap();
         assert_eq!((margins.scaled, margins.width, margins.height), ((510, 303), 512, 304));
         assert!(margins.pads());
-        let padded = exact_sizes(Target::Sticker, Resize::Pad, (170, 101), thrice).unwrap();
+        let padded =
+            exact_sizes(Format::Webm, Target::Sticker, Resize::Pad, (170, 101), thrice).unwrap();
         assert_eq!((padded.width, padded.height), (512, 512));
         let emoji = exact(Target::Emoji, (33, 20), thrice).unwrap();
         assert_eq!((emoji.scaled, emoji.width, emoji.height), ((99, 60), 100, 100));
@@ -719,7 +737,9 @@ mod tests {
         assert!(wrong.to_string().contains("at most 256 pixels"), "{wrong}");
         assert!(exact(Target::Emoji, (51, 40), twice).is_err());
         assert!(exact(Target::Sticker, (1023, 576), half).is_err());
-        assert!(exact_sizes(Target::Sticker, Resize::Crop, (256, 100), twice).is_err());
+        assert!(
+            exact_sizes(Format::Webm, Target::Sticker, Resize::Crop, (256, 100), twice).is_err()
+        );
 
         let crop = Some(Crop { x: 0, y: 0, width: 256, height: 144 });
         let options = Options { crop, integer_scale: Some(twice), ..Default::default() };

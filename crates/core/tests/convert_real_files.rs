@@ -476,6 +476,22 @@ fn crops_odd_sizes_exactly() {
                 "{name} {crop}"
             );
         }
+        // a static sticker keeps odd sides: as cropped, and scaled
+        for (crop, size) in [
+            (Crop { x: 1, y: 0, width: 51, height: 100 }, (261, 512)),
+            (Crop { x: 1, y: 1, width: 101, height: 51 }, (512, 259)),
+        ] {
+            let output = dir.path().join(format!("{name}-{}x{}.webp", crop.width, crop.height));
+            let request = Request {
+                output: Some(output.clone()),
+                options: Options { crop: Some(crop), ..Options::default() },
+                ..Request::new(Input::File(input.clone()))
+            };
+            let made = still(backend, &request, &CancelToken::new()).unwrap();
+            assert!(made.issues.is_empty(), "{name} {crop}: {:?}", made.issues);
+            let preview = webp::preview(&output).unwrap();
+            assert_eq!((preview.width, preview.height), size, "{name} {crop}");
+        }
     }
 }
 
