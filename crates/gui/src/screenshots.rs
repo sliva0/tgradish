@@ -1101,11 +1101,15 @@ fn readme_screenshot() {
         predictable_texture_filtering: false,
         ..egui_wgpu::RendererOptions::PREDICTABLE
     };
-    // wide enough for the settings to go in two columns, which they do
-    // from 1605, with room to spare; as tall as 16:10, where both columns
-    // end between two settings rather than through one
+    // narrow enough that the README, which shows it about 900 wide, keeps
+    // its smaller words readable, the settings in one column; wide enough
+    // for the timeline to stay on one row; as tall as the settings below
+    // the preview end between two of them rather than through one; drawn
+    // at twice the pixels, so that it is sharp as it is shown smaller and
+    // on screens of more pixels
     let mut harness = Harness::builder()
-        .with_size([1680.0, 1050.0])
+        .with_size([1280.0, 880.0])
+        .with_pixels_per_point(2.0)
         .with_render_options(filtering)
         .wgpu()
         .build_eframe(move |cc| {
@@ -1130,11 +1134,9 @@ fn readme_screenshot() {
         harness.run_steps(2);
         finish(&mut harness);
     }
-    // said to go where pictures usually do, rather than to the test's
-    // temporary folder
-    harness.state_mut().config.gui.output_dir = Some("/home/user/Pictures/Stickers".into());
     // the frog chosen, its idle tag, cropped to the frog and a little
-    // around it, 4:3, with the result's small picture
+    // around it, 4:3, and made, with the result's small picture and what
+    // Telegram will make of it
     let frog = harness.state().items[0].id;
     harness.state_mut().select(frog);
     let item = &mut harness.state_mut().items[0];
@@ -1142,7 +1144,15 @@ fn readme_screenshot() {
     item.choices.crop = Some(Crop { x: 1, y: 5, width: 32, height: 24 });
     item.view.inset = true;
     finish(&mut harness);
+    convert(&harness);
+    harness.run_steps(2);
+    finish(&mut harness);
+    // said to go where pictures usually do, rather than to the test's
+    // temporary folder
+    harness.state_mut().config.gui.output_dir = Some("/home/user/Pictures/Stickers".into());
+    // the input shown, with the crop over it
     let item = &mut harness.state_mut().items[0];
+    item.view.show = crate::item::Show::Input;
     item.view.playing = false;
     // its first frame, calm, in the preview and the result alike
     (item.view.time, item.view.result_time) = (0.0, 0.0);
@@ -1151,7 +1161,14 @@ fn readme_screenshot() {
     std::thread::sleep(Duration::from_millis(300));
     harness.run_steps(3);
     let image = harness.render().expect("rendering needs a GPU");
-    image.save(out.join("tgradish-readme.png")).unwrap();
+    // packed as tightly as PNG goes, for the README to load quickly
+    let file = std::fs::File::create(out.join("tgradish-readme.png")).unwrap();
+    let png = image::codecs::png::PngEncoder::new_with_quality(
+        std::io::BufWriter::new(file),
+        image::codecs::png::CompressionType::Best,
+        image::codecs::png::FilterType::Adaptive,
+    );
+    image.write_with_encoder(png).unwrap();
 }
 
 /// The README's inputs, written to `dir`: pixel art from ansimuz's Sunny
