@@ -134,7 +134,7 @@ cargo install --locked --path crates/cli
 
 ### macOS
 
-Untested: no release is built for it yet. If you want to help test tgradish on macOS, contact me.
+Untested: no release is built for it yet. If you want to help test tgradish on macOS, [contact me](#contributing).
 
 Building from source might work, with Homebrew's ffmpeg:
 
