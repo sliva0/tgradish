@@ -123,7 +123,7 @@ impl Default for GuiConfig {
             output_dir: None,
             overwrite: false,
             target: None,
-            smooth_scrolling: false,
+            smooth_scrolling: true,
             language: None,
             theme: Theme::default(),
             accent: Accent::default(),
@@ -367,6 +367,9 @@ mod tests {
              [gui.result-preview]\nsize = 9\ncorner = 'top-left'\n",
         );
         assert!(gui.overwrite && !gui.reopen_files);
+        // scrolling eases unless it is said not to
+        assert!(gui.smooth_scrolling);
+        assert!(!read("[gui]\nsmooth-scrolling = false\n").smooth_scrolling);
         // a theme it doesn't know, and a size out of range: the defaults
         assert_eq!(gui.theme, Theme::System);
         assert_eq!(gui.result_preview, ResultPreview { size: 3, corner: Corner::TopLeft });
