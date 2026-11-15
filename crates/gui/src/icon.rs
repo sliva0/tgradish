@@ -57,10 +57,22 @@ pub(crate) fn side(ctx: &egui::Context, room: f32) -> f32 {
     fit(texture(ctx).size()[0] as f32, ctx.pixels_per_point(), room)
 }
 
+/// [`side`] for `room`, where the icon fits in it with at least a screen
+/// pixel for each of its own.
+pub(crate) fn fitting(ctx: &egui::Context, room: f32) -> Option<f32> {
+    within(texture(ctx).size()[0] as f32, ctx.pixels_per_point(), room)
+}
+
 /// Side in points of `pixels` of pixel art at `ppp` screen pixels per point,
 /// as [`side`] chooses it.
 fn fit(pixels: f32, ppp: f32, room: f32) -> f32 {
     (room * ppp / pixels).floor().max(1.0) * pixels / ppp
+}
+
+/// [`fit`], where a screen pixel for each of the art's fits in `room`.
+fn within(pixels: f32, ppp: f32, room: f32) -> Option<f32> {
+    // a hair over, which a fractional scale's points may come to
+    (room * ppp + 0.01 >= pixels).then(|| fit(pixels, ppp, room))
 }
 
 /// Draws the icon at [`side`] for `room`.
@@ -98,6 +110,64 @@ mod tests {
             [(1.0, 48.0, 48.0), (1.25, 48.0, 38.4), (2.0, 48.0, 48.0), (1.0, 20.0, 48.0)]
         {
             assert!((fit(48.0, ppp, room) - shown).abs() < 1e-3, "{ppp} {room}");
+        }
+        // where it fits: smaller by whole screen pixels, down to one for
+        // each of its own, and not at all in less room
+        for (ppp, room, shown) in [
+            (1.0, 48.0, Some(48.0)),
+            (1.0, 47.0, None),
+            (1.25, 40.0, Some(38.4)),
+            (1.25, 38.4, Some(38.4)),
+            (1.25, 38.0, None),
+            (2.0, 47.0, Some(24.0)),
+            (2.0, 23.0, None),
+            (3.0, 48.0, Some(48.0)),
+            (3.0, 40.0, Some(32.0)),
+        ] {
+            let fitted = within(48.0, ppp, room);
+            assert_eq!(fitted.map(|side| (side * 100.0).round() / 100.0), shown, "{ppp} {room}");
+        }
+    }
+
+    /// The GUI's icon over the list, where it was drawn last: its texture's
+    /// mesh, as [`show`] paints it.
+    fn drawn(harness: &egui_kittest::Harness<'_, crate::app::App>) -> Option<Rect> {
+        let id = texture(&harness.ctx).id();
+        harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Mesh(mesh) if mesh.texture_id == id => Some(mesh.calc_bounds()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn shows_the_icon_over_the_list_at_the_smallest_size() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        // at whole scales and fractional ones
+        for ppp in [1.0, 1.25, 1.5, 2.0] {
+            let mut harness = egui_kittest::Harness::builder()
+                .with_size([crate::MIN_WIDTH, crate::MIN_HEIGHT])
+                .with_pixels_per_point(ppp)
+                .build_eframe(|cc| {
+                    let app = crate::app::App::with(
+                        crate::config::Config::default(),
+                        None,
+                        tgradish_core::presets::Presets::builtin(),
+                    );
+                    app.style(&cc.egui_ctx);
+                    app
+                });
+            harness.run_steps(3);
+            let icon = drawn(&harness).unwrap_or_else(|| panic!("no icon at {ppp}"));
+            // whole, at a screen pixel or more for each of its own, and
+            // clear of the buttons beside it
+            assert!(icon.width() * ppp >= 48.0 - 1e-3, "{ppp}: {icon:?}");
+            let add = crate::l10n::fl!("add-files");
+            let buttons = harness.query_all(egui_kittest::kittest::by().label(&add));
+            let first = buttons
+                .filter_map(|node| node.accesskit_node().bounding_box())
+                .min_by(|a, b| a.y0.total_cmp(&b.y0))
+                .expect("Add files over the list");
+            assert!(f64::from(icon.max.x) <= first.x0, "{ppp}: {icon:?} {first:?}");
         }
     }
 }

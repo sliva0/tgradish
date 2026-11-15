@@ -164,7 +164,9 @@ impl App {
                     self.pick(ui.ctx(), Pick::Files);
                 }
             });
-            // the icon and name, where the buttons leave room for them
+            // the icon and name, where the buttons leave room for them, the
+            // space after the last already left out; the icon smaller where
+            // it must be, down to a screen pixel for each of its own
             let title = egui::WidgetText::from(RichText::new("tgradish").heading().strong());
             let galley = title.into_galley(
                 ui,
@@ -173,11 +175,11 @@ impl App {
                 egui::TextStyle::Heading,
             );
             let gap = ui.spacing().item_spacing.x;
-            let room = ui.available_width() - gap;
-            if icon_side <= room {
+            let room = ui.available_width();
+            if let Some(shown) = icon::fitting(ui.ctx(), room.min(ICON_ROOM)) {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    icon::show(ui, ICON_ROOM);
-                    if icon_side + gap + galley.size().x <= room {
+                    icon::show(ui, room.min(ICON_ROOM));
+                    if shown + gap + galley.size().x <= room {
                         ui.label(galley);
                     }
                 });

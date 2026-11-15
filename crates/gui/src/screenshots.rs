@@ -40,6 +40,7 @@ fn screenshots() {
     };
     walk(&mut save);
     edges(&mut save);
+    empties(&mut save);
     accents(&mut save);
 }
 
@@ -69,6 +70,51 @@ fn state_screenshots() {
         let image = harness.render().expect("rendering needs a GPU");
         image.save(out.join(format!("tgradish-{name}.png"))).unwrap();
     });
+}
+
+/// Only the pictures of [`empties`], to `$TGRADISH_SCREENSHOTS` as
+/// [`screenshots`] makes them.
+#[test]
+#[ignore]
+fn empty_screenshots() {
+    let out =
+        PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
+    crate::l10n::choose(None);
+    empties(&mut |harness: &mut Harness<App>, name: &str| {
+        let image = harness.render().expect("rendering needs a GPU");
+        image.save(out.join(format!("tgradish-{name}.png"))).unwrap();
+    });
+}
+
+/// The GUI without files, and its icon over the list: at the smallest
+/// size, a little larger and the usual one, at whole and fractional
+/// scales, in both themes.
+fn empties(save: &mut impl FnMut(&mut Harness<App>, &str)) {
+    use crate::config::Theme;
+    let sizes = [
+        ("smallest", egui::vec2(crate::MIN_WIDTH, crate::MIN_HEIGHT)),
+        ("small", egui::vec2(1024.0, 640.0)),
+        ("wide", egui::vec2(1280.0, 820.0)),
+    ];
+    for (size_name, size) in sizes {
+        for ppp in [1.0, 1.25, 2.0] {
+            for theme in [Theme::Dark, Theme::Light] {
+                let theme_name = if theme == Theme::Dark { "dark" } else { "light" };
+                let mut harness = Harness::builder()
+                    .with_size(size)
+                    .with_pixels_per_point(ppp)
+                    .wgpu()
+                    .build_eframe(|cc| {
+                        let app = App::with(Config::default(), None, Presets::builtin());
+                        app.style(&cc.egui_ctx);
+                        app
+                    });
+                set_theme(&harness.ctx, theme);
+                harness.run_steps(3);
+                save(&mut harness, &format!("empty-{size_name}-{ppp}x-{theme_name}"));
+            }
+        }
+    }
 }
 
 /// Only the pictures of [`notices`], to `$TGRADISH_SCREENSHOTS` as
