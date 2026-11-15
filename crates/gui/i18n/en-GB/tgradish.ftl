@@ -293,8 +293,8 @@ saves-to = Saves to { $folder }
     .hint = Where results go is set in "{ settings }"
 # Before the folder of a result made as the settings are now.
 result-saved-to = Saved to { $folder }
-# Beside Show in folder, once there is a result: copies it as a file, to
-# paste into Telegram's chat.
+# Beside Convert, once there is a result: copies it as a file, to paste
+# into Telegram's chat.
 copy-result = Copy
     .hint = Copy the sticker as a file, to paste into a chat in Telegram
     .done = Copied
@@ -972,6 +972,9 @@ path-in-the-way = { $path } is in the way
 stopped-early = Stopped before it was done
 result = Result
     .stale = Result, outdated
+# Under Telegram's verdict on a result it would accept, as long as the
+# bar's Copy (copy-result) copies it; $keys is Copy's shortcut.
+result-copy = Copy it ({ $keys }) to paste it into a chat in Telegram
 # A WebM result: its size in pixels, frame rate and length.
 result-webm = { $width } × { $height } px, { $fps } fps, { $length }
     .spoofed = { $width } × { $height } px, { $fps } fps, { $length }, duration spoofed

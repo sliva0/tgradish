@@ -59,6 +59,7 @@ impl App {
             ui.add_space(crate::actions::BAR_BELOW);
         });
         let output = self.item(id).map(|item| self.output_for(item));
+        let copyable = self.copyable(id, output.as_deref()).is_some();
         let (choice, path) = self.ffmpeg_settings();
         let context = file_settings::Context {
             presets: &self.presets,
@@ -122,7 +123,7 @@ impl App {
                                 // what converting did, where the eye is once
                                 // Convert is pressed, before the plan, which
                                 // matters most before there is a result
-                                summary(ui, item, queued);
+                                summary(ui, item, queued, copyable);
                                 details(ui, item);
                                 file_settings::plan(ui, item, &context);
                             });

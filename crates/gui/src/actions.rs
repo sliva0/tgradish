@@ -1,6 +1,6 @@
 //! The bar under the selected item: converting it, stopping or not
-//! converting it after all and how far it has got, what went wrong last
-//! time, and where its result goes. Where that doesn't fit on a line,
+//! converting it after all and how far it has got, copying its result,
+//! what went wrong last time, and where its result goes. Where that doesn't fit on a line,
 //! where the result goes is on a second, under the rest.
 
 use std::path::{MAIN_SEPARATOR, Path, PathBuf};
@@ -39,6 +39,20 @@ const LINES: &str = "action bar lines";
 pub(crate) const POINT_AT_FAILURE: &str = "point at failure";
 
 impl App {
+    /// The result `id` made, there still as it wrote it, not put in its
+    /// place since, which can be copied as a file: the one at `output`,
+    /// where the bar says its result goes, not one of another format made
+    /// before.
+    pub(crate) fn copyable(&self, id: u64, output: Option<&Path>) -> Option<PathBuf> {
+        let item = self.item(id)?;
+        match &item.made.as_ref()?.job.status {
+            Status::Done(done) if Some(done.output.as_path()) == output => {
+                Some(done.output.clone()).filter(|made| self.wrote(id, made))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn actions(&mut self, ui: &mut egui::Ui, id: u64) {
         let output = self.item(id).map(|item| self.output_for(item));
         // a file there that this item didn't write, which tgradish made or
@@ -52,15 +66,9 @@ impl App {
         let queued = self.queue.iter().position(|&other| other == id);
         let presets_kept = self.presets_dir.is_some();
         let keyed = self.keyed;
-        // the result made, there still as this item wrote it, not put in
-        // its place since, which can be copied as a file, and whether it is
-        // where the next goes, made as it would be made now
-        let made = self.item(id).and_then(|item| match &item.made.as_ref()?.job.status {
-            Status::Done(done) => Some(done.output.clone()).filter(|output| self.wrote(id, output)),
-            _ => None,
-        });
-        // the one the bar names, not one of another format made before
-        let made = made.filter(|made| Some(made) == output.as_ref());
+        // the result to copy, and whether it is where the next goes, made
+        // as it would be made now
+        let made = self.copyable(id, output.as_deref());
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
         let saved = item.result_is_current() && made.is_some();
         let mut convert = false;
@@ -70,9 +78,12 @@ impl App {
         // already names the file
         let converting = item.job.as_ref().is_some_and(|conversion| conversion.job.is_running());
         let fallbacks = &self.fallbacks;
-        let right = output.as_ref().filter(|_| !converting).map(|output| {
-            Right::of(ui, fallbacks, (output, there, made.clone(), saved), replaces.as_deref())
-        });
+        let right = output
+            .as_ref()
+            .filter(|_| !converting)
+            .map(|output| Right::of(ui, fallbacks, (output, there, saved), replaces.as_deref()));
+        // the result made, to copy, while nothing is converted in its place
+        let made = made.filter(|_| !converting);
         let gap = ui.spacing().item_spacing.x;
         let bar = ui.available_width();
         // where the result goes on a line of its own, under the rest, while
@@ -116,6 +127,9 @@ impl App {
                         item.job = None;
                         self.queue.retain(|&other| other != id);
                     } else {
+                        if let Some(made) = &made {
+                            copy = copy_button(ui, made, keyed.copy);
+                        }
                         let ahead = queued.unwrap_or(0);
                         let text = if ahead == 0 {
                             fl!("next-to-convert")
@@ -156,10 +170,13 @@ impl App {
                     // what is said after the buttons, and how wide it is
                     let status = Said::of(item, blocked);
                     let said = status.width(ui);
+                    // Copy after Save preset, so that nothing moves as it
+                    // shows once there is a result
+                    let copying = made.as_ref().map_or(0.0, |_| copy_width(ui) + gap);
                     if presets_kept {
                         // an icon alone where what follows needs the room
                         let text = fl!("save-preset");
-                        let room = ui.available_width() - keep - said;
+                        let room = ui.available_width() - keep - copying - said;
                         let save = match widgets::fitting(ui, &[&text], room, 16.0) {
                             Some(_) => egui::Button::new(text),
                             None => egui::Button::new(RichText::new("💾").size(15.0)),
@@ -174,6 +191,9 @@ impl App {
                             );
                         }
                     }
+                    if let Some(made) = &made {
+                        copy = copy_button(ui, made, keyed.copy);
+                    }
                     left = ui.cursor().min.x - start + said;
                     let room = ui.available_width() - keep;
                     if let Some(path) = status.show(ui, room) {
@@ -183,7 +203,7 @@ impl App {
             }
             if let Some(right) = right.as_ref().filter(|_| !two) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    copy = right.show(ui, fallbacks, keyed.copy);
+                    right.show(ui, fallbacks);
                 });
             }
         });
@@ -192,7 +212,7 @@ impl App {
             let row = vec2(ui.available_width(), theme::CONTROL);
             let layout = egui::Layout::right_to_left(egui::Align::Center);
             ui.allocate_ui_with_layout(row, layout, |ui| {
-                copy = right.show(ui, fallbacks, keyed.copy);
+                right.show(ui, fallbacks);
             });
         }
         // on two lines from the next frame, or back on one, as they fit
@@ -329,14 +349,12 @@ const COPIED: &str = "result copied";
 /// How long what copying did is said on its button.
 const COPIED_SHOWN: f64 = 2.0;
 
-/// The right of the bar: where the result goes, its name, and the buttons
-/// that copy the result made and show its folder.
+/// The right of the bar: where the result goes, its name, and the button
+/// that shows its folder.
 struct Right<'a> {
     output: &'a Path,
     /// Something is there, whose folder can be shown.
     there: bool,
-    /// The result made, which can be copied.
-    made: Option<PathBuf>,
     /// Made where it goes, as it would be made now.
     saved: bool,
     name: String,
@@ -349,12 +367,12 @@ impl<'a> Right<'a> {
     fn of(
         ui: &egui::Ui,
         fallbacks: &crate::fallback::Fallbacks,
-        (output, there, made, saved): (&'a Path, bool, Option<PathBuf>, bool),
+        (output, there, saved): (&'a Path, bool, bool),
         replaces: Option<&str>,
     ) -> Right<'a> {
         let name = output.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let replaces = replaces.map(|replaces| format!("⚠ {replaces}"));
-        let mut right = Right { output, there, made, saved, name, replaces, least: 0.0 };
+        let mut right = Right { output, there, saved, name, replaces, least: 0.0 };
         let gap = ui.spacing().item_spacing.x;
         let shortest = folders(output).pop().unwrap_or_default();
         let mut least = right.buttons_width(ui)
@@ -398,53 +416,20 @@ impl<'a> Right<'a> {
         ui.painter().layout_job(self.saves(ui, fallbacks, folder)).size().x
     }
 
-    /// The buttons' room, with their names as long as they get.
+    /// The button's room.
     fn buttons_width(&self, ui: &egui::Ui) -> f32 {
-        let gap = ui.spacing().item_spacing.x;
-        let mut width = 0.0;
-        if self.there {
-            width += widgets::text_width(ui, &fl!("show-in-folder"), button_padding(ui)) + gap;
+        match self.there {
+            true => widgets::text_width(ui, &fl!("show-in-folder"), button_padding(ui)),
+            false => 0.0,
         }
-        if self.made.is_some() {
-            width += copy_width(ui) + gap;
-        }
-        (width - gap).max(0.0)
     }
 
     /// Draws it, from the right: its folder shortened from its middle
     /// where it has less room than it would take, and its name only where
-    /// it alone is wider than that, its ending kept. Gives the result to
-    /// copy, once asked, by Copy or, where `keyed`, its key.
-    fn show(
-        &self,
-        ui: &mut egui::Ui,
-        fallbacks: &crate::fallback::Fallbacks,
-        keyed: bool,
-    ) -> Option<PathBuf> {
+    /// it alone is wider than that, its ending kept.
+    fn show(&self, ui: &mut egui::Ui, fallbacks: &crate::fallback::Fallbacks) {
         if self.there && ui.button(fl!("show-in-folder")).clicked() {
             system::reveal(self.output);
-        }
-        let mut copy = None;
-        if let Some(made) = &self.made {
-            // what copying did, said on the button a moment
-            let now = ui.input(|input| input.time);
-            let copied: Option<(f64, Result<(), String>)> =
-                ui.data(|data| data.get_temp(egui::Id::new(COPIED)));
-            let (text, hint) = match copied.filter(|(when, _)| now - when < COPIED_SHOWN) {
-                Some((when, copied)) => {
-                    ui.ctx().request_repaint_after_secs((COPIED_SHOWN - (now - when)) as f32);
-                    match copied {
-                        Ok(()) => (copied_text(), copy_hint()),
-                        Err(why) => (fl!("copy-result", "failed"), why),
-                    }
-                }
-                None => (fl!("copy-result"), copy_hint()),
-            };
-            // as wide whatever it says, so nothing beside it moves
-            let button = egui::Button::new(text).min_size(vec2(copy_width(ui), 0.0));
-            if ui.add(button).on_hover_text(hint).clicked() || keyed {
-                copy = Some(made.clone());
-            }
         }
         if let Some(replaces) = &self.replaces {
             let warning = RichText::new(replaces).color(theme::warn(ui.visuals()));
@@ -485,7 +470,7 @@ impl<'a> Right<'a> {
             .unwrap_or_default();
         // none of it where hardly any would show
         if room < FOLDER_LEAST {
-            return copy;
+            return;
         }
         let saves = self.saves(ui, fallbacks, &folder);
         // shortened: said in full on hover
@@ -494,8 +479,30 @@ impl<'a> Right<'a> {
             None => fl!("saves-to", "hint"),
         };
         ui.add(egui::Label::new(saves).truncate()).on_hover_text(hint);
-        copy
     }
+}
+
+/// Copy, beside Convert once there is a result: it copies `made` as a
+/// file, to paste into Telegram, and says what copying did on it a moment,
+/// as wide whatever it says, so nothing beside it moves. Gives the result
+/// to copy, once clicked or, where `keyed`, asked by its key.
+fn copy_button(ui: &mut egui::Ui, made: &Path, keyed: bool) -> Option<PathBuf> {
+    let now = ui.input(|input| input.time);
+    let copied: Option<(f64, Result<(), String>)> =
+        ui.data(|data| data.get_temp(egui::Id::new(COPIED)));
+    let (text, hint) = match copied.filter(|(when, _)| now - when < COPIED_SHOWN) {
+        Some((when, copied)) => {
+            ui.ctx().request_repaint_after_secs((COPIED_SHOWN - (now - when)) as f32);
+            match copied {
+                Ok(()) => (copied_text(), copy_hint()),
+                Err(why) => (fl!("copy-result", "failed"), why),
+            }
+        }
+        None => (fl!("copy-result"), copy_hint()),
+    };
+    let button = egui::Button::new(text).min_size(vec2(copy_width(ui), BAR_ROW));
+    let clicked = ui.add(button).on_hover_text(hint).clicked();
+    (clicked || keyed).then(|| made.to_path_buf())
 }
 
 /// The padding of a button's words, both sides.
@@ -815,6 +822,14 @@ mod tests {
         harness.run_steps(2);
         finish(&mut harness);
         harness.get_by_label(&fl!("result-saved-to", folder = folder.as_str()));
+        // beside Convert again, as high, and pointed at by the result
+        let keys = crate::keys::keys_text(crate::keys::Command::Convert);
+        let again = harness.get(egui_kittest::kittest::by().label_contains(&keys)).rect();
+        let copy = harness.get_by_label(&fl!("copy-result")).rect();
+        assert_eq!((copy.top(), copy.bottom()), (again.top(), again.bottom()));
+        assert!(copy.left() > again.right(), "{copy:?} beside {again:?}");
+        let copy_keys = crate::keys::keys_text(crate::keys::Command::CopyResult);
+        harness.get_by_label(&fl!("result-copy", keys = copy_keys));
         harness.get_by_label(&fl!("copy-result")).click();
         harness.run_steps(2);
         let output = made_job(&harness.state().items[0]).output.clone();

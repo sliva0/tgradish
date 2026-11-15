@@ -10,8 +10,9 @@ use crate::l10n::fl;
 use crate::{theme, widgets};
 
 /// The last result of an item in short: its size and what Telegram would
-/// say, beside the preview.
-pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
+/// say, beside the preview, and, where it is `copyable` as the bar's Copy
+/// copies it, that it is pasted into Telegram so.
+pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>, copyable: bool) {
     if let Some(conversion) = &item.job {
         progress_column(ui, &conversion.job, queued);
     }
@@ -49,6 +50,12 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
     );
     ui.add_space(4.0);
     widgets::problems(ui, &done.problems);
+    // the way on, once converting is done, with a result Telegram takes
+    let refused = done.problems.iter().any(|problem| problem.refused);
+    if copyable && item.job.is_none() && item.result_is_current() && !refused {
+        let keys = crate::keys::keys_text(crate::keys::Command::CopyResult);
+        widgets::note(ui, fl!("result-copy", keys = keys));
+    }
     if let Some(plan) = &made.job.progress.webm {
         // the encode kept, which fitting may have made at a lower
         // frame rate or shorter than planned
