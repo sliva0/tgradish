@@ -7,11 +7,59 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use tgradish_tgs::sticker::Step;
 
+use tgradish_tgs::normalise::Report;
+
 use crate::presets::Format;
 use crate::preview::Preview;
 use crate::telegram::{Issue, Target};
-use crate::webm::Params;
+use crate::webm::{Params, Plan};
 use crate::webp::Encoding;
+
+/// A conversion of any format is about to make its result, which its
+/// `started` event says, the first of each conversion: what it makes of
+/// which input, where, and the limit it must fit, beside what only its
+/// format says then.
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub struct Started {
+    /// The input, the first picture of a sequence.
+    #[serde(serialize_with = "crate::protocol::serialize_path")]
+    pub input: PathBuf,
+    /// Where the result goes.
+    #[serde(serialize_with = "crate::protocol::serialize_path")]
+    pub output: PathBuf,
+    /// What it makes.
+    pub format: Format,
+    /// What it makes it as.
+    pub target: Target,
+    /// The most Telegram takes of it, in bytes.
+    pub limit: u64,
+    /// What only its format says as it starts, beside the rest.
+    #[serde(flatten)]
+    pub details: StartDetails,
+}
+
+/// What only one format's [`Started`] says, serialised beside the rest of
+/// it, its `format` saying which.
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[serde(untagged, rename_all_fields = "kebab-case")]
+#[non_exhaustive]
+pub enum StartDetails {
+    /// A WebM's: the conversion is planned and about to start encoding.
+    Webm {
+        /// What the conversion will do.
+        plan: Box<Plan>,
+    },
+    /// A `.tgs`'s: the input is read.
+    Tgs {
+        /// What normalising found and did.
+        report: Box<Report>,
+    },
+    /// A WebP's: the input was read, and the picture is about to be made;
+    /// nothing more is said of it.
+    Webp {},
+}
 
 /// What converting made, of any format, which its `finished` event says
 /// whether or not events were followed: the sticker or emoji written, how

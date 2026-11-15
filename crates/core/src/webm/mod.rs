@@ -44,7 +44,7 @@ use std::path::{Path, PathBuf};
 use crate::CancelToken;
 use crate::backend::{Backend, Pass};
 use crate::error::{Error, FileAction, Result};
-use crate::events::{Details, Outcome};
+use crate::events::{Details, Outcome, StartDetails, Started};
 use crate::ffmpeg::Output;
 use crate::input::Input;
 use crate::picture::choose_auto_scaling;
@@ -236,8 +236,15 @@ pub fn convert(
         return Err(Error::FfmpegArgsNeedProgram);
     }
     // the input as given, not as drawn for ffmpeg
-    let started = Plan { input: request.input.first().to_path_buf(), ..plan.clone() };
-    on_event(Event::Started { plan: Box::new(started) });
+    let input = request.input.first().to_path_buf();
+    on_event(Event::Started(Started {
+        input: input.clone(),
+        output: plan.output.clone(),
+        format: Format::Webm,
+        target: plan.target,
+        limit: plan.target.max_bytes(),
+        details: StartDetails::Webm { plan: Box::new(Plan { input, ..plan.clone() }) },
+    }));
     // after it: of several inputs' events, a warning is about the one that
     // started last
     for message in warnings {

@@ -5,7 +5,6 @@
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use super::Plan;
 use crate::protocol::Failure;
 
 /// Rate control used by one encode. Serialised tagged by `mode`, as
@@ -69,11 +68,8 @@ pub struct Params {
 #[non_exhaustive]
 pub enum Event {
     /// The conversion is planned and about to start encoding: the first
-    /// event of every conversion.
-    Started {
-        /// What the conversion will do.
-        plan: Box<Plan>,
-    },
+    /// event of every conversion, with its plan.
+    Started(crate::Started),
     /// An encode starts.
     AttemptStarted {
         /// Which, from 1.

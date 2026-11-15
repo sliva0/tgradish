@@ -10,7 +10,7 @@ use std::process::Command;
 
 use common::{backends, clip, name};
 use tgradish_core::backend::{Backend, FramesRequest};
-use tgradish_core::events::Details;
+use tgradish_core::events::{Details, StartDetails};
 use tgradish_core::ffmpeg;
 use tgradish_core::input::Input;
 use tgradish_core::mark::made_by_tgradish;
@@ -21,7 +21,7 @@ use tgradish_core::webm::container;
 use tgradish_core::webm::{Decision, Event};
 use tgradish_core::webm::{Request, convert};
 use tgradish_core::webp;
-use tgradish_core::{CancelToken, Error, Outcome};
+use tgradish_core::{CancelToken, Error, Outcome, Started};
 use tgradish_corpus::Clip;
 
 /// What only a WebM's outcome has: the attempt kept, whether its duration
@@ -96,7 +96,7 @@ fn converts_short_clip_without_spoofing() {
         let (_, spoofed, settled, _) = webm(&outcome);
         assert!(!spoofed && !settled);
         assert!(outcome.bytes <= telegram::MAX_STICKER_BYTES);
-        assert!(matches!(events.first(), Some(Event::Started { .. })));
+        assert!(matches!(events.first(), Some(Event::Started(_))));
         assert!(matches!(events.last(), Some(Event::Finished(_))));
 
         let info = container::inspect_file(&outcome.output).unwrap();
@@ -178,7 +178,7 @@ fn warns_once_started() {
         let mut events = Vec::new();
         convert(backend, &request, &CancelToken::new(), &mut |e| events.push(e)).unwrap();
         let name = name(backend);
-        assert!(matches!(events.first(), Some(Event::Started { .. })), "{name}: {:?}", events[0]);
+        assert!(matches!(events.first(), Some(Event::Started(_))), "{name}: {:?}", events[0]);
         let warned = events.iter().position(|event| matches!(event, Event::Warning { .. }));
         assert_eq!(warned, Some(1), "{name}");
     }
@@ -503,7 +503,7 @@ fn keeps_pixel_art_sharp() {
         };
         let mut scaling = None;
         convert(backend, &request, &CancelToken::new(), &mut |event| {
-            if let Event::Started { plan } = event {
+            if let Event::Started(Started { details: StartDetails::Webm { plan }, .. }) = event {
                 scaling = Some(plan.scaling);
             }
         })
@@ -1261,7 +1261,13 @@ fn converts_aseprite_files_through_ffmpeg() {
         assert!(made.issues.is_empty(), "{name}: {:?}", made.issues);
         // told as given, not as drawn for ffmpeg
         let started = events.first();
-        assert!(matches!(started, Some(Event::Started { plan }) if plan.input == ase), "{name}");
+        let planned = |plan: &tgradish_core::webm::Plan| plan.input == ase;
+        assert!(
+            matches!(started, Some(Event::Started(Started { input, details: StartDetails::Webm { plan }, .. }))
+                if *input == ase && planned(plan)),
+            "{name}"
+        );
+        assert_eq!(made.input, ase, "{name}");
         let info = container::inspect_file(&made.output).unwrap();
         assert_eq!(info.video_frames, 2, "{name}");
         // a picture of its first frame

@@ -6,12 +6,12 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use console::style;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
-use tgradish_core::Outcome;
 use tgradish_core::backend::Backend;
-use tgradish_core::events::Details;
+use tgradish_core::events::{Details, StartDetails};
 use tgradish_core::input::Input;
 use tgradish_core::presets::{Format, FormatOptions, PresetError, Presets};
 use tgradish_core::webm::{self, Event, Options};
+use tgradish_core::{Outcome, Started};
 use tgradish_core::{tgs, webp};
 
 use crate::Context;
@@ -392,7 +392,7 @@ impl<'a> Converter<'a> {
                     let quiet = self.ctx.global.quiet;
                     let outcome =
                         webp::convert(&backend, &request, cancel, &mut |event| match event {
-                            webp::Event::Started { input, output } if !quiet => {
+                            webp::Event::Started(Started { input, output, .. }) if !quiet => {
                                 eprintln!("{}", converting(&input, &output));
                             }
                             webp::Event::Warning { message } => {
@@ -616,11 +616,11 @@ impl Printer {
     }
 
     fn event(&mut self, event: Event) {
-        if let Event::Started { plan } = &event {
-            self.limit = plan.target.max_bytes();
+        if let Event::Started(started) = &event {
+            self.limit = started.limit;
         }
         match event {
-            Event::Started { plan } if !self.quiet => {
+            Event::Started(Started { details: StartDetails::Webm { plan }, .. }) if !self.quiet => {
                 self.bar.line(converting(&plan.input, &plan.output));
                 let spoof = if plan.spoofs(plan.length) { ", spoofed" } else { "" };
                 self.bar.line(ui::status(
@@ -751,7 +751,9 @@ impl TgsPrinter {
 
     fn event(&mut self, event: tgs::Event) {
         match event {
-            tgs::Event::Started { input, report } if !self.quiet => {
+            tgs::Event::Started(Started {
+                input, details: StartDetails::Tgs { report }, ..
+            }) if !self.quiet => {
                 self.bar.line(converting(&input, &self.output));
                 let scale = match report.scale {
                     1 => String::new(),

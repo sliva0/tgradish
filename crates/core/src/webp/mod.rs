@@ -26,7 +26,7 @@ use serde::Serialize;
 use crate::CancelToken;
 use crate::backend::Backend;
 use crate::error::{Error, Result};
-use crate::events::{Details, Outcome};
+use crate::events::{Details, Outcome, StartDetails, Started};
 use crate::input::Input;
 use crate::picture;
 use crate::presets::Format;
@@ -71,14 +71,7 @@ impl Request {
 #[non_exhaustive]
 pub enum Event {
     /// The input was read, and the picture is about to be made.
-    Started {
-        /// The input, the first picture of a sequence.
-        #[serde(serialize_with = "crate::protocol::serialize_path")]
-        input: PathBuf,
-        /// Where the picture goes.
-        #[serde(serialize_with = "crate::protocol::serialize_path")]
-        output: PathBuf,
-    },
+    Started(crate::Started),
     /// The picture is written: what was made, as converting returns it.
     Finished(Box<Outcome>),
     /// Something worth knowing: about the picture, as options that were
@@ -193,8 +186,14 @@ pub fn convert(
         _ => Vec::new(),
     };
     let (mut plan, warnings) = plan(request, source, &starts)?;
-    let input_name = request.input.first().to_path_buf();
-    on_event(Event::Started { input: input_name, output: plan.output.clone() });
+    on_event(Event::Started(Started {
+        input: request.input.first().to_path_buf(),
+        output: plan.output.clone(),
+        format: Format::Webp,
+        target: plan.target,
+        limit: Format::Webp.max_bytes(plan.target),
+        details: StartDetails::Webp {},
+    }));
     for message in warnings {
         on_event(Event::Warning { message });
     }

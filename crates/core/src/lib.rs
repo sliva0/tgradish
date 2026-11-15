@@ -72,7 +72,7 @@ pub mod webp;
 
 pub use cancel::CancelToken;
 pub use error::{ClipboardError, Error, FfmpegMissing, FileAction, Result, io_reason};
-pub use events::Outcome;
+pub use events::{Outcome, Started};
 /// `tgradish-tgs`, which makes `.tgs` stickers of pixel art, with the pixel
 /// art reader under it as `tgradish_tgs::frames`: every type of theirs
 /// this crate's API names is reached through it.

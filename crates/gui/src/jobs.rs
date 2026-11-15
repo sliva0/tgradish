@@ -7,7 +7,7 @@ use std::sync::mpsc::{Receiver, channel};
 use eframe::egui;
 use tgradish_core::CancelToken;
 use tgradish_core::backend::Backend;
-use tgradish_core::events::Details;
+use tgradish_core::events::{Details, StartDetails};
 use tgradish_core::input::Input;
 use tgradish_core::presets::Format;
 use tgradish_core::preview::Preview;
@@ -17,7 +17,7 @@ use tgradish_core::tgradish_tgs::sticker::Step;
 use tgradish_core::tgs;
 use tgradish_core::webm::{self, Decision, Event, Options, Params};
 use tgradish_core::webp;
-use tgradish_core::{Error, FfmpegMissing, Outcome, telegram};
+use tgradish_core::{Error, FfmpegMissing, Outcome, Started, telegram};
 
 use crate::l10n::fl;
 use crate::widgets;
@@ -576,7 +576,9 @@ fn run(
             }));
             let outcome =
                 tgs::convert(backend.as_ref(), &request, cancel, &mut |event| match event {
-                    tgs::Event::Started { report, .. } => update(Box::new(move |progress| {
+                    tgs::Event::Started(Started {
+                        details: StartDetails::Tgs { report }, ..
+                    }) => update(Box::new(move |progress| {
                         progress.report = Some(report);
                         progress.tgs = Some(TgsStage::Drawing);
                     })),
@@ -607,9 +609,8 @@ fn convert_webm(
     cancel: &CancelToken,
     update: Update,
 ) -> Result<Done, Error> {
-    let limit = request.options.target.unwrap_or_default().max_bytes();
     let outcome = webm::convert(&backend, request, cancel, &mut |event| match event {
-        Event::Started { plan } => {
+        Event::Started(Started { details: StartDetails::Webm { plan }, limit, .. }) => {
             let planned = WebmPlan {
                 width: plan.width,
                 height: plan.height,

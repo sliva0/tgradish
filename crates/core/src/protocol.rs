@@ -277,7 +277,7 @@ mod tests {
 
     use super::Failure;
     use super::*;
-    use crate::events::{Details, Outcome};
+    use crate::events::{Details, Outcome, StartDetails, Started};
     use crate::ffmpeg::Probe;
     use crate::telegram::{Issue, Target};
     use crate::webm::{Decision, Params, Rate};
@@ -312,7 +312,14 @@ mod tests {
         let params = Params { fps: 30.0, length: 2.0, rate: Rate::Bitrate(500.0) };
         let too_big = Issue::TooBig { bytes: 300_000, max: 262_144 };
         let webm = [
-            Event::Started { plan: Box::new(plan()) },
+            Event::Started(Started {
+                input: "in.mp4".into(),
+                output: "in.sticker.webm".into(),
+                format: Format::Webm,
+                target: Target::Sticker,
+                limit: 262_144,
+                details: StartDetails::Webm { plan: Box::new(plan()) },
+            }),
             Event::AttemptStarted { attempt: 1, params },
             Event::Progress { attempt: 1, pass: 1, passes: 2, fraction: 0.5, can_settle: false },
             Event::AttemptFinished {
@@ -365,7 +372,14 @@ mod tests {
             0.01,
         );
         let tgs = [
-            tgs::Event::Started { input: "art.gif".into(), report: Box::new(report) },
+            tgs::Event::Started(Started {
+                input: "art.gif".into(),
+                output: "art.sticker.tgs".into(),
+                format: Format::Tgs,
+                target: Target::Sticker,
+                limit: 65_536,
+                details: StartDetails::Tgs { report: Box::new(report) },
+            }),
             tgs::Event::TooLarge { bytes: 70_000 },
             tgs::Event::Reduced { step: step.clone() },
             tgs::Event::Packing,
@@ -391,7 +405,14 @@ mod tests {
         ]
         .map(|event| serde_json::to_value(event).unwrap());
         let still = [
-            webp::Event::Started { input: "in.png".into(), output: "in.sticker.webp".into() },
+            webp::Event::Started(Started {
+                input: "in.png".into(),
+                output: "in.sticker.webp".into(),
+                format: Format::Webp,
+                target: Target::Emoji,
+                limit: 524_288,
+                details: StartDetails::Webp {},
+            }),
             webp::Event::Finished(Box::new(Outcome {
                 input: "in.png".into(),
                 output: "in.sticker.webp".into(),
@@ -626,7 +647,9 @@ mod tests {
                 r#"{"event":"finished","input":"art.gif","output":"art.sticker.tgs","format":"tgs","target":"sticker","bytes":60000,"limit":65536,"changed":true,"issues":[],"json-bytes":300000,"steps":[{"reduction":"despeckle","bytes":60000,"distortion":0.01}],"layers":3,"rectangles":40}"#,
             ),
             Some(r#"{"event":"error","message":"it failed","input":null}"#),
-            Some(r#"{"event":"started","input":"in.png","output":"in.sticker.webp"}"#),
+            Some(
+                r#"{"event":"started","input":"in.png","output":"in.sticker.webp","format":"webp","target":"emoji","limit":524288}"#,
+            ),
             Some(
                 r#"{"event":"finished","input":"in.png","output":"in.sticker.webp","format":"webp","target":"emoji","bytes":100000,"limit":524288,"changed":true,"issues":[{"kind":"wrong-size","width":512,"height":384,"side":100,"exact":true,"severity":"error","message":"size is 512×384, expected 100×100"}],"width":512,"height":384,"encoding":{"kind":"lossy","quality":80}}"#,
             ),
@@ -643,12 +666,14 @@ mod tests {
         }
         let keys =
             |value: &Value| -> Vec<String> { value.as_object().unwrap().keys().cloned().collect() };
-        assert_eq!(keys(&samples[0]), ["event", "plan"]);
+        let head = ["event", "input", "output", "format", "target", "limit"];
+        assert_eq!(keys(&samples[0]), [&head[..], &["plan"]].concat());
+        assert_eq!(samples[0]["input"], "in.mp4");
         for key in ["input", "output", "source", "target", "scaled-width", "fit-range", "watermark"]
         {
             assert!(samples[0]["plan"].get(key).is_some(), "{key}");
         }
         let tgs = samples.iter().filter(|sample| sample["event"] == "started").nth(1).unwrap();
-        assert_eq!(keys(tgs), ["event", "input", "report"]);
+        assert_eq!(keys(tgs), [&head[..], &["report"]].concat());
     }
 }

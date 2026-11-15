@@ -1,10 +1,7 @@
 //! What a `.tgs` conversion reports as it goes.
 
-use std::path::PathBuf;
-
 use schemars::JsonSchema;
 use serde::Serialize;
-use tgradish_tgs::normalise::Report;
 use tgradish_tgs::sticker::Step;
 
 /// Progress of a `.tgs` conversion, printed by `convert --json` one per
@@ -15,14 +12,8 @@ use tgradish_tgs::sticker::Step;
 #[schemars(rename = "TgsEvent")]
 #[non_exhaustive]
 pub enum Event {
-    /// The input is read: what normalising found and did.
-    Started {
-        /// The input, the first file of a sequence.
-        #[serde(serialize_with = "crate::protocol::serialize_path")]
-        input: PathBuf,
-        /// What normalising found and did.
-        report: Box<Report>,
-    },
+    /// The input is read, with what normalising found and did.
+    Started(crate::Started),
     /// Unchanged, the sticker would come to about this many bytes, more
     /// than fits; fitting starts, unless `exact` keeps the art as it is.
     TooLarge {

@@ -28,7 +28,7 @@ use tgradish_tgs::sticker::{self, Progress};
 use crate::CancelToken;
 use crate::backend::Backend;
 use crate::error::{Error, Result};
-use crate::events::{Details, Outcome};
+use crate::events::{Details, Outcome, StartDetails, Started};
 use crate::input::Input;
 use crate::options::Resize;
 use crate::presets::Format;
@@ -103,6 +103,7 @@ pub fn convert(
         settings.normalise.length = part.length;
     }
     let input = request.input.first().to_path_buf();
+    let target = request.options.target.unwrap_or_default();
     let sticker = sticker::make(
         loaded.animation,
         &settings,
@@ -111,7 +112,14 @@ pub fn convert(
             Progress::Normalised { report } => {
                 let found = report.warnings.iter().map(|w| w.to_string());
                 let warnings: Vec<String> = loaded.warnings.iter().cloned().chain(found).collect();
-                on_event(Event::Started { input: input.clone(), report });
+                on_event(Event::Started(Started {
+                    input: input.clone(),
+                    output: output.clone(),
+                    format: Format::Tgs,
+                    target,
+                    limit: Format::Tgs.max_bytes(target),
+                    details: StartDetails::Tgs { report },
+                }));
                 for message in warnings {
                     on_event(Event::Warning { message });
                 }
@@ -134,7 +142,6 @@ pub fn convert(
         return Err(Error::Cancelled);
     }
     crate::fsutil::write_output(&output, &sticker.tgs, request.overwrite)?;
-    let target = request.options.target.unwrap_or_default();
     let outcome = Outcome {
         input,
         output,
