@@ -26,7 +26,7 @@ BEGIN
       VALUE "ProductName", "tgradish"
       VALUE "FileVersion", TGRADISH_TEXT(TGRADISH_VERSION)
       VALUE "ProductVersion", TGRADISH_TEXT(TGRADISH_VERSION)
-      VALUE "LegalCopyright", "Copyright (c) 2022 sliva0, MIT License"
+      VALUE "LegalCopyright", "Copyright (c) 2022 sliva0"
     END
   END
   BLOCK "VarFileInfo"

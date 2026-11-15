@@ -4433,7 +4433,7 @@ MIT License, used by:
 
 MIT License
 
-Copyright (c) 2022 https://github.com/sliva0
+Copyright (c) 2022 sliva0
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
