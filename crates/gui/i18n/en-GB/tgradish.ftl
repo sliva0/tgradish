@@ -399,6 +399,12 @@ part-end = Where the used part ends
     .frame = Where the used part ends: its last frame
 # Where the pointer is over the timeline, counting frames from 1.
 frame-number = frame { $number }
+# The mark of Telegram's 3 seconds on the timeline, on hover: what becomes
+# of the used part past it, as "Over 3 seconds" and the speed choose. The
+# part cut off is hatched; one spoofed or sped up is kept whole.
+limit-mark = Telegram's limit of 3 seconds: the used part past it is cut off
+    .spoofed = Telegram's limit of 3 seconds: the used part past it plays too, as Telegram is told the sticker is shorter
+    .sped-up = Telegram's limit of 3 seconds: a longer used part plays faster, to fit in it
 # Picking the frame a picture is made from.
 frame-before = The frame before (←)
     .first = This is the first frame

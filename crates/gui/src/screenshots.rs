@@ -22,6 +22,7 @@ use crate::app::{App, set_theme};
 use crate::item::{self, Show, Zoom};
 use crate::jobs::{self, Job, Status};
 use crate::testing::{convert, finish, square, video};
+use crate::timeline::PastLimit;
 use crate::{inspect, preset_dialogs, settings_dialog};
 
 /// Renders the GUI to `$TGRADISH_SCREENSHOTS/*.png` for a look at
@@ -175,7 +176,9 @@ fn notices(save: &mut impl FnMut(&mut Harness<App>, &str)) {
 
 /// The timeline of a video whose used part runs past Telegram's 3
 /// seconds, and of one within them, in each of Plasma's accents and two of
-/// one's own, a light and a dark one, in both themes, to
+/// one's own, a light and a dark one, in both themes: as a WebM spoofed
+/// and one cut at 3 s, and as a `.tgs` sped up to fit and one at a speed
+/// set, so cut; and the limit's mark hovered in each. To
 /// `$TGRADISH_SCREENSHOTS` as [`screenshots`] makes them. Needs ffmpeg.
 #[test]
 #[ignore]
@@ -197,21 +200,68 @@ fn limit_screenshots() {
         .iter()
         .map(|(name, _)| (*name, Accent::Named(name)))
         .chain([("own-light", own(246, 240, 170)), ("own-dark", own(28, 36, 64))]);
-    for (name, accent) in accents {
-        harness.state_mut().config.gui.accent = accent;
-        // from half a second to five, and to three, the playhead in it
-        for (part, used) in [("over", 4.5), ("within", 2.5)] {
-            let item = &mut harness.state_mut().items[0];
-            (item.choices.start, item.choices.length) = (Some(0.5), Some(used));
-            (item.view.time, item.view.playing, item.view.show) = (1.5, false, Show::Input);
-            for theme in [Theme::Dark, Theme::Light] {
-                set_theme(&harness.ctx, theme);
-                harness.event(egui::Event::PointerGone);
-                harness.run_steps(3);
-                let theme = if theme == Theme::Dark { "dark" } else { "light" };
-                let image = harness.render().expect("rendering needs a GPU");
-                image.save(out.join(format!("limit-{part}-{name}-{theme}.png"))).unwrap();
+    // hovers at once
+    harness.ctx.all_styles_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    let accents: Vec<_> = accents.collect();
+    let never = Some(tgradish_core::options::Spoof::Never);
+    let handlings = [
+        ("spoofed", Format::Webm, None, None),
+        ("cut", Format::Webm, never, None),
+        ("sped-up", Format::Tgs, None, None),
+        ("tgs-cut", Format::Tgs, None, Some(1.0)),
+    ];
+    for (handling, format, spoof, tempo) in handlings {
+        let item = &mut harness.state_mut().items[0];
+        (item.format, item.choices.webm.spoof, item.choices.tgs.tempo) = (format, spoof, tempo);
+        finish(&mut harness);
+        for &(name, accent) in &accents {
+            harness.state_mut().config.gui.accent = accent;
+            // from half a second to five, and to three, the playhead in it
+            for (part, used) in [("over", 4.5), ("within", 2.5)] {
+                let item = &mut harness.state_mut().items[0];
+                (item.choices.start, item.choices.length) = (Some(0.5), Some(used));
+                (item.view.time, item.view.playing, item.view.show) = (1.5, false, Show::Input);
+                for theme in [Theme::Dark, Theme::Light] {
+                    set_theme(&harness.ctx, theme);
+                    harness.event(egui::Event::PointerGone);
+                    harness.run_steps(3);
+                    let theme = if theme == Theme::Dark { "dark" } else { "light" };
+                    let image = harness.render().expect("rendering needs a GPU");
+                    let file = format!("limit-{handling}-{part}-{name}-{theme}.png");
+                    image.save(out.join(file)).unwrap();
+                }
             }
+        }
+        // the limit's mark hovered, on the used part running past it
+        harness.state_mut().config.gui.accent = Accent::default();
+        let item = &mut harness.state_mut().items[0];
+        (item.choices.start, item.choices.length) = (Some(0.5), Some(4.5));
+        for theme in [Theme::Dark, Theme::Light] {
+            set_theme(&harness.ctx, theme);
+            harness.event(egui::Event::PointerGone);
+            harness.run_steps(3);
+            // the tick, as far along the bar as the limit is from the start
+            let app = harness.state();
+            let (item, presets, config) = (&app.items[0], &app.presets, &app.config);
+            let at = (0.5 + 3.0 * item.tempo(presets, config)) / item.input_length().unwrap();
+            let webm = item.choices.webm_options(presets, config).unwrap_or_default();
+            let tgs = item.choices.tgs_options(presets, config).unwrap_or_default();
+            let said = Some(PastLimit::of(item.format, &webm, &tgs).text());
+            let bar = harness.query_all(egui_kittest::kittest::by()).find(|node| {
+                use egui_kittest::kittest::NodeT;
+                node.accesskit_node().description() == said
+            });
+            let (bar, at) =
+                (bar.expect("the timeline says what is past the limit").rect(), at as f32);
+            let track = bar.shrink2(egui::vec2(8.0, 0.0));
+            harness.hover_at(egui::pos2(track.left() + at * track.width(), bar.center().y));
+            harness.run_steps(3);
+            let theme = if theme == Theme::Dark { "dark" } else { "light" };
+            let image = harness.render().expect("rendering needs a GPU");
+            image.save(out.join(format!("limit-{handling}-hovered-{theme}.png"))).unwrap();
         }
     }
 }

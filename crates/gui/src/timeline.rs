@@ -7,6 +7,10 @@ use std::ops::RangeInclusive;
 
 use eframe::egui::{self, CursorIcon, PointerButton, Rect, Sense, Shape, Stroke, pos2, vec2};
 
+use tgradish_core::options::Spoof;
+use tgradish_core::presets::Format;
+use tgradish_core::{tgs, webm};
+
 use crate::cuts::{Frames, part, set_part};
 use crate::l10n::fl;
 use crate::{theme, widgets};
@@ -22,10 +26,53 @@ pub(crate) struct Timeline<'a> {
     pub(crate) playing: &'a mut bool,
     /// Telegram's length limit, marked from the start.
     pub(crate) limit: f64,
+    /// What becomes of the used part past the limit.
+    pub(crate) past: PastLimit,
     /// The input's frames, which cuts land between, when they are known.
     pub(crate) frames: Option<&'a Frames>,
     /// Numbers count frames rather than seconds.
     pub(crate) in_frames: &'a mut bool,
+}
+
+/// What becomes of the used part past Telegram's limit, which the
+/// timeline hatches only where it is left out of the result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PastLimit {
+    /// Kept: a WebM's duration is spoofed, so Telegram takes all of it.
+    Spoofed,
+    /// Kept: a `.tgs` at the speed tgradish picks plays fast enough to fit.
+    SpedUp,
+    /// Left out: the result ends at the limit.
+    Cut,
+}
+
+impl PastLimit {
+    /// What a result in `format` does with the used part past the limit,
+    /// made with `webm` or `tgs`, the preset's options and the file's own.
+    pub(crate) fn of(format: Format, webm: &webm::Options, tgs: &tgs::Options) -> PastLimit {
+        match format {
+            Format::Webm if webm.spoof_or_default() != Spoof::Never => PastLimit::Spoofed,
+            // a speed set plays as it says, the rest cut at 3 seconds
+            Format::Tgs if tgs.tempo.is_none() => PastLimit::SpedUp,
+            _ => PastLimit::Cut,
+        }
+    }
+
+    /// What the limit's mark says, on hover and to screen readers.
+    pub(crate) fn text(self) -> String {
+        match self {
+            PastLimit::Spoofed => fl!("limit-mark", "spoofed"),
+            PastLimit::SpedUp => fl!("limit-mark", "sped-up"),
+            PastLimit::Cut => fl!("limit-mark"),
+        }
+    }
+}
+
+/// What of the used part, from `from` to `to`, is left out of the result
+/// past the `limit` from its start, as `past` says: what the bar hatches.
+fn left_out(from: f64, to: f64, limit: f64, past: PastLimit) -> Option<(f64, f64)> {
+    let over = to - from > limit + 1e-3;
+    (over && past == PastLimit::Cut).then_some((from + limit, to))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -183,7 +230,7 @@ fn unit(ui: &mut egui::Ui, in_frames: &mut bool, known: bool, room: f32) {
 
 /// Shows the timeline.
 pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
-    let Timeline { length, start, used, time, playing, limit, frames, in_frames } = timeline;
+    let Timeline { length, start, used, time, playing, limit, past, frames, in_frames } = timeline;
     // one frame used has nothing to play
     let still = frames.is_some_and(|frames| {
         let (first, after) = frames.part(length, *start, *used);
@@ -222,6 +269,7 @@ pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
         }
         let (width, unit_room) = bar_width(ui, FIELD + ui.spacing().item_spacing.x, alone);
         let (rect, response) = ui.allocate_exact_size(vec2(width, BAR), Sense::click_and_drag());
+        let limit = (limit, past);
         bar(ui, rect, &response, (length, frames, *in_frames), (start, used), time, limit);
         match frames {
             Some(frames) => {
@@ -282,7 +330,7 @@ fn bar(
     (length, frames, in_frames): (f64, Option<&Frames>, bool),
     (start, used): (&mut Option<f64>, &mut Option<f64>),
     time: &mut f64,
-    limit: f64,
+    (limit, past): (f64, PastLimit),
 ) {
     let length = length.max(1e-6);
     let track = Rect::from_min_max(
@@ -311,12 +359,10 @@ fn bar(
             Grab::Seek
         }
     };
-    if let Some(pointer) = response.hover_pos() {
-        if grab_at(pointer.x) != Grab::Seek {
-            ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
-        }
-        let text = time_text(seconds_at(pointer.x), frames, in_frames);
-        response.clone().on_hover_text_at_pointer(text);
+    if let Some(pointer) = response.hover_pos()
+        && grab_at(pointer.x) != Grab::Seek
+    {
+        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
     }
     let id = response.id.with("grab");
     if response.drag_started_by(PointerButton::Primary)
@@ -371,15 +417,16 @@ fn bar(
     painter.rect_filled(track, 3.0, theme::span(visuals));
     // Telegram plays 3 seconds; longer stickers are spoofed, sped up or cut:
     // where they end, marked from the start of the used part while it is
-    // on the bar, and the used part past it hatched, in stripes that stay
-    // where they are as its ends move
-    let over = to - from > limit + 1e-3;
+    // on the bar, and only what is cut hatched, in stripes that stay where
+    // they are as its ends move, as what is spoofed or sped up is all kept
     let limit_x = (from + limit < length).then(|| x_of(from + limit));
-    if let Some(x) = limit_x
-        && over
-    {
-        let past = Rect::from_min_max(pos2(x, track.top()), pos2(x_of(to), track.bottom()));
-        widgets::hatch(&painter, past, track.left(), theme::past_limit(visuals));
+    let cut = left_out(from, to, limit, past);
+    if let Some((cut_from, cut_to)) = cut {
+        let cut = Rect::from_min_max(
+            pos2(x_of(cut_from), track.top()),
+            pos2(x_of(cut_to), track.bottom()),
+        );
+        widgets::hatch(&painter, cut, track.left(), theme::past_limit(visuals));
     }
     // the unused parts, dimmed
     painter.rect_filled(
@@ -403,11 +450,14 @@ fn bar(
         }
     }
     // the limit: a tick that shows on the accent of any hue, and its
-    // label over the bar, a warning only while the used part runs past it
+    // label over the bar, a warning only while some of the used part is
+    // cut off past it; both say what becomes of that part on hover
+    let mut mark = None;
     if let Some(x) = limit_x {
         let ends = (track.top() - 2.0, track.bottom() + 2.0);
         let (left, right) = widgets::tick(&painter, visuals, x, ends);
-        let colour = if over { theme::warn(visuals) } else { visuals.weak_text_color() };
+        let warned = cut.is_some();
+        let colour = if warned { theme::warn(visuals) } else { visuals.weak_text_color() };
         let text = format!("{} s", tgradish_core::telegram::MAX_SECONDS);
         let galley = painter.layout_no_wrap(text, egui::FontId::proportional(10.5), colour);
         // its baseline a point over the track, after the tick, or before it
@@ -423,9 +473,26 @@ fn bar(
         } else {
             left - gap - galley.size().x
         };
+        let label = Rect::from_min_size(pos2(x, y), galley.size());
+        let tick = Rect::from_x_y_ranges(left..=right, ends.0..=ends.1);
+        mark = Some((label, tick));
         // over the bar's top, which the label's tallest glyphs reach past
         let above = Rect::from_min_max(pos2(rect.left(), rect.top() - 3.0), rect.max);
         ui.painter().with_clip_rect(above).galley(pos2(x, y), galley, colour);
+        let text = past.text();
+        ui.ctx().accesskit_node_builder(response.id, |node| node.set_description(text));
+    }
+    // where the pointer is, or over the limit's mark what becomes of the
+    // used part past it, but for where a drag takes its ends
+    if let Some(pointer) = response.hover_pos() {
+        let on_mark = mark.is_some_and(|(label, tick)| {
+            label.expand(1.0).contains(pointer) || tick.expand2(vec2(1.0, 0.0)).contains(pointer)
+        });
+        let text = match on_mark && !response.dragged() {
+            true => past.text(),
+            false => time_text(seconds_at(pointer.x), frames, in_frames),
+        };
+        response.clone().on_hover_text_at_pointer(text);
     }
     // brackets at both ends of the used part
     let marks = ui.visuals().strong_text_color();
@@ -635,6 +702,91 @@ mod tests {
         );
         plain.run_steps(2);
         plain.get(egui_kittest::kittest::by().role(Role::SpinButton).value("1:02.50"));
+    }
+
+    #[test]
+    fn hatches_only_what_the_result_leaves_out() {
+        // from half a second to five, over the 3 seconds from its start
+        for past in [PastLimit::Spoofed, PastLimit::SpedUp] {
+            assert_eq!(left_out(0.5, 5.0, 3.0, past), None, "{past:?}");
+        }
+        assert_eq!(left_out(0.5, 5.0, 3.0, PastLimit::Cut), Some((3.5, 5.0)));
+        // twice as fast, 6 of the input's seconds fit
+        assert_eq!(left_out(0.5, 5.0, 6.0, PastLimit::Cut), None);
+        // within the limit, or over it by rounding, nothing is cut
+        assert_eq!(left_out(0.5, 3.0, 3.0, PastLimit::Cut), None);
+        assert_eq!(left_out(0.5, 3.5005, 3.0, PastLimit::Cut), None);
+    }
+
+    #[test]
+    fn follows_what_becomes_of_the_part_past_the_limit() {
+        use tgradish_core::options::Spoof;
+        let webm = |spoof| webm::Options { spoof, ..webm::Options::default() };
+        let tgs = |tempo| tgs::Options { tempo, ..tgs::Options::default() };
+        let (unset, fast) = (tgs(None), tgs(Some(2.0)));
+        let of = |spoof, tgs: &tgs::Options| PastLimit::of(Format::Webm, &webm(spoof), tgs);
+        assert_eq!(of(None, &unset), PastLimit::Spoofed);
+        assert_eq!(of(Some(Spoof::Auto), &unset), PastLimit::Spoofed);
+        assert_eq!(of(Some(Spoof::Always), &unset), PastLimit::Spoofed);
+        assert_eq!(of(Some(Spoof::Never), &unset), PastLimit::Cut);
+        // a .tgs plays fast enough to fit, unless its speed is set
+        let honest = webm(Some(Spoof::Never));
+        assert_eq!(PastLimit::of(Format::Tgs, &honest, &unset), PastLimit::SpedUp);
+        assert_eq!(PastLimit::of(Format::Tgs, &webm(None), &fast), PastLimit::Cut);
+    }
+
+    #[test]
+    fn says_what_becomes_of_the_part_past_the_limit() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::{NodeT, Queryable};
+
+        for past in [PastLimit::Spoofed, PastLimit::SpedUp, PastLimit::Cut] {
+            let mut harness = Harness::builder().with_size(vec2(640.0, 80.0)).build_ui_state(
+                |ui, (start, used, time): &mut (Option<f64>, Option<f64>, f64)| {
+                    let (mut playing, mut in_frames) = (false, false);
+                    show(
+                        ui,
+                        Timeline {
+                            length: 10.0,
+                            start,
+                            used,
+                            time,
+                            playing: &mut playing,
+                            limit: 3.0,
+                            past,
+                            frames: None,
+                            in_frames: &mut in_frames,
+                        },
+                    );
+                },
+                (Some(0.5), Some(4.5), 1.0),
+            );
+            widgets::test_fonts(&harness);
+            // hovers at once
+            harness.ctx.all_styles_mut(|style| {
+                style.interaction.tooltip_delay = 0.0;
+                style.interaction.show_tooltips_only_when_still = false;
+            });
+            harness.run_steps(2);
+            let text = past.text();
+            let bar = harness
+                .query_all(egui_kittest::kittest::by())
+                .find(|node| node.accesskit_node().description().as_ref() == Some(&text))
+                .unwrap_or_else(|| panic!("{past:?}: {text}"))
+                .rect();
+            // the tick, 3 seconds after the used part's start, says it on
+            // hover, and the rest of the bar where the pointer is
+            let track = bar.shrink2(vec2(8.0, 0.0));
+            let at =
+                |seconds: f32| pos2(track.left() + seconds / 10.0 * track.width(), bar.center().y);
+            harness.hover_at(at(3.5));
+            harness.run_steps(2);
+            assert!(harness.query_by_label(&text).is_some(), "{past:?}: {text}");
+            harness.hover_at(at(2.0));
+            harness.run_steps(2);
+            assert!(harness.query_by_label(&text).is_none(), "{past:?}: {text}");
+            assert!(harness.query_by_label("2.00 s").is_some());
+        }
     }
 
     #[test]
