@@ -1178,8 +1178,8 @@ fn readme_inputs(dir: &std::path::Path) -> Vec<PathBuf> {
 }
 
 /// The GUI in accents of its own, in both themes: one of Plasma's, a
-/// light one and a dark one, a file chosen, a button with the keyboard's
-/// focus and one hovered; then Settings, where they are chosen, at the
+/// light one and a dark one, a file chosen, its result out of date, a
+/// button with the keyboard's focus and one hovered; then Settings, where they are chosen, at the
 /// usual width and the narrowest, and the picker of one's own.
 fn accents(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     use crate::config::{Accent, Theme};
@@ -1201,6 +1201,11 @@ fn accents(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     finish(&mut harness);
     let first = harness.state().items[0].id;
     harness.state_mut().select(first);
+    // the selected one's result out of date, its badge on the lit row
+    convert(&harness);
+    harness.run_steps(2);
+    finish(&mut harness);
+    harness.state_mut().items[0].choices.tgs.tempo = Some(2.0);
     let shot =
         |harness: &mut Harness<App>, save: &mut dyn FnMut(&mut Harness<App>, &str), name: &str| {
             harness.run_steps(3);

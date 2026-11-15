@@ -384,6 +384,20 @@ pub(crate) fn over_fill(visuals: &egui::Visuals) -> Cased {
     Cased { core: scheme.text, casing: scheme.view }
 }
 
+/// The outline of a badge on a list row, as a result out of date has: seen
+/// on the row whatever the accent lit it with, where the badge's orange may
+/// not be. On Breeze Light the text colour; on Breeze Dark, whose white
+/// text outlines it heavily, the weaker text's grey, or as much nearer the
+/// text as it takes to be seen.
+pub(crate) fn badge_edge(visuals: &egui::Visuals) -> Color32 {
+    let scheme = scheme(visuals);
+    if !visuals.dark_mode {
+        return scheme.text;
+    }
+    let rows = [true, false].map(|selected| over(scheme.window, row(visuals, selected)));
+    towards(scheme.inactive, scheme.text, &[rows[0], rows[1], scheme.window], SEEN)
+}
+
 /// What a bar's used part is hatched with past a limit, over [`span`]:
 /// the view's colour, which the bar's unused part is filled with, so it
 /// reads as used only in part, whatever the accent's hue.
@@ -749,6 +763,13 @@ mod tests {
                 // a click picks over the frame picked: its casing seen on
                 // it, its core on the track
                 seen(casing, mark(&visuals), "the casing of a mark on the accent");
+                // the outline of a badge on a list row, on the row lit as
+                // selected or hovered, or not at all
+                for selected in [true, false] {
+                    let row = over(scheme.window, row(&visuals, selected));
+                    seen(badge_edge(&visuals), row, "a badge's outline on a list row");
+                }
+                seen(badge_edge(&visuals), scheme.window, "a badge's outline on the list");
                 // the limit's label, beside the bar, on the window
                 for label in [scheme.inactive, scheme.neutral] {
                     let ratio = contrast(label, scheme.window);

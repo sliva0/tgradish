@@ -515,9 +515,9 @@ fn row(
         if stale && !item.is_busy() && !item.blocked() {
             let badge =
                 egui::Rect::from_min_size(result.right_top() - vec2(20.0, 0.0), vec2(20.0, 20.0));
-            // outlined in the text colour, which reads on the selected row
-            // whatever its accent, where the badge's orange may not
-            let edge = egui::Stroke::new(1.0, theme::over_fill(ui.visuals()).core);
+            // outlined in what is seen on the selected row whatever its
+            // accent, where the badge's orange may not be
+            let edge = egui::Stroke::new(1.0, theme::badge_edge(ui.visuals()));
             let button = egui::Button::new(RichText::new("⟳").size(13.0).color(Color32::BLACK))
                 .fill(theme::NEUTRAL)
                 .stroke(edge)
