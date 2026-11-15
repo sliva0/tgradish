@@ -15,8 +15,10 @@ that makes every kind of Telegram sticker and emoji.
   started from a file manager or a menu, or with files opened in it from
   one: drop files in, crop, cut and preview them, and see what Telegram
   would say of the result. It reopens the files of last time, laid out as
-  they were. Keyboard shortcuts, listed under F1, add, pick, convert and
-  copy files, step through frames and cut, and open Settings or Inspect.
+  they were. Started again while it runs, it adds the files to the GUI
+  open and brings it forward, rather than opening another. Keyboard
+  shortcuts, listed under F1, add, pick, convert and copy files, step
+  through frames and cut, and open Settings or Inspect.
 - Shell completions (`tgradish completions SHELL`) for bash, zsh, fish,
   PowerShell and nushell, and man pages, which packages install, nushell's
   in its vendor autoload folder.

@@ -26,7 +26,8 @@ use crate::l10n::fl;
 use crate::outputs::{FileVersion, Written};
 use crate::work::release;
 use crate::{
-    accent, fallback, inspect, preset_dialogs, session, settings_dialog, system, theme, widgets,
+    accent, fallback, inspect, instance, preset_dialogs, session, settings_dialog, system, theme,
+    widgets,
 };
 #[cfg(all(unix, not(target_os = "macos")))]
 use crate::{dnd, toplevel_icon};
@@ -113,6 +114,11 @@ pub(crate) struct App {
     /// Where the open files are kept between runs; `None` where they
     /// aren't.
     pub(crate) session: Option<session::Store>,
+    /// Where GUIs started while this one runs hand it their files.
+    pub(crate) instance: Option<instance::Listener>,
+    /// The window asked for attention, for files handed over, until it
+    /// has the focus.
+    pub(crate) attention: bool,
     /// When to see whether the session changed.
     pub(crate) next_save: f64,
     /// The system's fonts for what tgradish's own lack.
@@ -158,7 +164,14 @@ pub(crate) struct App {
 }
 
 impl App {
-    pub(crate) fn new(launch: Launch) -> App {
+    /// The GUI as `launch` starts it, keeping the session in `session`
+    /// where it is the one to, and hearing from the GUIs started after it
+    /// on `listener`.
+    pub(crate) fn new(
+        launch: Launch,
+        session: Option<session::Store>,
+        listener: Option<instance::Listener>,
+    ) -> App {
         let config_path = launch.config_path.or_else(Config::default_path);
         let (config, unreadable) = match config_path.as_deref() {
             Some(path) => load_config(path),
@@ -169,12 +182,11 @@ impl App {
         let mut app = App::with(config, config_path, Presets::builtin());
         app.ffmpeg_override = (launch.ffmpeg_choice, launch.ffmpeg_path);
         app.start(unreadable, tgradish_core::presets::user_dir());
-        if let Some(path) = session_path() {
-            app.reopen(path);
+        if let Some(store) = session {
+            app.resume(store);
         }
-        // as the command line names them, from where it was started
-        let files = launch.files.into_iter().map(|file| std::path::absolute(&file).unwrap_or(file));
-        app.add(files.collect());
+        app.instance = listener;
+        app.add(launch.files);
         app
     }
 
@@ -190,10 +202,19 @@ impl App {
 
     /// Opens the files of last time from the session at `path`, unless the
     /// settings say not to, and keeps the session there from now on. A
-    /// second instance started while another has the session starts empty
-    /// and keeps none.
+    /// second instance started while another has the session, which it
+    /// couldn't hand its files to, starts empty and keeps none.
+    #[cfg(test)]
     pub(crate) fn reopen(&mut self, path: PathBuf) {
-        let Some(mut store) = session::Store::open(path) else { return };
+        if let Some(store) = session::Store::open(path) {
+            self.resume(store);
+        }
+    }
+
+    /// Opens the files of last time from the session `store` holds,
+    /// unless the settings say not to, and keeps the session there from
+    /// now on.
+    pub(crate) fn resume(&mut self, mut store: session::Store) {
         // laid out as last time, whether or not its files are opened again
         if let Some(window) = session::window(store.path()) {
             self.preview_share = window.preview;
@@ -252,6 +273,44 @@ impl App {
                     return self.say(message);
                 }
             }
+        }
+    }
+
+    /// Adds the files GUIs started since handed over, as dropped files
+    /// are, whatever dialog is open, and brings the window forward for
+    /// them: where it was raised with a token already, as on Wayland, by
+    /// egui's means too, and where it wasn't, asking for attention as
+    /// well, as a system may not let a window take the focus itself.
+    fn take_handed(&mut self, ctx: &egui::Context) {
+        let (minimized, focused) = ctx.input(|input| {
+            let viewport = input.viewport();
+            (viewport.minimized == Some(true), viewport.focused == Some(true))
+        });
+        if self.attention && focused {
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                egui::UserAttentionType::Reset,
+            ));
+            self.attention = false;
+        }
+        let handed = self.instance.as_ref().map(instance::Listener::poll).unwrap_or_default();
+        if handed.is_empty() {
+            return;
+        }
+        let raised = handed.iter().all(|handed| handed.raised);
+        for handed in handed {
+            self.add(handed.files);
+        }
+        // restored only from being minimised, as Windows would restore a
+        // maximised window too
+        if minimized {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        if !raised && !focused {
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                egui::UserAttentionType::Informational,
+            ));
+            self.attention = true;
         }
     }
 
@@ -315,6 +374,8 @@ impl App {
             scale_shown: None,
             scaling: Default::default(),
             session: None,
+            instance: None,
+            attention: false,
             next_save: 0.0,
             fallbacks: fallback::Fallbacks::new(fonts()),
             fonts_checked: None,
@@ -897,6 +958,10 @@ pub(crate) struct FoundBackend {
 
 impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // the window is let go of next
+        if let Some(instance) = &self.instance {
+            instance.detach();
+        }
         self.save_session();
         self.stop_converting();
         // the listener shares winit's Wayland connection, which closes next
@@ -904,6 +969,11 @@ impl eframe::App for App {
         if let Some(drops) = &mut self.drops {
             drops.stop();
         }
+    }
+
+    // before every frame, and while the window is minimised and draws none
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.take_handed(ctx);
     }
 
     /// Says the frame's input at the scale egui applies to it, with the
@@ -1181,6 +1251,45 @@ mod tests {
         let mut third = harness(Config::default());
         third.state_mut().reopen(state);
         assert_eq!(third.state().items.len(), 1);
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn adds_the_files_a_gui_started_later_hands_over_as_dropped_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state").join("session.json");
+        let instance::Start::First { store, listener: Some(listener) } =
+            instance::start(state.clone(), &instance::Request::default())
+        else {
+            panic!("not the first, listening");
+        };
+        let mut first = harness(Config::default());
+        listener.attach(&first.ctx);
+        first.state_mut().resume(store);
+        first.state_mut().instance = Some(listener);
+        // behind a dialog, as a drop is
+        first.state_mut().about = true;
+        first.run_steps(2);
+
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        let frames = dir.path().join("frames");
+        std::fs::create_dir(&frames).unwrap();
+        square(&frames.join("1.png"), [0, 0, 255, 255]);
+        let request =
+            instance::Request { files: vec![art.clone(), frames.clone()], ..Default::default() };
+        assert!(matches!(instance::start(state, &request), instance::Start::HandedOver));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while first.state().items.is_empty() && std::time::Instant::now() < deadline {
+            first.step();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let app = first.state();
+        let added: Vec<_> =
+            app.items.iter().map(|item| (item.inputs.clone(), item.sequence)).collect();
+        assert_eq!(added, [(vec![art], false), (vec![frames], true)]);
+        assert_eq!(app.selected, Some(app.items[1].id));
+        assert!(app.about);
     }
 
     #[test]

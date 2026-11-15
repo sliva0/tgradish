@@ -236,7 +236,7 @@ pub enum Command {
         shell: ShellArg,
     },
 
-    /// Open the GUI, with FILES in it.
+    /// Open the GUI, with FILES in it, or add them to the one running.
     ///
     /// It also opens when tgradish is started without arguments outside a
     /// terminal.

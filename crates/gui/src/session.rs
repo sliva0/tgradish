@@ -5,7 +5,8 @@
 //!
 //! A session this version can't read, as one a newer tgradish kept, is
 //! set aside rather than written over, and the copies it may name are left
-//! alone. Only one instance at a time keeps a session, the first to start.
+//! alone. Only one instance at a time keeps a session, the first to start,
+//! which the others hand their files to where they can (see `instance`).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -223,6 +224,13 @@ impl Store {
 
     pub(crate) fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Whether it is this instance's alone for certain: not where there is
+    /// no telling whether another runs, as the folder's file system has no
+    /// locks.
+    pub(crate) fn locked(&self) -> bool {
+        self.lock.is_some()
     }
 
     /// The name a session that couldn't be read is kept under, with a

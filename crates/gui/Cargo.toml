@@ -33,6 +33,11 @@ rust-embed.workspace = true
 shlex.workspace = true
 tempfile.workspace = true
 
+# the user's id, which the folder of the socket other instances reach
+# this one on must be
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["process"] }
+
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 raw-window-handle.workspace = true
 rustix = { workspace = true, features = ["event"] }
@@ -51,10 +56,15 @@ objc2.workspace = true
 objc2-app-kit = { workspace = true, features = ["std", "NSColor", "NSColorSpace", "objc2-core-foundation"] }
 
 [target.'cfg(windows)'.dependencies]
-# the accent colour, from the registry, and links opened through the shell
+# the accent colour, from the registry, links opened through the shell,
+# and the pipe other instances reach this one on
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
     "Win32_System_Com",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
     "Win32_System_Registry",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",

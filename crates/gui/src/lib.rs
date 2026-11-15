@@ -9,6 +9,8 @@
 mod about;
 mod accent;
 mod actions;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod activation;
 mod app;
 mod banner;
 mod canvas;
@@ -26,6 +28,7 @@ mod fonts;
 mod icon;
 mod inset;
 mod inspect;
+mod instance;
 mod item;
 mod jobs;
 mod keys;
@@ -122,9 +125,20 @@ impl std::error::Error for Error {
     }
 }
 
-/// Runs the GUI until its window is closed.
+/// Runs the GUI until its window is closed, or where one runs already,
+/// hands it the files to add and brings it forward instead.
 pub fn run(launch: Launch) -> Result<(), Error> {
     tgradish_core::mark::set_client(tgradish_core::mark::Client::Gui);
+    // as the command line names them, from where it was started
+    let files = launch.files.iter().map(|file| std::path::absolute(file).unwrap_or(file.clone()));
+    let launch = Launch { files: files.collect(), ..launch };
+    let request = instance::Request::from_env(launch.files.clone());
+    let (store, listener) = match app::session_path().map(|path| instance::start(path, &request)) {
+        Some(instance::Start::HandedOver) => return Ok(()),
+        Some(instance::Start::First { store, listener }) => (Some(store), listener),
+        // one that couldn't be reached keeps the session, and this one none
+        Some(instance::Start::Second) | None => (None, None),
+    };
     // as it was last time, where the session says
     let window = app::session_path().and_then(|path| session::window(&path));
     let mut viewport = egui::ViewportBuilder::default()
@@ -144,8 +158,18 @@ pub fn run(launch: Launch) -> Result<(), Error> {
         "tgradish",
         options,
         Box::new(|cc| {
-            let app = App { accent: Some(accent::Accent::watch(&cc.egui_ctx)), ..App::new(launch) };
+            let app = App {
+                accent: Some(accent::Accent::watch(&cc.egui_ctx)),
+                ..App::new(launch, store, listener)
+            };
             app.style(&cc.egui_ctx);
+            if let Some(listener) = &app.instance {
+                listener.attach(&cc.egui_ctx);
+                #[cfg(all(unix, not(target_os = "macos")))]
+                if let Some(window) = cc.winit_window() {
+                    listener.raise(window);
+                }
+            }
             #[cfg(all(unix, not(target_os = "macos")))]
             let app = App {
                 drops: dnd::Drops::start(cc, &cc.egui_ctx),
