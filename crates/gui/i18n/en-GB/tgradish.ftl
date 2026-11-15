@@ -1190,7 +1190,7 @@ not-put-back = The preset "{ $name }" couldn't be put back
 # The dialog's title.
 about-title = About and licences
 # Under the name and version; a link to the source code follows.
-about-summary = Telegram stickers from videos and pixel art. MIT licence;
+about-summary = Telegram stickers and emoji from videos, images or pixel art. MIT licence;
 source-code = source code
 # Under the summary, a link to the author on Telegram.
 send-feedback = Send feedback on Telegram

@@ -593,6 +593,12 @@ mod tests {
         ] {
             assert!(read(path).lines().any(|found| found == line), "{path} lacks {line:?}");
         }
+        // About in the GUI, before the licence and the link to the source
+        let (path, line) = (
+            "crates/gui/i18n/en-GB/tgradish.ftl",
+            format!("about-summary = {SUMMARY}. MIT licence;"),
+        );
+        assert!(read(path).lines().any(|found| found == line), "{path} lacks {line:?}");
         // the AUR asks for about 80 characters at most, within which the
         // static build says it brings its own ffmpeg
         for (package, note) in
