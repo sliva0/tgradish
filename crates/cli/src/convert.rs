@@ -47,7 +47,7 @@ pub enum Verdict {
 
 impl Verdict {
     /// What Telegram would say of a result with `issues`, as
-    /// [`telegram::refuses`] them.
+    /// [`tgradish_core::telegram::refuses`] them.
     fn of(issues: &[tgradish_core::telegram::Issue]) -> Verdict {
         if tgradish_core::telegram::refuses(issues) { Verdict::Refused } else { Verdict::Accepted }
     }
