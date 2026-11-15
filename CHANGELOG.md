@@ -72,10 +72,6 @@ that makes every kind of Telegram sticker and emoji.
 
 - tgradish is no longer a Python package: install a release build or a
   package, or build it with `cargo install tgradish`.
-- Results are named `NAME.sticker.webm` (or `.emoji`, `.tgs`, `.webp`)
-  beside their input, where 1.x wrote `NAME.webm`. A result made into
-  another format isn't given `.sticker` again: `pig.sticker.webm` makes
-  `pig.sticker.webp`.
 
 ### Removed
 
@@ -84,26 +80,6 @@ that makes every kind of Telegram sticker and emoji.
   `--encoder-options` and `--ffmpeg-args` pass on what they don't cover.
 - `--multithreading`, `--loop`, `--maxrate`, `--minrate` and
   `--verbosity`.
-
-### Coming from 1.x
-
-| 1.x | 2.0 |
-| --- | --- |
-| `pip install tgradish` | a release build or package, or `cargo install tgradish` |
-| `tgradish convert -i clip.mp4` | `tgradish convert clip.mp4` |
-| `tgradish convert -i clip.mp4 -o out.webm` | `tgradish convert clip.mp4 -o out.webm` |
-| `tgradish spoof in.webm out.webm` | the same, or `tgradish spoof in.webm -o out.webm` |
-| `--guess-value`, `-g` | `--fit` |
-| `--iterations`, `-it` | `--attempts` |
-| `-min`, `-max` | `--fit-range MIN..MAX` |
-| `--framerate`, `-fr` | `--fps` |
-| `--bitrate`, `-bt` | `--bitrate`, `-b` |
-| `-crf` | `--crf` |
-| `--lossless`, `-ll` | `--lossless` |
-| `--best_quality`, `-bq` | `--effort best`, or `--preset best` |
-| `--scaling squared`, `-sc squared` | `--resize stretch` |
-| `--verbosity` | `-v`, `-vv` or `-q` |
-| `tgradish config showpath` | `tgradish config path` |
 
 ## [1.0.4] - 2024-10-28
 
