@@ -565,9 +565,9 @@ speed = Speed
 # The choices beside a number tgradish can pick itself, as the speed: what
 # it picks, and how. Where the preset sets the number, in any group of
 # settings, the choice is the preset's.
-from-preset = Preset's
+from-preset = As preset
     .hint = The value the preset sets
-from-input = Input's
+from-input = As input
     .speed = As fast as the input plays
     .rate = The input's rate at the speed, at most 60 fps
 fits-3-s = Fits 3 s

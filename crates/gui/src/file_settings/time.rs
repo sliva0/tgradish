@@ -390,7 +390,7 @@ mod tests {
         let show = |ui: &mut egui::Ui, state: &mut State| {
             ui.set_width(260.0);
             ui.horizontal(|ui| {
-                super::speed_field(ui, &mut state.0, None, ("Input's", ""), 1.0);
+                super::speed_field(ui, &mut state.0, None, ("As input", ""), 1.0);
                 state.2 = Some(ui.button("Fit 3 s").rect);
             });
             ui.horizontal(|ui| {
@@ -399,7 +399,7 @@ mod tests {
                     ui,
                     &mut state.1,
                     None,
-                    ("Input's", ""),
+                    ("As input", ""),
                     chosen,
                     (30.0, 1.0..=60.0),
                 );
