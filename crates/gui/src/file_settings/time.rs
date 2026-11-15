@@ -377,7 +377,8 @@ mod tests {
     use egui_kittest::kittest::Queryable;
     use tgradish_core::ffmpeg::FfmpegChoice;
 
-    use crate::testing::{finish, harness, video_of};
+    use crate::l10n::fl;
+    use crate::testing::{ANY, finish, fixed, harness, video_of};
 
     #[test]
     fn keeps_what_follows_changing_numbers_in_place() {
@@ -441,16 +442,17 @@ mod tests {
         let mut harness = harness(config);
         harness.state_mut().add(vec![video]);
         finish(&mut harness);
-        harness.get_by_label_contains("Telegram is told it is shorter");
-        harness.get_by_label("Spoofed duration");
+        let spoofed = fl!("plays-spoofed", played = ANY);
+        harness.get_by_label_contains(fixed(&spoofed));
+        harness.get_by_label(&fl!("spoof-to"));
         // cut to 3 seconds, or not spoofed at all: no warning
         harness.state_mut().items[0].choices.length = Some(3.0);
         harness.run_steps(2);
-        assert!(harness.query_by_label_contains("Telegram is told it is shorter").is_none());
+        assert!(harness.query_by_label_contains(fixed(&spoofed)).is_none());
         harness.state_mut().items[0].choices.length = None;
         harness.state_mut().items[0].choices.webm.spoof =
             Some(tgradish_core::options::Spoof::Never);
         harness.run_steps(2);
-        assert!(harness.query_by_label_contains("Telegram is told it is shorter").is_none());
+        assert!(harness.query_by_label_contains(fixed(&spoofed)).is_none());
     }
 }

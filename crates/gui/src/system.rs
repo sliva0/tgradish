@@ -349,6 +349,7 @@ mod tests {
     use egui_kittest::kittest::Queryable;
 
     use super::*;
+    use crate::l10n::fl;
     use crate::testing::harness;
 
     #[test]
@@ -437,8 +438,9 @@ mod tests {
         harness.state_mut().about = true;
         harness.run_steps(2);
         // a link, a label whose text is its name rather than its value
+        let source = fl!("source-code");
         let link = egui_kittest::kittest::by()
-            .predicate(|node| node.label().as_deref() == Some("source code"));
+            .predicate(|node| node.label().as_deref() == Some(source.as_str()));
         harness.get(link).click_accesskit();
         harness.run_steps(2);
         let browsed = BROWSED.lock().unwrap();
@@ -447,7 +449,7 @@ mod tests {
             "{browsed:?}"
         );
         drop(browsed);
-        harness.get_by_label("Send feedback on Telegram").click_accesskit();
+        harness.get_by_label(&fl!("send-feedback")).click_accesskit();
         harness.run_steps(2);
         let browsed = BROWSED.lock().unwrap();
         assert!(browsed.iter().any(|url| url == "https://t.me/s0untitled?direct"), "{browsed:?}");
@@ -456,9 +458,9 @@ mod tests {
         let before = BROWSED.lock().unwrap().len();
         harness.state_mut().about = false;
         harness.run_steps(2);
-        harness.get_by_label("Settings and more").click();
+        harness.get_by_label(&fl!("main-menu")).click();
         harness.run_steps(2);
-        harness.get_by_label("Send feedback").click();
+        harness.get_by_label(&fl!("feedback")).click();
         harness.run_steps(2);
         let browsed = BROWSED.lock().unwrap();
         assert_eq!(browsed[before..], ["https://t.me/s0untitled?direct"]);

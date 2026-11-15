@@ -689,19 +689,20 @@ mod tests {
             let (out, preview, result) = place(&harness);
             assert_eq!((out, preview), (before.0, before.1), "{width}");
             assert_eq!(result.left(), before.2.left(), "{width}");
-            // nothing cut short, and no way to the folders over the preview
+            // nothing cut short but the hint of what the mouse does, and no
+            // way to the folders over the preview
+            let hints = [fl!("input-hint"), fl!("crop-hint")];
             for shape in &harness.output().shapes {
                 if let egui::Shape::Text(text) = &shape.shape {
                     let said = text.galley.text();
-                    assert!(
-                        !text.galley.elided || said.starts_with("Drag"),
-                        "{width}: {said:?} cut short"
-                    );
+                    let hint =
+                        hints.iter().any(|hint| hint.starts_with(said.trim_end_matches('…')));
+                    assert!(!text.galley.elided || hint, "{width}: {said:?} cut short");
                 }
             }
             assert!(
                 harness
-                    .query_by_label("Show in folder")
+                    .query_by_label(&fl!("show-in-folder"))
                     .is_none_or(|button| { button.rect().top() > out.bottom() + 200.0 })
             );
         }

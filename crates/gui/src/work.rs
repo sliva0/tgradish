@@ -458,8 +458,8 @@ mod tests {
     use super::*;
     use crate::item::Blocker;
     use crate::testing::{
-        convert, corpus, finish, harness, has_ffmpeg, made_job, square, video, video_of,
-        walking_video,
+        convert, convert_all, corpus, finish, harness, has_ffmpeg, made_job, square, video,
+        video_of, walking_video,
     };
 
     #[test]
@@ -473,7 +473,7 @@ mod tests {
         config.gui.output_dir = Some(dir.path().join("out"));
         let mut harness = harness(config);
         harness.run_steps(2);
-        harness.get_by_label_contains("Drop videos");
+        harness.get_by_label(&fl!("drop-here"));
 
         harness.state_mut().add(vec![frames]);
         finish(&mut harness);
@@ -481,7 +481,7 @@ mod tests {
         assert_eq!((item.kind, item.format), (Kind::Frames, Format::Tgs));
         assert!(item.input_thumb.is_some());
         // a folder can't be a video
-        harness.get_by_label("Animated");
+        harness.get_by_label(&fl!("format-animation"));
         convert(&harness);
         harness.run_steps(2);
         finish(&mut harness);
@@ -489,7 +489,7 @@ mod tests {
         assert!(matches!(made_job(item).status, Status::Done(_)));
         assert!(item.result_is_current() && item.result_thumb.is_some());
         assert!(dir.path().join("out").join("frames.sticker.tgs").exists());
-        harness.get_by_label_contains("Telegram should accept it");
+        harness.get_by_label_contains(&fl!("telegram-accepts"));
 
         // changing a setting makes the result old, and converting again
         // replaces the file it wrote before
@@ -543,7 +543,7 @@ mod tests {
         let mut harness = harness(config);
         harness.state_mut().add(vec![video]);
         finish(&mut harness);
-        harness.get_by_label("Static").click();
+        harness.get_by_label(&fl!("format-image")).click();
         harness.run_steps(2);
         // the frame at a second, which the preview stops at
         harness.state_mut().items[0].choices.frame = Some(1.0);
@@ -559,7 +559,7 @@ mod tests {
         let info = webp::inspect_file(&out).unwrap();
         assert_eq!((info.width, info.height), (512, 384));
         assert!(item.result_clip.ready().is_some());
-        harness.get_by_label_contains("Telegram should accept it");
+        harness.get_by_label_contains(&fl!("telegram-accepts"));
     }
 
     #[test]
@@ -850,7 +850,7 @@ mod tests {
             .collect();
         harness.state_mut().add(arts);
         finish(&mut harness);
-        harness.get(egui_kittest::kittest::by().label_contains("Convert all")).click();
+        convert_all(&harness).click();
         harness.run_steps(2);
         finish(&mut harness);
         let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
@@ -1033,7 +1033,7 @@ mod tests {
         // starts in this frame and is taken in only in the next
         harness.step();
         assert!(harness.state().items[0].input_reading());
-        assert!(harness.query_by_label("Aseprite file").is_some());
+        assert!(harness.query_by_label(&fl!("aseprite-file")).is_some());
         finish(&mut harness);
         assert_eq!(harness.state().items[0].input_clip().unwrap().frames.len(), 2);
         // drawn the same for ffmpeg, as a video and as a picture

@@ -225,7 +225,8 @@ mod tests {
 
     use super::*;
     use crate::jobs::Status;
-    use crate::testing::{convert, finish, harness, made_job, pasted_image, square};
+    use crate::l10n::fl;
+    use crate::testing::{convert, convert_all, finish, harness, made_job, pasted_image, square};
 
     #[test]
     fn looks_at_files_now_and_then_and_rests_while_nothing_happens() {
@@ -239,7 +240,7 @@ mod tests {
         harness.run_steps(2);
         finish(&mut harness);
         let looked = |harness: &Harness<App>| harness.state().probes.looked.get();
-        let copy = crate::l10n::fl!("copy-result");
+        let copy = fl!("copy-result");
         harness.get_by_label(&copy);
         // frames that change nothing look at nothing, for a while, and
         // ask for no more frames: a while from the window getting the
@@ -276,7 +277,7 @@ mod tests {
         let mut harness = harness(config);
         harness.state_mut().add(vec![a.join("same.png"), b.join("same.png")]);
         finish(&mut harness);
-        harness.get_by_label_contains("Convert all").click();
+        convert_all(&harness).click();
         harness.run_steps(2);
         finish(&mut harness);
         for item in &harness.state().items {
@@ -324,7 +325,7 @@ mod tests {
             harness.state_mut().add(vec![art.clone()]);
             finish(&mut harness);
             // said before converting
-            let said = harness.query_by_label_contains("Replaces an earlier result").is_some();
+            let said = harness.query_by_label_contains(&fl!("replaces-earlier")).is_some();
             assert_eq!(said, !earlier);
             convert(&harness);
             harness.run_steps(2);
@@ -333,7 +334,7 @@ mod tests {
             assert_eq!(made.output, output);
             assert_eq!(made.replaces, !earlier);
             // and no longer once this run has made it
-            assert!(harness.query_by_label_contains("Replaces an earlier result").is_none());
+            assert!(harness.query_by_label_contains(&fl!("replaces-earlier")).is_none());
         }
     }
 

@@ -579,6 +579,7 @@ mod tests {
     use tgradish_core::webm::Options;
 
     use super::{Change, Dialog};
+    use crate::l10n::fl;
     use crate::testing::{finish, harness, square};
 
     #[test]
@@ -596,7 +597,7 @@ mod tests {
         item.choices.webm.resize = Some(Resize::Crop);
         item.choices.webm.title = Some("only this one".into());
         harness.run_steps(2);
-        harness.get_by_label("Save current settings as preset…").click();
+        harness.get_by_label(&fl!("save-preset")).click();
         harness.run_steps(2);
         // into its name field, which has the focus
         harness
@@ -605,7 +606,7 @@ mod tests {
             .unwrap()
             .type_text("by quality");
         harness.run_steps(2);
-        harness.get_by_label("Save").click();
+        harness.get_by_label(&fl!("save")).click();
         harness.run_steps(3);
         // the item takes it up, its title its own still
         let state = harness.state();
@@ -646,9 +647,9 @@ mod tests {
         let choices = &mut harness.state_mut().items[0].choices;
         (choices.preset, choices.webm.fit_range) = (Some("mine".into()), Some(range));
         harness.run_steps(2);
-        harness.get_by_label("Manage…").click();
+        harness.get_by_label(&fl!("manage-presets")).click();
         harness.run_steps(2);
-        harness.get_by_label("Your presets");
+        harness.get_by_label(&fl!("your-presets"));
         let state = harness.state_mut();
         let Some(Dialog::Manage(mut managing)) = state.preset_dialog.take() else { panic!() };
         assert_eq!(managing.rows.len(), 1);

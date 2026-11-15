@@ -586,7 +586,7 @@ mod tests {
 
     use super::*;
     use crate::app::App;
-    use crate::testing::{convert, finish, harness, made_job, square, video_of};
+    use crate::testing::{convert, convert_all, finish, harness, made_job, square, video_of};
 
     /// The GUI with `count` pixel art files, results going to `out`.
     fn with_art(dir: &std::path::Path, count: usize) -> Harness<'static, App> {
@@ -617,7 +617,7 @@ mod tests {
         let mut harness = with_art(dir.path(), 3);
         harness.state_mut().items[1].choices.preset = Some("no such preset".into());
         harness.run_steps(2);
-        harness.get_by_label_contains("Convert all").click();
+        convert_all(&harness).click();
         harness.run_steps(2);
         finish(&mut harness);
         let items = &harness.state().items;
@@ -672,9 +672,9 @@ mod tests {
     fn says_how_far_converting_all_got_and_stops_it() {
         let dir = tempfile::tempdir().unwrap();
         let mut harness = with_art(dir.path(), 4);
-        let all = |harness: &Harness<App>| harness.get_by_label_contains("Convert all").rect();
+        let all = |harness: &Harness<App>| convert_all(harness).rect();
         let before = all(&harness);
-        harness.get_by_label_contains("Convert all").click();
+        convert_all(&harness).click();
         harness.run_steps(1);
         assert_eq!(harness.state().batch_progress(), Some((1, 4)));
         harness.run_steps(1);
@@ -708,20 +708,20 @@ mod tests {
         harness.state_mut().queue.pop_front();
         harness.state_mut().items[0].job.as_mut().unwrap().job.status = Status::Running;
         select(&mut harness, 1);
-        assert!(harness.query_all_by_label("Next to convert").count() > 0);
-        harness.get_by_label("Cancel").click();
+        assert!(harness.query_all_by_label(&fl!("next-to-convert")).count() > 0);
+        harness.get_by_label(&fl!("cancel-waiting")).click();
         harness.run_steps(2);
         let app = harness.state();
         assert!(app.queue.is_empty() && app.items[1].job.is_none());
         assert!(app.items[1].made.is_none() && app.items[1].failed.is_none());
-        assert_eq!(harness.query_all_by_label("Next to convert").count(), 0);
+        assert_eq!(harness.query_all_by_label(&fl!("next-to-convert")).count(), 0);
     }
 
     #[test]
     fn goes_on_once_a_file_converting_is_removed() {
         let dir = tempfile::tempdir().unwrap();
         let mut harness = with_art(dir.path(), 2);
-        harness.get_by_label_contains("Convert all").click();
+        convert_all(&harness).click();
         harness.run_steps(2);
         let first = harness.state().items[0].id;
         assert!(harness.state().items[0].job.as_ref().is_some_and(|c| c.job.is_running()));
@@ -744,13 +744,13 @@ mod tests {
         finish(&mut harness);
         convert(&harness);
         harness.run_steps(2);
-        harness.get_by_label("Stop").click();
+        harness.get_by_label(&fl!("stop")).click();
         finish(&mut harness);
         let item = &harness.state().items[0];
         let failed = item.failed.as_ref().map(|failed| &failed.job.status);
         assert!(matches!(failed, Some(Status::Cancelled)), "{failed:?}");
         assert!(item.made.is_none());
-        harness.get_by_label("Stopped");
+        harness.get_by_label(&fl!("stopped"));
     }
 
     #[test]
@@ -774,7 +774,7 @@ mod tests {
             let node = harness.get_by_label(&keep);
             (node.rect(), node.accesskit_node().is_disabled())
         };
-        let stop = harness.get_by_label("Stop").rect();
+        let stop = harness.get_by_label(&fl!("stop")).rect();
         // there before anything fits, beside Stop and as high
         let (before, disabled) = button(&harness);
         assert!(disabled);
@@ -883,7 +883,7 @@ mod tests {
         let mut harness = with_art(dir.path(), 2);
         let folder = format!("{}{}", dir.path().join("out").display(), std::path::MAIN_SEPARATOR);
         let saved = fl!("result-saved-to", folder = folder.as_str());
-        harness.get_by_label_contains("Convert all").click();
+        convert_all(&harness).click();
         harness.run_steps(2);
         finish(&mut harness);
         let id = harness.state().items[0].id;
@@ -921,7 +921,7 @@ mod tests {
         let failed = harness.state().items[0].failed.as_ref().map(|failed| &failed.job.status);
         assert!(matches!(failed, Some(Status::Exists(path)) if *path == output), "{failed:?}");
         assert_eq!(std::fs::read(&output).unwrap(), b"mine");
-        harness.get_by_label("Replace it").click();
+        harness.get_by_label(&fl!("replace-it")).click();
         harness.run_steps(2);
         finish(&mut harness);
         let item = &harness.state().items[0];

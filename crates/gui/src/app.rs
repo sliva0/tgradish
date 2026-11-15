@@ -1366,7 +1366,7 @@ mod tests {
             panic!("not made");
         };
         assert!(done.problems.is_empty(), "{:?}", done.problems);
-        second.get_by_label_contains("Telegram should accept it");
+        second.get_by_label_contains(&fl!("telegram-accepts"));
         // and shown
         assert!(item.result_clip.ready().is_some() && item.result_thumb.is_some());
     }
@@ -1548,7 +1548,7 @@ mod tests {
         let mut harness = harness(Config::default());
         harness.state_mut().reopen(state.clone());
         harness.run_steps(2);
-        harness.get_by_label_contains("The files of last time couldn't be read");
+        harness.get_by_label(&fl!("session-unreadable"));
         // written anew by this run, the other kept beside it
         harness.state_mut().save_session();
         assert!(std::fs::read_to_string(&aside).unwrap().contains("a later tgradish"));

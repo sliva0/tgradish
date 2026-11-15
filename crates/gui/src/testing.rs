@@ -15,6 +15,7 @@ use tgradish_core::presets::Presets;
 use crate::app::App;
 use crate::item::Item;
 use crate::jobs::Job;
+use crate::l10n::fl;
 
 /// A 4x4 PNG with a 2x2 square of `colour` in the middle.
 pub(crate) fn square(path: &Path, colour: [u8; 4]) {
@@ -146,6 +147,27 @@ pub(crate) fn convert(harness: &Harness<App>) {
     let keys = crate::keys::keys_text(crate::keys::Command::Convert);
     harness.get(egui_kittest::kittest::by().label_contains(&keys)).click();
 }
+
+/// The Convert all button, whatever number of files it says it would
+/// convert.
+pub(crate) fn convert_all<'a>(harness: &'a Harness<App>) -> egui_kittest::Node<'a> {
+    let counts = 0..=harness.state().items.len();
+    let labels: Vec<String> = counts.map(|count| fl!("convert-all", count = count)).collect();
+    let by = egui_kittest::kittest::by();
+    harness.get(by.predicate(move |node| node.label().is_some_and(|label| labels.contains(&label))))
+}
+
+/// The part of `message`, asked for with each of its arguments as
+/// [`ANY`], that stays the same whatever they are: its longest, to look
+/// for where they aren't known, without the spaces and punctuation at
+/// its ends, where a line may break beside an argument.
+pub(crate) fn fixed(message: &str) -> &str {
+    let part = message.split(ANY).max_by_key(|part| part.len()).unwrap_or_default();
+    part.trim_matches(|c: char| c.is_whitespace() || c.is_ascii_punctuation())
+}
+
+/// An argument to `fl!` that [`fixed`] leaves out.
+pub(crate) const ANY: &str = "\u{1}";
 
 /// Steps the GUI until no item is busy and no file dialog is open, two
 /// frames in a row: the GUI starts what is due as a frame begins, so

@@ -909,7 +909,7 @@ mod tests {
         harness.run_steps(2);
         assert!(harness.state().config.gui.overwrite);
         assert!(Config::load(&path).unwrap().gui.overwrite);
-        harness.get_by_label_contains("Saved to");
+        harness.get_by_label_contains(&fl!("saved-to", path = path.display().to_string()));
         // and so is a change made as it closes
         harness.state_mut().config.gui.reopen_files = false;
         harness.get_all_by_label(&fl!("close")).last().unwrap().click_accesskit();
@@ -1040,7 +1040,9 @@ mod tests {
         settle(&mut harness);
         harness.get_by_label(&fl!("scale-percent", percent = 100));
         // its keys said as other shortcuts are, Ctrl++ rather than Ctrl+=
-        harness.get_by_label_contains("Ctrl++ and Ctrl+- change it too; Ctrl+0");
+        let (larger, smaller, reset) = ("Ctrl++", "Ctrl+-", "Ctrl+0");
+        let keys = fl!("scale", "keys", larger = larger, smaller = smaller, reset = reset);
+        harness.get_by_label(&keys);
         // + clicked again and again where it is on the screen
         let pixel = |harness: &Harness<App>, label: &str| {
             harness.get_by_label(label).rect().center() * harness.ctx.zoom_factor()
@@ -1495,8 +1497,8 @@ mod tests {
         harness.state_mut().ffmpeg_override = (Some(FfmpegChoice::System), None);
         harness.state_mut().settings_dialog.open();
         harness.run_steps(2);
-        harness.get_by_label_contains("ffmpeg given as tgradish was started");
-        harness.get_by_label("Check").click_accesskit();
+        harness.get_by_label(&fl!("ffmpeg-given"));
+        harness.get_by_label(&fl!("check")).click_accesskit();
         harness.run_steps(2);
         // what it finds is taken in as frames are drawn
         for _ in 0..500 {
