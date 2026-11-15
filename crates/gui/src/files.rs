@@ -87,7 +87,7 @@ impl App {
     }
 
     /// Asks for something with one of the system's file dialogs, parented
-    /// to the window. It runs on a thread of its own, so the window keeps
+    /// to the window. It runs on a thread of its own, so the GUI keeps
     /// drawing and converting meanwhile, and what is picked is taken in as
     /// it draws. One at a time: while one is open, others aren't asked for.
     pub(crate) fn pick(&mut self, ctx: &egui::Context, pick: Pick) {
@@ -127,7 +127,7 @@ impl App {
             Ok(Some(Picked::Inspected(inspection))) => self.inspection = Some(*inspection),
             // for Settings, which keeps it as it keeps any change; else, as
             // a message or a file's settings asked, kept at once, and used
-            // over one given as the window was started
+            // over one given as the GUI was started
             Ok(Some(Picked::Ffmpeg(file))) if self.settings_dialog.is_open() => {
                 self.config.ffmpeg.path = Some(file)
             }
@@ -426,7 +426,7 @@ impl Pick {
     /// `dialog`, which has the window as its parent, titled with what it
     /// is for, as the system's dialog may be another program's window,
     /// titled with that program's name otherwise, and showing only the
-    /// files it is for where those are known. Made on the window's thread,
+    /// files it is for where those are known. Made on the GUI's thread,
     /// where its messages are given.
     fn dialog(self, dialog: rfd::FileDialog) -> rfd::FileDialog {
         let dialog = dialog.set_title(match self {
@@ -731,7 +731,7 @@ mod tests {
         square(&a, [255, 0, 0, 255]);
         square(&b, [0, 0, 255, 255]);
         let mut harness = harness(Config::default());
-        // as a dialog answers, a moment later, while the window draws on
+        // as a dialog answers, a moment later, while the GUI draws on
         let (answer, picked) = std::sync::mpsc::channel();
         let ctx = harness.ctx.clone();
         harness.state_mut().picking =

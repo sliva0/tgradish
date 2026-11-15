@@ -1,7 +1,7 @@
-//! The icons for menus and the Windows executable, made from the window's
+//! The icons for menus and the Windows executable, made from the GUI's
 //! own pixel art rather than drawn apart, so they can't drift from it.
 //! They are committed, since release packages and the Windows build take
-//! them from the repository, and CI checks they still match the window's.
+//! them from the repository, and CI checks they still match the GUI's.
 
 use std::path::Path;
 
@@ -25,7 +25,7 @@ const ICO_HEADER: usize = 6;
 /// pixel, two each; and its length and where it starts, four each.
 const ICO_ENTRY: usize = 16;
 
-/// Writes or checks the icons made from the window's: PNGs in
+/// Writes or checks the icons made from the GUI's: PNGs in
 /// `crates/cli/assets/icons`, laid out as in `share/icons`, and
 /// `crates/cli/assets/tgradish.ico` for the Windows executable.
 pub fn icons(args: &[String]) -> Result<()> {

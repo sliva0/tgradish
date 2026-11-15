@@ -1,7 +1,7 @@
 //! What a conversion converts, and where its result goes unless it is
 //! told: [`Input`], one file or the pictures of one animation, named for
 //! its result by [`Input::default_output`]. Which files tgradish takes as
-//! input, by their extension, is here too, so the window's dialogues,
+//! input, by their extension, is here too, so the GUI's dialogues,
 //! folders of frames and watched folders agree.
 
 use std::path::{Path, PathBuf};
@@ -162,7 +162,7 @@ impl FileKind {
 
     /// The kind a file named `path` is by its extension, as [`sniff`]
     /// takes it where the content tells nothing: what a file is taken
-    /// for until it can be read, as the window does.
+    /// for until it can be read, as the GUI does.
     pub fn of_name(path: &Path) -> FileKind {
         match extension(path).as_str() {
             "webm" | "mkv" => FileKind::Webm,

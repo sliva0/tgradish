@@ -31,7 +31,7 @@ const CONVERT_EXAMPLES: &str =
 const ENVIRONMENT: &str = "  TGRADISH_CONFIG  The config file, as --config names it.
   TGRADISH_FFMPEG  The ffmpeg to use, as --ffmpeg names it, when neither --ffmpeg
                    nor --ffmpeg-from is given; over the config file's.
-  TGRADISH_LANG    The window's language, as de, over the system's.
+  TGRADISH_LANG    The GUI's language, as de, over the system's.
   NO_COLOR         No colours, with --colour auto.
   CLICOLOR_FORCE   Colours even where the terminal isn't one, with --colour auto.
   FORCE_HYPERLINK  1 links file names, 0 doesn't, whatever the terminal.";
@@ -86,13 +86,13 @@ fn exit_status_help() -> String {
 }
 
 /// What `--version` says, `-V` saying the version alone: how this build
-/// was made, with which ffmpeg and whether it has the window.
+/// was made, with which ffmpeg and whether it has the GUI.
 fn long_version() -> &'static str {
     static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     TEXT.get_or_init(|| {
         let ffmpeg = if cfg!(feature = "linked") { "ffmpeg built in" } else { "system ffmpeg" };
-        let window = if cfg!(feature = "gui") { "with the window" } else { "no window" };
-        format!("{} ({ffmpeg}; {window})", env!("CARGO_PKG_VERSION"))
+        let gui = if cfg!(feature = "gui") { "with the GUI" } else { "no GUI" };
+        format!("{} ({ffmpeg}; {gui})", env!("CARGO_PKG_VERSION"))
     })
 }
 
@@ -244,7 +244,7 @@ pub enum Command {
         shell: ShellArg,
     },
 
-    /// Open the tgradish window, with FILES in it.
+    /// Open the GUI, with FILES in it.
     ///
     /// It also opens when tgradish is started without arguments outside a
     /// terminal.
@@ -258,11 +258,11 @@ pub enum Command {
 
 impl Cli {
     /// What clap can't tell is wrong with the command line: `--json` for
-    /// the window, which prints nothing to read, and an input named true
+    /// the GUI, which prints nothing to read, and an input named true
     /// or false that isn't there, as `--watermark false` gives one.
     pub fn misused(&self) -> Option<String> {
-        if self.command.is_window() && self.global.json {
-            return Some("--json can't be used with gui: the window prints nothing to read".into());
+        if self.command.is_gui() && self.global.json {
+            return Some("--json can't be used with gui, which prints nothing to read".into());
         }
         // `-`, which other tools read as stdin or stdout, would be a file
         // named so here
@@ -316,7 +316,7 @@ impl Cli {
 
 impl Command {
     /// Whether it reads the config file: only what uses it does, so that a
-    /// mistake in it never stops the rest. The window reads its own.
+    /// mistake in it never stops the rest. The GUI reads its own.
     pub fn reads_config(&self) -> bool {
         match self {
             Command::Convert(_)
@@ -336,9 +336,9 @@ impl Command {
         }
     }
 
-    /// Whether it opens the window, which takes Ctrl-C as any program
-    /// does and marks what it makes as its own.
-    pub fn is_window(&self) -> bool {
+    /// Whether it opens the GUI, which takes Ctrl-C as any program does
+    /// and marks what it makes as its own.
+    pub fn is_gui(&self) -> bool {
         #[cfg(feature = "gui")]
         if matches!(self, Command::Gui { .. }) {
             return true;
@@ -907,8 +907,8 @@ mod tests {
         };
         assert_eq!(version("-V").trim_end(), format!("tgradish {}", env!("CARGO_PKG_VERSION")));
         let long = version("--version");
-        let window = if cfg!(feature = "gui") { "with the window" } else { "no window" };
-        assert!(long.trim_end().ends_with(&format!("; {window})")), "{long}");
+        let gui = if cfg!(feature = "gui") { "with the GUI" } else { "no GUI" };
+        assert!(long.trim_end().ends_with(&format!("; {gui})")), "{long}");
         assert!(long.contains("ffmpeg built in") == cfg!(feature = "linked"), "{long}");
     }
 
@@ -1058,7 +1058,7 @@ mod tests {
 
     #[cfg(feature = "gui")]
     #[test]
-    fn opens_the_window_with_the_files_named() {
+    fn opens_the_gui_with_the_files_named() {
         let cli = Cli::parse_from(["tgradish", "gui", "a.png", "frames"]);
         let Command::Gui { files } = cli.command else { panic!() };
         assert_eq!(files, [PathBuf::from("a.png"), PathBuf::from("frames")]);

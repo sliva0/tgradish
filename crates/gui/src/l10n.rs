@@ -1,4 +1,4 @@
-//! The window's words in its user's language: a Fluent file for each
+//! The GUI's words in its user's language: a Fluent file for each
 //! language in `i18n`, built into the binary. English is complete, and what
 //! another language lacks is shown in English.
 //!
@@ -26,7 +26,7 @@ pub(crate) static LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
     loader
 });
 
-/// A message in the window's language, see the module's docs.
+/// A message in the GUI's language, see the module's docs.
 macro_rules! fl {
     ($id:literal) => {
         $crate::l10n::seen($id, i18n_embed_fl::fl!($crate::l10n::LOADER, $id))
@@ -57,7 +57,7 @@ pub(crate) fn languages() -> &'static [(LanguageIdentifier, String)] {
         languages
             .into_iter()
             .map(|language| {
-                // its own file alone, as the window's loads only those shown
+                // its own file alone, as `LOADER` loads only those shown
                 let loader = FluentLanguageLoader::new(LOADER.domain(), language.clone());
                 let name = match loader.load_languages(&Files, std::slice::from_ref(&language)) {
                     Ok(()) => loader.get("language-name"),
@@ -70,7 +70,7 @@ pub(crate) fn languages() -> &'static [(LanguageIdentifier, String)] {
     &LANGUAGES
 }
 
-/// Shows the window in `language`, as a tag, or in the system's when
+/// Shows the GUI in `language`, as a tag, or in the system's when
 /// `None`, as far as there are translations. `TGRADISH_LANG` comes first.
 pub(crate) fn choose(language: Option<&str>) {
     let variable = std::env::var(VARIABLE).ok().filter(|tag| !tag.is_empty());
@@ -90,7 +90,7 @@ pub(crate) fn choose(language: Option<&str>) {
 }
 
 /// Sets up the messages just loaded: without the marks Fluent puts
-/// around arguments for text running both ways, which the window's fonts
+/// around arguments for text running both ways, which tgradish's fonts
 /// lack and its layout doesn't need, and, for `pseudo`, transformed.
 fn settle(loader: &FluentLanguageLoader, pseudo: bool) {
     loader.set_use_isolating(false);
@@ -136,7 +136,7 @@ pub(crate) mod record {
     }
 
     /// Every message given on any thread since `remember`, in order, for
-    /// those the window keeps and shows later, as notices and errors.
+    /// those the GUI keeps and shows later, as notices and errors.
     static EVER: Mutex<(Vec<Said>, BTreeSet<Said>)> = Mutex::new((Vec::new(), BTreeSet::new()));
 
     /// A message given: its name and words.
@@ -459,7 +459,7 @@ mod tests {
     }
 
     /// Every message English has, and each of its attributes, is shown
-    /// somewhere: asked for by `fl!` in the window's code, other than its
+    /// somewhere: asked for by `fl!` in the GUI's code, other than its
     /// tests', or put in another message. `fl!` itself fails to build for
     /// a message or attribute English doesn't have.
     #[test]
@@ -562,7 +562,7 @@ mod tests {
         }
     }
 
-    /// The window's own fonts draw every language it has: the system's
+    /// The built-in fonts draw every language the GUI has: the system's
     /// are only for names of files.
     #[test]
     fn the_fonts_draw_every_language() {
@@ -595,7 +595,7 @@ mod tests {
     fn pseudo_text_is_longer_and_keeps_what_is_not_a_letter() {
         assert_eq!(pseudo_text("Crop: 4 px"), "Çřøøþ: 4 þx");
         assert!(pseudo_text("Settings").chars().count() > "Settings".chars().count());
-        // the window's fonts have every letter it makes
+        // the built-in fonts have every letter it makes
         let drawn: BTreeSet<char> = crate::fonts::fonts()
             .font_data
             .values()

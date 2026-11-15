@@ -1,4 +1,4 @@
-// The titles of the notices the window finds among the rest, shared by
+// The titles of the notices the GUI finds among the rest, shared by
 // build.rs, which packs them, and `licenses`, which exports them.
 
 /// The title of the notice of the Rust crates' licences, the longest.

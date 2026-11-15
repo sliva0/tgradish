@@ -1,4 +1,4 @@
-//! The Settings dialog, of the window's own settings: ffmpeg, where
+//! The Settings dialog, of the GUI's own settings: ffmpeg, where
 //! results go, and what new files start with. Changes apply at once, and
 //! are kept in `config.toml` at once too: as typing or dragging pauses,
 //! and only what is typed that makes sense.
@@ -35,7 +35,7 @@ pub(crate) struct SettingsDialog {
     /// What checking ffmpeg found: whether it is ready, and what to say.
     ffmpeg_status: Option<(bool, String)>,
     /// Checking ffmpeg, which runs it, on a thread of its own: stopped if
-    /// the dialog is opened again or the window closes.
+    /// the dialog is opened again or the GUI closes.
     checking: Option<Task<(bool, String)>>,
     /// What writing the settings did last: where they went, or why they
     /// didn't.
@@ -49,21 +49,21 @@ pub(crate) struct SettingsDialog {
     /// folder for results.
     ffmpeg_typed: Typed,
     folder_typed: Typed,
-    /// Reset to defaults was clicked, which the window takes up, as it may
+    /// Reset to defaults was clicked, which `App` takes up, as it may
     /// be undone from its message.
     pub(crate) reset: bool,
     /// What the fields show while empty, found once the dialog opens: the
     /// ffmpeg on PATH, and a folder results could go to.
     placeholders: (String, String),
-    /// A file dialog asked for, which the window opens.
+    /// A file dialog asked for, which `App` opens.
     pub(crate) pick: Option<crate::files::Pick>,
     /// Results are to go in a folder not chosen yet: kept here, as the
     /// settings never hold a folder without a name.
     folder_unchosen: bool,
-    /// A default preset picked for a format, which the window takes up, as
+    /// A default preset picked for a format, which `App` takes up, as
     /// the items that follow it may then fit another way.
     pub(crate) default_preset: Option<(Format, String)>,
-    /// The settings file was written, which the window takes up, as what
+    /// The settings file was written, which `App` takes up, as what
     /// it said of the file is past.
     pub(crate) wrote: bool,
     /// The accent colour of one's own as typed, `#rrggbb`, while it is.
@@ -237,7 +237,7 @@ fn keep(
 /// Saves `config` to `path`, or says why it couldn't. A file there that
 /// can't be read is kept beside it first, as what it held is lost
 /// otherwise: the settings shown are the defaults where it was unreadable
-/// as the window opened.
+/// as the GUI started.
 fn save(config: &mut Config, path: &Path) -> Result<String, String> {
     let shown = path.display().to_string();
     match write(config, path) {
@@ -264,7 +264,7 @@ pub(crate) fn write(config: &mut Config, path: &Path) -> Result<Option<PathBuf>,
 }
 
 /// How near the scale's row the pointer keeps the dialog where it is, as
-/// its buttons scale the window, and for how long after the last click.
+/// its buttons change the scale, and for how long after the last click.
 const NEAR: f32 = 24.0;
 const HELD: f64 = 1.5;
 /// How long the dialog takes back to the window's middle.
@@ -363,7 +363,7 @@ fn release(dialog: &mut SettingsDialog, now: f64) {
 const FADE: f32 = 24.0;
 
 /// Shows the dialog if it is open. `ffmpeg_given` says an ffmpeg was given
-/// as the window was started, which it uses over the settings'.
+/// as tgradish was started, which it uses over the settings'.
 pub(crate) fn show(
     ctx: &egui::Context,
     dialog: &mut SettingsDialog,
@@ -598,7 +598,7 @@ fn sections(
         ui.checkbox(&mut gui.overwrite, fl!("replace-in-the-way"));
     });
 
-    widgets::section(ui, &fl!("window"));
+    widgets::section(ui, &fl!("interface"));
     // only once there is more than English to pick
     let languages = l10n::languages();
     if languages.len() > 1 {
@@ -698,16 +698,16 @@ fn ffmpeg_use(ui: &mut egui::Ui, config: &mut Config, builtin: bool) {
     });
 }
 
-/// The window's scale, `scale`, smaller and larger by the steps egui's
-/// keys take, and back to 100%, which the window applies at once, with those keys
-/// under it, as the window's other hints write keys. Gives the button that changed it,
+/// The scale, `scale`, smaller and larger by the steps egui's keys
+/// take, and back to 100%, which `App` applies at once, with those keys
+/// under it, as the other hints write keys. Gives the button that changed it,
 /// where one did: nowhere for the one back to 100%.
 fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
     use crate::keys::{Command, key_text, shortcut_of};
     let mut stepped = None;
-    // the setting changes, which the window then applies, as it does a
+    // the setting changes, which `App` then applies, as it does a
     // theme: kept once saved, like the rest of Settings; egui would only
-    // apply a scale asked of it on the next frame, which the window would
+    // apply a scale asked of it on the next frame, which `App` would
     // take for its keys', which it keeps at once
     let mut changed = None;
     ui.horizontal(|ui| {
@@ -741,9 +741,9 @@ fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
     if let Some(changed) = changed {
         *scale = changed;
     }
-    // as the window's other hints write keys, Ctrl+V: so Ctrl++, rather
+    // as the other hints write keys, Ctrl+V: so Ctrl++, rather
     // than egui's Ctrl+Plus
-    // the first of each, as the window's shortcuts list them, though
+    // the first of each, as the dialog of shortcuts lists them, though
     // Ctrl+= does it too
     let keys = |command| key_text(&shortcut_of(command).keys[0]);
     widgets::hint(
@@ -811,7 +811,7 @@ fn accents(ui: &mut egui::Ui, accent: &mut Accent, typed: &mut String) {
     });
 }
 
-/// The name of one of [`theme::ACCENTS`], in the window's language.
+/// The name of one of [`theme::ACCENTS`], in the GUI's language.
 fn accent_name(name: &str) -> String {
     match name {
         "pink" => fl!("accent-pink"),
@@ -883,7 +883,7 @@ mod tests {
 
     use super::*;
 
-    /// A window whose settings are kept in `path`, with frames a moment
+    /// The GUI with its settings kept in `path`, with frames a moment
     /// apart, as by hand.
     fn kept_in(path: &Path) -> Harness<'static, App> {
         let at = path.to_path_buf();
@@ -1015,7 +1015,7 @@ mod tests {
     }
 
     #[test]
-    fn scales_the_window_keeping_its_buttons_under_the_pointer() {
+    fn scales_keeping_its_buttons_under_the_pointer() {
         use eframe::egui::{Key, Modifiers, vec2};
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
@@ -1075,7 +1075,7 @@ mod tests {
         harness.key_press_modifiers(Modifiers::COMMAND, Key::Minus);
         settle(&mut harness);
         assert_eq!(harness.ctx.zoom_factor(), 1.1);
-        // and read as the window opens again
+        // and read as the GUI starts again
         let config = Config::load(&path).unwrap();
         let mut again = Harness::builder()
             .with_size(pixels)
@@ -1232,7 +1232,7 @@ mod tests {
     fn takes_clicks_again_and_again_in_a_window_it_hardly_fits() {
         use crate::testing::Screen;
         // `label`'s button clicked again and again, the pointer kept still,
-        // each click scaling the window to the next of `scales`
+        // each click setting the scale to the next of `scales`
         let clicks = |screen: &mut Screen, label: &str, scales: &[f64]| {
             let under = screen.pixels(label);
             for &scale in scales {
@@ -1321,7 +1321,7 @@ mod tests {
         assert!((dialog.drawn.0.center() - middle).length() < 1.0);
         assert!((screen.pixels(&larger) - under).length() > 20.0);
         assert!(!screen.on(&larger));
-        // so clicking there again doesn't scale the window
+        // so clicking there again doesn't change the scale
         screen.click();
         screen.frames(4);
         assert_eq!(screen.harness.state().config.gui.scale, 1.3);
@@ -1484,7 +1484,7 @@ mod tests {
     }
 
     #[test]
-    fn checks_ffmpeg_while_the_window_draws() {
+    fn checks_ffmpeg_while_frames_are_drawn() {
         let dir = tempfile::tempdir().unwrap();
         let mut config = Config::default();
         config.ffmpeg.path = Some(dir.path().join("no-ffmpeg-here"));
@@ -1497,7 +1497,7 @@ mod tests {
         harness.get_by_label_contains("ffmpeg given as tgradish was started");
         harness.get_by_label("Check").click_accesskit();
         harness.run_steps(2);
-        // what it finds is taken in as the window draws
+        // what it finds is taken in as frames are drawn
         for _ in 0..500 {
             if harness.state().settings_dialog.ffmpeg_status.is_some() {
                 break;
@@ -1505,7 +1505,7 @@ mod tests {
             harness.step();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        // in the window's words, as reading a file without it would say
+        // in tgradish's own words, as reading a file without it would say
         let status = harness.state().settings_dialog.ffmpeg_status.clone();
         assert!(
             matches!(&status, Some((false, said)) if said.starts_with("ffmpeg wasn't found")),

@@ -1,4 +1,4 @@
-//! The window's state and its frame: the files open, what waits to be
+//! The GUI's state and its frame: the files open, what waits to be
 //! converted, the dialogs and the theme. The other modules add their parts
 //! to `App`; this holds what they share, and draws them in turn.
 
@@ -60,11 +60,11 @@ pub(crate) struct App {
     pub(crate) queue: VecDeque<u64>,
     /// How many were asked to be converted since nothing was.
     pub(crate) batch: usize,
-    /// Results this window wrote, which it replaces when making them again.
+    /// Results the GUI wrote, which it replaces when making them again.
     pub(crate) written: HashMap<PathBuf, Written>,
     /// Files found in the way, by their size and time: whether tgradish
     /// made them, so they may be replaced. Working out where results go
-    /// fills it in, though it only borrows the window, hence the cell.
+    /// fills it in, though it only borrows `App`, hence the cell.
     pub(crate) made_by_tgradish: std::cell::RefCell<HashMap<PathBuf, (FileVersion, bool)>>,
     /// What was seen of files where results go, looked at again only now
     /// and then rather than on every frame.
@@ -78,7 +78,7 @@ pub(crate) struct App {
     /// seconds, to notice one installed meanwhile, or when the settings
     /// change.
     pub(crate) found_backend: std::cell::RefCell<Option<FoundBackend>>,
-    /// The ffmpeg given as the window was started, by the command line or
+    /// The ffmpeg given as the GUI was started, by the command line or
     /// `TGRADISH_FFMPEG`, over the config's for this run alone, so
     /// Settings doesn't save it.
     pub(crate) ffmpeg_override: (Option<FfmpegChoice>, Option<PathBuf>),
@@ -95,7 +95,7 @@ pub(crate) struct App {
     pub(crate) picking: Option<crate::media::Task<Option<crate::files::Picked>>>,
     /// A file dialog parented to the window, to ask with.
     pub(crate) file_dialog: rfd::FileDialog,
-    /// A dialog of the user's presets, open over the window.
+    /// A dialog of the user's presets, open over the rest.
     pub(crate) preset_dialog: Option<preset_dialogs::Dialog>,
     pub(crate) inspection: Option<inspect::Inspection>,
     /// Whether the dialog of tgradish's version and licences is open.
@@ -107,7 +107,7 @@ pub(crate) struct App {
     pub(crate) shortcuts: bool,
     /// The theme Settings showed last, to apply a change made there.
     pub(crate) theme_shown: Option<crate::config::Theme>,
-    /// The window's scale shown last, to apply a change made in Settings
+    /// The scale shown last, to apply a change made in Settings
     /// and save one made by egui's keys.
     pub(crate) scale_shown: Option<f32>,
     /// The scale asked of egui, and the pointer kept where it is on the
@@ -118,11 +118,11 @@ pub(crate) struct App {
     pub(crate) session: Option<session::Store>,
     /// When to see whether the session changed.
     pub(crate) next_save: f64,
-    /// The system's fonts for what the window's own lack.
+    /// The system's fonts for what tgradish's own lack.
     pub(crate) fallbacks: fallback::Fallbacks,
     /// What the texts were when fonts were last looked for them.
     pub(crate) fonts_checked: Option<u64>,
-    /// What the window says over its bottom.
+    /// What is said along the bottom.
     pub(crate) banner: Banner,
     /// Files removed a moment ago, which may be put back.
     pub(crate) removed: Option<Removed>,
@@ -146,7 +146,7 @@ pub(crate) struct App {
     #[cfg(all(unix, not(target_os = "macos")))]
     pub(crate) _toplevel_icon: Option<toplevel_icon::ToplevelIcon>,
     /// Files are being dragged over the window, as egui or, on Wayland,
-    /// the window's own listener reports it.
+    /// tgradish's own listener reports it.
     pub(crate) hovering: bool,
     /// Share of the main panel's height the preview takes.
     pub(crate) preview_share: f32,
@@ -155,7 +155,7 @@ pub(crate) struct App {
     pub(crate) window: Option<session::Window>,
     /// The system's accent colour, as it changes.
     pub(crate) accent: Option<accent::Accent>,
-    /// The accent the window's look was made with last: the one chosen, or
+    /// The accent the look was made with last: the one chosen, or
     /// else the system's.
     pub(crate) applied_accent: Option<Color32>,
 }
@@ -182,7 +182,7 @@ impl App {
     }
 
     /// Says why the settings couldn't be read, where `unreadable` gives
-    /// why, and reads the presets in `presets_dir`, as the window opens.
+    /// why, and reads the presets in `presets_dir`, as the GUI starts.
     fn start(&mut self, unreadable: Option<tgradish_core::Error>, presets_dir: Option<PathBuf>) {
         if let Some(err) = unreadable {
             self.say(settings_unreadable(fl!("settings-unreadable"), &err));
@@ -193,8 +193,8 @@ impl App {
 
     /// Opens the files of last time from the session at `path`, unless the
     /// settings say not to, and keeps the session there from now on. A
-    /// window opened while another has the session starts empty and keeps
-    /// none.
+    /// second instance started while another has the session starts empty
+    /// and keeps none.
     pub(crate) fn reopen(&mut self, path: PathBuf) {
         let Some(mut store) = session::Store::open(path) else { return };
         // laid out as last time, whether or not its files are opened again
@@ -234,9 +234,9 @@ impl App {
         self.session = Some(store);
     }
 
-    /// Shows `message` over the window, under what it already says there,
-    /// unless it says that already: in the corner over the list where it
-    /// passes, in the banner where it stays.
+    /// Shows `message` under what is said already, unless it is among it:
+    /// in the corner over the list where it passes, in the banner where it
+    /// stays.
     pub(crate) fn say(&mut self, message: Message) {
         self.banner.say(message);
     }
@@ -349,8 +349,8 @@ impl App {
         }
     }
 
-    /// Keeps the window's scale and its setting together: the setting is
-    /// applied as the window opens, and as Settings changes it, which
+    /// Keeps the scale and its setting together: the setting is applied
+    /// as the GUI starts, and as Settings changes it, which
     /// keeps it once saved, as it does the theme; a change by egui's keys,
     /// Ctrl++ (or Ctrl+=) and Ctrl+- and Ctrl+0, is saved at once, as the theme's button
     /// saves its change. egui applies a scale asked of it from the next
@@ -360,7 +360,7 @@ impl App {
         let set = self.config.gui.scale as f32;
         let alike = |a: f32, b: f32| (a - b).abs() < 0.005;
         match self.scale_shown {
-            // the setting changed, by Settings, or as the window opens
+            // the setting changed, by Settings, or as the GUI starts
             Some(shown) if !alike(set, shown) => self.scaling.set(ctx, set),
             None => self.scaling.set(ctx, set),
             // what was asked, now applied
@@ -429,7 +429,7 @@ impl App {
         window.preview = self.preview_share;
     }
 
-    /// Makes the window's look again when the accent chosen, or the
+    /// Makes the look again when the accent chosen, or the
     /// system's, changed.
     fn follow_accent(&mut self, ctx: &egui::Context) {
         let system = || self.accent.as_ref().and_then(accent::Accent::get);
@@ -538,7 +538,7 @@ impl App {
 
     /// Adds a pasted image, the one file in `dir`, which is kept as long
     /// as the item is, and copied next to the session at once: `dir` goes
-    /// when the window closes.
+    /// when the GUI closes.
     pub(crate) fn add_pasted(&mut self, files: Vec<PathBuf>, dir: tempfile::TempDir) {
         let mut item =
             Item::new(self.next_id, files, false, self.config.gui.target.unwrap_or_default());
@@ -632,7 +632,7 @@ impl App {
 
     /// Takes the settings the Settings dialog shows from `from`: the
     /// default presets as Settings picks them, so the files that follow
-    /// them may fit another way, and the window's language as it changes.
+    /// them may fit another way, and the GUI's language as it changes.
     fn take_dialog_settings(&mut self, from: &Config) {
         use tgradish_core::presets::Format;
         for format in [Format::Webm, Format::Tgs] {
@@ -693,7 +693,7 @@ impl App {
         self.queue.clear();
     }
 
-    /// Changes a setting of the window, and keeps that change in the config
+    /// Changes a setting of the GUI, and keeps that change in the config
     /// file at once, without the rest of what Settings changed.
     pub(crate) fn save_setting(&mut self, change: impl Fn(&mut crate::config::GuiConfig)) {
         self.save_config_setting(|config| change(&mut config.gui));
@@ -725,7 +725,7 @@ impl App {
         }
     }
 
-    /// Whether a dialog is open over the window.
+    /// Whether a dialog is open over the rest.
     pub(crate) fn dialog_open(&self) -> bool {
         self.picking.is_some()
             || self.settings_dialog.is_open()
@@ -831,7 +831,7 @@ pub(crate) fn keep_aside(path: &Path) -> std::io::Result<PathBuf> {
             Err(err) if err.kind() == ErrorKind::NotFound => {}
             Err(err) => return Err(err),
         }
-        // not even another window's copy made meanwhile is written over
+        // not even a copy another instance made meanwhile is written over
         match std::fs::File::create_new(&aside) {
             Ok(mut file) => return file.write_all(&bytes).map(|()| aside),
             Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
@@ -841,7 +841,7 @@ pub(crate) fn keep_aside(path: &Path) -> std::io::Result<PathBuf> {
     Err(std::io::Error::other("too many copies of unreadable settings are kept"))
 }
 
-/// How long a closing window waits for conversions to stop, so they take
+/// How long the GUI waits as it closes for conversions to stop, so they take
 /// their temporary files and ffmpeg's processes with them.
 const STOPPING: std::time::Duration = std::time::Duration::from_secs(3);
 
@@ -859,7 +859,7 @@ impl App {
     }
 }
 
-/// Makes the window light or dark.
+/// Makes the GUI light or dark.
 pub(crate) fn set_theme(ctx: &egui::Context, theme: crate::config::Theme) {
     use crate::config::Theme;
     ctx.set_theme(match theme {
@@ -1032,7 +1032,7 @@ impl eframe::App for App {
         // last, as egui would take them
         self.scaling.keys(&ctx);
         // every few seconds, so a crash loses little; what changed is kept
-        // even if nothing draws the window again before then
+        // even if nothing is drawn again before then
         let now = ctx.input(|input| input.time);
         if now >= self.next_save {
             self.next_save = now + 2.0;
@@ -1090,7 +1090,7 @@ mod tests {
         let (files, folder) = pasted_image();
         first.state_mut().add_pasted(files, folder);
         first.state_mut().save_session();
-        // turned off, and on again before the window closes
+        // turned off, and on again before the GUI closes
         first.state_mut().config.gui.reopen_files = false;
         first.state_mut().save_session();
         first.state_mut().config.gui.reopen_files = true;
@@ -1138,7 +1138,7 @@ mod tests {
     }
 
     #[test]
-    fn leaves_the_session_to_the_window_that_has_it() {
+    fn leaves_the_session_to_the_instance_that_has_it() {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state").join("session.json");
         let mut first = harness(Config::default());
@@ -1148,7 +1148,7 @@ mod tests {
         first.state_mut().save_session();
         let written = std::fs::read_to_string(&state).unwrap();
 
-        // a second window meanwhile, whose own files are kept nowhere
+        // a second instance meanwhile, whose own files are kept nowhere
         let mut second = harness(Config::default());
         second.state_mut().reopen(state.clone());
         assert!(second.state().session.is_none() && second.state().items.is_empty());
@@ -1186,7 +1186,7 @@ mod tests {
         first.state_mut().save_session();
         drop(first);
 
-        // the next window names the result the same, and knows the file
+        // the next run names the result the same, and knows the file
         // there for the image's own
         let mut second = harness(config);
         second.state_mut().reopen(state);
@@ -1247,7 +1247,7 @@ mod tests {
     }
 
     #[test]
-    fn stops_converting_when_the_window_closes() {
+    fn stops_converting_on_exit() {
         let dir = tempfile::tempdir().unwrap();
         let Some(video) = crate::testing::video_of(dir.path(), "1280x720", 8) else { return };
         let mut config = Config::default();
@@ -1359,12 +1359,12 @@ mod tests {
         harness.state_mut().reopen(state.clone());
         harness.run_steps(2);
         harness.get_by_label_contains("The files of last time couldn't be read");
-        // written anew by this window, the other kept beside it
+        // written anew by this run, the other kept beside it
         harness.state_mut().save_session();
         assert!(std::fs::read_to_string(&aside).unwrap().contains("a later tgradish"));
         assert!(std::fs::read_to_string(&state).unwrap().contains(r#""version":1"#));
 
-        // told to forget the files, the next window reads none and keeps none
+        // told to forget the files, the next run reads none and keeps none
         drop(harness);
         std::fs::write(&state, "anything").unwrap();
         let mut config = Config::default();
@@ -1408,7 +1408,7 @@ mod tests {
         // as it was, whatever the setting of opening files again
         let mut config = Config::default();
         config.gui.reopen_files = false;
-        // read before the window is first drawn, as it opens
+        // read before the first frame is drawn, as the GUI starts
         let session = state.clone();
         let mut second =
             egui_kittest::Harness::builder().with_size([1280.0, 820.0]).build_eframe(move |_| {
@@ -1450,11 +1450,11 @@ mod tests {
         assert!(state.exists());
         drop(first);
 
-        // a file goes before the window opens again
+        // a file goes before the next run
         std::fs::remove_file(&gone).unwrap();
         let mut second = harness(config);
         second.state_mut().reopen(state);
-        // its result is read as the window draws, not before it opens
+        // its result is read as frames are drawn, not as the GUI starts
         assert!(second.state().items[0].made.is_none());
         assert!(second.state().items[0].earlier.is_some());
         finish(&mut second);

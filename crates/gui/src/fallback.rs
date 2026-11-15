@@ -1,7 +1,7 @@
-//! The system's fonts, for characters the window's own fonts lack: CJK,
+//! The system's fonts, for characters tgradish's own fonts lack: CJK,
 //! Arabic, Hebrew, Thai, Indic and other scripts in file names. A font is
 //! looked for when such a character first shows up, read on another
-//! thread, and added behind the window's fonts, so nothing is loaded for
+//! thread, and added behind tgradish's own, so nothing is loaded for
 //! names that don't need it.
 //!
 //! Linux asks fontconfig for a font with the character; Windows and macOS
@@ -72,7 +72,7 @@ pub(crate) fn formatting(c: char) -> bool {
 }
 
 impl Fallbacks {
-    /// Falls back from `fonts`, the window's own.
+    /// Falls back from `fonts`, tgradish's own.
     pub(crate) fn new(fonts: egui::FontDefinitions) -> Fallbacks {
         let covered =
             fonts.font_data.values().flat_map(|data| characters(&data.font, data.index)).collect();
@@ -96,7 +96,7 @@ impl Fallbacks {
         !self.pending.is_empty()
     }
 
-    /// Looks for fonts for the characters of `texts` the window can't show,
+    /// Looks for fonts for the characters of `texts` that can't be shown yet,
     /// and adds those found by now.
     pub(crate) fn check<'a>(
         &mut self,

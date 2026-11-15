@@ -6,9 +6,9 @@
 | --- | --- |
 | `crates/frames` (`tgradish-frames`) | RGBA animations with frame times, and pure-Rust decoders for GIF, PNG and APNG, WebP, JPEG, BMP, Aseprite, sprite sheets and image sequences, within limits on what they allocate. Works on bytes only, so it builds for `wasm32-unknown-unknown`. What only Aseprite files have, as tags and layers, is in its `aseprite` module. |
 | `crates/tgs` (`tgradish-tgs`) | Pixel art to Telegram `.tgs` stickers: normalising the art to its grid, the painter's encoder that draws it as rectangles in layers, the reductions that fit it into 64 KiB, packing, and Telegram's limits and checks. No files, processes or ffmpeg either, and threads only with its `threads` feature. `make` and what it reads and reports are its public interface, serialised in kebab-case; the encoder's interior (scenes, Lottie, layout, the painter, packing and marks) is public only with the `internals` feature, which tgs-lab turns on and semver doesn't cover. |
-| `crates/core` (`tgradish-core`) | What the command line and the window share. A module for each kind of result, `webm`, `webp` and `tgs`, converts an `input::Input`, a file or a sequence of pictures, by the same `convert(backend, &Request, &cancel, on_event)`, reporting through its `Event`s; `webm` also plans and fits WebM to the size limit, and in `webm::container` inspects WebM and patches it for duration spoofing. Beside them: `picture`, where a picture lands in a sticker and telling pixel art; `input`, results' default names and `sniff`, which tells kinds of file apart; `drawn`, pixel art drawn for ffmpeg; presets, the config file, and `inspect`. ffmpeg runs through a `Backend`: the `ffmpeg` and `ffprobe` programs, or with the `linked` feature its libraries, used to do exactly what those command lines do. It re-exports `tgradish-tgs`, so the types of it that core's API names are reached through core. What it serialises for `--json` and `describe` keeps the rules `protocol`'s docs give, as kebab-case and an object a line, and its errors say what is wrong without naming flags, which the command line adds and the window words its own way. |
-| `crates/gui` (`tgradish-gui`) | The egui window, which calls core directly, and reaches `tgradish-tgs` through it. |
-| `crates/cli` (`tgradish`) | The binary: arguments and terminal output. It includes the window unless built with `--no-default-features`. |
+| `crates/core` (`tgradish-core`) | What the command line and the GUI share. A module for each kind of result, `webm`, `webp` and `tgs`, converts an `input::Input`, a file or a sequence of pictures, by the same `convert(backend, &Request, &cancel, on_event)`, reporting through its `Event`s; `webm` also plans and fits WebM to the size limit, and in `webm::container` inspects WebM and patches it for duration spoofing. Beside them: `picture`, where a picture lands in a sticker and telling pixel art; `input`, results' default names and `sniff`, which tells kinds of file apart; `drawn`, pixel art drawn for ffmpeg; presets, the config file, and `inspect`. ffmpeg runs through a `Backend`: the `ffmpeg` and `ffprobe` programs, or with the `linked` feature its libraries, used to do exactly what those command lines do. It re-exports `tgradish-tgs`, so the types of it that core's API names are reached through core. What it serialises for `--json` and `describe` keeps the rules `protocol`'s docs give, as kebab-case and an object a line, and its errors say what is wrong without naming flags, which the command line adds and the GUI words its own way. |
+| `crates/gui` (`tgradish-gui`) | The GUI, made with egui, which calls core directly, and reaches `tgradish-tgs` through it. |
+| `crates/cli` (`tgradish`) | The binary: arguments and terminal output. It includes the GUI unless built with `--no-default-features`. |
 | `crates/corpus` (`tgradish-corpus`) | Test art drawn in code, and video clips made with ffmpeg, so nothing in the repository belongs to anyone else. `tgs-lab corpus DIR` writes it all out. Published only so the other crates' tests build from their packages, as cargo keeps only dev-dependencies that are on crates.io. |
 | `crates/tgs-lab` | Encoder research: benchmarks, renders checked against tlottie and rlottie, and the probes that measured Telegram's limits. A workspace of its own with its own `Cargo.lock`, so tlottie, which isn't on crates.io, and rlottie stay out of what packagers fetch: run it from its folder, as `cargo run -- corpus DIR`, or with `--manifest-path crates/tgs-lab/Cargo.toml`. |
 | `xtask` | Release builds with ffmpeg built in, packages, licences and icons; its module docs list the tasks. |
@@ -25,7 +25,7 @@ A video cut keeps the frames that start at or after its start, as ffmpeg
 does, so a cut meant to start on a frame is written a little before it
 (`webm::read_from`), never more than a millisecond, in case times are
 rounded on the way. Pixel art is cut by overlap instead: a frame is kept
-when any of it falls within the cut. The window writes cuts by both rules
+when any of it falls within the cut. The GUI writes cuts by both rules
 (`cuts::Frames`, which its timeline edits), and the tests
 `counts_time_from_where_the_video_starts`, `finds_where_frames_start` and
 `cuts_where_converting_keeps_the_frames_meant` hold them.
@@ -70,13 +70,13 @@ not supported.
 - tgs-lab, which renders with tlottie, and with rlottie too:
   `cargo test --manifest-path crates/tgs-lab/Cargo.toml --features rlottie`
   (cmake, ninja and clang).
-- The window as pictures, which needs a GPU:
+- The GUI as pictures, which needs a GPU:
   `TGRADISH_SCREENSHOTS=/tmp/shots cargo test -p tgradish-gui -- --ignored screenshot`,
   into a folder that exists. `tgradish-readme.png` is the README's
   `.github/screenshot.png`.
 
 CI also runs `cargo fmt --all --check`, clippy with `-D warnings` with and
-without the window and for musl, `cargo xtask icons --check` and `cargo
+without the GUI and for musl, `cargo xtask icons --check` and `cargo
 xtask licenses --check`.
 
 Keep your own test files in `references/`, which git ignores.
@@ -88,7 +88,7 @@ the code says what. Commit messages say what changed and why.
 
 ### Translations
 
-The window's words are in `crates/gui/i18n/en-GB/tgradish.ftl`, in
+The GUI's words are in `crates/gui/i18n/en-GB/tgradish.ftl`, in
 [Fluent](https://projectfluent.org/fluent/guide/), and code asks for them
 with `fl!("message-id")`, which fails to compile if English lacks the
 message or the arguments given. Each message's comment says where it is
@@ -98,18 +98,18 @@ and scripts read its output.
 A translation is a copy of that file in a folder named for its language, as
 `crates/gui/i18n/de/tgradish.ftl`, with `language-name` its name for itself.
 What it leaves out shows in English, though a message that puts in
-another's words, as `{ save }`, needs that one translated too. The window
+another's words, as `{ save }`, needs that one translated too. The GUI
 follows the system's language, or the one picked in Settings;
 `TGRADISH_LANG=de` picks one for a run, and `TGRADISH_LANG=pseudo` shows
 English with longer, accented words, to see where text won't fit. The
 screenshots test takes `TGRADISH_LANG` too. The tests check every file
 reads as Fluent, that translations only take the arguments English does and
-put in only messages they have, and that the window's fonts draw them: a
+put in only messages they have, and that the GUI's fonts draw them: a
 script they lack, as Chinese or Arabic, needs a font added first, and egui
 doesn't yet lay out text that runs right to left.
 
 `cargo xtask strings` writes `target/strings/index.html`: each of the
-window's messages with its comment, beside pictures of where it shows, and
+GUI's messages with its comment, beside pictures of where it shows, and
 the command line's help pages and the messages its sources print, each with
 a name to refer to it by. It takes `TGRADISH_LANG` as well, to see a
 translation in place.
@@ -118,7 +118,7 @@ translation in place.
 
 tgradish is MIT. Every binary carries every notice it needs
 (`crates/core/build.rs`), which `tgradish licenses` prints and About in the
-window shows. The notices are in `crates/core/licenses`, and every published
+GUI shows. The notices are in `crates/core/licenses`, and every published
 crate has its own copy of `LICENSE.txt`, since a crate is packaged without
 the repository around it. After changing dependencies, run `cargo xtask
 licenses` with cargo-about 0.9.2, which CI uses too (`cargo install

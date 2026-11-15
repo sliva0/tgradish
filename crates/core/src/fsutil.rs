@@ -1,5 +1,5 @@
 //! Writing files without leaving half-written ones behind: results, and
-//! files kept between runs, as the config and the window's session.
+//! files kept between runs, as the config and the GUI's session.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};

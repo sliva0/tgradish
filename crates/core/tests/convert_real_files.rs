@@ -93,7 +93,7 @@ fn converts_short_clip_without_spoofing() {
         assert_eq!(info.title, None, "{name}: source metadata must be dropped");
         assert_eq!(info.writing_app.as_deref(), Some(tgradish_core::TOOL_ID), "{name}");
         assert!(info.signature.is_some());
-        // which the window may replace without asking
+        // which the GUI may replace without asking
         assert!(made_by_tgradish(&outcome.output), "{name}");
     }
 }
@@ -887,7 +887,7 @@ fn passes_encoder_options() {
     }
 }
 
-/// Stickers that look like tgradish's but aren't, which the window must
+/// Stickers that look like tgradish's but aren't, which the GUI must
 /// not replace without asking.
 #[test]
 fn tells_its_own_stickers_from_look_alikes() {

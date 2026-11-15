@@ -235,7 +235,7 @@ jobs:
           # the system-ffmpeg build really uses the system's
           tgradish-*-system-ffmpeg/tgradish --json ffmpeg status | grep -q /usr/bin/ffmpeg
 
-  # runs the musl builds on Alpine: converting, and opening the window on
+  # runs the musl builds on Alpine: converting, and opening the GUI on
   # virtual X11 and Wayland displays, drawn by Mesa's software renderer
   test-musl:
     needs: build
@@ -257,7 +257,7 @@ jobs:
 
       # in a container started here, as the runner's actions don't run in
       # Alpine's
-      - name: Convert and open the window on Alpine
+      - name: Convert and open the GUI on Alpine
         run: |
           cat > artifacts/test.sh <<'EOF'
           set -ex
@@ -278,7 +278,7 @@ jobs:
           "$bin" inspect out.webm out.tgs out.webp
           export XDG_RUNTIME_DIR=/tmp
           # still open after a while: it found the system's libraries and drew
-          window() {
+          gui() {
             env "$1" "$bin" gui & pid=$!
             sleep 10
             kill -0 $pid
@@ -286,10 +286,10 @@ jobs:
           }
           Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
           sleep 2
-          window DISPLAY=:99
+          gui DISPLAY=:99
           weston --backend=headless --renderer=gl --socket=wl-test &
           sleep 2
-          window WAYLAND_DISPLAY=wl-test
+          gui WAYLAND_DISPLAY=wl-test
           EOF
           docker run --rm -v "$PWD/artifacts:/test" -w /test alpine:latest sh test.sh
 
@@ -424,7 +424,7 @@ jobs:
           cd artifacts
           unzip -q tgradish-*.zip
           bin=$(ls tgradish-*/tgradish.exe)
-          # opens the window without a console when started from Explorer
+          # opens the GUI without a console when started from Explorer
           grep -q consoleAllocationPolicy "$bin"
           "$bin" ffmpeg status
           "$bin" convert input.png -o still.webm --length 1 --preset fast

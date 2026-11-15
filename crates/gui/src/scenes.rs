@@ -1,4 +1,4 @@
-//! The window's main scenes, drawn without a GPU, for tests that look over
+//! The GUI's main scenes, drawn without a GPU, for tests that look over
 //! all of them at once: that every button has a name screen readers can
 //! say, that no button's words are cut short, and that the list's bars
 //! are level with those beside them.
@@ -17,7 +17,8 @@ use crate::l10n::fl;
 use crate::testing::{convert, finish, has_ffmpeg, square, video};
 use crate::{inspect, preset_dialogs, settings_dialog};
 
-/// A window as it opens, with the window's fonts and look, `width` wide.
+/// The GUI as it opens, with its fonts and look, in a window `width`
+/// wide.
 fn window(config: Config, width: f32) -> Harness<'static, App> {
     Harness::builder().with_size([width, 820.0]).build_eframe(move |cc| {
         let app = App::with(config.clone(), None, Presets::builtin());
@@ -26,7 +27,7 @@ fn window(config: Config, width: f32) -> Harness<'static, App> {
     })
 }
 
-/// Settles what was just asked of the window, the pointer over `at`.
+/// Settles what was just asked of the GUI, the pointer over `at`.
 fn settle(harness: &mut Harness<App>, at: Option<egui::Pos2>) {
     harness.event(at.map_or(egui::Event::PointerGone, egui::Event::PointerMoved));
     for item in &mut harness.state_mut().items {
@@ -35,10 +36,10 @@ fn settle(harness: &mut Harness<App>, at: Option<egui::Pos2>) {
     harness.run_steps(4);
 }
 
-/// Takes a window `width` wide through its main scenes, handing each to
-/// `visit` by name: empty, with files, one converted and then changed, its
-/// folded settings open, a video's frame picked, the menus, the dialogs,
-/// and files removed. The video's need ffmpeg, and are left out without.
+/// Takes the GUI, in a window `width` wide, through its main scenes,
+/// handing each to `visit` by name: empty, with files, one converted and
+/// then changed, its folded settings open, a video's frame picked, the
+/// menus, the dialogs, and files removed. The video's need ffmpeg, and are left out without.
 pub(crate) fn walk(width: f32, mut visit: impl FnMut(&mut Harness<App>, &str)) {
     let dir = tempfile::tempdir().unwrap();
     let mut config = Config::default();
@@ -194,7 +195,7 @@ fn dialogs(
     settle(harness, None);
 }
 
-/// Each text the window drew last, with where, and whether it was cut
+/// Each text the GUI drew last, with where, and whether it was cut
 /// short.
 fn texts(harness: &Harness<App>) -> Vec<(String, Rect, bool)> {
     fn walk(shape: &egui::Shape, found: &mut Vec<(String, Rect, bool)>) {

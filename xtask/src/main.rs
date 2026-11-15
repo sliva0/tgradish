@@ -60,12 +60,12 @@
 //! have both (`package`).
 //!
 //! `cargo xtask icons [--check]` makes the icons for menus and the Windows
-//! executable from the window's own, `crates/gui/assets/icon.png`;
+//! executable from the GUI's own, `crates/gui/assets/icon.png`;
 //! `--check` fails if they are out of date.
 //!
 //! `cargo xtask strings [--no-pictures]` writes `target/strings/index.html`,
 //! a page of the words tgradish shows, to review them or translate the
-//! window's: each message beside pictures of where it shows, and the
+//! GUI's: each message beside pictures of where it shows, and the
 //! command line's help pages and messages. The pictures need a GPU wgpu can
 //! use and ffmpeg; `--no-pictures` keeps those made last time.
 
@@ -137,7 +137,7 @@ const NOTICES: &str = "crates/core/licenses";
 const MUSL_GCC: &str = "musl-gcc";
 
 /// Linux builds are for glibc, or for musl as on Alpine. Both have the
-/// window, so both link their C library dynamically: a static program
+/// GUI, so both link their C library dynamically: a static program
 /// can't load the system's graphics libraries.
 #[derive(Clone, Copy, PartialEq)]
 enum Target {

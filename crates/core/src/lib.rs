@@ -1,4 +1,4 @@
-//! Everything tgradish's command line and window share: Telegram stickers
+//! Everything tgradish's command line and GUI share: Telegram stickers
 //! and emoji made from videos, pictures, Aseprite files and sequences of
 //! images, as any of three kinds of result, each converted by its module's
 //! `convert(backend, &Request, &cancel, on_event)`, which reports through

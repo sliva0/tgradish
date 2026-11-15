@@ -1,6 +1,6 @@
 [package]
 name = "tgradish-gui"
-description = "The tgradish window: converts with tgradish-core"
+description = "The tgradish GUI: converts with tgradish-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

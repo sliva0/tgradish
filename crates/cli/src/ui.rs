@@ -38,20 +38,19 @@ pub fn dim(text: impl std::fmt::Display) -> String {
     style(text).dim().to_string()
 }
 
-/// What `tgradish` alone prints: a note on the window above the help,
-/// which goes to stdout unless `to_stderr`, as where it stands in for the
-/// window, which couldn't open.
+/// What `tgradish` alone prints: a note on the GUI above the help, which
+/// goes to stdout unless `to_stderr`, as where it stands in for the GUI,
+/// which couldn't start.
 pub fn introduce(to_stderr: bool) {
     use clap::CommandFactory;
-    let window = cfg!(feature = "gui");
-    if window {
+    if cfg!(feature = "gui") {
         // as wide as the note, or the terminal where that is narrower
         let width = console::Term::stderr().size_checked().map_or(66, |(_, columns)| columns);
         let line = "─".repeat(usize::from(width).min(66));
         eprintln!("{}", style(&line).cyan());
         eprintln!(
             "  {} {} {}",
-            style("tgradish has a window:").cyan().bold(),
+            style("tgradish has a GUI:").cyan().bold(),
             style("tgradish gui").bold().underlined(),
             style("opens it.").cyan().bold()
         );

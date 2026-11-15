@@ -44,7 +44,7 @@ impl Inspection {
                 let problems = issues.iter().map(|issue| Problem::refused(issue, target));
                 (Found::Webm { info, target }, problems.collect())
             }
-            // a kind of file this window doesn't know yet
+            // a kind of file the GUI doesn't know yet
             Ok(_) => (Found::Failed(fl!("inspect-unknown")), Vec::new()),
             Err(err) => (Found::Failed(crate::jobs::failure(&err)), Vec::new()),
         };

@@ -1,4 +1,4 @@
-//! The window's look: KDE's Breeze Light and Breeze Dark colour schemes and
+//! The GUI's look: KDE's Breeze Light and Breeze Dark colour schemes and
 //! Breeze's sizes, as far as egui's style has them, with the system's
 //! accent where it has one, or one the user chose. Every colour that
 //! follows the accent is made from the one given to [`apply`], so changing
@@ -271,7 +271,7 @@ fn luminance(colour: Color32) -> f32 {
     0.2126 * channel(colour.r()) + 0.7152 * channel(colour.g()) + 0.0722 * channel(colour.b())
 }
 
-/// `tint` laid over `background`, as the window draws it.
+/// `tint` laid over `background`, as it is drawn.
 fn over(background: Color32, tint: Color32) -> Color32 {
     // premultiplied, as it is blended
     let left = 1.0 - f32::from(tint.a()) / 255.0;

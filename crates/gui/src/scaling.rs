@@ -1,4 +1,4 @@
-//! The window's scale as egui applies it, with the pointer kept where it
+//! The GUI's scale as egui applies it, with the pointer kept where it
 //! is on the screen as the scale changes.
 //!
 //! egui-winit says where the pointer is in points, at the scale of the
@@ -33,9 +33,9 @@ impl Scaling {
         ctx.set_zoom_factor(zoom);
     }
 
-    /// Takes the scale's keys as the window's shortcuts list them, Ctrl++
+    /// Takes the scale's keys as the shortcuts list them, Ctrl++
     /// (or Ctrl+=), Ctrl+- and Ctrl+0, as egui would at the end of the
-    /// frame, which leaves them to the window, so the scale they ask for is
+    /// frame, which leaves them to the app, so the scale they ask for is
     /// known.
     pub(crate) fn keys(&mut self, ctx: &egui::Context) {
         use crate::keys::{Command, shortcut_of};
@@ -116,7 +116,7 @@ mod tests {
     use crate::testing::Screen;
 
     #[test]
-    fn keeps_the_pointer_where_it_is_as_the_keys_scale_the_window() {
+    fn keeps_the_pointer_where_it_is_as_the_keys_scale_the_gui() {
         let mut screen = Screen::new(Config::default(), [1280.0, 900.0], false);
         let pixels = pos2(700.0, 400.0);
         screen.move_to(pixels);

@@ -405,7 +405,7 @@ fn percent(share: f64) -> String {
 }
 
 /// Why fitting stopped where it did, or tried a lower frame rate or not,
-/// in the window's words.
+/// in the GUI's words.
 fn decision_text(decision: &tgradish_core::webm::Decision) -> String {
     use tgradish_core::webm::Decision;
     let fps = widgets::trimmed;
@@ -458,7 +458,7 @@ fn decision_text(decision: &tgradish_core::webm::Decision) -> String {
             kept_alike = percent(kept_ssim)
         ),
         Decision::Settled { attempt } => fl!("decided-settled", number = attempt),
-        // one added to core since, which the window has no words for
+        // one added to core since, which the GUI has no words for
         decision => decision.to_string(),
     }
 }
@@ -480,7 +480,7 @@ fn reduction(reduction: &tgradish_core::tgradish_tgs::reduce::Reduction) -> Stri
         Reduction::Downscale { factor } => {
             fl!("step-resolution", factor = format!("{:.0}", factor * 100.0))
         }
-        // one added to tgradish-tgs since, which the window has no words for
+        // one added to tgradish-tgs since, which the GUI has no words for
         other => format!("{other:?}"),
     }
 }

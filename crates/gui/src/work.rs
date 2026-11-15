@@ -1,5 +1,5 @@
 //! Reading and decoding inputs and results, and converting, each on a
-//! worker thread so the window keeps drawing meanwhile. The window starts
+//! worker thread so the GUI keeps drawing meanwhile. It starts
 //! what is due and takes in what is done each time it draws, and lets go
 //! of decoded frames where an item isn't looked at, as they take much
 //! memory.
@@ -510,7 +510,7 @@ mod tests {
         harness.get_by_label_contains("Telegram should accept it");
 
         // changing a setting makes the result old, and converting again
-        // replaces the file this window wrote
+        // replaces the file it wrote before
         harness.state_mut().items[0].choices.target = telegram::Target::Emoji;
         harness.run_steps(2);
         assert!(!harness.state().items[0].result_is_current());

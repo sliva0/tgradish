@@ -1,13 +1,13 @@
-### The window's words in British English, which every other language
+### tgradish's words in British English, which every other language
 ### falls back on for what it lacks.
 ###
 ### A comment above a message says where it is shown, or what it means
-### when its words don't. Arguments, as { $count }, are filled in by the
-### window. Counts pick a form with [one] and *[other]; another language
+### when its words don't. Arguments, as { $count }, are filled in by
+### tgradish. Counts pick a form with [one] and *[other]; another language
 ### may have more forms, such as [few] and [many], and its own variants
 ### for them. Key names, as Ctrl, can be put the way keyboards are
 ### labelled in the language. Units, as s, px, fps and KiB, are left as
-### they are: the window shows them the same in every language.
+### they are: tgradish shows them the same in every language.
 ###
 ### { other-message } puts in another message's words, as where a hint
 ### names a button, so the two stay the same; { -term } does so for a
@@ -23,7 +23,7 @@ close = Close
 # The small button beside a setting a preset can set, back to the preset's
 # value when it has been changed.
 back-to-preset = Go back to the preset's value
-# Beside a number the window picks unless asked for one: that it should be
+# Beside a number tgradish picks unless asked for one: that it should be
 # the number typed next to it.
 custom = Custom
     .hint = Pick "{ custom }" to set it
@@ -62,7 +62,7 @@ of-limit = { $used } of { $limit }
 telegram-accepts = Telegram should accept it
 
 
-## Messages over the bottom of the window
+## Messages along the bottom
 
 # Each message says what happened first; under it, in smaller words where
 # there is one, the file it is about, then a line of what it means, buttons
@@ -76,7 +76,7 @@ dismiss = Dismiss
 said-times = ×{ $count }
 # The toggle of what went wrong, as a program said it, when that is long.
 details = Details
-# The settings file couldn't be read as the window opened, as when it was
+# The settings file couldn't be read as tgradish started, as when it was
 # changed by hand or by another version of tgradish: the defaults are used.
 settings-unreadable = The settings file can't be read, so the defaults are in use
 # A setting changed outside the Settings dialog, such as the theme, which is
@@ -87,7 +87,7 @@ setting-unsaved = Your change couldn't be saved to the settings file
 # Under settings-unreadable and setting-unsaved.unreadable, before buttons
 # of fresh-settings, read-again, copy-path and show-folder.
 settings-file-note = It may have been edited by hand or by another version of tgradish. Changes can't be saved until it is fixed or replaced; nothing in it is lost.
-# A button that writes the settings the window has in place of a settings
+# A button that writes the settings in use in place of a settings
 # file that can't be read. .saved and .kept say it did: the file shown is
 # the old one, kept beside the new under the name given. .failed says it
 # couldn't, why under it.
@@ -124,7 +124,7 @@ undo-reset = Undo
 # Opens the Settings dialog, from a message.
 open-settings = Open Settings
     .hint = Where ffmpeg, and the rest, are chosen
-# Over the window while files that need ffmpeg are open and there is none;
+# Shown while files that need ffmpeg are open and there is none;
 # what went wrong looking for it follows.
 ffmpeg-missing = Videos need ffmpeg
     .note = Install ffmpeg from your system's packages, or from ffmpeg.org, or choose where it is. Files are read again once it is found
@@ -133,7 +133,7 @@ folder-of = Show in folder
     .hint = Open the folder it is in
 # The user's presets couldn't be read, their folder and why under it.
 presets-unreadable = Your presets couldn't be read, so only the built-in ones are offered
-# Files open when the window last closed, which aren't there any more.
+# Files open when tgradish last closed, which aren't there any more.
 files-gone = { $count ->
     [one] { $count } file is gone since last time
    *[other] { $count } files are gone since last time
@@ -154,7 +154,7 @@ session-unsaved = The open files couldn't be kept for next time
 paste-failed = Nothing could be pasted
 
 
-## The window
+## Dropping files
 
 # Over the window while files are dragged over it.
 drop-to-add = Drop to add
@@ -252,11 +252,11 @@ paste = Paste
 name-pasted = pasted image
 name-frames = { $name } (frames)
 name-and-more = { $name } and { $more } more
-# When a file's name has characters no font, the window's or the system's,
+# When a file's name has characters no font, tgradish's or the system's,
 # can draw: each is shown by its code, as U+2FE0.
 no-font = { $count ->
-    [one] No font was found for { $codes }, neither among the window's own nor the system's, so it is shown by its code. The file itself is fine
-   *[other] No font was found for { $codes }, neither among the window's own nor the system's, so they are shown by their codes. The file itself is fine
+    [one] No font was found for { $codes }, neither among tgradish's own nor the system's, so it is shown by its code. The file itself is fine
+   *[other] No font was found for { $codes }, neither among tgradish's own nor the system's, so they are shown by their codes. The file itself is fine
 }
 
 
@@ -346,7 +346,7 @@ show-result = Result
     .hint = Outdated: the result was made with earlier settings
 # Why the result can't be shown yet.
 convert-first = Convert it first
-tgs-unseen = This window can only show TGS results it made itself; convert again to see it
+tgs-unseen = TGS results from an earlier run can't be shown; convert again to see it
 # Turns on the result's small picture.
 result-preview = Result preview
     .hint = Show / hide small preview beside the input
@@ -553,7 +553,7 @@ part-frame = Frame { $number } of { $count }
 part-frames = Frames { $first } to { $last } of { $count }
 speed = Speed
     .hint = How many times as fast as the input the result plays
-# The choices beside a number the window can pick itself, as the speed: what
+# The choices beside a number tgradish can pick itself, as the speed: what
 # it picks, and how. Where the preset sets the number, in any group of
 # settings, the choice is the preset's.
 from-preset = Preset's
@@ -840,7 +840,7 @@ commands = Commands
 copy = Copy
 commands-posix = The same conversion on the command line, for a POSIX shell:
 commands-powershell = The same conversion on the command line, for PowerShell:
-pasted-temporary = A pasted image is kept in a temporary folder, gone when the window closes
+pasted-temporary = A pasted image is kept in a temporary folder, gone when tgradish closes
 ffmpeg-commands = The ffmpeg commands of the first encode; fitting changes the rate, and maybe the frame rate, between encodes:
     .builtin = What the built-in ffmpeg does for the first encode, as commands for the system's ffmpeg; fitting changes the rate, and maybe the frame rate, between encodes:
 no-ffmpeg-commands = No ffmpeg commands: { $why }
@@ -900,9 +900,9 @@ in-a-folder = In a folder
 existing-files = Existing files
     .hint = Results tgradish made are always replaced when made again
 replace-in-the-way = Replace any file that is in the way
-window = Window
+interface = Interface
 language = Language
-    .hint = The window's language; the command line's stays English
+    .hint = The language shown here; the command line stays in English
 as-the-system = As the system
 theme = Theme
     .hint = The button beside ⚙ switches between light and dark too
@@ -910,10 +910,10 @@ theme-light = Light
 theme-dark = Dark
 accent = Accent colour
     .hint = What marks the chosen, the hovered and the focused
-# How large everything in the window is; .keys under it says the keys that
-# change it too, as the window writes keys elsewhere, as Ctrl++.
+# How large everything is drawn; .keys under it says the keys that change
+# it too, written as keys are elsewhere, as Ctrl++.
 scale = Scale
-    .hint = How large the window's text and controls are
+    .hint = How large text and controls are
     .keys = { $larger } and { $smaller } change it too; { $reset } is back to 100%
 scale-smaller = Smaller
 scale-larger = Larger
@@ -1067,8 +1067,8 @@ inspect-webm-emoji = A video emoji
 inspect-image-sticker = An image sticker
 inspect-image-emoji = An image emoji
 inspect-tgs = A vector animation, { $width } × { $height } at { $fps } fps
-# A kind of sticker this version of the window can't show yet.
-inspect-unknown = A kind of sticker this window can't show
+# A kind of sticker this version of tgradish can't show yet.
+inspect-unknown = A kind of sticker this version can't show
 inspect-size = Size
     .hint = Telegram refuses larger files
     .tgs = Telegram refuses larger stickers

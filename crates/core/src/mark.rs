@@ -15,7 +15,7 @@ pub enum Client {
     /// tgradish as a library, or a front-end that didn't say.
     Library,
     Cli,
-    Window,
+    Gui,
 }
 
 impl Client {
@@ -25,7 +25,7 @@ impl Client {
         match self {
             Client::Library => 0,
             Client::Cli => 1,
-            Client::Window => 2,
+            Client::Gui => 2,
         }
     }
 
@@ -33,7 +33,7 @@ impl Client {
         Some(match code {
             0 => Client::Library,
             1 => Client::Cli,
-            2 => Client::Window,
+            2 => Client::Gui,
             _ => return None,
         })
     }
@@ -117,7 +117,7 @@ impl Mark {
 }
 
 /// Reading marks back, which only the tests do: tgradish writes them, and
-/// neither the command line nor the window reads them.
+/// neither the command line nor the GUI reads them.
 #[cfg(test)]
 impl Mark {
     /// The first mark in `bits`, which hold copies of it one after another
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn reads_back_what_it_writes() {
-        let mark = Mark { version: [2, 0, 1], client: Client::Window, user: 0x3f_a9c1 };
+        let mark = Mark { version: [2, 0, 1], client: Client::Gui, user: 0x3f_a9c1 };
         let bytes = mark.to_bytes();
         assert_eq!(Mark::from_bytes(bytes), Some(mark));
         assert_eq!(Mark::from_u64(mark.to_u64()), Some(mark));

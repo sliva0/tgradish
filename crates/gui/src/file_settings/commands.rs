@@ -1,5 +1,5 @@
 //! The same conversion as command lines to copy, so it can be repeated
-//! or scripted outside the window: the `tgradish` one, and for WebM the
+//! or scripted outside the GUI: the `tgradish` one, and for WebM the
 //! ffmpeg ones it runs, quoted for the shell of the system at hand.
 
 use crate::config::Config;
@@ -51,10 +51,10 @@ fn powershell_word(word: &str) -> String {
     if plain { word.to_owned() } else { format!("'{}'", word.replace('\'', "''")) }
 }
 
-/// The `tgradish` command that makes what the window makes of `item`.
+/// The `tgradish` command that makes what the GUI makes of `item`.
 fn command_line(item: &Item, context: &Context) -> Vec<String> {
     let mut args = vec!["tgradish".to_owned()];
-    // what the window reads and runs with, where the command line
+    // what the GUI reads and runs with, where the command line
     // wouldn't by default
     let default_config = Config::default_path();
     if let Some(path) = context.config_path.filter(|&path| Some(path) != default_config.as_deref())
@@ -96,7 +96,7 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
     let merged = base.clone().merged(&choices.webm);
     let effective = crate::item::shown(merged.clone(), &merged);
     let mut webm = crate::item::shown(choices.webm.clone(), &merged);
-    // the preset's values the window sets aside, as their settings are
+    // the preset's values the GUI sets aside, as their settings are
     // greyed out, which the command line would otherwise take up again
     if base.lossless == Some(true) && effective.lossless != Some(true) {
         webm.lossless = Some(false);
@@ -113,7 +113,7 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
         tgradish_core::options::flags(&options)
     };
     // image stickers take their picture settings from the preset too;
-    // named unless it is the format's own, as the window's settings may
+    // named unless it is the format's own, as the GUI's settings may
     // choose another than the config file
     let preset = choices.preset_name(item.format, config);
     if choices.preset.is_some() || preset != item.format.default_preset() {
@@ -172,7 +172,7 @@ fn ffmpeg_commands(item: &Item, context: &Context) -> Result<Vec<String>, String
     }
     let video = item.video.ready().ok_or_else(|| fl!("no-ffmpeg-commands", "unread"))?;
     let (request, mut plan) = super::webm::planned(item, context)?;
-    // as converting decides it, guessed from the frames the window has
+    // as converting decides it, guessed from the frames the GUI has
     // read, which are those converting reads unless the input is long
     let clip = &video.overview;
     let size = (video.probe.width, video.probe.height);
@@ -198,7 +198,7 @@ mod tests {
     use tgradish_core::config::FfmpegConfig;
 
     #[test]
-    fn names_what_the_window_runs_with() {
+    fn names_what_the_gui_runs_with() {
         use tgradish_core::presets::Presets;
         use tgradish_core::telegram::Target;
 
@@ -206,7 +206,7 @@ mod tests {
         let mut config = Config::default();
         config.ffmpeg.path = Some("/saved/ffmpeg".into());
         config.preset = Some("best".into());
-        // the command line that started the window chose the system's,
+        // the command line that started the GUI chose the system's,
         // over the one the settings name
         let context = Context {
             presets: &presets,
@@ -262,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn sets_aside_what_the_window_does() {
+    fn sets_aside_what_the_gui_does() {
         use tgradish_core::options::{ExactScale, Fit, Scaling};
         use tgradish_core::presets::Presets;
         use tgradish_core::telegram::Target;

@@ -1,4 +1,4 @@
-//! Small pieces the window is built from.
+//! Small pieces the GUI is built from.
 
 use eframe::egui::{self, Color32, RichText, vec2};
 
@@ -42,7 +42,7 @@ pub(crate) fn parse_seconds(text: &str) -> Option<f64> {
 /// Size of a section's heading, in the headings' weight: hardly larger
 /// than the text under it, as the weight sets it apart.
 pub(crate) const HEADING: f32 = 14.5;
-/// Size of a dialog's title, and of the window's other headings.
+/// Size of a dialog's title, and of the other headings.
 pub(crate) const TITLE: f32 = 17.0;
 
 /// `text` in the headings' weight, Ubuntu Medium, at `size`.
@@ -440,8 +440,9 @@ pub(crate) fn text_field(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> 
 /// Room inside a dialog's frame.
 const DIALOG_MARGIN: i8 = 16;
 
-/// A dialog over the window, `id` telling it from others, framed as every
-/// dialog is: its [`dialog_title`] first, its [`dialog_buttons`] last.
+/// A dialog over the rest of the GUI, `id` telling it from others, framed
+/// as every dialog is: its [`dialog_title`] first, its [`dialog_buttons`]
+/// last.
 pub(crate) fn dialog(ctx: &egui::Context, id: &str) -> egui::Modal {
     let frame = egui::Frame::popup(&ctx.global_style()).inner_margin(DIALOG_MARGIN);
     egui::Modal::new(egui::Id::new(id)).frame(frame)
@@ -1442,7 +1443,7 @@ pub(crate) fn hatch(painter: &egui::Painter, rect: egui::Rect, origin: f32, colo
     }
 }
 
-/// Gives a test's bare `harness` the window's fonts. egui's own are left
+/// Gives a test's bare `harness` the GUI's fonts. egui's own are left
 /// out of the build, and text without glyphs has no place for a cursor but
 /// its start, so what is typed would go in backwards.
 #[cfg(test)]

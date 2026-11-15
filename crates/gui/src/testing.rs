@@ -1,4 +1,4 @@
-//! What the window's tests share: a window to drive, ways to wait for its
+//! What the GUI's tests share: an app to drive, ways to wait for its
 //! work and to convert, and inputs to give it. Videos are made with the
 //! ffmpeg on PATH; without one, the tests that need them are skipped, or
 //! fail where `TGRADISH_REQUIRE_FFMPEG` says it must be there.
@@ -42,9 +42,9 @@ pub(crate) fn harness(config: Config) -> Harness<'static, App> {
         .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin()))
 }
 
-/// The window as eframe and egui-winit drive it on a screen, a frame a
-/// moment apart: its size kept in pixels as its scale changes, each
-/// frame's input given to the window's hook first, and the pointer said
+/// The GUI as eframe and egui-winit drive it on a screen, a frame a
+/// moment apart: the window's size kept in pixels as the scale changes, each
+/// frame's input given to the GUI's hook first, and the pointer said
 /// as egui-winit says it, where it moves in points at the scale of the
 /// moment, and then, for each press until it moves again, that same place
 /// in points, whatever the scale has become since.
@@ -57,8 +57,9 @@ pub(crate) struct Screen {
 }
 
 impl Screen {
-    /// The window, `size` pixels large, from `config`, with Settings open
-    /// where `settings` says, once its parts have found their sizes.
+    /// The GUI in a window `size` pixels large, from `config`, with
+    /// Settings open where `settings` says, once its parts have found their
+    /// sizes.
     pub(crate) fn new(config: Config, size: [f32; 2], settings: bool) -> Self {
         let harness = Harness::builder()
             .with_size(size)
@@ -132,7 +133,7 @@ impl Screen {
     }
 }
 
-/// Everything the window's messages say, each part on a line of its own,
+/// Everything the GUI's messages say, each part on a line of its own,
 /// to look in.
 pub(crate) fn said(app: &App) -> String {
     let rows = app.banner.rows.iter();
@@ -140,14 +141,14 @@ pub(crate) fn said(app: &App) -> String {
 }
 
 /// Clicks the selected item's Convert button, which shows its shortcut,
-/// in whichever language the window is in.
+/// in whichever language the GUI is in.
 pub(crate) fn convert(harness: &Harness<App>) {
     let keys = crate::keys::keys_text(crate::keys::Command::Convert);
     harness.get(egui_kittest::kittest::by().label_contains(&keys)).click();
 }
 
-/// Steps the window until no item is busy and no file dialog is open, two
-/// frames in a row: the window starts what is due as a frame begins, so
+/// Steps the GUI until no item is busy and no file dialog is open, two
+/// frames in a row: the GUI starts what is due as a frame begins, so
 /// what a frame's click changed, as a setting that has an input read
 /// again, is only started by the next.
 pub(crate) fn finish(harness: &mut Harness<App>) {
@@ -174,7 +175,7 @@ pub(crate) fn finish(harness: &mut Harness<App>) {
         settled = false;
         std::thread::sleep(Duration::from_millis(10));
     }
-    panic!("the window didn't settle");
+    panic!("the GUI didn't settle");
 }
 
 /// The conversion `item` made, or a panic saying why there is none.

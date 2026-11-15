@@ -151,7 +151,7 @@ fn refused(issues: &[telegram::Issue], target: telegram::Target) -> Vec<Problem>
     issues.iter().map(|issue| Problem::refused(issue, target)).collect()
 }
 
-/// What Telegram would refuse, in the window's words.
+/// What Telegram would refuse, in the GUI's words.
 fn issue_text(issue: &telegram::Issue, target: telegram::Target) -> String {
     use telegram::Issue;
     match issue {
@@ -180,7 +180,7 @@ fn issue_text(issue: &telegram::Issue, target: telegram::Target) -> String {
             fl!("issue-too-many-fps", fps = widgets::trimmed(fps), limit = widgets::trimmed(max))
         }
         Issue::Animated => fl!("issue-animated"),
-        // what the window has no words of its own for, as core says it
+        // what the GUI has no words of its own for, as core says it
         issue => issue.to_string(),
     }
 }
@@ -192,7 +192,7 @@ fn sizes(bytes: u64, limit: u64) -> (String, String) {
     if size == most { (format!("{bytes} B"), format!("{limit} B")) } else { (size, most) }
 }
 
-/// What went wrong, in the window's words where people meet it, and as
+/// What went wrong, in the GUI's words where people meet it, and as
 /// tgradish-core says it otherwise.
 pub(crate) fn failure(err: &Error) -> String {
     let name = |path: &Path| {
@@ -258,14 +258,14 @@ pub(crate) struct Done {
     pub(crate) shapes: Option<(usize, usize)>,
     pub(crate) problems: Vec<Problem>,
     /// The frames of `.tgs` results, as drawn while making them, and of
-    /// pictures, until the window takes them; WebM ones are decoded from
+    /// pictures, until `App` takes them; WebM ones are decoded from
     /// the file.
     pub(crate) preview: Option<Preview>,
 }
 
 impl Done {
-    /// What a result made earlier is, read from the file, for a window
-    /// that didn't make it; `None` when it is gone.
+    /// What a result made earlier is, read from the file, for an
+    /// instance that didn't make it; `None` when it is gone.
     pub(crate) fn of_file(path: &Path, format: Format, target: telegram::Target) -> Option<Done> {
         match format {
             Format::Webm => {
@@ -543,7 +543,7 @@ fn run(
         Setup::Tgs { mut options, backend } => {
             let exact = options.exact_or_default();
             // a sheet of a file of frames of its own, which converting
-            // refuses: read as it is, and said so, as the window shows it
+            // refuses: read as it is, and said so, as the GUI shows it
             if let Some((_, frames)) =
                 crate::media::animated(backend.as_ref(), &input, &options, cancel)
             {
@@ -725,13 +725,13 @@ mod tests {
     }
 
     #[test]
-    fn words_failures_as_the_window_does() {
+    fn words_failures_as_the_gui_does() {
         let invalid = Error::InvalidOption { option: "crf", reason: "must be at most 63".into() };
         assert_eq!(failure(&invalid), "Crf must be at most 63");
         let missing = failure(&Error::FfmpegNotFound(FfmpegMissing::NotBuiltIn));
         let details = FfmpegMissing::NotBuiltIn.to_string();
         assert_eq!(missing, fl!("ffmpeg-not-found", details = details));
-        // the window's own words for what core names flags or keys in
+        // the GUI's own words for what core names flags or keys in
         assert_eq!(
             failure(&Error::FfmpegNotFound(FfmpegMissing::NotOnPath)),
             fl!("ffmpeg-not-on-path")
@@ -745,14 +745,14 @@ mod tests {
             failure(&unreadable),
             fl!("unreadable-file", name = "clip.mp4", details = "broken")
         );
-        // a file gone, or of the wrong kind, by its name in the window's words
+        // a file gone, or of the wrong kind, by its name in the GUI's words
         let gone = Error::NoSuchFile(PathBuf::from("/some/where/clip.mp4"));
         assert_eq!(failure(&gone), fl!("no-such-file", name = "clip.mp4"));
         let not = Error::NotSticker(PathBuf::from("/some/where/notes.txt"));
         assert_eq!(failure(&not), fl!("not-sticker", name = "notes.txt"));
         let not = Error::NotWebm(PathBuf::from("/some/where/clip.mp4"));
         assert_eq!(failure(&not), fl!("not-webm", name = "clip.mp4"));
-        // what the window has no words of its own for, as tgradish-core says
+        // what the GUI has no words of its own for, as tgradish-core says
         assert_eq!(failure(&Error::Cancelled), Error::Cancelled.to_string());
     }
 }

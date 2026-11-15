@@ -1,6 +1,6 @@
 //! The user's own presets: the selected item's settings saved as one, and
 //! a dialog to rename, describe or delete them. The settings and the bar
-//! under them ask for them; the window opens them over everything.
+//! under them ask for them; they open over everything.
 //!
 //! An item saved as a preset takes it up: its own values over the preset
 //! it started from, of every format, but none that only make sense for its
@@ -24,7 +24,7 @@ use crate::jobs::failure;
 use crate::l10n::fl;
 use crate::{theme, widgets};
 
-/// A dialog the settings ask the window for.
+/// A dialog the settings ask for.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Ask {
     /// Saving the settings of the item with this id.
@@ -36,7 +36,7 @@ fn ask_id() -> egui::Id {
     egui::Id::new("preset dialog asked for")
 }
 
-/// Asks the window to open a preset dialog.
+/// Asks for a preset dialog to open.
 pub(crate) fn ask(ctx: &egui::Context, ask: Ask) {
     ctx.data_mut(|data| data.insert_temp(ask_id(), ask));
 }
@@ -139,7 +139,7 @@ enum Change {
 }
 
 /// What keeps a preset from being named, renamed or deleted as asked, in
-/// the window's words.
+/// the GUI's words.
 fn problem(err: &tgradish_core::Error) -> String {
     use tgradish_core::Error;
     use tgradish_core::presets::PresetError;
@@ -718,7 +718,7 @@ mod tests {
         app.presets_dir = Some(dir.path().to_path_buf());
         let mut managing = super::Managing::of(&app.presets);
         let id = managing.rows.iter().find(|row| row.name == "base").unwrap().id;
-        // neither renamed nor deleted, and said why in the window's words
+        // neither renamed nor deleted, and said why in the GUI's words
         let said = crate::l10n::fl!("preset-extended", other = "child");
         let row = |managing: &super::Managing| {
             managing.rows.iter().find(|row| row.id == id).cloned().unwrap()

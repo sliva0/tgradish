@@ -1,4 +1,4 @@
-//! The window's own fonts, and text laid out with them so that it always
+//! The GUI's own fonts, and text laid out with them so that it always
 //! reads as something: a character no font has, the system's included, is
 //! shown as its code. `fallback` finds the system's fonts.
 
@@ -15,8 +15,8 @@ pub(crate) fn medium() -> egui::FontFamily {
     egui::FontFamily::Name("medium".into())
 }
 
-/// [`medium`] where `ctx` has the window's fonts, else the body's: tests
-/// draw parts of the window without them.
+/// [`medium`] where `ctx` has the GUI's fonts, else the body's: tests
+/// draw parts of the GUI without them.
 pub(crate) fn medium_in(ctx: &egui::Context) -> egui::FontFamily {
     let medium = medium();
     match ctx.fonts(|fonts| fonts.definitions().families.contains_key(&medium)) {
@@ -25,7 +25,7 @@ pub(crate) fn medium_in(ctx: &egui::Context) -> egui::FontFamily {
     }
 }
 
-/// The window's fonts: Ubuntu Light for text, Ubuntu Medium for headings,
+/// The GUI's fonts: Ubuntu Light for text, Ubuntu Medium for headings,
 /// JetBrains Mono NL for commands, and a few symbols; small subsets, see
 /// `assets/fonts`. Ubuntu's are named "Ubuntu Light derivative tgradish"
 /// and "Ubuntu Medium derivative tgradish" within, as its licence asks of
@@ -54,7 +54,7 @@ pub(crate) fn fonts() -> egui::FontDefinitions {
 }
 
 impl App {
-    /// Looks for the system's fonts for characters in names the window's
+    /// Looks for the system's fonts for characters in names the GUI's
     /// own fonts lack.
     pub(crate) fn find_fonts(&mut self, ctx: &egui::Context) {
         // only as what is shown changes, or while fonts are looked for:
@@ -98,8 +98,8 @@ pub(crate) fn text_format(ui: &egui::Ui, colour: Color32) -> egui::TextFormat {
     egui::TextFormat::simple(egui::TextStyle::Body.resolve(ui.style()), colour)
 }
 
-/// `text` laid out as the window can draw it: each character no font has,
-/// neither the window's nor the system's, as a small tag of its code, and
+/// `text` laid out as the GUI can draw it: each character no font has,
+/// neither the GUI's nor the system's, as a small tag of its code, and
 /// formatting characters, which draw nothing, left out. Also the
 /// characters no font has.
 pub(crate) fn drawable(

@@ -1,9 +1,9 @@
-//! What the window says that wasn't asked for. What passes, information
+//! What tgradish says that wasn't asked for. What passes, information
 //! that goes by itself, as files removed with a way back, shows in the
 //! corner over the list of files, mostly empty there, each notice on a
 //! card of its own; what asks for something to be done, as a file that
-//! couldn't be read or saved, stays in the banner over the bottom of the
-//! window, right of the list, until it is. Each message has its row, with
+//! couldn't be read or saved, stays in the banner along the bottom,
+//! right of the list, until it is. Each message has its row, with
 //! what happened first, the file it is about, what to do and buttons that
 //! do it, and what went wrong as the program said it, folded away when it
 //! is long.
@@ -37,11 +37,11 @@ pub(crate) enum Subject {
     SettingsReset,
 }
 
-/// A button in a message's row, which the window does when it is clicked.
+/// A button in a message's row, and what clicking it does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Action {
-    /// Writes the settings the window has in place of the settings file,
-    /// which can't be read, keeping that beside it.
+    /// Writes the settings in use in place of the settings file, which
+    /// can't be read, keeping that beside it.
     FreshSettings,
     /// Reads the settings file again, as after it was put right by hand.
     ReadSettingsAgain,
@@ -65,8 +65,8 @@ fn asked_id() -> egui::Id {
     egui::Id::new("asked action")
 }
 
-/// Asks the window to do `action`, as a message's button would, from
-/// where the window itself isn't at hand.
+/// Asks for `action` to be done, as a message's button would, from
+/// where `App` itself isn't at hand.
 pub(crate) fn ask(ctx: &egui::Context, action: Action) {
     ctx.data_mut(|data| data.insert_temp(asked_id(), Some(action)));
 }
@@ -109,11 +109,11 @@ impl Action {
     }
 }
 
-/// Something the window says.
+/// Something tgradish says.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Message {
     pub(crate) severity: Severity,
-    /// What happened, in a short sentence of the window's own.
+    /// What happened, in a short sentence of tgradish's own.
     pub(crate) headline: String,
     /// The file it is about.
     pub(crate) file: Option<PathBuf>,
@@ -205,7 +205,7 @@ impl Said {
     }
 }
 
-/// The messages the window shows, oldest first.
+/// The messages shown, oldest first.
 #[derive(Default)]
 pub(crate) struct Banner {
     pub(crate) rows: Vec<Said>,
@@ -216,8 +216,8 @@ pub(crate) struct Banner {
     /// When the messages were last drawn: hovering what passes holds it.
     drawn: Option<f64>,
     /// Whether what passes was held as they were: the time since, until
-    /// they are drawn again, is its as it was then, however long, as the
-    /// window may not be drawn while the pointer rests.
+    /// they are drawn again, is its as it was then, however long, as
+    /// nothing may be drawn while the pointer rests.
     held: bool,
 }
 
@@ -307,8 +307,7 @@ impl Banner {
 
     /// Draws the banner, if there is anything to say, and the notices in
     /// the corner over the list, and takes in their dismissals. Gives the
-    /// actions clicked, with the messages they are of, for the window to
-    /// do.
+    /// actions clicked, with the messages they are of, to be done.
     pub(crate) fn show(&mut self, ctx: &egui::Context) -> Vec<(Message, Action)> {
         let mut clicked = Vec::new();
         let mut dismissed = Vec::new();
@@ -364,8 +363,8 @@ impl Banner {
         clicked
     }
 
-    /// Draws the banner of what asks for something to be done, over the
-    /// bottom of the window right of the list, if there is any. Gives
+    /// Draws the banner of what asks for something to be done, along the
+    /// bottom, right of the list, if there is any. Gives
     /// whether all of it was dismissed at once.
     fn banner(
         &mut self,
@@ -525,7 +524,7 @@ impl crate::app::App {
             Action::ReadSettingsAgain => {
                 let Some(path) = self.config_path.clone() else { return };
                 match crate::config::Config::load(&path) {
-                    // taken up as when the window opens
+                    // taken up as when the GUI starts
                     Ok(config) => {
                         if config.gui.language != self.config.gui.language {
                             crate::l10n::choose(config.gui.language.as_deref());
@@ -553,8 +552,8 @@ impl crate::app::App {
         }
     }
 
-    /// Writes the settings the window has in place of the settings file,
-    /// which can't be read, keeping that beside it, as Settings saves.
+    /// Writes the settings in use in place of the settings file, which
+    /// can't be read, keeping that beside it, as Settings saves.
     /// The changes that couldn't be saved are among them.
     fn fresh_settings(&mut self) {
         let Some(path) = self.config_path.clone() else { return };
@@ -861,7 +860,7 @@ fn detail_block(ui: &mut egui::Ui, detail: &str, column: f32, id: u64) {
 }
 
 /// A button drawn as a link, for what is done beside a message rather than
-/// a page opened: a button to whatever reads the window out.
+/// a page opened: a button to a screen reader.
 fn link_button(ui: &mut egui::Ui, text: String) -> egui::Response {
     let colour = ui.visuals().hyperlink_color;
     ui.scope(|ui| {
@@ -1029,7 +1028,7 @@ mod tests {
     use crate::app::App;
     use crate::config::Config;
 
-    /// A window whose settings are kept in `dir`, in a file of an older
+    /// The GUI with its settings kept in `dir`, in a file of an older
     /// version that can't be read; and that file.
     fn unreadable_settings(dir: &Path) -> (Harness<'static, App>, PathBuf) {
         let path = dir.join("config.toml");
@@ -1138,8 +1137,8 @@ mod tests {
         assert!(harness.state().banner.rows.is_empty());
     }
 
-    /// Time spent hovering counts as held however long the window goes
-    /// undrawn meanwhile, as it does while the pointer rests: let go of
+    /// Time spent hovering counts as held however long nothing is drawn
+    /// meanwhile, as when the pointer rests: let go of
     /// after that, a notice has as long left as when it was hovered.
     #[test]
     fn holds_what_passes_while_hovered_however_long_undrawn() {

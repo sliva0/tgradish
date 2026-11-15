@@ -1,5 +1,5 @@
 //! Where results go, and which files they may replace. A result never
-//! goes over a file someone else put there, so the window remembers what
+//! goes over a file someone else put there, so the GUI remembers what
 //! it wrote itself, and looks for tgradish's marks on files in the way.
 
 use std::collections::HashSet;
@@ -33,12 +33,12 @@ impl FileVersion {
 }
 
 /// How long what was seen of files is taken as it is, while nothing
-/// happens in the window: one put in place or taken away meanwhile, by
+/// happens: one put in place or taken away meanwhile, by
 /// another program, is noticed this long after, or as the window gets the
 /// focus back.
 const LOOK_AGAIN: f64 = 2.0;
 
-/// What the window saw of files on disk, results where they go and files
+/// What was seen of files on disk, results where they go and files
 /// in their way, each looked at once rather than on every frame: seen
 /// again every [`LOOK_AGAIN`] seconds, as the window gets the focus back,
 /// and as anything happens in it, a click or a key, or a conversion
@@ -99,7 +99,7 @@ impl Probes {
     }
 }
 
-/// A result this window wrote, now or in an earlier run: for which item,
+/// A result the GUI wrote, now or in an earlier run: for which item,
 /// and the file as written, so a file put there since isn't taken for it.
 pub(crate) struct Written {
     pub(crate) item: u64,
@@ -124,7 +124,7 @@ impl App {
     }
 
     /// Where an item's result goes: next to its input or in the folder
-    /// for results, numbered if another file in the window has the name.
+    /// for results, numbered if another file open has the name.
     pub(crate) fn work_out_output(&self, item: &Item) -> PathBuf {
         let dir = self.config.gui.output_dir.clone();
         let next_to_input = item.input().default_output(item.format, item.choices.target);
@@ -318,7 +318,7 @@ mod tests {
         let art = dir.path().join("art.png");
         square(&art, [255, 0, 0, 255]);
         let output = dir.path().join("art.sticker.tgs");
-        // made by an earlier window, which this one knows nothing of
+        // made by an earlier run, which this one knows nothing of
         for earlier in [true, false] {
             let mut harness = harness(Config::default());
             harness.state_mut().add(vec![art.clone()]);
@@ -332,7 +332,7 @@ mod tests {
             let made = made_job(&harness.state().items[0]);
             assert_eq!(made.output, output);
             assert_eq!(made.replaces, !earlier);
-            // and no longer once this window has made it
+            // and no longer once this run has made it
             assert!(harness.query_by_label_contains("Replaces an earlier result").is_none());
         }
     }

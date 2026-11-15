@@ -18,10 +18,10 @@
 
 let
   version = (lib.importTOML ../../Cargo.toml).workspace.package.version;
-  # the window loads these with dlopen when it opens, and D-Bus for file
-  # dialogues; they are WINDOW_LIBRARIES in xtask/src/package.rs, which
+  # the GUI loads these with dlopen when it opens, and D-Bus for file
+  # dialogues; they are GUI_LIBRARIES in xtask/src/package.rs, which
   # says where each comes from: keep them alike
-  windowLibraries = [
+  guiLibraries = [
     dbus
     libGL
     libxkbcommon
@@ -80,11 +80,11 @@ rustPlatform.buildRustPackage {
 
   # after the fixup phase has shrunk the rpath to what is linked
   postFixup = ''
-    patchelf --add-rpath ${lib.makeLibraryPath windowLibraries} $out/bin/tgradish
+    patchelf --add-rpath ${lib.makeLibraryPath guiLibraries} $out/bin/tgradish
     wrapProgram $out/bin/tgradish --prefix PATH : ${lib.makeBinPath [ ffmpeg ]}
   '';
 
-  passthru = { inherit windowLibraries; };
+  passthru = { inherit guiLibraries; };
 
   meta = {
     description = "Telegram video, image and animated stickers and emoji from videos, pictures and pixel art";

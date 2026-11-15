@@ -1,11 +1,11 @@
-//! The files open in the window and their settings, kept across restarts:
-//! saved as the window runs and when it closes, read when it opens. Kept
+//! The files open in the GUI and their settings, kept across restarts:
+//! saved as the GUI runs and when it closes, read as it starts. Kept
 //! in the state directory (`~/.local/state/tgradish` on Linux), with
-//! copies of pasted images, whose own folders go when the window closes.
+//! copies of pasted images, whose own folders go when the GUI closes.
 //!
 //! A session this version can't read, as one a newer tgradish kept, is
 //! set aside rather than written over, and the copies it may name are left
-//! alone. Only one window at a time keeps a session, the first to open.
+//! alone. Only one instance at a time keeps a session, the first to start.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -52,7 +52,7 @@ pub(crate) struct Session {
 
 /// How the window was laid out, to open it so again: its size and place,
 /// and where the lines between its parts were. Sizes are in points as the
-/// system counts them, without the window's own scale.
+/// system counts them, without tgradish's own scale.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct Window {
@@ -61,7 +61,7 @@ pub(crate) struct Window {
     /// Where its frame's corner was then, where the system says.
     pub(crate) position: Option<[f32; 2]>,
     pub(crate) maximized: bool,
-    /// How wide the list of files was, in the window's own points.
+    /// How wide the list of files was, in egui's own points.
     pub(crate) list: f32,
     /// The share of the height beside the list the preview took.
     pub(crate) preview: f32,
@@ -128,7 +128,7 @@ struct Saved {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 struct SavedResult {
     output: PathBuf,
-    /// The file as the window wrote it, by which it knows its own result
+    /// The file as the GUI wrote it, by which it knows its own result
     /// again; `None` for one it found.
     written: Option<FileVersion>,
     /// What it was made with, in the format it was made in, to tell
@@ -176,17 +176,17 @@ pub(crate) struct Unreadable {
     pub(crate) aside: PathBuf,
 }
 
-/// A window's session file: where it is, what the window last wrote there,
-/// and which copies of pasted images are the window's to remove.
+/// The session file this instance holds: where it is, what it last wrote
+/// there, and which copies of pasted images are its own to remove.
 pub(crate) struct Store {
     path: PathBuf,
     /// The session as last written or read, so it is only written again
     /// when it changes.
     written: String,
-    /// The copies of pasted images this window read of or made. Others in
+    /// The copies of pasted images this instance read of or made. Others in
     /// the folder may belong to a session that was set aside.
     copies: HashSet<String>,
-    /// Held while the window runs, so no other keeps a session here.
+    /// Held while the GUI runs, so no other instance keeps a session here.
     lock: Option<std::fs::File>,
     /// The sessions set aside as they were last read, and what they name,
     /// so they are read again only when one comes, goes or changes rather
@@ -204,7 +204,7 @@ type AsideNames = Option<HashSet<String>>;
 impl Drop for Store {
     // Closing the file alone may not let go: a process being started at
     // that moment shares it until it runs its program, as ffmpeg's are
-    // while another window, or test, opens the session.
+    // while another instance, or test, opens the session.
     fn drop(&mut self) {
         if let Some(lock) = &self.lock {
             let _ = lock.unlock();
@@ -213,8 +213,8 @@ impl Drop for Store {
 }
 
 impl Store {
-    /// The session at `path`, for this window alone: `None` while another
-    /// window has it, as two would write over each other's files and
+    /// The session at `path`, for this instance alone: `None` while
+    /// another has it, as two would write over each other's files and
     /// remove each other's pasted images.
     pub(crate) fn open(path: PathBuf) -> Option<Store> {
         let lock = lock(&path).ok()?;
@@ -339,7 +339,7 @@ impl Store {
     }
 
     /// Copies the pasted image of item `id` next to the session file, so
-    /// the window can open it again, and gives the copy's name, which no
+    /// it can be opened again, and gives the copy's name, which no
     /// other has had.
     pub(crate) fn copy_pasted(&mut self, id: u64, image: &Path) -> std::io::Result<String> {
         let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
@@ -379,9 +379,9 @@ impl Store {
             self.written = json;
         }
         // copies nobody names are left over, unless a session set aside
-        // may name them: then only this window's own go, and of those not
+        // may name them: then only this instance's own go, and of those not
         // the ones a session set aside names, as one read in part does
-        // the copies of the files this window took from it. Where there is
+        // the copies of the files this instance took from it. Where there is
         // no telling what one names, as a session set aside is often one
         // that isn't whole, or whether there are any, none go.
         let leftover = match self.set_aside_sessions() {
@@ -418,19 +418,19 @@ impl Store {
 enum Leftover {
     /// Every one, as no session set aside may name them.
     All,
-    /// The window's own, but for those sessions set aside name.
+    /// This instance's own, but for those sessions set aside name.
     MineBut(HashSet<String>),
     /// None, as there is no telling which a session set aside names.
     None,
 }
 
-/// Another window holds the session.
+/// Another instance holds the session.
 struct Held;
 
 /// Takes the lock beside the session at `path`, which lasts until the
-/// store lets go of it or the file is closed, as when the window ends in
+/// store lets go of it or the file is closed, as when the process ends in
 /// any way. No file where there is
-/// no telling whether another window is open, as the folder can't be
+/// no telling whether another instance runs, as the folder can't be
 /// written to or its file system has no locks: the session is kept as if
 /// there were none, and where it can't be, writing it says so.
 fn lock(path: &Path) -> Result<Option<std::fs::File>, Held> {
@@ -500,7 +500,7 @@ fn keeps(item: &Item) -> bool {
 
 impl Session {
     /// What `items` are, `selected` the one selected, without those the
-    /// session can't hold. `written` are the results the window wrote.
+    /// session can't hold. `written` are the results the GUI wrote.
     pub(crate) fn of(
         items: &[Item],
         selected: Option<u64>,
@@ -596,7 +596,7 @@ fn restore_item(saved: Saved, path: &Path, id: u64) -> Option<Item> {
     item.format = saved.format;
     item.format_guessed = saved.format_guessed;
     item.choices = saved.choices;
-    // read again as the window draws, as the file may have gone or changed
+    // read again as frames are drawn, as the file may have gone or changed
     item.earlier = saved.result.map(|result| {
         (Conversion::earlier(Job::waiting(result.output), result.recipe), Load::Idle)
     });
@@ -622,7 +622,7 @@ mod tests {
         items.iter().map(|item| std::fs::read(&item.inputs[0]).unwrap()).collect()
     }
 
-    /// Saves `items` at `path`, pasted images copied there as the window
+    /// Saves `items` at `path`, pasted images copied there as the GUI
     /// copies them, and opens them again, numbered from 1.
     fn again(items: &mut [Item], path: &Path) -> Vec<Item> {
         let mut store = Store::open(path.to_path_buf()).unwrap();
@@ -635,7 +635,7 @@ mod tests {
         Store::open(path.to_path_buf()).unwrap().read().unwrap().session.restore(path, 1).items
     }
 
-    /// The session of `items`, none of whose results the window wrote.
+    /// The session of `items`, none of whose results the GUI wrote.
     fn session(items: &[Item], selected: Option<u64>) -> Session {
         Session::of(items, selected, &HashMap::new())
     }
@@ -664,12 +664,12 @@ mod tests {
     }
 
     #[test]
-    fn lets_one_window_at_a_time_keep_the_session() {
+    fn lets_one_instance_at_a_time_keep_the_session() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state").join("session.json");
         let first = Store::open(path.clone()).expect("nobody has it");
         assert!(Store::open(path.clone()).is_none());
-        // until the first window is gone
+        // until the first is gone
         drop(first);
         assert!(Store::open(path).is_some());
     }
@@ -691,7 +691,7 @@ mod tests {
             let unreadable = loaded.unreadable.expect("unreadable");
             assert!(loaded.session.items.is_empty() && unreadable.files.is_none());
             assert_eq!(std::fs::read_to_string(&unreadable.aside).unwrap(), text);
-            // the window goes on with a session of its own, whose copies
+            // the GUI goes on with a session of its own, whose copies
             // come and go, and leaves the other's alone
             let mut items = [pasted(1, b"one")];
             items[0].pasted_copy = Some(store.copy_pasted(1, &items[0].inputs[0]).unwrap());

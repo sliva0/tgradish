@@ -2,7 +2,7 @@
 
 use crate::preview::Preview;
 
-/// The longest side of a `.tgs` preview: plenty for a window, and within
+/// The longest side of a `.tgs` preview: plenty for the GUI, and within
 /// what any GPU takes as a texture.
 pub(crate) const PREVIEW_MAX_SIDE: u32 = 1024;
 

@@ -1,4 +1,4 @@
-# The window's translations, see src/l10n.rs
+# The GUI's translations, see src/l10n.rs
 fallback_language = "en-GB"
 
 [fluent]

@@ -299,7 +299,7 @@ fn windows_takes_tg() -> bool {
 }
 
 /// Web addresses tests asked to open, rather than opening them.
-/// The clipboard, kept while the window is open: on Linux what is copied
+/// The clipboard, kept while the GUI runs: on Linux what is copied
 /// is there only while the program that copied it holds it.
 #[derive(Default)]
 pub(crate) struct Clipboard(Option<arboard::Clipboard>);
@@ -327,7 +327,7 @@ impl Clipboard {
     }
 }
 
-/// The files the tests' windows copied.
+/// The files the tests copied.
 #[cfg(test)]
 pub(crate) static COPIED: std::sync::Mutex<Vec<std::path::PathBuf>> =
     std::sync::Mutex::new(Vec::new());

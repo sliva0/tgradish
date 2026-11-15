@@ -179,7 +179,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         }
     }
     // how a .tgs becomes square, its preset's or else the default, which
-    // keeps the crop's shape square while it is "Off", as the window keeps
+    // keeps the crop's shape square while it is "Off", as the GUI keeps
     // it for every file, shown or not
     let tgs_base = (item.format == Format::Tgs)
         .then(|| item.choices.tgs_base(presets, config).unwrap_or_default().resize_or_default());
@@ -545,7 +545,7 @@ const SQUARE: Aspect = Aspect::Ratio(1.0, 1.0);
 /// its own choice, its preset's or the default's says, square, and its
 /// aspect ratio 1:1, once its size is known: however the choice came, by a
 /// preset, the defaults, a session, the format changed or Settings, and
-/// whether its settings are shown or not. The window keeps every file so,
+/// whether its settings are shown or not. The GUI keeps every file so,
 /// each frame, and as it is queued to convert.
 pub(crate) fn keep_square(item: &mut Item, presets: &Presets, config: &Config) {
     if item.format != Format::Tgs {

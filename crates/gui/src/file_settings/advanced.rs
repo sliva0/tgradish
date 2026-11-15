@@ -244,7 +244,7 @@ mod tests {
         harness
     }
 
-    /// Types `text` a key at a time, the window drawn after each.
+    /// Types `text` a key at a time, a frame drawn after each.
     fn type_keys(harness: &mut Harness<Item>, text: &str) {
         for key in text.chars() {
             harness.event(egui::Event::Text(key.to_string()));

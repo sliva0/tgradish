@@ -613,7 +613,7 @@ mod tests {
         std::fs::create_dir(&frames).unwrap();
         square(&frames.join("1.png"), [255, 0, 0, 255]);
         square(&frames.join("2.png"), [0, 0, 255, 255]);
-        // in the window's fonts and style, as its words take their room
+        // in the GUI's fonts and style, as its words take their room
         let mut harness =
             Harness::builder().with_size([crate::MIN_WIDTH, 640.0]).build_eframe(|cc| {
                 let app = App::with(Config::default(), None, Presets::builtin());

@@ -26,7 +26,7 @@ impl Accent {
                 ctx.request_repaint();
             }
         };
-        // nothing to do without one: the window keeps Breeze's
+        // nothing to do without one: the GUI keeps Breeze's
         let _ = std::thread::Builder::new().name("accent".into()).spawn(move || follow(set));
         Accent { colour }
     }

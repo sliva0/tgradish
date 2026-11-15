@@ -280,7 +280,7 @@ impl Recipe {
 /// `options` without the values of settings that are hidden or greyed
 /// out, as `effective`, everything a conversion gets, shows them: they are
 /// kept for when they show again, but have no say until then. What has no
-/// say by how fitting uses it core says; the window adds its own rows'.
+/// say by how fitting uses it core says; the GUI adds its own rows'.
 pub(crate) fn shown(options: Options, effective: &Options) -> Options {
     let mut options = tgradish_core::webm::in_effect(options, effective);
     // a scale of whole multiples, which keeps the whole picture

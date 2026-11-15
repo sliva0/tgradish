@@ -1,7 +1,7 @@
 # Art of the README's screenshot
 
 The pictures `readme_screenshot` in `src/screenshots.rs` loads into the
-window for the README. Not part of the crate's package.
+GUI for the README. Not part of the crate's package.
 
 All are from **Sunny Land 2D Pixel Art Pack** by **Luis Zuno (ansimuz)**,
 released under **CC0** (public domain), as the pack's own

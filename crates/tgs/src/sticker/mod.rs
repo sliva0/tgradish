@@ -403,7 +403,7 @@ fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::mpsc::{RecvTimeoutError, channel};
         use std::time::Duration;
-        // a stop is noticed within this, which the window can't tell apart
+        // a stop is noticed within this, which the GUI can't tell apart
         // from at once
         const POLL: Duration = Duration::from_millis(50);
         static RUNNING: AtomicUsize = AtomicUsize::new(0);

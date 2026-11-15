@@ -55,7 +55,7 @@
           ];
           buildInputs = [ pkgs.ffmpeg ];
           LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
-          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath pkgs.tgradish.windowLibraries;
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath pkgs.tgradish.guiLibraries;
         };
       }
     );

@@ -83,7 +83,7 @@ const SYSTEM_DLLS: &[&str] = &[
     "ucrtbase.dll",
     "bcryptprimitives.dll",
     "combase.dll",
-    // the window's
+    // the GUI's
     "dwmapi.dll",
     "imm32.dll",
     "opengl32.dll",
@@ -288,7 +288,7 @@ const SHELL_PATHS: [&str; 3] = [
     "fish/vendor_completions.d/tgradish.fish",
 ];
 
-/// What the window loads when it opens, as Debian packages and as the
+/// What the GUI loads when it opens, as Debian packages and as the
 /// libraries an .rpm can ask for by name, which Fedora and openSUSE both
 /// resolve: the graphics libraries, and D-Bus for file dialogs. winit opens
 /// libX11, libX11-xcb, libXcursor and libXi, and does RandR through x11rb,
@@ -296,7 +296,7 @@ const SHELL_PATHS: [&str; 3] = [
 /// xkbcommon-dl loads libxkbcommon and its X11 half. The AUR packages'
 /// `depends` and `packaging/nix/package.nix` list the same, by their own
 /// names.
-const WINDOW_LIBRARIES: [(&str, &str); 13] = [
+const GUI_LIBRARIES: [(&str, &str); 13] = [
     ("libegl1", "libEGL.so.1"),
     ("libgl1", "libGL.so.1"),
     ("libwayland-client0", "libwayland-client.so.0"),
@@ -399,13 +399,13 @@ fn linux_packages(
     let (major, minor) = needed_glibc(&stage.join("tgradish"))?;
     let debs = std::iter::once(format!("libc6 (>= {major}.{minor})"))
         .chain(["libgcc-s1 | libgcc1".to_owned()])
-        .chain(WINDOW_LIBRARIES.iter().map(|(deb, _)| (*deb).to_owned()))
+        .chain(GUI_LIBRARIES.iter().map(|(deb, _)| (*deb).to_owned()))
         .collect();
     // as rpm names the libraries of 64-bit programs
     let glibc = format!("libc.so.6(GLIBC_{major}.{minor})");
     let rpms = [glibc.as_str(), "libgcc_s.so.1"]
         .into_iter()
-        .chain(WINDOW_LIBRARIES.iter().map(|(_, library)| *library))
+        .chain(GUI_LIBRARIES.iter().map(|(_, library)| *library))
         .map(|library| match library.ends_with(')') {
             true => format!("{library}(64bit)"),
             false => format!("{library}()(64bit)"),
@@ -478,7 +478,7 @@ fn debian_copyright(stage: &Path) -> Result<String> {
 }
 
 /// What a musl build may be linked to: musl alone, by the name musl-gcc
-/// links it as, which musl's loader takes for itself. The window's
+/// links it as, which musl's loader takes for itself. The GUI's
 /// libraries are loaded when it opens, so the command line runs without
 /// them, and the unwinder is linked in (see `static_unwinder` in build.rs).
 const MUSL_LINKS: [&str; 1] = ["libc.so"];

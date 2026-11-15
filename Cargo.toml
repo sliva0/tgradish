@@ -4,13 +4,13 @@ members = ["crates/*", "xtask"]
 # a workspace of its own, see its manifest
 exclude = ["crates/tgs-lab"]
 
-# the application's version, which core, the window and the command line
+# the application's version, which core, the GUI and the command line
 # share; the two libraries, tgradish-frames and tgradish-tgs, have their own
 [workspace.package]
 version = "2.0.0"
 edition = "2024"
 # the oldest Rust that builds every crate: `if let` guards in matches need
-# it, as does the window's egui
+# it, as does the GUI's egui
 rust-version = "1.95"
 license = "MIT"
 authors = ["sliva0 <sliva0mk@gmail.com>"]
@@ -40,15 +40,15 @@ ctrlc = "3.5.2"
 directories = "6.0.0"
 embed-resource = "3.0.12"
 eframe = { version = "0.36.2", default-features = false, features = ["glow", "wayland", "x11"] }
-# the window's tests, which must move with eframe
+# the GUI's tests, which must move with eframe
 egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
 egui-wgpu = "0.36.2"
 flate2 = "1.1.10"
 gif = "0.14.2"
-# the window's translations' tests, which read the files as Fluent does
+# the GUI's translations' tests, which read the files as Fluent does
 fluent-bundle = "0.16.0"
 fluent-syntax = "0.12.0"
-# the window's translations: Fluent files built into the binary, `fl!`
+# the GUI's translations: Fluent files built into the binary, `fl!`
 # checking their messages at compile time
 i18n-embed = { version = "0.16.0", default-features = false, features = ["fluent-system", "rust-embed"] }
 i18n-embed-fl = "0.10.1"
@@ -57,7 +57,7 @@ libloading = "0.8.9"
 # the allocator of musl builds, see crates/cli/src/main.rs
 libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
 mimalloc = { version = "0.1.52", features = ["override"] }
-# the accent colour on macOS, already in the window's dependencies there
+# the accent colour on macOS, already in the GUI's dependencies there
 objc2 = "0.6.5"
 objc2-app-kit = { version = "0.3.2", default-features = false }
 libwebp-sys = { version = "0.14.4", default-features = false, features = ["std", "parallel"] }
@@ -112,7 +112,7 @@ lto = "thin"
 strip = true
 codegen-units = 1
 
-# most dependencies are the window's and argument parsing, which aren't
+# most dependencies are the GUI's and argument parsing, which aren't
 # where time goes; what decodes, writes and compresses stickers is
 [profile.release.package."*"]
 opt-level = "s"

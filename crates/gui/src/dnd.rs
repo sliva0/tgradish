@@ -3,7 +3,7 @@
 //! winit reports dropped files on X11, Windows and macOS, but not on
 //! Wayland. There, this listens for drags itself: on winit's connection,
 //! with a data device of its own read on a thread of its own, like the
-//! clipboard's. Compositors send a drag to every data device of the window's
+//! clipboard's. Compositors send a drag to every data device of the same
 //! client, so this one takes nothing from the clipboard's.
 
 use std::collections::HashMap;
@@ -138,7 +138,7 @@ struct State {
     types: HashMap<ObjectId, Vec<String>>,
     /// The offer of the drag over the window, if it has files.
     over: Option<WlDataOffer>,
-    /// Set when the window closes, which reading a drop gives up for.
+    /// Set when the GUI closes, which reading a drop gives up for.
     stop: Arc<AtomicBool>,
     _device: WlDataDevice,
 }
@@ -156,8 +156,8 @@ impl State {
 
     /// Reads the dropped files' URIs, which the drag's source writes and
     /// then closes the pipe. A source that never closes it would hold the
-    /// window from closing, which waits for this thread: reading gives up
-    /// when the window closes, or after [`SILENCE`] without a byte.
+    /// GUI from closing, which waits for this thread: reading gives up
+    /// when the GUI closes, or after [`SILENCE`] without a byte.
     fn receive(&self, offer: &WlDataOffer) -> Option<Vec<PathBuf>> {
         use rustix::event::{PollFd, PollFlags};
         let (mut reader, writer) = std::io::pipe().ok()?;

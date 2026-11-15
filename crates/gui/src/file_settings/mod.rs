@@ -41,14 +41,14 @@ pub(crate) use webm::{fit_of, follow_fit};
 pub(crate) struct Context<'a> {
     pub(crate) presets: &'a Presets,
     pub(crate) config: &'a Config,
-    /// The ffmpeg the window runs with: the config's, unless the command
+    /// The ffmpeg the GUI runs with: the config's, unless the command
     /// line that started it gave another.
     pub(crate) ffmpeg: FfmpegConfig,
     /// ffmpeg is a separate program, so raw arguments can be passed.
     pub(crate) ffmpeg_args: bool,
     /// Where the result goes.
     pub(crate) output: Option<std::path::PathBuf>,
-    /// The config file the window reads and saves.
+    /// The config file the GUI reads and saves.
     pub(crate) config_path: Option<&'a std::path::Path>,
     /// Where presets are saved, if anywhere.
     pub(crate) presets_dir: Option<&'a std::path::Path>,
@@ -72,7 +72,7 @@ pub(crate) fn preset_names(presets: &Presets) -> Vec<(String, Result<String, Str
 }
 
 /// What a built-in preset does for `format`. Core's own descriptions
-/// speak of every format at once, for the command line; the window shows
+/// speak of every format at once, for the command line; the GUI shows
 /// only what the preset does for what is being made.
 pub(crate) fn builtin_description(name: &str, format: Format) -> Option<String> {
     Some(match (name, format) {
@@ -86,7 +86,7 @@ pub(crate) fn builtin_description(name: &str, format: Format) -> Option<String> 
     })
 }
 
-/// What a preset is called: the built-in ones in the window's language,
+/// What a preset is called: the built-in ones in the GUI's language,
 /// the user's own as they named them.
 pub(crate) fn preset_label(name: &str) -> String {
     match name {
@@ -125,7 +125,7 @@ pub(crate) fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         },
     );
     // picked for what isn't pixel art, which would come out blocky; the
-    // window's own guess never does
+    // GUI's own guess never does
     let not_art = item.format == Format::Tgs
         && !item.format_guessed
         && !matches!(item.kind, Kind::Aseprite | Kind::Frames)

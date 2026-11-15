@@ -1,5 +1,5 @@
 //! A page of the words tgradish shows, for reviewing them and for
-//! translators: each of the window's messages from its English Fluent file,
+//! translators: each of the GUI's messages from its English Fluent file,
 //! with its note and pictures of where it shows, then the command line's
 //! help pages and the messages its sources hold, each with a name to refer
 //! to it by. The pictures come from `strings` in `crates/gui/src/strings.rs`,
@@ -368,14 +368,14 @@ impl Page<'_> {
         writeln!(
             html,
             "<section id=window><p class=about>{} texts, {pictured} of them seen in the \
-             pictures. The pictures are taken by putting the window through a set of \
+             pictures. The pictures are taken by putting the GUI through a set of \
              states, scrolling and hovering in each; a text marked as having no picture shows \
              only in a state none of them reaches, as an error that is hard to cause, or as a \
              part of a longer message, which is pictured whole. \
              Each says where it shows above its words, which are \
              as written in <code>crates/gui/i18n/en-GB/tgradish.ftl</code>: {{ $name }} is \
              filled in, {{ other-message }} puts in another's words. Hovering a picture shows \
-             the state of the window it is of; clicking opens all of it.</p>",
+             the state of the GUI it is of; clicking opens all of it.</p>",
             texts.len()
         )?;
         for section in sections {
@@ -591,7 +591,7 @@ pre { margin: 0; white-space: pre-wrap; font: 14.5px/1.45 system-ui, sans-serif;
 </style>
 <header>
 <h1>tgradish's words</h1>
-<button id=show-window class=on>Window</button>
+<button id=show-window class=on>GUI</button>
 <button id=show-cli>Command line</button>
 <input id=filter type=search placeholder="Filter by words or name">
 </header>

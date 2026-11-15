@@ -189,7 +189,7 @@ fn rejects_bad_flags() {
         let said = "error: reading stdin or writing stdout isn't supported: name a file";
         assert!(String::from_utf8_lossy(&output.stderr).starts_with(said), "{args:?}");
     }
-    // the window prints nothing to read
+    // the GUI prints nothing to read
     if cfg!(feature = "gui") {
         let output = tgradish(&["--json", "gui"]);
         assert_eq!(output.status.code(), Some(2));
@@ -197,7 +197,7 @@ fn rejects_bad_flags() {
     }
 }
 
-/// Without a display the window says so plainly, and tgradish alone, which
+/// Without a display the GUI says so plainly, and tgradish alone, which
 /// would have opened it, says what it is instead.
 #[cfg(all(unix, not(target_os = "macos")))]
 #[test]
@@ -220,7 +220,7 @@ fn says_when_there_is_no_display() {
     assert_eq!(gui.status.code(), Some(1));
     assert_eq!(
         String::from_utf8_lossy(&gui.stderr).trim_end(),
-        "error: the window can't open: no display (neither WAYLAND_DISPLAY nor DISPLAY is set)"
+        "error: the GUI can't start: no display (neither WAYLAND_DISPLAY nor DISPLAY is set)"
     );
     let alone = run(&[]);
     assert_eq!(alone.status.code(), Some(2));

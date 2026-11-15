@@ -1,4 +1,4 @@
-//! Pictures of the window, for a look at its layout and for the README.
+//! Pictures of the GUI, for a look at its layout and for the README.
 //! Ignored unless asked for, as they need a GPU wgpu can use and somewhere
 //! to put them. This makes both:
 //! `TGRADISH_SCREENSHOTS=/tmp/x cargo test -p tgradish-gui -- --ignored screenshots`
@@ -24,7 +24,7 @@ use crate::jobs::{self, Job, Status};
 use crate::testing::{convert, finish, square, video};
 use crate::{inspect, preset_dialogs, settings_dialog};
 
-/// Renders the window to `$TGRADISH_SCREENSHOTS/*.png` for a look at
+/// Renders the GUI to `$TGRADISH_SCREENSHOTS/*.png` for a look at
 /// the layout: `TGRADISH_SCREENSHOTS=/tmp cargo test -p tgradish-gui
 /// screenshots -- --ignored`. Needs a GPU wgpu can use, and ffmpeg.
 #[test]
@@ -84,8 +84,8 @@ fn notice_screenshots() {
     });
 }
 
-/// What passes in the corner over the list, and what stays over the
-/// window: files removed, with a short list and a full one; two and more
+/// What passes in the corner over the list, and what stays at the
+/// bottom: files removed, with a short list and a full one; two and more
 /// at once; and one beside the banner saying ffmpeg is missing, at the
 /// usual size and the smallest, in both themes. Needs ffmpeg.
 fn notices(save: &mut impl FnMut(&mut Harness<App>, &str)) {
@@ -202,9 +202,10 @@ fn limit_screenshots() {
     }
 }
 
-/// A window drawn as the screenshots draw it, of `config`, `size` large.
+/// The GUI drawn as the screenshots draw it, of `config`, in a window
+/// `size` large.
 fn window(config: Config, size: egui::Vec2) -> Harness<'static, App> {
-    // filtering as the window does it, so pixel art stays sharp
+    // filtering as the GUI does it, so pixel art stays sharp
     let filtering = egui_wgpu::RendererOptions {
         predictable_texture_filtering: false,
         ..egui_wgpu::RendererOptions::PREDICTABLE
@@ -279,7 +280,7 @@ fn bars_and_insets(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     }
 }
 
-/// The states the window shows of what goes on around a conversion: a
+/// The states the GUI shows of what goes on around a conversion: a
 /// video made. Needs ffmpeg.
 fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     bars_and_insets(save);
@@ -462,7 +463,7 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     shot(&mut harness, save, "state-queue-narrow");
 }
 
-/// Takes the window through each state worth a picture, handing each to
+/// Takes the GUI through each state worth a picture, handing each to
 /// `save` by name. Needs a GPU wgpu can use, and ffmpeg.
 pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     let dir = tempfile::tempdir().unwrap();
@@ -473,7 +474,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     let mut config = Config::default();
     config.gui.output_dir = Some(dir.path().join("out"));
     config.ffmpeg.choice = FfmpegChoice::System;
-    // filtering as the window does it, so pixel art stays sharp
+    // filtering as the GUI does it, so pixel art stays sharp
     let filtering = egui_wgpu::RendererOptions {
         predictable_texture_filtering: false,
         ..egui_wgpu::RendererOptions::PREDICTABLE
@@ -595,7 +596,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         harness.state_mut().items[0].choices.preset = None;
         harness.run_steps(3);
     }
-    // names in scripts the window's fonts lack, drawn with the system's
+    // names in scripts the GUI's fonts lack, drawn with the system's
     // with characters no font has, an unassigned one and a newer
     // emoji, and a zero width joiner
     let named = dir.path().join("日本語 العربية ภาษาไทย \u{2fe0}\u{200d}\u{1faf9}.png");
@@ -784,7 +785,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     save(&mut harness, "scaled");
 }
 
-/// The window where it is most likely to break: a result in a short
+/// The GUI where it is most likely to break: a result in a short
 /// window, the keyboard's focus, a result out of date, a conversion that
 /// failed, at the usual width and the narrowest, a long name, many presets
 /// of the user's own, and every section open. Needs ffmpeg.
@@ -986,7 +987,7 @@ fn banners(
     harness.run_steps(3);
 }
 
-/// The window at work, for the README: `TGRADISH_SCREENSHOTS` says
+/// The GUI at work, for the README: `TGRADISH_SCREENSHOTS` says
 /// where it goes.
 #[test]
 #[ignore]
@@ -1123,7 +1124,7 @@ fn readme_inputs(dir: &std::path::Path) -> Vec<PathBuf> {
     inputs
 }
 
-/// The window in accents of its own, in both themes: one of Plasma's, a
+/// The GUI in accents of its own, in both themes: one of Plasma's, a
 /// light one and a dark one, a file chosen, a button with the keyboard's
 /// focus and one hovered; then Settings, where they are chosen, at the
 /// usual width and the narrowest, and the picker of one's own.

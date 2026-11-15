@@ -14,7 +14,7 @@ pub fn config_dir() -> Option<PathBuf> {
     Some(dirs()?.config_dir().to_path_buf())
 }
 
-/// Directory for what the window keeps between runs, like the files it
+/// Directory for what the GUI keeps between runs, like the files it
 /// had open: `$XDG_STATE_HOME/tgradish` (`~/.local/state/tgradish`) on
 /// Linux, which is kept unlike a cache, and the local application data
 /// directory elsewhere.

@@ -294,7 +294,7 @@ impl ConfigFile {
     }
 }
 
-/// The ffmpeg given over the config file's, as the window takes it too: by
+/// The ffmpeg given over the config file's, as the GUI takes it too: by
 /// `--ffmpeg` or `--ffmpeg-from`, which can't be given together, or else
 /// a path in `TGRADISH_FFMPEG`, which either flag beats.
 fn ffmpeg_given(
@@ -404,8 +404,8 @@ fn run(cli: Cli) -> Result<()> {
     let config_path = config_file.as_ref().map(|file| file.path.clone());
 
     let cancel = CANCEL.get_or_init(CancelToken::new).clone();
-    // the window never reads the token, so Ctrl-C there ends it as usual
-    if !cli.command.is_window() {
+    // the GUI never reads the token, so Ctrl-C there ends it as usual
+    if !cli.command.is_gui() {
         // convert's first Ctrl-C keeps the best WebM encode so far, where
         // one fits. ffmpeg, in the terminal's process group, gets Ctrl-C
         // too, and stops at once; core waits a moment for what it meant,
@@ -453,12 +453,12 @@ fn run(cli: Cli) -> Result<()> {
         #[cfg(feature = "gui")]
         Command::Gui { files } => {
             if let Some(why) = no_display() {
-                anyhow::bail!("the window can't open: {why}");
+                anyhow::bail!("the GUI can't start: {why}");
             }
             let (choice, path) = ctx.ffmpeg_given();
             let launch = tgradish_gui::Launch::default().config_path(config_path).files(files);
             tgradish_gui::run(launch.ffmpeg(choice, path))
-                .map_err(|err| anyhow::anyhow!("the window can't open: {}", window_error(&err)))
+                .map_err(|err| anyhow::anyhow!("the GUI can't start: {}", gui_error(&err)))
         }
     }
 }
@@ -493,10 +493,10 @@ fn no_display() -> Option<&'static str> {
     (!display).then_some("no display (neither WAYLAND_DISPLAY nor DISPLAY is set)")
 }
 
-/// What stopped the window, without what winit adds of where in its
+/// What stopped the GUI, without what winit adds of where in its
 /// source it was found, a path on the machine that built tgradish.
 #[cfg(feature = "gui")]
-fn window_error(err: &tgradish_gui::Error) -> String {
+fn gui_error(err: &tgradish_gui::Error) -> String {
     without_source_place(err.to_string())
 }
 
@@ -568,13 +568,13 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 // there is no terminal to print to
-                let err = window_error(&err);
-                tgradish_gui::show_error(&format!("The window couldn't open: {err}"));
+                let err = gui_error(&err);
+                tgradish_gui::show_error(&format!("tgradish couldn't start: {err}"));
                 ExitCode::FAILURE
             }
         };
     }
-    // `tgradish` alone, in a terminal: what it does, and that a window opens
+    // `tgradish` alone, in a terminal: what it does, and that it has a GUI
     // too
     if std::env::args_os().len() == 1 {
         term::init(args::ColourChoice::Auto, false);
@@ -587,7 +587,7 @@ fn main() -> ExitCode {
         Cli::command().error(clap::error::ErrorKind::ArgumentConflict, misused).exit();
     }
     term::init(cli.global.colour, cli.global.json);
-    if !cli.command.is_window() {
+    if !cli.command.is_gui() {
         tgradish_core::mark::set_client(tgradish_core::mark::Client::Cli);
     }
     let json = cli.global.json;
@@ -669,7 +669,7 @@ mod tests {
 
     /// Where in winit an error was found is no one's business but its.
     #[test]
-    fn says_why_the_window_failed_without_winits_source() {
+    fn says_why_the_gui_failed_without_winits_source() {
         let raw = "winit EventLoopError: os error at /home/me/.cargo/registry/src/c:d/winit-0.30.13/\
                    src/platform_impl/linux/mod.rs:765: neither WAYLAND_DISPLAY nor DISPLAY: set";
         assert_eq!(

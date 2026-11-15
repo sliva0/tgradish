@@ -1,6 +1,6 @@
-//! The window's settings: core's `config.toml`, with the `[gui]` table core
-//! keeps for the window read here. They are read leniently, unlike the
-//! rest of the file: a key a newer window wrote, or one renamed since, is
+//! The GUI's settings: core's `config.toml`, with the `[gui]` table core
+//! keeps for the GUI read here. They are read leniently, unlike the
+//! rest of the file: a key a newer tgradish wrote, or one renamed since, is
 //! left as it is, and a value that can't be read gives that setting its
 //! default rather than failing the file, which the command line reads too,
 //! and is left as it is until that setting is changed.
@@ -15,12 +15,12 @@ use tgradish_core::telegram::Target;
 
 use crate::theme;
 
-/// Core's config, and the window's own settings from its `[gui]` table.
+/// Core's config, and the GUI's own settings from its `[gui]` table.
 /// It stands for core's where that is asked for, as presets are chosen by
 /// it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Config {
-    /// Core's, its `[gui]` holding only what the window doesn't know of:
+    /// Core's, its `[gui]` holding only what the GUI doesn't know of:
     /// keys, and values of its own keys it can't read.
     core: tgradish_core::config::Config,
     pub(crate) gui: GuiConfig,
@@ -43,7 +43,7 @@ impl DerefMut for Config {
 impl From<tgradish_core::config::Config> for Config {
     fn from(mut core: tgradish_core::config::Config) -> Config {
         let gui = GuiConfig::read(&core.gui);
-        let read = toml::Table::try_from(&gui).expect("the window's settings are a table");
+        let read = toml::Table::try_from(&gui).expect("the GUI's settings are a table");
         core.gui.retain(|key, value| !KEYS.contains(&key) || read.get(key) != Some(value));
         Config { core, gui }
     }
@@ -60,7 +60,7 @@ impl Config {
         tgradish_core::config::Config::load(path).map(Config::from)
     }
 
-    /// Writes the settings to `path`, with what the window doesn't know of
+    /// Writes the settings to `path`, with what the GUI doesn't know of
     /// in `[gui]` kept as it was read.
     pub(crate) fn save(&mut self, path: &Path) -> tgradish_core::Result<()> {
         self.forget_overridden();
@@ -72,21 +72,21 @@ impl Config {
     /// Forgets each value of `[gui]` this version couldn't read whose
     /// setting is no longer what that value was read as, so that changing
     /// the setting back writes what was chosen rather than bringing the
-    /// value back. The window does this at every frame, as Settings
+    /// value back. `App` does this at every frame, as Settings
     /// changes them without saving.
     pub(crate) fn forget_overridden(&mut self) {
         // most files have none, which costs nothing to tell
         if !KEYS.iter().any(|key| self.core.gui.contains_key(*key)) {
             return;
         }
-        let chosen = toml::Table::try_from(&self.gui).expect("the window's settings are a table");
+        let chosen = toml::Table::try_from(&self.gui).expect("the GUI's settings are a table");
         let unread = GuiConfig::read(&self.core.gui);
-        let unread = toml::Table::try_from(&unread).expect("the window's settings are a table");
+        let unread = toml::Table::try_from(&unread).expect("the GUI's settings are a table");
         self.core.gui.retain(|key, _| !KEYS.contains(&key) || chosen.get(key) == unread.get(key));
     }
 }
 
-/// Settings of the tgradish window.
+/// Settings of the tgradish GUI.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct GuiConfig {
@@ -100,17 +100,17 @@ pub(crate) struct GuiConfig {
     pub(crate) target: Option<Target>,
     /// Ease scrolling over a few frames instead of following the wheel.
     pub(crate) smooth_scrolling: bool,
-    /// The window's language, as a tag like `de`; the system's when unset.
+    /// The GUI's language, as a tag like `de`; the system's when unset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) language: Option<String>,
     /// Light or dark, or as the system has it.
     pub(crate) theme: Theme,
     /// The colour that marks what is chosen, hovered and focused.
     pub(crate) accent: Accent,
-    /// How large everything in the window is, 1 as the system has it: as
+    /// How large everything is drawn, 1 as the system has it: as
     /// Ctrl++ (or Ctrl+=) and Ctrl+- change it, from [`SCALES`]'s start to its end.
     pub(crate) scale: f64,
-    /// Start with the files open when the window last closed.
+    /// Start with the files open when the GUI last closed.
     pub(crate) reopen_files: bool,
     /// Show the timeline's cuts and times in frames rather than seconds.
     pub(crate) timeline_frames: bool,
@@ -135,7 +135,7 @@ impl Default for GuiConfig {
     }
 }
 
-/// The keys of `[gui]` the window reads and writes; others are kept.
+/// The keys of `[gui]` the GUI reads and writes; others are kept.
 const KEYS: [&str; 11] = [
     "output-dir",
     "overwrite",
@@ -150,7 +150,7 @@ const KEYS: [&str; 11] = [
     "result-preview",
 ];
 
-/// The scales the window may have, as egui's keys for zooming allow.
+/// The scales the GUI may have, as egui's keys for zooming allow.
 pub(crate) const SCALES: std::ops::RangeInclusive<f64> = 0.2..=5.0;
 
 /// `scale` a step of a tenth larger, or `by` steps, within [`SCALES`], as
@@ -202,7 +202,7 @@ impl GuiConfig {
     /// there only while its setting is still what it read as
     /// ([`Config::forget_overridden`]).
     fn write(&self, table: &mut toml::Table) {
-        let written = toml::Table::try_from(self).expect("the window's settings are a table");
+        let written = toml::Table::try_from(self).expect("the GUI's settings are a table");
         for key in KEYS {
             if !table.contains_key(key)
                 && let Some(value) = written.get(key)
@@ -213,8 +213,8 @@ impl GuiConfig {
     }
 }
 
-/// The result's small picture beside the input in the window: how large
-/// it is, and in which corner.
+/// The result's small picture beside the input: how large it is, and in
+/// which corner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct ResultPreview {
@@ -268,7 +268,7 @@ impl Corner {
         [Corner::TopLeft, Corner::TopRight, Corner::BottomLeft, Corner::BottomRight];
 }
 
-/// The window's colours.
+/// The GUI's colours.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum Theme {
@@ -279,7 +279,7 @@ pub(crate) enum Theme {
     Dark,
 }
 
-/// The window's accent colour: the system's, one of Plasma's, or one of
+/// The GUI's accent colour: the system's, one of Plasma's, or one of
 /// the user's own. Written as `system`, a name of [`theme::ACCENTS`], or
 /// `#rrggbb`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]

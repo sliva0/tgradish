@@ -1,8 +1,8 @@
-//! Where each of the window's messages is shown, for reviewing their words
+//! Where each of the GUI's messages is shown, for reviewing their words
 //! and for translators: `TGRADISH_STRINGS=/tmp/x cargo test -p tgradish-gui
-//! -- --ignored strings` takes the window through the screenshots' states,
+//! -- --ignored strings` takes the GUI through the screenshots' states,
 //! hovers whatever might say more, and writes `window.json`: what each
-//! message said and where, in pictures of the window under `pictures`.
+//! message said and where, in pictures of the GUI under `pictures`.
 //! `cargo xtask strings` makes a page of it. Needs a GPU wgpu can use, and
 //! ffmpeg; `TGRADISH_LANG` shows another language.
 
@@ -47,7 +47,7 @@ fn strings() {
     std::fs::write(out.join("window.json"), json).unwrap();
 }
 
-/// States of the window the screenshots leave out, for the messages they
+/// States of the GUI the screenshots leave out, for the messages they
 /// show: a notice, the queue at work, conversions that failed or were
 /// stopped, emoji, the folded settings open, other stickers inspected,
 /// long and slowed videos, a picture read as pixel art, settings checked
@@ -276,7 +276,7 @@ struct Shown {
     places: Vec<Place>,
 }
 
-/// A part of a picture where a message shows: the state of the window it
+/// A part of a picture where a message shows: the state of the GUI it
 /// is of, the part to look at, and the message's outlines in it, in the
 /// picture's pixels.
 #[derive(Serialize)]
@@ -291,7 +291,7 @@ struct Place {
     said: String,
 }
 
-/// A message the window showed, with where it drew it.
+/// A message the GUI showed, with where it drew it.
 type Seen = (&'static str, String, Vec<Rect>);
 
 #[derive(Default)]
@@ -299,7 +299,7 @@ struct Found {
     messages: BTreeMap<String, Shown>,
     pictures: usize,
     /// The messages given so far, by what they say, for finding those the
-    /// window keeps and shows later; and how many of them are in it.
+    /// GUI keeps and shows later; and how many of them are in it.
     kept: std::collections::HashMap<String, Vec<&'static str>>,
     taken: usize,
 }
@@ -332,7 +332,7 @@ impl Found {
         scroll(harness, 100_000.0);
     }
 
-    /// Notes what the window shows as it is scrolled now, `shown`, and
+    /// Notes what the GUI shows as it is scrolled now, `shown`, and
     /// what its widgets say when hovered that isn't `known` yet.
     fn view(
         &mut self,
@@ -378,7 +378,7 @@ impl Found {
         }
     }
 
-    /// Saves a picture of the window for `shown`, of all of it, or of the
+    /// Saves a picture of the GUI for `shown`, of all of it, or of the
     /// part around a hovered `widget` and what it says.
     fn picture(
         &mut self,

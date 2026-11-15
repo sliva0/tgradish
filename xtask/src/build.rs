@@ -82,7 +82,7 @@ pub fn build(target: Target, system_ffmpeg: bool) -> Result<()> {
             .env(format!("AR_{triple}"), "ar")
             .env(format!("CARGO_TARGET_{upper}_LINKER"), MUSL_GCC);
         // linked to musl dynamically, unlike Rust's musl builds by default,
-        // as the window loads the system's graphics libraries; with the
+        // as the GUI loads the system's graphics libraries; with the
         // loader where musl distributions keep it, whatever path the build
         // machine's musl-gcc names
         rustflags.extend([

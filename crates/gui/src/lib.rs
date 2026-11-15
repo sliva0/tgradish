@@ -1,9 +1,9 @@
-//! The tgradish window: a list of files, each with its own settings, a
+//! The tgradish GUI: a list of files, each with its own settings, a
 //! preview to crop and trim it, and its result. It converts with
 //! `tgradish-core` directly, like the CLI.
 
 // What the crate offers is what this file exports; everything else is
-// the window's own, which the lint keeps from being marked public.
+// the crate's own, which the lint keeps from being marked public.
 #![warn(unreachable_pub)]
 
 mod about;
@@ -69,7 +69,7 @@ pub(crate) const MIN_WIDTH: f32 = 920.0;
 /// The lowest it goes.
 pub(crate) const MIN_HEIGHT: f32 = 560.0;
 
-/// How the window starts, from the command line: by default with the
+/// How the GUI starts, from the command line: by default with the
 /// user's own config and the ffmpeg it chooses.
 #[derive(Debug, Default)]
 pub struct Launch {
@@ -79,7 +79,7 @@ pub struct Launch {
     pub(crate) ffmpeg_choice: Option<FfmpegChoice>,
     /// An ffmpeg executable or directory to use instead of the config's.
     pub(crate) ffmpeg_path: Option<PathBuf>,
-    /// Files to open in the window as it opens.
+    /// Files to open as the GUI starts.
     pub(crate) files: Vec<PathBuf>,
 }
 
@@ -97,7 +97,7 @@ impl Launch {
         Launch { ffmpeg_choice: choice, ffmpeg_path: path, ..self }
     }
 
-    /// Opens `files` in the window as it opens, each as one dropped there
+    /// Opens `files` as the GUI starts, each as a dropped one
     /// is, after those of last time: pictures, videos, or folders of
     /// frames.
     pub fn files(self, files: Vec<PathBuf>) -> Launch {
@@ -105,7 +105,7 @@ impl Launch {
     }
 }
 
-/// Why the window couldn't open, or stopped.
+/// Why the GUI couldn't start, or stopped.
 #[derive(Debug)]
 pub struct Error(eframe::Error);
 
@@ -122,9 +122,9 @@ impl std::error::Error for Error {
     }
 }
 
-/// Opens the window and runs until it is closed.
+/// Runs the GUI until its window is closed.
 pub fn run(launch: Launch) -> Result<(), Error> {
-    tgradish_core::mark::set_client(tgradish_core::mark::Client::Window);
+    tgradish_core::mark::set_client(tgradish_core::mark::Client::Gui);
     // as it was last time, where the session says
     let window = app::session_path().and_then(|path| session::window(&path));
     let mut viewport = egui::ViewportBuilder::default()
@@ -152,7 +152,7 @@ pub fn run(launch: Launch) -> Result<(), Error> {
                 _toplevel_icon: cc.winit_window().and_then(|window| toplevel_icon::set(window)),
                 ..app
             };
-            // the icon applies with the window's next frame
+            // the icon applies with the next frame
             cc.egui_ctx.request_repaint();
             Ok(Box::new(app))
         }),

@@ -41,9 +41,9 @@ pub struct Config {
     pub tgs_preset: Option<String>,
     /// Which ffmpeg to use.
     pub ffmpeg: FfmpegConfig,
-    /// The window's settings, which the window reads and words itself:
-    /// kept here as written, and saved again with the rest. They aren't
-    /// held to this file's strictness, so a setting a newer window writes
+    /// The GUI's settings, which the GUI reads and words itself: kept
+    /// here as written, and saved again with the rest. They aren't held
+    /// to this file's strictness, so a setting a newer GUI writes
     /// never breaks the command line.
     #[serde(skip_serializing_if = "toml::Table::is_empty")]
     #[schemars(with = "BTreeMap<String, serde_json::Value>")]
@@ -148,8 +148,8 @@ mod tests {
     }
 
     #[test]
-    fn leaves_the_window_its_own_settings() {
-        // what the window writes is its own to read, even keys it learns
+    fn leaves_the_gui_its_own_settings() {
+        // what the GUI writes is its own to read, even keys it learns
         // later; the rest of the file still catches typos
         let text = "preset = 'fast'\n[gui]\nnewer-setting = { any = 1 }\ntheme = 7\n";
         let config: Config = toml::from_str(text).unwrap();

@@ -322,7 +322,7 @@ impl ExactScale {
     /// the config file can't otherwise say that the scale below has no
     /// say, as leaving it out keeps it. Written as nothing: `--exact-scale=`,
     /// `exact-scale = ''` or `"exact-scale": ""`. `merged` leaves no scale
-    /// in its place, so presets, the command line and the window never hand
+    /// in its place, so presets, the command line and the GUI never hand
     /// it on; and where options holding it aren't merged, the options'
     /// `exact_scale()` leaves it out, so it scales as no scale does.
     pub const NONE: ExactScale = ExactScale { up: 0, down: 0 };

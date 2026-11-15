@@ -6,12 +6,12 @@ What changed in each release of tgradish, newest first. The format follows
 
 ## [2.0.0] - Unreleased
 
-tgradish rewritten in Rust: one program, with a window and a command line,
+tgradish rewritten in Rust: one program, with a GUI and a command line,
 that makes every kind of Telegram sticker and emoji.
 
 ### Added
 
-- A window, `tgradish gui [FILES]`, which also opens when tgradish is
+- A GUI, `tgradish gui [FILES]`, which also opens when tgradish is
   started from a file manager or a menu, or with files opened in it from
   one: drop files in, crop, cut and preview them, and see what Telegram
   would say of the result. It reopens the files of last time, laid out as
@@ -37,9 +37,9 @@ that makes every kind of Telegram sticker and emoji.
   where the best that fits looks poor and looked better for more bits.
   Why fitting stops, or tries a lower frame rate or not, is said: in
   `convert`'s output, as `decided` events with `--json`, and under the
-  table of encodes in the window.
+  table of encodes in the GUI.
 - Keeping the best WebM encode so far, once one fits, rather than letting
-  fitting go on: Keep best so far beside Stop in the window; in `convert`,
+  fitting go on: Keep best so far beside Stop in the GUI; in `convert`,
   the first Ctrl-C, which goes on to the next input, a second within 2
   seconds cancelling as before; a line reading `settle` on stdin with
   `--cancel-on-stdin`. `progress` and `attempt-finished` events say

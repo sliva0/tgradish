@@ -51,13 +51,13 @@ jobs:
       # --locked first, so a Cargo.lock that is out of date fails rather
       # than being rewritten for the steps after
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      # the command line on its own, without the window
+      # the command line on its own, without the GUI
       - run: cargo clippy -p tgradish --no-default-features --all-targets -- -D warnings
       - run: cargo test --workspace
       # .tgs on one thread, as for the web: the workspace's other crates
       # turn on its threads
       - run: cargo test -p tgradish-tgs
-      # the icons for menus and Windows, made from the window's
+      # the icons for menus and Windows, made from the GUI's
       - run: cargo xtask icons --check
       # public docs that link to what readers of them can't see, or to
       # nothing; the same on every system, so once
@@ -113,7 +113,7 @@ jobs:
             libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev \
             libswscale-dev libswresample-dev libavdevice-dev
       # only core's code changes with the feature; the command line and the
-      # window are tested as they run with it, the other crates don't use it
+      # GUI are tested as they run with it, the other crates don't use it
       - run: cargo clippy -p tgradish-core --all-targets --features linked --locked -- -D warnings
       - run: >
           cargo test -p tgradish-core -p tgradish -p tgradish-gui

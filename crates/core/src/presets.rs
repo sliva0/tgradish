@@ -366,7 +366,7 @@ fn extends_loop(names: &[String]) -> String {
 pub struct Presets {
     entries: BTreeMap<String, std::result::Result<Preset, PresetError>>,
     /// Each preset's options with what it extends applied, worked out
-    /// once as presets load: the window asks for them many times a frame,
+    /// once as presets load: the GUI asks for them many times a frame,
     /// and each would otherwise merge the whole chain again.
     resolved: BTreeMap<String, Resolved>,
 }
@@ -790,7 +790,7 @@ mod tests {
         }
         assert!(outside.exists());
         assert!(!root.path().join("y.toml").exists());
-        // one saved by hand under a name the window wouldn't give is still
+        // one saved by hand under a name the GUI wouldn't give is still
         // the user's to rename and delete
         write(&dir, "by.hand", "description = ''\n");
         let presets = Presets::load(Some(&dir)).unwrap();

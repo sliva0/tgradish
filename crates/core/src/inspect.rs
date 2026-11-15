@@ -1,6 +1,6 @@
 //! What a sticker file is and holds, whichever of the three kinds it is,
 //! and what Telegram would say of it: what the command line's `inspect`
-//! prints and the window's Inspect shows. The command line inspects what
+//! prints and the GUI's Inspect shows. The command line inspects what
 //! stickers are made of too, as [`inspect_any`] reads it.
 
 use std::path::Path;

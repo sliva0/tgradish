@@ -1,6 +1,6 @@
 //! What the keyboard, the mouse wheel, the clipboard and dropped files ask
-//! of the window. Keys go to the window only while no text field or dialog
-//! has them, so typing is never taken for a command.
+//! for. Keys are shortcuts only while no text field or dialog has them,
+//! so typing is never taken for a command.
 
 use std::path::PathBuf;
 
@@ -15,7 +15,7 @@ use crate::item::{Item, Show};
 use crate::l10n::fl;
 use crate::widgets;
 
-/// What the window's keys do. Each is listed in [`SHORTCUTS`], which both
+/// What the keys do. Each is listed in [`SHORTCUTS`], which both
 /// the keys' handling and the dialog that lists them read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Command {
@@ -44,7 +44,7 @@ pub(crate) enum Command {
     MoveStart,
     /// Its end, likewise.
     MoveEnd,
-    /// The window's scale, which [`crate::scaling::Scaling::keys`] takes
+    /// The GUI's scale, which [`crate::scaling::Scaling::keys`] takes
     /// by these keys, in place of egui.
     ScaleUp,
     ScaleDown,
@@ -88,7 +88,7 @@ const fn shortcut(
     Shortcut { command, group, keys, with_shift }
 }
 
-/// Every shortcut of the window, in the order the dialog lists them.
+/// Every shortcut, in the order the dialog lists them.
 pub(crate) const SHORTCUTS: &[Shortcut] = {
     use egui::Key;
     use egui::Modifiers as M;
@@ -174,7 +174,7 @@ pub(crate) fn pressed(input: &egui::InputState, command: Command) -> Option<(usi
     at.map(|at| (at, held.shift))
 }
 
-/// `key` as the window writes keys, in its language: Ctrl+Enter.
+/// `key` as the GUI writes keys, in its language: Ctrl+Enter.
 pub(crate) fn key_text(key: &egui::KeyboardShortcut) -> String {
     use egui::Key;
     let mac = cfg!(target_os = "macos");
@@ -211,7 +211,7 @@ pub(crate) fn key_text(key: &egui::KeyboardShortcut) -> String {
     parts.join("+")
 }
 
-/// The keys of `command`, as the window writes them: one, or each of them
+/// The keys of `command`, as the GUI writes them: one, or each of them
 /// apart by a slash.
 pub(crate) fn keys_text(command: Command) -> String {
     let keys: Vec<String> = shortcut_of(command).keys.iter().map(key_text).collect();
@@ -823,7 +823,7 @@ mod tests {
         harness.key_press(egui::Key::Delete);
         harness.run_steps(2);
         assert_eq!(harness.state().items.len(), 1);
-        // Escape closes the dialog, and the window has its keys again
+        // Escape closes the dialog, and the keys are shortcuts again
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
         assert!(!harness.state().settings_dialog.is_open());

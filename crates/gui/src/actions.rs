@@ -584,7 +584,7 @@ mod tests {
     use crate::app::App;
     use crate::testing::{convert, finish, harness, made_job, square, video_of};
 
-    /// A window with `count` pixel art files, results going to `out`.
+    /// The GUI with `count` pixel art files, results going to `out`.
     fn with_art(dir: &std::path::Path, count: usize) -> Harness<'static, App> {
         let mut config = Config::default();
         config.gui.output_dir = Some(dir.join("out"));
@@ -878,8 +878,9 @@ mod tests {
         harness.state_mut().select(id);
         harness.run_steps(2);
         harness.get_by_label(&saved);
-        // another result of tgradish's in its place, as another window
-        // may put there, as like it as can be but for when it was written
+        // another result of tgradish's in its place, as another tgradish
+        // running may put there, as like it as can be but for when it was
+        // written
         let output = made_job(&harness.state().items[0]).output.clone();
         let other = made_job(&harness.state().items[1]).output.clone();
         std::fs::copy(&other, &output).unwrap();
