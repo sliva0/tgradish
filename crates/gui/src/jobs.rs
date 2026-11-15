@@ -684,6 +684,10 @@ mod tests {
         assert_eq!(progress.overall(), Some(1.0));
     }
 
+    fn texts(issues: &[telegram::Issue]) -> Vec<String> {
+        problems(issues).into_iter().map(|problem| problem.text).collect()
+    }
+
     #[test]
     fn words_problems_as_the_gui_does() {
         use telegram::Issue;
@@ -706,6 +710,11 @@ mod tests {
         let thirty = br#"{"fr":30,"ip":0,"op":60,"w":512,"h":512,"layers":[{"ty":4,"shapes":[]}]}"#;
         let (_, found) = tgradish_core::tgradish_tgs::check::check(thirty, None).unwrap();
         let frowned = Issue::Lottie(found[0].clone());
+        // and a .tgs's of the kinds every format has in the GUI's words
+        let narrow = br#"{"fr":60,"ip":0,"op":60,"w":512,"h":256,"layers":[{"ty":4,"shapes":[]}]}"#;
+        let (stats, narrow) = tgradish_core::tgradish_tgs::check::check(narrow, None).unwrap();
+        let narrow = telegram::check_lottie(narrow, &stats);
+        assert_eq!(texts(&narrow), [fl!("issue-size", width = 512, height = 256, side = 512)]);
         assert_eq!(
             Problem::of(&frowned),
             Problem { refused: false, text: found[0].message.clone() }

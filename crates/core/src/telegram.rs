@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::webm::container::WebmInfo;
 pub use tgradish_tgs::check::Severity;
-use tgradish_tgs::check::{self, IssueKind};
+use tgradish_tgs::check::{self, IssueKind, Stats};
+use tgradish_tgs::limits::telegram as tgs_limits;
 
 /// Largest video sticker @Stickers accepts, in bytes; one more is "too big".
 pub const MAX_STICKER_BYTES: u64 = 256 * 1024;
@@ -302,6 +303,44 @@ pub fn check_input(info: &crate::inspect::InputInfo, target: Target) -> Vec<Issu
     issues
 }
 
+/// What checking a `.tgs` found, `found` of one that holds `stats`, as
+/// issues: of the kinds every format has, its canvas, size, length and a
+/// frame rate over the most, each with what it found; the rest, which no
+/// other format is checked for, as [`Issue::Lottie`].
+pub fn check_lottie(found: Vec<check::Issue>, stats: &Stats) -> Vec<Issue> {
+    // a canvas a whole number of pixels on each side
+    let whole = |value: f64| (value >= 0.0 && value.fract() == 0.0).then_some(value as u64);
+    let canvas = u64::from(tgs_limits::CANVAS);
+    let fps = f64::from(tgs_limits::FPS);
+    found
+        .into_iter()
+        .map(|found| match found.kind {
+            _ if found.severity != Severity::Error => Issue::Lottie(found),
+            IssueKind::Canvas => match (whole(stats.width), whole(stats.height)) {
+                (Some(width), Some(height)) => {
+                    Issue::WrongSize { width, height, side: canvas, exact: true }
+                }
+                _ => Issue::Lottie(found),
+            },
+            IssueKind::FileSize => match stats.tgs_bytes {
+                Some(bytes) => {
+                    Issue::TooBig { bytes: bytes as u64, max: tgs_limits::MAX_BYTES as u64 }
+                }
+                None => Issue::Lottie(found),
+            },
+            IssueKind::Length if stats.fps > 0.0 => Issue::TooLong {
+                seconds: stats.frames / stats.fps,
+                max: f64::from(tgs_limits::MAX_FRAMES) / fps,
+            },
+            // one under it is no other format's issue
+            IssueKind::FrameRate if stats.fps > fps => {
+                Issue::TooManyFps { fps: stats.fps, max: fps }
+            }
+            _ => Issue::Lottie(found),
+        })
+        .collect()
+}
+
 /// Lists everything that would make Telegram reject `info` as `target`.
 ///
 /// Duration is checked against the header, which is what Telegram reads, so
@@ -424,6 +463,26 @@ mod tests {
         };
         assert_eq!(keys(&tgs), ["kind", "message", "severity"]);
         assert!(keys(&tgs).iter().all(|key| issue.get(key).is_some()));
+    }
+
+    #[test]
+    fn tells_a_tgs_by_the_kinds_every_format_has() {
+        let lottie =
+            br#"{"fr":25,"ip":0,"op":200,"w":512,"h":256,"layers":[{"ty":4,"shapes":[]}]}"#;
+        let (stats, found) = tgradish_tgs::check::check(lottie, Some(70_000)).unwrap();
+        let issues = check_lottie(found, &stats);
+        assert_eq!(issues[0], Issue::WrongSize { width: 512, height: 256, side: 512, exact: true });
+        // fewer frames a second than stickers have is a .tgs's own
+        assert!(matches!(&issues[1], Issue::Lottie(found) if found.kind == IssueKind::FrameRate));
+        assert_eq!(issues[2], Issue::TooLong { seconds: 8.0, max: 3.0 });
+        assert_eq!(issues[3], Issue::TooBig { bytes: 70_000, max: 65_536 });
+        assert_eq!(issues.len(), 4, "{issues:?}");
+        let printed = serde_json::to_value(&issues[3]).unwrap();
+        assert_eq!((&printed["kind"], &printed["max"]), (&"too-big".into(), &65_536.into()));
+        // more than a sticker plays
+        let fast = br#"{"fr":120,"ip":0,"op":120,"w":512,"h":512,"layers":[{"ty":4,"shapes":[]}]}"#;
+        let (stats, found) = tgradish_tgs::check::check(fast, None).unwrap();
+        assert_eq!(check_lottie(found, &stats), [Issue::TooManyFps { fps: 120.0, max: 60.0 }]);
     }
 
     #[test]

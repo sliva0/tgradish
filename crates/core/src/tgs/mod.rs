@@ -30,7 +30,7 @@ use crate::events::{Details, Event, Outcome, StartDetails, Started};
 use crate::input::Input;
 use crate::options::Resize;
 use crate::presets::Format;
-use crate::telegram::Issue;
+use crate::telegram;
 
 /// Frame rate of still images, sprite sheets and image sequences unless
 /// `fps` says otherwise.
@@ -148,7 +148,7 @@ pub fn convert(
         bytes: sticker.bytes as u64,
         limit: Format::Tgs.max_bytes(target),
         changed,
-        issues: sticker.issues.into_iter().map(Issue::Lottie).collect(),
+        issues: telegram::check_lottie(sticker.issues, &sticker.stats),
         details: Details::Tgs {
             json_bytes: sticker.json_bytes as u64,
             steps: sticker.steps,

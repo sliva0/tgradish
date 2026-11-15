@@ -147,6 +147,10 @@ pub struct Sticker {
     pub rectangles: usize,
     /// Problems the finished sticker has, from [`check::check`].
     pub issues: Vec<Issue>,
+    /// What checking it found it holds, as [`check::check`] counts it,
+    /// which tells what its issues are about.
+    #[serde(skip)]
+    pub stats: check::Stats,
     /// What the sticker shows, cell for cell: the animation after any
     /// reductions.
     #[serde(skip)]
@@ -364,7 +368,7 @@ pub fn make(
             continue;
         }
         check()?;
-        let (_, issues) =
+        let (stats, issues) =
             check::check(json.as_bytes(), Some(tgs.len())).expect("the writer's JSON parses");
         let groups = scene.layers.iter().map(|layer| layer.groups.len()).sum();
         let rectangles = scene
@@ -383,6 +387,7 @@ pub fn make(
             groups,
             rectangles,
             issues,
+            stats,
             anim: current,
         });
     }

@@ -36,5 +36,6 @@ pub fn inspect_file(path: &Path) -> Result<(Stats, Vec<Issue>)> {
     let (json, packed) = read_lottie(path)?;
     let (stats, found) = tgradish_tgs::check::check(&json, packed)
         .map_err(|err| Error::Unreadable { path: path.to_path_buf(), message: err.to_string() })?;
-    Ok((stats, found.into_iter().map(Issue::Lottie).collect()))
+    let issues = crate::telegram::check_lottie(found, &stats);
+    Ok((stats, issues))
 }

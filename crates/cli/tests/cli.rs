@@ -1996,7 +1996,7 @@ fn prints_conversions_and_inspections_as_text() {
   Converting dir/noise → dir/exact.tgs
         Read #×# cells, # colours, # frames, #.# s
 warning: about #.# KiB (#.#%) as it is, too large; --no-exact lets fitting change the art
-error: the file is # bytes, at most # are allowed
+warning: Telegram will refuse it: #.# KiB, over the # KiB limit
 error: # shapes in # layers count #, a layer as #; Telegram takes at most #
 "#,
         r#"exit Some(0)
@@ -2022,7 +2022,8 @@ dir/exact.tgs
   size        #.# KiB (#.#%), #.# KiB of JSON
   animation   #×#, # fps, # frames (#.# s)
   drawing     # layers, up to # shapes and # fills in one; cost # of #
-  error: the file is # bytes, at most # are allowed
+  telegram    ✖ refuses it:
+              - #.# KiB, over the # KiB limit
   error: # shapes in # layers count #, a layer as #; Telegram takes at most #
 
 dir/dot.png
