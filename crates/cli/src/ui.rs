@@ -85,6 +85,18 @@ pub fn about(path: &std::path::Path, message: &str) -> String {
     }
 }
 
+/// What `tgradish gui` says where a GUI ran already and took the `files`
+/// it was given, of which `first` is the first, named as given.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn handed_over(files: usize, first: Option<&std::path::Path>) -> String {
+    let what = match (files, first) {
+        (0, _) => "brought it to the front".to_owned(),
+        (1, Some(file)) => format!("added {} to it", crate::term::link(file.display(), file)),
+        (files, _) => format!("added {} to it", count(files, "file")),
+    };
+    format!("tgradish is already open: {what}")
+}
+
 pub fn error_label() -> console::StyledObject<&'static str> {
     style("error:").red().bold()
 }

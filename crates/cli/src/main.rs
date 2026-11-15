@@ -456,9 +456,19 @@ fn run(cli: Cli) -> Result<()> {
                 anyhow::bail!("the GUI can't start: {why}");
             }
             let (choice, path) = ctx.ffmpeg_given();
+            let first = files.first().cloned();
             let launch = tgradish_gui::Launch::default().config_path(config_path).files(files);
-            tgradish_gui::run(launch.ffmpeg(choice, path))
-                .map_err(|err| anyhow::anyhow!("the GUI can't start: {}", gui_error(&err)))
+            let started = tgradish_gui::run(launch.ffmpeg(choice, path))
+                .map_err(|err| anyhow::anyhow!("the GUI can't start: {}", gui_error(&err)))?;
+            if let tgradish_gui::Started::HandedOver { files } = started
+                && !ctx.global.quiet
+            {
+                // written as it can be: without a console, as on Windows
+                // started from a shortcut, there is no one to tell
+                use std::io::Write;
+                let _ = writeln!(std::io::stderr(), "{}", ui::handed_over(files, first.as_deref()));
+            }
+            Ok(())
         }
     }
 }
@@ -565,7 +575,8 @@ fn main() -> ExitCode {
         }
         let (choice, path) = ffmpeg_given(None, None);
         return match tgradish_gui::run(tgradish_gui::Launch::default().ffmpeg(choice, path)) {
-            Ok(()) => ExitCode::SUCCESS,
+            // handed over or not, there is no terminal to say so in
+            Ok(_) => ExitCode::SUCCESS,
             Err(err) => {
                 // there is no terminal to print to
                 let err = gui_error(&err);
@@ -665,6 +676,16 @@ mod tests {
             env!("CARGO_PKG_VERSION_PATCH")
         );
         assert!(manifest.contains(&version), "tgradish.exe.manifest should have {version}");
+    }
+
+    /// What `tgradish gui` says where a GUI open already took its files.
+    #[test]
+    fn says_what_the_gui_open_already_took() {
+        use std::path::Path;
+        let said = |files, first: Option<&str>| super::ui::handed_over(files, first.map(Path::new));
+        assert_eq!(said(0, None), "tgradish is already open: brought it to the front");
+        assert_eq!(said(1, Some("frog.gif")), "tgradish is already open: added frog.gif to it");
+        assert_eq!(said(3, Some("a.png")), "tgradish is already open: added 3 files to it");
     }
 
     /// Where in winit an error was found is no one's business but its.

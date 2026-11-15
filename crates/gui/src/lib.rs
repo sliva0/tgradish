@@ -125,16 +125,28 @@ impl std::error::Error for Error {
     }
 }
 
+/// What came of [`run`], for whoever started it to say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Started {
+    /// Its window opened, and has been closed since.
+    Opened,
+    /// A GUI ran already: it took this many files to add, maybe none, and
+    /// was brought forward.
+    HandedOver { files: usize },
+}
+
 /// Runs the GUI until its window is closed, or where one runs already,
 /// hands it the files to add and brings it forward instead.
-pub fn run(launch: Launch) -> Result<(), Error> {
+pub fn run(launch: Launch) -> Result<Started, Error> {
     tgradish_core::mark::set_client(tgradish_core::mark::Client::Gui);
     // as the command line names them, from where it was started
     let files = launch.files.iter().map(|file| std::path::absolute(file).unwrap_or(file.clone()));
     let launch = Launch { files: files.collect(), ..launch };
     let request = instance::Request::from_env(launch.files.clone());
     let (store, listener) = match app::session_path().map(|path| instance::start(path, &request)) {
-        Some(instance::Start::HandedOver) => return Ok(()),
+        Some(instance::Start::HandedOver) => {
+            return Ok(Started::HandedOver { files: launch.files.len() });
+        }
         Some(instance::Start::First { store, listener }) => (Some(store), listener),
         // one that couldn't be reached keeps the session, and this one none
         Some(instance::Start::Second) | None => (None, None),
@@ -181,6 +193,7 @@ pub fn run(launch: Launch) -> Result<(), Error> {
             Ok(Box::new(app))
         }),
     )
+    .map(|()| Started::Opened)
     .map_err(Error)
 }
 
