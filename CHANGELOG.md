@@ -11,59 +11,22 @@ that makes every kind of Telegram sticker and emoji.
 
 ### Added
 
-- A GUI, `tgradish gui [FILES]`, which also opens when tgradish is
-  started from a file manager or a menu, or with files opened in it from
-  one: drop files in, crop, cut and preview them, and see what Telegram
-  would say of the result. It reopens the files of last time, laid out as
-  they were. Started again while it runs, it adds the files to the GUI
-  open and brings it forward, rather than opening another. Keyboard
-  shortcuts, listed under F1, add, pick, convert and copy files, step
-  through frames and cut, and open Settings or Inspect.
-- Shell completions (`tgradish completions SHELL`) for bash, zsh, fish,
-  PowerShell and nushell, and man pages, which packages install, nushell's
-  in its vendor autoload folder.
-- Animated stickers and emoji as `.tgs` (`-f tgs`), drawn from pixel art:
-  GIF, PNG and APNG, WebP, Aseprite files, sprite sheets, image sequences
-  and videos of pixel art, fitted into 64 KiB.
+- A GUI, `tgradish gui [FILES]`: drop files in, crop, cut and preview
+  them, and see what Telegram would say of the result.
+- Animated stickers and emoji as `.tgs` (`-f tgs`), drawn from pixel art
+  and fitted into 64 KiB.
 - Static stickers and emoji as WebP (`-f webp`).
 - Emoji (`--target emoji`) beside stickers.
-- Presets (`--preset fast|balanced|best`, and your own), and a config file
-  in the user's config folder (`tgradish config path`, `config show`,
-  `config example`).
+- Presets (`--preset fast|balanced|best`, and your own) and a config
+  file (`tgradish config`).
 - Size fitting by bitrate, quality, frame rate or length (`--fit`), and a
   choice of how a picture is cropped, scaled and timed.
-- Fitting a WebM stops at the first encode that uses 96% to 100% of the
-  limit, predicts each next setting from the encodes so far, and skips an
-  encode predicted to gain under 1% of the limit or any likeness to be
-  seen; where nothing fits, it encodes the least of the range before
-  saying so, whatever was predicted of it. `--fit auto` tries lower frame rates only where nothing fits, or
-  where the best that fits looks poor and looked better for more bits.
-  Why fitting stops, or tries a lower frame rate or not, is said: in
-  `convert`'s output, as `decided` events with `--json`, and under the
-  table of encodes in the GUI.
-- Keeping the best WebM encode so far, once one fits, rather than letting
-  fitting go on: Keep best so far beside Stop in the GUI; in `convert`,
-  the first Ctrl-C, which goes on to the next input, a second within 2
-  seconds cancelling as before; a line reading `settle` on stdin with
-  `--cancel-on-stdin`. `progress` and `attempt-finished` events say
-  whether it can (`can-settle`), and `finished` whether it did
-  (`settled`).
 - `tgradish watch DIR`, converting what appears in a folder.
-- `tgradish inspect`, which says what a WebM, WebP or `.tgs` file holds
-  and whether Telegram would take it; and of what stickers are made of,
-  pictures, animations, Aseprite files and videos, their size, frames,
-  length and frame rate, and what a sticker that kept them would be
-  refused for.
-- `-q`/`--quiet`, with which `convert` and `watch` print the path of each
-  file made alone, a line each, for scripts: `tgradish convert -q *.png |
-  xargs …`.
-- `--json` output for scripts and front-ends, as JSON Lines, and `tgradish
-  describe`, which gives the schemas of its options and events. Every
-  format's conversion prints the same events: `started` and `finished`
-  name the input, output, format, target and size limit, and `finished`
-  says the result's size, whether it was changed to fit and what Telegram
-  would have a problem with, issues every format and `inspect` report
-  alike by their `kind`, with what each found.
+- `tgradish inspect`, which says what a file holds and whether Telegram
+  would take it.
+- `--json` output and `tgradish describe` for scripts and front-ends, and
+  `-q`, which prints only the paths of the files made.
+- Shell completions and man pages.
 - ffmpeg built in, in the release builds that say so, or the system's.
 - Releases for Linux (glibc and musl, x86-64 and aarch64, as archives,
   .deb and .rpm), Windows, the AUR and a Nix flake.
@@ -72,6 +35,8 @@ that makes every kind of Telegram sticker and emoji.
 
 - tgradish is no longer a Python package: install a release build or a
   package, or build it with `cargo install tgradish`.
+- `convert` takes its inputs as arguments, without `-i`, and its options
+  have new names: see `tgradish convert --help`.
 
 ### Removed
 

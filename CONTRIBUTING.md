@@ -4,14 +4,16 @@
 
 | Crate | What it holds |
 | --- | --- |
-| `crates/frames` (`tgradish-frames`) | Decodes GIF, PNG and APNG, WebP, JPEG, BMP and Aseprite files, sprite sheets and image sequences into RGBA animations with frame times, in pure Rust, within limits on what it allocates. Works on bytes only, so it builds for `wasm32-unknown-unknown`. What only Aseprite files have, as tags and layers, is in its `aseprite` module. |
-| `crates/tgs` (`tgradish-tgs`) | Pixel art to Telegram `.tgs` stickers: normalising the art to its grid, the painter's encoder that draws it as rectangles in layers, the reductions that fit it into 64 KiB, packing, and Telegram's limits and checks, which any `.tgs` can be put to, and pictures of its own stickers for previews. No files, processes or ffmpeg either, and threads only with its `threads` feature. `make` and what it reads and reports are its public interface, serialised in kebab-case; the encoder's interior (scenes, Lottie, layout, the painter, packing and the order of rectangles) is public only with the `internals` feature, which tgs-lab turns on and semver doesn't cover. |
-| `crates/core` (`tgradish-core`) | What the command line and the GUI share. A module for each kind of result, `webm`, `webp` and `tgs`, converts an `input::Input`, a file or a sequence of pictures, by the same `convert(backend, &Request, &cancel, on_event)`, and `convert::convert` into any of them by the options of the one to make; each reports through the same `Event`s and returns the same `Outcome`, of `events`, and every issue Telegram would have is a `telegram::Issue`; `webm` also plans and fits WebM to the size limit, and in `webm::container` inspects WebM and patches it for duration spoofing. Beside them: `picture`, where a picture lands in a sticker and telling pixel art; `input`, results' default names and `sniff`, which tells kinds of file apart; `drawn`, pixel art drawn for ffmpeg; presets, the config file, and `inspect`. ffmpeg runs through a `Backend`: the `ffmpeg` and `ffprobe` programs, or with the `linked` feature its libraries, used to do exactly what those command lines do. It re-exports `tgradish-tgs`, so the types of it that core's API names are reached through core. What it serialises for `--json` and `describe` keeps the rules `protocol`'s docs give, as kebab-case and an object a line, and its errors say what is wrong without naming flags, which the command line adds and the GUI words its own way. |
-| `crates/gui` (`tgradish-gui`) | The GUI, made with egui, which calls core directly, and reaches `tgradish-tgs` through it. |
+| `crates/frames` (`tgradish-frames`) | Reads pictures, animations and Aseprite files into RGBA frames with durations. |
+| `crates/tgs` (`tgradish-tgs`) | Makes `.tgs` stickers from pixel art, and checks any `.tgs` against Telegram's limits. |
+| `crates/core` (`tgradish-core`) | What the command line and the GUI share: conversion to every format, ffmpeg, presets, the config file and `inspect`. |
+| `crates/gui` (`tgradish-gui`) | The GUI, made with egui. |
 | `crates/cli` (`tgradish`) | The binary: arguments and terminal output. It includes the GUI unless built with `--no-default-features`. |
-| `crates/corpus` (`tgradish-corpus`) | Test art drawn in code, and video clips made with ffmpeg, so nothing in the repository belongs to anyone else. `tgs-lab corpus DIR` writes it all out. Unpublished: the other crates use it only in their tests, as a dependency without a version, which cargo leaves out of their packages. |
-| `crates/tgs-lab` | Encoder research: benchmarks, renders checked against tlottie and rlottie, and the probes that measured Telegram's limits. A workspace of its own with its own `Cargo.lock`, so tlottie, which isn't on crates.io, and rlottie stay out of what packagers fetch: run it from its folder, as `cargo run -- corpus DIR`, or with `--manifest-path crates/tgs-lab/Cargo.toml`. |
-| `xtask` | Release builds with ffmpeg built in, packages, licences and icons; its module docs list the tasks. |
+| `crates/corpus` | Test inputs drawn in code, so nothing in the repository belongs to anyone else. |
+| `crates/tgs-lab` | Encoder research: benchmarks, and renders checked against tlottie and rlottie. A workspace of its own: run it from its folder. |
+| `xtask` | Release builds with ffmpeg built in, packages, licences and icons. |
+
+Each crate's own docs (`cargo doc --open`) say how it is laid out.
 
 ## Building and testing
 
@@ -19,132 +21,87 @@
 cargo test --workspace
 ```
 
-needs `ffmpeg` and `ffprobe` on PATH, with libvpx, and libx264 for the
-video clips of the corpus; tests that need them print "skipped" and pass
-without, unless `TGRADISH_REQUIRE_FFMPEG=1`, as CI sets, fails them
-instead. `nix develop` gives everything below but cargo-about, of which
-nixpkgs has another version than the one `cargo xtask licenses` takes.
-tgradish is built and tested for Linux and Windows; macOS is untested and
-not supported.
+needs `ffmpeg` and `ffprobe` on PATH, with libvpx and libx264. Tests that
+need them are skipped without, or fail with `TGRADISH_REQUIRE_FFMPEG=1`,
+as in CI. `nix develop` gives everything below but cargo-about. tgradish
+is built and tested for Linux and Windows.
 
-- The built-in ffmpeg: `cargo test --workspace --features tgradish/linked`,
-  with ffmpeg's development files, pkg-config and libclang.
-- `.tgs` on one thread, as for the web: `cargo test -p tgradish-tgs`;
-  `--features internals` builds it with its interior public, as tgs-lab
-  does.
-- tgs-lab, which renders with tlottie, and with rlottie too:
-  `cargo test --manifest-path crates/tgs-lab/Cargo.toml --features rlottie`
-  (cmake, ninja and clang).
-- The GUI as pictures, which needs a GPU:
-  `TGRADISH_SCREENSHOTS=/tmp/shots cargo test -p tgradish-gui -- --ignored screenshot`,
-  into a folder that exists. `tgradish-readme.png` is the README's
+- With ffmpeg built in: `cargo test --workspace --features tgradish/linked`,
+  which needs ffmpeg's development files, pkg-config and libclang.
+- tgs-lab:
+  `cargo test --manifest-path crates/tgs-lab/Cargo.toml --features rlottie`,
+  which needs cmake, ninja and clang.
+- Pictures of the GUI, which need a GPU:
+  `TGRADISH_SCREENSHOTS=DIR cargo test -p tgradish-gui -- --ignored screenshot`.
+  `tgradish-readme.png` among them is the README's
   `.github/screenshot.png`.
 
-CI also runs `cargo fmt --all --check`, clippy with `-D warnings` with and
-without the GUI and for musl, `cargo xtask icons --check` and `cargo
-xtask licenses --check`.
+CI also runs rustfmt, clippy with `-D warnings`, `cargo xtask icons
+--check` and `cargo xtask licenses --check`;
+`.github/workflows/ci.yml` has the exact commands.
 
 Keep your own test files in `references/`, which git ignores.
 
 ## Writing
 
-Comments say why, in plain British English, and doc comments go on items;
-the code says what. Commit messages say what changed and why.
+Comments say why; the code says what. Commit messages say what changed
+and why.
 
 ### Translations
 
-The GUI's words are in `crates/gui/i18n/en-GB/tgradish.ftl`, in
-[Fluent](https://projectfluent.org/fluent/guide/), and code asks for them
-with `fl!("message-id")`, which fails to compile if English lacks the
-message or the arguments given. Each message's comment says where it is
-shown. The command line stays English: clap can't translate its own words,
-and scripts read its output.
+The GUI's text is in `crates/gui/i18n/en-GB/tgradish.ftl`, in
+[Fluent](https://projectfluent.org/fluent/guide/), and each message's
+comment says where it is shown. The command line stays English, since
+scripts read its output.
 
-A translation is a copy of that file in a folder named for its language, as
-`crates/gui/i18n/de/tgradish.ftl`, with `language-name` its name for itself.
-What it leaves out shows in English, though a message that puts in
-another's words, as `{ save }`, needs that one translated too. The GUI
-follows the system's language, or the one picked in Settings;
-`TGRADISH_LANG=de` picks one for a run, and `TGRADISH_LANG=pseudo` shows
-English with longer, accented words, to see where text won't fit. The
-tests hold British English alone to fitting: no button's words are cut
-short in the narrowest window, 920 points wide, or a wider one. Other
-languages' may be where there is little room. The screenshots test takes
-`TGRADISH_LANG` too. The tests check every file
-reads as Fluent, that translations only take the arguments English does and
-put in only messages they have, and that the GUI's fonts draw them: a
-script they lack, as Chinese or Arabic, needs a font added first, and egui
-doesn't yet lay out text that runs right to left.
+A translation is a copy of that file in a folder named for its language,
+as `crates/gui/i18n/de/tgradish.ftl`. What it leaves out shows in English.
+`TGRADISH_LANG=de` picks a language for a run, and `TGRADISH_LANG=pseudo`
+shows English with longer, accented words, to see where text won't fit.
+A script the GUI's fonts lack, as Chinese or Arabic, needs a font added
+first.
 
-`cargo xtask strings` writes `target/strings/index.html`: each of the
-GUI's messages with its comment, beside pictures of where it shows, and
-the command line's help pages and the messages its sources print, each with
-a name to refer to it by. It takes `TGRADISH_LANG` as well, to see a
-translation in place.
+`cargo xtask strings` writes `target/strings/index.html`: every message
+of the GUI beside pictures of where it shows, and the command line's help
+and messages.
 
 ## Licences
 
-tgradish is MIT. Every binary carries every notice it needs
-(`crates/core/build.rs`, from the list in `crates/core/src/notices.rs`),
-which `tgradish licenses` prints and About in the GUI shows, titled in the
-GUI's language by what each is. The notices are in `crates/core/licenses`, and every published
-crate has its own copy of `LICENSE.txt`, since a crate is packaged without
-the repository around it. After changing dependencies, run `cargo xtask
-licenses` with cargo-about 0.9.2, which CI uses too (`cargo install
---locked cargo-about@0.9.2 --features cli`); it renews those copies as
-well. `cargo xtask ffmpeg` keeps `crates/core/licenses/ffmpeg` up to
-date. `.gitattributes` checks text out with LF on Windows too, so the
-notices build in and compare the same everywhere. ffmpeg stays LGPL:
-never enable its GPL parts. Paths and commands say "licenses", prose says
-"licences".
+tgradish is MIT, and every binary carries the notices of what is built
+into it, kept in `crates/core/licenses`. After changing dependencies, run
+`cargo xtask licenses` with cargo-about 0.9.2 (`cargo install --locked
+cargo-about@0.9.2 --features cli`). ffmpeg stays LGPL: never enable its
+GPL parts.
 
 ## Releasing
 
-1. Give the version its section in `CHANGELOG.md`, dated: the release's
-   notes are that section, which the release workflow fails without.
-   Set the version in `Cargo.toml`: `[workspace.package]`, and
-   `tgradish-core` and `tgradish-gui` under `[workspace.dependencies]`,
-   which ask for it exactly; and `pkgver` in each
-   `packaging/aur/*/PKGBUILD`. The two libraries, `tgradish-frames` and
-   `tgradish-tgs`, have versions of their own: raise one in its manifest
-   and under `[workspace.dependencies]` when it changed since it was last
-   published. Then refresh `Cargo.lock` with `cargo update --workspace`,
-   and `crates/tgs-lab/Cargo.lock`, which records the versions of the
-   workspace's crates it uses, with the same and `--manifest-path
-   crates/tgs-lab/Cargo.toml`, and commit them, as release builds and CI
-   use `--locked`. Raise `RUSTUP_TOOLCHAIN` in
-   `.github/workflows/release.yml`, the Rust release builds are made
-   with, to the newest stable; pinned there, building a tag again makes
-   the same binaries. The release workflow
-   checks the PKGBUILDs; the Windows executable takes its version from
-   `Cargo.toml` when it is built.
+1. Prepare the version:
+   - give it a dated section in `CHANGELOG.md`, which becomes the
+     release's notes;
+   - set it in `Cargo.toml`, under `[workspace.package]` and for
+     `tgradish-core` and `tgradish-gui` under `[workspace.dependencies]`,
+     and as `pkgver` in each `packaging/aur/*/PKGBUILD`;
+   - `tgradish-frames` and `tgradish-tgs` have versions of their own:
+     raise one, in its manifest and under `[workspace.dependencies]`,
+     if it changed since it was last published;
+   - refresh both lock files: `cargo update --workspace`, and the same
+     with `--manifest-path crates/tgs-lab/Cargo.toml`;
+   - raise `RUSTUP_TOOLCHAIN` in `.github/workflows/release.yml` to the
+     newest stable Rust.
 2. `cargo xtask local-release` builds every variant into
-   `target/release-artifacts`, Windows with mingw-w64. `--targets` picks
-   others, as `linux-musl-x86_64`, made with musl-gcc (musl-tools on
-   Debian and Ubuntu, musl on Arch). Try them.
-3. Push a `vX.Y.Z` tag. The release workflow builds everything, tests the
-   packages on AlmaLinux, Ubuntu, Debian, Fedora, openSUSE and Windows,
-   the musl builds on Alpine, and the AUR packages, built with makepkg, on
-   Arch Linux, and drafts a release with the archives, packages,
-   checksums, each file's and all in `SHA256SUMS`, and ffmpeg's sources.
-   Release builds write the workspace's and cargo's paths as `/tgradish`
-   and `/cargo` (`xtask/src/build.rs`), so no runner's paths are in them.
-   Check the draft, then publish it.
+   `target/release-artifacts`; it needs mingw-w64 for Windows and
+   musl-gcc for musl. Try them.
+3. Push a `vX.Y.Z` tag. The release workflow builds and tests
+   everything, and drafts a release. Check the draft, then publish it.
 4. Copy each `packaging/aur/*/PKGBUILD` into your clone of that package
    on the AUR, and there run `updpkgsums`, then `makepkg --printsrcinfo >
-   .SRCINFO`, and push. The checksums go in the AUR clones alone: the
-   repository keeps `SKIP`, since `test-aur` builds the packages from
-   archives each run makes anew, which no checksum written down matches.
+   .SRCINFO`, and push. The repository's own PKGBUILDs keep `SKIP` for
+   checksums.
+5. `cargo publish -p` each crate whose version is new, in this order:
+   `tgradish-frames`, `tgradish-tgs`, `tgradish-core`, `tgradish-gui`,
+   `tgradish`. Before packaging again at a version already packaged,
+   delete the `tgradish-*` folders under cargo's `registry/src`, or the
+   old copies are used.
 
-5. `cargo publish -p` each crate whose version is new, in the order they
-   depend on each other: `tgradish-frames`, `tgradish-tgs`,
-   `tgradish-core`, `tgradish-gui`, then `tgradish`. They ask for each
-   other's exact versions, since `cargo install` doesn't read
-   `Cargo.lock`. Packaging checks them against each other from copies
-   it unpacks under cargo's `registry/src`, and keeps using those while
-   the version is the same, so before packaging again at a version
-   already packaged, delete the `tgradish-*` folders there.
-
-The corpus, tgs-lab and xtask are `publish = false`, and stay that way.
 `rust-version` in `Cargo.toml` is the oldest Rust that builds every crate,
-which CI checks with; `rust-toolchain.toml` builds with the newest.
+which CI checks.

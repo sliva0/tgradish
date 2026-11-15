@@ -38,7 +38,7 @@ From source, with Rust 1.95 or newer, `cargo build --release` makes `target/rele
 
 Packages install shell completions and man pages; elsewhere `tgradish completions SHELL` prints the script for bash, zsh, fish, PowerShell or nushell.
 
-The Python version, 1.x, is on the [`1.x`](https://github.com/sliva0/tgradish/tree/1.x) branch and on PyPI. 2.0's command line is different: `convert` takes its inputs as arguments, without `-i`. [CHANGELOG.md](CHANGELOG.md) says what changed, with a table of what each 1.x command and flag became.
+The Python version, 1.x, is on the [`1.x`](https://github.com/sliva0/tgradish/tree/1.x) branch and on PyPI. 2.0's command line is different: `convert` takes its inputs as arguments, without `-i`. [CHANGELOG.md](CHANGELOG.md) says what changed.
 
 
 ## Dependencies

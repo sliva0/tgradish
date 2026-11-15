@@ -28,10 +28,3 @@ The pack's music, by Pascal Belisle, is under other terms and is not used.
 | `cherry.gif` | `GIF/sprites/items/cherry.gif` | none |
 | `house.png` | `PNG/environment/props/house.png` | none |
 | `seaside.png` | `PNG/environment/environment-preview.png` | cropped to 756x216 from 700,0; metadata stripped |
-
-The screenshot makes Aseprite files of the sheets, cut into frames, 100 ms
-a frame as the pack's GIFs have them: `frog.aseprite`, 35x32, tagged
-"idle", the calm first frame repeated ten times and then the croak, as the
-pack's GIF holds it for a second, and "jump"; and `fox.aseprite`, 33x32,
-tagged "idle" and "run". It makes `seaside.mp4` of `seaside.png`, a
-384x216 view panning along it for three seconds at twice its size.
