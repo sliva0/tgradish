@@ -134,8 +134,16 @@ pub(crate) fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
         ui.colored_label(theme::warn(ui.visuals()), format!("⚠ {}", fl!("not-pixel-art")));
     }
     if item.blockers.contains(&Blocker::NeedsFfmpeg) {
+        // on hover, what looking for it found, as reading the input failed
+        // for want of it, and what to do
+        let note = fl!("needs-ffmpeg", "hint");
+        let why = match item.input_error() {
+            Some(found) => format!("{found}\n{note}"),
+            None => note,
+        };
+        let text = fl!("needs-ffmpeg");
         let fix = (fl!("choose-ffmpeg"), fl!("choose-ffmpeg", "hint"));
-        if widgets::attention(ui, &fl!("needs-ffmpeg"), &fix.0, &fix.1) {
+        if widgets::attention_explained(ui, &text, &why, &fix.0, &fix.1) {
             crate::banner::ask(ui.ctx(), crate::banner::Action::ChooseFfmpeg);
         }
     }

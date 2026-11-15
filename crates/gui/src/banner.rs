@@ -29,8 +29,6 @@ pub(crate) enum Severity {
 pub(crate) enum Subject {
     SettingsFile,
     Presets,
-    /// ffmpeg, which isn't there for files that need it.
-    Ffmpeg,
     /// Files removed a moment ago.
     Removed,
     /// Settings put back to their defaults a moment ago.
@@ -51,10 +49,9 @@ pub(crate) enum Action {
     CopyPath,
     /// Opens the folder of the message's file, the file selected.
     ShowInFolder,
-    /// Asks for the ffmpeg program, and keeps it in the settings.
+    /// Asks for the ffmpeg program, and keeps it in the settings, as a
+    /// file's settings ask while it is missing.
     ChooseFfmpeg,
-    /// Opens Settings.
-    OpenSettings,
     /// Puts the files removed a moment ago back.
     Undo,
     /// Puts back the settings as they were before they were reset.
@@ -84,7 +81,6 @@ impl Action {
             Action::CopyPath => fl!("copy-path"),
             Action::ShowInFolder => fl!("folder-of"),
             Action::ChooseFfmpeg => fl!("choose-ffmpeg"),
-            Action::OpenSettings => fl!("open-settings"),
             Action::Undo => fl!("undo-removing"),
             Action::UndoReset => fl!("undo-reset"),
         }
@@ -97,7 +93,6 @@ impl Action {
             Action::CopyPath => fl!("copy-path", "hint"),
             Action::ShowInFolder => fl!("folder-of", "hint"),
             Action::ChooseFfmpeg => fl!("choose-ffmpeg", "hint"),
-            Action::OpenSettings => fl!("open-settings", "hint"),
             Action::Undo => fl!("undo-removing", "hint"),
             Action::UndoReset => fl!("undo-reset", "hint"),
         }
@@ -550,7 +545,6 @@ impl crate::app::App {
                 }
             }
             Action::ChooseFfmpeg => self.pick(ctx, crate::files::Pick::Ffmpeg),
-            Action::OpenSettings => self.settings_dialog.open(),
             Action::Undo => self.undo_removing(),
             Action::UndoReset => self.undo_reset(),
             Action::ReadPresetsAgain => {

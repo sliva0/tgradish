@@ -11,7 +11,6 @@ use tgradish_core::webm::Options;
 use tgradish_core::webp;
 
 use crate::app::App;
-use crate::banner::{Action, Message, Subject};
 use crate::files::THUMB;
 use crate::item::{Conversion, Item, Kind, Recipe, Show};
 use crate::jobs::{Done, Setup, Status};
@@ -153,26 +152,8 @@ impl App {
                 }
             }
         }
-        self.say_ffmpeg_missing(&backend);
         self.load_detail(ctx, &backend);
         self.convert_next(ctx, &backend);
-    }
-
-    /// Says, once, that files open need ffmpeg, which isn't there, and
-    /// stops saying it once it is found or they are gone.
-    fn say_ffmpeg_missing(&mut self, backend: &Result<Backend, String>) {
-        let missing = backend.is_err() && self.items.iter().any(Item::needs_ffmpeg);
-        if missing == self.ffmpeg_missing {
-            return;
-        }
-        self.ffmpeg_missing = missing;
-        let (true, Err(why)) = (missing, backend) else {
-            self.banner.forget(Subject::Ffmpeg);
-            return;
-        };
-        let message = Message::warning(fl!("ffmpeg-missing")).note(fl!("ffmpeg-missing", "note"));
-        let actions = [Action::ChooseFfmpeg, Action::OpenSettings];
-        self.say(message.reason(why).actions(&actions).about(Subject::Ffmpeg));
     }
 
     /// Reads more of the selected video once what is looked at stays put
@@ -719,27 +700,36 @@ mod tests {
     }
 
     #[test]
-    fn says_once_that_videos_need_ffmpeg_while_there_is_none() {
+    fn says_where_ffmpeg_is_needed_while_there_is_none() {
         let dir = tempfile::tempdir().unwrap();
         let clip = dir.path().join("clip.mp4");
         std::fs::write(&clip, b"a video, as far as its name says").unwrap();
+        // pixel art, made into a .tgs without ffmpeg
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
         let mut config = Config::default();
         config.ffmpeg.path = Some(dir.path().join("no-ffmpeg-here"));
         let mut harness = harness(config);
-        harness.run_steps(2);
-        // nothing said without a file that needs it
-        assert!(harness.state().banner.rows.is_empty());
-        harness.state_mut().add(vec![clip]);
+        harness.state_mut().add(vec![clip, art]);
         finish(&mut harness);
-        let app = harness.state();
-        assert_eq!(app.items[0].blockers, [Blocker::NeedsFfmpeg]);
-        let said: Vec<_> = app.banner.rows.iter().map(|said| &said.message).collect();
-        assert_eq!(said.len(), 1);
-        assert_eq!(said[0].headline, fl!("ffmpeg-missing"));
-        assert_eq!(said[0].subject, Some(Subject::Ffmpeg));
-        assert_eq!(said[0].actions, [Action::ChooseFfmpeg, Action::OpenSettings]);
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        assert_eq!(harness.state().items[0].blockers, [Blocker::NeedsFfmpeg]);
+        assert!(harness.state().items[1].blockers.is_empty());
+        let needs = format!("⚠ {}", fl!("needs-ffmpeg"));
+        let row = format!("⚠ {}", fl!("row-needs-ffmpeg"));
+        // the video's row says why, while the pixel art is selected
+        harness.state_mut().select(ids[1]);
+        harness.run_steps(2);
+        harness.get_by_label(&row);
+        assert!(harness.query_by_label(&needs).is_none());
+        // and its settings, with a way to choose one, once it is
+        harness.state_mut().select(ids[0]);
+        harness.run_steps(2);
+        harness.get_by_label(&needs);
+        harness.get_by_label(&fl!("choose-ffmpeg"));
+        // said there, and not again over the settings
+        assert!(harness.state().banner.rows.is_empty());
         // the file waits for it, rather than failing
-        harness.get_by_label(&format!("⚠ {}", fl!("row-needs-ffmpeg")));
         convert(&harness);
         harness.run_steps(2);
         let item = &harness.state().items[0];
@@ -751,8 +741,9 @@ mod tests {
         let ffmpeg = &mut harness.state_mut().config.ffmpeg;
         (ffmpeg.choice, ffmpeg.path) = (FfmpegChoice::System, None);
         harness.run_steps(2);
-        assert!(harness.state().banner.rows.is_empty());
         assert!(!harness.state().items[0].blockers.contains(&Blocker::NeedsFfmpeg));
+        harness.run_steps(2);
+        assert!(harness.query_by_label(&needs).is_none());
     }
 
     #[test]

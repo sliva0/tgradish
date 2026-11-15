@@ -388,8 +388,23 @@ fn broken_as(text: &str, like: &str, breaks: &[usize]) -> String {
 /// of, in the warning colour, with a button that puts it right, named
 /// `fix` and explained by `hint`: true once clicked.
 pub(crate) fn attention(ui: &mut egui::Ui, text: &str, fix: &str, hint: &str) -> bool {
+    attention_explained(ui, text, "", fix, hint)
+}
+
+/// [`attention`], with more of what to do about it said on hover over
+/// `text`, as `why` says it, where that isn't empty.
+pub(crate) fn attention_explained(
+    ui: &mut egui::Ui,
+    text: &str,
+    why: &str,
+    fix: &str,
+    hint: &str,
+) -> bool {
     let warning = RichText::new(format!("⚠ {text}")).color(theme::warn(ui.visuals()));
-    ui.add(egui::Label::new(warning).wrap());
+    let said = ui.add(egui::Label::new(warning).wrap());
+    if !why.is_empty() {
+        said.on_hover_text(why);
+    }
     ui.button(fix).on_hover_text(hint).clicked()
 }
 

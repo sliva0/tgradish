@@ -121,13 +121,6 @@ undo-removing = Undo
 settings-reset = Settings are back to their defaults
 undo-reset = Undo
     .hint = Put back the settings as they were before
-# Opens the Settings dialog, from a message.
-open-settings = Open Settings
-    .hint = Where ffmpeg, and the rest, are chosen
-# Shown while files that need ffmpeg are open and there is none;
-# what went wrong looking for it follows.
-ffmpeg-missing = Videos need ffmpeg
-    .note = Install ffmpeg from your system's packages, or from ffmpeg.org, or choose where it is. Files are read again once it is found
 # The hover of show-folder's button in a message.
 folder-of = Show in folder
     .hint = Open the folder it is in
@@ -797,8 +790,10 @@ layers-missing = { $count ->
 }
 layers-as-file = Show layers as in the file
     .hint = Show and hide the layers as the file does
-# Under what to make, where it needs ffmpeg, which isn't there.
+# Under what to make, where it needs ffmpeg, which isn't there; .hint on
+# hover over it.
 needs-ffmpeg = This needs ffmpeg, which wasn't found
+    .hint = Install ffmpeg from your system's packages, or from ffmpeg.org, or choose where it is. Files are read again once it is found
 choose-ffmpeg = Choose ffmpeg…
     .hint = Pick the ffmpeg program, or a folder with ffmpeg and ffprobe
 # A file's state in the list, in place of its Convert button.

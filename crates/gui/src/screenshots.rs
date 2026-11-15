@@ -88,9 +88,8 @@ fn notice_screenshots() {
 /// What passes in the corner over the list, and what stays at the
 /// bottom: files removed, with a short list and a full one; two and more
 /// at once; nothing to paste, and the open files not kept, which say why
-/// in tgradish's words and in the system's; and one beside the banner
-/// saying ffmpeg is missing, at the usual size and the smallest, in both
-/// themes. Needs ffmpeg.
+/// in tgradish's words and in the system's; at the usual size and the
+/// smallest, in both themes.
 fn notices(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     use crate::banner::Message;
     use crate::config::Theme;
@@ -106,7 +105,6 @@ fn notices(save: &mut impl FnMut(&mut Harness<App>, &str)) {
             art
         })
         .collect();
-    let Some(clip) = video(dir.path(), "640x360") else { return };
     let shot =
         |harness: &mut Harness<App>, save: &mut dyn FnMut(&mut Harness<App>, &str), name: &str| {
             // the pointer away from what it would hover
@@ -159,17 +157,6 @@ fn notices(save: &mut impl FnMut(&mut Harness<App>, &str)) {
             let denied = std::io::Error::from_raw_os_error(13);
             harness.state_mut().say(crate::app::session_unsaved(&session, &denied));
             shot(&mut harness, save, &name("session"));
-            harness.state_mut().banner = Default::default();
-            // beside what stays until it is dealt with: no ffmpeg
-            let mut config = config.clone();
-            config.ffmpeg.path = Some(dir.path().join("no-ffmpeg-here"));
-            let mut harness = window(config, size);
-            set_theme(&harness.ctx, theme);
-            harness.state_mut().add(vec![arts[0].clone(), arts[1].clone(), clip.clone()]);
-            finish(&mut harness);
-            let first = harness.state().items[0].id;
-            harness.state_mut().remove(first);
-            shot(&mut harness, save, &name("banner"));
         }
     }
 }
