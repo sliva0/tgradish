@@ -442,7 +442,7 @@ mod tests {
         harness.state_mut().add(vec![video]);
         finish(&mut harness);
         harness.get_by_label_contains("Telegram is told it is shorter");
-        harness.get_by_label("Spoof to");
+        harness.get_by_label("Spoofed duration");
         // cut to 3 seconds, or not spoofed at all: no warning
         harness.state_mut().items[0].choices.length = Some(3.0);
         harness.run_steps(2);

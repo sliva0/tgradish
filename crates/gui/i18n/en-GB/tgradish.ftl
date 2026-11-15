@@ -396,7 +396,7 @@ part-end = Where the used part ends
 # Where the pointer is over the timeline, counting frames from 1.
 frame-number = frame { $number }
 # The mark of Telegram's 3 seconds on the timeline, on hover: what becomes
-# of the used part past it, as "Over 3 seconds" and the speed choose. The
+# of the used part past it, as "Spoof duration" and the speed choose. The
 # part cut off is hatched; one spoofed or sped up is kept whole.
 limit-mark = Telegram's limit of 3 seconds: the used part past it is cut off
     .spoofed = Telegram's limit of 3 seconds: the used part past it plays too, as Telegram is told the sticker is shorter
@@ -585,15 +585,15 @@ frame-rate = Frame rate
     .sheet = How fast the frames of a sequence or sprite sheet play
 default-rate = Default
     .hint = { $fps } fps, as these frames don't say how fast they play
-over-3-s = Over 3 seconds
+over-3-s = Spoof duration
     .hint = Telegram refuses stickers that say they last longer than 3 seconds
-spoof-auto = Spoof when longer
+spoof-auto = When longer
     .hint = Stickers longer than 3 seconds get a short duration encoded into them: Telegram accepts them and plays all of it
-spoof-always = Always spoof
+spoof-always = Always
     .hint = Even short stickers get the short duration encoded into them
-spoof-never = Cut at 3 s
+spoof-never = Never: cut at 3 s
     .hint = Doesn't spoof the metadata and cuts the video at 3 seconds
-spoof-to = Spoof to
+spoof-to = Spoofed duration
     .hint = The duration encoded into the metadata, which Telegram reads
     .honest = Nothing is spoofed when "{ spoof-never }" is picked
 default-duration = Default
@@ -840,7 +840,7 @@ plan-faster = Sped up ×{ $factor }
 plan-slower = Slowed down ×{ $factor }
 plan-cut-3-s = Cut at 3 s of { $played }
 plan-spoofed = Duration spoofed, so all { $played } plays
-# "Always spoof", where the result is short enough not to need it.
+# Spoofing "Always", where the result is short enough not to need it.
 plan-spoofed-anyway = Duration spoofed, though { $played } is short enough
 plan-saved = Saved as { $name }
 

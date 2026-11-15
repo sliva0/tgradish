@@ -215,7 +215,7 @@ fn time(item: &Item, used: &Used, tempo: f64, spoof: Spoof, steps: &mut Vec<Stri
 }
 
 /// What is done to a result that plays for `played` to keep to Telegram's
-/// length: cut, or its duration spoofed, which "Always spoof" does to
+/// length: cut, or its duration spoofed, which spoofing "Always" does to
 /// short ones too.
 fn length_step(played: f64, spoof: Spoof) -> Option<String> {
     let long = telegram::too_long(played);
