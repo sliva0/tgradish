@@ -230,9 +230,10 @@ pub enum Details {
         layers: u64,
         /// Rectangles drawn in all of them.
         rectangles: u64,
-        /// What the sticker shows, for previews; not serialised.
+        /// What the sticker shows, drawn for previews when asked, as
+        /// [`Outcome::preview`] draws it; not serialised.
         #[serde(skip)]
-        preview: Preview,
+        drawing: crate::tgs::Drawing,
     },
     /// A WebP's: the picture, and how it was encoded.
     Webp {
@@ -246,14 +247,14 @@ pub enum Details {
 }
 
 impl Outcome {
-    /// What a `.tgs` shows, drawn from what it was made of, as reading it
-    /// back with [`crate::tgs::preview_file`] draws it; `None` for the
-    /// other formats, which are read from their files for previews, as
-    /// [`crate::webp::preview`] and
+    /// What a `.tgs` shows, drawn now from what it was made of, as
+    /// reading it back with [`crate::tgs::preview_file`] draws it; `None`
+    /// for the other formats, which are read from their files for
+    /// previews, as [`crate::webp::preview`] and
     /// [`Backend::preview`](crate::backend::Backend::preview) read them.
     pub fn preview(&self) -> Option<Preview> {
         match &self.details {
-            Details::Tgs { preview, .. } => Some(preview.clone()),
+            Details::Tgs { drawing, .. } => Some(drawing.draw()),
             _ => None,
         }
     }

@@ -12,7 +12,6 @@ use tgradish_core::events::{Details, StartDetails};
 use tgradish_core::input::Input;
 use tgradish_core::presets::Format;
 use tgradish_core::presets::FormatOptions;
-use tgradish_core::preview::Preview;
 use tgradish_core::tgradish_tgs::check::Severity;
 use tgradish_core::tgradish_tgs::normalise::Report;
 use tgradish_core::tgradish_tgs::sticker::Step;
@@ -250,17 +249,16 @@ pub(crate) struct Done {
     pub(crate) json_bytes: Option<u64>,
     pub(crate) shapes: Option<(usize, usize)>,
     pub(crate) problems: Vec<Problem>,
-    /// The frames of `.tgs` results, as drawn while making them, and of
-    /// pictures, until `App` takes them, after which they are read from
-    /// the file again; WebM ones are always decoded from the file.
-    pub(crate) preview: Option<Preview>,
+    /// What a `.tgs` made now shows, kept as its art until the result's
+    /// frames are first drawn from it, after which they are drawn from the
+    /// file again, as other results' are always read from theirs.
+    pub(crate) drawing: Option<tgs::Drawing>,
 }
 
 impl Done {
     /// What converting made, as core says it.
     fn of(outcome: Outcome) -> Done {
         let mut done = Done {
-            preview: outcome.preview(),
             output: outcome.output,
             bytes: outcome.bytes,
             limit: outcome.limit,
@@ -273,14 +271,16 @@ impl Done {
             json_bytes: None,
             shapes: None,
             problems: problems(&outcome.issues),
+            drawing: None,
         };
         match outcome.details {
             Details::Webm { attempt, spoofed, settled, .. } => {
                 (done.attempt, done.spoofed, done.settled) = (Some(attempt), spoofed, settled);
             }
-            Details::Tgs { json_bytes, layers, rectangles, .. } => {
+            Details::Tgs { json_bytes, layers, rectangles, drawing, .. } => {
                 done.json_bytes = Some(json_bytes);
                 done.shapes = Some((layers as usize, rectangles as usize));
+                done.drawing = Some(drawing);
             }
             _ => {}
         }
@@ -305,7 +305,7 @@ impl Done {
                     json_bytes: None,
                     shapes: None,
                     problems: problems(&telegram::check(&info, target)),
-                    preview: None,
+                    drawing: None,
                 })
             }
             Format::Webp => {
@@ -322,7 +322,7 @@ impl Done {
                     json_bytes: None,
                     shapes: None,
                     problems: problems(&issues),
-                    preview: None,
+                    drawing: None,
                 })
             }
             Format::Tgs => {
@@ -338,7 +338,7 @@ impl Done {
                     json_bytes: Some(stats.json_bytes as u64),
                     shapes: Some((stats.layers, stats.shapes)),
                     problems: problems(&issues),
-                    preview: None,
+                    drawing: None,
                 })
             }
         }
@@ -554,12 +554,7 @@ fn run(
         convert::Request { input, output: Some(output), options, overwrite, keep_temp: false };
     let outcome =
         convert::convert(backend.as_ref(), &request, cancel, &mut |event| follow(event, update))?;
-    let mut done = Done::of(outcome);
-    // a picture is small enough to read again at once
-    if request.options.format() == Format::Webp {
-        done.preview = webp::preview(&done.output).ok();
-    }
-    Ok(done)
+    Ok(Done::of(outcome))
 }
 
 /// Takes in what a conversion of any format says as it goes.

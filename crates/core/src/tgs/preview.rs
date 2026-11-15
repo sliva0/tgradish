@@ -2,7 +2,9 @@
 //! or read back from a file tgradish wrote, which shows the same.
 
 use std::path::Path;
+use std::sync::Arc;
 
+use tgradish_tgs::PixelAnim;
 use tgradish_tgs::picture::{self, DrawError, Picture};
 
 use crate::error::{Error, Result};
@@ -17,8 +19,49 @@ fn preview(picture: Picture) -> Preview {
 }
 
 /// What `anim` shows, `stretch`ed square as the sticker is, or not.
-pub(super) fn draw(anim: &tgradish_tgs::PixelAnim, stretch: bool) -> Preview {
+fn draw(anim: &PixelAnim, stretch: bool) -> Preview {
     preview(picture::of_art(anim, stretch, PREVIEW_MAX_SIDE))
+}
+
+/// What a `.tgs` made here shows, kept as the art it was made of, which
+/// is cheap to keep and to clone: drawn into a preview only when asked,
+/// as [`Drawing::draw`] draws it, the same as [`preview_file`] draws
+/// from the file.
+#[derive(Clone)]
+pub struct Drawing {
+    anim: Arc<PixelAnim>,
+    /// Stretched square, as the sticker is.
+    stretch: bool,
+}
+
+impl Drawing {
+    /// What `anim` shows, `stretch`ed square as the sticker is, or not.
+    pub(crate) fn new(anim: PixelAnim, stretch: bool) -> Drawing {
+        Drawing { anim: Arc::new(anim), stretch }
+    }
+
+    /// Draws it: a pixel per art pixel, each frame with how long it shows.
+    pub fn draw(&self) -> Preview {
+        draw(&self.anim, self.stretch)
+    }
+}
+
+impl PartialEq for Drawing {
+    fn eq(&self, other: &Drawing) -> bool {
+        self.stretch == other.stretch
+            && (Arc::ptr_eq(&self.anim, &other.anim) || self.anim == other.anim)
+    }
+}
+
+impl std::fmt::Debug for Drawing {
+    /// Its size, not every pixel of every frame.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Drawing")
+            .field("width", &self.anim.width())
+            .field("height", &self.anim.height())
+            .field("stretch", &self.stretch)
+            .finish_non_exhaustive()
+    }
 }
 
 /// What the `.tgs` (or plain Lottie JSON) at `path` shows, drawn as

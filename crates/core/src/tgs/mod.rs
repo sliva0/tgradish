@@ -13,7 +13,7 @@ pub use inspect::inspect_file;
 #[cfg(test)]
 pub(crate) use inspect::read_json;
 pub use options::Options;
-pub use preview::preview_file;
+pub use preview::{Drawing, preview_file};
 use read::load;
 pub use read::{Art, needs_ffmpeg, read_art};
 
@@ -154,8 +154,8 @@ pub fn convert(
             steps: sticker.steps,
             layers: sticker.layers as u64,
             rectangles: sticker.rectangles as u64,
-            preview: preview::draw(
-                &sticker.anim,
+            drawing: Drawing::new(
+                sticker.anim,
                 settings.normalise.square == normalise::Square::Stretch,
             ),
         },

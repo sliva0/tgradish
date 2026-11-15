@@ -209,20 +209,13 @@ impl App {
             };
             let output = done.output.clone();
             item.result_thumb = None;
-            // a picture or a .tgs is read from its file again, once its
-            // frames are let go
-            item.result_clip = match done.preview.take() {
-                Some(preview) => Load::Ready(Clip::from_preview(preview, true)),
-                None => Load::Idle,
-            };
+            item.result_clip = Load::Idle;
             if selected {
                 item.view.show = Show::Result;
             }
             item.made = Some(made);
             item.failed = None;
-            if item.result_clip.is_idle() {
-                load_result_clip(ctx, item, backend);
-            }
+            load_result_clip(ctx, item, backend);
             if let Some(written) = Written::of(id, &output) {
                 self.written.insert(output, written);
             }
@@ -424,8 +417,8 @@ fn texture_options(clip: &Clip) -> egui::TextureOptions {
 }
 
 fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backend, String>) {
-    let Some(Conversion { job, format, .. }) = &item.made else { return };
-    let Status::Done(done) = &job.status else { return };
+    let Some(Conversion { job, format, .. }) = &mut item.made else { return };
+    let Status::Done(done) = &mut job.status else { return };
     item.result_clip = match (format, backend) {
         (Format::Webm, Ok(backend)) => {
             Load::Loading(media::load_result(ctx, backend.clone(), &done.output))
@@ -435,12 +428,15 @@ fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backe
             Ok(preview) => Load::Ready(Clip::from_preview(preview, true)),
             Err(err) => Load::Failed(crate::jobs::failure(&err)),
         },
-        // drawn again from its file, as converting drew it
+        // drawn from the art it was just made of, and once that is let
+        // go, from its file, which shows the same
         (Format::Tgs, _) => {
-            let output = done.output.clone();
+            let (output, drawing) = (done.output.clone(), done.drawing.take());
             Load::Loading(Task::spawn(ctx, move |_| {
-                let preview =
-                    tgs::preview_file(&output).map_err(|err| crate::jobs::failure(&err))?;
+                let preview = match drawing {
+                    Some(drawing) => drawing.draw(),
+                    None => tgs::preview_file(&output).map_err(|err| crate::jobs::failure(&err))?,
+                };
                 Ok(Clip::from_preview(preview, true))
             }))
         }

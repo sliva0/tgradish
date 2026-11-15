@@ -1396,11 +1396,11 @@ mod tests {
         let item = &first.state().items[0];
         let fresh = shown(item).expect("drawn as it was made");
         let output = crate::testing::made_job(item).output.clone();
-        // its frames are kept once, where they show
+        // its frames are kept once, where they show, and its art no more
         let Some(Status::Done(done)) = item.made.as_ref().map(|made| &made.job.status) else {
             panic!("not made");
         };
-        assert!(done.preview.is_none());
+        assert!(done.drawing.is_none());
         // let go of, as when other files are looked at, and read again
         crate::work::release(&mut first.state_mut().items[0]);
         finish(&mut first);
