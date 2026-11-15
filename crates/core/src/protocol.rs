@@ -277,11 +277,12 @@ mod tests {
 
     use super::Failure;
     use super::*;
+    use crate::events::{Details, Outcome};
     use crate::ffmpeg::Probe;
-    use crate::telegram::Issue;
+    use crate::telegram::{Issue, Target};
     use crate::webm::{Decision, Params, Rate};
     use crate::webm::{Plan, Request};
-    use crate::webp::{self, Encoding, Outcome};
+    use crate::webp::{self, Encoding};
 
     fn probe() -> Probe {
         Probe {
@@ -328,17 +329,23 @@ mod tests {
             },
             Event::Warning { message: "a warning".into() },
             Event::Log { line: "a line".into() },
-            Event::Finished {
+            Event::Finished(Box::new(Outcome {
                 input: "in.mp4".into(),
                 output: "in.sticker.webm".into(),
+                format: Format::Webm,
+                target: Target::Sticker,
                 bytes: 250_000,
-                attempt: 2,
-                params: Params { rate: Rate::Crf(32), ..params },
-                spoofed: false,
-                settled: false,
+                limit: 262_144,
+                changed: false,
                 issues: vec![too_big.clone()],
-                temp_dir: Some("/tmp/tgradish-x".into()),
-            },
+                details: Details::Webm {
+                    attempt: 2,
+                    params: Params { rate: Rate::Crf(32), ..params },
+                    spoofed: false,
+                    settled: false,
+                    temp_dir: Some("/tmp/tgradish-x".into()),
+                },
+            })),
             Event::Error(Failure { message: "it failed".into(), input: Some("in.mp4".into()) }),
         ]
         .map(|event| serde_json::to_value(event).unwrap());
@@ -363,31 +370,43 @@ mod tests {
             tgs::Event::Reduced { step: step.clone() },
             tgs::Event::Packing,
             tgs::Event::Warning { message: "a warning".into() },
-            tgs::Event::Finished {
+            tgs::Event::Finished(Box::new(Outcome {
                 input: "art.gif".into(),
                 output: "art.sticker.tgs".into(),
+                format: Format::Tgs,
+                target: Target::Sticker,
                 bytes: 60_000,
-                json_bytes: 300_000,
+                limit: 65_536,
                 changed: true,
-                steps: vec![step],
-                layers: 3,
-                rectangles: 40,
                 issues: Vec::new(),
-            },
+                details: Details::Tgs {
+                    json_bytes: 300_000,
+                    steps: vec![step],
+                    layers: 3,
+                    rectangles: 40,
+                    preview: crate::preview::Preview::new(1, 1, vec![(vec![0; 4], 6)]),
+                },
+            })),
             tgs::Event::Error(Failure { message: "it failed".into(), input: None }),
         ]
         .map(|event| serde_json::to_value(event).unwrap());
         let still = [
             webp::Event::Started { input: "in.png".into(), output: "in.sticker.webp".into() },
-            webp::Event::Finished(Outcome {
+            webp::Event::Finished(Box::new(Outcome {
                 input: "in.png".into(),
                 output: "in.sticker.webp".into(),
+                format: Format::Webp,
+                target: Target::Emoji,
                 bytes: 100_000,
-                width: 512,
-                height: 384,
-                encoding: Encoding::Lossy { quality: 80 },
+                limit: 524_288,
+                changed: true,
                 issues: vec![Issue::WrongSize { width: 512, height: 384, side: 100, exact: true }],
-            }),
+                details: Details::Webp {
+                    width: 512,
+                    height: 384,
+                    encoding: Encoding::Lossy { quality: 80 },
+                },
+            })),
             webp::Event::Warning { message: "a warning".into() },
             webp::Event::Error(Failure { message: "it failed".into(), input: None }),
         ]
@@ -593,7 +612,7 @@ mod tests {
             Some(r#"{"event":"warning","message":"a warning"}"#),
             Some(r#"{"event":"log","line":"a line"}"#),
             Some(
-                r#"{"event":"finished","input":"in.mp4","output":"in.sticker.webm","bytes":250000,"attempt":2,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"crf","crf":32}},"spoofed":false,"settled":false,"issues":[{"kind":"too-big","bytes":300000,"max":262144,"severity":"error","message":"293.0 KiB, over the 256 KiB limit"}],"temp-dir":"/tmp/tgradish-x"}"#,
+                r#"{"event":"finished","input":"in.mp4","output":"in.sticker.webm","format":"webm","target":"sticker","bytes":250000,"limit":262144,"changed":false,"issues":[{"kind":"too-big","bytes":300000,"max":262144,"severity":"error","message":"293.0 KiB, over the 256 KiB limit"}],"attempt":2,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"crf","crf":32}},"spoofed":false,"settled":false,"temp-dir":"/tmp/tgradish-x"}"#,
             ),
             Some(r#"{"event":"error","message":"it failed","input":"in.mp4"}"#),
             None,
@@ -604,12 +623,12 @@ mod tests {
             Some(r#"{"event":"packing"}"#),
             Some(r#"{"event":"warning","message":"a warning"}"#),
             Some(
-                r#"{"event":"finished","input":"art.gif","output":"art.sticker.tgs","bytes":60000,"json-bytes":300000,"changed":true,"steps":[{"reduction":"despeckle","bytes":60000,"distortion":0.01}],"layers":3,"rectangles":40,"issues":[]}"#,
+                r#"{"event":"finished","input":"art.gif","output":"art.sticker.tgs","format":"tgs","target":"sticker","bytes":60000,"limit":65536,"changed":true,"issues":[],"json-bytes":300000,"steps":[{"reduction":"despeckle","bytes":60000,"distortion":0.01}],"layers":3,"rectangles":40}"#,
             ),
             Some(r#"{"event":"error","message":"it failed","input":null}"#),
             Some(r#"{"event":"started","input":"in.png","output":"in.sticker.webp"}"#),
             Some(
-                r#"{"event":"finished","input":"in.png","output":"in.sticker.webp","bytes":100000,"width":512,"height":384,"encoding":{"kind":"lossy","quality":80},"issues":[{"kind":"wrong-size","width":512,"height":384,"side":100,"exact":true,"severity":"error","message":"size is 512×384, expected 100×100"}]}"#,
+                r#"{"event":"finished","input":"in.png","output":"in.sticker.webp","format":"webp","target":"emoji","bytes":100000,"limit":524288,"changed":true,"issues":[{"kind":"wrong-size","width":512,"height":384,"side":100,"exact":true,"severity":"error","message":"size is 512×384, expected 100×100"}],"width":512,"height":384,"encoding":{"kind":"lossy","quality":80}}"#,
             ),
             Some(r#"{"event":"warning","message":"a warning"}"#),
             Some(r#"{"event":"error","message":"it failed","input":null}"#),

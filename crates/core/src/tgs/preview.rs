@@ -101,7 +101,7 @@ mod tests {
                 let made =
                     convert(None, &request, &crate::CancelToken::new(), &mut |_| {}).unwrap();
                 let preview = preview_file(&made.output).unwrap();
-                assert_eq!(preview, made.preview, "{} {index}", file.name);
+                assert_eq!(Some(preview), made.preview(), "{} {index}", file.name);
                 read += 1;
             }
         }

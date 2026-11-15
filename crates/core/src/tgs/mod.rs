@@ -23,15 +23,15 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use tgradish_tgs::normalise;
-use tgradish_tgs::sticker::{self, Progress, Step};
+use tgradish_tgs::sticker::{self, Progress};
 
 use crate::CancelToken;
 use crate::backend::Backend;
 use crate::error::{Error, Result};
+use crate::events::{Details, Outcome};
 use crate::input::Input;
 use crate::options::Resize;
 use crate::presets::Format;
-use crate::preview::Preview;
 use crate::telegram::Issue;
 
 /// Frame rate of still images, sprite sheets and image sequences unless
@@ -67,32 +67,6 @@ impl Request {
         let target = self.options.target.unwrap_or_default();
         self.output.clone().unwrap_or_else(|| self.input.default_output(Format::Tgs, target))
     }
-}
-
-/// What converting made: all that [`Event::Finished`] says, whether or
-/// not events were followed, and a preview.
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct Outcome {
-    /// Where the sticker was written.
-    pub output: PathBuf,
-    /// Its size in bytes.
-    pub bytes: u64,
-    /// Size of the Lottie JSON inside.
-    pub json_bytes: u64,
-    /// Whether anything visible was given up to fit, see
-    /// [`Event::Finished`].
-    pub changed: bool,
-    /// Reductions fitting applied, in order.
-    pub steps: Vec<Step>,
-    /// Lottie layers in it.
-    pub layers: usize,
-    /// Rectangles drawn in all of them.
-    pub rectangles: usize,
-    /// Problems Telegram would still have with the result.
-    pub issues: Vec<Issue>,
-    /// What the sticker shows, for previews.
-    pub preview: Preview,
 }
 
 /// Converts pixel art into a `.tgs` sticker. `backend` is ffmpeg, which
@@ -160,31 +134,28 @@ pub fn convert(
         return Err(Error::Cancelled);
     }
     crate::fsutil::write_output(&output, &sticker.tgs, request.overwrite)?;
+    let target = request.options.target.unwrap_or_default();
     let outcome = Outcome {
+        input,
         output,
+        format: Format::Tgs,
+        target,
         bytes: sticker.bytes as u64,
-        json_bytes: sticker.json_bytes as u64,
+        limit: Format::Tgs.max_bytes(target),
         changed,
-        steps: sticker.steps,
-        layers: sticker.layers,
-        rectangles: sticker.rectangles,
         issues: sticker.issues.into_iter().map(Issue::Lottie).collect(),
-        preview: preview::draw(
-            &sticker.anim,
-            settings.normalise.square == normalise::Square::Stretch,
-        ),
+        details: Details::Tgs {
+            json_bytes: sticker.json_bytes as u64,
+            steps: sticker.steps,
+            layers: sticker.layers as u64,
+            rectangles: sticker.rectangles as u64,
+            preview: preview::draw(
+                &sticker.anim,
+                settings.normalise.square == normalise::Square::Stretch,
+            ),
+        },
     };
-    on_event(Event::Finished {
-        input: request.input.first().to_path_buf(),
-        output: outcome.output.clone(),
-        bytes: outcome.bytes,
-        json_bytes: outcome.json_bytes,
-        changed,
-        steps: outcome.steps.clone(),
-        layers: outcome.layers as u64,
-        rectangles: outcome.rectangles as u64,
-        issues: outcome.issues.clone(),
-    });
+    on_event(Event::Finished(Box::new(outcome.clone())));
     Ok(outcome)
 }
 
@@ -229,12 +200,13 @@ mod tests {
             convert(None, &request, &CancelToken::new(), &mut |_| {})
         };
         // taller than wide: padded keeps its shape, the others are square
-        let padded = make(Resize::Pad).unwrap();
-        assert!(padded.preview.width < padded.preview.height);
+        let padded = make(Resize::Pad).unwrap().preview().unwrap();
+        assert!(padded.width < padded.height);
         for resize in [Resize::Crop, Resize::Stretch] {
             let made = make(resize).unwrap();
             assert!(made.issues.is_empty(), "{resize:?}: {:?}", made.issues);
-            assert_eq!(made.preview.width, made.preview.height, "{resize:?}");
+            let preview = made.preview().unwrap();
+            assert_eq!(preview.width, preview.height, "{resize:?}");
         }
         // kept as it is only where it is square already: the whole of
         // the walker, but not a crop of it that isn't
@@ -243,8 +215,8 @@ mod tests {
             u32::from(u16::from_le_bytes([walker.bytes[8], walker.bytes[9]])),
         );
         assert_eq!(width, height);
-        let made = make(Resize::Contain).unwrap();
-        assert_eq!(made.preview.width, padded.preview.width);
+        let made = make(Resize::Contain).unwrap().preview().unwrap();
+        assert_eq!(made.width, padded.width);
         let crop = crate::options::Crop { x: 0, y: 0, width, height: height - 2 };
         let options =
             Options { resize: Some(Resize::Contain), crop: Some(crop), ..Options::default() };

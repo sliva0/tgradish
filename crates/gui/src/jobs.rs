@@ -7,6 +7,7 @@ use std::sync::mpsc::{Receiver, channel};
 use eframe::egui;
 use tgradish_core::CancelToken;
 use tgradish_core::backend::Backend;
+use tgradish_core::events::Details;
 use tgradish_core::input::Input;
 use tgradish_core::presets::Format;
 use tgradish_core::preview::Preview;
@@ -16,7 +17,7 @@ use tgradish_core::tgradish_tgs::sticker::Step;
 use tgradish_core::tgs;
 use tgradish_core::webm::{self, Decision, Event, Options, Params};
 use tgradish_core::webp;
-use tgradish_core::{Error, FfmpegMissing, telegram};
+use tgradish_core::{Error, FfmpegMissing, Outcome, telegram};
 
 use crate::l10n::fl;
 use crate::widgets;
@@ -264,6 +265,36 @@ pub(crate) struct Done {
 }
 
 impl Done {
+    /// What converting made, as core says it.
+    fn of(outcome: Outcome) -> Done {
+        let mut done = Done {
+            preview: outcome.preview(),
+            output: outcome.output,
+            bytes: outcome.bytes,
+            limit: outcome.limit,
+            // a WebM's notes say what fitting kept of its frame rate and
+            // length instead
+            changed: outcome.changed && outcome.format != Format::Webm,
+            attempt: None,
+            spoofed: false,
+            settled: false,
+            json_bytes: None,
+            shapes: None,
+            problems: problems(&outcome.issues),
+        };
+        match outcome.details {
+            Details::Webm { attempt, spoofed, settled, .. } => {
+                (done.attempt, done.spoofed, done.settled) = (Some(attempt), spoofed, settled);
+            }
+            Details::Tgs { json_bytes, layers, rectangles, .. } => {
+                done.json_bytes = Some(json_bytes);
+                done.shapes = Some((layers as usize, rectangles as usize));
+            }
+            _ => {}
+        }
+        done
+    }
+
     /// What a result made earlier is, read from the file, for an
     /// instance that didn't make it; `None` when it is gone.
     pub(crate) fn of_file(path: &Path, format: Format, target: telegram::Target) -> Option<Done> {
@@ -274,7 +305,7 @@ impl Done {
                 Some(Done {
                     output: path.to_path_buf(),
                     bytes: info.file_size,
-                    limit: target.max_bytes(),
+                    limit: format.max_bytes(target),
                     changed: false,
                     attempt: None,
                     spoofed,
@@ -291,7 +322,7 @@ impl Done {
                 Some(Done {
                     output: path.to_path_buf(),
                     bytes: info.bytes,
-                    limit: telegram::MAX_STILL_BYTES,
+                    limit: format.max_bytes(target),
                     changed: false,
                     attempt: None,
                     spoofed: false,
@@ -307,7 +338,7 @@ impl Done {
                 Some(Done {
                     output: path.to_path_buf(),
                     bytes: stats.tgs_bytes.unwrap_or_default() as u64,
-                    limit: tgs::MAX_BYTES,
+                    limit: format.max_bytes(target),
                     changed: false,
                     attempt: None,
                     spoofed: false,
@@ -525,19 +556,7 @@ fn run(
                 }
             })?;
             let preview = webp::preview(&outcome.output).ok();
-            Ok(Done {
-                output: outcome.output,
-                bytes: outcome.bytes,
-                limit: telegram::MAX_STILL_BYTES,
-                changed: matches!(outcome.encoding, webp::Encoding::Lossy { .. }),
-                attempt: None,
-                spoofed: false,
-                settled: false,
-                json_bytes: None,
-                shapes: None,
-                problems: problems(&outcome.issues),
-                preview,
-            })
+            Ok(Done { preview, ..Done::of(outcome) })
         }
         Setup::Tgs { mut options, backend } => {
             let exact = options.exact_or_default();
@@ -577,19 +596,7 @@ fn run(
                     })),
                     _ => {}
                 })?;
-            Ok(Done {
-                output: outcome.output,
-                bytes: outcome.bytes,
-                limit: tgs::MAX_BYTES,
-                changed: outcome.changed,
-                attempt: None,
-                spoofed: false,
-                settled: false,
-                json_bytes: Some(outcome.json_bytes),
-                shapes: Some((outcome.layers, outcome.rectangles)),
-                problems: problems(&outcome.issues),
-                preview: Some(outcome.preview),
-            })
+            Ok(Done::of(outcome))
         }
     }
 }
@@ -650,19 +657,7 @@ fn convert_webm(
         }
         _ => {}
     })?;
-    Ok(Done {
-        output: outcome.output,
-        bytes: outcome.bytes,
-        limit,
-        changed: false,
-        attempt: Some(outcome.attempt),
-        spoofed: outcome.spoofed,
-        settled: outcome.settled,
-        json_bytes: None,
-        shapes: None,
-        problems: problems(&outcome.issues),
-        preview: None,
-    })
+    Ok(Done::of(outcome))
 }
 
 #[cfg(test)]

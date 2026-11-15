@@ -6,7 +6,9 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use console::style;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use tgradish_core::Outcome;
 use tgradish_core::backend::Backend;
+use tgradish_core::events::Details;
 use tgradish_core::input::Input;
 use tgradish_core::presets::{Format, FormatOptions, PresetError, Presets};
 use tgradish_core::webm::{self, Event, Options};
@@ -325,7 +327,7 @@ impl<'a> Converter<'a> {
                     printer.bar.finish();
                     result
                 }?;
-                if let Some(dir) = &outcome.temp_dir
+                if let Details::Webm { temp_dir: Some(dir), .. } = &outcome.details
                     && !json
                 {
                     eprintln!(
@@ -369,8 +371,11 @@ impl<'a> Converter<'a> {
                         tgs::convert(backend.as_ref(), &request, cancel, &mut |e| printer.event(e));
                     printer.bar.finish();
                     let outcome = result?;
-                    if !self.ctx.global.quiet && term::shows_pictures() {
-                        show_result(&outcome.preview);
+                    if !self.ctx.global.quiet
+                        && term::shows_pictures()
+                        && let Some(preview) = outcome.preview()
+                    {
+                        show_result(&preview);
                     }
                     outcome
                 };
@@ -407,15 +412,14 @@ impl<'a> Converter<'a> {
 
     /// What an image came out as, with what Telegram would refuse: the
     /// result on stdout, even when quiet, as every format's is.
-    fn print_still(&self, outcome: &webp::Outcome) {
+    fn print_still(&self, outcome: &Outcome) {
+        let Details::Webp { width, height, encoding } = outcome.details else { return };
         let output = term::link_out(style(outcome.output.display()).bold(), &outcome.output);
         let mut line = format!(
-            "{output} {}, {}×{}",
-            ui::size_within(outcome.bytes, tgradish_core::telegram::MAX_STILL_BYTES),
-            outcome.width,
-            outcome.height
+            "{output} {}, {width}×{height}",
+            ui::size_within(outcome.bytes, outcome.limit),
         );
-        if let webp::Encoding::Lossy { quality } = outcome.encoding {
+        if let webp::Encoding::Lossy { quality } = encoding {
             line.push_str(&format!(", lossy at quality {quality} to fit"));
         }
         finished(self.ctx.global.quiet, &outcome.output, line);
@@ -670,8 +674,10 @@ impl Printer {
             Event::Log { line } if self.verbose > 1 => {
                 self.bar.line(ui::dim(format!("    {line}")))
             }
-            Event::Finished { output, bytes, params, spoofed, settled, issues, .. } => {
+            Event::Finished(outcome) => {
                 self.bar.finish();
+                let Outcome { output, bytes, issues, details, .. } = *outcome;
+                let Details::Webm { params, spoofed, settled, .. } = details else { return };
                 let spoofed = if spoofed { ", duration spoofed" } else { "" };
                 // the result line says it, where it says more than its path
                 let settled = if settled { ", the best so far as asked" } else { "" };
@@ -819,8 +825,10 @@ impl TgsPrinter {
             tgs::Event::Warning { message } => {
                 self.bar.line(format!("{} {message}", ui::warning_label()));
             }
-            tgs::Event::Finished { output, bytes, changed, steps, issues, .. } => {
+            tgs::Event::Finished(outcome) => {
                 self.bar.finish();
+                let Outcome { output, bytes, changed, issues, details, .. } = *outcome;
+                let Details::Tgs { steps, .. } = details else { return };
                 let changed = if changed && !steps.is_empty() {
                     format!(", {}", style("changed to fit").yellow())
                 } else if changed {

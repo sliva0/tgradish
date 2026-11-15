@@ -26,10 +26,11 @@ use serde::Serialize;
 use crate::CancelToken;
 use crate::backend::Backend;
 use crate::error::{Error, Result};
+use crate::events::{Details, Outcome};
 use crate::input::Input;
 use crate::picture;
 use crate::presets::Format;
-use crate::telegram::{self, Issue};
+use crate::telegram;
 use crate::webm::{self, Plan};
 
 /// A picture to make.
@@ -78,8 +79,8 @@ pub enum Event {
         #[serde(serialize_with = "crate::protocol::serialize_path")]
         output: PathBuf,
     },
-    /// The picture is written.
-    Finished(Outcome),
+    /// The picture is written: what was made, as converting returns it.
+    Finished(Box<Outcome>),
     /// Something worth knowing: about the picture, as options that were
     /// adjusted or ignored, or about more than one, as `watch` says of
     /// folders it can't read.
@@ -90,31 +91,6 @@ pub enum Event {
     /// A conversion, or the whole command, failed. Only printed by the
     /// CLI; the library returns errors instead.
     Error(crate::protocol::Failure),
-}
-
-/// What converting made: all that [`Event::Finished`] says, whether or not
-/// events were followed.
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-#[non_exhaustive]
-pub struct Outcome {
-    /// The input as given, or a sequence's first picture: a picture has no
-    /// event before it is made to name it, as WebM's and `.tgs`'s start.
-    #[serde(serialize_with = "crate::protocol::serialize_path")]
-    pub input: PathBuf,
-    /// Where the picture was written.
-    #[serde(serialize_with = "crate::protocol::serialize_path")]
-    pub output: PathBuf,
-    /// Its size in bytes.
-    pub bytes: u64,
-    /// Its width in pixels.
-    pub width: u32,
-    /// Its height in pixels.
-    pub height: u32,
-    /// How it was encoded to fit.
-    pub encoding: Encoding,
-    /// Problems Telegram would still have with it.
-    pub issues: Vec<Issue>,
 }
 
 /// The options a still picture has, of WebM's: what to make, what is read
@@ -241,13 +217,15 @@ pub fn convert(
     let outcome = Outcome {
         input: request.input.first().to_path_buf(),
         output: plan.output.clone(),
+        format: Format::Webp,
+        target: plan.target,
         bytes,
-        width: plan.width,
-        height: plan.height,
-        encoding,
+        limit: Format::Webp.max_bytes(plan.target),
+        changed: matches!(encoding, Encoding::Lossy { .. }),
         issues: telegram::check_still(plan.width, plan.height, bytes, plan.target),
+        details: Details::Webp { width: plan.width, height: plan.height, encoding },
     };
-    on_event(Event::Finished(outcome.clone()));
+    on_event(Event::Finished(Box::new(outcome.clone())));
     Ok(outcome)
 }
 

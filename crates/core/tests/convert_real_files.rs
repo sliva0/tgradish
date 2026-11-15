@@ -9,9 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use common::{backends, clip, name};
-use tgradish_core::CancelToken;
-use tgradish_core::Error;
 use tgradish_core::backend::{Backend, FramesRequest};
+use tgradish_core::events::Details;
 use tgradish_core::ffmpeg;
 use tgradish_core::input::Input;
 use tgradish_core::mark::made_by_tgradish;
@@ -22,14 +21,26 @@ use tgradish_core::webm::container;
 use tgradish_core::webm::{Decision, Event};
 use tgradish_core::webm::{Request, convert};
 use tgradish_core::webp;
+use tgradish_core::{CancelToken, Error, Outcome};
 use tgradish_corpus::Clip;
+
+/// What only a WebM's outcome has: the attempt kept, whether its duration
+/// was spoofed and fitting settled, and where intermediate files are.
+fn webm(outcome: &Outcome) -> (u32, bool, bool, Option<PathBuf>) {
+    match &outcome.details {
+        &Details::Webm { attempt, spoofed, settled, ref temp_dir, .. } => {
+            (attempt, spoofed, settled, temp_dir.clone())
+        }
+        details => panic!("not a WebM's: {details:?}"),
+    }
+}
 
 /// The picture `request` would make the video of, as webp makes it.
 fn still(
     backend: &Backend,
     request: &Request,
     cancel: &CancelToken,
-) -> tgradish_core::Result<webp::Outcome> {
+) -> tgradish_core::Result<Outcome> {
     let request = webp::Request {
         input: request.input.clone(),
         output: request.output.clone(),
@@ -71,7 +82,7 @@ fn converts_short_clip_without_spoofing() {
         let outcome = convert(backend, &request, &cancel, &mut |e| {
             // once the search ends, as its result is written, too late to
             // settle on what it kept, and so not offered
-            if let Event::Finished { .. } = e {
+            if let Event::Finished(_) = e {
                 late = true;
                 refused = !cancel.can_settle() && !cancel.settle();
             }
@@ -82,10 +93,11 @@ fn converts_short_clip_without_spoofing() {
         let name = name(backend);
         assert!(late && refused, "{name}");
         assert!(outcome.issues.is_empty(), "{name}: {:?}", outcome.issues);
-        assert!(!outcome.spoofed && !outcome.settled);
+        let (_, spoofed, settled, _) = webm(&outcome);
+        assert!(!spoofed && !settled);
         assert!(outcome.bytes <= telegram::MAX_STICKER_BYTES);
         assert!(matches!(events.first(), Some(Event::Started { .. })));
-        assert!(matches!(events.last(), Some(Event::Finished { .. })));
+        assert!(matches!(events.last(), Some(Event::Finished(_))));
 
         let info = container::inspect_file(&outcome.output).unwrap();
         assert_eq!(info.video_frames, 50, "{name}");
@@ -133,7 +145,8 @@ fn settles_on_the_best_so_far_when_asked() {
         })
         .unwrap();
         assert!(refused && asked, "{name}");
-        assert!(outcome.settled && outcome.attempt == 1, "{name}: {outcome:?}");
+        let (attempt, _, settled, _) = webm(&outcome);
+        assert!(settled && attempt == 1, "{name}: {outcome:?}");
         assert!(outcome.bytes <= telegram::MAX_STICKER_BYTES);
         assert!(container::inspect_file(&outcome.output).is_ok(), "{name}");
         // no third, and said so
@@ -144,7 +157,8 @@ fn settles_on_the_best_so_far_when_asked() {
                 .iter()
                 .any(|e| matches!(e, Event::Decided { decision, .. } if *decision == settled))
         );
-        assert!(matches!(events.last(), Some(Event::Finished { settled: true, attempt: 1, .. })));
+        let Some(Event::Finished(last)) = events.last() else { panic!("{name}: not finished") };
+        assert_eq!(**last, outcome, "{name}");
         // the token serves the next conversion afresh
         assert!(!cancel.can_settle() && !cancel.is_settling() && !cancel.is_cancelled());
     }
@@ -186,11 +200,11 @@ fn keeps_intermediate_files_whatever_comes_of_them() {
         let made = Options { length: Some(0.5), ..fast(Fit::Off) };
         let mut said = None;
         let outcome = convert(backend, &request(made), &CancelToken::new(), &mut |event| {
-            if let Event::Finished { temp_dir, .. } = event {
-                said = temp_dir;
+            if let Event::Finished(outcome) = event {
+                said = webm(&outcome).3;
             }
         });
-        let kept = outcome.unwrap().temp_dir.expect("kept");
+        let kept = webm(&outcome.unwrap()).3.expect("kept");
         // the event says where, as the outcome does
         assert_eq!(said.as_ref(), Some(&kept), "{name}");
         assert!(kept.join("attempt-01.webm").exists(), "{name}");
@@ -256,7 +270,7 @@ fn converts_long_clip_with_spoofing() {
         let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
 
         let name = name(backend);
-        assert!(outcome.spoofed);
+        assert!(webm(&outcome).1);
         assert!(outcome.issues.is_empty(), "{name}: {:?}", outcome.issues);
         let info = container::inspect_file(&outcome.output).unwrap();
         let video = info.video.unwrap();
@@ -1176,8 +1190,9 @@ fn makes_static_stickers_from_a_frame() {
         let made = still(backend, &request, &CancelToken::new()).unwrap();
         assert!(made.issues.is_empty(), "{name}: {:?}", made.issues);
         assert!(made_by_tgradish(&made.output), "{name}");
-        assert_eq!((made.width, made.height), (512, 256), "{name}");
-        assert_eq!(made.encoding, tgradish_core::webp::Encoding::Lossless, "{name}");
+        let Details::Webp { width, height, encoding } = made.details else { panic!("{name}") };
+        assert_eq!((width, height), (512, 256), "{name}");
+        assert_eq!(encoding, tgradish_core::webp::Encoding::Lossless, "{name}");
         let preview = tgradish_core::webp::preview(&made.output).unwrap();
         assert_eq!((preview.width, preview.height), (512, 256), "{name}");
         pictures.push(preview.frames[0].0.clone());
@@ -1190,7 +1205,8 @@ fn makes_static_stickers_from_a_frame() {
         };
         let made = still(backend, &request, &CancelToken::new()).unwrap();
         assert!(made.issues.is_empty(), "{name}: {:?}", made.issues);
-        assert_eq!((made.width, made.height), (100, 100), "{name}");
+        let Details::Webp { width, height, .. } = made.details else { panic!("{name}") };
+        assert_eq!((width, height), (100, 100), "{name}");
         let corner = &tgradish_core::webp::preview(&made.output).unwrap().frames[0].0[..4];
         assert_eq!(corner[3], 0, "{name}: the padding is transparent");
         // the frame that shows at a time, from where it starts, and the last
@@ -1306,11 +1322,11 @@ fn makes_tgs_stickers_from_videos() {
         let made = video(&once, tgs::Options::default()).unwrap();
         assert!(made.issues.is_empty() && !made.changed, "{name}: {:?}", made.issues);
         assert!(made_by_tgradish(&made.output), "{name}");
-        assert!(made.preview == direct.preview, "{name}: not the same as the GIF");
+        assert!(made.preview() == direct.preview(), "{name}: not the same as the GIF");
         // the third walk, read from where it starts
         let third = tgs::Options { start: Some(1.6), length: Some(0.8), ..tgs::Options::default() };
         let made = video(&long, third).unwrap();
-        assert!(made.preview == direct.preview, "{name}: not the same as the GIF");
+        assert!(made.preview() == direct.preview(), "{name}: not the same as the GIF");
         // at its own pace, what plays past 3 seconds is cut, and said
         let own_pace = tgs::Options { tempo: Some(1.0), ..tgs::Options::default() };
         assert!(video(&long, own_pace).unwrap().changed, "{name}");
@@ -1320,7 +1336,7 @@ fn makes_tgs_stickers_from_videos() {
         // a cut between frames, as long as asked: 9 sixtieths
         let cut = tgs::Options { length: Some(0.15), ..tgs::Options::default() };
         let made = video(&once, cut).unwrap();
-        let ticks: u32 = made.preview.frames.iter().map(|(_, ticks)| ticks).sum();
+        let ticks: u32 = made.preview().unwrap().frames.iter().map(|(_, ticks)| ticks).sum();
         assert_eq!(ticks, 9, "{name}");
         let none = tgs::Options { length: Some(0.0), ..tgs::Options::default() };
         assert!(video(&once, none).is_err(), "{name}");
@@ -1330,12 +1346,12 @@ fn makes_tgs_stickers_from_videos() {
         make(&["-f", "lavfi", "-i", "color=red:s=16x16:r=1:d=2", "-c:v", "ffv1", out]);
         let half = tgs::Options { length: Some(0.5), ..tgs::Options::default() };
         let made = video(&slow, half).unwrap();
-        let ticks: u32 = made.preview.frames.iter().map(|(_, ticks)| ticks).sum();
+        let ticks: u32 = made.preview().unwrap().frames.iter().map(|(_, ticks)| ticks).sum();
         assert_eq!(ticks, 30, "{name}");
         // a stream that doesn't say how long it is, nor when frames start
         if let Some(raw) = &raw {
             let made = video(raw, tgs::Options::default()).unwrap();
-            assert!(made.preview.frames.len() > 1, "{name}: read as a still");
+            assert!(made.preview().unwrap().frames.len() > 1, "{name}: read as a still");
         }
     }
     // without ffmpeg, there is nothing to read a video with

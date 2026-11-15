@@ -79,6 +79,17 @@ impl Format {
         }
     }
 
+    /// The largest file of this format Telegram takes as `target`, in
+    /// bytes: a video's limit is the target's, a `.tgs` and a static
+    /// sticker or emoji have one of their own.
+    pub fn max_bytes(self, target: Target) -> u64 {
+        match self {
+            Format::Webm => target.max_bytes(),
+            Format::Tgs => crate::tgs::MAX_BYTES,
+            Format::Webp => crate::telegram::MAX_STILL_BYTES,
+        }
+    }
+
     /// The format a file name asks for, by its extension.
     pub fn of_path(path: &Path) -> Option<Format> {
         match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {

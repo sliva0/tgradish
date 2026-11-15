@@ -41,31 +41,8 @@ pub enum Event {
         /// What, in English.
         message: String,
     },
-    /// The sticker is written.
-    Finished {
-        /// The input, the first picture of a sequence, as every format's
-        /// result names it.
-        #[serde(serialize_with = "crate::protocol::serialize_path")]
-        input: PathBuf,
-        /// Where.
-        #[serde(serialize_with = "crate::protocol::serialize_path")]
-        output: PathBuf,
-        /// Its size in bytes.
-        bytes: u64,
-        /// Size of the Lottie JSON inside.
-        json_bytes: u64,
-        /// Whether anything visible was given up to fit: reductions, a
-        /// forced pixel scale, the end of a long input.
-        changed: bool,
-        /// Reductions fitting applied, in order.
-        steps: Vec<Step>,
-        /// Lottie layers in it.
-        layers: u64,
-        /// Rectangles drawn in all of them.
-        rectangles: u64,
-        /// Problems Telegram would still have with the result.
-        issues: Vec<crate::telegram::Issue>,
-    },
+    /// The sticker is written: what was made, as converting returns it.
+    Finished(Box<crate::Outcome>),
     /// A conversion, or the whole command, failed. Only printed by the
     /// CLI; the library returns errors instead.
     Error(crate::protocol::Failure),

@@ -41,17 +41,15 @@ pub(crate) use plan::{encoded_length, estimate_bitrate};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use schemars::JsonSchema;
-use serde::Serialize;
-
 use crate::CancelToken;
 use crate::backend::{Backend, Pass};
 use crate::error::{Error, FileAction, Result};
+use crate::events::{Details, Outcome};
 use crate::ffmpeg::Output;
 use crate::input::Input;
 use crate::picture::choose_auto_scaling;
 use crate::presets::Format;
-use crate::telegram::{self, Issue};
+use crate::telegram;
 use container::Patch;
 use fit::{Attempt, Encoder};
 
@@ -91,33 +89,6 @@ impl Request {
         let target = self.options.target.unwrap_or_default();
         self.output.clone().unwrap_or_else(|| self.input.default_output(Format::Webm, target))
     }
-}
-
-/// What converting made: all that [`Event::Finished`] says, whether or not
-/// events were followed.
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-#[non_exhaustive]
-pub struct Outcome {
-    /// Where the sticker was written.
-    #[serde(serialize_with = "crate::protocol::serialize_path")]
-    pub output: PathBuf,
-    /// Its size in bytes.
-    pub bytes: u64,
-    /// The attempt that was kept.
-    pub attempt: u32,
-    /// Its settings.
-    pub params: Params,
-    /// Whether its header's duration was spoofed.
-    pub spoofed: bool,
-    /// Whether fitting was asked to stop early and kept the best encode
-    /// that fit so far, see [`CancelToken::settle`].
-    pub settled: bool,
-    /// Problems Telegram would still have with the result.
-    pub issues: Vec<Issue>,
-    /// Directory with intermediate files, if they were kept.
-    #[serde(serialize_with = "crate::protocol::serialize_optional_path")]
-    pub temp_dir: Option<PathBuf>,
 }
 
 /// Runs fitting attempts through a [`Backend`]. Reuses first-pass logs:
@@ -370,29 +341,28 @@ fn encode_in(
     crate::fsutil::write_output(&plan.output, &bytes, request.overwrite)?;
 
     let info = container::inspect(&bytes)?;
-    let issues = telegram::check(&info, plan.target);
-    let temp_dir = request.keep_temp.then(|| dir.to_path_buf());
-    on_event(Event::Finished {
-        input: plan.input.clone(),
-        output: plan.output.clone(),
-        bytes: info.file_size,
-        attempt: best.number,
-        params: best.params,
-        spoofed,
-        settled,
-        issues: issues.clone(),
-        temp_dir: temp_dir.clone(),
-    });
-    Ok(Outcome {
+    // frames or the end given up, as fitting by them makes: within a
+    // hundredth, as lengths are tried to two places
+    let changed = best.params.fps < plan.fps - 0.01 || best.params.length < plan.length - 0.01;
+    let outcome = Outcome {
+        input: request.input.first().to_path_buf(),
         output: plan.output,
+        format: Format::Webm,
+        target: plan.target,
         bytes: info.file_size,
-        attempt: best.number,
-        params: best.params,
-        spoofed,
-        settled,
-        issues,
-        temp_dir,
-    })
+        limit: plan.target.max_bytes(),
+        changed,
+        issues: telegram::check(&info, plan.target),
+        details: Details::Webm {
+            attempt: best.number,
+            params: best.params,
+            spoofed,
+            settled,
+            temp_dir: request.keep_temp.then(|| dir.to_path_buf()),
+        },
+    };
+    on_event(Event::Finished(Box::new(outcome.clone())));
+    Ok(outcome)
 }
 
 #[cfg(test)]

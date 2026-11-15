@@ -2,14 +2,11 @@
 //! `.tgs` and WebP conversions report their own, [`crate::tgs::Event`]
 //! and [`crate::webp::Event`].
 
-use std::path::PathBuf;
-
 use schemars::JsonSchema;
 use serde::Serialize;
 
 use super::Plan;
 use crate::protocol::Failure;
-use crate::telegram::Issue;
 
 /// Rate control used by one encode. Serialised tagged by `mode`, as
 /// `{"mode":"bitrate","kbps":500}`, `{"mode":"crf","crf":32}` or
@@ -139,33 +136,8 @@ pub enum Event {
         /// The line.
         line: String,
     },
-    /// The sticker is written.
-    Finished {
-        /// The input, the first picture of a sequence, as every format's
-        /// result names it.
-        #[serde(serialize_with = "crate::protocol::serialize_path")]
-        input: PathBuf,
-        /// Where.
-        #[serde(serialize_with = "crate::protocol::serialize_path")]
-        output: PathBuf,
-        /// Its size in bytes.
-        bytes: u64,
-        /// The attempt that was kept.
-        attempt: u32,
-        /// Its settings.
-        params: Params,
-        /// Whether its header's duration was spoofed.
-        spoofed: bool,
-        /// Whether fitting was asked to stop early and kept the best
-        /// encode that fit so far, see
-        /// [`CancelToken::settle`](crate::CancelToken::settle).
-        settled: bool,
-        /// Problems Telegram would still have with the result.
-        issues: Vec<Issue>,
-        /// Where the intermediate files are, when they were kept.
-        #[serde(serialize_with = "crate::protocol::serialize_optional_path")]
-        temp_dir: Option<PathBuf>,
-    },
+    /// The sticker is written: what was made, as converting returns it.
+    Finished(Box<crate::Outcome>),
     /// A conversion, or the whole command, failed. Only printed by the
     /// CLI; the library returns errors instead.
     Error(Failure),
