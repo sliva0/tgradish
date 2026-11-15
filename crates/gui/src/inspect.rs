@@ -12,7 +12,7 @@ use tgradish_core::webp;
 
 use crate::app::App;
 use crate::fonts::drawable_in;
-use crate::jobs::Problem;
+use crate::jobs::{self, Problem};
 use crate::l10n::fl;
 use crate::theme;
 use crate::widgets::{self, gauge, label, note, problems};
@@ -34,15 +34,11 @@ impl Inspection {
     pub(crate) fn of(path: &Path) -> Inspection {
         let (found, problems) = match inspect::inspect(path, None) {
             Ok(Inspected::Webp { target, info, issues }) => {
-                let problems = issues.iter().map(|issue| Problem::refused(issue, target));
-                (Found::Image { info, target }, problems.collect())
+                (Found::Image { info, target }, jobs::problems(&issues))
             }
-            Ok(Inspected::Tgs { info, issues }) => {
-                (Found::Tgs(info), issues.into_iter().map(Problem::of_tgs).collect())
-            }
+            Ok(Inspected::Tgs { info, issues }) => (Found::Tgs(info), jobs::problems(&issues)),
             Ok(Inspected::Webm { target, info, issues }) => {
-                let problems = issues.iter().map(|issue| Problem::refused(issue, target));
-                (Found::Webm { info, target }, problems.collect())
+                (Found::Webm { info, target }, jobs::problems(&issues))
             }
             // a kind of file the GUI doesn't know yet
             Ok(_) => (Found::Failed(fl!("inspect-unknown")), Vec::new()),

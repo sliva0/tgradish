@@ -135,33 +135,30 @@ pub(crate) struct Problem {
 }
 
 impl Problem {
-    /// Something Telegram refuses in a result for `target`.
-    pub(crate) fn refused(issue: &telegram::Issue, target: telegram::Target) -> Problem {
-        Problem { refused: true, text: issue_text(issue, target) }
-    }
-
-    /// What checking a `.tgs` found, which may only be frowned on.
-    pub(crate) fn of_tgs(issue: telegram::Issue) -> Problem {
-        Problem { refused: issue.severity() == Severity::Error, text: issue.to_string() }
+    /// What Telegram would have with a result or a file, in the GUI's
+    /// words where it has them: refused, or only frowned on.
+    pub(crate) fn of(issue: &telegram::Issue) -> Problem {
+        Problem { refused: issue.severity() == Severity::Error, text: issue_text(issue) }
     }
 }
 
-/// Telegram's `issues` with a result for `target`, as problems.
-fn refused(issues: &[telegram::Issue], target: telegram::Target) -> Vec<Problem> {
-    issues.iter().map(|issue| Problem::refused(issue, target)).collect()
+/// Telegram's `issues` with a result, as problems.
+pub(crate) fn problems(issues: &[telegram::Issue]) -> Vec<Problem> {
+    issues.iter().map(Problem::of).collect()
 }
 
-/// What Telegram would refuse, in the GUI's words.
-fn issue_text(issue: &telegram::Issue, target: telegram::Target) -> String {
+/// What Telegram would have with a result, in the GUI's words: of the
+/// kinds every format has, its own; of what only a `.tgs` is checked for,
+/// as core says it.
+fn issue_text(issue: &telegram::Issue) -> String {
     use telegram::Issue;
     match issue {
         Issue::NotWebm { doc_type } => fl!("issue-not-webm", container = doc_type.as_str()),
         Issue::NoVideo => fl!("issue-no-video"),
         Issue::NotVp9 { codec_id } => fl!("issue-not-vp9", codec = codec_id.as_str()),
         Issue::HasAudio => fl!("issue-audio"),
-        &Issue::WrongSize { width, height, .. } => {
-            let side = target.box_size().0;
-            if target.requires_exact_size() {
+        &Issue::WrongSize { width, height, side, exact } => {
+            if exact {
                 fl!("issue-size", width = width, height = height, side = side)
             } else {
                 fl!("issue-size", "sticker", width = width, height = height, side = side)
@@ -180,7 +177,8 @@ fn issue_text(issue: &telegram::Issue, target: telegram::Target) -> String {
             fl!("issue-too-many-fps", fps = widgets::trimmed(fps), limit = widgets::trimmed(max))
         }
         Issue::Animated => fl!("issue-animated"),
-        // what the GUI has no words of its own for, as core says it
+        // what only a .tgs is checked for, and what the GUI has no words
+        // of its own for yet, as core says it
         issue => issue.to_string(),
     }
 }
@@ -283,7 +281,7 @@ impl Done {
                     settled: false,
                     json_bytes: None,
                     shapes: None,
-                    problems: refused(&telegram::check(&info, target), target),
+                    problems: problems(&telegram::check(&info, target)),
                     preview: None,
                 })
             }
@@ -300,7 +298,7 @@ impl Done {
                     settled: false,
                     json_bytes: None,
                     shapes: None,
-                    problems: refused(&issues, target),
+                    problems: problems(&issues),
                     preview: None,
                 })
             }
@@ -316,7 +314,7 @@ impl Done {
                     settled: false,
                     json_bytes: Some(stats.json_bytes as u64),
                     shapes: Some((stats.layers, stats.shapes)),
-                    problems: issues.into_iter().map(Problem::of_tgs).collect(),
+                    problems: problems(&issues),
                     preview: None,
                 })
             }
@@ -520,7 +518,6 @@ fn run(
             convert_webm(&request, backend, cancel, update)
         }
         Setup::Image { options, backend } => {
-            let target = options.target.unwrap_or_default();
             let request = webp::Request { input, output, options, overwrite };
             let outcome = webp::convert(&backend, &request, cancel, &mut |event| {
                 if let webp::Event::Warning { message } = event {
@@ -538,7 +535,7 @@ fn run(
                 settled: false,
                 json_bytes: None,
                 shapes: None,
-                problems: refused(&outcome.issues, target),
+                problems: problems(&outcome.issues),
                 preview,
             })
         }
@@ -590,7 +587,7 @@ fn run(
                 settled: false,
                 json_bytes: Some(outcome.json_bytes),
                 shapes: Some((outcome.layers, outcome.rectangles)),
-                problems: outcome.issues.into_iter().map(Problem::of_tgs).collect(),
+                problems: problems(&outcome.issues),
                 preview: Some(outcome.preview),
             })
         }
@@ -663,7 +660,7 @@ fn convert_webm(
         settled: outcome.settled,
         json_bytes: None,
         shapes: None,
-        problems: refused(&outcome.issues, request.options.target.unwrap_or_default()),
+        problems: problems(&outcome.issues),
         preview: None,
     })
 }
@@ -718,6 +715,34 @@ mod tests {
         // more than were planned don't go past the end
         progress.attempts = vec![attempt(Some(10)); 6];
         assert_eq!(progress.overall(), Some(1.0));
+    }
+
+    #[test]
+    fn words_problems_as_the_gui_does() {
+        use telegram::Issue;
+        // a sticker's size, and an emoji's, by what the issue says
+        let sticker = Issue::WrongSize { width: 300, height: 200, side: 512, exact: false };
+        let emoji = Issue::WrongSize { width: 300, height: 200, side: 100, exact: true };
+        assert_eq!(
+            Problem::of(&sticker),
+            Problem {
+                refused: true,
+                text: fl!("issue-size", "sticker", width = 300, height = 200, side = 512)
+            }
+        );
+        assert_eq!(
+            Problem::of(&emoji).text,
+            fl!("issue-size", width = 300, height = 200, side = 100)
+        );
+        // what only a .tgs is checked for, as core says it, and refused
+        // only where it is an error
+        let thirty = br#"{"fr":30,"ip":0,"op":60,"w":512,"h":512,"layers":[{"ty":4,"shapes":[]}]}"#;
+        let (_, found) = tgradish_core::tgradish_tgs::check::check(thirty, None).unwrap();
+        let frowned = Issue::Lottie(found[0].clone());
+        assert_eq!(
+            Problem::of(&frowned),
+            Problem { refused: false, text: found[0].message.clone() }
+        );
     }
 
     #[test]
