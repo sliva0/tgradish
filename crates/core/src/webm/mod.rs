@@ -354,7 +354,7 @@ fn encode_in(
         duration: spoofs.then_some(plan.fake_duration),
         muxing_app: plan.watermark.then(|| crate::TOOL_ID.to_string()),
         signature: plan.watermark.then(crate::signature),
-        // the hidden mark, which no option leaves out
+        // the video track's UID, as crate::mark makes it
         track_uid: Some(crate::mark::Mark::current().to_u64()),
         ..Default::default()
     };
@@ -434,7 +434,8 @@ mod tests {
             });
             let made = made.unwrap();
             let info = container::inspect(&bytes).unwrap();
-            // the mark always fits; the name never does here
+            // the UID is written over the old one, so it fits; the name never
+            // does here
             assert_eq!(info.video.as_ref().unwrap().uid, Some(mark));
             // which inspect doesn't print
             let printed = serde_json::to_value(&info).unwrap();

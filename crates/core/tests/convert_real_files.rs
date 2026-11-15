@@ -375,7 +375,7 @@ fn makes_transparent_emoji_from_image() {
         let info = container::inspect_file(&output).unwrap();
         let video = info.video.unwrap();
         assert_eq!((video.width, video.height, video.alpha), (100, 100, true), "{name}");
-        // the hidden mark, in the track's UID
+        // the track's UID, as tgradish_core::mark makes it
         let mark = video.uid.and_then(tgradish_core::mark::Mark::from_u64);
         assert_eq!(mark, Some(tgradish_core::mark::Mark::current()), "{name}");
         assert_eq!(info.video_frames, 25, "{name}: still images repeat at 25 fps");

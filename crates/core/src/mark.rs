@@ -1,11 +1,10 @@
-//! A mark hidden in every sticker tgradish makes, which no option removes:
-//! the version of tgradish that made it, through which front-end, and a
-//! hash of the user's name. The hash tells stickers by one person from
-//! others' without saying who it is.
+//! The 8 bytes tgradish writes into every sticker it makes: its version,
+//! the front-end that ran it, and 24 bits of a hash of the user's name,
+//! with a check byte, XORed with a fixed key.
 //!
-//! The mark is 8 bytes that look random: in WebM files they are the video
-//! track's UID, in `.tgs` files the order of rectangles that may come in
-//! any order (see `tgradish_tgs::mark`).
+//! In WebM files they are the video track's UID, in `.tgs` files the
+//! order of rectangles that may come in any order, or the first layer's
+//! name when there are too few (see `tgradish_tgs::mark`).
 
 use std::sync::OnceLock;
 
@@ -59,8 +58,8 @@ pub struct Mark {
 
 /// Layout of the bytes, in the high half of the first byte.
 const FORMAT: u8 = 1;
-/// Mixed into the bytes so they look random; marks of different stickers
-/// still match where their content does.
+/// XORed into the bytes; the same values give the same bytes in every
+/// sticker.
 const KEY: [u8; 8] = [0x9e, 0x37, 0x79, 0xb9, 0x7f, 0x4a, 0x7c, 0x15];
 
 impl Mark {
@@ -200,7 +199,7 @@ fn user_hash() -> u32 {
 pub(crate) fn read_file(path: &std::path::Path) -> Option<Mark> {
     if crate::input::sniff(path) == crate::input::FileKind::Tgs {
         let json = crate::tgs::read_json(path).ok()?;
-        Mark::from_bits(&tgradish_tgs::mark::hidden_bits(&json)).or_else(|| {
+        Mark::from_bits(&tgradish_tgs::mark::order_bits(&json)).or_else(|| {
             let bytes = tgradish_tgs::mark::layer_name(&json)?;
             Mark::from_bytes(bytes.try_into().ok()?)
         })

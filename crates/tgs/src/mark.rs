@@ -1,4 +1,4 @@
-//! Hides bits in the order of rectangles within groups. A group's fill
+//! Writes bits as the order of rectangles within groups. A group's fill
 //! paints all of its rectangles together, so their order changes nothing
 //! that is drawn, and a JSON re-encoding keeps it.
 //!
@@ -49,7 +49,7 @@ fn written_key(centre: [f64; 2], size: [f64; 2]) -> Key {
 }
 
 internal! {
-/// Hides `payload` once in the order of `animation`'s rectangles, or as its
+/// Writes `payload` once as the order of `animation`'s rectangles, or as its
 /// first layer's name when they have no room for it. False when it has no
 /// layers either. Each copy would cost about 0.6% of a sticker's size, as
 /// swapped pairs break up repeats, so there is only the one.
@@ -134,9 +134,9 @@ fn write_group(items: &mut [Item], bits: &mut impl Iterator<Item = bool>) {
     }
 }
 
-/// The bits hidden in a Lottie document's rectangles, in order, or none
-/// when it doesn't parse.
-pub fn hidden_bits(json: &[u8]) -> Vec<bool> {
+/// The bits the order of a Lottie document's rectangles holds, in order,
+/// or none when it doesn't parse.
+pub fn order_bits(json: &[u8]) -> Vec<bool> {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(json) else { return Vec::new() };
     let mut bits = Vec::new();
     let layers = value.get("layers").and_then(|layers| layers.as_array());
@@ -210,17 +210,17 @@ mod tests {
         let rect = |x: &str| format!(r#"{{"ty":"rc","p":{{"k":[{x},{x}]}},"s":{{"k":[1,{x}]}}}}"#);
         let far = ["1e300", "-1e20", "2", "0"].map(rect).join(",");
         let json = format!(r#"{{"layers":[{{"shapes":[{{"ty":"gr","it":[{far}]}}]}}]}}"#);
-        assert_eq!(hidden_bits(json.as_bytes()).len(), 2);
+        assert_eq!(order_bits(json.as_bytes()).len(), 2);
     }
 
     #[test]
-    fn reads_back_hidden_bytes() {
+    fn reads_back_bytes_from_the_order() {
         let mut lottie = animation(100);
         assert_eq!(capacity(&lottie), 100);
         let payload = [0b1011_0001, 0x5a, 0xff, 0x00];
         assert!(embed(&mut lottie, &payload));
         let json = lottie.to_json(Style::default());
-        let bits = hidden_bits(json.as_bytes());
+        let bits = order_bits(json.as_bytes());
         let expected: Vec<bool> = payload
             .iter()
             .flat_map(|&byte| (0..8).rev().map(move |bit| byte >> bit & 1 == 1))
@@ -262,7 +262,7 @@ mod tests {
             assert_eq!(capacity(&lottie), 22);
             let payload = [0b1011_0001, 0x5a];
             assert!(embed(&mut lottie, &payload));
-            let bits = hidden_bits(lottie.to_json(Style::default()).as_bytes());
+            let bits = order_bits(lottie.to_json(Style::default()).as_bytes());
             let expected: Vec<bool> = payload
                 .iter()
                 .flat_map(|&byte| (0..8).rev().map(move |bit| byte >> bit & 1 == 1))
@@ -273,15 +273,15 @@ mod tests {
     }
 
     #[test]
-    fn hides_nothing_where_there_is_no_room() {
+    fn uses_the_first_layers_name_where_there_is_no_room() {
         let mut lottie = animation(3);
         assert_eq!(capacity(&lottie), 2);
         // the first layer's name holds it instead
         assert!(embed(&mut lottie, &[1, 0xab]));
         let json = lottie.to_json(Style::default());
-        assert_eq!(hidden_bits(json.as_bytes()), [false, false]);
+        assert_eq!(order_bits(json.as_bytes()), [false, false]);
         assert!(json.starts_with(r#"{"v""#) && json.contains(r#"{"ln":"01ab","ty":4,"#), "{json}");
         assert_eq!(layer_name(json.as_bytes()), Some(vec![1, 0xab]));
-        assert!(hidden_bits(b"not json").is_empty() && layer_name(b"{}").is_none());
+        assert!(order_bits(b"not json").is_empty() && layer_name(b"{}").is_none());
     }
 }

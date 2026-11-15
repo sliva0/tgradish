@@ -41,8 +41,8 @@ schema = ["dep:schemars"]
 threads = []
 # The encoder's interior, public for tgs-lab's benchmarks, render checks
 # and probes: scenes, Lottie, layout, the painter and its settings, and
-# how stickers are packed and marked. Unstable, and exempt from semver:
-# anything behind it can change in any release.
+# how stickers are packed and their rectangles ordered. Unstable, and
+# exempt from semver: anything behind it can change in any release.
 internals = []
 
 [dev-dependencies]

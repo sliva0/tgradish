@@ -52,7 +52,9 @@ pub struct Options {
     pub max_bytes: usize,
     /// Written into the sticker as its name.
     pub name: Option<String>,
-    /// For tgradish-core's own use: `None` elsewhere.
+    /// Bytes written as the order of the sticker's rectangles, or as its
+    /// first layer's name when they have too few; tgradish-core sets them,
+    /// and `None` writes none.
     pub mark: Option<Vec<u8>>,
 }
 

@@ -40,8 +40,8 @@ pub struct Style {
 /// A shape layer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
-    /// `ln`, a name renderers don't use; carries tgradish's mark in
-    /// stickers too small to hide it elsewhere (see [`crate::mark`]).
+    /// `ln`, a name renderers don't use; holds the bytes of [`crate::mark`]
+    /// in stickers with too few rectangles to order for them.
     pub id: Option<String>,
     /// Shown for frames `from..to`: `ip` and `op`.
     pub from: u32,
