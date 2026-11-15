@@ -10,6 +10,7 @@ use eframe::egui::{self, RichText, vec2};
 use crate::app::App;
 use crate::fonts::{drawable, missing_note, text_format};
 use crate::jobs::Status;
+use crate::keys::{Command, with_keys};
 use crate::l10n::fl;
 use crate::outputs::Written;
 use crate::{system, theme, widgets};
@@ -50,6 +51,7 @@ impl App {
         });
         let queued = self.queue.iter().position(|&other| other == id);
         let presets_kept = self.presets_dir.is_some();
+        let keyed = self.keyed;
         // the result made, there still as this item wrote it, not put in
         // its place since, which can be copied as a file, and whether it is
         // where the next goes, made as it would be made now
@@ -98,7 +100,7 @@ impl App {
                     // there from the start, so nothing beside it moves
                     // once an encode fits
                     if job.settles {
-                        keep_best(ui, job, stopping);
+                        keep_best(ui, job, stopping, keyed.keep_best);
                     }
                     let size = vec2(ui.available_width(), BAR_ROW);
                     crate::result::step_bar(ui, job, size);
@@ -181,7 +183,7 @@ impl App {
             }
             if let Some(right) = right.as_ref().filter(|_| !two) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    copy = right.show(ui, fallbacks);
+                    copy = right.show(ui, fallbacks, keyed.copy);
                 });
             }
         });
@@ -189,7 +191,9 @@ impl App {
             ui.add_space(4.0);
             let row = vec2(ui.available_width(), theme::CONTROL);
             let layout = egui::Layout::right_to_left(egui::Align::Center);
-            ui.allocate_ui_with_layout(row, layout, |ui| copy = right.show(ui, fallbacks));
+            ui.allocate_ui_with_layout(row, layout, |ui| {
+                copy = right.show(ui, fallbacks, keyed.copy);
+            });
         }
         // on two lines from the next frame, or back on one, as they fit
         let needs_two = right.as_ref().is_some_and(|right| left + gap + right.least > bar + 0.5);
@@ -221,8 +225,9 @@ impl App {
 
 /// Keep best so far, beside Stop while a WebM is fitted: it stops fitting
 /// and saves the best encode that fits so far, once one does. As wide
-/// whatever it says, and as high as Stop.
-fn keep_best(ui: &mut egui::Ui, job: &crate::jobs::Job, stopping: bool) {
+/// whatever it says, and as high as Stop. Pressed by its key too, where
+/// `keyed`.
+fn keep_best(ui: &mut egui::Ui, job: &crate::jobs::Job, stopping: bool, keyed: bool) {
     let (keep, keeping) = (fl!("keep-best"), fl!("keeping-best"));
     let width = [&keep, &keeping]
         .iter()
@@ -238,8 +243,9 @@ fn keep_best(ui: &mut egui::Ui, job: &crate::jobs::Job, stopping: bool) {
         false => fl!("keep-best", "nothing-fits"),
     };
     let response = ui.add_enabled(enabled, button);
-    let response = response.on_hover_text(fl!("keep-best", "hint")).on_disabled_hover_text(why);
-    if response.clicked() {
+    let hint = with_keys(&fl!("keep-best", "hint"), Command::KeepBest);
+    let response = response.on_hover_text(hint).on_disabled_hover_text(why);
+    if response.clicked() || (enabled && keyed) {
         job.settle();
     }
 }
@@ -411,8 +417,13 @@ impl<'a> Right<'a> {
     /// Draws it, from the right: its folder shortened from its middle
     /// where it has less room than it would take, and its name only where
     /// it alone is wider than that, its ending kept. Gives the result to
-    /// copy, once asked.
-    fn show(&self, ui: &mut egui::Ui, fallbacks: &crate::fallback::Fallbacks) -> Option<PathBuf> {
+    /// copy, once asked, by Copy or, where `keyed`, its key.
+    fn show(
+        &self,
+        ui: &mut egui::Ui,
+        fallbacks: &crate::fallback::Fallbacks,
+        keyed: bool,
+    ) -> Option<PathBuf> {
         if self.there && ui.button(fl!("show-in-folder")).clicked() {
             system::reveal(self.output);
         }
@@ -426,15 +437,15 @@ impl<'a> Right<'a> {
                 Some((when, copied)) => {
                     ui.ctx().request_repaint_after_secs((COPIED_SHOWN - (now - when)) as f32);
                     match copied {
-                        Ok(()) => (copied_text(), fl!("copy-result", "hint")),
+                        Ok(()) => (copied_text(), copy_hint()),
                         Err(why) => (fl!("copy-result", "failed"), why),
                     }
                 }
-                None => (fl!("copy-result"), fl!("copy-result", "hint")),
+                None => (fl!("copy-result"), copy_hint()),
             };
             // as wide whatever it says, so nothing beside it moves
             let button = egui::Button::new(text).min_size(vec2(copy_width(ui), 0.0));
-            if ui.add(button).on_hover_text(hint).clicked() {
+            if ui.add(button).on_hover_text(hint).clicked() || keyed {
                 copy = Some(made.clone());
             }
         }
@@ -493,6 +504,11 @@ impl<'a> Right<'a> {
 /// The padding of a button's words, both sides.
 fn button_padding(ui: &egui::Ui) -> f32 {
     2.0 * ui.spacing().button_padding.x
+}
+
+/// What Copy says on hover, with its key.
+fn copy_hint() -> String {
+    with_keys(&fl!("copy-result", "hint"), Command::CopyResult)
 }
 
 /// What Copy says once it copied.
@@ -776,7 +792,8 @@ mod tests {
         let (after, disabled) = button(&harness);
         assert!(!disabled);
         assert_eq!(after, before);
-        harness.get_by_label(&keep).click();
+        // by its key, which presses it as a click does
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::K);
         harness.run_steps(1);
         finish(&mut harness);
         let item = &harness.state().items[0];
@@ -819,6 +836,33 @@ mod tests {
         );
         // nor one of it to copy
         assert!(harness.query_by_label(&format!("✔ {}", fl!("copy-result", "done"))).is_none());
+    }
+
+    #[test]
+    fn copies_a_result_by_its_key_unless_text_is_copied() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = with_art(dir.path(), 1);
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let output = made_job(&harness.state().items[0]).output.clone();
+        let copies =
+            || crate::system::COPIED.lock().unwrap().iter().filter(|p| **p == output).count();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::C);
+        harness.run_steps(2);
+        assert_eq!(copies(), 1);
+        harness.get_by_label(&copied_text());
+        // as egui-winit passes Ctrl+C on
+        harness.event(egui::Event::Copy);
+        harness.run_steps(2);
+        assert_eq!(copies(), 2);
+        // a field's text, while it has the focus
+        let field = egui::accesskit::Role::SpinButton;
+        harness.query_all_by_role(field).next().expect("a number field").focus();
+        harness.run_steps(2);
+        harness.event(egui::Event::Copy);
+        harness.run_steps(2);
+        assert_eq!(copies(), 2);
     }
 
     #[test]

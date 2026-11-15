@@ -15,7 +15,8 @@ that makes every kind of Telegram sticker and emoji.
   started from a file manager or a menu, or with files opened in it from
   one: drop files in, crop, cut and preview them, and see what Telegram
   would say of the result. It reopens the files of last time, laid out as
-  they were.
+  they were. Keyboard shortcuts, listed under F1, add, pick, convert and
+  copy files, step through frames and cut, and open Settings or Inspect.
 - Shell completions (`tgradish completions SHELL`) and man pages, which
   packages install.
 - Animated stickers and emoji as `.tgs` (`-f tgs`), drawn from pixel art:

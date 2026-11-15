@@ -13,6 +13,7 @@ use crate::fonts::{drawable, missing_note, text_format};
 use crate::inspect::Inspection;
 use crate::item::{Blocker, Item};
 use crate::jobs::Status;
+use crate::keys::{Command, keys_text, pressed, with_keys};
 use crate::l10n::fl;
 use crate::media::Task;
 use crate::{fallback, icon, theme, widgets};
@@ -48,7 +49,8 @@ impl App {
             self.pick(ui.ctx(), Pick::Frames);
             ui.close();
         }
-        if ui.button(fl!("add-pasted")).on_hover_text(fl!("add-pasted", "hint")).clicked() {
+        let pasted = egui::Button::new(fl!("add-pasted")).shortcut_text(keys_text(Command::Paste));
+        if ui.add(pasted).on_hover_text(fl!("add-pasted", "hint")).clicked() {
             self.paste();
             ui.close();
         }
@@ -58,16 +60,18 @@ impl App {
     /// sticker, the keyboard's shortcuts, and what isn't about the files at
     /// all, feedback and About.
     fn main_menu(&mut self, ui: &mut egui::Ui) {
-        if ui.button(fl!("menu-settings")).clicked() {
+        let item =
+            |text: String, command| egui::Button::new(text).shortcut_text(keys_text(command));
+        if ui.add(item(fl!("menu-settings"), Command::Settings)).clicked() {
             self.settings_dialog.open();
             ui.close();
         }
-        if ui.button(fl!("inspect")).on_hover_text(fl!("inspect", "hint")).clicked() {
+        let inspect = ui.add(item(fl!("inspect"), Command::Inspect));
+        if inspect.on_hover_text(fl!("inspect", "hint")).clicked() {
             self.pick(ui.ctx(), Pick::Inspected);
             ui.close();
         }
-        let keys = crate::keys::keys_text(crate::keys::Command::Shortcuts);
-        if ui.add(egui::Button::new(fl!("shortcuts")).shortcut_text(keys)).clicked() {
+        if ui.add(item(fl!("shortcuts"), Command::Shortcuts)).clicked() {
             self.shortcuts = true;
             ui.close();
         }
@@ -88,6 +92,12 @@ impl App {
     /// it draws. One at a time: while one is open, others aren't asked for.
     pub(crate) fn pick(&mut self, ctx: &egui::Context, pick: Pick) {
         if self.picking.is_some() {
+            return;
+        }
+        // tests open none of the system's dialogs, only say one was asked for
+        if cfg!(test) {
+            #[cfg(test)]
+            self.asked_to_pick.push(pick);
             return;
         }
         let dialog = pick.dialog(self.file_dialog.clone());
@@ -148,7 +158,8 @@ impl App {
                 ui.spacing_mut().item_spacing.x = 1.0;
                 let more = ui.menu_button("⏷", |ui| self.add_menu(ui)).response;
                 widgets::named(more, &fl!("add-more"));
-                if ui.button(fl!("add-files")).clicked() {
+                let add = ui.button(fl!("add-files")).on_hover_text(keys_text(Command::AddFiles));
+                if add.clicked() {
                     self.pick(ui.ctx(), Pick::Files);
                 }
             });
@@ -175,8 +186,6 @@ impl App {
         ui.separator();
 
         // what Convert all converts, and what it leaves out
-        let convertible =
-            |item: &Item| !item.is_busy() && !item.result_is_current() && !item.blocked();
         let changed = self.items.iter().filter(|item| convertible(item)).count();
         let attention = self.items.iter().filter(|item| !item.is_busy() && item.blocked()).count();
         // without files there is nothing to convert or remove, and the way
@@ -212,20 +221,9 @@ impl App {
                     let width = widgets::text_width(ui, &widgets::zeros(&widest), padding);
                     let all = egui::Button::new(fl!("convert-all", count = changed))
                         .min_size(vec2(width.ceil(), 0.0));
-                    if ui
-                        .add_enabled(changed > 0, all)
-                        .on_hover_text(fl!("convert-all", "hint"))
-                        .clicked()
-                    {
-                        let ids: Vec<u64> = self
-                            .items
-                            .iter()
-                            .filter(|item| convertible(item))
-                            .map(|item| item.id)
-                            .collect();
-                        for id in ids {
-                            self.enqueue(id);
-                        }
+                    let hint = with_keys(&fl!("convert-all", "hint"), Command::ConvertAll);
+                    if ui.add_enabled(changed > 0, all).on_hover_text(hint).clicked() {
+                        self.convert_all();
                     }
                     if ui.button(fl!("remove-all")).clicked() {
                         let ids: Vec<u64> = self.items.iter().map(|item| item.id).collect();
@@ -262,13 +260,16 @@ impl App {
             let mut again = None;
             // Delete or Backspace on the row with the keyboard's focus,
             // which a text field with the focus would take instead
-            use crate::keys::{Command, pressed};
             let delete = ui.input(|input| pressed(input, Command::Remove).is_some());
             let mut focus_next = None;
+            let reveal = std::mem::take(&mut self.reveal_selected);
             for (index, item) in self.items.iter().enumerate() {
                 let selected = self.selected == Some(item.id);
                 let queued = self.queue.iter().position(|&id| id == item.id);
                 let (response, action) = row(ui, item, selected, queued, &self.fallbacks);
+                if selected && reveal {
+                    response.scroll_to_me(None);
+                }
                 match action {
                     Some(RowAction::Remove) => removed = Some(item.id),
                     Some(RowAction::Convert) => again = Some(item.id),
@@ -317,6 +318,15 @@ impl App {
         });
     }
 
+    /// Converts every file Convert all says it does.
+    pub(crate) fn convert_all(&mut self) {
+        let ids: Vec<u64> =
+            self.items.iter().filter(|item| convertible(item)).map(|item| item.id).collect();
+        for id in ids {
+            self.enqueue(id);
+        }
+    }
+
     /// How far converting got, while it is under way: the one at work, or
     /// the last begun, counted from the first asked for since nothing was
     /// converting, of all asked for since.
@@ -363,7 +373,8 @@ impl App {
                 ui.add_space((ui.available_width() - width).max(0.0) / 2.0);
                 let add = egui::Button::new(widgets::medium(ui, fl!("add-files"), 14.0))
                     .min_size(vec2(130.0, 34.0));
-                if widgets::primary(ui, true, add).clicked() {
+                let add = widgets::primary(ui, true, add);
+                if add.on_hover_text(keys_text(Command::AddFiles)).clicked() {
                     self.pick(ui.ctx(), Pick::Files);
                 }
                 if ui
@@ -374,7 +385,7 @@ impl App {
                 }
                 if ui
                     .add(egui::Button::new(fl!("paste")).min_size(vec2(90.0, 34.0)))
-                    .on_hover_text(fl!("paste", "hint"))
+                    .on_hover_text(keys_text(Command::Paste))
                     .clicked()
                 {
                     self.paste();
@@ -579,6 +590,13 @@ fn row(
 /// The row of item `id` in the list.
 fn row_id(ui: &egui::Ui, id: u64) -> egui::Id {
     ui.id().with(("file", id))
+}
+
+/// Whether Convert all converts `item`: not while it converts or waits to,
+/// nor with its result up to date, nor while something keeps it from
+/// being converted.
+fn convertible(item: &Item) -> bool {
+    !item.is_busy() && !item.result_is_current() && !item.blocked()
 }
 
 /// Whether a row has a button to convert where its result would be: until
@@ -811,7 +829,8 @@ mod tests {
         let menu = |harness: &mut Harness<App>, item: &str| {
             harness.get_by_label(&fl!("main-menu")).click();
             harness.run_steps(2);
-            harness.get_by_label(item).click();
+            // which says its keys after it, where it has any
+            harness.get_by_label_contains(item).click();
             harness.run_steps(2);
         };
         menu(&mut harness, &fl!("menu-settings"));

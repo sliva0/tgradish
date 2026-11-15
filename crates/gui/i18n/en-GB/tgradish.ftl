@@ -215,7 +215,7 @@ add-folder = A folder of frames…
 add-images = Images as one animation…
     .hint = The images picked, in name order
 add-pasted = From the clipboard
-    .hint = Copied files, paths or an image (Ctrl+V)
+    .hint = Copied files, paths or an image
 convert-all = { $count ->
     [0] Convert all
    *[other] Convert all ({ $count })
@@ -248,7 +248,6 @@ row-stopped = stopped
 drop-here = Drop videos, GIFs, images or Aseprite files here
 drop-here-note = To convert into a video, animated or image sticker or emoji
 paste = Paste
-    .hint = Ctrl+V
 # A file's name in the list when it is more than its first input.
 name-pasted = pasted image
 name-frames = { $name } (frames)
@@ -1205,15 +1204,22 @@ key-end = End
 key-escape = Esc
 key-left = Left
 key-right = Right
+key-up = Up
+key-down = Down
 # Its groups.
 shortcuts-files = Files
 shortcuts-playing = The preview and its timeline
-shortcuts-window = The window
+shortcuts-general = General
 shortcuts-mouse = The mouse, over the preview
 # What each does. Where there are two keys, the first goes back and the
 # second on, or the first to the start and the second to the end.
+shortcut-add-files = Add files
 shortcut-paste = Add the files or the image on the clipboard
+shortcut-select = Pick the file above or below
 shortcut-convert = Convert the file picked
+shortcut-convert-all = Convert all: every file without an up-to-date result
+shortcut-keep-best = Keep the best encode so far, while a WebM is fitted
+shortcut-copy-result = Copy the result of the file picked, to paste into Telegram
 shortcut-remove = Remove the file picked, or the one whose row has the focus
 shortcut-undo = Put back the files just removed
 shortcut-play = Play or pause
@@ -1222,11 +1228,16 @@ shortcut-ends = The first or the last frame used
 shortcut-cut-here = Start or end the part used at the frame shown
 shortcut-move-start = Move the start of the part used; with Shift, by ten frames
 shortcut-move-end = Move the end of the part used; with Shift, by ten frames
+shortcut-settings = Open Settings
+shortcut-inspect = Inspect a sticker
 shortcut-scale-up = Make everything larger
 shortcut-scale-down = Make everything smaller
 shortcut-scale-reset = Back to 100%
 shortcut-shortcuts = This list
 shortcut-close = Close a dialog or a menu
+# A button's hover where a shortcut does what it does too: what it says
+# on hover otherwise, and the shortcut's keys.
+with-keys = { $hint } ({ $keys })
 # Ways of using the mouse, and what each does.
 mouse-drag = Drag
     .does = Crop, or move the crop or its edges

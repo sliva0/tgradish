@@ -133,6 +133,13 @@ pub(crate) struct App {
     pub(crate) clipboard: system::Clipboard,
     /// What Ctrl+V has done so far.
     pub(crate) paste_key: crate::keys::PasteKey,
+    /// What keys asked of the bar under the preview this frame.
+    pub(crate) keyed: crate::keys::Keyed,
+    /// The file picked by its key, which the list scrolls to.
+    pub(crate) reveal_selected: bool,
+    /// What file dialogs were asked for, which tests don't open.
+    #[cfg(test)]
+    pub(crate) asked_to_pick: Vec<crate::files::Pick>,
     #[cfg(all(unix, not(target_os = "macos")))]
     pub(crate) drops: Option<dnd::Drops>,
     /// The window's icon on Wayland, kept while the window shows it.
@@ -326,6 +333,10 @@ impl App {
             settings_reset: None,
             clipboard: system::Clipboard::default(),
             paste_key: crate::keys::PasteKey::default(),
+            keyed: crate::keys::Keyed::default(),
+            reveal_selected: false,
+            #[cfg(test)]
+            asked_to_pick: Vec::new(),
             #[cfg(all(unix, not(target_os = "macos")))]
             drops: None,
             #[cfg(all(unix, not(target_os = "macos")))]

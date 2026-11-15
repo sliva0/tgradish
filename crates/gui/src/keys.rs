@@ -10,6 +10,7 @@ use tgradish_core::presets::Format;
 use crate::app::App;
 #[cfg(all(unix, not(target_os = "macos")))]
 use crate::dnd;
+use crate::files::Pick;
 use crate::item::{Item, Show};
 use crate::l10n::fl;
 use crate::widgets;
@@ -18,8 +19,18 @@ use crate::widgets;
 /// the keys' handling and the dialog that lists them read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Command {
+    AddFiles,
     Paste,
+    /// The file above the one picked, or below.
+    Select,
     Convert,
+    /// What Convert all converts.
+    ConvertAll,
+    /// Keep best so far, while a WebM is fitted.
+    KeepBest,
+    /// The result made, copied as a file, as its Copy does: Ctrl+C, which
+    /// egui-winit passes on as [`egui::Event::Copy`] instead.
+    CopyResult,
     Remove,
     UndoRemoving,
     Play,
@@ -38,6 +49,8 @@ pub(crate) enum Command {
     ScaleUp,
     ScaleDown,
     ScaleReset,
+    Settings,
+    Inspect,
     /// Escape, which egui's dialogs and menus take.
     Close,
     Shortcuts,
@@ -48,7 +61,7 @@ pub(crate) enum Command {
 pub(crate) enum Group {
     Files,
     Playing,
-    Window,
+    General,
 }
 
 /// A command, and the keys that ask for it: where it goes two ways, back
@@ -82,8 +95,18 @@ pub(crate) const SHORTCUTS: &[Shortcut] = {
     use egui::gui_zoom::kb_shortcuts as zoom;
     use {Command as C, Group as G};
     &[
+        shortcut(C::AddFiles, G::Files, &[key(M::COMMAND, Key::O)], false),
         shortcut(C::Paste, G::Files, &[key(M::COMMAND, Key::V)], false),
+        shortcut(
+            C::Select,
+            G::Files,
+            &[key(M::NONE, Key::ArrowUp), key(M::NONE, Key::ArrowDown)],
+            false,
+        ),
         shortcut(C::Convert, G::Files, &[key(M::COMMAND, Key::Enter)], false),
+        shortcut(C::ConvertAll, G::Files, &[key(M::COMMAND.plus(M::SHIFT), Key::Enter)], false),
+        shortcut(C::KeepBest, G::Files, &[key(M::COMMAND, Key::K)], false),
+        shortcut(C::CopyResult, G::Files, &[key(M::COMMAND, Key::C)], false),
         shortcut(
             C::Remove,
             G::Files,
@@ -117,16 +140,18 @@ pub(crate) const SHORTCUTS: &[Shortcut] = {
             &[key(M::ALT, Key::ArrowLeft), key(M::ALT, Key::ArrowRight)],
             true,
         ),
-        shortcut(C::ScaleUp, G::Window, &[zoom::ZOOM_IN, zoom::ZOOM_IN_SECONDARY], false),
-        shortcut(C::ScaleDown, G::Window, &[zoom::ZOOM_OUT], false),
-        shortcut(C::ScaleReset, G::Window, &[zoom::ZOOM_RESET], false),
+        shortcut(C::Settings, G::General, &[key(M::COMMAND, Key::Comma)], false),
+        shortcut(C::Inspect, G::General, &[key(M::COMMAND, Key::I)], false),
+        shortcut(C::ScaleUp, G::General, &[zoom::ZOOM_IN, zoom::ZOOM_IN_SECONDARY], false),
+        shortcut(C::ScaleDown, G::General, &[zoom::ZOOM_OUT], false),
+        shortcut(C::ScaleReset, G::General, &[zoom::ZOOM_RESET], false),
         shortcut(
             C::Shortcuts,
-            G::Window,
+            G::General,
             &[key(M::NONE, Key::Questionmark), key(M::NONE, Key::F1)],
             true,
         ),
-        shortcut(C::Close, G::Window, &[key(M::NONE, Key::Escape)], false),
+        shortcut(C::Close, G::General, &[key(M::NONE, Key::Escape)], false),
     ]
 };
 
@@ -177,6 +202,8 @@ pub(crate) fn key_text(key: &egui::KeyboardShortcut) -> String {
         Key::Escape => fl!("key-escape"),
         Key::ArrowLeft => fl!("key-left"),
         Key::ArrowRight => fl!("key-right"),
+        Key::ArrowUp => fl!("key-up"),
+        Key::ArrowDown => fl!("key-down"),
         // a hyphen, as typed, rather than egui's minus sign
         Key::Minus => "-".to_owned(),
         other => other.symbol_or_name().to_owned(),
@@ -191,11 +218,21 @@ pub(crate) fn keys_text(command: Command) -> String {
     keys.join(" / ")
 }
 
+/// `hint`, said on hover of what `command` does too, with its keys after.
+pub(crate) fn with_keys(hint: &str, command: Command) -> String {
+    fl!("with-keys", hint = hint, keys = keys_text(command))
+}
+
 /// What `command` does, as the dialog of shortcuts says it.
 fn what(command: Command) -> String {
     match command {
+        Command::AddFiles => fl!("shortcut-add-files"),
         Command::Paste => fl!("shortcut-paste"),
+        Command::Select => fl!("shortcut-select"),
         Command::Convert => fl!("shortcut-convert"),
+        Command::ConvertAll => fl!("shortcut-convert-all"),
+        Command::KeepBest => fl!("shortcut-keep-best"),
+        Command::CopyResult => fl!("shortcut-copy-result"),
         Command::Remove => fl!("shortcut-remove"),
         Command::UndoRemoving => fl!("shortcut-undo"),
         Command::Play => fl!("shortcut-play"),
@@ -204,6 +241,8 @@ fn what(command: Command) -> String {
         Command::CutHere => fl!("shortcut-cut-here"),
         Command::MoveStart => fl!("shortcut-move-start"),
         Command::MoveEnd => fl!("shortcut-move-end"),
+        Command::Settings => fl!("shortcut-settings"),
+        Command::Inspect => fl!("shortcut-inspect"),
         Command::ScaleUp => fl!("shortcut-scale-up"),
         Command::ScaleDown => fl!("shortcut-scale-down"),
         Command::ScaleReset => fl!("shortcut-scale-reset"),
@@ -230,7 +269,7 @@ impl App {
                 let groups = [
                     (Group::Files, fl!("shortcuts-files")),
                     (Group::Playing, fl!("shortcuts-playing")),
-                    (Group::Window, fl!("shortcuts-window")),
+                    (Group::General, fl!("shortcuts-general")),
                 ];
                 for (group, title) in groups {
                     let rows = SHORTCUTS.iter().filter(|shortcut| shortcut.group == group);
@@ -294,6 +333,21 @@ impl App {
             asked(Command::UndoRemoving).is_some(),
             asked(Command::Shortcuts).is_some(),
         );
+        let (add, settings, inspect, convert_all, keep_best) = (
+            asked(Command::AddFiles).is_some(),
+            asked(Command::Settings).is_some(),
+            asked(Command::Inspect).is_some(),
+            asked(Command::ConvertAll).is_some(),
+            asked(Command::KeepBest).is_some(),
+        );
+        let copy = ctx.input(|input| {
+            let copied = input.events.iter().any(|event| matches!(event, egui::Event::Copy));
+            copied || pressed(input, Command::CopyResult).is_some()
+        });
+        // text picked in a label is what Ctrl+C copies then
+        use egui::text_selection::LabelSelectionState;
+        let selecting = ctx.with_plugin::<LabelSelectionState, _>(|labels| labels.has_selection());
+        self.keyed = Keyed::default();
         self.hovering = hovered || self.hovering;
         if !dropped.is_empty() {
             self.add(dropped);
@@ -307,15 +361,36 @@ impl App {
                 }
             }
         }
-        // typing into a text field is just typing, and keys pressed in a
-        // dialog are for it, not the window behind
-        if ctx.text_edit_focused() || self.dialog_open() {
+        // keys pressed in a dialog are for it, not what is behind
+        if self.dialog_open() {
+            return;
+        }
+        // as Convert's, from a field too, its value typed in
+        if convert_all {
+            self.convert_all();
+        }
+        // typing into a text field is just typing
+        if ctx.text_edit_focused() {
             return;
         }
         if shortcuts {
             self.shortcuts = true;
             return;
         }
+        if settings {
+            self.settings_dialog.open();
+            return;
+        }
+        if inspect {
+            self.pick(ctx, Pick::Inspected);
+            return;
+        }
+        if add {
+            self.pick(ctx, Pick::Files);
+            return;
+        }
+        // for the bar under the preview, which has the buttons they press
+        self.keyed = Keyed { copy: copy && selecting != Some(true), keep_best };
         // while a notice offers it, as after a row with the focus was
         // removed by its key
         if undo {
@@ -324,6 +399,9 @@ impl App {
         // the rest are a focused button's own, as Space and the arrows
         if ctx.memory(|memory| memory.focused().is_some()) {
             return;
+        }
+        if let Some((at, _)) = asked(Command::Select) {
+            self.select_beside(at == 0);
         }
         if space
             && let Some(id) = self.selected
@@ -360,6 +438,34 @@ impl App {
         }
         if paste {
             self.paste();
+        }
+    }
+}
+
+/// What keys asked of the bar under the preview this frame, which has the
+/// buttons that do it too.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct Keyed {
+    /// Its result copied, as Copy does.
+    pub(crate) copy: bool,
+    /// Keep best so far pressed.
+    pub(crate) keep_best: bool,
+}
+
+impl App {
+    /// Picks the file above the one picked, or below, and has the list show
+    /// it: the last or the first where none is picked.
+    fn select_beside(&mut self, above: bool) {
+        let at = self.selected.and_then(|id| self.items.iter().position(|item| item.id == id));
+        let next = match (at, above) {
+            (Some(at), true) => at.checked_sub(1),
+            (Some(at), false) => Some(at + 1),
+            (None, true) => self.items.len().checked_sub(1),
+            (None, false) => Some(0),
+        };
+        if let Some(id) = next.and_then(|next| self.items.get(next)).map(|item| item.id) {
+            self.select(id);
+            self.reveal_selected = true;
         }
     }
 }
@@ -576,6 +682,9 @@ mod tests {
             assert!(!keys[..at].contains(key), "{key:?} twice");
         }
         assert_eq!(keys_text(Command::Convert), "Ctrl+Enter");
+        assert_eq!(keys_text(Command::ConvertAll), "Ctrl+Shift+Enter");
+        assert_eq!(keys_text(Command::Settings), "Ctrl+,");
+        assert_eq!(keys_text(Command::Select), "Up / Down");
         assert_eq!(keys_text(Command::Step), "Left / Right");
         assert_eq!(keys_text(Command::ScaleUp), "Ctrl++ / Ctrl+=");
         assert_eq!(keys_text(Command::ScaleDown), "Ctrl+-");
@@ -611,6 +720,94 @@ mod tests {
         harness.key_press(egui::Key::F1);
         harness.run_steps(2);
         assert!(!harness.state().shortcuts);
+    }
+
+    #[test]
+    fn opens_settings_inspecting_and_adding_files_by_their_keys() {
+        use crate::l10n::fl;
+        use egui_kittest::kittest::Queryable;
+        let mut harness = harness(Config::default());
+        let command = |harness: &mut egui_kittest::Harness<App>, key| {
+            harness.key_press_modifiers(egui::Modifiers::COMMAND, key);
+            harness.run_steps(2);
+        };
+        command(&mut harness, egui::Key::Comma);
+        assert!(harness.state().settings_dialog.is_open());
+        // none of the others while it is open, whose keys they are
+        command(&mut harness, egui::Key::I);
+        command(&mut harness, egui::Key::O);
+        assert!(harness.state().asked_to_pick.is_empty());
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+        command(&mut harness, egui::Key::I);
+        command(&mut harness, egui::Key::O);
+        assert_eq!(harness.state().asked_to_pick, [Pick::Inspected, Pick::Files]);
+        // the menu's rows say their keys, as Convert does
+        harness.get_by_label(&fl!("main-menu")).click();
+        harness.run_steps(2);
+        for (command, row) in [
+            (Command::Settings, fl!("menu-settings")),
+            (Command::Inspect, fl!("inspect")),
+            (Command::Shortcuts, fl!("shortcuts")),
+        ] {
+            harness.get_by_label_contains(&row);
+            harness.get_by_label_contains(&keys_text(command));
+        }
+    }
+
+    #[test]
+    fn picks_the_file_above_or_below_by_its_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let arts: Vec<_> = (0..3)
+            .map(|n| {
+                let art = dir.path().join(format!("{n}.png"));
+                square(&art, [255, 0, 0, 255]);
+                art
+            })
+            .collect();
+        let mut harness = harness(Config::default());
+        harness.state_mut().add(arts);
+        finish(&mut harness);
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        harness.state_mut().select(ids[1]);
+        harness.run_steps(2);
+        let mut picked = Vec::new();
+        use egui::Key::{ArrowDown as Down, ArrowUp as Up};
+        for key in [Down, Down, Up, Up, Up] {
+            harness.key_press(key);
+            harness.run_steps(2);
+            picked.push(harness.state().selected.unwrap());
+        }
+        // stopping at the ends
+        assert_eq!(picked, [ids[2], ids[2], ids[1], ids[0], ids[0]]);
+    }
+
+    #[test]
+    fn converts_all_by_its_key_from_a_field_too() {
+        use egui_kittest::kittest::Queryable;
+        let dir = tempfile::tempdir().unwrap();
+        let arts: Vec<_> = (0..2)
+            .map(|n| {
+                let art = dir.path().join(format!("{n}.png"));
+                square(&art, [255, 0, 0, 255]);
+                art
+            })
+            .collect();
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = harness(config);
+        harness.state_mut().add(arts);
+        finish(&mut harness);
+        // a value typed in, as Ctrl+Enter converts from a field too
+        let field = egui::accesskit::Role::SpinButton;
+        harness.query_all_by_role(field).next().expect("a number field").focus();
+        harness.run_steps(2);
+        assert!(harness.ctx.text_edit_focused());
+        let both = egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT);
+        harness.key_press_modifiers(both, egui::Key::Enter);
+        harness.run_steps(2);
+        finish(&mut harness);
+        assert!(harness.state().items.iter().all(|item| item.made.is_some()));
     }
 
     #[test]
