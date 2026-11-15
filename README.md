@@ -1,6 +1,6 @@
 # tgradish
 
-Telegram video, image and animated stickers and emoji from videos, pictures and pixel art, in a window or on the command line:
+Telegram video, image and animated stickers and emoji from videos, pictures and pixel art, in a GUI or on the command line:
 
 - video stickers and emoji (WebM) from any video, GIF, picture, Aseprite file or folder of frames;
 - animated stickers and emoji (.tgs) from pixel art: GIF, APNG, WebP, Aseprite, a sprite sheet, a folder of frames, or a video of it;
@@ -36,7 +36,7 @@ nix run github:sliva0/tgradish
 
 From source, with Rust 1.95 or newer, `cargo build --release` makes `target/release/tgradish`, which uses the system's ffmpeg; [CONTRIBUTING.md](CONTRIBUTING.md) says how to build it with ffmpeg built in.
 
-Packages install shell completions and man pages; elsewhere `tgradish completions SHELL` prints the script for bash, zsh, fish or PowerShell.
+Packages install shell completions and man pages; elsewhere `tgradish completions SHELL` prints the script for bash, zsh, fish, PowerShell or nushell.
 
 The Python version, 1.x, is on the [`1.x`](https://github.com/sliva0/tgradish/tree/1.x) branch and on PyPI. 2.0's command line is different: `convert` takes its inputs as arguments, without `-i`. [CHANGELOG.md](CHANGELOG.md) says what changed, with a table of what each 1.x command and flag became.
 
@@ -50,7 +50,7 @@ Builds with ffmpeg built in need no separate ffmpeg. The rest use `ffmpeg` and `
 
 ## Usage examples
 
-`tgradish` opens the window when started without arguments outside a terminal, as does `tgradish gui [FILES]`, with the files given. It opens at the size and layout it was left in, with the files of last time. Everything the window does can be done on the command line too: `tgradish --help` lists the commands, and `tgradish <command> --help` their options.
+`tgradish` opens the GUI when started without arguments outside a terminal, as does `tgradish gui [FILES]`, with the files given. It opens at the size and layout it was left in, with the files of last time; F1 lists its keyboard shortcuts. Everything the GUI does can be done on the command line too: `tgradish --help` lists the commands, and `tgradish <command> --help` their options.
 
 ``` console
 tgradish convert clip.mp4                  # a video sticker, clip.sticker.webm
@@ -85,4 +85,4 @@ Feedback: [@s0untitled](https://t.me/s0untitled?direct) on Telegram, or open an 
 
 ## Licence
 
-[MIT License](LICENSE.txt). Builds with ffmpeg built in also carry ffmpeg under the LGPL, its sources attached to each release; `tgradish licenses` prints every notice a build carries, and About in the window shows them.
+[MIT License](LICENSE.txt). Builds with ffmpeg built in also carry ffmpeg under the LGPL, its sources attached to each release; `tgradish licenses` prints every notice a build carries, and About in the GUI shows them.
