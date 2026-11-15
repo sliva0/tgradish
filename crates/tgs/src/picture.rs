@@ -23,6 +23,15 @@
 //! cut from wider art through transparent columns reads as art as wide as
 //! what shows. The picture is then the same on the canvas, whose margins
 //! are wider by the transparent part.
+//!
+//! A picture is shown as a sticker's art is placed: in the middle of the
+//! canvas, filling it along its longer side, or stretched to fill it.
+//! Art placed otherwise, as smaller than the canvas or away from its
+//! middle, is drawn with the whole canvas around it, transparent where
+//! nothing is, so that it shows where it is on the canvas; where the
+//! canvas's edges aren't on the art's pixel grid, so that its margins
+//! can't be drawn in whole squares of it, it is refused as shapes off a
+//! pixel grid.
 
 use serde_json::{Map, Value};
 use thiserror::Error;
@@ -160,7 +169,9 @@ pub fn of_art(anim: &PixelAnim, stretch: bool, max_side: u32) -> Picture {
 
 /// What the Lottie `json` of a `.tgs` tgradish wrote shows, as [`of_art`]
 /// draws the art it was made of, at most `max_side` pixels along its
-/// longer side. Lottie with more than tgradish writes is refused, as is
+/// longer side; art placed otherwise than tgradish places it is drawn
+/// with the canvas around it. Lottie with more than tgradish writes is
+/// refused, as is
 /// more JSON than Telegram's apps play
 /// ([`MAX_RAW_JSON`]) and a sticker longer
 /// than the 3 seconds Telegram allows.
@@ -715,6 +726,30 @@ impl Extent {
         extents
     }
 
+    /// Whether `extents` show as the canvas does, a picture of them placed
+    /// as tgradish places art: in the canvas's middle, filling it along
+    /// the longer side, or along both where `stretched`.
+    fn as_placed(
+        extents: &[Extent; 2],
+        position: [f64; 2],
+        scale: [f64; 2],
+        stretched: bool,
+    ) -> bool {
+        let sides = extents.iter().zip(position.into_iter().zip(scale));
+        let placed = sides.map(|(extent, (position, scale))| {
+            let ((middle, off), (half, off_half)) = canvas(position, scale);
+            let centre = (extent.low + extent.high) / 2.0;
+            let centred = (centre - middle).abs() <= extent.tolerance + 2.0 * off + EDGE;
+            let tolerance = extent.tolerance + 2.0 * off_half;
+            let fills = extent.length() >= 2.0 * half - 2.0 * tolerance - EDGE;
+            (centred, fills)
+        });
+        let placed: Vec<(bool, bool)> = placed.collect();
+        let centred = placed.iter().all(|&(centred, _)| centred);
+        let mut fills = placed.iter().map(|&(_, fills)| fills);
+        centred && if stretched { fills.all(|fills| fills) } else { fills.any(|fills| fills) }
+    }
+
     /// How far the art starts before its first whole art pixel, and how
     /// far it ends past its last's start, in art pixels, with how far off
     /// they may be.
@@ -828,6 +863,13 @@ impl Sticker {
             {
                 return Err(unsupported("shapes outside the canvas"));
             }
+        }
+        // art placed otherwise than tgradish places it, as smaller than the
+        // canvas or away from its middle, is drawn with the whole canvas
+        // around it, so the picture shows as the canvas does; where the
+        // canvas's edges are off the art's pixel grid, it isn't drawn
+        if !Extent::as_placed(&extents, position, scale, stretched) {
+            extents = [0, 1].map(|side| Extent::filling(position[side], scale[side]));
         }
         let divisions = divisions(&extents)?;
         let (across, down) = (Side::of(&extents[0], divisions)?, Side::of(&extents[1], divisions)?);
@@ -1045,6 +1087,82 @@ mod tests {
             }
         }
         assert!(fitted > 5, "{fitted}");
+    }
+
+    #[test]
+    fn draws_padded_art_as_converting_drew_it() {
+        // art wider or higher than square, whole with margins, as tgradish
+        // pads it: the same picture of the art alone, not of the canvas
+        let mut padded = 0;
+        for (name, input) in inputs() {
+            for keep_canvas in [false, true] {
+                let options = normalise::Options { keep_canvas, ..Default::default() };
+                let (anim, _) = normalise(input.clone(), &options).unwrap();
+                let read = of_lottie(lottie(&anim, false).as_bytes(), 1024).unwrap();
+                let drawn = of_art(&anim, false, 1024);
+                if drawn.width == drawn.height || anim.grid().cut_at_sides() {
+                    continue;
+                }
+                assert_eq!(read, drawn, "{name}, {keep_canvas}");
+                padded += 1;
+            }
+        }
+        assert!(padded >= 5, "{padded}");
+    }
+
+    /// A 512×512 sticker of one frame of `rects`, each its middle, size
+    /// and colour, in layer coordinates placed at `position + percent /
+    /// 100 * point`, as another program may write it.
+    fn placed(position: [f64; 2], percent: f64, rects: &[([f64; 2], [f64; 2], [u8; 3])]) -> Value {
+        use serde_json::json;
+        let groups: Vec<Value> = rects
+            .iter()
+            .map(|&(middle, size, colour)| {
+                let colour = colour.map(|channel| f64::from(channel) / 255.0);
+                let rect = json!({"ty": "rc", "p": {"k": middle}, "s": {"k": size}});
+                let fill = json!({"ty": "fl", "c": {"k": colour}});
+                json!({"ty": "gr", "it": [rect, fill, {"ty": "tr"}]})
+            })
+            .collect();
+        let ks = json!({"p": {"k": position}, "s": {"k": [percent, percent]}});
+        let layer = json!({"ty": 4, "ip": 0, "op": 1, "ks": ks, "shapes": groups});
+        json!({"fr": 60, "ip": 0, "op": 1, "w": 512, "h": 512, "layers": [layer]})
+    }
+
+    /// The canvas, as a picture of a frame: `rects`, `[left, top, right,
+    /// bottom]` in canvas pixels, of their colours, on nothing.
+    fn canvas_of(rects: &[([u32; 4], [u8; 3])]) -> Picture {
+        let side = telegram::CANVAS;
+        let mut rgba = vec![0; (side * side * 4) as usize];
+        for &([left, top, right, bottom], [r, g, b]) in rects {
+            for y in top..bottom {
+                for x in left..right {
+                    let at = ((y * side + x) * 4) as usize;
+                    rgba[at..at + 4].copy_from_slice(&[r, g, b, 255]);
+                }
+            }
+        }
+        Picture { width: side, height: side, frames: vec![(rgba, 1)] }
+    }
+
+    #[test]
+    fn keeps_the_margins_of_art_that_does_not_fill_the_canvas() {
+        let (red, blue) = ([255, 0, 0], [0, 0, 255]);
+        // a dot in the middle of the canvas, an art pixel a canvas pixel
+        let dot = drawn(&placed([256.0, 256.0], 100.0, &[([0.0, 0.0], [1.0, 1.0], red)])).unwrap();
+        assert_eq!(dot.width, dot.height);
+        same_on_canvas(&dot, &canvas_of(&[([255, 255, 256, 256], red)]), false, "a dot");
+        // art smaller than the canvas, away from its middle, 16 canvas
+        // pixels an art pixel
+        let rects = [([1.0, 0.5], [3.0, 2.0], red), ([10.0, 20.0], [1.0, 1.0], blue)];
+        let aside = drawn(&placed([32.0, 64.0], 1600.0, &rects)).unwrap();
+        assert_eq!(aside.width, aside.height);
+        let canvas = canvas_of(&[([24, 56, 72, 88], red), ([184, 376, 200, 392], blue)]);
+        same_on_canvas(&aside, &canvas, false, "aside");
+        // and where the canvas's edges are off the art's pixel grid, its
+        // margins can't be drawn in whole pixels
+        let off = placed([256.123_456_7, 256.0], 100.0, &[([0.0, 0.0], [1.0, 1.0], red)]);
+        assert!(matches!(drawn(&off), Err(DrawError::Unsupported(_))), "{:?}", drawn(&off));
     }
 
     /// A small sticker's Lottie, as JSON to change.
