@@ -333,11 +333,10 @@ impl App {
             asked(Command::UndoRemoving).is_some(),
             asked(Command::Shortcuts).is_some(),
         );
-        let (add, settings, inspect, convert_all, keep_best) = (
+        let (add, settings, inspect, keep_best) = (
             asked(Command::AddFiles).is_some(),
             asked(Command::Settings).is_some(),
             asked(Command::Inspect).is_some(),
-            asked(Command::ConvertAll).is_some(),
             asked(Command::KeepBest).is_some(),
         );
         let copy = ctx.input(|input| {
@@ -365,7 +364,21 @@ impl App {
         if self.dialog_open() {
             return;
         }
-        // as Convert's, from a field too, its value typed in
+        // taken, so the button with the focus isn't pressed too, as egui has
+        // Enter press it whatever is held with it: Ctrl+Shift+Enter first,
+        // which taking Ctrl+Enter would take too
+        let take = |command| {
+            ctx.input_mut(|input| {
+                let (at, _) = pressed(input, command)?;
+                input.consume_shortcut(&shortcut_of(command).keys[at]);
+                Some(())
+            })
+            .is_some()
+        };
+        let convert_all = take(Command::ConvertAll);
+        // both from a field too, its value typed in; Convert's for the bar
+        // under the preview, which has its button
+        self.keyed.convert = take(Command::Convert);
         if convert_all {
             self.convert_all();
         }
@@ -390,7 +403,8 @@ impl App {
             return;
         }
         // for the bar under the preview, which has the buttons they press
-        self.keyed = Keyed { copy: copy && selecting != Some(true), keep_best };
+        self.keyed.copy = copy && selecting != Some(true);
+        self.keyed.keep_best = keep_best;
         // while a notice offers it, as after a row with the focus was
         // removed by its key
         if undo {
@@ -446,6 +460,8 @@ impl App {
 /// buttons that do it too.
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct Keyed {
+    /// Converted, as Convert does.
+    pub(crate) convert: bool,
     /// Its result copied, as Copy does.
     pub(crate) copy: bool,
     /// Keep best so far pressed.
@@ -808,6 +824,43 @@ mod tests {
         harness.run_steps(2);
         finish(&mut harness);
         assert!(harness.state().items.iter().all(|item| item.made.is_some()));
+    }
+
+    #[test]
+    fn converts_by_its_keys_without_pressing_the_button_with_the_focus() {
+        use crate::l10n::fl;
+        use egui_kittest::kittest::Queryable;
+        let dir = tempfile::tempdir().unwrap();
+        let arts: Vec<_> = (0..2)
+            .map(|n| {
+                let art = dir.path().join(format!("{n}.png"));
+                square(&art, [255, 0, 0, 255]);
+                art
+            })
+            .collect();
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = harness(config);
+        harness.state_mut().add(arts);
+        finish(&mut harness);
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        harness.state_mut().select(ids[0]);
+        harness.run_steps(2);
+        // Enter presses the button with the focus, whatever is held with it
+        let (ctrl, both) =
+            (egui::Modifiers::COMMAND, egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT));
+        for (modifiers, converted) in [(ctrl, vec![true, false]), (both, vec![true, true])] {
+            harness.get_by_label(&fl!("remove-all")).focus();
+            harness.run_steps(2);
+            assert!(harness.ctx.memory(|memory| memory.focused().is_some()));
+            harness.key_press_modifiers(modifiers, egui::Key::Enter);
+            harness.run_steps(2);
+            finish(&mut harness);
+            let app = harness.state();
+            assert_eq!(app.items.len(), 2, "{modifiers:?} removed them");
+            let made: Vec<bool> = app.items.iter().map(|item| item.made.is_some()).collect();
+            assert_eq!(made, converted, "{modifiers:?}");
+        }
     }
 
     #[test]

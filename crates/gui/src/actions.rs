@@ -206,10 +206,7 @@ impl App {
             let copied = self.clipboard.copy_file(&path);
             ui.data_mut(|data| data.insert_temp(egui::Id::new(COPIED), (now, copied)));
         }
-        let shortcut = !self.dialog_open()
-            && ui.input(|input| {
-                crate::keys::pressed(input, crate::keys::Command::Convert).is_some()
-            });
+        let shortcut = keyed.convert;
         // the user lets this item replace the file that is there now
         if let Some(path) = replace {
             if let Some(written) = Written::of(id, &path) {
