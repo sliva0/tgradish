@@ -3,7 +3,8 @@ name: release
 # Builds single-file tgradish binaries with ffmpeg linked statically, for
 # Linux (x86-64 and aarch64, for glibc and for musl) and Windows
 # (cross-compiled with mingw-w64), the glibc ones also as .deb and .rpm
-# packages, and glibc binaries that use the system's ffmpeg instead. Tests
+# packages and the Windows one also alone, and glibc binaries that use the
+# system's ffmpeg instead, all named without the version. Tests
 # them, and on a version tag drafts a GitHub release with them and the
 # ffmpeg sources the LGPL asks for. Pull requests that touch the ffmpeg
 # build run it too.
@@ -96,9 +97,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # archives are named after the version in Cargo.toml, the release
-      # after the tag, and the AUR packages download it by their pkgver; the
-      # Windows executable takes Cargo.toml's when it is built
+      # the release is named after the tag, and the AUR packages download
+      # it by their pkgver; the folders in the archives, the packages and
+      # the binaries take Cargo.toml's version as they are built. The files
+      # themselves are named without it, alike in every release
       - name: Check the tag is the version
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
@@ -194,6 +196,7 @@ jobs:
             target/release-artifacts/*.zip
             target/release-artifacts/*.deb
             target/release-artifacts/*.rpm
+            target/release-artifacts/*.exe
             target/release-artifacts/*.sha256
 
   # runs the Linux builds on a current Ubuntu, with and without ffmpeg
@@ -381,7 +384,10 @@ jobs:
             # a file of the name a source downloads to is taken in its place
             case $package in
               tgradish) cp /tmp/source.tar.gz "$dir/tgradish-$version.tar.gz" ;;
-              *) cp artifacts/tgradish-"$version"-x86_64-unknown-linux-gnu*.tar.gz "$dir" ;;
+              tgradish-bin)
+                cp artifacts/tgradish-linux-x86_64-system-ffmpeg.tar.gz "$dir/$package-$version-x86_64.tar.gz" ;;
+              tgradish-static-bin)
+                cp artifacts/tgradish-linux-x86_64.tar.gz "$dir/$package-$version-x86_64.tar.gz" ;;
             esac
             chown -R builder "$dir"
             # its dependencies, as root, since builder can't install them
@@ -439,6 +445,13 @@ jobs:
           "$bin" inspect out.webm out.tgs out.webp
           # Windows paths and an output that already exists
           "$bin" convert still.webm -o out.webm --preset fast && exit 1 || true
+          # the executable published alone is the archive's, with ffmpeg's
+          # licence and where its sources are in it
+          cmp tgradish.exe "$bin"
+          # into a file, as grep -q stopping early would break the pipe
+          ./tgradish.exe licenses > licenses.txt
+          grep -q "GNU LESSER GENERAL PUBLIC LICENSE" licenses.txt
+          grep -q -- "-sources.tar, published with each tgradish release" licenses.txt
 
   # gathers what the release holds: every build, and ffmpeg's sources. It
   # runs every time, so a tag isn't the first time it does, and so only

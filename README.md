@@ -13,35 +13,70 @@ Video stickers and emoji can run past Telegram's 3 second limit: tgradish spoofs
 
 ## Installation
 
-From [Releases](https://github.com/sliva0/tgradish/releases):
+Every release is on [Releases](https://github.com/sliva0/tgradish/releases); the links below take the latest.
 
-- **Linux** (x86-64 and aarch64): a single binary, or a `.deb` or `.rpm` package:
+### Windows
+
+x86-64: [tgradish-windows-x86_64.zip](https://github.com/sliva0/tgradish/releases/latest/download/tgradish-windows-x86_64.zip), with ffmpeg built in. Unpack it and run `tgradish.exe`.
+
+Or [tgradish.exe](https://github.com/sliva0/tgradish/releases/latest/download/tgradish.exe) alone, the same program: `tgradish licenses` prints the notices the zip has as files.
+
+### Linux
+
+x86-64 and aarch64: `$(uname -m)` picks the file for the machine.
+
+- **Debian, Ubuntu, Mint** and other Debian-based, with ffmpeg built in:
   ``` console
-  sudo apt install ./tgradish_2.0.0-1_amd64.deb
-  sudo dnf install ./tgradish-2.0.0-1.x86_64.rpm
+  wget https://github.com/sliva0/tgradish/releases/latest/download/tgradish-linux-$(uname -m).deb
+  sudo apt install ./tgradish-linux-$(uname -m).deb
   ```
-- **Windows** (x86-64): a zip with `tgradish.exe`.
+- **Fedora, openSUSE** and other rpm-based, with ffmpeg built in:
+  ``` console
+  curl -LO https://github.com/sliva0/tgradish/releases/latest/download/tgradish-linux-$(uname -m).rpm
+  sudo dnf install ./tgradish-linux-$(uname -m).rpm
+  # or on openSUSE
+  sudo zypper install --allow-unsigned-rpm ./tgradish-linux-$(uname -m).rpm
+  ```
+- **Arch Linux**, from the AUR: `tgradish` builds from source, `tgradish-bin` uses the system's ffmpeg, `tgradish-static-bin` has it built in:
+  ``` console
+  yay -S tgradish-bin
+  ```
+- **NixOS, Nix**, with nixpkgs' ffmpeg; on NixOS the flake's `overlays.default` adds `pkgs.tgradish`:
+  ``` console
+  nix run github:sliva0/tgradish               # once
+  nix profile install github:sliva0/tgradish   # to keep
+  ```
+- **Any Linux** with glibc 2.28 or newer, from an archive with ffmpeg built in:
+  ``` console
+  curl -L https://github.com/sliva0/tgradish/releases/latest/download/tgradish-linux-$(uname -m).tar.gz | tar -xz
+  install -Dm755 tgradish-*/tgradish ~/.local/bin/tgradish
+  ```
+  For musl, as on Alpine, take `tgradish-linux-musl-$(uname -m).tar.gz` instead, or `tgradish-linux-$(uname -m)-system-ffmpeg.tar.gz` to use the system's ffmpeg. The archives also have a menu entry, icons, man pages and shell completions.
+- **Cargo**, with Rust 1.95 or newer and a C compiler, using the system's ffmpeg:
+  ``` console
+  cargo install tgradish
+  ```
+- **From source**, likewise:
+  ``` console
+  git clone https://github.com/sliva0/tgradish
+  cd tgradish
+  cargo install --locked --path crates/cli
+  ```
 
-Arch Linux, from the AUR: `tgradish` (built from source), `tgradish-bin` (uses the system's ffmpeg) or `tgradish-static-bin` (ffmpeg built in):
+### macOS
+
+Untested and not supported: no release is built for it. Building from source might work, with Homebrew's ffmpeg:
 ``` console
-yay -S tgradish-bin
+brew install ffmpeg rust
+cargo install tgradish
 ```
-
-Nix:
-``` console
-nix run github:sliva0/tgradish
-```
-
-From source, with Rust 1.95 or newer: `cargo install tgradish`.
-
-macOS is untested and not supported.
 
 The Python version, 1.x, is on the [`1.x`](https://github.com/sliva0/tgradish/tree/1.x) branch and on PyPI. Its command line was different: see [CHANGELOG.md](CHANGELOG.md).
 
 
 ## Dependencies
 
-Release builds have ffmpeg built in, except those named `system-ffmpeg`. The rest need `ffmpeg` and `ffprobe` on PATH, with libvpx; `tgradish ffmpeg` shows which is used and whether it can make stickers.
+Release builds have ffmpeg built in, as does `tgradish-static-bin`, but not the archives named `system-ffmpeg`. Those, the other AUR packages, Nix's and builds with cargo run `ffmpeg` and `ffprobe` from PATH, with libvpx, which the AUR and Nix packages install with them; `tgradish ffmpeg` shows which is used and whether it can make stickers.
 
 Animated stickers from pixel art, `tgradish spoof` and `tgradish inspect` work without ffmpeg.
 

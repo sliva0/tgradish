@@ -34,13 +34,15 @@ optdepends=(
 provides=("$_pkgname")
 conflicts=("$_pkgname")
 options=(!strip !debug)
-source_x86_64=("$url/releases/download/v$pkgver/$_pkgname-$pkgver-x86_64-unknown-linux-gnu.tar.gz")
-source_aarch64=("$url/releases/download/v$pkgver/$_pkgname-$pkgver-aarch64-unknown-linux-gnu.tar.gz")
+# a release names its files alike in every version: here they are named
+# by it, so a cache of downloads, as SRCDEST, keeps versions apart
+source_x86_64=("$pkgname-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/$_pkgname-linux-x86_64.tar.gz")
+source_aarch64=("$pkgname-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/$_pkgname-linux-aarch64.tar.gz")
 sha256sums_x86_64=('SKIP')
 sha256sums_aarch64=('SKIP')
 
 package() {
-  cd "$_pkgname-$pkgver-$CARCH-unknown-linux-gnu"
+  cd "$_pkgname-$pkgver-linux-$CARCH"
   install -Dm755 tgradish -t "$pkgdir/usr/bin/"
   install -Dm644 man/*.1.gz -t "$pkgdir/usr/share/man/man1/"
   install -Dm644 completions/tgradish.bash "$pkgdir/usr/share/bash-completion/completions/tgradish"

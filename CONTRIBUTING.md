@@ -89,8 +89,10 @@ GPL parts.
    - raise `RUSTUP_TOOLCHAIN` in `.github/workflows/release.yml` to the
      newest stable Rust.
 2. `cargo xtask local-release` builds every variant into
-   `target/release-artifacts`; it needs mingw-w64 for Windows and
-   musl-gcc for musl. Try them.
+   `target/release-artifacts`, named as the release names them; it needs
+   mingw-w64 for Windows and musl-gcc for musl. Try them. The files are
+   named without the version, alike in every release, as the README's
+   links to the latest release's need.
 3. Push a `vX.Y.Z` tag. The release workflow builds and tests
    everything, and drafts a release. Check the draft, then publish it.
 4. Copy each `packaging/aur/*/PKGBUILD` into your clone of that package

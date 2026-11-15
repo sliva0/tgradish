@@ -1,6 +1,11 @@
 //! Release archives of a built tgradish, and for glibc builds with ffmpeg
-//! built in also a .deb and an .rpm. Each holds the binary with every
-//! notice it needs, and for Linux its menu entry and icons. Binaries are
+//! built in also a .deb and an .rpm; Windows's executable is published on
+//! its own too, as it carries every notice in itself. Each archive holds
+//! the binary with every notice it needs, and for Linux its menu entry and
+//! icons. Files are named without the version, the same in every release,
+//! so that links to the latest release's, as the README's, keep finding
+//! them; the tag says the version, as does the folder in an archive,
+//! which keeps two versions unpacked apart. Binaries are
 //! checked before they are packed, since a release must run where it says
 //! it does: Windows ones without MinGW's DLLs, glibc ones on a glibc as old
 //! as asked, musl ones linked to nothing that musl distributions may lack.
@@ -150,10 +155,7 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
     );
 
     let out = root.join("target/release-artifacts");
-    let name = match system_ffmpeg {
-        true => format!("tgradish-{version}-{triple}-system-ffmpeg"),
-        false => format!("tgradish-{version}-{triple}"),
-    };
+    let name = format!("tgradish-{version}-{}", variant(target, system_ffmpeg));
     let stage = out.join(&name);
     if stage.exists() {
         std::fs::remove_dir_all(&stage)?;
@@ -226,20 +228,28 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
         check_glibc(&binary, max)?;
     }
 
-    let archive = if target.is_windows() {
-        let archive = out.join(format!("{name}.zip"));
+    let archive = out.join(archive_name(target, system_ffmpeg));
+    if target.is_windows() {
         if archive.exists() {
             std::fs::remove_file(&archive)?;
         }
         run(Command::new("zip").current_dir(&out).arg("-qr").arg(&archive).arg(&name))?;
-        archive
     } else {
-        let archive = out.join(format!("{name}.tar.gz"));
         run(Command::new("tar").arg("-czf").arg(&archive).arg("-C").arg(&out).arg(&name))?;
-        archive
-    };
+    }
     sha256_file(&archive)?;
     println!("{}", archive.display());
+
+    // the executable alone, for those who want no archive: it carries the
+    // licences and notices of the archive's licenses/ in itself, which
+    // `tgradish licenses` prints, and ffmpeg's sources are beside it in the
+    // release, as the LGPL asks
+    if target.is_windows() {
+        let exe = out.join(target.exe("tgradish"));
+        std::fs::copy(&binary, &exe)?;
+        sha256_file(&exe)?;
+        println!("{}", exe.display());
+    }
 
     // with ffmpeg built in, as the system's may be too old or lack codecs;
     // musl distributions have packages of their own
@@ -250,6 +260,30 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
         }
     }
     Ok(())
+}
+
+/// A build as the release's files and folders name it: its target, and
+/// `-system-ffmpeg` after it for one without ffmpeg.
+fn variant(target: Target, system_ffmpeg: bool) -> String {
+    match system_ffmpeg {
+        true => format!("{}-system-ffmpeg", target.name()),
+        false => target.name().to_owned(),
+    }
+}
+
+/// The release's archive of a build, as `tgradish-linux-x86_64.tar.gz`.
+fn archive_name(target: Target, system_ffmpeg: bool) -> String {
+    let extension = if target.is_windows() { "zip" } else { "tar.gz" };
+    format!("tgradish-{}.{extension}", variant(target, system_ffmpeg))
+}
+
+/// The release's .deb and .rpm of a glibc build, as
+/// `tgradish-linux-x86_64.deb`: named like the archives, by the processor
+/// as `uname -m` names it rather than as Debian does (amd64, arm64), so
+/// one `$(uname -m)` picks any of a machine's files. apt, dnf and zypper
+/// install a package whatever its file is called.
+fn package_names(target: Target) -> [String; 2] {
+    ["deb", "rpm"].map(|extension| format!("tgradish-{}.{extension}", target.name()))
 }
 
 /// The completion scripts of bash, zsh, fish and nushell, as
@@ -457,11 +491,8 @@ fn linux_packages(
     let out = stage.parent().unwrap();
     let config_path = out.join(format!("nfpm-{}.yaml", target.triple()));
     std::fs::write(&config_path, config)?;
-    let rpm_arch = target.triple().split('-').next().unwrap();
-    let packages = [
-        ("deb", out.join(format!("tgradish_{version}-1_{arch}.deb"))),
-        ("rpm", out.join(format!("tgradish-{version}-1.{rpm_arch}.rpm"))),
-    ];
+    let [deb, rpm] = package_names(target);
+    let packages = [("deb", out.join(deb)), ("rpm", out.join(rpm))];
     for (packager, path) in &packages {
         run(Command::new(nfpm_dir.join("nfpm"))
             .arg("package")
@@ -550,6 +581,92 @@ fn needed_glibc(exe: &Path) -> Result<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every file a release has, as the release workflow builds them with
+    /// `package` and gathers them: each build's archive, the glibc ones
+    /// also without ffmpeg and as a .deb and an .rpm, Windows's executable,
+    /// ffmpeg's sources, and the sums.
+    fn release_files() -> Vec<String> {
+        let mut files = vec![];
+        for target in Target::ALL {
+            let glibc = !target.is_windows() && !target.is_musl();
+            files.push(archive_name(target, false));
+            if glibc {
+                files.push(archive_name(target, true));
+                files.extend(package_names(target));
+            }
+        }
+        files.push(Target::WindowsX64.exe("tgradish"));
+        // each built file has its own sum beside it
+        let sums: Vec<String> = files.iter().map(|file| format!("{file}.sha256")).collect();
+        files.extend(sums);
+        files.push(format!("{}.tar", sources_archive()));
+        files.push("SHA256SUMS".to_owned());
+        files
+    }
+
+    /// The names of the release's files, every one different, which the
+    /// workflow gathers into one folder, and none with the version in it.
+    #[test]
+    fn release_files_are_named_apart_and_without_the_version() {
+        let files = release_files();
+        let mut sorted = files.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), files.len(), "{files:?}");
+        for file in &files {
+            assert!(!file.contains(env!("CARGO_PKG_VERSION")), "{file} has the version in it");
+        }
+    }
+
+    /// The files the README names, in links to the latest release and in
+    /// the commands around them, and those the -bin AUR packages download
+    /// from a release, are files releases have: `$(uname -m)` stands for
+    /// either processor.
+    #[test]
+    fn links_name_files_releases_have() {
+        let files = release_files();
+        let root = workspace_root();
+        let read = |path: &str| std::fs::read_to_string(root.join(path)).unwrap();
+        let has = |path: &str, name: &str| {
+            for arch in ["x86_64", "aarch64"] {
+                let name = name.replace("{arch}", arch);
+                assert!(files.contains(&name), "{path} names {name}, which releases lack");
+            }
+        };
+        // the README: every name of a release's file, in a link or not
+        let readme = read("README.md").replace("$(uname -m)", "{arch}");
+        let named: Vec<&str> = readme
+            .split(|c: char| !(c.is_ascii_alphanumeric() || "-_.{}".contains(c)))
+            .filter(|word| word.starts_with("tgradish"))
+            .filter(|word| {
+                [".tar.gz", ".zip", ".deb", ".rpm", ".exe"].iter().any(|ext| word.ends_with(ext))
+            })
+            .collect();
+        assert!(named.len() >= 6, "{named:?}");
+        for name in named {
+            has("README.md", name);
+        }
+        let links = readme.matches("/releases/latest/download/").count();
+        assert!(links >= 5, "the README has {links} links to the latest release's files");
+        // the AUR's: a release's files, by its tag
+        for package in ["tgradish-bin", "tgradish-static-bin"] {
+            for file in ["PKGBUILD", ".SRCINFO"] {
+                let path = format!("packaging/aur/{package}/{file}");
+                let text = read(&path).replace("$_pkgname", "tgradish");
+                let downloads: Vec<&str> = text
+                    .split("/releases/download/")
+                    .skip(1)
+                    .map(|link| link.split_once('/').unwrap().1)
+                    .map(|link| link.split(['"', '\n', ')']).next().unwrap())
+                    .collect();
+                assert_eq!(downloads.len(), 2, "{path}: {downloads:?}");
+                for name in downloads {
+                    has(&path, name);
+                }
+            }
+        }
+    }
 
     #[test]
     fn debian_copyright_names_where_the_package_puts_things() {
