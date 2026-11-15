@@ -38,22 +38,22 @@ impl Input {
     /// after its first file or folder, so a folder of frames and a
     /// sequence of the frames in it are named alike only when given as the
     /// folder: `walk/` makes `walk.sticker.tgs` beside it, `walk/1.png
-    /// walk/2.png` makes `walk/1.sticker.tgs`. A name that ends in
-    /// `.sticker` or `.emoji` already, as an earlier result's does, isn't
-    /// given it again: `pig.sticker.webm` makes `pig.sticker.webp`, but
-    /// `pig.sticker.sticker.webm` of itself, which would otherwise be its
-    /// own name. Front-ends writing results into a folder of their own keep
-    /// the name.
+    /// walk/2.png` makes `walk/1.sticker.tgs`. A result, by its name, isn't
+    /// given `.sticker` or `.emoji` again: `pig.sticker.webm` makes
+    /// `pig.sticker.webp`, but `pig.sticker.sticker.webm` of itself, which
+    /// would otherwise be its own name. Only a result's name, as
+    /// [`is_result_name`] tells it: `pig.sticker.mp4` makes
+    /// `pig.sticker.sticker.webm`, apart from `pig.mp4`'s. Front-ends
+    /// writing results into a folder of their own keep the name.
     pub fn default_output(&self, format: Format, target: Target) -> PathBuf {
         let first = self.first();
-        let folder = first.is_dir();
-        let name = if folder { first.file_name() } else { first.file_stem() };
-        let named = name
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.ends_with(&format!(".{}", target.name())));
+        let stem = first.file_stem().and_then(|stem| stem.to_str()).map(str::to_lowercase);
+        let named = !first.is_dir()
+            && is_result_name(first)
+            && stem.is_some_and(|stem| stem.ends_with(&format!(".{}", target.name())));
         // its own name, whatever the extension's case, which names the
         // same file where names ignore case
-        let itself = !folder && extension(first) == format.extension();
+        let itself = extension(first) == format.extension();
         let suffix = match named && !itself {
             true => format.extension().to_owned(),
             false => result_suffix(format, target),
@@ -280,7 +280,7 @@ mod tests {
             Path::new("clips/cat.sticker.tgs")
         );
         assert_eq!(
-            named("cat.emoji.gif", Format::Webm, Target::Emoji),
+            named("cat.emoji.webp", Format::Webm, Target::Emoji),
             Path::new("cat.emoji.webm")
         );
         // but not into itself, nor into what it isn't
@@ -300,18 +300,34 @@ mod tests {
             named("sticker.webm", Format::Webp, Target::Sticker),
             Path::new("sticker.sticker.webp")
         );
-        // a sequence, by its first file
+        // whatever the case of the name
+        assert_eq!(
+            named("Cat.STICKER.WebM", Format::Webp, Target::Sticker),
+            Path::new("Cat.STICKER.webp")
+        );
+        // only a result's name, as a watched folder takes it: an input that
+        // merely ends so is named apart from the one without, as cat.mp4
+        // makes cat.sticker.webm
+        assert_eq!(
+            named("cat.sticker.mp4", Format::Webm, Target::Sticker),
+            Path::new("cat.sticker.sticker.webm")
+        );
+        assert_eq!(
+            named("cat.emoji.png", Format::Webp, Target::Emoji),
+            Path::new("cat.emoji.emoji.webp")
+        );
+        // nor a sequence's first frame
         let frames = Input::Sequence(vec!["walk/1.sticker.png".into(), "walk/2.png".into()]);
         assert_eq!(
             frames.default_output(Format::Tgs, Target::Sticker),
-            Path::new("walk/1.sticker.tgs")
+            Path::new("walk/1.sticker.sticker.tgs")
         );
-        // and a folder by its whole name
+        // nor a folder, named by its whole name
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join("walk.sticker");
         std::fs::create_dir(&folder).unwrap();
         let output = Input::Sequence(vec![folder]).default_output(Format::Tgs, Target::Sticker);
-        assert_eq!(output, dir.path().join("walk.sticker.tgs"));
+        assert_eq!(output, dir.path().join("walk.sticker.sticker.tgs"));
     }
 
     #[test]
