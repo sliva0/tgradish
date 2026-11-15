@@ -1,6 +1,6 @@
 # tgradish-gui
 
-The window of [tgradish](https://github.com/sliva0/tgradish), made with
+The GUI of [tgradish](https://github.com/sliva0/tgradish), made with
 egui: a list of files, each with its own settings, a preview to crop and
 trim it, and its result.
 
