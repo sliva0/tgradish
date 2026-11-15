@@ -12,6 +12,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::CancelToken;
+use crate::config::Threads;
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, Capabilities, Ffmpeg, FfmpegChoice, Output, Probe};
 use crate::webm::Params;
@@ -203,11 +204,13 @@ impl Backend {
         let read = absolute(path);
         let frames = match self {
             Backend::Process(ffmpeg) => {
-                ffmpeg::frames(ffmpeg, &read, probe, (start, fps), (width, height), count, cancel)
+                let (size, threads) = ((width, height), request.threads);
+                ffmpeg::frames(ffmpeg, &read, probe, (start, fps), size, count, threads, cancel)
             }
             #[cfg(feature = "linked")]
             Backend::Builtin => {
-                crate::linked::frames(&read, probe, (start, fps), (width, height), count, cancel)
+                let (size, threads) = ((width, height), request.threads);
+                crate::linked::frames(&read, probe, (start, fps), size, count, threads, cancel)
             }
         };
         let frames = naming(frames, path, &read)?;
@@ -241,6 +244,7 @@ impl Backend {
             max_side,
             // long ones are shown at a lower frame rate
             max_frames: ((PREVIEW_BYTES as f64 / frame_bytes.max(1.0)) as usize).max(1),
+            threads: Threads::Auto,
         };
         let frames = self.frames(path, &probe, &request, cancel)?;
         let ticks = ticks(frames.frames.len(), frames.fps);
@@ -352,6 +356,8 @@ pub struct FramesRequest {
     /// At most this many frames, spread over the length by lowering the
     /// frame rate.
     pub max_frames: usize,
+    /// How many threads ffmpeg reads them in.
+    pub threads: Threads,
 }
 
 /// Evenly spaced frames of a video, as straight RGBA in its display
@@ -401,7 +407,7 @@ mod tests {
     }
 
     fn request(start: f64, length: Option<f64>, fps: f64, max_frames: usize) -> FramesRequest {
-        FramesRequest { start, length, fps, max_side: 320, max_frames }
+        FramesRequest { start, length, fps, max_side: 320, max_frames, threads: Threads::Auto }
     }
 
     #[test]

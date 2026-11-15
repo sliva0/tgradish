@@ -1,7 +1,7 @@
-//! The Settings dialog, of the GUI's own settings: ffmpeg, where
-//! results go, and what new files start with. Changes apply at once, and
-//! are kept in `config.toml` at once too: as typing or dragging pauses,
-//! and only what is typed that makes sense.
+//! The Settings dialog, of the GUI's own settings: ffmpeg, how many
+//! threads converting uses, where results go, and what new files start
+//! with. Changes apply at once, and are kept in `config.toml` at once too:
+//! as typing or dragging pauses, and only what is typed that makes sense.
 
 use std::path::{Path, PathBuf};
 
@@ -557,6 +557,9 @@ fn sections(
         });
     });
 
+    widgets::section(ui, &fl!("converting-settings"));
+    row(ui, &fl!("threads"), &fl!("threads", "hint"), Ok(()), |ui| threads(ui, config));
+
     widgets::section(ui, &fl!("results"));
     let gui = &mut config.gui;
     let placeholder = &dialog.placeholders.1;
@@ -698,6 +701,28 @@ fn ffmpeg_use(ui: &mut egui::Ui, config: &mut Config, builtin: bool) {
         });
     });
 }
+
+/// How many threads converting uses: automatic, which stands for as many
+/// as the machine runs at once, or at most a number of one's own.
+fn threads(ui: &mut egui::Ui, config: &mut Config) {
+    use std::num::NonZeroU32;
+    use tgradish_core::config::Threads;
+    let machine = std::thread::available_parallelism().map_or(1, |threads| threads.get() as u32);
+    let mut limit = config.threads.limit().map(NonZeroU32::get);
+    let automatic = (fl!("threads-auto"), fl!("threads-auto", "hint"));
+    let automatic = (automatic.0.as_str(), automatic.1.as_str());
+    let changed =
+        widgets::auto_number(ui, &mut limit, automatic, Some(machine), machine, |field| {
+            field.range(1..=MOST_THREADS)
+        });
+    if changed {
+        config.threads = limit.and_then(NonZeroU32::new).map_or(Threads::Auto, Threads::Limit);
+    }
+}
+
+/// The most threads the field of [`threads`] goes to: far more than any
+/// machine it runs on makes use of.
+const MOST_THREADS: u32 = 256;
 
 /// The scale, `scale`, smaller and larger by the steps egui's keys
 /// take, and back to 100%, which `App` applies at once, with those keys
@@ -979,6 +1004,55 @@ mod tests {
         harness.run_steps(30);
         harness.get_by_label(&fl!("ffmpeg-program", "missing"));
         assert_eq!(harness.state().config.ffmpeg.path, None);
+    }
+
+    #[test]
+    fn limits_the_threads_conversions_use() {
+        use egui::accesskit::Role;
+        use std::num::NonZeroU32;
+        use tgradish_core::config::Threads;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut harness = kept_in(&path);
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(2);
+        // automatic, beside how many this computer runs at once, which a
+        // number of one's own starts from; the ffmpeg's Automatic, where
+        // there is one to choose, comes first
+        let machine = std::thread::available_parallelism().unwrap().get().to_string();
+        let automatic = |harness: &Harness<App>| {
+            harness.get_all_by_label(&fl!("threads-auto")).last().unwrap().click_accesskit()
+        };
+        harness.get_by_label(&fl!("custom")).click_accesskit();
+        harness.run_steps(2);
+        let field = egui_kittest::kittest::by().role(Role::SpinButton).value(&machine);
+        harness.get(field).focus();
+        harness.run_steps(2);
+        assert!(harness.ctx.text_edit_focused());
+        // what it shows, after the cursor
+        for _ in 0..machine.len() {
+            harness.key_press(egui::Key::Delete);
+            harness.run_steps(1);
+        }
+        harness.event(egui::Event::Text("3".into()));
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(30);
+        let three = Threads::Limit(NonZeroU32::new(3).unwrap());
+        assert_eq!(harness.state().config.threads, three);
+        assert_eq!(Config::load(&path).unwrap().threads, three);
+        // what is converted next runs in them
+        let recipe = crate::item::Recipe::Tgs(Default::default());
+        let setup = harness.state().setup(recipe, &Err(String::new())).unwrap();
+        assert_eq!(setup.threads, three);
+        // back to automatic, and to the defaults
+        automatic(&harness);
+        harness.run_steps(2);
+        assert_eq!(Config::load(&path).unwrap().threads, Threads::Auto);
+        harness.state_mut().config.threads = three;
+        harness.run_steps(30);
+        harness.get_by_label(&fl!("reset-settings")).click_accesskit();
+        harness.run_steps(3);
+        assert_eq!(Config::load(&path).unwrap().threads, Threads::Auto);
     }
 
     #[test]

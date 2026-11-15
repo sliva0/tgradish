@@ -44,6 +44,7 @@ use std::path::{Path, PathBuf};
 
 use crate::CancelToken;
 use crate::backend::{Backend, Pass};
+use crate::config::Threads;
 use crate::error::{Error, FileAction, Result};
 use crate::events::{Details, Event, Outcome, StartDetails, Started};
 use crate::ffmpeg::Output;
@@ -70,6 +71,8 @@ pub struct Request {
     /// report where they are: in the outcome, or in a warning when it
     /// fails.
     pub keep_temp: bool,
+    /// How many threads it uses.
+    pub threads: Threads,
 }
 
 impl Request {
@@ -82,6 +85,7 @@ impl Request {
             options: Options::default(),
             overwrite: false,
             keep_temp: false,
+            threads: Threads::Auto,
         }
     }
 

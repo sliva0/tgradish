@@ -6,7 +6,7 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::process::Command;
 
-use super::args::{input_args, ssim_graph};
+use super::args::{input_args, ssim_graph, threads_args};
 use super::{Ffmpeg, Output, run};
 use crate::CancelToken;
 use crate::error::{Error, Result};
@@ -28,7 +28,10 @@ pub(crate) fn ssim(
     let graph = ssim_graph(plan, fps, ("1:v", "0:v"), "", "");
 
     let mut cmd = Command::new(&ffmpeg.ffmpeg);
-    cmd.args(["-hide_banner", "-nostdin", "-nostats", "-loglevel", "info", "-i"])
+    cmd.args(["-hide_banner", "-nostdin", "-nostats", "-loglevel", "info"])
+        .args(threads_args(plan.threads, "-filter_complex_threads"))
+        .args(threads_args(plan.threads, "-threads"))
+        .arg("-i")
         .arg(candidate)
         .args(input_args(plan, plan.length, plan.fps))
         .args::<_, OsString>(["-lavfi".into(), graph.into(), "-f".into(), "null".into()])

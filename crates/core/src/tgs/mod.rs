@@ -25,6 +25,7 @@ use tgradish_tgs::sticker::{self, Progress};
 
 use crate::CancelToken;
 use crate::backend::Backend;
+use crate::config::Threads;
 use crate::error::{Error, Result};
 use crate::events::{Details, Event, Outcome, StartDetails, Started};
 use crate::input::Input;
@@ -51,13 +52,16 @@ pub struct Request {
     pub options: Options,
     /// Replace the output if it exists.
     pub overwrite: bool,
+    /// How many threads it uses: ffmpeg reading a video, and fitting.
+    pub threads: Threads,
 }
 
 impl Request {
     /// A sticker of `input` with the default options, beside it, not
     /// replacing one there.
     pub fn new(input: Input) -> Self {
-        Self { input, output: None, options: Options::default(), overwrite: false }
+        let threads = Threads::Auto;
+        Self { input, output: None, options: Options::default(), overwrite: false, threads }
     }
 
     /// Where the result goes, as asked or by default.
@@ -79,7 +83,8 @@ pub fn convert(
     let output = request.output();
     request.input.check_output(&output, request.overwrite)?;
     let mut settings = request.options.sticker_options()?;
-    let loaded = load(backend, &request.input, &request.options, cancel)?;
+    settings.threads = request.threads.limit().and_then(|threads| threads.try_into().ok());
+    let loaded = load(backend, &request.input, &request.options, request.threads, cancel)?;
     // kept as it is, the part used must already be square
     if request.options.resize_or_default() == Resize::Contain {
         let animation = &loaded.animation;

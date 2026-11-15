@@ -17,6 +17,7 @@ use ffmpeg_next as ff;
 use self::reader::Reader;
 use crate::CancelToken;
 use crate::backend::{Pass, pass_log_file};
+use crate::config::Threads;
 use crate::error::{Error, FileAction, Result};
 use crate::ffmpeg::{Capabilities, Output, Probe};
 use crate::ffmpeg::{Facts, Orientation, frames_filter, picture_filter, read_seconds};
@@ -129,7 +130,7 @@ fn ratio(value: Rational) -> Option<f64> {
 
 pub(crate) fn probe(input: &Path, cancel: &CancelToken) -> Result<Probe> {
     init()?;
-    let source = Reader::open_file(input, None, cancel)?;
+    let source = Reader::open_file(input, None, Threads::Auto, cancel)?;
     let (context, stream, decoder) = (source.input(), source.stream(), source.decoder());
     // like ffprobe: the stream's aspect ratio wins over the codec's
     // SAFETY: reading a plain field of the open stream
@@ -173,20 +174,26 @@ pub(crate) fn probe(input: &Path, cancel: &CancelToken) -> Result<Probe> {
         timing: None,
     };
     if facts.untimed() {
-        facts.timing = Reader::open_file(input, None, cancel)?.timing()?;
+        facts.timing = Reader::open_file(input, None, Threads::Auto, cancel)?.timing()?;
     }
     facts.probe(input)
 }
 
 pub(crate) fn frame_starts(input: &Path, cancel: &CancelToken) -> Result<Vec<f64>> {
     init()?;
-    Reader::open_file(input, None, cancel)?.frame_starts()
+    Reader::open_file(input, None, Threads::Auto, cancel)?.frame_starts()
 }
 
 /// A filter graph from `buffer` sources named after `inputs` to a
-/// `buffersink` named `out`. `spec` refers to them as `[name]` and `[out]`.
-fn filter_graph(inputs: &[(&str, String)], spec: &str) -> Result<filter::Graph> {
+/// `buffersink` named `out`, which filters in as many `threads`. `spec`
+/// refers to them as `[name]` and `[out]`.
+fn filter_graph(inputs: &[(&str, String)], spec: &str, threads: Threads) -> Result<filter::Graph> {
     let mut graph = filter::Graph::new();
+    if let Some(threads) = threads.limit() {
+        // SAFETY: a plain field of the graph, which is set before any
+        // filter is added, as libavfilter asks
+        unsafe { (*graph.as_mut_ptr()).nb_threads = threads.get().try_into().unwrap_or(i32::MAX) };
+    }
     let buffer = filter::find("buffer").expect("buffer filter is always built");
     let sink = filter::find("buffersink").expect("buffersink filter is always built");
     for (name, args) in inputs {
@@ -213,14 +220,14 @@ struct Filtered {
 }
 
 impl Filtered {
-    /// `source` through `spec`, or `None` when it has no frames: the
-    /// filters' input takes its format from the first.
-    fn new(mut source: Reader, spec: &str) -> Result<Option<Filtered>> {
+    /// `source` through `spec`, in as many `threads`, or `None` when it
+    /// has no frames: the filters' input takes its format from the first.
+    fn new(mut source: Reader, spec: &str, threads: Threads) -> Result<Option<Filtered>> {
         let mut next = frame::Video::empty();
         if !source.next(&mut next)? {
             return Ok(None);
         }
-        let graph = filter_graph(&[("in", source.buffer_args(&next))], spec)?;
+        let graph = filter_graph(&[("in", source.buffer_args(&next))], spec, threads)?;
         Ok(Some(Filtered { source, graph, next, input_open: true }))
     }
 
@@ -307,6 +314,28 @@ fn open_encoder(
     Ok(ff::encoder::video::Encoder(encoder))
 }
 
+/// The options libvpx-vp9 is opened with, as the ffmpeg command lines
+/// give them: tgradish's own, then `encoder_options` over them.
+fn encoder_options(plan: &Plan, params: &Params) -> Dictionary<'static> {
+    let mut options = Dictionary::new();
+    // automatic as the ffmpeg command line has it; the library default is
+    // one thread
+    let threads = plan.threads.limit().map_or("auto".to_owned(), |n| n.to_string());
+    options.set("threads", &threads);
+    options.set("deadline", "good");
+    options.set("cpu-used", &plan.effort.cpu_used().to_string());
+    options.set("row-mt", "1");
+    match params.rate {
+        Rate::Bitrate(_) => {}
+        Rate::Crf(crf) => options.set("crf", &crf.to_string()),
+        Rate::Lossless => options.set("lossless", "1"),
+    }
+    for (name, value) in &plan.encoder_options {
+        options.set(name, value);
+    }
+    options
+}
+
 /// Opened encoder, the output it writes to, and two-pass state.
 struct Encoder {
     encoder: ff::encoder::Video,
@@ -346,19 +375,11 @@ impl Encoder {
         encoder.set_time_base(time_base);
         encoder.set_frame_rate(Some(Rational::from(params.fps)));
 
-        let mut options = Dictionary::new();
-        // the ffmpeg command line does this too; the library default is one thread
-        options.set("threads", "auto");
-        options.set("deadline", "good");
-        options.set("cpu-used", &plan.effort.cpu_used().to_string());
-        options.set("row-mt", "1");
+        let options = encoder_options(plan, params);
         match params.rate {
             Rate::Bitrate(kbps) => encoder.set_bit_rate((kbps * 1000.0).round() as usize),
-            Rate::Crf(crf) => {
-                encoder.set_bit_rate(0);
-                options.set("crf", &crf.to_string());
-            }
-            Rate::Lossless => options.set("lossless", "1"),
+            Rate::Crf(_) => encoder.set_bit_rate(0),
+            Rate::Lossless => {}
         }
 
         let mut flags = codec::Flags::empty();
@@ -389,9 +410,6 @@ impl Encoder {
         }
         encoder.set_flags(flags);
 
-        for (name, value) in &plan.encoder_options {
-            options.set(name, value);
-        }
         let encoder = open_encoder(encoder, options)?;
         if let Some(output) = &mut output {
             let mut stream = output.add_stream(codec).map_err(libav("adding the stream"))?;
@@ -473,7 +491,7 @@ pub(crate) fn encode(
     let pix_fmt = if plan.alpha { "yuva420p" } else { "yuv420p" };
     let chain = video_filter(plan, params.fps, params.length, pix_fmt);
     let spec = format!("[in]{}{chain}[out]", plan.source.orientation.filters());
-    let Some(mut filtered) = Filtered::new(source, &spec)? else {
+    let Some(mut filtered) = Filtered::new(source, &spec, plan.threads)? else {
         return Err(Error::Libav(format!("{} has no frames to encode", plan.input.display())));
     };
     let mut encoder = Encoder::open(plan, params, pass, output, filtered.time_base())?;
@@ -497,21 +515,22 @@ pub(crate) fn encode(
 }
 
 /// Up to `count` frames of `input` from `start` seconds on, at `fps`,
-/// scaled to `size`, as straight RGBA.
+/// scaled to `size`, as straight RGBA, read in as many `threads`.
 pub(crate) fn frames(
     input: &Path,
     probe: &Probe,
     (start, fps): (f64, f64),
     (width, height): (u32, u32),
     count: usize,
+    threads: Threads,
     cancel: &CancelToken,
 ) -> Result<Vec<Vec<u8>>> {
     init()?;
     let read = read_seconds(count as u64, fps);
-    let source = Reader::open_window(input, probe, start, read, cancel)?;
+    let source = Reader::open_window(input, probe, (start, read), threads, cancel)?;
     let chain = frames_filter(probe.still_image || count == 1, fps, (width, height));
     let spec = format!("[in]{}{chain},format=rgba[out]", probe.orientation.filters());
-    let Some(mut filtered) = Filtered::new(source, &spec)? else { return Ok(Vec::new()) };
+    let Some(mut filtered) = Filtered::new(source, &spec, threads)? else { return Ok(Vec::new()) };
     let mut frame = frame::Video::empty();
     let mut out = Vec::new();
     while out.len() < count && filtered.next(&mut frame, cancel)? {
@@ -531,7 +550,7 @@ pub(crate) fn still(plan: &Plan, cancel: &CancelToken) -> Result<Vec<u8>> {
     // can skip a short one
     let chain = picture_filter(plan, crate::presets::Format::Webp, "rgba");
     let spec = format!("[in]{}{chain}[out]", plan.source.orientation.filters());
-    let mut filtered = Filtered::new(source, &spec)?.ok_or_else(no_frame)?;
+    let mut filtered = Filtered::new(source, &spec, plan.threads)?.ok_or_else(no_frame)?;
     let mut frame = frame::Video::empty();
     if !filtered.next(&mut frame, cancel)? {
         return Err(no_frame());
@@ -546,7 +565,7 @@ pub(crate) fn ssim(plan: &Plan, candidate: &Path, fps: f64, cancel: &CancelToken
     let frames = frame_count(plan.length, plan.fps);
     let mut sources = [
         Reader::open(plan, read_seconds(frames, plan.fps), cancel)?,
-        Reader::open_file(candidate, None, cancel)?,
+        Reader::open_file(candidate, None, plan.threads, cancel)?,
     ];
     let mut next = [frame::Video::empty(), frame::Video::empty()];
     let mut open = [false; 2];
@@ -564,7 +583,7 @@ pub(crate) fn ssim(plan: &Plan, candidate: &Path, fps: f64, cancel: &CancelToken
         ("source", sources[0].buffer_args(&next[0])),
         ("attempt", sources[1].buffer_args(&next[1])),
     ];
-    let mut graph = filter_graph(&inputs, &spec)?;
+    let mut graph = filter_graph(&inputs, &spec, plan.threads)?;
 
     let (mut total, mut count) = (0.0, 0u64);
     let mut scored = frame::Video::empty();
@@ -607,4 +626,61 @@ pub(crate) fn ssim(plan: &Plan, candidate: &Path, fps: f64, cancel: &CancelToken
         return Err(Error::Libav("the ssim filter reported nothing".into()));
     }
     Ok(total / count as f64)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU32;
+
+    use super::*;
+    use crate::input::Input;
+    use crate::webm::{Options, Request};
+
+    fn plan(threads: Threads, options: Options) -> Plan {
+        let source = Probe {
+            format: "mov,mp4".into(),
+            codec: "h264".into(),
+            width: 640,
+            height: 480,
+            fps: Some(30.0),
+            base_fps: Some(30.0),
+            duration: Some(2.0),
+            start: 0.0,
+            alpha: false,
+            still_image: false,
+            orientation: Default::default(),
+            decoder: None,
+        };
+        let request = Request { threads, options, ..Request::new(Input::File("in.mp4".into())) };
+        crate::webm::plan(&request, source).unwrap().0
+    }
+
+    #[test]
+    fn limits_its_threads_where_asked() {
+        init().unwrap();
+        let three = Threads::Limit(NonZeroU32::new(3).unwrap());
+        let params = |plan: &Plan| crate::webm::first_params(plan);
+        // the encoder's: automatic as the command line has it, else as
+        // many as asked, and the user's own over that
+        let auto = plan(Threads::Auto, Options::default());
+        assert_eq!(encoder_options(&auto, &params(&auto)).get("threads"), Some("auto"));
+        let limited = plan(three, Options::default());
+        assert_eq!(encoder_options(&limited, &params(&limited)).get("threads"), Some("3"));
+        let own = Options {
+            encoder_options: Some([("threads".to_owned(), "5".to_owned())].into()),
+            ..Options::default()
+        };
+        let theirs = plan(three, own);
+        assert_eq!(encoder_options(&theirs, &params(&theirs)).get("threads"), Some("5"));
+        // the filters': the graph's own choice, which goes by the
+        // machine's cores, or as many as asked
+        let input = [("in", "video_size=8x8:pix_fmt=0:time_base=1/30:pixel_aspect=1/1".into())];
+        let threads_of = |threads| {
+            let mut graph = filter_graph(&input, "[in]scale=4:4[out]", threads).unwrap();
+            // SAFETY: reading a plain field of the graph
+            unsafe { (*graph.as_mut_ptr()).nb_threads }
+        };
+        assert!(threads_of(Threads::Auto) >= 1);
+        assert_eq!(threads_of(three), 3);
+    }
 }

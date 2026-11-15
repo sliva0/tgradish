@@ -795,6 +795,7 @@ impl Removed {
 /// Copies the settings the Settings dialog shows from `from` to `to`.
 fn dialog_settings(from: &Config, to: &mut Config) {
     (to.ffmpeg.choice, to.ffmpeg.path) = (from.ffmpeg.choice, from.ffmpeg.path.clone());
+    to.threads = from.threads;
     (to.preset, to.tgs_preset) = (from.preset.clone(), from.tgs_preset.clone());
     let (gui, from) = (&mut to.gui, &from.gui);
     (gui.output_dir, gui.overwrite, gui.target) =

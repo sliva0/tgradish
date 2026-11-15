@@ -909,6 +909,16 @@ checking-ffmpeg = Checking…
 # What checking ffmpeg found, its version as "8.0".
 ffmpeg-ready = ffmpeg { $version } with VP9: ready
 ffmpeg-no-vp9 = ffmpeg { $version } can't encode VP9 with libvpx
+# The heading of how converting runs on this computer, after ffmpeg's.
+converting-settings = Converting
+# How many threads converting uses at once, at most: beside it, threads-auto
+# or Custom (custom) with a number, which shows how many this computer runs
+# at once while it is automatic.
+threads = Threads
+    .hint = How many converting uses at once, at most; fewer leave more of the computer to the rest, and take longer
+# The first choice of the threads setting.
+threads-auto = Automatic
+    .hint = As many as each part of converting makes use of
 results = Results
 save-results = Save them
 next-to-input = Next to each input

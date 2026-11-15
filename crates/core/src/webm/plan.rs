@@ -8,6 +8,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use super::Request;
+use crate::config::Threads;
 use crate::error::{Error, Result};
 use crate::ffmpeg::Probe;
 use crate::options::{self, Crop, Effort, Fit, FitUnit, Range, Resize, Scaling, Spoof};
@@ -91,6 +92,10 @@ pub struct Plan {
     pub encoder_options: BTreeMap<String, String>,
     /// Raw ffmpeg arguments, only for ffmpeg as a separate program.
     pub ffmpeg_args: Vec<String>,
+    /// How many threads ffmpeg decodes, filters and encodes in, at most;
+    /// a `threads` of `encoder_options` or `ffmpeg_args` goes over it for
+    /// what it covers.
+    pub threads: Threads,
 }
 
 impl Plan {
@@ -446,6 +451,7 @@ pub(crate) fn plan_for(
         watermark: o.watermark.unwrap_or(true),
         encoder_options,
         ffmpeg_args: o.ffmpeg_args.clone().unwrap_or_default(),
+        threads: request.threads,
         source,
     };
     Ok((plan, warnings))
@@ -787,5 +793,56 @@ mod tests {
         for tempo in [0.0, 0.05, 11.0, f64::NAN] {
             assert!(plan_with(Options { tempo: Some(tempo), ..Options::default() }).is_err());
         }
+    }
+
+    #[test]
+    fn limits_ffmpegs_threads_where_asked() {
+        use std::num::NonZeroU32;
+        let words = |plan: &Plan| -> Vec<Vec<String>> {
+            let params = super::super::first_params(plan);
+            let commands = crate::ffmpeg::commands(plan, &params);
+            let word = |arg: &std::ffi::OsString| arg.to_string_lossy().into_owned();
+            commands.iter().map(|command| command.iter().map(word).collect()).collect()
+        };
+        // automatic: ffmpeg's own choice, as it always was
+        let (auto, _) = plan_with(Options::default()).unwrap();
+        assert_eq!(auto.threads, Threads::Auto);
+        for command in words(&auto) {
+            assert!(!command.iter().any(|word| word.contains("threads")), "{command:?}");
+        }
+        // at most three: the filters, the decoder before the input and
+        // the encoder after its name, in both passes
+        let three = Threads::Limit(NonZeroU32::new(3).unwrap());
+        let request = Request { threads: three, ..Request::new(Input::File("in.mp4".into())) };
+        let (plan, _) = plan(&request, source(4.84)).unwrap();
+        assert_eq!(plan.threads, three);
+        let commands = words(&plan);
+        assert_eq!(commands.len(), 2);
+        for command in &commands {
+            let at = |word: &str| command.iter().position(|w| w == word).unwrap();
+            let after = |index: usize| command[index + 1].as_str();
+            assert_eq!(after(at("-filter_threads")), "3", "{command:?}");
+            let threads: Vec<usize> =
+                (0..command.len()).filter(|&index| command[index] == "-threads").collect();
+            assert_eq!(threads.len(), 2, "{command:?}");
+            assert!(threads.iter().all(|&index| after(index) == "3"), "{command:?}");
+            assert!(threads[0] < at("-i") && at("-i") < at("libvpx-vp9"), "{command:?}");
+            assert_eq!(threads[1], at("libvpx-vp9") + 1, "{command:?}");
+        }
+        // and the user's own goes over it, after it
+        let options = Options {
+            encoder_options: Some([("threads".to_owned(), "5".to_owned())].into()),
+            ffmpeg_args: Some(vec!["-threads".into(), "6".into()]),
+            ..Options::default()
+        };
+        let request = Request { options, ..request };
+        let (planned, _) = super::plan(&request, source(4.84)).unwrap();
+        let command = &words(&planned)[1];
+        let ours = command.iter().rposition(|word| word == "3").unwrap();
+        let theirs = command.iter().position(|word| word == "-threads:v").unwrap();
+        assert_eq!(command[theirs + 1], "5");
+        let raw = command.iter().rposition(|word| word == "-threads").unwrap();
+        assert_eq!(command[raw + 1], "6");
+        assert!(ours < theirs && theirs < raw, "{command:?}");
     }
 }

@@ -327,6 +327,7 @@ impl<'a> Converter<'a> {
             options: self.options.clone(),
             overwrite,
             keep_temp: self.args.keep_temp,
+            threads: self.args.threads.unwrap_or(self.ctx.config.threads),
         };
         // a frame rate is how fast pictures that have none play
         if let FormatOptions::Tgs(options) = &self.options

@@ -123,6 +123,9 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
         Format::Tgs => args.extend(["--format".into(), "tgs".into()]),
         Format::Webp => args.extend(["--format".into(), "webp".into()]),
     }
+    if let Some(threads) = context.config.threads.limit() {
+        args.extend(["--threads".into(), threads.to_string()]);
+    }
     let choices = &item.choices;
     let (presets, config) = (context.presets, context.config);
     // what is set over the preset, as far as it has a say
@@ -262,6 +265,14 @@ mod tests {
             "{line}"
         );
         assert!(line.contains(" --preset best") && !line.contains("/saved"), "{line}");
+        // as many threads as Settings allow, where they say
+        assert!(!line.contains("--threads"), "{line}");
+        let mut limited = config.clone();
+        limited.threads = "2".parse().unwrap();
+        let ffmpeg = context.ffmpeg.clone();
+        let limited = Context { config: &limited, ffmpeg, output: None, ..context };
+        let line = command_line(&video, &limited).join(" ");
+        assert!(line.contains(" --threads 2"), "{line}");
 
         // .tgs needs no ffmpeg, and its preset is the format's own
         let mut art = Item::new(2, vec!["art.gif".into()], false, Target::Sticker);

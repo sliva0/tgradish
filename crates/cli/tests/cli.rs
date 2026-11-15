@@ -362,6 +362,8 @@ fn refuses_mistakes_in_the_command_line_with_2() {
         (&["convert", a, b, "-t", "0"], "must be more than 0 seconds"),
         (&["convert", a, b, "-f", "tgs", "-s=-1"], "must be 0 or more seconds"),
         (&["convert", a, "--attempts", "0"], "--attempts"),
+        (&["convert", a, "--threads", "0"], "0 threads: expected at least 1, or auto"),
+        (&["watch", a, "--threads", "all"], r#""all": expected auto or a number of threads"#),
     ] {
         let output = tgradish(args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
@@ -371,6 +373,28 @@ fn refuses_mistakes_in_the_command_line_with_2() {
         assert!(!stderr.contains("Converting"), "{args:?}: {stderr}");
     }
     assert!(!Path::new(out).exists());
+}
+
+/// `--threads` over the config file's `threads`, as the plan says.
+#[test]
+fn converts_in_as_many_threads_as_asked() {
+    let Some(input) = clip(Clip::Square) else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config.toml");
+    std::fs::write(&config, "threads = 2\n").unwrap();
+    let threads = |flags: &[&str]| {
+        let out = dir.path().join("out.webm");
+        let mut args = vec!["--json", "--config", config.to_str().unwrap(), "convert"];
+        args.extend([input.to_str().unwrap(), "-o", out.to_str().unwrap(), "-y"]);
+        args.extend(["--preset", "fast", "--fit", "off", "--length", "0.5"]);
+        args.extend(flags);
+        let output = tgradish(&args);
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        json_lines(&output)[0]["plan"]["threads"].clone()
+    };
+    assert_eq!(threads(&[]), 2);
+    assert_eq!(threads(&["--threads", "1"]), 1);
+    assert_eq!(threads(&["--threads", "auto"]), "auto");
 }
 
 #[test]

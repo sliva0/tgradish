@@ -296,6 +296,7 @@ pub(super) fn planned(
         options,
         overwrite: true,
         keep_temp: false,
+        threads: context.config.threads,
     };
     let (plan, _) = webm::plan(&request, video.probe.clone()).map_err(|err| err.to_string())?;
     Ok((request, plan))

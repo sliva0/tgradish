@@ -29,6 +29,8 @@ use crate::widgets;
 pub(crate) struct Setup {
     pub(crate) options: FormatOptions,
     pub(crate) backend: Option<Backend>,
+    /// How many threads it uses, as Settings says.
+    pub(crate) threads: tgradish_core::config::Threads,
 }
 
 /// One encode while fitting a WebM sticker.
@@ -534,7 +536,7 @@ fn run(
             error,
         })?;
     }
-    let Setup { mut options, backend } = setup;
+    let Setup { mut options, backend, threads } = setup;
     if let FormatOptions::Tgs(options) = &mut options {
         let exact = options.exact_or_default();
         // a sheet of a file of frames of its own, which converting
@@ -550,8 +552,8 @@ fn run(
             progress.tgs_exact = exact;
         }));
     }
-    let request =
-        convert::Request { input, output: Some(output), options, overwrite, keep_temp: false };
+    let (output, keep_temp) = (Some(output), false);
+    let request = convert::Request { input, output, options, overwrite, keep_temp, threads };
     let outcome =
         convert::convert(backend.as_ref(), &request, cancel, &mut |event| follow(event, update))?;
     Ok(Done::of(outcome))

@@ -269,6 +269,7 @@ fn looks_like_pixel_art(backend: &Backend, plan: &Plan, cancel: &CancelToken) ->
         fps: plan.fps,
         max_side: plan.source.width.max(plan.source.height),
         max_frames: PIXEL_ART_SAMPLES,
+        threads: plan.threads,
     };
     let frames = backend.frames(&plan.input, &plan.source, &request, cancel)?;
     Ok(is_pixel_art(&frames.frames, frames.width, plan.crop))

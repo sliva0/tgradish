@@ -8,6 +8,7 @@
 use std::ffi::OsString;
 use std::path::Path;
 
+use crate::config::Threads;
 use crate::options::Scaling;
 use crate::picture::pad_offset;
 use crate::presets::Format;
@@ -18,6 +19,19 @@ use crate::webm::{Plan, frame_count};
 fn num(value: f64) -> String {
     let text = format!("{value:.6}");
     text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// `option` and the most threads `threads` allows, or nothing when it is
+/// automatic, which leaves ffmpeg its own choice: before an input,
+/// `-threads` is its decoder's; after the encoder's name, the encoder's;
+/// and `-filter_threads` or `-filter_complex_threads`, global options,
+/// are those of `-vf` and of `-lavfi`. A conversion's commands limit all
+/// of them.
+pub(crate) fn threads_args(threads: Threads, option: &str) -> Vec<OsString> {
+    match threads.limit() {
+        Some(threads) => vec![option.into(), threads.to_string().into()],
+        None => Vec::new(),
+    }
 }
 
 /// How many seconds to read for `count` frames at `fps`: one frame more,
@@ -75,6 +89,7 @@ pub(crate) fn input_args(plan: &Plan, length: f64, fps: f64) -> Vec<OsString> {
     if let Some(decoder) = &plan.source.decoder {
         args.extend(["-c:v".into(), decoder.into()]);
     }
+    args.extend(threads_args(plan.threads, "-threads"));
     args.extend(["-i".into(), plan.input.clone().into()]);
     args
 }
@@ -231,6 +246,7 @@ pub(crate) fn encode_args(
         ["-hide_banner", "-nostdin", "-nostats", "-y", "-loglevel", "warning"]
             .map(OsString::from)
             .into();
+    args.extend(threads_args(plan.threads, "-filter_threads"));
     args.extend(input_args(plan, params.length, params.fps));
 
     let pix_fmt = if plan.alpha { "yuva420p" } else { "yuv420p" };
@@ -238,6 +254,10 @@ pub(crate) fn encode_args(
     push(&["-map", "0:v:0", "-map_metadata", "-1", "-map_chapters", "-1", "-an", "-sn", "-dn"]);
     push(&["-vf", &video_filter(plan, params.fps, params.length, pix_fmt)]);
     push(&["-c:v", "libvpx-vp9"]);
+    // before what the user gives, which goes over it
+    if let Some(threads) = plan.threads.limit() {
+        push(&["-threads", &threads.to_string()]);
+    }
     match params.rate {
         Rate::Bitrate(kbps) => push(&["-b:v", &format!("{}", (kbps * 1000.0).round() as u64)]),
         Rate::Crf(crf) => push(&["-crf", &crf.to_string(), "-b:v", "0"]),

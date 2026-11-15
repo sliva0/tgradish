@@ -23,6 +23,7 @@
 use std::path::PathBuf;
 
 use crate::backend::Backend;
+use crate::config::Threads;
 use crate::error::{Error, FfmpegMissing, Result};
 use crate::input::Input;
 use crate::presets::FormatOptions;
@@ -45,13 +46,16 @@ pub struct Request {
     /// For WebM: keep intermediate files, as
     /// [`webm::Request::keep_temp`] does; the other formats leave none.
     pub keep_temp: bool,
+    /// How many threads it uses.
+    pub threads: Threads,
 }
 
 impl Request {
     /// A conversion of `input` with `options`, beside it, not replacing
     /// one there, intermediate files deleted.
     pub fn new(input: Input, options: FormatOptions) -> Self {
-        Self { input, output: None, options, overwrite: false, keep_temp: false }
+        let (overwrite, keep_temp, threads) = (false, false, Threads::Auto);
+        Self { input, output: None, options, overwrite, keep_temp, threads }
     }
 
     /// Where the result goes, as asked or by default.
@@ -82,21 +86,23 @@ pub fn convert(
 ) -> Result<Outcome> {
     let format = request.options.format();
     let backend_for = || backend.ok_or(Error::FfmpegNotFound(FfmpegMissing::ForFormat(format)));
-    let (input, output, overwrite) =
-        (request.input.clone(), request.output.clone(), request.overwrite);
+    let (input, output, overwrite, threads) =
+        (request.input.clone(), request.output.clone(), request.overwrite, request.threads);
     match &request.options {
         FormatOptions::Webm(options) => {
             let keep_temp = request.keep_temp;
             let options = options.clone();
-            let request = webm::Request { input, output, options, overwrite, keep_temp };
+            let request = webm::Request { input, output, options, overwrite, keep_temp, threads };
             webm::convert(backend_for()?, &request, cancel, on_event)
         }
         FormatOptions::Webp(options) => {
-            let request = webp::Request { input, output, options: options.clone(), overwrite };
+            let options = options.clone();
+            let request = webp::Request { input, output, options, overwrite, threads };
             webp::convert(backend_for()?, &request, cancel, on_event)
         }
         FormatOptions::Tgs(options) => {
-            let request = tgs::Request { input, output, options: options.clone(), overwrite };
+            let options = options.clone();
+            let request = tgs::Request { input, output, options, overwrite, threads };
             tgs::convert(backend, &request, cancel, on_event)
         }
     }

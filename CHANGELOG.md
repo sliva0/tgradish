@@ -28,6 +28,8 @@ that makes every kind of Telegram sticker and emoji.
   `-q`, which prints only the paths of the files made.
 - Shell completions and man pages.
 - ffmpeg built in, in the release builds that say so, or the system's.
+- `--threads N`, `threads` in the config file and Threads in Settings, which
+  limit how many threads a conversion uses.
 - Releases for Linux (glibc and musl, x86-64 and aarch64, as archives,
   .deb and .rpm), Windows, the AUR and a Nix flake.
 

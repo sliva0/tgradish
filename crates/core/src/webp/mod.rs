@@ -22,6 +22,7 @@ use std::path::PathBuf;
 
 use crate::CancelToken;
 use crate::backend::Backend;
+use crate::config::Threads;
 use crate::error::{Error, Result};
 use crate::events::{Details, Event, Outcome, StartDetails, Started};
 use crate::input::Input;
@@ -42,13 +43,17 @@ pub struct Request {
     pub options: Options,
     /// Replace the output if it exists.
     pub overwrite: bool,
+    /// How many threads ffmpeg reads the frame in; the picture is
+    /// encoded in one.
+    pub threads: Threads,
 }
 
 impl Request {
     /// A picture of `input` with the default options, beside it, not
     /// replacing one there.
     pub fn new(input: Input) -> Self {
-        Self { input, output: None, options: Options::default(), overwrite: false }
+        let threads = Threads::Auto;
+        Self { input, output: None, options: Options::default(), overwrite: false, threads }
     }
 
     /// Where the result goes, as asked or by default.
@@ -125,6 +130,7 @@ pub fn plan(
         options,
         overwrite: request.overwrite,
         keep_temp: false,
+        threads: request.threads,
     };
     let (mut plan, warnings) = webm::plan_for(Format::Webp, &request, source)?;
     // one frame

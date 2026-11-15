@@ -10,6 +10,7 @@ use std::process::Command;
 
 use common::{backends, clip, name};
 use tgradish_core::backend::{Backend, FramesRequest};
+use tgradish_core::config::Threads;
 use tgradish_core::events::{Details, StartDetails};
 use tgradish_core::ffmpeg;
 use tgradish_core::input::Input;
@@ -46,6 +47,7 @@ fn still(
         output: request.output.clone(),
         options: request.options.clone(),
         overwrite: request.overwrite,
+        threads: request.threads,
     };
     webp::convert(backend, &request, cancel, &mut |_| {})
 }
@@ -107,6 +109,49 @@ fn converts_short_clip_without_spoofing() {
         assert!(info.signature.is_some());
         // which the GUI may replace without asking
         assert!(made_by_tgradish(&outcome.output), "{name}");
+    }
+}
+
+/// Each format, and fitting's comparisons, in as few threads as asked, by
+/// either ffmpeg.
+#[test]
+fn converts_in_as_few_threads_as_asked() {
+    use tgradish_core::tgs;
+    let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
+    let one: Threads = "1".parse().unwrap();
+    for backend in &backends {
+        let name = name(backend);
+        let dir = tempfile::tempdir().unwrap();
+        let request = Request {
+            output: Some(dir.path().join("out.webm")),
+            options: Options { length: Some(1.0), attempts: Some(2), ..fast(Fit::Auto) },
+            threads: one,
+            ..Request::new(Input::File(input.clone()))
+        };
+        let mut started = None;
+        let outcome = convert(backend, &request, &CancelToken::new(), &mut |event| {
+            if let Event::Started(Started { details: StartDetails::Webm { plan }, .. }) = event {
+                started = Some(plan.threads);
+            }
+        })
+        .unwrap();
+        assert_eq!(started, Some(one), "{name}");
+        assert!(outcome.issues.is_empty(), "{name}: {:?}", outcome.issues);
+        let request = Request { output: Some(dir.path().join("out.webp")), ..request };
+        assert!(still(backend, &request, &CancelToken::new()).unwrap().issues.is_empty());
+        // pixel art in a video, made alike either way
+        let walker = walking_video(dir.path(), 1);
+        let sticker = |threads, output: &str| {
+            let request = tgs::Request {
+                output: Some(dir.path().join(output)),
+                options: tgs::Options { effort: Some(Effort::Fast), ..tgs::Options::default() },
+                threads,
+                ..tgs::Request::new(Input::File(walker.clone()))
+            };
+            let made = tgs::convert(Some(backend), &request, &CancelToken::new(), &mut |_| {});
+            std::fs::read(made.unwrap().output).unwrap()
+        };
+        assert_eq!(sticker(one, "one.tgs"), sticker(Threads::Auto, "auto.tgs"), "{name}");
     }
 }
 
@@ -336,8 +381,14 @@ fn previews_results() {
 #[test]
 fn decodes_frames_of_a_part_of_a_video() {
     let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
-    let request =
-        FramesRequest { start: 1.0, length: Some(1.0), fps: 10.0, max_side: 200, max_frames: 5 };
+    let request = FramesRequest {
+        start: 1.0,
+        length: Some(1.0),
+        fps: 10.0,
+        max_side: 200,
+        max_frames: 5,
+        threads: Threads::Auto,
+    };
     let mut decoded = Vec::new();
     for backend in &backends {
         let name = name(backend);
@@ -1461,6 +1512,7 @@ fn sequences_keep_every_frame_at_any_rate() {
             options: Options { fps: Some(29.97), attempts: Some(1), ..Options::default() },
             overwrite: true,
             keep_temp: false,
+            threads: Threads::Auto,
         };
         let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
         let probe = backend.probe(&outcome.output, &CancelToken::new()).unwrap();

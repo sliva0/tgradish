@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use tgradish_core::config::Threads;
 use tgradish_core::ffmpeg::FfmpegChoice;
 use tgradish_core::options::{self, Crop, IntegerScale, Range};
 use tgradish_core::presets::Format;
@@ -423,6 +424,13 @@ pub struct ConversionArgs {
     /// where they are.
     #[arg(long)]
     pub keep_temp: bool,
+    /// How many threads a conversion uses at once, at most: ffmpeg's to
+    /// read, scale and encode, and those trying a .tgs's reductions; or
+    /// auto, as many as each makes use of. Files are converted one at a
+    /// time either way. Over the config file's. [default: the config's, or
+    /// auto]
+    #[arg(long, value_name = "N|auto", value_parser = |text: &str| text.parse::<Threads>())]
+    pub threads: Option<Threads>,
     /// Stop, as Ctrl-C does, when a line reading `cancel` comes on stdin:
     /// for front-ends, which can't always send Ctrl-C. A line reading
     /// `settle` stops fitting a WebM once an encode fits and keeps the best
@@ -983,6 +991,35 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn takes_a_number_of_threads_or_auto() {
+        let threads = |command: &str, value: &str| {
+            let given = match command {
+                "convert" => ["tgradish", "convert", "a.gif", "--threads", value],
+                _ => ["tgradish", "watch", "dir", "--threads", value],
+            };
+            Cli::try_parse_from(given).map(|cli| match cli.command {
+                Command::Convert(args) => args.conversion.threads,
+                Command::Watch(args) => args.conversion.threads,
+                _ => unreachable!(),
+            })
+        };
+        for command in ["convert", "watch"] {
+            assert_eq!(threads(command, "auto").unwrap(), Some(Threads::Auto));
+            assert_eq!(threads(command, "4").unwrap(), Some("4".parse().unwrap()));
+            for wrong in ["0", "many", "1.5", ""] {
+                let err = threads(command, wrong).unwrap_err();
+                assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation, "{wrong:?}");
+            }
+        }
+        let err = threads("convert", "0").unwrap_err().to_string();
+        assert!(err.contains("0 threads: expected at least 1, or auto"), "{err}");
+        // left to the config without it
+        let cli = Cli::parse_from(["tgradish", "convert", "a.gif"]);
+        let Command::Convert(args) = cli.command else { panic!() };
+        assert_eq!(args.conversion.threads, None);
     }
 
     #[test]

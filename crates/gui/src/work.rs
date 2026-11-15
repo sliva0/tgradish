@@ -22,6 +22,28 @@ use crate::outputs::Written;
 const READING: usize = 2;
 
 impl App {
+    /// What converting as `recipe` says runs with: `backend`, which a
+    /// `.tgs` needs only for videos, and as many threads as Settings say.
+    pub(crate) fn setup(
+        &self,
+        recipe: Recipe,
+        backend: &Result<Backend, String>,
+    ) -> Result<Setup, String> {
+        let options = match recipe {
+            Recipe::Webm(options) => FormatOptions::Webm(options),
+            Recipe::Tgs(options) => FormatOptions::Tgs(options),
+            Recipe::Webp(options) => FormatOptions::Webp(options),
+        };
+        let threads = self.config.threads;
+        match backend {
+            Ok(backend) => Ok(Setup { options, backend: Some(backend.clone()), threads }),
+            Err(_) if options.format() == Format::Tgs => {
+                Ok(Setup { options, backend: None, threads })
+            }
+            Err(why) => Err(why.clone()),
+        }
+    }
+
     /// Takes in loads and conversions, and starts what is due.
     pub(crate) fn pump(&mut self, ctx: &egui::Context) {
         let backend = self.backend();
@@ -270,21 +292,7 @@ impl App {
                 continue;
             };
             let recipe = choices.recipe(*format, &self.presets, &self.config);
-            let setup = recipe.clone().and_then(|recipe| {
-                let options = match recipe {
-                    Recipe::Webm(options) => FormatOptions::Webm(options),
-                    Recipe::Tgs(options) => FormatOptions::Tgs(options),
-                    Recipe::Webp(options) => FormatOptions::Webp(options),
-                };
-                match backend.clone() {
-                    Ok(backend) => Ok(Setup { options, backend: Some(backend) }),
-                    // which a .tgs needs only for videos
-                    Err(_) if options.format() == Format::Tgs => {
-                        Ok(Setup { options, backend: None })
-                    }
-                    Err(why) => Err(why),
-                }
-            });
+            let setup = recipe.clone().and_then(|recipe| self.setup(recipe, backend));
             let overwrite = self.may_replace(id, &job.output);
             // a result of another time, rather than this item's own
             let replaces = job.output.exists() && !self.wrote(id, &job.output);

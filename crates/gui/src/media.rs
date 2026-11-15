@@ -9,6 +9,7 @@ use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use eframe::egui;
 use tgradish_core::CancelToken;
 use tgradish_core::backend::{Backend, Frames, FramesRequest};
+use tgradish_core::config::Threads;
 use tgradish_core::drawn::{self, Readable};
 use tgradish_core::ffmpeg::Probe;
 use tgradish_core::input::Input;
@@ -324,6 +325,7 @@ impl Video {
                 fps: 30.0,
                 max_side: OVERVIEW_SIDE,
                 max_frames: OVERVIEW_FRAMES,
+                threads: Threads::Auto,
             };
             let frames =
                 backend.frames(path, &probe, &request, cancel).map_err(|err| failure(&err))?;
@@ -407,6 +409,7 @@ impl Video {
                 fps: 30.0,
                 max_side: DETAIL_SIDE,
                 max_frames: (DETAIL_BYTES / bytes).clamp(1, 600),
+                threads: Threads::Auto,
             };
             let path = readable.path();
             let frames =
@@ -436,6 +439,7 @@ impl Video {
                 fps,
                 max_side: probe.width.max(probe.height),
                 max_frames: 1,
+                threads: Threads::Auto,
             };
             let path = readable.path();
             let frames =

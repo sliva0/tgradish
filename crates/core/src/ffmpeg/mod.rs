@@ -21,6 +21,7 @@ pub use args::commands;
 pub(crate) use args::encode_args;
 #[cfg(test)]
 pub(crate) use args::input_args;
+use args::threads_args;
 #[cfg(any(feature = "linked", test))]
 pub(crate) use args::video_filter;
 #[cfg(feature = "linked")]
@@ -102,7 +103,8 @@ pub struct Ffmpeg {
 }
 
 /// Up to `count` frames of `input` from `start` seconds on, at `fps`,
-/// scaled to `size`, as straight RGBA.
+/// scaled to `size`, as straight RGBA, read in as many `threads`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn frames(
     ffmpeg: &Ffmpeg,
     input: &Path,
@@ -110,11 +112,13 @@ pub(crate) fn frames(
     (start, fps): (f64, f64),
     (width, height): (u32, u32),
     count: usize,
+    threads: crate::config::Threads,
     cancel: &CancelToken,
 ) -> crate::Result<Vec<Vec<u8>>> {
     cancel.check()?;
     let mut cmd = Command::new(&ffmpeg.ffmpeg);
     cmd.args(["-hide_banner", "-nostdin", "-v", "error"]);
+    cmd.args(threads_args(threads, "-filter_threads"));
     let seek = probe.seek(start);
     if seek > 0.0 && !probe.still_image {
         cmd.args(["-ss", &format!("{seek:.6}")]);
@@ -122,6 +126,7 @@ pub(crate) fn frames(
     if let Some(decoder) = &probe.decoder {
         cmd.args(["-c:v", decoder]);
     }
+    cmd.args(threads_args(threads, "-threads"));
     cmd.arg("-i").arg(input);
     let filter = args::frames_filter(probe.still_image || count == 1, fps, (width, height));
     cmd.args(["-map", "0:v:0", "-frames:v", &count.to_string(), "-vf", &filter]);
@@ -141,6 +146,7 @@ pub(crate) fn still(
     let length = 1.0 / plan.fps;
     let mut cmd = Command::new(&ffmpeg.ffmpeg);
     cmd.args(["-hide_banner", "-nostdin", "-v", "error"]);
+    cmd.args(threads_args(plan.threads, "-filter_threads"));
     cmd.args(args::input_args(plan, length, plan.fps));
     // the first frame from the start, as it is: resampling to a frame rate
     // can skip a short one

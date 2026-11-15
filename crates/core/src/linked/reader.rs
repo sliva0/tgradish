@@ -10,6 +10,7 @@ use ffmpeg_next as ff;
 
 use super::{c_path, libav};
 use crate::CancelToken;
+use crate::config::Threads;
 use crate::error::{Error, Result};
 use crate::ffmpeg::{Probe, Timing};
 use crate::webm::Plan;
@@ -118,10 +119,12 @@ fn to_units(seconds: f64, time_base: Rational) -> i64 {
 }
 
 impl Reader {
-    /// Opens a file and its first video stream, like ffmpeg's `-map 0:v:0`.
+    /// Opens a file and its first video stream, like ffmpeg's `-map 0:v:0`,
+    /// decoded in as many `threads`.
     pub(super) fn open_file(
         path: &Path,
         decoder: Option<&str>,
+        threads: Threads,
         cancel: &CancelToken,
     ) -> Result<Reader> {
         cancel.check()?;
@@ -156,7 +159,10 @@ impl Reader {
 
         let mut context = codec::context::Context::from_parameters(stream.parameters())
             .map_err(libav("reading stream parameters"))?;
-        context.set_threading(codec::threading::Config::kind(codec::threading::Type::Frame));
+        // as many as the codec makes use of where automatic, as 0 asks
+        let count = threads.limit().map_or(0, |threads| threads.get() as usize);
+        let frame_threads = codec::threading::Config::kind(codec::threading::Type::Frame);
+        context.set_threading(codec::threading::Config { count, ..frame_threads });
         let decoder = match decoder.and_then(ff::decoder::find_by_name) {
             Some(codec) => context.decoder().open_as(codec).and_then(|d| d.video()),
             None => context.decoder().video(),
@@ -188,19 +194,20 @@ impl Reader {
     /// Opens the planned input, limited to what plays for `read` seconds
     /// of the result after the start.
     pub(super) fn open(plan: &Plan, read: f64, cancel: &CancelToken) -> Result<Reader> {
-        Self::open_window(&plan.input, &plan.source, plan.start, read * plan.tempo, cancel)
+        let (path, probe, threads) = (&plan.input, &plan.source, plan.threads);
+        Self::open_window(path, probe, (plan.start, read * plan.tempo), threads, cancel)
     }
 
     /// Opens `path`, probed as `probe`, limited to `read` seconds after
-    /// `start`.
+    /// `start`, decoded in as many `threads`.
     pub(super) fn open_window(
         path: &Path,
         probe: &Probe,
-        start: f64,
-        read: f64,
+        (start, read): (f64, f64),
+        threads: Threads,
         cancel: &CancelToken,
     ) -> Result<Reader> {
-        let mut source = Self::open_file(path, probe.decoder.as_deref(), cancel)?;
+        let mut source = Self::open_file(path, probe.decoder.as_deref(), threads, cancel)?;
         if probe.still_image {
             source.still = Some((None, 0));
             source.window = (read * f64::from(STILL_FPS)).ceil() as i64;

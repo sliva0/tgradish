@@ -10,6 +10,7 @@ use super::Options;
 use crate::CancelToken;
 use crate::art::{self, Aseprite};
 use crate::backend::{Backend, FramesRequest};
+use crate::config::Threads;
 use crate::error::{Error, Result};
 use crate::input::{Input, sniff, sniff_readable};
 use crate::telegram;
@@ -60,11 +61,13 @@ fn limits() -> Limits {
 
 /// Pixel art as [`convert`](super::convert) reads it, with the tags and
 /// layers of an Aseprite file, read from the same bytes; or a video, read
-/// through `backend`. `cancel` is asked between files.
+/// through `backend` in as many `threads`. `cancel` is asked between
+/// files.
 pub(super) fn load(
     backend: Option<&Backend>,
     input: &Input,
     options: &Options,
+    threads: Threads,
     cancel: &CancelToken,
 ) -> Result<Loaded> {
     input.refuse_folder()?;
@@ -80,7 +83,7 @@ pub(super) fn load(
         let backend = backend.ok_or_else(|| {
             Error::FfmpegNotFound(crate::error::FfmpegMissing::ForVideo(input.clone()))
         })?;
-        return read_video(backend, input, options, cancel);
+        return read_video(backend, input, options, threads, cancel);
     }
     let bytes = art::read(input, art::most_bytes(&limits))?;
     cancel.check()?;
@@ -128,6 +131,7 @@ fn read_video(
     backend: &Backend,
     input: &Path,
     options: &Options,
+    threads: Threads,
     cancel: &CancelToken,
 ) -> Result<Loaded> {
     let chosen =
@@ -188,6 +192,7 @@ fn read_video(
         fps,
         max_side: probe.width.max(probe.height),
         max_frames: wanted.min(fit),
+        threads,
     };
     let decoded = backend.frames(input, &probe, &request, cancel)?;
     if decoded.frames.is_empty() {
@@ -245,7 +250,7 @@ pub fn read_art(
     options: &Options,
     cancel: &CancelToken,
 ) -> Result<Art> {
-    let loaded = load(backend, input, options, cancel)?;
+    let loaded = load(backend, input, options, Threads::Auto, cancel)?;
     let (width, height) = (loaded.animation.width(), loaded.animation.height());
     let frames = loaded
         .animation
@@ -269,7 +274,13 @@ mod tests {
         let path = dir.path().join(&ase.name);
         std::fs::write(&path, &ase.bytes).unwrap();
         let read = |options: Options| {
-            let loaded = load(None, &Input::File(path.clone()), &options, &CancelToken::new());
+            let loaded = load(
+                None,
+                &Input::File(path.clone()),
+                &options,
+                Threads::Auto,
+                &CancelToken::new(),
+            );
             let loaded = loaded.unwrap();
             (loaded.animation.width(), loaded.animation.frames().len(), loaded.tags)
         };
@@ -286,21 +297,22 @@ mod tests {
             ..Options::default()
         };
         let input = Input::File(path.clone());
-        let refused = load(None, &input, &sheet, &CancelToken::new()).err().unwrap();
+        let refused = load(None, &input, &sheet, Threads::Auto, &CancelToken::new()).err().unwrap();
         assert!(refused.to_string().contains("must be a single picture"), "{refused}");
         let gif = dir.path().join("walker.gif");
         std::fs::write(&gif, tgradish_corpus::encode::gif(&ase.sprite)).unwrap();
-        assert!(load(None, &Input::File(gif), &sheet, &CancelToken::new()).is_err());
+        assert!(load(None, &Input::File(gif), &sheet, Threads::Auto, &CancelToken::new()).is_err());
         let png = dir.path().join("walker.png");
         std::fs::write(&png, tgradish_corpus::encode::sheet(&ase.sprite, 2)).unwrap();
-        let loaded = load(None, &Input::File(png), &sheet, &CancelToken::new()).unwrap();
+        let loaded =
+            load(None, &Input::File(png), &sheet, Threads::Auto, &CancelToken::new()).unwrap();
         assert_eq!(loaded.animation.width(), width);
 
         // stopped between the files of a sequence
         let cancel = CancelToken::new();
         cancel.cancel();
         let both = Input::Sequence(vec![path.clone(), path.clone()]);
-        let stopped = load(None, &both, &Options::default(), &cancel);
+        let stopped = load(None, &both, &Options::default(), Threads::Auto, &cancel);
         assert!(matches!(stopped, Err(Error::Cancelled)));
     }
 
@@ -328,7 +340,9 @@ mod tests {
         let path = dir.path().join("large.ase");
         std::fs::write(&path, &ase).unwrap();
         let input = Input::File(path);
-        let refused = load(None, &input, &Options::default(), &CancelToken::new()).err().unwrap();
+        let refused = load(None, &input, &Options::default(), Threads::Auto, &CancelToken::new())
+            .err()
+            .unwrap();
         let half = (Limits::default().max_bytes / 2).to_string();
         assert!(refused.to_string().contains(&half), "{refused}");
     }
