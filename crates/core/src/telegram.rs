@@ -7,7 +7,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::webm::container::WebmInfo;
-use tgradish_tgs::check::Severity;
+pub use tgradish_tgs::check::Severity;
+use tgradish_tgs::check::{self, IssueKind};
 
 /// Largest video sticker @Stickers accepts, in bytes; one more is "too big".
 pub const MAX_STICKER_BYTES: u64 = 256 * 1024;
@@ -70,12 +71,14 @@ impl Target {
     }
 }
 
-/// Something about a file that Telegram will reject.
+/// Something about a file that Telegram, or one of its apps, would have a
+/// problem with: of every format, one kind for each check the formats
+/// share, with what it found, and [`Issue::Lottie`] for what only a
+/// `.tgs` is checked for.
 ///
-/// Serialised as every issue tgradish reports is, `.tgs` ones too: by its
-/// `kind`, with its `severity` and `message`, beside what it found, as
-/// `{"kind":"too-big","severity":"error","message":"293.0 KiB, over the
-/// 256 KiB limit","bytes":300000,"max":262144}`.
+/// Serialised by its `kind`, with its `severity` and `message`, beside
+/// what it found, as `{"kind":"too-big","bytes":300000,"max":262144,
+/// "severity":"error","message":"293.0 KiB, over the 256 KiB limit"}`.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(into = "Reported")]
 #[non_exhaustive]
@@ -129,13 +132,28 @@ pub enum Issue {
     },
     /// An animated image, where static stickers are one picture.
     Animated,
+    /// What checking a `.tgs` found that no other format is checked for,
+    /// as Lottie features or the limits of Telegram's renderer: named by
+    /// its own `kind`, and only frowned on where its severity says so.
+    Lottie(check::Issue),
 }
 
 impl Issue {
-    /// How bad it is: Telegram refuses a file with any of these.
+    /// How bad it is: Telegram refuses a file with any of these, except a
+    /// [`Issue::Lottie`] one that says it only frowns on it.
     pub fn severity(&self) -> Severity {
-        Severity::Error
+        match self {
+            Issue::Lottie(issue) => issue.severity,
+            _ => Severity::Error,
+        }
     }
+}
+
+/// Whether Telegram would refuse a file with `issues`: any of them an
+/// error. What every format's result, `inspect` and the GUI go by, and
+/// what makes the command line exit with 3.
+pub fn refuses(issues: &[Issue]) -> bool {
+    issues.iter().any(|issue| issue.severity() == Severity::Error)
 }
 
 /// An [`Issue`] as it is serialised.
@@ -147,11 +165,26 @@ struct Reported {
     message: String,
 }
 
-/// What an [`Issue`] found, tagged by its kind: a copy of it, as serde
-/// can't put fields that are worked out beside an enum's own.
+/// What an [`Issue`] found, by its kind: a kind every format has, or one
+/// only a `.tgs` is checked for.
+#[derive(Serialize, JsonSchema)]
+#[serde(untagged)]
+enum Found {
+    /// A kind every format has.
+    Shared(Shared),
+    /// What a `.tgs` alone is checked for.
+    Lottie {
+        /// What was checked.
+        kind: IssueKind,
+    },
+}
+
+/// What an [`Issue`] of a kind every format has found, tagged by its kind:
+/// a copy of it, as serde can't put fields that are worked out beside an
+/// enum's own.
 #[derive(Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
-enum Found {
+enum Shared {
     /// The container isn't WebM.
     NotWebm { doc_type: String },
     /// There is no video track.
@@ -176,20 +209,23 @@ enum Found {
 impl From<Issue> for Reported {
     fn from(issue: Issue) -> Reported {
         let (severity, message) = (issue.severity(), issue.to_string());
-        let found = match issue {
-            Issue::NotWebm { doc_type } => Found::NotWebm { doc_type },
-            Issue::NoVideo => Found::NoVideo,
-            Issue::NotVp9 { codec_id } => Found::NotVp9 { codec_id },
-            Issue::HasAudio => Found::HasAudio,
+        let shared = match issue {
+            Issue::NotWebm { doc_type } => Shared::NotWebm { doc_type },
+            Issue::NoVideo => Shared::NoVideo,
+            Issue::NotVp9 { codec_id } => Shared::NotVp9 { codec_id },
+            Issue::HasAudio => Shared::HasAudio,
             Issue::WrongSize { width, height, side, exact } => {
-                Found::WrongSize { width, height, side, exact }
+                Shared::WrongSize { width, height, side, exact }
             }
-            Issue::TooBig { bytes, max } => Found::TooBig { bytes, max },
-            Issue::TooLong { seconds, max } => Found::TooLong { seconds, max },
-            Issue::TooManyFps { fps, max } => Found::TooManyFps { fps, max },
-            Issue::Animated => Found::Animated,
+            Issue::TooBig { bytes, max } => Shared::TooBig { bytes, max },
+            Issue::TooLong { seconds, max } => Shared::TooLong { seconds, max },
+            Issue::TooManyFps { fps, max } => Shared::TooManyFps { fps, max },
+            Issue::Animated => Shared::Animated,
+            Issue::Lottie(issue) => {
+                return Reported { found: Found::Lottie { kind: issue.kind }, severity, message };
+            }
         };
-        Reported { found, severity, message }
+        Reported { found: Found::Shared(shared), severity, message }
     }
 }
 
@@ -218,6 +254,7 @@ impl std::fmt::Display for Issue {
                 write!(f, "frame rate is {fps:.2} fps, limit is {max}")
             }
             Issue::Animated => write!(f, "it is animated; static stickers are one picture"),
+            Issue::Lottie(issue) => write!(f, "{}", issue.message),
         }
     }
 }
@@ -360,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn reports_issues_as_tgs_ones_are() {
+    fn reports_issues_of_every_format_alike() {
         let issue = serde_json::to_value(Issue::TooBig { bytes: 300_000, max: 262_144 }).unwrap();
         let message = "293.0 KiB, over the 256 KiB limit";
         let expected = serde_json::json!({
@@ -374,10 +411,12 @@ mod tests {
             (&size["side"], &size["exact"]),
             (&serde_json::json!(100), &serde_json::json!(true))
         );
-        // a .tgs's have the same envelope, with no data of their own
+        // what only a .tgs is checked for has the same envelope, with no
+        // data of its own
         let lottie = br#"{"v":"5.5.2","w":100,"h":100,"fr":60,"ip":0,"op":60,"layers":[]}"#;
         let (_, found) = tgradish_tgs::check::check(lottie, None).unwrap();
-        let tgs = serde_json::to_value(&found[0]).unwrap();
+        let tgs = serde_json::to_value(Issue::Lottie(found[0].clone())).unwrap();
+        assert_eq!(tgs, serde_json::to_value(&found[0]).unwrap());
         let keys = |value: &serde_json::Value| -> Vec<String> {
             let mut keys: Vec<_> = value.as_object().unwrap().keys().cloned().collect();
             keys.sort();
@@ -385,5 +424,16 @@ mod tests {
         };
         assert_eq!(keys(&tgs), ["kind", "message", "severity"]);
         assert!(keys(&tgs).iter().all(|key| issue.get(key).is_some()));
+    }
+
+    #[test]
+    fn refuses_for_errors_only() {
+        let thirty = br#"{"fr":30,"ip":0,"op":60,"w":512,"h":512,"layers":[{"ty":4,"shapes":[]}]}"#;
+        let (_, found) = tgradish_tgs::check::check(thirty, None).unwrap();
+        let frowned: Vec<Issue> = found.into_iter().map(Issue::Lottie).collect();
+        assert_eq!(frowned.iter().map(Issue::severity).collect::<Vec<_>>(), [Severity::Warning]);
+        assert!(!refuses(&frowned) && !refuses(&[]));
+        let too_big = Issue::TooBig { bytes: 2, max: 1 };
+        assert!(refuses(&[frowned[0].clone(), too_big]));
     }
 }

@@ -22,7 +22,6 @@ pub use read::{Art, needs_ffmpeg, read_art};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use tgradish_tgs::check::Issue;
 use tgradish_tgs::normalise;
 use tgradish_tgs::sticker::{self, Progress, Step};
 
@@ -33,6 +32,7 @@ use crate::input::Input;
 use crate::options::Resize;
 use crate::presets::Format;
 use crate::preview::Preview;
+use crate::telegram::Issue;
 
 /// Frame rate of still images, sprite sheets and image sequences unless
 /// `fps` says otherwise.
@@ -168,7 +168,7 @@ pub fn convert(
         steps: sticker.steps,
         layers: sticker.layers,
         rectangles: sticker.rectangles,
-        issues: sticker.issues,
+        issues: sticker.issues.into_iter().map(Issue::Lottie).collect(),
         preview: preview::draw(
             &sticker.anim,
             settings.normalise.square == normalise::Square::Stretch,

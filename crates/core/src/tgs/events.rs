@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use schemars::JsonSchema;
 use serde::Serialize;
-use tgradish_tgs::check::Issue;
 use tgradish_tgs::normalise::Report;
 use tgradish_tgs::sticker::Step;
 
@@ -65,7 +64,7 @@ pub enum Event {
         /// Rectangles drawn in all of them.
         rectangles: u64,
         /// Problems Telegram would still have with the result.
-        issues: Vec<Issue>,
+        issues: Vec<crate::telegram::Issue>,
     },
     /// A conversion, or the whole command, failed. Only printed by the
     /// CLI; the library returns errors instead.

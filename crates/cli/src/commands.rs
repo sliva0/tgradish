@@ -580,7 +580,7 @@ fn short_version(line: &str) -> &str {
         .unwrap_or(line)
 }
 
-fn print_sticker(path: &std::path::Path, stats: &check::Stats, issues: &[check::Issue]) {
+fn print_sticker(path: &std::path::Path, stats: &check::Stats, issues: &[telegram::Issue]) {
     outln!("{}", style(term::link_out(path.display(), path)).bold());
     if let Some(name) = &stats.name {
         outln!("{}", ui::field("name", name));
@@ -619,10 +619,10 @@ fn print_sticker(path: &std::path::Path, stats: &check::Stats, issues: &[check::
         outln!("{}", ui::field("telegram", style("✔ accepts it").green()));
     }
     for issue in issues {
-        let label = match issue.severity {
+        let label = match issue.severity() {
             check::Severity::Error => ui::error_label(),
             _ => ui::warning_label(),
         };
-        outln!("  {label} {}", issue.message);
+        outln!("  {label} {issue}");
     }
 }

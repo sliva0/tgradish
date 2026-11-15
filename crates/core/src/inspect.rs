@@ -37,7 +37,7 @@ pub enum Inspected {
         /// What its Lottie holds.
         info: Box<check::Stats>,
         /// What breaks Telegram's limits or renderers, by severity.
-        issues: Vec<check::Issue>,
+        issues: Vec<telegram::Issue>,
     },
     /// A WebM video, judged as `target`.
     Webm {
@@ -104,14 +104,13 @@ pub enum InputKind {
 }
 
 impl Inspected {
-    /// Whether Telegram would refuse the file: any issue of WebM or WebP,
-    /// and of a `.tgs` those it refuses rather than frowns on.
+    /// Whether Telegram would refuse the file, as [`telegram::refuses`]
+    /// its issues.
     pub fn refused(&self) -> bool {
         match self {
-            Inspected::Webp { issues, .. } | Inspected::Webm { issues, .. } => !issues.is_empty(),
-            Inspected::Tgs { issues, .. } => {
-                issues.iter().any(|issue| issue.severity == check::Severity::Error)
-            }
+            Inspected::Webp { issues, .. }
+            | Inspected::Webm { issues, .. }
+            | Inspected::Tgs { issues, .. } => telegram::refuses(issues),
             // no sticker at all yet
             Inspected::Input { .. } => true,
         }

@@ -373,7 +373,7 @@ impl<'a> Converter<'a> {
                     }
                     outcome
                 };
-                outcome.issues.iter().any(|issue| issue.severity == Severity::Error)
+                tgradish_core::telegram::refuses(&outcome.issues)
             }
             FormatOptions::Webp(options) => {
                 let backend = self.backend()?;
@@ -828,11 +828,11 @@ impl TgsPrinter {
                     format!("{output_text} {}{changed}", ui::size_within(bytes, tgs::MAX_BYTES));
                 finished(self.quiet, &output, line);
                 for issue in issues {
-                    let label = match issue.severity {
+                    let label = match issue.severity() {
                         Severity::Error => ui::error_label(),
                         _ => ui::warning_label(),
                     };
-                    eprintln!("{label} {}", issue.message);
+                    eprintln!("{label} {issue}");
                 }
             }
             _ => {}

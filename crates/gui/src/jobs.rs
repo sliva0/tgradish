@@ -10,7 +10,7 @@ use tgradish_core::backend::Backend;
 use tgradish_core::input::Input;
 use tgradish_core::presets::Format;
 use tgradish_core::preview::Preview;
-use tgradish_core::tgradish_tgs::check::{Issue, Severity};
+use tgradish_core::tgradish_tgs::check::Severity;
 use tgradish_core::tgradish_tgs::normalise::Report;
 use tgradish_core::tgradish_tgs::sticker::Step;
 use tgradish_core::tgs;
@@ -141,8 +141,8 @@ impl Problem {
     }
 
     /// What checking a `.tgs` found, which may only be frowned on.
-    pub(crate) fn of_tgs(issue: Issue) -> Problem {
-        Problem { refused: issue.severity == Severity::Error, text: issue.message }
+    pub(crate) fn of_tgs(issue: telegram::Issue) -> Problem {
+        Problem { refused: issue.severity() == Severity::Error, text: issue.to_string() }
     }
 }
 
