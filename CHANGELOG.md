@@ -58,7 +58,12 @@ that makes every kind of Telegram sticker and emoji.
   file made alone, a line each, for scripts: `tgradish convert -q *.png |
   xargs …`.
 - `--json` output for scripts and front-ends, as JSON Lines, and `tgradish
-  describe`, which gives the schemas of its options and events.
+  describe`, which gives the schemas of its options and events. Every
+  format's conversion prints the same events: `started` and `finished`
+  name the input, output, format, target and size limit, and `finished`
+  says the result's size, whether it was changed to fit and what Telegram
+  would have a problem with, issues every format and `inspect` report
+  alike by their `kind`, with what each found.
 - ffmpeg built in, in the release builds that say so, or the system's.
 - Releases for Linux (glibc and musl, x86-64 and aarch64, as archives,
   .deb and .rpm), Windows, the AUR and a Nix flake.

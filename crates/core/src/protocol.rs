@@ -4,15 +4,23 @@
 //!
 //! - Every key and every enum value is kebab-case.
 //! - Every `--json` output is JSON Lines: one compact object per line.
-//!   `convert` and `watch` print an event a line, as the description's
-//!   schemas give them, `inspect` a file a line, `preset list` a preset a
-//!   line, `licenses` a notice a line, `spoof` one event, a [`SpoofEvent`],
-//!   and other commands one line.
+//!   `convert` and `watch` print an event a line, an [`Event`] as the
+//!   description's `events` schema gives it, the same for every format:
+//!   `started` first and `finished` last, each naming the `input`,
+//!   `output`, `format`, `target` and `limit`, with what only the format
+//!   has beside them. `inspect` prints a file a line, `preset list` a
+//!   preset a line, `licenses` a notice a line, `spoof` one event, a
+//!   [`SpoofEvent`], and other commands one line.
 //! - A tagged union names its tag by what it distinguishes: `event` for
 //!   events, `format` for what `inspect` found, `kind` for issues,
 //!   encodings and ffmpeg backends, `mode` for an encode's rate control.
 //! - A file is named by its path as text, with what isn't Unicode in it
 //!   replaced, and a line about one input names it `input`.
+//! - What Telegram would have a problem with is an issue, of every format
+//!   alike, as [`crate::telegram::Issue`] serialises it: its `kind`, with
+//!   what it found, its `severity` and its `message`. A file with any
+//!   issue of severity `error` is refused, and makes the command exit
+//!   with 3.
 //! - Whatever fails is an `error` event, with its `message` and the
 //!   `input` that failed, or `null` where the whole command did.
 

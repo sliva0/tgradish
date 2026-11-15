@@ -1,8 +1,9 @@
 //! Everything tgradish's command line and GUI share: Telegram stickers
 //! and emoji made from videos, pictures, Aseprite files and sequences of
 //! images, as any of three kinds of result, each converted by its module's
-//! `convert(backend, &Request, &cancel, on_event)`, which reports through
-//! its `Event`s and returns its `Outcome`:
+//! `convert(backend, &Request, &cancel, on_event)`, or by
+//! [`convert::convert`] for any of them, which report through the same
+//! [`Event`]s and return the same [`Outcome`], of [`events`]:
 //!
 //! - [`webm`]: VP9 WebM, planned from its [`webm::Options`] and the input,
 //!   fitted to the size limit, and the container inspected and patched,
@@ -26,7 +27,9 @@
 //! - [`options`]: the values every format's options take, and how options
 //!   layer and become flags; [`presets`] and [`config`], the user's;
 //! - [`inspect`], what a sticker file holds, judged by [`telegram`]'s
-//!   limits; [`preview`], finished stickers decoded for showing;
+//!   limits, whose [`telegram::Issue`] is what every format's results and
+//!   inspections have a problem with; [`preview`], finished stickers
+//!   decoded for showing;
 //! - [`protocol`]: what `--json` and `describe` print, by the rules its
 //!   docs give;
 //! - [`licenses`], [`paths`], and with the `clipboard` feature
