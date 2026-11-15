@@ -21,7 +21,8 @@ default = ["gui"]
 gui = ["dep:tgradish-gui", "dep:windows-sys"]
 # ffmpeg linked into the binary instead of separate executables
 linked = ["tgradish-core/linked"]
-linked-static = ["tgradish-core/linked-static"]
+# link them statically, as release builds do
+linked-static = ["linked", "tgradish-core/linked-static"]
 
 [dependencies]
 png.workspace = true

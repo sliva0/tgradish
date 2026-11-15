@@ -908,7 +908,10 @@ mod tests {
         let long = version("--version");
         let gui = if cfg!(feature = "gui") { "with the GUI" } else { "no GUI" };
         assert!(long.trim_end().ends_with(&format!("; {gui})")), "{long}");
-        assert!(long.contains("ffmpeg built in") == cfg!(feature = "linked"), "{long}");
+        // as core has it, whichever feature built it in
+        let built_in = tgradish_core::backend::Backend::select(FfmpegChoice::Builtin, None).is_ok();
+        assert_eq!(long.contains("ffmpeg built in"), built_in, "{long}");
+        assert_eq!(long.contains("system ffmpeg"), !built_in, "{long}");
     }
 
     /// Every default is said once, at the end of its option's help, and
