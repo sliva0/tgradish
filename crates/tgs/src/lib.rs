@@ -18,6 +18,9 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
+//! What a sticker shows is drawn for previews by [`picture`], from the art
+//! it is made of or, the same, from the Lottie of a `.tgs` tgradish wrote.
+//!
 //! Pure Rust that builds for `wasm32-unknown-unknown`: no ffmpeg,
 //! processes, filesystem or `tgradish-core`. The `threads` feature tries
 //! fitting's candidates, and packs, in threads of their own, except on
@@ -55,6 +58,7 @@ pub mod limits;
 #[doc(hidden)]
 pub mod mark;
 pub mod normalise;
+pub mod picture;
 pub mod reduce;
 pub mod sticker;
 

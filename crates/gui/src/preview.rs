@@ -18,7 +18,7 @@ use crate::canvas::{self, Cropping, Kept, Picture, Screen};
 use crate::inset::{self, Inset, InsetChange};
 use crate::item::{Framing, Item, Show, Zoom};
 use crate::l10n::fl;
-use crate::media::Clip;
+use crate::media::{Clip, Load};
 use crate::result::{details, summary};
 use crate::{file_settings, predict, theme, timeline, widgets};
 
@@ -213,11 +213,10 @@ fn preview(
         let result_hint = if outdated { fl!("show-result", "hint") } else { String::new() };
         let choices =
             [(Show::Input, fl!("show-input"), String::new()), (Show::Result, result, result_hint)];
-        // .tgs results made by an earlier run, which tgradish can't draw
-        let unseen = if item.made.as_ref().is_some_and(|made| made.format == Format::Tgs) {
-            fl!("tgs-unseen")
-        } else {
-            fl!("convert-first")
+        // a result that couldn't be read says why
+        let unseen = match &item.result_clip {
+            Load::Failed(why) if item.made.is_some() => why.clone(),
+            _ => fl!("convert-first"),
         };
         if widgets::segments(ui, &mut show, &choices, |show| {
             if show == Show::Result && !has_result { Err(unseen.clone()) } else { Ok(()) }

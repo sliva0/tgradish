@@ -9,7 +9,7 @@ use crate::error::{Error, Result};
 
 /// The Lottie JSON of a `.tgs` (or plain Lottie JSON) file, and the
 /// file's size when it was packed.
-fn read_lottie(path: &Path) -> Result<(Vec<u8>, Option<usize>)> {
+pub(super) fn read_lottie(path: &Path) -> Result<(Vec<u8>, Option<usize>)> {
     let bytes = art::read(path, art::MAX_STICKER_BYTES)?;
     if bytes.starts_with(&[0x1f, 0x8b]) {
         let json = tgradish_tgs::file::unpack(&bytes).map_err(|err| Error::Unreadable {

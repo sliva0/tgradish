@@ -46,6 +46,15 @@ pub enum Error {
         /// Why, in English.
         message: String,
     },
+    /// A `.tgs` that can't be shown as tgradish draws its own: one with
+    /// more than tgradish's stickers have, as paths, gradients or masks.
+    #[error("{} has {what}, which tgradish doesn't draw", path.display())]
+    Undrawable {
+        /// The sticker.
+        path: PathBuf,
+        /// What it has, in English.
+        what: String,
+    },
     /// The input has no video stream.
     #[error("{} has no video stream", .0.display())]
     NoVideo(PathBuf),

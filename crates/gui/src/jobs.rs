@@ -213,6 +213,7 @@ pub(crate) fn failure(err: &Error) -> String {
         }
         Error::NoVideo(path) => fl!("no-video", name = name(path)),
         Error::NoSuchFile(path) => fl!("no-such-file", name = name(path)),
+        Error::Undrawable { .. } => fl!("tgs-unseen"),
         Error::NotWebm(path) => fl!("not-webm", name = name(path)),
         Error::NotSticker(path) => fl!("not-sticker", name = name(path)),
         Error::NoFrame { path, at } => {
@@ -259,8 +260,8 @@ pub(crate) struct Done {
     pub(crate) shapes: Option<(usize, usize)>,
     pub(crate) problems: Vec<Problem>,
     /// The frames of `.tgs` results, as drawn while making them, and of
-    /// pictures, until `App` takes them; WebM ones are decoded from
-    /// the file.
+    /// pictures, until `App` takes them, after which they are read from
+    /// the file again; WebM ones are always decoded from the file.
     pub(crate) preview: Option<Preview>,
 }
 

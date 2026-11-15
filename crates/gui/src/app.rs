@@ -1372,6 +1372,71 @@ mod tests {
     }
 
     #[test]
+    fn shows_a_tgs_result_of_last_time_as_it_was_made() {
+        use crate::jobs::Status;
+        let dir = tempfile::tempdir().unwrap();
+        let art = crate::testing::corpus(dir.path(), "walker_2x.gif", "walker.gif");
+        let state = dir.path().join("state").join("session.json");
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut first = harness(config.clone());
+        first.state_mut().reopen(state.clone());
+        first.state_mut().add(vec![art]);
+        finish(&mut first);
+        let id = first.state().items[0].id;
+        first.state_mut().select(id);
+        assert_eq!(first.state().items[0].format, Format::Tgs);
+        convert(&first);
+        first.run_steps(2);
+        finish(&mut first);
+        let shown = |item: &Item| {
+            let clip = item.result_clip.ready()?;
+            Some((clip.width, clip.height, clip.frames.clone(), clip.times.clone()))
+        };
+        let item = &first.state().items[0];
+        let fresh = shown(item).expect("drawn as it was made");
+        let output = crate::testing::made_job(item).output.clone();
+        // its frames are kept once, where they show
+        let Some(Status::Done(done)) = item.made.as_ref().map(|made| &made.job.status) else {
+            panic!("not made");
+        };
+        assert!(done.preview.is_none());
+        // let go of, as when other files are looked at, and read again
+        crate::work::release(&mut first.state_mut().items[0]);
+        finish(&mut first);
+        assert_eq!(shown(&first.state().items[0]).as_ref(), Some(&fresh));
+        // and taken out of the list and put back
+        first.state_mut().remove(id);
+        first.state_mut().undo_removing();
+        finish(&mut first);
+        assert_eq!(shown(&first.state().items[0]).as_ref(), Some(&fresh));
+        first.state_mut().save_session();
+        drop(first);
+
+        // and the next time the GUI starts, drawn from the file
+        let mut second = harness(config);
+        second.state_mut().reopen(state);
+        finish(&mut second);
+        let item = &second.state().items[0];
+        assert!(item.result_is_current() && item.result_thumb.is_some());
+        assert_eq!(shown(item), Some(fresh));
+        // replaced by a sticker tgradish can't draw, a circle, which it says
+        let circle = concat!(
+            r#"{"v":"5.7.2","fr":60,"ip":0,"op":60,"w":512,"h":512,"layers":[{"ty":4,"ks":{},"#,
+            r#""ip":0,"op":60,"shapes":[{"ty":"gr","it":[{"ty":"el","p":{"k":[256,256]},"#,
+            r#""s":{"k":[200,200]}},{"ty":"fl","c":{"k":[1,0,0]}},{"ty":"tr"}]}]}]}"#,
+        );
+        std::fs::write(&output, circle).unwrap();
+        let id = second.state().items[0].id;
+        second.state_mut().select(id);
+        crate::work::release(&mut second.state_mut().items[0]);
+        finish(&mut second);
+        let item = &second.state().items[0];
+        let unseen = fl!("tgs-unseen");
+        assert!(matches!(&item.result_clip, crate::media::Load::Failed(why) if *why == unseen));
+    }
+
+    #[test]
     fn stops_converting_on_exit() {
         let dir = tempfile::tempdir().unwrap();
         let Some(video) = crate::testing::video_of(dir.path(), "1280x720", 8) else { return };

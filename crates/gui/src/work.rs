@@ -8,7 +8,7 @@ use eframe::egui;
 use tgradish_core::backend::Backend;
 use tgradish_core::presets::Format;
 use tgradish_core::webm::Options;
-use tgradish_core::webp;
+use tgradish_core::{tgs, webp};
 
 use crate::app::App;
 use crate::files::THUMB;
@@ -203,19 +203,15 @@ impl App {
             let selected = self.selected == Some(id);
             let item = self.item_mut(id).expect("just found");
             let mut made = item.job.take().expect("just found");
-            let format = made.format;
             let Status::Done(done) = &mut made.job.status else {
                 item.failed = Some(made);
                 continue;
             };
             let output = done.output.clone();
             item.result_thumb = None;
-            // a picture is read from its file again; a .tgs can't be
-            let preview = match format {
-                Format::Webp => done.preview.take(),
-                Format::Webm | Format::Tgs => done.preview.clone(),
-            };
-            item.result_clip = match preview {
+            // a picture or a .tgs is read from its file again, once its
+            // frames are let go
+            item.result_clip = match done.preview.take() {
                 Some(preview) => Load::Ready(Clip::from_preview(preview, true)),
                 None => Load::Idle,
             };
@@ -434,11 +430,15 @@ fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backe
             Ok(preview) => Load::Ready(Clip::from_preview(preview, true)),
             Err(err) => Load::Failed(crate::jobs::failure(&err)),
         },
-        // drawn when it was made
-        (Format::Tgs, _) => match &done.preview {
-            Some(preview) => Load::Ready(Clip::from_preview(preview.clone(), true)),
-            None => return,
-        },
+        // drawn again from its file, as converting drew it
+        (Format::Tgs, _) => {
+            let output = done.output.clone();
+            Load::Loading(Task::spawn(ctx, move |_| {
+                let preview =
+                    tgs::preview_file(&output).map_err(|err| crate::jobs::failure(&err))?;
+                Ok(Clip::from_preview(preview, true))
+            }))
+        }
         (Format::Webm, Err(_)) => return,
     };
 }

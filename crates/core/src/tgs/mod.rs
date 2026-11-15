@@ -15,6 +15,7 @@ pub use inspect::inspect_file;
 #[cfg(test)]
 pub(crate) use inspect::read_json;
 pub use options::Options;
+pub use preview::preview_file;
 use read::load;
 pub use read::{Art, needs_ffmpeg, read_art};
 

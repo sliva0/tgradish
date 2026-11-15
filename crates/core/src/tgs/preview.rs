@@ -1,52 +1,41 @@
-//! What a `.tgs` shows, drawn from the art it was made of, for previews.
+//! What a `.tgs` shows, for previews: drawn from the art it was made of,
+//! or read back from a file tgradish wrote, which shows the same.
 
+use std::path::Path;
+
+use tgradish_tgs::picture::{self, DrawError, Picture};
+
+use crate::error::{Error, Result};
 use crate::preview::Preview;
 
 /// The longest side of a `.tgs` preview: plenty for the GUI, and within
 /// what any GPU takes as a texture.
 pub(crate) const PREVIEW_MAX_SIDE: u32 = 1024;
 
+fn preview(picture: Picture) -> Preview {
+    Preview { width: picture.width, height: picture.height, frames: picture.frames }
+}
+
 /// What `anim` shows, `stretch`ed square as the sticker is, or not.
 pub(super) fn draw(anim: &tgradish_tgs::PixelAnim, stretch: bool) -> Preview {
-    let grid = anim.grid();
-    let width = *grid.columns().last().unwrap_or(&0);
-    let height = *grid.rows().last().unwrap_or(&0);
-    // input pixels per preview pixel: an art pixel, unless the canvas
-    // cuts those at the sides, which then show only in part
-    let unit = if grid.cut_at_sides() { 1 } else { grid.scale() };
-    let step = unit.max(width.max(height).div_ceil(PREVIEW_MAX_SIDE)).max(1);
-    let most = width.max(height).div_ceil(step);
-    // the cell under the middle of each step, or stretched, of each of
-    // as many preview pixels as along the longer side
-    let cells = |edges: &[u32], size: u32| -> Vec<usize> {
-        let middles: Vec<u32> = if stretch {
-            (0..most)
-                .map(|i| ((2 * i + 1) as u64 * size as u64 / (2 * most) as u64) as u32)
-                .collect()
-        } else {
-            (0..size.div_ceil(step)).map(|i| i * step + step / 2).collect()
-        };
-        middles
-            .into_iter()
-            .map(|x| edges.partition_point(|&edge| edge <= x.min(size - 1)) - 1)
-            .collect()
-    };
-    let (columns, rows) = (cells(grid.columns(), width), cells(grid.rows(), height));
-    let frames = anim
-        .frames()
-        .iter()
-        .map(|frame| {
-            let mut rgba = Vec::with_capacity(columns.len() * rows.len() * 4);
-            for &row in &rows {
-                for &column in &columns {
-                    let colour = frame.pixels[row * anim.width() as usize + column];
-                    rgba.extend(anim.palette()[colour as usize]);
-                }
-            }
-            (rgba, frame.ticks)
-        })
-        .collect();
-    Preview { width: columns.len() as u32, height: rows.len() as u32, frames }
+    preview(picture::of_art(anim, stretch, PREVIEW_MAX_SIDE))
+}
+
+/// What the `.tgs` (or plain Lottie JSON) at `path` shows, drawn as
+/// converting drew it when tgradish made it: a pixel per art pixel, each
+/// frame with how long it shows. A sticker with more than tgradish's own
+/// have, as paths or gradients, fails as [`Error::Undrawable`], and one
+/// that can't be read as [`Error::Unreadable`]; neither is a picture that
+/// isn't what it shows.
+pub fn preview_file(path: &Path) -> Result<Preview> {
+    let (json, _) = super::inspect::read_lottie(path)?;
+    match picture::of_lottie(&json, PREVIEW_MAX_SIDE) {
+        Ok(picture) => Ok(preview(picture)),
+        Err(DrawError::Unsupported(what)) => {
+            Err(Error::Undrawable { path: path.to_path_buf(), what })
+        }
+        Err(err) => Err(Error::Unreadable { path: path.to_path_buf(), message: err.to_string() }),
+    }
 }
 
 #[cfg(test)]
@@ -81,5 +70,59 @@ mod tests {
         let preview = draw(&wide, false);
         assert_eq!((preview.width, preview.height), (1000, 1));
         assert_eq!(preview.frames[0].0.len(), 1000 * 4);
+    }
+
+    #[test]
+    fn reads_back_what_converting_drew() {
+        use crate::options::{Crop, Resize, Speed};
+        use crate::tgs::{Options, Request, convert};
+        let dir = tempfile::tempdir().unwrap();
+        let mut read = 0;
+        for file in tgradish_corpus::files() {
+            let input = dir.path().join(&file.name);
+            std::fs::write(&input, &file.bytes).unwrap();
+            let (width, height) = file.sprite.size();
+            // whole, square three ways, and cut through art pixels
+            let cut = Crop { x: 1, y: 2, width: width - 2, height: height - 3 };
+            let options = [
+                Options::default(),
+                Options { resize: Some(Resize::Crop), ..Options::default() },
+                Options { resize: Some(Resize::Stretch), ..Options::default() },
+                Options { crop: Some(cut), ..Options::default() },
+                Options { crop: Some(cut), resize: Some(Resize::Crop), ..Options::default() },
+            ];
+            for (index, options) in options.into_iter().enumerate() {
+                let request = Request {
+                    output: Some(dir.path().join(format!("{}.{index}.tgs", file.name))),
+                    options: Options { speed: Some(Speed::Fast), ..options },
+                    overwrite: true,
+                    ..Request::new(crate::input::Input::File(input.clone()))
+                };
+                let made =
+                    convert(None, &request, &crate::CancelToken::new(), &mut |_| {}).unwrap();
+                let preview = preview_file(&made.output).unwrap();
+                assert_eq!(preview, made.preview, "{} {index}", file.name);
+                read += 1;
+            }
+        }
+        assert!(read >= 30, "{read}");
+    }
+
+    #[test]
+    fn says_why_a_file_cant_be_shown() {
+        let dir = tempfile::tempdir().unwrap();
+        // another program's sticker, a circle, as plain Lottie JSON
+        let circle = br#"{"v":"5.7.2","fr":60,"ip":0,"op":60,"w":512,"h":512,"layers":[{"ty":4,"ks":{},"ip":0,"op":60,"shapes":[{"ty":"gr","it":[{"ty":"el","p":{"k":[256,256]},"s":{"k":[200,200]}},{"ty":"fl","c":{"k":[1,0,0]}},{"ty":"tr"}]}]}]}"#;
+        let path = dir.path().join("circle.tgs");
+        std::fs::write(&path, circle).unwrap();
+        let err = preview_file(&path).unwrap_err();
+        assert!(matches!(&err, Error::Undrawable { what, .. } if what == "ellipses"), "{err}");
+        // and what is no sticker at all
+        let broken = dir.path().join("broken.tgs");
+        std::fs::write(&broken, b"\x1f\x8b\x08 and no more").unwrap();
+        assert!(matches!(preview_file(&broken), Err(Error::Unreadable { .. })));
+        std::fs::write(&broken, b"{\"layers\":").unwrap();
+        assert!(matches!(preview_file(&broken), Err(Error::Unreadable { .. })));
+        assert!(preview_file(&dir.path().join("gone.tgs")).is_err());
     }
 }

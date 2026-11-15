@@ -346,7 +346,10 @@ show-result = Result
     .hint = Outdated: the result was made with earlier settings
 # Why the result can't be shown yet.
 convert-first = Convert it first
-tgs-unseen = TGS results from an earlier run can't be shown; convert again to see it
+# Why a .tgs result can't be shown: its file has shapes, such as curves
+# or gradients, that tgradish's own stickers don't, as when another
+# program replaced it.
+tgs-unseen = This TGS sticker has shapes tgradish can't draw
 # Turns on the result's small picture.
 result-preview = Result preview
     .hint = Show / hide small preview beside the input
