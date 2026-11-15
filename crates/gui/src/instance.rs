@@ -10,6 +10,13 @@
 //! raised with, and nothing else is taken from it. A GUI that doesn't
 //! answer within [`ANSWER`], or a socket that nothing listens on any more,
 //! is given up on, and the GUI started opens as a second one would.
+//!
+//! The files are the started GUI's until it says otherwise: having the
+//! answer in time, it writes [`CONFIRMED`] and ends, and the GUI that
+//! keeps the session adds them only once it has read that. One that
+//! answers too late, or is never told, adds nothing, so the files are
+//! opened by one GUI at most, and never by both: the one byte is either
+//! written, and the started GUI ends, or isn't, and it opens them itself.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -32,8 +39,12 @@ const AGAIN: Duration = Duration::from_millis(25);
 const LONGEST: usize = 4 << 20;
 /// What a GUI answers once it has the files.
 const ACCEPTED: &[u8] = b"ok\n";
-/// The layout of the message, so another is left alone.
-const VERSION: u64 = 1;
+/// What the GUI started says once it has the answer, and leaves the files
+/// to the one that keeps the session: a byte, which is written or not.
+const CONFIRMED: &[u8] = b"!";
+/// The layout of the message, so another is left alone: 2 is confirmed,
+/// which 1 wasn't, so a GUI of either never takes what the other leaves.
+const VERSION: u64 = 2;
 /// The longest token a window is raised with that is passed on.
 const LONGEST_TOKEN: usize = 1024;
 
@@ -204,6 +215,8 @@ pub(crate) enum Refused {
 
 /// Hands `request` to the GUI listening at `address`, trying to reach it
 /// until `within` is up, and waiting no longer than that for its answer.
+/// Where it is `Ok`, the files are that GUI's; where it isn't, they were
+/// never left to it, and it adds none of them.
 pub(crate) fn hand_over(
     address: &transport::Address,
     request: &Request,
@@ -213,17 +226,21 @@ pub(crate) fn hand_over(
     let deadline = Instant::now() + within;
     let (sender, receiver) = channel();
     let address = address.clone();
-    // on a thread of its own, which a GUI that never answers keeps waiting
-    // while this one goes on to open
+    // on a thread of its own, as reaching a GUI may take longer; it only
+    // reads the answer, and gives up as this one does, closing the
+    // connection unconfirmed where the answer comes too late
     let exchange = move || {
         let answer = (|| {
-            let mut stream = transport::connect(&address, deadline)?;
-            stream.write_all(&line).map_err(|_| Refused::Unreached)?;
-            stream.flush().map_err(|_| Refused::Unreached)?;
+            let mut link = transport::connect(&address, deadline)?;
+            if Instant::now() >= deadline {
+                return Err(Refused::Unreached);
+            }
+            write_all_by(&mut link, &line, deadline).map_err(|_| Refused::Unreached)?;
             let mut answer = [0; ACCEPTED.len()];
-            stream.read_exact(&mut answer).map_err(|_| Refused::Unanswered)?;
-            if answer == ACCEPTED { Ok(()) } else { Err(Refused::Unanswered) }
+            read_exact_by(&mut link, &mut answer, deadline).map_err(|_| Refused::Unanswered)?;
+            if answer == ACCEPTED { Ok(link) } else { Err(Refused::Unanswered) }
         })();
+        // given up on, it goes here, and the connection with it
         let _ = sender.send(answer);
     };
     std::thread::Builder::new()
@@ -231,7 +248,58 @@ pub(crate) fn hand_over(
         .spawn(exchange)
         .map_err(|_| Refused::Unreached)?;
     let left = deadline.saturating_duration_since(Instant::now());
-    receiver.recv_timeout(left).unwrap_or(Err(Refused::Unanswered))
+    let mut link = receiver.recv_timeout(left).unwrap_or(Err(Refused::Unanswered))?;
+    // this one decides, and only here: once the byte is written the files
+    // are the other GUI's, and while it isn't they are this one's, which
+    // the other, waiting a while longer than this, adds none of
+    if Instant::now() >= deadline {
+        return Err(Refused::Unanswered);
+    }
+    write_all_by(&mut link, CONFIRMED, deadline).map_err(|_| Refused::Unanswered)
+}
+
+/// A connection between two GUIs, which gives up on whatever it is
+/// waiting for at a deadline.
+pub(crate) trait Link {
+    /// Reads what comes into `buf`, as `Read::read` does, waiting no
+    /// longer than `deadline`, though taking what has come by then.
+    fn read_by(&mut self, buf: &mut [u8], deadline: Instant) -> std::io::Result<usize>;
+    /// Writes some of `buf`, as `Write::write` does, waiting no longer
+    /// than `deadline`.
+    fn write_by(&mut self, buf: &[u8], deadline: Instant) -> std::io::Result<usize>;
+}
+
+/// Writes all of `buf` to `link`, by `deadline`.
+fn write_all_by(link: &mut impl Link, mut buf: &[u8], deadline: Instant) -> std::io::Result<()> {
+    while !buf.is_empty() {
+        match link.write_by(buf, deadline)? {
+            0 => return Err(std::io::ErrorKind::WriteZero.into()),
+            written => buf = &buf[written..],
+        }
+    }
+    Ok(())
+}
+
+/// Fills `buf` from `link`, by `deadline`.
+fn read_exact_by(
+    link: &mut impl Link,
+    mut buf: &mut [u8],
+    deadline: Instant,
+) -> std::io::Result<()> {
+    while !buf.is_empty() {
+        match link.read_by(buf, deadline)? {
+            0 => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+            read => buf = &mut buf[read..],
+        }
+    }
+    Ok(())
+}
+
+/// How long is left until `deadline`, though never nothing, so what has
+/// come by then is still taken.
+#[cfg(unix)]
+fn left(deadline: Instant) -> Duration {
+    deadline.saturating_duration_since(Instant::now()).max(Duration::from_millis(1))
 }
 
 /// Files another GUI handed over, and whether its window was raised for
@@ -322,13 +390,19 @@ impl Listener {
     }
 }
 
-/// Reads one GUI's message from `stream`, answers it and passes it on;
-/// anything else is let go of unanswered.
+/// Reads one GUI's message from `stream`, answers it, and passes it on
+/// once that GUI says it leaves the files to this one; anything else is
+/// let go of unanswered.
 fn serve(stream: &mut (impl Read + Write), shared: &Shared, sender: &Sender<Handed>) {
     let Some(line) = read_line(stream) else { return };
     let Some(request) = Request::decode(&line) else { return };
-    // one that gave up waiting opens the files itself
     if stream.write_all(ACCEPTED).and_then(|()| stream.flush()).is_err() {
+        return;
+    }
+    // one that gave up waiting, as it may have just as the answer came,
+    // says nothing more, and opens the files itself
+    let mut confirmed = [0; CONFIRMED.len()];
+    if stream.read_exact(&mut confirmed).is_err() || confirmed != CONFIRMED {
         return;
     }
     shared.deliver(sender, request);
@@ -363,12 +437,13 @@ pub(crate) mod transport {
     //! A Unix socket beside the session's lock, in a folder of the user's
     //! own, which the user alone may connect to.
 
+    use std::io::{Read, Write};
     use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::{Path, PathBuf};
     use std::time::Instant;
 
-    use super::{AGAIN, ANSWER, Refused};
+    use super::{AGAIN, ANSWER, Link, Refused, left};
 
     pub(crate) type Address = PathBuf;
 
@@ -402,6 +477,36 @@ pub(crate) mod transport {
 
     fn identity(meta: &std::fs::Metadata) -> (u64, u64) {
         (meta.dev(), meta.ino())
+    }
+
+    /// Waits out `io` on `stream` until `deadline`, as the socket's
+    /// timeout, which is set for each, says.
+    fn by<T>(
+        stream: &mut UnixStream,
+        deadline: Instant,
+        mut io: impl FnMut(&mut UnixStream) -> std::io::Result<T>,
+    ) -> std::io::Result<T> {
+        loop {
+            stream.set_read_timeout(Some(left(deadline)))?;
+            stream.set_write_timeout(Some(left(deadline)))?;
+            match io(stream) {
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    return Err(std::io::ErrorKind::TimedOut.into());
+                }
+                done => return done,
+            }
+        }
+    }
+
+    impl Link for UnixStream {
+        fn read_by(&mut self, buf: &mut [u8], deadline: Instant) -> std::io::Result<usize> {
+            by(self, deadline, |stream| stream.read(buf))
+        }
+
+        fn write_by(&mut self, buf: &[u8], deadline: Instant) -> std::io::Result<usize> {
+            by(self, deadline, |stream| stream.write(buf))
+        }
     }
 
     /// Listens at `path`, giving each connection to `serve` in turn. A
@@ -471,19 +576,24 @@ pub(crate) mod transport {
     use std::time::Instant;
 
     use windows_sys::Win32::Foundation::{
-        ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE,
+        ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_OPERATION_ABORTED, ERROR_PIPE_BUSY,
+        ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
     };
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX,
+        FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX, ReadFile,
+        WriteFile,
     };
+    use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
     use windows_sys::Win32::System::Pipes::{
         ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeServerProcessId,
         PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
         PIPE_WAIT,
     };
+    use windows_sys::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObject};
     use windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
+    use windows_sys::core::BOOL;
 
-    use super::{AGAIN, Refused};
+    use super::{AGAIN, Link, Refused};
 
     pub(crate) type Address = String;
 
@@ -588,20 +698,126 @@ pub(crate) mod transport {
         let _ = pipe.sync_all();
     }
 
+    /// An end of a pipe opened for overlapped I/O, which is waited for as
+    /// long as it may be and cancelled then.
+    pub(crate) struct Pipe {
+        handle: OwnedHandle,
+        /// What each operation signals as it ends.
+        event: OwnedHandle,
+    }
+
+    impl Pipe {
+        /// The end `handle`, which was opened for overlapped I/O.
+        pub(crate) fn new(handle: OwnedHandle) -> std::io::Result<Pipe> {
+            // SAFETY: no attributes or name give an event of the process's
+            // own, reset by hand
+            let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
+            if event.is_null() {
+                return Err(std::io::Error::last_os_error());
+            }
+            // SAFETY: an event just made, which nothing else owns
+            let event = unsafe { OwnedHandle::from_raw_handle(event as _) };
+            Ok(Pipe { handle, event })
+        }
+
+        fn raw(&self) -> HANDLE {
+            self.handle.as_raw_handle() as HANDLE
+        }
+
+        /// Runs `start` with what it starts an operation with, and waits
+        /// for that until `deadline`, or as long as it takes where there
+        /// is none, cancelling it then: what it transferred.
+        pub(crate) fn run(
+            &self,
+            deadline: Option<Instant>,
+            start: impl FnOnce(*mut OVERLAPPED) -> BOOL,
+        ) -> std::io::Result<u32> {
+            let mut overlapped = OVERLAPPED {
+                hEvent: self.event.as_raw_handle() as HANDLE,
+                ..OVERLAPPED::default()
+            };
+            let overlapped = &raw mut overlapped;
+            if start(overlapped) == 0 {
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() != Some(ERROR_IO_PENDING as i32) {
+                    return Err(err);
+                }
+            }
+            let wait = deadline.map_or(INFINITE, |deadline| {
+                let left = deadline.saturating_duration_since(Instant::now()).as_millis();
+                u32::try_from(left).unwrap_or(INFINITE - 1).min(INFINITE - 1)
+            });
+            // SAFETY: the event is open
+            if unsafe { WaitForSingleObject(self.event.as_raw_handle() as HANDLE, wait) }
+                != WAIT_OBJECT_0
+            {
+                // SAFETY: the handle is open, and the operation is waited
+                // out next, done or cancelled
+                unsafe { CancelIoEx(self.raw(), overlapped) };
+            }
+            let mut transferred = 0;
+            // SAFETY: waits until the operation is over, after which
+            // nothing is written to `overlapped` or what it was given
+            if unsafe { GetOverlappedResult(self.raw(), overlapped, &mut transferred, 1) } == 0 {
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() == Some(ERROR_OPERATION_ABORTED as i32) {
+                    return Err(std::io::ErrorKind::TimedOut.into());
+                }
+                return Err(err);
+            }
+            Ok(transferred)
+        }
+    }
+
+    /// The most an operation is given at once.
+    fn length(buf: &[u8]) -> u32 {
+        u32::try_from(buf.len()).unwrap_or(u32::MAX)
+    }
+
+    impl Link for Pipe {
+        fn read_by(&mut self, buf: &mut [u8], deadline: Instant) -> std::io::Result<usize> {
+            let handle = self.raw();
+            let (data, length) = (buf.as_mut_ptr(), length(buf));
+            // SAFETY: the buffer outlives the operation, which `run` waits out
+            let read = self.run(Some(deadline), |overlapped| unsafe {
+                ReadFile(handle, data, length, std::ptr::null_mut(), overlapped)
+            });
+            match read {
+                // the other end closed it
+                Err(err) if err.raw_os_error() == Some(ERROR_BROKEN_PIPE as i32) => Ok(0),
+                read => Ok(read? as usize),
+            }
+        }
+
+        fn write_by(&mut self, buf: &[u8], deadline: Instant) -> std::io::Result<usize> {
+            let handle = self.raw();
+            let (data, length) = (buf.as_ptr(), length(buf));
+            // SAFETY: the buffer outlives the operation, which `run` waits out
+            let written = self.run(Some(deadline), |overlapped| unsafe {
+                WriteFile(handle, data, length, std::ptr::null_mut(), overlapped)
+            });
+            Ok(written? as usize)
+        }
+    }
+
     /// Connects to the GUI listening on the pipe `name`, trying again until
     /// `deadline` while there is none yet or every instance is busy, and
     /// lets it bring its window forward, which Windows lets the program
     /// started last do.
-    pub(crate) fn connect(name: &Address, deadline: Instant) -> Result<std::fs::File, Refused> {
+    pub(crate) fn connect(name: &Address, deadline: Instant) -> Result<Pipe, Refused> {
+        use std::os::windows::fs::OpenOptionsExt;
         loop {
-            match std::fs::File::options().read(true).write(true).open(name) {
+            let opened = std::fs::File::options()
+                .read(true)
+                .write(true)
+                .custom_flags(FILE_FLAG_OVERLAPPED)
+                .open(name);
+            match opened {
                 Ok(pipe) => {
+                    let pipe = Pipe::new(pipe.into()).map_err(|_| Refused::Unreached)?;
                     let mut server = 0;
                     // SAFETY: the handle is open, and the id written where it says
-                    if unsafe {
-                        GetNamedPipeServerProcessId(pipe.as_raw_handle() as HANDLE, &mut server)
-                    } != 0
-                    {
+                    if unsafe { GetNamedPipeServerProcessId(pipe.raw(), &mut server) } != 0 {
                         // SAFETY: any process id may be named
                         unsafe { AllowSetForegroundWindow(server) };
                     }
@@ -643,7 +859,20 @@ pub(crate) mod transport {
         Err(std::io::ErrorKind::Unsupported.into())
     }
 
-    pub(crate) fn connect(_: &Address, _: Instant) -> Result<std::fs::File, Refused> {
+    /// No connection, which is never made.
+    pub(crate) enum Never {}
+
+    impl super::Link for Never {
+        fn read_by(&mut self, _: &mut [u8], _: Instant) -> std::io::Result<usize> {
+            match *self {}
+        }
+
+        fn write_by(&mut self, _: &[u8], _: Instant) -> std::io::Result<usize> {
+            match *self {}
+        }
+    }
+
+    pub(crate) fn connect(_: &Address, _: Instant) -> Result<Never, Refused> {
         Err(Refused::Unreached)
     }
 }
@@ -675,6 +904,17 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    /// All that comes over `link` until it is closed, or a while is up.
+    fn answer(link: &mut impl Link) -> Vec<u8> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut answer = Vec::new();
+        let mut chunk = [0; 64];
+        while let Ok(read @ 1..) = link.read_by(&mut chunk, deadline) {
+            answer.extend_from_slice(&chunk[..read]);
+        }
+        answer
     }
 
     fn files(dir: &Path) -> Request {
@@ -746,6 +986,51 @@ mod tests {
     }
 
     #[test]
+    fn opens_beside_a_gui_that_answers_too_late_which_then_takes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = session(dir.path());
+        let _store = Store::open(path.clone()).unwrap();
+        let address = transport::address(&path).unwrap();
+        let (sender, receiver) = channel();
+        let shared = Arc::new(Shared::default());
+        // one that serves each GUI only once that GUI has given up waiting
+        let _bound = transport::listen(&address, move |stream| {
+            std::thread::sleep(ANSWER + ANSWER / 2);
+            serve(stream, &shared, &sender);
+        })
+        .unwrap();
+        let started = Instant::now();
+        assert!(matches!(start(path, &files(dir.path())), Start::Second));
+        assert!(started.elapsed() < ANSWER * 3 / 2, "{:?}", started.elapsed());
+        // the files are the second GUI's alone
+        std::thread::sleep(ANSWER * 2);
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn takes_nothing_from_a_gui_that_does_not_leave_it_the_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = session(dir.path());
+        let (_store, listener) = first(&path);
+        let address = transport::address(&path).unwrap();
+        let line = files(dir.path()).encode().unwrap();
+        let mut answer = [0; ACCEPTED.len()];
+        // one that has the answer, but goes without a word, as one that
+        // gave up just then does, and one that says something else
+        for last in [&b""[..], b"?"] {
+            let deadline = Instant::now() + ANSWER;
+            let mut link = transport::connect(&address, deadline).unwrap();
+            write_all_by(&mut link, &line, deadline).unwrap();
+            read_exact_by(&mut link, &mut answer, deadline).unwrap();
+            assert_eq!(answer, ACCEPTED);
+            write_all_by(&mut link, last, deadline).unwrap();
+            drop(link);
+            std::thread::sleep(ANSWER / 2);
+            assert!(listener.poll().is_empty());
+        }
+    }
+
+    #[test]
     fn opens_beside_a_gui_that_does_not_listen() {
         let dir = tempfile::tempdir().unwrap();
         let path = session(dir.path());
@@ -762,14 +1047,13 @@ mod tests {
         let path = session(dir.path());
         let (_store, listener) = first(&path);
         let address = transport::address(&path).unwrap();
-        let relative = [br#"{"version":1,"files":["a.gif"]}"#.as_slice(), b"\n"].concat();
+        let relative = [br#"{"version":2,"files":["a.gif"]}"#.as_slice(), b"\n"].concat();
         let long = vec![b'a'; LONGEST + 1];
         let garbage: [&[u8]; 4] = [b"not a message\n", &relative, b"{}\n", &long];
         for garbage in garbage {
-            let mut stream = transport::connect(&address, Instant::now() + ANSWER).unwrap();
-            let _ = stream.write_all(garbage);
-            let mut answer = Vec::new();
-            let _ = stream.read_to_end(&mut answer);
+            let mut link = transport::connect(&address, Instant::now() + ANSWER).unwrap();
+            let _ = write_all_by(&mut link, garbage, Instant::now() + ANSWER);
+            let answer = answer(&mut link);
             assert!(answer.is_empty(), "{:?}", String::from_utf8_lossy(&answer));
         }
         // and one that ends before its line does, as a pipe can't
@@ -778,8 +1062,7 @@ mod tests {
             let mut stream = transport::connect(&address, Instant::now() + ANSWER).unwrap();
             stream.write_all(&relative[..relative.len() - 1]).unwrap();
             stream.shutdown(std::net::Shutdown::Write).unwrap();
-            let mut answer = Vec::new();
-            let _ = stream.read_to_end(&mut answer);
+            let answer = answer(&mut stream);
             assert!(answer.is_empty(), "{:?}", String::from_utf8_lossy(&answer));
         }
         assert!(listener.poll().is_empty());
@@ -801,16 +1084,17 @@ mod tests {
         let message = |text: &str| Request::decode(text.as_bytes());
         let absolute = serde_json::to_string(&request.files[0]).unwrap();
         // what a newer tgradish may say as well is no matter
-        let newer = format!(r#"{{"version":1,"files":[{absolute}],"run":"rm -rf"}}"#);
+        let newer = format!(r#"{{"version":2,"files":[{absolute}],"run":"rm -rf"}}"#);
         assert_eq!(message(&newer).unwrap().files, &request.files[..1]);
         for unread in [
-            format!(r#"{{"version":2,"files":[{absolute}]}}"#),
+            format!(r#"{{"version":3,"files":[{absolute}]}}"#),
+            format!(r#"{{"version":1,"files":[{absolute}]}}"#),
             format!(r#"{{"files":[{absolute}]}}"#),
-            r#"{"version":1,"files":["a.gif"]}"#.to_owned(),
-            format!(r#"{{"version":1,"files":{absolute}}}"#),
-            format!(r#"{{"version":1,"files":[{absolute}],"xdg-activation-token":"a\nb"}}"#),
-            format!(r#"{{"version":1,"files":[{absolute}],"xdg-activation-token":7}}"#),
-            r#"{"version":1,"files":[[1,300]]}"#.to_owned(),
+            r#"{"version":2,"files":["a.gif"]}"#.to_owned(),
+            format!(r#"{{"version":2,"files":{absolute}}}"#),
+            format!(r#"{{"version":2,"files":[{absolute}],"xdg-activation-token":"a\nb"}}"#),
+            format!(r#"{{"version":2,"files":[{absolute}],"xdg-activation-token":7}}"#),
+            r#"{"version":2,"files":[[1,300]]}"#.to_owned(),
             "[]".to_owned(),
         ] {
             assert_eq!(message(&unread), None, "{unread}");
