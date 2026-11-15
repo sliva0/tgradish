@@ -12,8 +12,9 @@ pub(crate) enum Cut {
     /// and counts them over the length: a cut is a hair before the frame
     /// it starts, and the length is the frames'.
     Video,
-    /// Converting takes a cut near where pixel art's frames start or end
-    /// as there, normalised for a `.tgs` or drawn for ffmpeg: a cut is
+    /// Converting keeps every frame of pixel art any of which falls within
+    /// a cut, and takes a cut near where its frames start or end as there,
+    /// normalised for a `.tgs` or drawn for ffmpeg: a cut is
     /// where the frames start and the length theirs, each in as few digits
     /// as are still that near.
     Art,

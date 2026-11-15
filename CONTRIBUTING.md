@@ -13,41 +13,6 @@
 | `crates/tgs-lab` | Encoder research: benchmarks, renders checked against tlottie and rlottie, and the probes that measured Telegram's limits. A workspace of its own with its own `Cargo.lock`, so tlottie, which isn't on crates.io, and rlottie stay out of what packagers fetch: run it from its folder, as `cargo run -- corpus DIR`, or with `--manifest-path crates/tgs-lab/Cargo.toml`. |
 | `xtask` | Release builds with ffmpeg built in, packages, licences and icons; its module docs list the tasks. |
 
-### Times in videos
-
-Times given by users, as cuts, frame times and previews, count from the
-video stream's first frame. In some files that comes after the file's
-start, as when sound starts first; ffmpeg's `-ss` counts from the file's
-start, so every reader seeks with `Probe::seek`, which adds the difference,
-and `Backend::frame_starts` gives frame times with it taken off.
-
-A video cut keeps the frames that start at or after its start, as ffmpeg
-does, so a cut meant to start on a frame is written a little before it
-(`webm::read_from`), never more than a millisecond, in case times are
-rounded on the way. Pixel art is cut by overlap instead: a frame is kept
-when any of it falls within the cut. The GUI writes cuts by both rules
-(`cuts::Frames`, which its timeline edits), and the tests
-`counts_time_from_where_the_video_starts`, `finds_where_frames_start` and
-`cuts_where_converting_keeps_the_frames_meant` hold them.
-
-### Fitting `.tgs` stickers
-
-Fitting works on estimates: a quick encode packed by `gzip -9`, scaled to
-what the real encoder and zopfli make of it. The scale is measured once the
-art comes near the limit. Each round keeps the reduction that saves the
-most bytes for the least visible change, and when the real result still
-misses, fitting aims a little lower and goes again.
-`crates/tgs/src/sticker/fit.rs` explains each constant involved.
-
-The encoder's weights, such as `TILE` and `CORE_SHARE`, were measured on
-the corpus. `cargo run --release -- bench --save before.tsv` in
-`crates/tgs-lab` records how it encodes now, and after a change `bench --against
-before.tsv` compares;
-`--verify` also renders every result and counts wrong cells. tlottie's
-limits in `crates/tgs/src/limits.rs` come from its source, at the version
-`tgs-lab` depends on, and Telegram's from stickers `tgs-lab probes DIR` makes
-for @Stickers to accept or refuse.
-
 ## Building and testing
 
 ```console

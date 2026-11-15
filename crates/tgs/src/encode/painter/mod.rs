@@ -32,6 +32,10 @@
 //! into layers ([`stack`]).
 //! When lifetimes leave too many layers or rectangles for one group, every
 //! frame is drawn in full instead, which always fits for 180 frames.
+//!
+//! The weights here were measured on the corpus: tgs-lab's `bench --save`
+//! before a change to them and `bench --against` after shows what it did,
+//! and `--verify` that every result still draws its art.
 
 mod order;
 

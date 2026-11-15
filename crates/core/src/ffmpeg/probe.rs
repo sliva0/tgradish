@@ -62,7 +62,9 @@ impl Probe {
     }
 
     /// Where reading the file starts for `start` seconds into the video,
-    /// at the start a hair before its first frame, so it stays.
+    /// at the start a hair before its first frame, so it stays. Every read
+    /// seeks through this, since ffmpeg's `-ss` counts from the file's
+    /// start, not the video's.
     pub fn seek(&self, start: f64) -> f64 {
         if start > 0.0 { start + self.start } else { (self.start - 1e-3).max(0.0) }
     }

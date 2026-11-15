@@ -20,7 +20,8 @@ pub mod telegram {
     /// refused.
     pub const MAX_BYTES: usize = 64 * 1024;
 
-    // Found by uploading probes: past these, the server
+    // Found by uploading probes, which `tgs-lab probes` writes, to
+    // @Stickers: past these, the server
     // keeps a `.tgs` as a plain file instead of making it a sticker, and
     // @Stickers answers "File type is invalid".
 
