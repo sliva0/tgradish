@@ -73,7 +73,9 @@ that makes every kind of Telegram sticker and emoji.
 - tgradish is no longer a Python package: install a release build or a
   package, or build it with `cargo install tgradish`.
 - Results are named `NAME.sticker.webm` (or `.emoji`, `.tgs`, `.webp`)
-  beside their input, where 1.x wrote `NAME.webm`.
+  beside their input, where 1.x wrote `NAME.webm`. An input named so
+  already, as an earlier result, isn't given `.sticker` again:
+  `pig.sticker.webm` makes `pig.sticker.webp`.
 
 ### Removed
 

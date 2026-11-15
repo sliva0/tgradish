@@ -38,10 +38,27 @@ impl Input {
     /// after its first file or folder, so a folder of frames and a
     /// sequence of the frames in it are named alike only when given as the
     /// folder: `walk/` makes `walk.sticker.tgs` beside it, `walk/1.png
-    /// walk/2.png` makes `walk/1.sticker.tgs`. Front-ends writing results
-    /// into a folder of their own keep the name.
+    /// walk/2.png` makes `walk/1.sticker.tgs`. A name that ends in
+    /// `.sticker` or `.emoji` already, as an earlier result's does, isn't
+    /// given it again: `pig.sticker.webm` makes `pig.sticker.webp`, but
+    /// `pig.sticker.sticker.webm` of itself, which would otherwise be its
+    /// own name. Front-ends writing results into a folder of their own keep
+    /// the name.
     pub fn default_output(&self, format: Format, target: Target) -> PathBuf {
-        crate::fsutil::beside(self.first(), &result_suffix(format, target))
+        let first = self.first();
+        let folder = first.is_dir();
+        let name = if folder { first.file_name() } else { first.file_stem() };
+        let named = name
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(&format!(".{}", target.name())));
+        // its own name, whatever the extension's case, which names the
+        // same file where names ignore case
+        let itself = !folder && extension(first) == format.extension();
+        let suffix = match named && !itself {
+            true => format.extension().to_owned(),
+            false => result_suffix(format, target),
+        };
+        crate::fsutil::beside(first, &suffix)
     }
 
     /// Fails with [`Error::IsFolder`] for a folder given as a file.
@@ -246,6 +263,55 @@ mod tests {
         for name in ["pig.webm", "sticker.webm", "walk.tgs", "pig.sticker.mp4"] {
             assert!(!is_result_name(Path::new(name)), "{name}");
         }
+    }
+
+    #[test]
+    fn names_a_result_of_a_result_with_one_suffix() {
+        let named =
+            |input: &str, format, target| Input::File(input.into()).default_output(format, target);
+        // a video sticker made into a static one, or an animated one
+        let sticker = "clips/cat.sticker.webm";
+        assert_eq!(
+            named(sticker, Format::Webp, Target::Sticker),
+            Path::new("clips/cat.sticker.webp")
+        );
+        assert_eq!(
+            named(sticker, Format::Tgs, Target::Sticker),
+            Path::new("clips/cat.sticker.tgs")
+        );
+        assert_eq!(
+            named("cat.emoji.gif", Format::Webm, Target::Emoji),
+            Path::new("cat.emoji.webm")
+        );
+        // but not into itself, nor into what it isn't
+        assert_eq!(
+            named(sticker, Format::Webm, Target::Sticker),
+            Path::new("clips/cat.sticker.sticker.webm")
+        );
+        assert_eq!(
+            named("cat.sticker.WEBM", Format::Webm, Target::Sticker),
+            Path::new("cat.sticker.sticker.webm")
+        );
+        assert_eq!(
+            named(sticker, Format::Webp, Target::Emoji),
+            Path::new("clips/cat.sticker.emoji.webp")
+        );
+        assert_eq!(
+            named("sticker.webm", Format::Webp, Target::Sticker),
+            Path::new("sticker.sticker.webp")
+        );
+        // a sequence, by its first file
+        let frames = Input::Sequence(vec!["walk/1.sticker.png".into(), "walk/2.png".into()]);
+        assert_eq!(
+            frames.default_output(Format::Tgs, Target::Sticker),
+            Path::new("walk/1.sticker.tgs")
+        );
+        // and a folder by its whole name
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("walk.sticker");
+        std::fs::create_dir(&folder).unwrap();
+        let output = Input::Sequence(vec![folder]).default_output(Format::Tgs, Target::Sticker);
+        assert_eq!(output, dir.path().join("walk.sticker.tgs"));
     }
 
     #[test]
