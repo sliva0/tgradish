@@ -817,6 +817,10 @@ plan-video = The video will be:
 plan-picture = The picture will be:
 plan-animation = The animation will be:
 plan-art = The pixel art will be:
+# For a static sticker or emoji, which is made of one frame of what plays.
+plan-video-frame = A frame of the video will be:
+plan-animation-frame = A frame of the animation will be:
+plan-art-frame = A frame of the pixel art will be:
 plan-tag = Played as its "{ $tag }" tag
 plan-tag-reverse = Played as its "{ $tag }" tag, in reverse
 plan-tag-ping-pong = Played as its "{ $tag }" tag, there and back

@@ -18,21 +18,14 @@ use crate::item::{Blocker, Item, Kind};
 use crate::l10n::fl;
 use crate::{cuts, theme, widgets};
 
-/// The steps, under a heading naming what the input is.
+/// The steps, under a heading naming what they are done to.
 pub(crate) fn plan(ui: &mut egui::Ui, item: &Item, context: &Context) {
     // what it can't do yet is said in its place, higher up
     if item.blocked() {
         return;
     }
     let animated = item.input_length().is_some();
-    let title = match (item.kind, animated) {
-        // what a video is, while it can't be read
-        (Kind::Video, false) if item.input_size().is_none() => fl!("plan-video"),
-        (Kind::Video, true) => fl!("plan-video"),
-        (Kind::Video | Kind::Image, false) => fl!("plan-picture"),
-        (Kind::Image, true) => fl!("plan-animation"),
-        (Kind::Aseprite | Kind::Frames, _) => fl!("plan-art"),
-    };
+    let title = heading(item.kind, animated, item.input_size().is_some(), item.format);
     widgets::section(ui, &title);
     for step in steps(item, context) {
         // wrapped lines start under the text, not the bullet
@@ -41,6 +34,23 @@ pub(crate) fn plan(ui: &mut egui::Ui, item: &Item, context: &Context) {
             ui.label("•");
             ui.add(egui::Label::new(step).wrap());
         });
+    }
+}
+
+/// What the steps are done to: the input, of a `kind`, `animated` or not
+/// once `read`, or one frame of what plays, as a static result is made of.
+fn heading(kind: Kind, animated: bool, read: bool, format: Format) -> String {
+    let frame = format == Format::Webp;
+    // what a video is, while it can't be read
+    let plays = animated || (kind == Kind::Video && !read);
+    match (kind, plays) {
+        (Kind::Video, true) if frame => fl!("plan-video-frame"),
+        (Kind::Video, true) => fl!("plan-video"),
+        (Kind::Video | Kind::Image, false) => fl!("plan-picture"),
+        (Kind::Image, true) if frame => fl!("plan-animation-frame"),
+        (Kind::Image, true) => fl!("plan-animation"),
+        (Kind::Aseprite | Kind::Frames, true) if frame => fl!("plan-art-frame"),
+        (Kind::Aseprite | Kind::Frames, _) => fl!("plan-art"),
     }
 }
 
@@ -263,6 +273,31 @@ mod tests {
             picture(Format::Webm, &cut, (64, 40)),
             ["Scaled to 160 × 100", "Middle cut to 100 × 100"]
         );
+    }
+
+    #[test]
+    fn heads_the_steps_with_what_they_are_done_to() {
+        let heading = |kind, animated, format| heading(kind, animated, true, format);
+        // the whole input, into a video or an animated sticker
+        for format in [Format::Webm, Format::Tgs] {
+            assert_eq!(heading(Kind::Video, true, format), fl!("plan-video"));
+            assert_eq!(heading(Kind::Image, true, format), fl!("plan-animation"));
+            assert_eq!(heading(Kind::Aseprite, true, format), fl!("plan-art"));
+        }
+        // one frame of it into a static sticker
+        assert_eq!(heading(Kind::Video, true, Format::Webp), fl!("plan-video-frame"));
+        assert_eq!(heading(Kind::Image, true, Format::Webp), fl!("plan-animation-frame"));
+        assert_eq!(heading(Kind::Frames, true, Format::Webp), fl!("plan-art-frame"));
+        // or what has only one, whole
+        assert_eq!(heading(Kind::Video, false, Format::Webp), fl!("plan-picture"));
+        assert_eq!(heading(Kind::Image, false, Format::Webp), fl!("plan-picture"));
+        assert_eq!(heading(Kind::Aseprite, false, Format::Webp), fl!("plan-art"));
+        // a video not read yet is taken to play
+        assert_eq!(
+            super::heading(Kind::Video, false, false, Format::Webp),
+            fl!("plan-video-frame")
+        );
+        assert_eq!(super::heading(Kind::Video, false, false, Format::Webm), fl!("plan-video"));
     }
 
     #[test]
