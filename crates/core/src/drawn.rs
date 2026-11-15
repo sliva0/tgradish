@@ -1,4 +1,4 @@
-//! Pixel art ffmpeg can't read, drawn for it, for WebM and image
+//! Pixel art ffmpeg can't read, drawn for it, for WebM and static
 //! stickers. That is Aseprite files, with the tag and layers chosen; the
 //! frames of one animation in several files; and animated WebP, which
 //! ffmpeg reads only from version 8.

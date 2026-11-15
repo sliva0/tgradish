@@ -103,19 +103,19 @@ fn scalings() -> [Choice<Scaling>; 4] {
     ]
 }
 
-/// Where a `crop` of the input lands in a WebM or image result made with
+/// Where a `crop` of the input lands in a WebM or static result made with
 /// `options`, everything the conversion gets; `None` when its integer scale
 /// can't make it.
 pub(crate) fn webm_sizes(options: &Options, crop: Crop) -> Option<picture::Sizes> {
     picture::picture_sizes(options, (crop.width, crop.height)).ok()
 }
 
-/// How a WebM or image result made with `options` fills its box.
+/// How a WebM or static result made with `options` fills its box.
 pub(crate) fn resize_of(options: &Options) -> Resize {
     options.resize.unwrap_or(picture::default_resize(options.target.unwrap_or_default()))
 }
 
-/// The size an integer scale holds the crop to, for a WebM or image result
+/// The size an integer scale holds the crop to, for a WebM or static result
 /// made with `options`.
 pub(crate) fn exact_of(options: &Options) -> Option<Exact> {
     Exact::of(options.integer_scale?, options.target.unwrap_or_default())
@@ -160,7 +160,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let size = item.input_size();
     let (presets, config) = (context.presets, context.config);
     // what the preset sets, which the item's own values go over, and
-    // everything a WebM or image conversion gets
+    // everything a WebM or static conversion gets
     let base = item.choices.webm_base(presets, config).unwrap_or_default();
     let effective =
         item.choices.webm_options(presets, config).unwrap_or_else(|_| item.choices.webm.clone());

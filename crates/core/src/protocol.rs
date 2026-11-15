@@ -116,7 +116,7 @@ pub struct PresetDescription {
     pub description: String,
     /// Whether it is built into tgradish rather than a user's file.
     pub builtin: bool,
-    /// Options for WebM and image results, with everything the preset
+    /// Options for WebM and static results, with everything the preset
     /// extends applied; `None` if broken.
     pub webm: Option<Options>,
     /// The same for `.tgs` results.

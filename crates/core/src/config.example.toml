@@ -1,4 +1,4 @@
-preset = "balanced"   # preset used when none is given, for WebM and images
+preset = "balanced"   # preset used when none is given, for WebM and WebP
 tgs-preset = "best"   # the same for TGS
 
 [ffmpeg]

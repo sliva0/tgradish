@@ -150,7 +150,7 @@ fn read(item: &Item, used: &Used, steps: &mut Vec<String>) {
 }
 
 /// How a `used` picture is scaled, stretched, cut and padded into a WebM
-/// or image result.
+/// or static result.
 fn picture(options: &Options, used: (u32, u32)) -> Vec<String> {
     let Ok(sizes) = picture::picture_sizes(options, used) else { return Vec::new() };
     let mut steps = Vec::new();

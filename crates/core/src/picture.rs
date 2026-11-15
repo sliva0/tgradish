@@ -181,7 +181,7 @@ pub fn default_resize(target: Target) -> Resize {
     if target.requires_exact_size() { Resize::Pad } else { Resize::Contain }
 }
 
-/// The sizes a WebM or image result of a `used` part of the input has, as
+/// The sizes a WebM or static result of a `used` part of the input has, as
 /// `options` ask. Planning a conversion uses this, and so can front-ends
 /// showing what it will make, so the two can't disagree.
 pub fn picture_sizes(options: &Options, used: (u32, u32)) -> Result<Sizes> {

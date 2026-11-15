@@ -10,7 +10,7 @@
 //! description = "Small and fast, for previews"
 //! extends = "fast"  # optional, options of the base preset come first
 //!
-//! [webm]            # options for WebM results, and for image results
+//! [webm]            # options for WebM results, and for static results
 //! crf = 40          # where a still picture has them
 //!
 //! [tgs]             # options for TGS results
@@ -202,7 +202,7 @@ pub struct Preset {
     pub description: String,
     /// The preset whose options it starts from, if any.
     pub extends: Option<String>,
-    /// Options for WebM and image results set by this preset itself,
+    /// Options for WebM and static results set by this preset itself,
     /// without the presets it extends: those its file sets.
     pub webm: Options,
     /// The same for `.tgs` results.
