@@ -369,7 +369,7 @@ fn encode_in(
             temp_dir: request.keep_temp.then(|| dir.to_path_buf()),
         },
     };
-    on_event(Event::Finished(Box::new(outcome.clone())));
+    on_event(Event::Finished(outcome.clone()));
     Ok(outcome)
 }
 

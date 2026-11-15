@@ -196,7 +196,7 @@ pub fn convert(
         issues: telegram::check_still(plan.width, plan.height, bytes, plan.target),
         details: Details::Webp { width: plan.width, height: plan.height, encoding },
     };
-    on_event(Event::Finished(Box::new(outcome.clone())));
+    on_event(Event::Finished(outcome.clone()));
     Ok(outcome)
 }
 

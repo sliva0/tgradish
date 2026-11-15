@@ -109,7 +109,7 @@ pub enum Event {
         message: String,
     },
     /// The result is written: what was made, as converting returns it.
-    Finished(Box<Outcome>),
+    Finished(Outcome),
     /// A conversion, or the whole command, failed. Only printed by the
     /// command line; the library returns errors instead.
     Error(Failure),

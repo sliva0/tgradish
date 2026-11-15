@@ -126,7 +126,7 @@ mod tests {
             (Format::Tgs, &request.output(), &input)
         );
         assert!(matches!(events.first(), Some(Event::Started(_))));
-        assert!(matches!(events.last(), Some(Event::Finished(last)) if **last == made));
+        assert!(matches!(events.last(), Some(Event::Finished(last)) if *last == made));
         // what ffmpeg makes isn't made without it
         let webm = Request { options: FormatOptions::Webm(Default::default()), ..request };
         assert!(needs_backend(&webm));

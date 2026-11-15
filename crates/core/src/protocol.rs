@@ -344,7 +344,7 @@ mod tests {
             },
             Event::Warning { message: "a warning".into() },
             Event::Log { line: "a line".into() },
-            Event::Finished(Box::new(Outcome {
+            Event::Finished(Outcome {
                 input: "in.mp4".into(),
                 output: "in.sticker.webm".into(),
                 format: Format::Webm,
@@ -360,7 +360,7 @@ mod tests {
                     settled: false,
                     temp_dir: Some("/tmp/tgradish-x".into()),
                 },
-            })),
+            }),
             Event::Error(Failure { message: "it failed".into(), input: Some("in.mp4".into()) }),
         ]
         .map(|event| serde_json::to_value(event).unwrap());
@@ -393,7 +393,7 @@ mod tests {
             Event::Reduced { step: step.clone() },
             Event::Packing,
             Event::Warning { message: "a warning".into() },
-            Event::Finished(Box::new(Outcome {
+            Event::Finished(Outcome {
                 input: "art.gif".into(),
                 output: "art.sticker.tgs".into(),
                 format: Format::Tgs,
@@ -409,7 +409,7 @@ mod tests {
                     rectangles: 40,
                     drawing: crate::tgs::Drawing::new(art, false),
                 },
-            })),
+            }),
             Event::Error(Failure { message: "it failed".into(), input: None }),
         ]
         .map(|event| serde_json::to_value(event).unwrap());
@@ -422,7 +422,7 @@ mod tests {
                 limit: 524_288,
                 details: StartDetails::Webp {},
             }),
-            Event::Finished(Box::new(Outcome {
+            Event::Finished(Outcome {
                 input: "in.png".into(),
                 output: "in.sticker.webp".into(),
                 format: Format::Webp,
@@ -436,7 +436,7 @@ mod tests {
                     height: 384,
                     encoding: Encoding::Lossy { quality: 80 },
                 },
-            })),
+            }),
             Event::Warning { message: "a warning".into() },
             Event::Error(Failure { message: "it failed".into(), input: None }),
         ]

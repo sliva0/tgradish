@@ -160,7 +160,7 @@ pub fn convert(
             ),
         },
     };
-    on_event(Event::Finished(Box::new(outcome.clone())));
+    on_event(Event::Finished(outcome.clone()));
     Ok(outcome)
 }
 

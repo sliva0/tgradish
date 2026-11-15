@@ -158,7 +158,7 @@ fn settles_on_the_best_so_far_when_asked() {
                 .any(|e| matches!(e, Event::Decided { decision, .. } if *decision == settled))
         );
         let Some(Event::Finished(last)) = events.last() else { panic!("{name}: not finished") };
-        assert_eq!(**last, outcome, "{name}");
+        assert_eq!(*last, outcome, "{name}");
         // the token serves the next conversion afresh
         assert!(!cancel.can_settle() && !cancel.is_settling() && !cancel.is_cancelled());
     }
