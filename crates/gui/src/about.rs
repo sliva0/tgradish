@@ -13,13 +13,18 @@ use crate::{icon, widgets};
 /// where it is installed, as [`crate::system::browse`] opens it.
 pub(crate) const FEEDBACK: &str = "https://t.me/s0untitled?direct";
 
+/// How wide About's content is, whatever the language: what is longer
+/// wraps.
+pub(crate) const WIDTH: f32 = 600.0;
+
 /// tgradish's version and the licences of what it is made of.
 pub(crate) fn about(ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         icon::show(ui, 96.0);
         ui.vertical(|ui| {
             ui.label(RichText::new(format!("tgradish {}", env!("CARGO_PKG_VERSION"))).heading());
-            ui.horizontal(|ui| {
+            // wrapped: on one line, a longer summary would widen About
+            ui.horizontal_wrapped(|ui| {
                 ui.label(fl!("about-summary"));
                 widgets::link(ui, fl!("source-code"), tgradish_core::REPOSITORY);
             });
@@ -211,6 +216,39 @@ fn links(line: &str) -> Vec<(bool, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The summary, and the link to the source after it, wrap within
+    /// About rather than widening it, at the narrowest the GUI goes.
+    #[test]
+    fn keeps_the_summary_within_abouts_width() {
+        use egui_kittest::kittest::Queryable;
+        use tgradish_core::presets::Presets;
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([crate::MIN_WIDTH, crate::MIN_HEIGHT])
+            .build_eframe(|cc| {
+                let config = crate::config::Config::default();
+                let app = crate::app::App::with(config, None, Presets::builtin());
+                // in the GUI's own fonts, whose widths the layout is of
+                app.style(&cc.egui_ctx);
+                app
+            });
+        harness.state_mut().about = true;
+        harness.run_steps(3);
+        let rect = |label: String| {
+            let nodes: Vec<_> =
+                harness.query_all_by_label(&label).map(|node| node.rect()).collect();
+            assert!(!nodes.is_empty(), "no {label:?}");
+            nodes.into_iter().reduce(|a, b| a.union(b)).unwrap()
+        };
+        // the title starts the content, and Close ends it
+        let left = rect(fl!("about-title")).left();
+        let right = rect(fl!("close")).right();
+        assert!(right - left <= WIDTH + 0.5, "About is {} wide", right - left);
+        for label in [fl!("about-summary"), fl!("source-code")] {
+            let shown = rect(label.clone());
+            assert!(shown.left() >= left && shown.right() <= right, "{label:?} at {shown:?}");
+        }
+    }
 
     #[test]
     fn names_licences_after_their_crates() {

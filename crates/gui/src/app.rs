@@ -1054,7 +1054,7 @@ impl eframe::App for App {
         self.preset_dialogs(&ctx);
         if self.about {
             let modal = widgets::dialog(&ctx, "about").show(&ctx, |ui| {
-                ui.set_width(600.0);
+                ui.set_width(crate::about::WIDTH);
                 let crossed =
                     widgets::dialog_title(ui, widgets::title_text(ui, fl!("about-title")));
                 // afresh each time it opens
