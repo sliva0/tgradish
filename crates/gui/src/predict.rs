@@ -6,6 +6,7 @@
 use eframe::egui;
 use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::picture::Sizes;
+use tgradish_core::presets::Format;
 
 /// The part of a frame used, in the frame's own pixels, which may be fewer
 /// than the input's.
@@ -100,17 +101,26 @@ pub(crate) fn within(sizes: &Sizes, most: usize) -> Sizes {
     )
 }
 
-/// The WebM result of `frame` (`width` pixels wide, straight RGBA):
-/// `part` scaled to `sizes.scaled` the way `sizes.scaling` does, cropped
-/// or padded around the middle to the result's size.
-pub(crate) fn webm(frame: &[u8], width: u32, part: Part, sizes: &Sizes) -> egui::ColorImage {
+/// The WebM or static (`format`) result of `frame` (`width` pixels wide,
+/// straight RGBA): `part` scaled to `sizes.scaled` the way `sizes.scaling`
+/// does, cropped or padded around the middle to the result's size.
+pub(crate) fn webm(
+    format: Format,
+    frame: &[u8],
+    width: u32,
+    part: Part,
+    sizes: &Sizes,
+) -> egui::ColorImage {
     let height = (frame.len() / 4) as u32 / width.max(1);
     let (out_w, out_h) = (sizes.width as usize, sizes.height as usize);
     let (sw, sh) = (sizes.scaled.0 as f64, sizes.scaled.1 as f64);
-    // where the scaled picture starts in the result; padding keeps chroma
-    // planes whole, so it starts on even pixels
-    let offset = |out: usize, scaled: f64| ((out as f64 - scaled) / 2.0 / 2.0).floor() * 2.0;
-    let (left, top) = (offset(out_w, sw), offset(out_h, sh));
+    // where the scaled picture starts in the result: padded as the
+    // conversion pads it, or cropped around the middle
+    let offset = |out: usize, scaled: u32| match scaled as usize <= out {
+        true => f64::from(tgradish_core::picture::pad_offset(format, out as u32, scaled)),
+        false => ((out as f64 - f64::from(scaled)) / 2.0 / 2.0).floor() * 2.0,
+    };
+    let (left, top) = (offset(out_w, sizes.scaled.0), offset(out_h, sizes.scaled.1));
     let linear = to_linear();
     // source pixels and weights along each side, for each output column and row
     let along = |out: usize, start: f64, scaled: f64, from: f64, used: f64, size: u32| {
@@ -288,7 +298,6 @@ pub(crate) fn tgs(
 mod tests {
     use super::*;
     use tgradish_core::options::Resize;
-    use tgradish_core::presets::Format;
     use tgradish_core::telegram::Target;
 
     /// 2x1: red, then blue, opaque.
@@ -300,11 +309,34 @@ mod tests {
         tgradish_core::picture::sizes(Format::Webm, Target::Emoji, Resize::Pad, scaling, (2, 1))
     }
 
+    /// Padded around the middle as core pads it: a static sticker
+    /// exactly, a WebM from an even column.
+    #[test]
+    fn pads_as_the_conversion_does() {
+        let frame = vec![255; 53 * 100 * 4];
+        let whole = Part { x: 0.0, y: 0.0, width: 53.0, height: 100.0 };
+        let left = |format| {
+            let sizes = tgradish_core::picture::sizes(
+                format,
+                Target::Emoji,
+                Resize::Pad,
+                Scaling::Smooth,
+                (53, 100),
+            );
+            let image = webm(format, &frame, 53, whole, &sizes);
+            let offset = tgradish_core::picture::pad_offset(format, 100, sizes.scaled.0);
+            let row = &image.pixels[50 * 100..51 * 100];
+            (row.iter().position(|pixel| pixel.a() > 128).unwrap(), offset as usize)
+        };
+        assert_eq!(left(Format::Webp), (23, 23));
+        assert_eq!(left(Format::Webm), (22, 22));
+    }
+
     #[test]
     fn scales_as_the_conversion_does() {
         let whole = Part::of(None, (2, 1), (2, 1));
         // 100 x 100 emoji: the pair is 100 x 50, padded above and below
-        let sharp = webm(&pair(), 2, whole, &sizes(Scaling::Sharp));
+        let sharp = webm(Format::Webm, &pair(), 2, whole, &sizes(Scaling::Sharp));
         assert_eq!(sharp.size, [100, 100]);
         assert_eq!(sharp.pixels[0], egui::Color32::TRANSPARENT);
         let middle = |image: &egui::ColorImage, x: usize| image.pixels[50 * 100 + x];
@@ -313,7 +345,7 @@ mod tests {
         assert_eq!(middle(&sharp, 50).to_srgba_unmultiplied(), [0, 0, 255, 255]);
         // smooth blends near the edge, in linear light: brighter than the
         // average of the two in sRGB would be
-        let smooth = webm(&pair(), 2, whole, &sizes(Scaling::Smooth));
+        let smooth = webm(Format::Webm, &pair(), 2, whole, &sizes(Scaling::Smooth));
         let [r, _, b, _] = middle(&smooth, 50).to_srgba_unmultiplied();
         assert!(r > 140 && b > 140, "{r} {b}");
     }
@@ -330,7 +362,7 @@ mod tests {
             Scaling::Smooth,
             (1, 1),
         );
-        let image = webm(&row, 3, part, &sizes);
+        let image = webm(Format::Webm, &row, 3, part, &sizes);
         for x in [0, 50, 99] {
             assert_eq!(image.pixels[50 * 100 + x].to_srgba_unmultiplied(), [0, 0, 255, 255]);
         }

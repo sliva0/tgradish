@@ -430,6 +430,7 @@ fn preview(
                                     inset.show(ui, place.0, place.1, key, label, result, |most| {
                                         let rgba = &clip.frames[frame];
                                         predict::webm(
+                                            item.format,
                                             rgba,
                                             clip.width,
                                             where_,

@@ -20,6 +20,18 @@ fn side(format: Format, value: f64) -> u32 {
     }
 }
 
+/// Where a picture `scaled` long starts along a side `out` long of a
+/// `format` result it is padded into, around the middle: exactly there,
+/// the half pixel before it where the margin is odd, or, where `format`
+/// has even sides, on the even pixel at or before that, as a WebM keeps a
+/// colour sample to each 2 × 2 pixels, which would blend the picture's
+/// edge with the margin. The conversion pads by it, and front-ends showing
+/// the result place the picture by it, so the two can't disagree.
+pub fn pad_offset(format: Format, out: u32, scaled: u32) -> u32 {
+    let middle = out.saturating_sub(scaled) / 2;
+    if format.even_sides() { middle / 2 * 2 } else { middle }
+}
+
 /// How a picture lands in the result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]

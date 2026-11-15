@@ -689,9 +689,8 @@ mod tests {
         assert!(plan.alpha);
         let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuva420p");
         assert!(
-            filter.contains(
-                "scale=500:300:flags=neighbor,format=rgba,pad=512:308:trunc((ow-iw)/4)*2:"
-            ),
+            // 6 and 4 pixels in, on the colour planes' grid
+            filter.contains("scale=500:300:flags=neighbor,format=rgba,pad=512:308:6:4:"),
             "{filter}"
         );
     }

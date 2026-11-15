@@ -9,6 +9,8 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use crate::options::Scaling;
+use crate::picture::pad_offset;
+use crate::presets::Format;
 use crate::webm::{Params, Rate};
 use crate::webm::{Plan, frame_count};
 
@@ -94,14 +96,14 @@ pub(crate) fn video_filter(plan: &Plan, fps: f64, length: f64, pix_fmt: &str) ->
     filters.extend([
         format!("fps={}", num(fps)),
         format!("trim=end_frame={}", frame_count(length, fps)),
-        picture_filter(plan, pix_fmt),
+        picture_filter(plan, Format::Webm, pix_fmt),
     ]);
     filters.join(",")
 }
 
-/// Filter chain that makes a frame the planned picture: cropped, scaled
-/// and padded, in `pix_fmt`.
-pub(crate) fn picture_filter(plan: &Plan, pix_fmt: &str) -> String {
+/// Filter chain that makes a frame the planned picture of a `format`
+/// result: cropped, scaled and padded, in `pix_fmt`.
+pub(crate) fn picture_filter(plan: &Plan, format: Format, pix_fmt: &str) -> String {
     let (w, h) = (plan.width, plan.height);
     let (sw, sh) = (plan.scaled_width, plan.scaled_height);
     let mut filters = Vec::new();
@@ -125,8 +127,11 @@ pub(crate) fn picture_filter(plan: &Plan, pix_fmt: &str) -> String {
             // transparent padding needs alpha, and full colour keeps a
             // picture of odd size whole, which 4:2:0 would trim
             "format=rgba".into(),
-            // even offsets keep pixel blocks on the colour planes' grid
-            format!("pad={w}:{h}:trunc((ow-iw)/4)*2:trunc((oh-ih)/4)*2:color=black@0"),
+            format!(
+                "pad={w}:{h}:{}:{}:color=black@0",
+                pad_offset(format, w, sw.min(w)),
+                pad_offset(format, h, sh.min(h))
+            ),
         ]);
     }
     filters.extend(["setsar=1".into(), format!("format={pix_fmt}")]);

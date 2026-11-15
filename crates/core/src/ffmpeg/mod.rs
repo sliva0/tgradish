@@ -131,7 +131,7 @@ pub(crate) fn frames(
 }
 
 /// The planned frame at the plan's start, cropped, scaled and padded as the
-/// plan says, as straight RGBA of the plan's size.
+/// plan says for a static sticker, as straight RGBA of the plan's size.
 pub(crate) fn still(
     ffmpeg: &Ffmpeg,
     plan: &crate::webm::Plan,
@@ -144,7 +144,12 @@ pub(crate) fn still(
     cmd.args(args::input_args(plan, length, plan.fps));
     // the first frame from the start, as it is: resampling to a frame rate
     // can skip a short one
-    cmd.args(["-map", "0:v:0", "-vf", &args::picture_filter(plan, "rgba")]);
+    cmd.args([
+        "-map",
+        "0:v:0",
+        "-vf",
+        &args::picture_filter(plan, crate::presets::Format::Webp, "rgba"),
+    ]);
     cmd.args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
     let out = process::run_bytes(cmd, "ffmpeg", cancel)?;
     let size = plan.width as usize * plan.height as usize * 4;

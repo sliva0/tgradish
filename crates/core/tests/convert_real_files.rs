@@ -496,6 +496,52 @@ fn crops_odd_sizes_exactly() {
 }
 
 #[test]
+fn pads_static_stickers_in_the_exact_middle() {
+    let Some(backends) = backends() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("clip.mp4");
+    let status = Command::new("ffmpeg")
+        .args(["-v", "error", "-f", "lavfi", "-i", "testsrc2=s=200x100:d=0.5"])
+        .args(["-pix_fmt", "yuv420p"])
+        .arg(&input)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    // the columns of transparent margin before the opaque picture
+    let left = |rgba: &[u8], width: usize| {
+        let row = &rgba[50 * width * 4..51 * width * 4];
+        row.chunks(4).position(|pixel| pixel[3] > 128).unwrap()
+    };
+    // a 53 × 100 crop in an emoji's 100 × 100: a WebP keeps it 53 wide,
+    // 47 of margin, 23 before it; a WebM makes it 54, 46 of margin, and
+    // starts it on an even column, 22, as its colour planes need
+    let crop = Crop { x: 1, y: 0, width: 53, height: 100 };
+    let options = Options { crop: Some(crop), target: Some(Target::Emoji), ..Options::default() };
+    for backend in &backends {
+        let name = name(backend);
+        let output = dir.path().join(format!("{name}.webp"));
+        let request = Request {
+            output: Some(output.clone()),
+            options: options.clone(),
+            ..Request::new(Input::File(input.clone()))
+        };
+        still(backend, &request, &CancelToken::new()).unwrap();
+        let preview = webp::preview(&output).unwrap();
+        assert_eq!((preview.width, preview.height), (100, 100), "{name}");
+        assert_eq!(left(&preview.frames[0].0, 100), 23, "{name}: WebP");
+
+        let output = dir.path().join(format!("{name}.webm"));
+        let request = Request {
+            output: Some(output.clone()),
+            options: Options { crop: Some(crop), target: Some(Target::Emoji), ..fast(Fit::Off) },
+            ..Request::new(Input::File(input.clone()))
+        };
+        convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
+        assert_eq!(left(&first_frame_rgba(&output), 100), 22, "{name}: WebM");
+    }
+}
+
+#[test]
 fn keeps_pixel_art_sharp() {
     let Some(backends) = backends() else { return };
     let dir = tempfile::tempdir().unwrap();

@@ -529,7 +529,7 @@ pub(crate) fn still(plan: &Plan, cancel: &CancelToken) -> Result<Vec<u8>> {
     let no_frame = || Error::NoFrame { path: plan.input.clone(), at: plan.start };
     // the first frame from the start, as it is: resampling to a frame rate
     // can skip a short one
-    let chain = picture_filter(plan, "rgba");
+    let chain = picture_filter(plan, crate::presets::Format::Webp, "rgba");
     let spec = format!("[in]{}{chain}[out]", plan.source.orientation.filters());
     let mut filtered = Filtered::new(source, &spec)?.ok_or_else(no_frame)?;
     let mut frame = frame::Video::empty();
