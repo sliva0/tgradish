@@ -33,11 +33,11 @@ zopfli.workspace = true
 [features]
 # JSON Schemas of reports and options, for front-ends
 schema = ["dep:schemars"]
-# Fitting tries its candidates in threads of their own, and zopfli packs in
-# one. zopfli can't be stopped, so a thread packing when a sticker is
-# cancelled is left to finish alone, and at most two pack at once in the
-# whole process, however many stickers are being made. Does nothing on
-# wasm, which has no threads to start.
+# Fitting tries its candidates in threads, as many at once as the options'
+# `threads` say, and zopfli packs in one. zopfli can't be stopped, so a
+# thread packing when a sticker is cancelled is left to finish alone, and
+# at most two pack at once in the whole process, however many stickers are
+# being made. Does nothing on wasm, which has no threads to start.
 threads = []
 # The encoder's interior, public for tgs-lab's benchmarks, render checks
 # and probes: scenes, Lottie, layout, the painter and its settings, and

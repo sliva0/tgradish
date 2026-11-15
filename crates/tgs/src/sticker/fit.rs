@@ -4,7 +4,7 @@
 use tgradish_frames::Animation;
 
 use super::{
-    Cancelled, Options, Progress, Rendered, Step, pack, parallel, render, share_of_limits,
+    Cancelled, Options, Progress, Rendered, Step, pack, parallel, render, share_of_limits, workers,
 };
 use crate::Result;
 use crate::encode::{Effort, Settings};
@@ -205,6 +205,7 @@ pub(super) fn fit(
     let mut distortion_now = steps.last().map_or(0.0, |step| step.distortion);
     // the state before the last step, to weaken it
     let mut before_last: Option<(PixelAnim, usize)> = None;
+    let workers = workers(options.threads);
 
     while size > target {
         if cancelled() {
@@ -224,7 +225,7 @@ pub(super) fn fit(
         // each kind's candidate, its estimate and its error, or `None` when
         // it doesn't help at this strength
         let now = factor(calibration);
-        let tries = parallel(&kinds, |&k| -> Result<Option<Candidate>> {
+        let tries = parallel(&kinds, workers, |&k| -> Result<Option<Candidate>> {
             let candidate = ladders[k][next[k]].apply(&current)?;
             let candidate_quick = quick(&candidate, options, cancelled)?;
             let candidate_size = size_of(candidate_quick, now);

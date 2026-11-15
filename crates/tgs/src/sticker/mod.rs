@@ -2,6 +2,7 @@
 //! and when it is too large, reduce until it fits.
 
 use std::cell::RefCell;
+use std::num::NonZeroUsize;
 
 use serde::{Deserialize, Serialize};
 use tgradish_frames::Animation;
@@ -56,6 +57,12 @@ pub struct Options {
     /// first layer's name when they have too few; tgradish-core sets them,
     /// and `None` writes none.
     pub mark: Option<Vec<u8>>,
+    /// How many of a round's candidates fitting tries at once, at most,
+    /// with the `threads` feature: `None` for as many as
+    /// [`std::thread::available_parallelism`] says the machine runs, and
+    /// one for each in turn, in the calling thread. The sticker is the
+    /// same whatever it is.
+    pub threads: Option<NonZeroUsize>,
 }
 
 impl Default for Options {
@@ -69,6 +76,7 @@ impl Default for Options {
             max_bytes: telegram::MAX_BYTES,
             name: None,
             mark: None,
+            threads: None,
         }
     }
 }
@@ -250,8 +258,9 @@ fn share_of_limits(scene: &Scene, json: &str) -> f64 {
 /// [`Error::Cancelled`](crate::Error::Cancelled).
 ///
 /// With the `threads` feature, fitting tries each round's candidates in
-/// threads of their own, and zopfli packs in one, which has two effects
-/// past this call:
+/// as many threads at once as [`Options::threads`] says, and zopfli packs
+/// in one while this call waits for it, which has two effects past this
+/// call:
 ///
 /// - zopfli can't be stopped, so a stop while it packs returns at once
 ///   and leaves its thread to finish alone, at work for as long as packing
@@ -458,16 +467,42 @@ fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
 /// one at work, and one left to finish after a stop.
 const PACKING: usize = 2;
 
-/// `f` of each item, in threads of their own with [`THREADS`].
-fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
-    if THREADS {
-        std::thread::scope(|scope| {
-            let handles: Vec<_> = items.iter().map(|item| scope.spawn(|| f(item))).collect();
-            handles.into_iter().map(|handle| handle.join().expect("no panics")).collect()
-        })
-    } else {
-        items.iter().map(f).collect()
+/// How many threads [`parallel`] works in with `threads` asked for: as
+/// many, or as many as the machine runs at once, which a round's few
+/// candidates seldom reach; one without [`THREADS`].
+fn workers(threads: Option<NonZeroUsize>) -> usize {
+    if !THREADS {
+        return 1;
     }
+    threads.or_else(|| std::thread::available_parallelism().ok()).map_or(1, NonZeroUsize::get)
+}
+
+/// `f` of each item, in order, in at most `workers` threads at once, each
+/// taking the next item left; in the calling thread with one.
+fn parallel<T: Sync, R: Send>(items: &[T], workers: usize, f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    if workers <= 1 || items.len() <= 1 {
+        return items.iter().map(f).collect();
+    }
+    let next = AtomicUsize::new(0);
+    let mut results: Vec<(usize, R)> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..workers.min(items.len()))
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(item) = items.get(index) else { break };
+                        done.push((index, f(item)));
+                    }
+                    done
+                })
+            })
+            .collect();
+        workers.into_iter().flat_map(|worker| worker.join().expect("no panics")).collect()
+    });
+    results.sort_by_key(|(index, _)| *index);
+    results.into_iter().map(|(_, result)| result).collect()
 }
 
 internal! {
@@ -531,6 +566,42 @@ mod tests {
         let took = started.elapsed();
         assert!(fitted.tgs == kept.tgs && fitted.steps.is_empty());
         assert!(took < once * 4 + Duration::from_secs(1), "{took:?} against {once:?}");
+    }
+
+    #[test]
+    fn fits_alike_in_any_number_of_threads() {
+        // limits that leave fitting several rounds of candidates to try,
+        // more than two of them at a time
+        let files = tgradish_corpus::files();
+        for (name, max_bytes) in
+            [("walker.gif", 600), ("sunrise.gif", 1000), ("waterfall.gif", 2300)]
+        {
+            let file = files.iter().find(|file| file.name == name).unwrap();
+            let input =
+                tgradish_frames::decode(&file.bytes, &Default::default(), &Default::default())
+                    .unwrap();
+            let made = |threads: Option<usize>| {
+                let threads = threads.and_then(NonZeroUsize::new);
+                let options =
+                    Options { max_bytes, threads, effort: Effort::Fast, ..Options::default() };
+                make(input.clone(), &options, &mut |_| {}, &|| false).unwrap()
+            };
+            let alone = made(Some(1));
+            assert!(alone.steps.len() > 1, "{name}: {:?}", alone.steps);
+            for threads in [Some(2), None] {
+                let again = made(threads);
+                assert!(again.tgs == alone.tgs, "{name} in {threads:?} threads");
+                assert_eq!(again.steps, alone.steps, "{name} in {threads:?} threads");
+            }
+        }
+        // in order, however many at once
+        let items: Vec<usize> = (0..9).collect();
+        for workers in [1, 2, 4, 16] {
+            assert_eq!(
+                parallel(&items, workers, |&item| item * 2),
+                [0, 2, 4, 6, 8, 10, 12, 14, 16]
+            );
+        }
     }
 
     #[test]
