@@ -10,8 +10,8 @@ use tgradish_core::backend::Backend;
 use tgradish_core::events::{Details, StartDetails};
 use tgradish_core::input::Input;
 use tgradish_core::presets::{Format, FormatOptions, PresetError, Presets};
-use tgradish_core::webm::{self, Event, Options};
-use tgradish_core::{Outcome, Started};
+use tgradish_core::webm::{self, Options};
+use tgradish_core::{Event, Outcome, Started};
 use tgradish_core::{tgs, webp};
 
 use crate::Context;
@@ -310,39 +310,23 @@ impl<'a> Converter<'a> {
         let cancel = &self.ctx.cancel;
         let json = self.ctx.global.json;
         let (input, output) = (input.clone(), Some(output));
-        let verdict = match &self.options {
+        let exact =
+            matches!(&self.options, FormatOptions::Tgs(options) if options.exact_or_default());
+        let mut printer = Printer::new(self.ctx, exact);
+        let mut on_event = |event: Event| {
+            if json {
+                crate::json_line(&event);
+            } else {
+                printer.event(event);
+            }
+        };
+        let (made, backend) = match &self.options {
             FormatOptions::Webm(options) => {
                 let backend = self.backend()?;
                 let options = options.clone();
                 let keep_temp = self.args.keep_temp;
                 let request = webm::Request { input, output, options, overwrite, keep_temp };
-                let outcome = if json {
-                    webm::convert(&backend, &request, cancel, &mut |event| {
-                        crate::json_line(&event);
-                    })
-                } else {
-                    let mut printer = Printer::new(self.ctx);
-                    let result =
-                        webm::convert(&backend, &request, cancel, &mut |e| printer.event(e));
-                    printer.bar.finish();
-                    result
-                }?;
-                if let Details::Webm { temp_dir: Some(dir), .. } = &outcome.details
-                    && !json
-                {
-                    eprintln!(
-                        "{}",
-                        ui::status("Kept", format!("intermediate files in {}", dir.display()))
-                    );
-                }
-                if !json
-                    && !self.ctx.global.quiet
-                    && term::shows_pictures()
-                    && let Ok(preview) = backend.preview(&outcome.output, 256, cancel)
-                {
-                    show_result(&preview);
-                }
-                Verdict::of(&outcome.issues)
+                (webm::convert(&backend, &request, cancel, &mut on_event), Some(backend))
             }
             FormatOptions::Tgs(options) => {
                 // a frame rate is how fast pictures that have none play
@@ -351,83 +335,50 @@ impl<'a> Converter<'a> {
                     let message =
                         "--fps only sets how fast image sequences and sprite sheets play for .tgs";
                     if json {
-                        crate::json_line(&tgs::Event::Warning { message: message.into() });
+                        crate::json_line(&Event::Warning { message: message.into() });
                     } else {
                         eprintln!("{} {message}", ui::warning_label());
                     }
                 }
                 // only videos need ffmpeg
                 let backend = tgs::needs_ffmpeg(&input).then(|| self.backend()).transpose()?;
-                let exact = options.exact_or_default();
                 let request = tgs::Request { input, output, options: options.clone(), overwrite };
-                let outcome = if json {
-                    tgs::convert(backend.as_ref(), &request, cancel, &mut |event| {
-                        crate::json_line(&event);
-                    })?
-                } else {
-                    let output = request.output();
-                    let mut printer = TgsPrinter::new(self.ctx, exact, output);
-                    let result =
-                        tgs::convert(backend.as_ref(), &request, cancel, &mut |e| printer.event(e));
-                    printer.bar.finish();
-                    let outcome = result?;
-                    if !self.ctx.global.quiet
-                        && term::shows_pictures()
-                        && let Some(preview) = outcome.preview()
-                    {
-                        show_result(&preview);
-                    }
-                    outcome
-                };
-                Verdict::of(&outcome.issues)
+                (tgs::convert(backend.as_ref(), &request, cancel, &mut on_event), backend)
             }
             FormatOptions::Webp(options) => {
                 let backend = self.backend()?;
                 let request = webp::Request { input, output, options: options.clone(), overwrite };
-                let outcome = if json {
-                    webp::convert(&backend, &request, cancel, &mut |event| {
-                        crate::json_line(&event);
-                    })?
-                } else {
-                    let quiet = self.ctx.global.quiet;
-                    let outcome =
-                        webp::convert(&backend, &request, cancel, &mut |event| match event {
-                            webp::Event::Started(Started { input, output, .. }) if !quiet => {
-                                eprintln!("{}", converting(&input, &output));
-                            }
-                            webp::Event::Warning { message } => {
-                                eprintln!("{} {message}", ui::warning_label());
-                            }
-                            _ => {}
-                        })?;
-                    self.print_still(&outcome);
-                    outcome
-                };
-                Verdict::of(&outcome.issues)
+                (webp::convert(&backend, &request, cancel, &mut on_event), Some(backend))
             }
         };
+        if !json {
+            printer.bar.finish();
+        }
+        let outcome = made?;
+        if !json {
+            self.after(&outcome, backend.as_ref());
+        }
         self.written.borrow_mut().insert(key, input_key);
-        Ok(verdict)
+        Ok(Verdict::of(&outcome.issues))
     }
 
-    /// What an image came out as, with what Telegram would refuse: the
-    /// result on stdout, even when quiet, as every format's is.
-    fn print_still(&self, outcome: &Outcome) {
-        let Details::Webp { width, height, encoding } = outcome.details else { return };
-        let output = term::link_out(style(outcome.output.display()).bold(), &outcome.output);
-        let mut line = format!(
-            "{output} {}, {width}×{height}",
-            ui::size_within(outcome.bytes, outcome.limit),
-        );
-        if let webp::Encoding::Lossy { quality } = encoding {
-            line.push_str(&format!(", lossy at quality {quality} to fit"));
+    /// What is said of a result once it is made, as text: where a WebM's
+    /// intermediate files are kept, and, in terminals that show pictures,
+    /// a frame of it.
+    fn after(&self, outcome: &Outcome, backend: Option<&Backend>) {
+        if let Details::Webm { temp_dir: Some(dir), .. } = &outcome.details {
+            eprintln!("{}", ui::status("Kept", format!("intermediate files in {}", dir.display())));
         }
-        finished(self.ctx.global.quiet, &outcome.output, line);
-        print_issues(&outcome.issues);
-        if !self.ctx.global.quiet
-            && term::shows_pictures()
-            && let Ok(preview) = webp::preview(&outcome.output)
-        {
+        if self.ctx.global.quiet || !term::shows_pictures() {
+            return;
+        }
+        let preview = match outcome.format {
+            Format::Webm => backend
+                .and_then(|backend| backend.preview(&outcome.output, 256, &self.ctx.cancel).ok()),
+            Format::Tgs => outcome.preview(),
+            Format::Webp => webp::preview(&outcome.output).ok(),
+        };
+        if let Some(preview) = preview {
             show_result(&preview);
         }
     }
@@ -596,45 +547,49 @@ impl Bar {
     }
 }
 
-/// Shows conversion events as text with a progress bar.
+/// Shows conversion events of any format as text, with a progress bar.
 struct Printer {
     verbose: u8,
     quiet: bool,
     bar: Bar,
     /// Telegram's size limit for what is being made.
     limit: u64,
+    /// For `.tgs`: the art is kept exactly as it is, so a sticker too
+    /// large isn't fitted.
+    exact: bool,
+    /// For `.tgs`: the size unchanged, to show how much fitting has taken
+    /// off.
+    unchanged: Option<u64>,
 }
 
 impl Printer {
-    fn new(ctx: &Context) -> Self {
+    fn new(ctx: &Context, exact: bool) -> Self {
         Self {
             verbose: ctx.global.verbose,
             quiet: ctx.global.quiet,
             bar: Bar::default(),
             limit: tgradish_core::telegram::MAX_STICKER_BYTES,
+            exact,
+            unchanged: None,
         }
     }
 
-    fn event(&mut self, event: Event) {
-        if let Event::Started(started) = &event {
-            self.limit = started.limit;
+    fn spinner(&mut self, verb: &str, message: String) {
+        if self.quiet {
+            return;
         }
+        let bar = progress_bar(verb, None);
+        bar.set_message(message);
+        self.bar.show(bar);
+    }
+
+    fn event(&mut self, event: Event) {
         match event {
-            Event::Started(Started { details: StartDetails::Webm { plan }, .. }) if !self.quiet => {
-                self.bar.line(converting(&plan.input, &plan.output));
-                let spoof = if plan.spoofs(plan.length) { ", spoofed" } else { "" };
-                self.bar.line(ui::status(
-                    "Planned",
-                    ui::dim(format!(
-                        "{} {}×{}, {}, {}, fit {}{spoof}",
-                        plan.target.name(),
-                        plan.width,
-                        plan.height,
-                        ui::fps(plan.fps),
-                        ui::seconds(plan.length),
-                        ui::name(&plan.fit),
-                    )),
-                ));
+            Event::Started(started) => {
+                self.limit = started.limit;
+                if !self.quiet {
+                    self.started(started);
+                }
             }
             Event::AttemptStarted { attempt, params } if !self.quiet => {
                 let bar = progress_bar("Encoding", Some(1000));
@@ -668,93 +623,75 @@ impl Printer {
             Event::Decided { message, .. } if !self.quiet => {
                 self.bar.line(ui::status("Decided", ui::dim(message)));
             }
-            Event::Warning { message } => {
-                self.bar.line(format!("{} {message}", ui::warning_label()));
-            }
             Event::Log { line } if self.verbose > 1 => {
                 self.bar.line(ui::dim(format!("    {line}")))
             }
-            Event::Finished(outcome) => {
-                self.bar.finish();
-                let Outcome { output, bytes, issues, details, .. } = *outcome;
-                let Details::Webm { params, spoofed, settled, .. } = details else { return };
-                let spoofed = if spoofed { ", duration spoofed" } else { "" };
-                // the result line says it, where it says more than its path
-                let settled = if settled { ", the best so far as asked" } else { "" };
-                let output_text = term::link_out(style(output.display()).bold(), &output);
-                let line = format!(
-                    "{output_text} {}, {}{spoofed}{settled}",
-                    ui::size_within(bytes, self.limit),
-                    ui::params(&params),
-                );
-                finished(self.quiet, &output, line);
-                print_issues(&issues);
+            Event::TooLarge { bytes } if !self.quiet && self.exact => {
+                self.bar.line(format!(
+                    "{} about {} as it is, too large; --no-exact lets fitting change the art",
+                    ui::warning_label(),
+                    ui::size_within(bytes, self.limit)
+                ));
             }
+            Event::TooLarge { bytes } if !self.quiet => {
+                self.unchanged = Some(bytes);
+                self.bar.line(ui::status(
+                    "Fitting",
+                    format!("about {} as it is, too large", ui::size_within(bytes, self.limit)),
+                ));
+                term::progress(Some(0.3));
+                self.spinner("Fitting", "into 64 KiB".into());
+            }
+            Event::Reduced { step } if !self.quiet => {
+                self.bar.line(ui::status(
+                    "Reduced",
+                    format!(
+                        "{} → about {}",
+                        reduction_text(&step.reduction),
+                        ui::kib(step.bytes as u64)
+                    ),
+                ));
+                // how much of the excess is gone, on a log scale
+                if let Some(unchanged) = self.unchanged {
+                    let (unchanged, now) = (unchanged as f64, step.bytes as f64);
+                    let target = self.limit as f64;
+                    let gone = ((unchanged / now).ln() / (unchanged / target).ln()).clamp(0.0, 1.0);
+                    term::progress(Some(0.3 + 0.5 * gone));
+                }
+            }
+            Event::Packing => {
+                term::progress(Some(0.85));
+                self.spinner("Compressing", "with zopfli".into());
+            }
+            Event::Warning { message } => {
+                self.bar.line(format!("{} {message}", ui::warning_label()));
+            }
+            Event::Finished(outcome) => self.finished(&outcome),
             _ => {}
         }
     }
-}
 
-/// The line on stdout of a file made, `output`: "Finished" and `line`,
-/// which says what it is, or `quiet`, its path alone, for scripts.
-fn finished(quiet: bool, output: &Path, line: String) {
-    if quiet {
-        outln!("{}", output.display());
-    } else {
-        outln!("{}", ui::status("Finished", line));
-    }
-}
-
-/// What Telegram would have a problem with in a result, under its line,
-/// on stderr.
-fn print_issues(issues: &[tgradish_core::telegram::Issue]) {
-    for issue in issues {
-        eprintln!("{}", ui::issue(issue));
-    }
-}
-
-/// The line that starts every conversion, whatever it makes: `input` →
-/// `output`.
-fn converting(input: &Path, output: &Path) -> String {
-    let input = term::link(input.display(), input);
-    let output = term::link(style(output.display()).bold(), output);
-    ui::status("Converting", format!("{input} → {output}"))
-}
-
-/// Shows `.tgs` conversion events as text.
-struct TgsPrinter {
-    quiet: bool,
-    /// Where the result goes.
-    output: PathBuf,
-    bar: Bar,
-    /// Whether the art is kept exactly as it is, so a sticker too large
-    /// isn't fitted.
-    exact: bool,
-    /// The size unchanged, to show how much fitting has taken off.
-    unchanged: Option<u64>,
-}
-
-impl TgsPrinter {
-    fn new(ctx: &Context, exact: bool, output: PathBuf) -> Self {
-        let quiet = ctx.global.quiet;
-        Self { quiet, output, bar: Bar::default(), exact, unchanged: None }
-    }
-
-    fn spinner(&mut self, verb: &str, message: String) {
-        if self.quiet {
-            return;
-        }
-        let bar = progress_bar(verb, None);
-        bar.set_message(message);
-        self.bar.show(bar);
-    }
-
-    fn event(&mut self, event: tgs::Event) {
-        match event {
-            tgs::Event::Started(Started {
-                input, details: StartDetails::Tgs { report }, ..
-            }) if !self.quiet => {
-                self.bar.line(converting(&input, &self.output));
+    /// The lines that start a conversion: what goes where, and what a
+    /// WebM's plan or a `.tgs`'s art comes to.
+    fn started(&mut self, started: Started) {
+        self.bar.line(converting(&started.input, &started.output));
+        match started.details {
+            StartDetails::Webm { plan } => {
+                let spoof = if plan.spoofs(plan.length) { ", spoofed" } else { "" };
+                self.bar.line(ui::status(
+                    "Planned",
+                    ui::dim(format!(
+                        "{} {}×{}, {}, {}, fit {}{spoof}",
+                        plan.target.name(),
+                        plan.width,
+                        plan.height,
+                        ui::fps(plan.fps),
+                        ui::seconds(plan.length),
+                        ui::name(&plan.fit),
+                    )),
+                ));
+            }
+            StartDetails::Tgs { report } => {
                 let scale = match report.scale {
                     1 => String::new(),
                     scale => format!(" at {scale}x"),
@@ -787,66 +724,65 @@ impl TgsPrinter {
                 term::progress(Some(0.1));
                 self.spinner("Converting", "to vector".into());
             }
-            tgs::Event::TooLarge { bytes } if !self.quiet && self.exact => {
-                self.bar.line(format!(
-                    "{} about {} as it is, too large; --no-exact lets fitting change the art",
-                    ui::warning_label(),
-                    ui::size_within(bytes, tgs::MAX_BYTES)
-                ));
-            }
-            tgs::Event::TooLarge { bytes } if !self.quiet => {
-                self.unchanged = Some(bytes);
-                self.bar.line(ui::status(
-                    "Fitting",
-                    format!("about {} as it is, too large", ui::size_within(bytes, tgs::MAX_BYTES)),
-                ));
-                term::progress(Some(0.3));
-                self.spinner("Fitting", "into 64 KiB".into());
-            }
-            tgs::Event::Reduced { step } if !self.quiet => {
-                self.bar.line(ui::status(
-                    "Reduced",
-                    format!(
-                        "{} → about {}",
-                        reduction_text(&step.reduction),
-                        ui::kib(step.bytes as u64)
-                    ),
-                ));
-                // how much of the excess is gone, on a log scale
-                if let Some(unchanged) = self.unchanged {
-                    let (unchanged, now) = (unchanged as f64, step.bytes as f64);
-                    let target = tgs::MAX_BYTES as f64;
-                    let gone = ((unchanged / now).ln() / (unchanged / target).ln()).clamp(0.0, 1.0);
-                    term::progress(Some(0.3 + 0.5 * gone));
-                }
-            }
-            tgs::Event::Packing => {
-                term::progress(Some(0.85));
-                self.spinner("Compressing", "with zopfli".into());
-            }
-            tgs::Event::Warning { message } => {
-                self.bar.line(format!("{} {message}", ui::warning_label()));
-            }
-            tgs::Event::Finished(outcome) => {
-                self.bar.finish();
-                let Outcome { output, bytes, changed, issues, details, .. } = *outcome;
-                let Details::Tgs { steps, .. } = details else { return };
-                let changed = if changed && !steps.is_empty() {
-                    format!(", {}", style("changed to fit").yellow())
-                } else if changed {
-                    ", changed".to_string()
-                } else {
-                    ", exact".to_string()
-                };
-                let output_text = term::link_out(style(output.display()).bold(), &output);
-                let line =
-                    format!("{output_text} {}{changed}", ui::size_within(bytes, tgs::MAX_BYTES));
-                finished(self.quiet, &output, line);
-                print_issues(&issues);
-            }
             _ => {}
         }
     }
+
+    /// The result's line on stdout, even when quiet, as every format's is,
+    /// and what Telegram would have a problem with in it.
+    fn finished(&mut self, outcome: &Outcome) {
+        self.bar.finish();
+        let size = ui::size_within(outcome.bytes, outcome.limit);
+        let said = match &outcome.details {
+            Details::Webm { params, spoofed, settled, .. } => {
+                let spoofed = if *spoofed { ", duration spoofed" } else { "" };
+                // the result line says it, where it says more than its path
+                let settled = if *settled { ", the best so far as asked" } else { "" };
+                format!(", {}{spoofed}{settled}", ui::params(params))
+            }
+            Details::Tgs { steps, .. } if outcome.changed && !steps.is_empty() => {
+                format!(", {}", style("changed to fit").yellow())
+            }
+            Details::Tgs { .. } if outcome.changed => ", changed".to_string(),
+            Details::Tgs { .. } => ", exact".to_string(),
+            Details::Webp { width, height, encoding } => match encoding {
+                webp::Encoding::Lossy { quality } => {
+                    format!(", {width}×{height}, lossy at quality {quality} to fit")
+                }
+                _ => format!(", {width}×{height}"),
+            },
+            _ => String::new(),
+        };
+        let output = term::link_out(style(outcome.output.display()).bold(), &outcome.output);
+        finished(self.quiet, &outcome.output, format!("{output} {size}{said}"));
+        print_issues(&outcome.issues);
+    }
+}
+
+/// The line on stdout of a file made, `output`: "Finished" and `line`,
+/// which says what it is, or `quiet`, its path alone, for scripts.
+fn finished(quiet: bool, output: &Path, line: String) {
+    if quiet {
+        outln!("{}", output.display());
+    } else {
+        outln!("{}", ui::status("Finished", line));
+    }
+}
+
+/// What Telegram would have a problem with in a result, under its line,
+/// on stderr.
+fn print_issues(issues: &[tgradish_core::telegram::Issue]) {
+    for issue in issues {
+        eprintln!("{}", ui::issue(issue));
+    }
+}
+
+/// The line that starts every conversion, whatever it makes: `input` →
+/// `output`.
+fn converting(input: &Path, output: &Path) -> String {
+    let input = term::link(input.display(), input);
+    let output = term::link(style(output.display()).bold(), output);
+    ui::status("Converting", format!("{input} → {output}"))
 }
 
 /// A frame of a finished sticker, shown in terminals that show pictures.

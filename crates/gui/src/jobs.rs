@@ -15,9 +15,9 @@ use tgradish_core::tgradish_tgs::check::Severity;
 use tgradish_core::tgradish_tgs::normalise::Report;
 use tgradish_core::tgradish_tgs::sticker::Step;
 use tgradish_core::tgs;
-use tgradish_core::webm::{self, Decision, Event, Options, Params};
+use tgradish_core::webm::{self, Decision, Options, Params};
 use tgradish_core::webp;
-use tgradish_core::{Error, FfmpegMissing, Outcome, Started, telegram};
+use tgradish_core::{Error, Event, FfmpegMissing, Outcome, Started, telegram};
 
 use crate::l10n::fl;
 use crate::widgets;
@@ -543,18 +543,15 @@ fn run(
         })?;
     }
     let output = Some(output);
+    let on_event = &mut |event| follow(event, update);
     match setup {
         Setup::Webm { options, backend } => {
             let request = webm::Request { input, output, options, overwrite, keep_temp: false };
-            convert_webm(&request, backend, cancel, update)
+            Ok(Done::of(webm::convert(&backend, &request, cancel, on_event)?))
         }
         Setup::Image { options, backend } => {
             let request = webp::Request { input, output, options, overwrite };
-            let outcome = webp::convert(&backend, &request, cancel, &mut |event| {
-                if let webp::Event::Warning { message } = event {
-                    update(Box::new(move |progress| progress.warnings.push(message)));
-                }
-            })?;
+            let outcome = webp::convert(&backend, &request, cancel, on_event)?;
             let preview = webp::preview(&outcome.output).ok();
             Ok(Done { preview, ..Done::of(outcome) })
         }
@@ -574,42 +571,14 @@ fn run(
                 progress.tgs = Some(TgsStage::Reading);
                 progress.tgs_exact = exact;
             }));
-            let outcome =
-                tgs::convert(backend.as_ref(), &request, cancel, &mut |event| match event {
-                    tgs::Event::Started(Started {
-                        details: StartDetails::Tgs { report }, ..
-                    }) => update(Box::new(move |progress| {
-                        progress.report = Some(report);
-                        progress.tgs = Some(TgsStage::Drawing);
-                    })),
-                    tgs::Event::TooLarge { bytes } => update(Box::new(move |progress| {
-                        progress.unchanged_bytes = Some(bytes as usize);
-                        progress.tgs = Some(TgsStage::Fitting);
-                    })),
-                    tgs::Event::Reduced { step } => update(Box::new(move |progress| {
-                        progress.steps.push(step);
-                        progress.tgs = Some(TgsStage::Fitting);
-                    })),
-                    tgs::Event::Packing => update(Box::new(|progress| {
-                        progress.tgs = Some(TgsStage::Compressing);
-                    })),
-                    tgs::Event::Warning { message } => update(Box::new(move |progress| {
-                        progress.warnings.push(message);
-                    })),
-                    _ => {}
-                })?;
-            Ok(Done::of(outcome))
+            Ok(Done::of(tgs::convert(backend.as_ref(), &request, cancel, on_event)?))
         }
     }
 }
 
-fn convert_webm(
-    request: &webm::Request,
-    backend: Backend,
-    cancel: &CancelToken,
-    update: Update,
-) -> Result<Done, Error> {
-    let outcome = webm::convert(&backend, request, cancel, &mut |event| match event {
+/// Takes in what a conversion of any format says as it goes.
+fn follow(event: Event, update: Update) {
+    match event {
         Event::Started(Started { details: StartDetails::Webm { plan }, limit, .. }) => {
             let planned = WebmPlan {
                 width: plan.width,
@@ -624,6 +593,12 @@ fn convert_webm(
                 limit,
             };
             update(Box::new(move |progress| progress.webm = Some(planned)));
+        }
+        Event::Started(Started { details: StartDetails::Tgs { report }, .. }) => {
+            update(Box::new(move |progress| {
+                progress.report = Some(report);
+                progress.tgs = Some(TgsStage::Drawing);
+            }))
         }
         Event::AttemptStarted { attempt, params } => update(Box::new(move |progress| {
             progress.fraction = Some(0.0);
@@ -653,12 +628,22 @@ fn convert_webm(
         Event::Decided { decision, .. } => {
             update(Box::new(move |progress| progress.decisions.push(decision)))
         }
+        Event::TooLarge { bytes } => update(Box::new(move |progress| {
+            progress.unchanged_bytes = Some(bytes as usize);
+            progress.tgs = Some(TgsStage::Fitting);
+        })),
+        Event::Reduced { step } => update(Box::new(move |progress| {
+            progress.steps.push(step);
+            progress.tgs = Some(TgsStage::Fitting);
+        })),
+        Event::Packing => update(Box::new(|progress| {
+            progress.tgs = Some(TgsStage::Compressing);
+        })),
         Event::Warning { message } => {
             update(Box::new(move |progress| progress.warnings.push(message)))
         }
         _ => {}
-    })?;
-    Ok(Done::of(outcome))
+    }
 }
 
 #[cfg(test)]

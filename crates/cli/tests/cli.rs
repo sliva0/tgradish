@@ -702,9 +702,11 @@ fn leaves_stdin_alone() {
 fn events_schema_includes_errors() {
     let output = tgradish(&["describe"]);
     let description: Value = serde_json::from_slice(&output.stdout).unwrap();
+    // one schema for every format's
+    let events = description["events"]["oneOf"].as_array().unwrap();
+    assert!(events.iter().any(|e| e["properties"]["event"]["const"] == "error"));
     for format in description["formats"].as_array().unwrap() {
-        let events = format["events"]["oneOf"].as_array().unwrap();
-        assert!(events.iter().any(|e| e["properties"]["event"]["const"] == "error"));
+        assert!(format.get("events").is_none(), "{format}");
     }
 }
 

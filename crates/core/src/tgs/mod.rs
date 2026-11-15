@@ -1,16 +1,14 @@
-//! Animated stickers (`.tgs`): options, events and the reading and
+//! Animated stickers (`.tgs`): options and the reading and
 //! writing of files around `tgradish-tgs`, which works on frames in
 //! memory only. Pixel art is read by tgradish itself; videos, read
 //! through ffmpeg, are taken as pixel art too, their frames at the rate
 //! a sticker can play. Previews of what was made are drawn here as well.
 
-mod events;
 mod inspect;
 mod options;
 mod preview;
 mod read;
 
-pub use events::Event;
 pub use inspect::inspect_file;
 #[cfg(test)]
 pub(crate) use inspect::read_json;
@@ -28,7 +26,7 @@ use tgradish_tgs::sticker::{self, Progress};
 use crate::CancelToken;
 use crate::backend::Backend;
 use crate::error::{Error, Result};
-use crate::events::{Details, Outcome, StartDetails, Started};
+use crate::events::{Details, Event, Outcome, StartDetails, Started};
 use crate::input::Input;
 use crate::options::Resize;
 use crate::presets::Format;

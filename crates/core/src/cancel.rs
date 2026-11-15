@@ -84,8 +84,8 @@ impl CancelToken {
     /// Whether fitting can settle now: a WebM conversion is fitting, and
     /// one of its encodes fits under the limit. Front-ends offer
     /// [`CancelToken::settle`] while this holds, as events say too
-    /// ([`Event::Progress`](crate::webm::Event::Progress) and
-    /// [`Event::AttemptFinished`](crate::webm::Event::AttemptFinished)).
+    /// ([`Event::Progress`](crate::Event::Progress) and
+    /// [`Event::AttemptFinished`](crate::Event::AttemptFinished)).
     pub fn can_settle(&self) -> bool {
         self.state().fitting == Fitting::Fits && !self.is_cancelled()
     }

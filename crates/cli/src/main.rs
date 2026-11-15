@@ -189,7 +189,7 @@ pub fn json_line(value: &impl serde::Serialize) {
                 message: format!("couldn't write this as JSON: {err}"),
                 input: None,
             };
-            json_line(&tgradish_core::webm::Event::Error(failure));
+            json_line(&tgradish_core::Event::Error(failure));
         }
     }
 }
@@ -197,7 +197,7 @@ pub fn json_line(value: &impl serde::Serialize) {
 /// Prints an error as a JSON line, see `Event::Error`: the same in every
 /// stream.
 pub fn print_json_error(err: &anyhow::Error, input: Option<&std::path::Path>) {
-    json_line(&tgradish_core::webm::Event::Error(tgradish_core::protocol::Failure {
+    json_line(&tgradish_core::Event::Error(tgradish_core::protocol::Failure {
         message: format!("{err:#}"),
         input: input.map(Into::into),
     }));

@@ -16,12 +16,12 @@ use tgradish_core::input::Input;
 use tgradish_core::mark::made_by_tgradish;
 use tgradish_core::options::{Crop, Effort, Fit, Resize, Scaling};
 use tgradish_core::telegram::{self, Target};
+use tgradish_core::webm::Decision;
 use tgradish_core::webm::Options;
 use tgradish_core::webm::container;
-use tgradish_core::webm::{Decision, Event};
 use tgradish_core::webm::{Request, convert};
 use tgradish_core::webp;
-use tgradish_core::{CancelToken, Error, Outcome, Started};
+use tgradish_core::{CancelToken, Error, Event, Outcome, Started};
 use tgradish_corpus::Clip;
 
 /// What only a WebM's outcome has: the attempt kept, whether its duration

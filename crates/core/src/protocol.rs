@@ -24,9 +24,9 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::config::Config;
+use crate::events::Event;
 use crate::presets::{Format, Presets};
 use crate::tgs;
-use crate::webm::Event;
 use crate::webm::Options;
 
 /// The version of the protocol: of the description, the events, what
@@ -37,7 +37,8 @@ use crate::webm::Options;
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What `describe` prints: the protocol, the formats with the schemas of
-/// their options and events, and the presets.
+/// their options, the schema of the events conversions print, and the
+/// presets.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
@@ -55,6 +56,9 @@ pub struct Description {
     pub cancel: &'static str,
     /// Every format conversions make.
     pub formats: Vec<FormatDescription>,
+    /// JSON Schema of the events `convert --json` and `watch --json`
+    /// print, one per line, of every format: an [`Event`].
+    pub events: Schema,
     /// Every preset, built in or the user's, broken ones too.
     pub presets: Vec<PresetDescription>,
     /// JSON Schema of what `spoof --json` prints: a [`SpoofEvent`].
@@ -101,8 +105,6 @@ pub struct FormatDescription {
     /// JSON Schema of the options accepted by `convert --options-json` for
     /// this format. Every property also has a `--<property>` flag.
     pub options: Schema,
-    /// JSON Schema of the events printed by `convert --json`, one per line.
-    pub events: Schema,
 }
 
 /// A preset, as [`Description`] tells of it.
@@ -245,7 +247,6 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
                 output_extension: Format::Webm.extension(),
                 default_preset: default_preset(Format::Webm),
                 options: schema_for!(Options),
-                events: printed::<Event>(),
             },
             FormatDescription {
                 format: Format::Tgs,
@@ -253,7 +254,6 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
                 output_extension: Format::Tgs.extension(),
                 default_preset: default_preset(Format::Tgs),
                 options: schema_for!(tgs::Options),
-                events: printed::<tgs::Event>(),
             },
             FormatDescription {
                 format: Format::Webp,
@@ -263,9 +263,9 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
                 output_extension: Format::Webp.extension(),
                 default_preset: default_preset(Format::Webp),
                 options: only_properties(schema_for!(Options), &crate::webp::PICTURE_OPTIONS),
-                events: printed::<crate::webp::Event>(),
             },
         ],
+        events: printed::<Event>(),
         presets,
         spoof_events: printed::<SpoofEvent>(),
     }
@@ -282,7 +282,7 @@ mod tests {
     use crate::telegram::{Issue, Target};
     use crate::webm::{Decision, Params, Rate};
     use crate::webm::{Plan, Request};
-    use crate::webp::{self, Encoding};
+    use crate::webp::Encoding;
 
     fn probe() -> Probe {
         Probe {
@@ -372,7 +372,7 @@ mod tests {
             0.01,
         );
         let tgs = [
-            tgs::Event::Started(Started {
+            Event::Started(Started {
                 input: "art.gif".into(),
                 output: "art.sticker.tgs".into(),
                 format: Format::Tgs,
@@ -380,11 +380,11 @@ mod tests {
                 limit: 65_536,
                 details: StartDetails::Tgs { report: Box::new(report) },
             }),
-            tgs::Event::TooLarge { bytes: 70_000 },
-            tgs::Event::Reduced { step: step.clone() },
-            tgs::Event::Packing,
-            tgs::Event::Warning { message: "a warning".into() },
-            tgs::Event::Finished(Box::new(Outcome {
+            Event::TooLarge { bytes: 70_000 },
+            Event::Reduced { step: step.clone() },
+            Event::Packing,
+            Event::Warning { message: "a warning".into() },
+            Event::Finished(Box::new(Outcome {
                 input: "art.gif".into(),
                 output: "art.sticker.tgs".into(),
                 format: Format::Tgs,
@@ -401,11 +401,11 @@ mod tests {
                     preview: crate::preview::Preview::new(1, 1, vec![(vec![0; 4], 6)]),
                 },
             })),
-            tgs::Event::Error(Failure { message: "it failed".into(), input: None }),
+            Event::Error(Failure { message: "it failed".into(), input: None }),
         ]
         .map(|event| serde_json::to_value(event).unwrap());
         let still = [
-            webp::Event::Started(Started {
+            Event::Started(Started {
                 input: "in.png".into(),
                 output: "in.sticker.webp".into(),
                 format: Format::Webp,
@@ -413,7 +413,7 @@ mod tests {
                 limit: 524_288,
                 details: StartDetails::Webp {},
             }),
-            webp::Event::Finished(Box::new(Outcome {
+            Event::Finished(Box::new(Outcome {
                 input: "in.png".into(),
                 output: "in.sticker.webp".into(),
                 format: Format::Webp,
@@ -428,8 +428,8 @@ mod tests {
                     encoding: Encoding::Lossy { quality: 80 },
                 },
             })),
-            webp::Event::Warning { message: "a warning".into() },
-            webp::Event::Error(Failure { message: "it failed".into(), input: None }),
+            Event::Warning { message: "a warning".into() },
+            Event::Error(Failure { message: "it failed".into(), input: None }),
         ]
         .map(|event| serde_json::to_value(event).unwrap());
         webm.into_iter().chain(tgs).chain(still).collect()
@@ -584,12 +584,13 @@ mod tests {
         let mut names = Vec::new();
         for format in description["formats"].as_array().unwrap() {
             schema_names(&format["options"], &mut names);
-            schema_names(&format["events"], &mut names);
         }
+        schema_names(&description["events"], &mut names);
         // the description itself, as presets, and what each stream prints
         schema_names(&description["spoof-events"], &mut names);
         let mut described = json!({ "description": description });
         described["description"]["formats"] = json!([]);
+        described["description"]["events"] = json!({});
         described["description"]["spoof-events"] = json!({});
         keys(&described, &mut names);
         for sample in samples().into_iter().chain(other_samples()) {

@@ -2,7 +2,8 @@
 //! the size limit, and what their container holds
 //! ([`container`]).
 //!
-//! [`convert`] runs synchronously and reports [`Event`]s through a callback.
+//! [`convert`] runs synchronously and reports [`crate::Event`]s through a
+//! callback.
 //! To run it in the background, call it from a thread and cancel it with a
 //! [`CancelToken`]:
 //!
@@ -26,7 +27,7 @@ mod fit;
 mod options;
 mod plan;
 
-pub use events::{Decision, Event, Params, Rate};
+pub use events::{Decision, Params, Rate};
 pub use fit::first_params;
 pub use options::{
     CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, DEFAULT_FAKE_DURATION, HIGHEST_BITRATE, MAX_ATTEMPTS,
@@ -44,7 +45,7 @@ use std::path::{Path, PathBuf};
 use crate::CancelToken;
 use crate::backend::{Backend, Pass};
 use crate::error::{Error, FileAction, Result};
-use crate::events::{Details, Outcome, StartDetails, Started};
+use crate::events::{Details, Event, Outcome, StartDetails, Started};
 use crate::ffmpeg::Output;
 use crate::input::Input;
 use crate::picture::choose_auto_scaling;

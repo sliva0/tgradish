@@ -20,13 +20,10 @@ pub use inspect::{Info, creator_tool, inspect_file, preview};
 
 use std::path::PathBuf;
 
-use schemars::JsonSchema;
-use serde::Serialize;
-
 use crate::CancelToken;
 use crate::backend::Backend;
 use crate::error::{Error, Result};
-use crate::events::{Details, Outcome, StartDetails, Started};
+use crate::events::{Details, Event, Outcome, StartDetails, Started};
 use crate::input::Input;
 use crate::picture;
 use crate::presets::Format;
@@ -59,31 +56,6 @@ impl Request {
         let target = self.options.target.unwrap_or_default();
         self.output.clone().unwrap_or_else(|| self.input.default_output(Format::Webp, target))
     }
-}
-
-/// What an image conversion reports, which `convert --json` and `watch
-/// --json` print: what is worth knowing about it, then the picture once
-/// it is made, or why it couldn't be.
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
-#[serde(tag = "event", rename_all = "kebab-case")]
-// `describe` titles the schema as it always has
-#[schemars(rename = "StillEvent")]
-#[non_exhaustive]
-pub enum Event {
-    /// The input was read, and the picture is about to be made.
-    Started(crate::Started),
-    /// The picture is written: what was made, as converting returns it.
-    Finished(Box<Outcome>),
-    /// Something worth knowing: about the picture, as options that were
-    /// adjusted or ignored, or about more than one, as `watch` says of
-    /// folders it can't read.
-    Warning {
-        /// What, in English.
-        message: String,
-    },
-    /// A conversion, or the whole command, failed. Only printed by the
-    /// CLI; the library returns errors instead.
-    Error(crate::protocol::Failure),
 }
 
 /// The options a still picture has, of WebM's: what to make, what is read

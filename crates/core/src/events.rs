@@ -1,19 +1,119 @@
-//! What a conversion of any format reports and makes: its [`Outcome`],
-//! the same of every format but for its [`Details`].
+//! What a conversion of any format reports and makes: its [`Event`]s,
+//! the first [`Started`] and the last [`Finished`](Event::Finished) with
+//! its [`Outcome`], each the same of every format but for its details.
 
 use std::path::PathBuf;
 
 use schemars::JsonSchema;
 use serde::Serialize;
-use tgradish_tgs::sticker::Step;
-
 use tgradish_tgs::normalise::Report;
+use tgradish_tgs::sticker::Step;
 
 use crate::presets::Format;
 use crate::preview::Preview;
+use crate::protocol::Failure;
 use crate::telegram::{Issue, Target};
-use crate::webm::{Params, Plan};
+use crate::webm::{Decision, Params, Plan};
 use crate::webp::Encoding;
+
+/// What a conversion of any format reports as it goes, for front-ends to
+/// follow, which `convert --json` and `watch --json` print one a line:
+/// [`Event::Started`] first, then what the format says as it works, and
+/// [`Event::Finished`] once the result is written. WebM's fitting says
+/// what each encode does, and `.tgs`'s what fitting takes off; a WebP is
+/// made in one go, and says nothing between.
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[serde(tag = "event", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
+#[non_exhaustive]
+pub enum Event {
+    /// The conversion is about to make its result: the first event of
+    /// every conversion, with a WebM's plan or what reading a `.tgs`'s art
+    /// found.
+    Started(Started),
+    /// WebM: an encode starts.
+    AttemptStarted {
+        /// Which, from 1.
+        attempt: u32,
+        /// With what settings.
+        params: Params,
+    },
+    /// WebM: progress of the current pass of an attempt, from 0 to 1.
+    Progress {
+        /// Which attempt.
+        attempt: u32,
+        /// Which of its passes, from 1.
+        pass: u8,
+        /// How many it has: 2, or 1 where an earlier attempt's first pass
+        /// serves it.
+        passes: u8,
+        /// How much of the pass is done.
+        fraction: f64,
+        /// Whether an encode fits already, so that fitting can settle on
+        /// the best so far, see
+        /// [`CancelToken::settle`](crate::CancelToken::settle).
+        can_settle: bool,
+    },
+    /// WebM: an encode is done.
+    AttemptFinished {
+        /// Which.
+        attempt: u32,
+        /// With what settings.
+        params: Params,
+        /// Its size in bytes.
+        bytes: u64,
+        /// Whether that is within the target's limit.
+        fits: bool,
+        /// Whether this or an earlier encode fits, so that fitting can
+        /// settle on the best so far.
+        can_settle: bool,
+    },
+    /// WebM: SSIM of an attempt compared to the source, from 0 to 1.
+    Scored {
+        /// Which attempt.
+        attempt: u32,
+        /// Its SSIM.
+        ssim: f64,
+    },
+    /// WebM: fitting decided to stop, or to try a change or not: why, for
+    /// front-ends to say.
+    Decided {
+        /// What, and why.
+        decision: Decision,
+        /// The same in English.
+        message: String,
+    },
+    /// WebM: a line of ffmpeg output.
+    Log {
+        /// The line.
+        line: String,
+    },
+    /// `.tgs`: unchanged, the sticker would come to about this many bytes,
+    /// more than fits; fitting starts, unless `exact` keeps the art as it
+    /// is.
+    TooLarge {
+        /// The estimate, in bytes.
+        bytes: u64,
+    },
+    /// `.tgs`: fitting applied a reduction.
+    Reduced {
+        /// Which, and what it came to.
+        step: Step,
+    },
+    /// `.tgs`: the result is being compressed.
+    Packing,
+    /// Something worth saying that doesn't stop the conversion: as options
+    /// that were adjusted or ignored, or what reading the art found; or
+    /// about more than one, as `watch` says of folders it can't read.
+    Warning {
+        /// What, in English.
+        message: String,
+    },
+    /// The result is written: what was made, as converting returns it.
+    Finished(Box<Outcome>),
+    /// A conversion, or the whole command, failed. Only printed by the
+    /// command line; the library returns errors instead.
+    Error(Failure),
+}
 
 /// A conversion of any format is about to make its result, which its
 /// `started` event says, the first of each conversion: what it makes of
