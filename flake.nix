@@ -1,5 +1,5 @@
 {
-  description = "Telegram video, image and animated stickers and emoji from videos, pictures and pixel art";
+  description = "Telegram video, image and animated stickers and emoji from videos, images or pixel art";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

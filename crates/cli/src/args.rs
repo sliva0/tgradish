@@ -100,7 +100,7 @@ const TGS: &str = "Animated stickers (TGS)";
 const ASEPRITE: &str = "Aseprite files";
 
 /// Telegram video, image and animated stickers and emoji from videos,
-/// pictures and pixel art.
+/// images or pixel art.
 ///
 /// Video stickers can run past Telegram's 3 seconds by spoofing the
 /// duration they say they last.

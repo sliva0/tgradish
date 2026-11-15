@@ -322,7 +322,7 @@ const GUI_LIBRARIES: [(&str, &str); 13] = [
 /// What tgradish is, as short as a package's summary has to be: the .deb's
 /// and .rpm's, and the AUR packages' `pkgdesc`. Where length is free, as in
 /// `crates/cli/Cargo.toml`, the sentence names the kinds of sticker too.
-const SUMMARY: &str = "Telegram stickers and emoji from videos, pictures and pixel art";
+const SUMMARY: &str = "Telegram stickers and emoji from videos, images or pixel art";
 
 /// Packs the release staged in `stage` as a .deb and an .rpm, with nfpm.
 /// Returns their paths.
@@ -593,15 +593,13 @@ mod tests {
         ] {
             assert!(read(path).lines().any(|found| found == line), "{path} lacks {line:?}");
         }
-        // the AUR asks for about 80 characters at most, which the prebuilt
-        // packages go a little over to say how they differ
-        for (package, note) in [
-            ("tgradish", ""),
-            ("tgradish-bin", " (prebuilt, uses system ffmpeg)"),
-            ("tgradish-static-bin", " (prebuilt, ffmpeg built in)"),
-        ] {
+        // the AUR asks for about 80 characters at most, within which the
+        // static build says it brings its own ffmpeg
+        for (package, note) in
+            [("tgradish", ""), ("tgradish-bin", ""), ("tgradish-static-bin", " (ffmpeg built-in)")]
+        {
             let described = format!("{SUMMARY}{note}");
-            assert!(described.len() <= 100, "{described:?} is too long for a pkgdesc");
+            assert!(described.len() <= 80, "{described:?} is too long for a pkgdesc");
             for (file, line) in [
                 ("PKGBUILD", format!("pkgdesc='{described}'")),
                 (".SRCINFO", format!("\tpkgdesc = {described}")),

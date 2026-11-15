@@ -3,7 +3,7 @@
 pkgname=tgradish
 pkgver=2.0.0
 pkgrel=1
-pkgdesc='Telegram stickers and emoji from videos, pictures and pixel art'
+pkgdesc='Telegram stickers and emoji from videos, images or pixel art'
 arch=(x86_64 aarch64)
 url='https://github.com/sliva0/tgradish'
 license=(MIT BSD-3-Clause)

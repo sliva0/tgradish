@@ -2,7 +2,7 @@
 name = "tgradish"
 # the one sentence saying what tgradish is: the packages, the flake and the
 # menu entry say the same, which an xtask test holds them to
-description = "Telegram video, image and animated stickers and emoji from videos, pictures and pixel art"
+description = "Telegram video, image and animated stickers and emoji from videos, images or pixel art"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
