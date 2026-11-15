@@ -86,6 +86,62 @@ fn empty_screenshots() {
     });
 }
 
+/// The settings of a video made into each format, in one column at the
+/// usual size and the smallest, and in two on a wide screen, scrolled down
+/// to them too, to see how they share the columns: to
+/// `$TGRADISH_SCREENSHOTS` as [`screenshots`] makes them. Needs ffmpeg.
+#[test]
+#[ignore]
+fn settings_screenshots() {
+    let out =
+        PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
+    crate::l10n::choose(None);
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::default();
+    config.gui.output_dir = Some(dir.path().join("out"));
+    config.ffmpeg.choice = FfmpegChoice::System;
+    let Some(clip) = video(dir.path(), "640x360") else { return };
+    let sizes = [
+        ("wide", egui::vec2(1280.0, 900.0)),
+        ("smallest", egui::vec2(crate::MIN_WIDTH, crate::MIN_HEIGHT)),
+        ("widest", egui::vec2(1920.0, 1080.0)),
+    ];
+    let formats = [(Format::Webp, "static"), (Format::Webm, "video"), (Format::Tgs, "animated")];
+    for ((size_name, size), (format, format_name)) in
+        sizes.into_iter().flat_map(|size| formats.map(|format| (size, format)))
+    {
+        let mut harness = window(config.clone(), size);
+        harness.state_mut().add(vec![clip.clone()]);
+        finish(&mut harness);
+        harness.state_mut().items[0].format = format;
+        finish(&mut harness);
+        for item in &mut harness.state_mut().items {
+            item.view.playing = false;
+        }
+        harness.event(egui::Event::PointerGone);
+        harness.run_steps(6);
+        let save = |harness: &mut Harness<App>, shot: &str| {
+            let image = harness.render().expect("rendering needs a GPU");
+            let name = format!("tgradish-settings-{format_name}-{size_name}{shot}.png");
+            image.save(out.join(name)).unwrap();
+        };
+        save(&mut harness, "");
+        // the settings, under the preview
+        let screen = harness.ctx.content_rect();
+        let under = egui::pos2(screen.center().x, screen.max.y - 120.0);
+        harness.event(egui::Event::PointerMoved(under));
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -2000.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        harness.event(egui::Event::PointerGone);
+        harness.run_steps(6);
+        save(&mut harness, "-scrolled");
+    }
+}
+
 /// The GUI without files, and its icon over the list: at the smallest
 /// size, a little larger and the usual one, at whole and fractional
 /// scales, in both themes.

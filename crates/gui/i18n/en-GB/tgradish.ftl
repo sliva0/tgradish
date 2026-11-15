@@ -452,6 +452,10 @@ preset-described = { $name }: { $description }
 ## Settings: the picture
 
 picture = Picture
+# For a static sticker, a section of its own beside Frame, of how the
+# picture becomes the result's size: Force into square, Scaling and
+# Integer scale, which are under Picture for the other formats.
+picture-size = Size
 # Shown in a setting's place until the file has been read.
 once-read = Shown once the input is read
 crop = Crop

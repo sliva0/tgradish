@@ -26,7 +26,7 @@ use crate::widgets::{self, Choice, note, segments};
 use advanced::advanced;
 use aseprite::aseprite;
 use commands::commands;
-use picture::picture;
+use picture::{picture, size};
 use tgs::{reading, tgs_quality};
 use time::{frame, time};
 use webm::webm_quality;
@@ -341,6 +341,9 @@ const BALANCE: f32 = 40.0;
 enum Part {
     Aseprite,
     Picture,
+    /// How a static picture fills the result, apart from the rest of the
+    /// picture's settings, which a WebM has under them.
+    Size,
     Time,
     Quality,
     Reading,
@@ -359,8 +362,9 @@ impl Part {
         match item.format {
             Format::Webm => parts.extend([Part::Quality, Part::Advanced]),
             Format::Tgs => parts.extend([Part::Quality, Part::Reading]),
-            // lossless, or lossy where only that fits: nothing to choose
-            Format::Webp => {}
+            // lossless, or lossy where only that fits: nothing to choose,
+            // and the picture's sizing apart, so two columns come out even
+            Format::Webp => parts.push(Part::Size),
         }
         parts
     }
@@ -369,6 +373,7 @@ impl Part {
         match (self, item.format) {
             (Part::Aseprite, _) => aseprite(ui, item),
             (Part::Picture, _) => picture(ui, item, context),
+            (Part::Size, _) => size(ui, item, context),
             (Part::Time, Format::Webp) => frame(ui, item, context.in_frames),
             (Part::Time, _) => time(ui, item, context),
             (Part::Quality, Format::Webm) => webm_quality(ui, item, context),
@@ -494,6 +499,50 @@ mod tests {
         harness.run_steps(3);
         assert_eq!(harness.state().items[0].choices.webm.integer_scale, None);
         harness.get(by().value("×2"));
+    }
+
+    #[test]
+    fn shares_a_static_stickers_settings_out_evenly() {
+        use egui_kittest::kittest::Queryable;
+        use tgradish_core::ffmpeg::FfmpegChoice;
+
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = crate::testing::video(dir.path(), "64x48") else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        // where a label first shows
+        let at = |harness: &egui_kittest::Harness<crate::app::App>, label: &str| {
+            harness.query_all_by_label(label).next().expect(label).rect().left_top()
+        };
+        for wide in [true, false] {
+            let size = if wide { [1920.0, 1400.0] } else { [crate::MIN_WIDTH, 1800.0] };
+            let mut harness = egui_kittest::Harness::builder().with_size(size).build_eframe(|cc| {
+                let app = crate::app::App::with(config.clone(), None, Presets::builtin());
+                app.style(&cc.egui_ctx);
+                app
+            });
+            harness.state_mut().add(vec![video.clone()]);
+            crate::testing::finish(&mut harness);
+            harness.state_mut().items[0].format = Format::Webp;
+            // the columns placed by how high their parts were drawn
+            harness.run_steps(4);
+            let (crop, frame) = (at(&harness, &fl!("crop")), at(&harness, &fl!("frame-at")));
+            let size = at(&harness, &fl!("picture-size"));
+            let rows = [fl!("square"), fl!("scaling"), fl!("integer-scale")];
+            let rows = rows.map(|label| at(&harness, &label));
+            if wide {
+                // the crop on the left; the frame, then the size, on the right
+                assert!(frame.x > crop.x + 200.0, "{crop:?} {frame:?}");
+                assert!(size.y > frame.y && (size.x - frame.x).abs() < 1.0, "{size:?}");
+            } else {
+                // one under another, in the order of the columns
+                assert!(crop.y < frame.y && frame.y < size.y, "{crop:?} {frame:?} {size:?}");
+                assert!((size.x - crop.x).abs() < 1.0, "{size:?} {crop:?}");
+            }
+            for row in rows {
+                assert!(row.y > size.y && (row.x - frame.x).abs() < 1.0, "{row:?} {frame:?}");
+            }
+        }
     }
 
     #[test]

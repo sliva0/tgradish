@@ -155,16 +155,34 @@ fn largest_scale(target: Target, used: (u32, u32)) -> IntegerScale {
     }
 }
 
+/// What the picture's settings go by: the input's size, what the preset
+/// sets, which the item's own values go over, everything a WebM or static
+/// conversion gets, and the integer scale fixed, if one is.
+struct Basis {
+    size: Option<(u32, u32)>,
+    base: Options,
+    effective: Options,
+    exact: Option<Exact>,
+}
+
+impl Basis {
+    fn of(item: &Item, context: &Context) -> Basis {
+        let (presets, config) = (context.presets, context.config);
+        let base = item.choices.webm_base(presets, config).unwrap_or_default();
+        let effective = item
+            .choices
+            .webm_options(presets, config)
+            .unwrap_or_else(|_| item.choices.webm.clone());
+        let exact = exact_of(&effective).filter(|_| item.format != Format::Tgs);
+        Basis { size: item.input_size(), base, effective, exact }
+    }
+}
+
 pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     widgets::section(ui, &fl!("picture"));
-    let size = item.input_size();
     let (presets, config) = (context.presets, context.config);
-    // what the preset sets, which the item's own values go over, and
-    // everything a WebM or static conversion gets
-    let base = item.choices.webm_base(presets, config).unwrap_or_default();
-    let effective =
-        item.choices.webm_options(presets, config).unwrap_or_else(|_| item.choices.webm.clone());
-    let exact = exact_of(&effective).filter(|_| item.format != Format::Tgs);
+    let basis = Basis::of(item, context);
+    let Basis { size, ref effective, exact, .. } = basis;
     // an integer scale holds the crop to the size it takes: this is where a
     // crop is kept to it, as the scale or the crop change, and the small
     // picture of the result counts on that from the next frame
@@ -187,53 +205,14 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     row(ui, &fl!("crop"), &fl!("crop", "hint"), Ok(()), |ui| crop_box(ui, item, size, exact));
 
     row(ui, &fl!("aspect-ratio"), &fl!("aspect-ratio", "hint"), Ok(()), |ui| {
-        aspect_ratio(ui, item, size, exact, &effective, tgs_base)
+        aspect_ratio(ui, item, size, exact, effective, tgs_base)
     });
 
     match item.format {
-        Format::Webm | Format::Webp => {
-            let target = item.choices.target;
-            row(ui, &fl!("square"), &fl!("square", "hint"), Ok(()), |ui| {
-                let squares = squares();
-                // cropping or stretching, which an integer scale sets aside:
-                // shown as what is made instead, and kept until changed
-                let default = picture::default_resize(target);
-                let made = |resize: Resize| match resize {
-                    Resize::Crop | Resize::Stretch if exact.is_some() => default,
-                    resize => resize,
-                };
-                let base = made(base.resize.unwrap_or(default));
-                let mut resize = item.choices.webm.resize.map(made);
-                let pick = |option| match option {
-                    Resize::Contain if target.requires_exact_size() => {
-                        Pick::No(fl!("square-off", "emoji"))
-                    }
-                    Resize::Crop | Resize::Stretch if exact.is_some() => {
-                        Pick::No(fl!("square-exact"))
-                    }
-                    _ => Pick::Yes,
-                };
-                if preset_picking(ui, &mut resize, base, &squares, pick) {
-                    item.choices.webm.resize = resize;
-                }
-                chosen_hint(ui, resize.unwrap_or(base), &squares);
-            });
-
-            row(ui, &fl!("scaling"), &fl!("scaling", "hint"), Ok(()), |ui| {
-                let scalings = scalings();
-                let preset = base.scaling_or_default();
-                preset_segments(ui, &mut item.choices.webm.scaling, preset, &scalings);
-                let scaling = item.choices.webm.scaling.unwrap_or(preset);
-                chosen_hint(ui, scaling, &scalings);
-            });
-            let integer = effective.scaling == Some(Scaling::Integer);
-            let only = fl!("integer-scale", "only");
-            let allowed = if integer { Ok(()) } else { Err(only.as_str()) };
-            let preset = base.integer_scale;
-            row(ui, &fl!("integer-scale"), &fl!("integer-scale", "hint"), allowed, |ui| {
-                integer_scale(ui, item, size, (integer, preset), &effective)
-            });
-        }
+        Format::Webm => sizing(ui, item, &basis),
+        // in a section of its own, beside the frame, as there is little
+        // else for a static sticker
+        Format::Webp => {}
         Format::Tgs => {
             let preset = item.choices.tgs_base(context.presets, context.config).ok();
             row(ui, &fl!("square"), &fl!("square", "tgs"), Ok(()), |ui| {
@@ -293,6 +272,55 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             });
         }
     }
+}
+
+/// How a WebM's or static picture fills the result: squared, and scaled
+/// how and by how much. Under the crop for a WebM; in a section of its own
+/// for a static sticker, beside the frame, as it has little else.
+pub(super) fn size(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
+    widgets::section(ui, &fl!("picture-size"));
+    sizing(ui, item, &Basis::of(item, context));
+}
+
+fn sizing(ui: &mut egui::Ui, item: &mut Item, basis: &Basis) {
+    let Basis { size, ref base, ref effective, exact } = *basis;
+    let target = item.choices.target;
+    row(ui, &fl!("square"), &fl!("square", "hint"), Ok(()), |ui| {
+        let squares = squares();
+        // cropping or stretching, which an integer scale sets aside:
+        // shown as what is made instead, and kept until changed
+        let default = picture::default_resize(target);
+        let made = |resize: Resize| match resize {
+            Resize::Crop | Resize::Stretch if exact.is_some() => default,
+            resize => resize,
+        };
+        let base = made(base.resize.unwrap_or(default));
+        let mut resize = item.choices.webm.resize.map(made);
+        let pick = |option| match option {
+            Resize::Contain if target.requires_exact_size() => Pick::No(fl!("square-off", "emoji")),
+            Resize::Crop | Resize::Stretch if exact.is_some() => Pick::No(fl!("square-exact")),
+            _ => Pick::Yes,
+        };
+        if preset_picking(ui, &mut resize, base, &squares, pick) {
+            item.choices.webm.resize = resize;
+        }
+        chosen_hint(ui, resize.unwrap_or(base), &squares);
+    });
+
+    row(ui, &fl!("scaling"), &fl!("scaling", "hint"), Ok(()), |ui| {
+        let scalings = scalings();
+        let preset = base.scaling_or_default();
+        preset_segments(ui, &mut item.choices.webm.scaling, preset, &scalings);
+        let scaling = item.choices.webm.scaling.unwrap_or(preset);
+        chosen_hint(ui, scaling, &scalings);
+    });
+    let integer = effective.scaling == Some(Scaling::Integer);
+    let only = fl!("integer-scale", "only");
+    let allowed = if integer { Ok(()) } else { Err(only.as_str()) };
+    let preset = base.integer_scale;
+    row(ui, &fl!("integer-scale"), &fl!("integer-scale", "hint"), allowed, |ui| {
+        integer_scale(ui, item, size, (integer, preset), effective)
+    });
 }
 
 /// Digits the crop's number fields have room for, at least: realistic
