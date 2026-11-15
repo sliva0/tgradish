@@ -284,7 +284,7 @@ pub(super) fn frame(ui: &mut egui::Ui, item: &mut Item, in_frames: bool) {
         let field = timeline::frame_field(&mut index, &frames, in_frames);
         if ui.add_sized(size, field).changed() {
             // where its frame starts, as the picture is made of it
-            item.choices.frame = (index > 0).then_some(frames.times[index]);
+            item.choices.frame = frames.start_of(index);
         }
         let index = frames.at(item.choices.frame.unwrap_or(0.0));
         // as it is dragged, its lines as they are

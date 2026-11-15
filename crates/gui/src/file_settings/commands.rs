@@ -35,20 +35,46 @@ fn code(ui: &mut egui::Ui, text: &str) {
 /// `args` as the shell commands are written for takes them: PowerShell on
 /// Windows, a POSIX shell elsewhere.
 fn shell_line<S: AsRef<str>>(args: &[S]) -> String {
-    let args: Vec<&str> = args.iter().map(AsRef::as_ref).collect();
-    if cfg!(windows) {
-        args.iter().map(|arg| powershell_word(arg)).collect::<Vec<_>>().join(" ")
-    } else {
-        shlex::try_join(args.iter().copied()).unwrap_or_else(|_| args.join(" "))
-    }
+    let word = if cfg!(windows) { powershell_word } else { posix_word };
+    args.iter().map(|arg| word(arg.as_ref())).collect::<Vec<_>>().join(" ")
+}
+
+/// `word` for a POSIX shell, bash and zsh: as it is when nothing in it is
+/// special to any of them, so a flag and its value read `--start=0.16`,
+/// else in single quotes, which keep everything but a single quote,
+/// written `'\''`. Not special are ASCII letters and digits, `+ , - . /
+/// : @ _ %`, and `=` but as the first character, where zsh takes `=name`
+/// for the path of the program `name`; the rest, as `~`, `#`, `!`, `{}`,
+/// globs and anything not ASCII, is quoted.
+fn posix_word(word: &str) -> String {
+    let plain = |c: char| c.is_ascii_alphanumeric() || "+,-./:=@_%".contains(c);
+    let bare = !word.is_empty() && !word.starts_with('=') && word.chars().all(plain);
+    if bare { word.to_owned() } else { format!("'{}'", word.replace('\'', r"'\''")) }
 }
 
 /// `word` for PowerShell: as it is when nothing in it is special, else in
-/// single quotes, which keep everything but a single quote, doubled.
+/// single quotes, which keep everything but a single quote, doubled; it
+/// takes the typographic ones, `‘ ’ ‚ ‛`, for single quotes too. A word
+/// that starts with a dash it reads as a parameter's name up to a dot,
+/// passing other programs what follows as a word of its own, as
+/// `-Dname.more` is: so one with a dot is quoted too.
 fn powershell_word(word: &str) -> String {
+    const QUOTES: [char; 5] = ['\'', '‘', '’', '‚', '‛'];
     let plain =
         !word.is_empty() && word.chars().all(|c| c.is_alphanumeric() || "-_./\\:=+".contains(c));
-    if plain { word.to_owned() } else { format!("'{}'", word.replace('\'', "''")) }
+    let split = word.starts_with('-') && word.contains('.');
+    if plain && !split {
+        return word.to_owned();
+    }
+    let mut quoted = String::from("'");
+    for c in word.chars() {
+        if QUOTES.contains(&c) {
+            quoted.push(c);
+        }
+        quoted.push(c);
+    }
+    quoted.push('\'');
+    quoted
 }
 
 /// The `tgradish` command that makes what the GUI makes of `item`.
@@ -316,9 +342,145 @@ mod tests {
     #[test]
     fn quotes_words_for_powershell() {
         assert_eq!(powershell_word("C:\\stickers\\pig.webm"), "C:\\stickers\\pig.webm");
+        assert_eq!(powershell_word("--format"), "--format");
+        assert_eq!(powershell_word("--crop=0,0,64,64"), "'--crop=0,0,64,64'");
         assert_eq!(powershell_word("my sticker"), "'my sticker'");
         assert_eq!(powershell_word("it's"), "'it''s'");
+        assert_eq!(powershell_word("it’s"), "'it’’s'");
         assert_eq!(powershell_word("a,b"), "'a,b'");
         assert_eq!(powershell_word(""), "''");
+        // a dot ends a parameter's name, and PowerShell splits it there
+        assert_eq!(powershell_word("--start=0.16"), "'--start=0.16'");
+        assert_eq!(powershell_word("pig.webm"), "pig.webm");
+    }
+
+    /// Words no shell may take for anything but themselves.
+    const NASTY: &[&str] = &[
+        "",
+        " ",
+        "'",
+        "''",
+        "\"",
+        "it's",
+        "a'b'c",
+        "\\",
+        "a\\'b",
+        "$HOME",
+        "${x}",
+        "$(echo no)",
+        "`echo no`",
+        "~",
+        "~/x",
+        "--x=~/x",
+        "a:~/x",
+        "#not a comment",
+        "a#b",
+        "!",
+        "!!",
+        "a!b",
+        "{a,b}",
+        "x{1..3}",
+        "*",
+        "?",
+        "[ab]",
+        "a*b",
+        "^x",
+        "=ls",
+        "=",
+        "==",
+        "a;b",
+        "a&b",
+        "a|b",
+        "a>b",
+        "a<b",
+        "(a)",
+        "a\tb",
+        "a\nb",
+        "-",
+        "--",
+        "-n",
+        "-e",
+        "%",
+        "%1",
+        "@",
+        "a=b=c",
+        "--title=-_-",
+        "--hide-layers=back, old",
+        "Стикеры/свинья.png",
+        "émoji 🐷.gif",
+    ];
+
+    #[test]
+    fn quotes_words_for_a_posix_shell() {
+        // what reads as plain, plain; the rest quoted
+        let line = shell_line(&[
+            "tgradish",
+            "convert",
+            "my stickers/pig.ase",
+            "--start=0.16",
+            "--length=0.48",
+            "--title=-_-",
+            "--crop=0,0,64,64",
+            "--hide-layers=back, old",
+            "--tag=it's",
+            "-o",
+            "out/100%.webm",
+            "a=b",
+        ]);
+        assert_eq!(
+            line,
+            "tgradish convert 'my stickers/pig.ase' --start=0.16 --length=0.48 --title=-_- \
+             --crop=0,0,64,64 '--hide-layers=back, old' '--tag=it'\\''s' -o out/100%.webm a=b"
+        );
+        for word in ["~", "~x", "#x", "{x}", "=x", "x y", "", "*", "é"] {
+            assert!(posix_word(word).starts_with('\''), "{word:?}");
+        }
+    }
+
+    #[test]
+    fn posix_words_read_back_as_themselves() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        // and with what is on in a shell typed into: history, as `!!`,
+        // which only lines read expand, and zsh's extended globs
+        let shells: [(&str, &[&str]); 6] = [
+            ("sh", &["-c"]),
+            ("bash", &["-c"]),
+            ("bash", &["-o", "history", "-o", "histexpand", "-s"]),
+            ("dash", &["-c"]),
+            ("zsh", &["-f", "-c"]),
+            ("zsh", &["-f", "-o", "extendedglob", "-o", "braceccl", "-c"]),
+        ];
+        let script = format!("printf '%s\\0' {}\n", shell_line(NASTY));
+        let mut ran = 0;
+        for (shell, flags) in shells {
+            let read_in = flags.last() == Some(&"-s");
+            let mut command = Command::new(shell);
+            command.args(flags).stdin(Stdio::piped()).stdout(Stdio::piped());
+            if !read_in {
+                command.arg(&script);
+            }
+            let Ok(mut child) = command.stderr(Stdio::null()).spawn() else { continue };
+            let mut stdin = child.stdin.take().unwrap();
+            if read_in {
+                stdin.write_all(script.as_bytes()).unwrap();
+            }
+            drop(stdin);
+            let output = child.wait_with_output().unwrap();
+            ran += 1;
+            assert!(output.status.success(), "{shell} {flags:?}: {script}");
+            let read: Vec<&str> = std::str::from_utf8(&output.stdout)
+                .unwrap()
+                .strip_suffix('\0')
+                .unwrap()
+                .split('\0')
+                .collect();
+            assert_eq!(read, NASTY, "{shell} {flags:?}");
+        }
+        // a POSIX system has at least its sh
+        if cfg!(unix) {
+            assert!(ran > 0);
+        }
     }
 }

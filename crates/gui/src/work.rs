@@ -172,7 +172,7 @@ impl App {
         };
         let message = Message::warning(fl!("ffmpeg-missing")).note(fl!("ffmpeg-missing", "note"));
         let actions = [Action::ChooseFfmpeg, Action::OpenSettings];
-        self.say(message.detail(why).actions(&actions).about(Subject::Ffmpeg));
+        self.say(message.reason(why).actions(&actions).about(Subject::Ffmpeg));
     }
 
     /// Reads more of the selected video once what is looked at stays put

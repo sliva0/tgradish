@@ -245,21 +245,22 @@ fn save(config: &mut Config, path: &Path) -> Result<String, String> {
         Ok(Some(kept)) => {
             Ok(fl!("saved-to", "kept", path = shown, kept = kept.display().to_string()))
         }
-        Err(error) => Err(fl!("not-saved", error = error)),
+        Err(error) => Err(fl!("not-saved", error = error.to_string())),
     }
 }
 
 /// Writes `config` to `path`, a file there that can't be read kept beside
 /// it first, and nothing written where it can't be. Gives where that file
 /// went, or why nothing was written.
-pub(crate) fn write(config: &mut Config, path: &Path) -> Result<Option<PathBuf>, String> {
+pub(crate) fn write(
+    config: &mut Config,
+    path: &Path,
+) -> Result<Option<PathBuf>, tgradish_core::Error> {
     let kept = match Config::load(path) {
-        Err(tgradish_core::Error::Config { .. }) => {
-            Some(crate::app::keep_aside(path).map_err(|err| err.to_string())?)
-        }
+        Err(tgradish_core::Error::Config { .. }) => Some(crate::app::keep_aside(path)?),
         _ => None,
     };
-    config.save(path).map_err(|err| err.to_string())?;
+    config.save(path)?;
     Ok(kept)
 }
 

@@ -137,7 +137,8 @@ impl App {
             }
             Ok(Some(Picked::OutputDir(dir))) => self.config.gui.output_dir = Some(dir),
             Ok(None) => {}
-            Err(message) => self.say(crate::banner::Message::warning(message)),
+            // what the task says is of a file shown, as "Reading it stopped"
+            Err(_) => self.say(crate::banner::Message::warning(fl!("pick-failed"))),
         }
     }
 

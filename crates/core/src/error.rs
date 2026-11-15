@@ -121,7 +121,7 @@ pub enum Error {
     Libav(String),
     /// Nothing on the clipboard could be read as an input, or saved as one.
     #[error("couldn't paste from the clipboard: {0}")]
-    Clipboard(String),
+    Clipboard(ClipboardError),
     /// A WebM's container couldn't be inspected or patched.
     #[error(transparent)]
     Webm(#[from] WebmError),
@@ -237,6 +237,22 @@ pub enum FfmpegMissing {
     /// A video was to be read, but no ffmpeg was given to read it.
     #[error("{} is a video, which ffmpeg reads", .0.display())]
     ForVideo(PathBuf),
+}
+
+/// Why nothing could be pasted, said to follow "couldn't paste from the
+/// clipboard: ", where "it" is the clipboard.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
+pub enum ClipboardError {
+    /// It holds nothing that can be an input.
+    #[error("it has no files, file paths or image")]
+    Empty,
+    /// It couldn't be read: what the system's clipboard said.
+    #[error("{0}")]
+    Unreadable(String),
+    /// The image on it couldn't be saved as a file: what the encoder said.
+    #[error("couldn't save the image: {0}")]
+    ImageUnsaved(String),
 }
 
 /// What the library's functions return.

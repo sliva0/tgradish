@@ -129,9 +129,9 @@ impl Inset {
     /// pixel, where there is room for twice it or more. `make` is told the
     /// most pixels along a side the picture shows with, which it needn't
     /// make more of. With `controls`, buttons on the label change its
-    /// `size`, one of [`INSET_SIZES`], where that would show it otherwise,
-    /// and dragging it or its label to another corner of `view` than its
-    /// `corner` moves it there.
+    /// `size`, one of [`INSET_SIZES`], to the nearest smaller or larger that
+    /// would show it otherwise, where there is one, and dragging it or its
+    /// label to another corner of `view` than its `corner` moves it there.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn show(
         &mut self,
@@ -289,27 +289,27 @@ impl Inset {
         row.spacing_mut().button_padding = vec2(0.0, 0.0);
         row.spacing_mut().interact_size = Vec2::splat(SIZE_BUTTON);
         let button = |text| egui::Button::new(text).min_size(vec2(SIZE_BUTTON, SIZE_BUTTON));
-        // only where the next size would show it otherwise: not past the
-        // ends, nor while it shows at its own size in either
+        // to the nearest size that shows it otherwise, past any that show it
+        // as this one does, as two that both show it at its own size: on
+        // only where there is one
         let label_height = boxed.y + LABEL_GAP;
         let scale_at = |size: usize| {
             scale_in(Vec2::splat(room_side(view, label_height, INSET_SIZES[size]).max(1.0)))
         };
-        let differs = |other: Option<usize>| {
-            other
-                .filter(|other| *other < INSET_SIZES.len())
-                .is_some_and(|other| (scale_at(other) - scale_at(size)).abs() > 1e-3)
-        };
-        let (less, more) = (differs(size.checked_sub(1)), differs(Some(size + 1)));
-        let smaller = widgets::named(row.add_enabled(less, button("−")), &fl!("inset-smaller"));
+        let otherwise = |other: &usize| (scale_at(*other) - scale_at(size)).abs() > 1e-3;
+        let less = (0..size).rev().find(otherwise);
+        let more = (size + 1..INSET_SIZES.len()).find(otherwise);
+        let smaller = row.add_enabled(less.is_some(), button("−"));
+        let smaller = widgets::named(smaller, &fl!("inset-smaller"));
         let smaller = smaller.on_disabled_hover_text(fl!("inset-smaller", "same"));
         if smaller.on_hover_text(fl!("inset-smaller")).clicked() {
-            change = Some(InsetChange::Size(size - 1));
+            change = less.map(InsetChange::Size);
         }
-        let larger = widgets::named(row.add_enabled(more, button("+")), &fl!("inset-larger"));
+        let larger = row.add_enabled(more.is_some(), button("+"));
+        let larger = widgets::named(larger, &fl!("inset-larger"));
         let larger = larger.on_disabled_hover_text(fl!("inset-larger", "same"));
         if larger.on_hover_text(fl!("inset-larger")).clicked() {
-            change = Some(InsetChange::Size(size + 1));
+            change = more.map(InsetChange::Size);
         }
         change
     }
@@ -658,20 +658,18 @@ mod tests {
             let room = split(view, (640, 360), label, INSET_SIZES[*size], Corner::BottomRight).1;
             let place = ((view, room, vec2(1.0, 1.0)), (Corner::BottomRight, *size, true));
             let red = |_| egui::ColorImage::filled([100, 100], Color32::RED);
-            inset.show(ui, place.0, place.1, 1, Some("100 × 100 px"), full, red);
+            let change = inset.show(ui, place.0, place.1, 1, Some("100 × 100 px"), full, red);
+            if let Some(InsetChange::Size(to)) = change {
+                *size = to;
+            }
         };
         let state = (Inset::default(), 0);
         let builder = egui_kittest::Harness::builder().with_size(vec2(1000.0, 700.0));
         let mut harness = builder.build_ui_state(show, state);
-        let enabled = |harness: &egui_kittest::Harness<'_, (Inset, usize)>| {
-            let on = |label: String| !harness.get_by_label(&label).accesskit_node().is_disabled();
-            (on(fl!("inset-smaller")), on(fl!("inset-larger")))
-        };
-        let mut found = Vec::new();
-        for size in 0..INSET_SIZES.len() {
-            harness.state_mut().1 = size;
-            harness.run_steps(2);
-            // the label as it is drawn
+        harness.run_steps(2);
+        // the size, how large the label says it shows, and which buttons
+        // are on, as drawn
+        let seen = |harness: &egui_kittest::Harness<'_, (Inset, usize)>| {
             let drawn: Vec<String> = harness
                 .output()
                 .shapes
@@ -685,17 +683,30 @@ mod tests {
             let shown = ["100%", "2×", "3×"]
                 .into_iter()
                 .find(|scale| drawn.iter().any(|text| text.starts_with(&label(scale))));
-            found.push((shown, enabled(&harness)));
+            let on = |label: String| !harness.get_by_label(&label).accesskit_node().is_disabled();
+            (harness.state().1, shown, (on(fl!("inset-smaller")), on(fl!("inset-larger"))))
+        };
+        // Larger pressed while it is on, from the smallest, then Smaller:
+        // each to the nearest size that shows it otherwise, past those that
+        // don't, to the largest and back
+        let mut found = vec![seen(&harness)];
+        for button in [fl!("inset-larger"), fl!("inset-smaller")] {
+            while !harness.get_by_label(&button).accesskit_node().is_disabled() {
+                harness.get_by_label(&button).click();
+                harness.run_steps(2);
+                found.push(seen(&harness));
+                assert!(found.len() < 10, "{found:?}");
+            }
         }
         let (whole, twice, thrice) = (Some("100%"), Some("2×"), Some("3×"));
         assert_eq!(
             found,
             [
-                (whole, (false, false)),
-                (whole, (false, true)),
-                (twice, (true, false)),
-                (twice, (false, true)),
-                (thrice, (true, false)),
+                (0, whole, (false, true)),
+                (2, twice, (true, true)),
+                (4, thrice, (true, false)),
+                (3, twice, (true, true)),
+                (1, whole, (false, true)),
             ]
         );
     }

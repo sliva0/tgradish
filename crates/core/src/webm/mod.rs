@@ -32,7 +32,10 @@ pub use options::{
     CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, DEFAULT_FAKE_DURATION, HIGHEST_BITRATE, MAX_ATTEMPTS,
     Options, in_effect, set_aside,
 };
-pub use plan::{Plan, default_fit_range, frame_count, plan, played_fps, read_from};
+pub use plan::{
+    CUT_LEEWAY, Plan, default_fit_range, drawn_cut, edge_leeway, frame_count, frame_edge, plan,
+    played_fps, read_from,
+};
 pub(crate) use plan::{encoded_length, estimate_bitrate};
 
 use std::collections::HashMap;
@@ -252,6 +255,9 @@ pub fn convert(
     // ffmpeg reads them from the file: not kept while it does
     drop(readable.take_drawn());
     let source = readable.probe(backend, cancel)?;
+    // cut where the frames drawn start and end, as meant
+    let cut = Request { options: readable.cut(&request.options), ..request.clone() };
+    let request = &cut;
     let (mut plan, warnings) = plan(request, source)?;
     plan.input = readable.path().to_path_buf();
     choose_auto_scaling(backend, &mut plan, &request.options, cancel)?;

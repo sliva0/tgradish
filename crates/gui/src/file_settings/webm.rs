@@ -287,6 +287,9 @@ pub(super) fn planned(
 ) -> Result<(webm::Request, webm::Plan), String> {
     let video = item.video.ready().ok_or_else(|| fl!("no-ffmpeg-commands", "unread"))?;
     let options = item.choices.webm_options(context.presets, context.config)?;
+    // pixel art drawn for ffmpeg cut where its frames are, as converting
+    // cuts it
+    let options = video.readable.cut(&options);
     let request = webm::Request {
         input: item.input(),
         output: context.output.clone(),

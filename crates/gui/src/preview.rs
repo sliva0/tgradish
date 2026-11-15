@@ -504,6 +504,7 @@ fn preview(
                     // in the input's seconds, which the tempo makes 3 of the
                     // result's
                     limit: telegram::MAX_SECONDS * tempo,
+                    past: timeline::PastLimit::of(item.format, webm, tgs),
                     frames: frames.as_deref(),
                     in_frames,
                 },

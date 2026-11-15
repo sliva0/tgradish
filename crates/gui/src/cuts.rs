@@ -2,7 +2,7 @@
 //! timeline shows and edits them and items keep them, written as the cuts
 //! converting reads.
 
-use tgradish_core::webm::read_from;
+use tgradish_core::webm::{edge_leeway, frame_edge, read_from};
 
 /// How a cut between frames is written, so converting keeps the frames
 /// meant, whatever rounding does to the number.
@@ -12,8 +12,10 @@ pub(crate) enum Cut {
     /// and counts them over the length: a cut is a hair before the frame
     /// it starts, and the length is the frames'.
     Video,
-    /// Normalising keeps every frame a cut overlaps: a cut is a hair
-    /// inside the frames it keeps.
+    /// Converting takes a cut near where pixel art's frames start or end
+    /// as there, normalised for a `.tgs` or drawn for ffmpeg: a cut is
+    /// where the frames start and the length theirs, each in as few digits
+    /// as are still that near.
     Art,
 }
 
@@ -55,12 +57,28 @@ impl Frames {
         self.times.len() - 1
     }
 
-    /// The frame shown at `time`.
+    /// The frame shown at `time`, or that starts a hair after it, as
+    /// converting takes a time written with few digits.
     pub(crate) fn at(&self, time: f64) -> usize {
-        self.times
-            .partition_point(|&start| start <= time + 1e-9)
-            .saturating_sub(1)
-            .min(self.count() - 1)
+        let shown = self.times.partition_point(|&start| start <= time).saturating_sub(1);
+        frame_edge(time, &self.times).unwrap_or(shown).min(self.count() - 1)
+    }
+
+    /// Where the frame `index` starts, as a picture made of it is cut:
+    /// none for the first.
+    pub(crate) fn start_of(&self, index: usize) -> Option<f64> {
+        (index > 0).then(|| self.written(self.times[index], index))
+    }
+
+    /// `seconds`, a time at the boundary `index` or a length to it, in as
+    /// few digits as converting still takes for it: pixel art's within a
+    /// tenth of how near it takes them, a video's as they are.
+    fn written(&self, seconds: f64, index: usize) -> f64 {
+        let within = match self.cut {
+            Cut::Video => 1e-9,
+            Cut::Art => edge_leeway(&self.times, index) / 10.0,
+        };
+        shortest(seconds, within)
     }
 
     /// The boundary between frames nearest `time`: 0 is before the first,
@@ -97,17 +115,34 @@ impl Frames {
         used: &mut Option<f64>,
     ) {
         let times = &self.times;
-        let (from, length) = match self.cut {
-            Cut::Video if first > 0 => {
-                (read_from(times[first], times[first - 1]), times[after] - times[first])
+        let (from, frames) = match self.cut {
+            _ if first == 0 => (0.0, times[after]),
+            Cut::Video => (
+                shortest(read_from(times[first], times[first - 1]), 1e-9),
+                times[after] - times[first],
+            ),
+            // to where the frames end, from where the cut is written
+            Cut::Art => {
+                let from = self.written(times[first], first);
+                (from, times[after] - from)
             }
-            Cut::Video => (0.0, times[after]),
-            Cut::Art if first > 0 => (times[first] + 1e-6, times[after] - times[first] - 2e-6),
-            Cut::Art => (0.0, times[after] - 1e-6),
         };
         *start = (first > 0).then_some(from);
-        *used = (after < self.count()).then_some(length);
+        *used = (after < self.count()).then(|| self.written(frames, after));
     }
+}
+
+/// `seconds` in the fewest decimals within `within` of it, as the number
+/// is written: 0.16 rather than 0.16000000000000003, or for a third of a
+/// second, 0.33333 where that is near enough.
+fn shortest(seconds: f64, within: f64) -> f64 {
+    (0..=12)
+        .map(|digits| {
+            let scale = 10f64.powi(digits);
+            (seconds * scale).round() / scale
+        })
+        .find(|written| (written - seconds).abs() <= within)
+        .unwrap_or(seconds)
 }
 
 /// The used part as `(start, end)`, and as the item stores it.
@@ -129,6 +164,9 @@ pub(crate) fn set_part(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+    use tgradish_core::tgradish_tgs::frames::{Animation, Frame};
+    use tgradish_core::tgradish_tgs::normalise::PixelFrame;
 
     #[test]
     fn finds_frames_and_the_boundaries_between_them() {
@@ -170,13 +208,18 @@ mod tests {
         video.set_part((0, 25), &mut start, &mut used);
         assert_eq!((start, used), (None, None));
 
-        // art keeps every frame a cut overlaps: cuts fall just inside
-        let art = Frames { times: vec![0.0, 0.1, 0.25, 0.4], cut: Cut::Art };
+        // art is cut where its frames start and end, as converting takes
+        // a cut near them, written as short as it is
+        let art = Frames { times: vec![0.0, 0.1, 0.1 + 0.06, 0.4], cut: Cut::Art };
         let (mut start, mut used) = (None, None);
         art.set_part((1, 2), &mut start, &mut used);
-        let end = start.unwrap() + used.unwrap();
-        assert!(start.unwrap() > 0.1 && end < 0.25, "{start:?} {used:?}");
+        assert_eq!((start, used), (Some(0.1), Some(0.06)));
         assert_eq!(art.part(0.4, start, used), (1, 2));
+        // as it was once written, a hair inside the frames, it is the same
+        assert_eq!(art.part(0.4, Some(0.100001), Some(0.059998)), (1, 2));
+        art.set_part((0, 2), &mut start, &mut used);
+        assert_eq!((start, used), (None, Some(0.16)));
+        assert_eq!((art.start_of(0), art.start_of(2)), (None, Some(0.16)));
 
         // frames of different lengths keep their own
         let uneven = Frames::starting(&[0.0, 0.1, 0.2, 0.7], 0.8, Cut::Video).unwrap();
@@ -186,5 +229,120 @@ mod tests {
         let used = used.unwrap();
         assert!(start > 0.1 && start < 0.2 && (used - 0.5).abs() < 1e-9, "{start} {used}");
         assert_eq!(uneven.part(0.8, Some(start), Some(used)), (2, 3));
+    }
+
+    /// Frames of one colour each, red from 10 up, lasting `seconds`, and
+    /// where they start as the GUI reads them, then where the last ends.
+    fn art(seconds: &[f64]) -> (Animation, Frames) {
+        let frames: Vec<Frame> = (0..seconds.len())
+            .map(|index| Frame {
+                rgba: vec![10 + index as u8, 0, 0, 255],
+                duration: Duration::from_secs_f64(seconds[index]),
+            })
+            .collect();
+        let mut times = vec![0.0];
+        for frame in &frames {
+            times.push(times.last().unwrap() + frame.duration.as_secs_f64());
+        }
+        (Animation::new(1, 1, frames).unwrap(), Frames { times, cut: Cut::Art })
+    }
+
+    /// Which frames of `animation` normalising for a `.tgs` keeps, by
+    /// their colour, and how many 60 fps frames each shows for, then how
+    /// many it drops as too short for one and joins: from
+    /// `start` for `length` seconds, as the command line reads them, or
+    /// else from the frame `exactly.0` up to the one before `exactly.1`.
+    fn kept(
+        animation: &Animation,
+        (start, length): (Option<f64>, Option<f64>),
+        exactly: Option<(usize, usize)>,
+    ) -> (Vec<(u8, u32)>, usize, usize) {
+        let options = tgradish_core::tgs::Options { start, length, ..Default::default() };
+        let mut normalise = options.sticker_options().unwrap().normalise;
+        if let Some((first, after)) = exactly {
+            let time = |index: usize| -> Duration {
+                animation.frames()[..index].iter().map(|frame| frame.duration).sum()
+            };
+            normalise.start = time(first);
+            normalise.length = Some(time(after) - time(first));
+        }
+        let (kept, report) =
+            tgradish_core::tgradish_tgs::normalise(animation.clone(), &normalise).unwrap();
+        let colour = |frame: &PixelFrame| kept.palette()[usize::from(frame.pixels[0])][0];
+        let frames = kept.frames().iter().map(|frame| (colour(frame), frame.ticks)).collect();
+        (frames, report.dropped_frames, report.merged_frames)
+    }
+
+    #[test]
+    fn art_cut_as_its_flags_say_keeps_the_frames_meant() {
+        // a third of a second, 33 ms and 16.67 ms frames among others, as
+        // frame folders and Aseprite files time them
+        let fixtures: [&[f64]; 4] = [
+            &[1.0 / 3.0; 5],
+            &[0.033, 0.017, 0.033, 0.1, 0.007, 0.033, 0.25],
+            &[1.0 / 60.0, 1.0 / 60.0, 1.0 / 12.0, 1.0 / 60.0, 1.0 / 12.0, 1.0 / 7.0],
+            &[0.08; 9],
+        ];
+        for seconds in fixtures {
+            let (animation, frames) = art(seconds);
+            let count = frames.count();
+            let total = frames.times[count];
+            for first in 0..count {
+                for after in first + 1..=count {
+                    let (mut start, mut length) = (None, None);
+                    frames.set_part((first, after), &mut start, &mut length);
+                    assert_eq!(frames.part(total, start, length), (first, after));
+                    // as the command line shows them and reads them back
+                    let shown = tgradish_core::options::flags(&tgradish_core::tgs::Options {
+                        start,
+                        length,
+                        ..Default::default()
+                    });
+                    let read = |name: &str| {
+                        let text = shown.iter().find_map(|flag| flag.strip_prefix(name))?;
+                        // written short: no float noise, at most 5 decimals
+                        let decimals =
+                            text.split_once('.').map_or(0, |(_, decimals)| decimals.len());
+                        assert!(decimals <= 5, "{shown:?}");
+                        let value: f64 = text.parse().unwrap();
+                        let key = &name[2..name.len() - 1];
+                        assert_eq!(tgradish_core::options::wrong_value(key, value), None);
+                        Some(value)
+                    };
+                    let (start, length) = (read("--start="), read("--length="));
+                    let what = format!("{seconds:?} {first}..{after}: {shown:?}");
+                    // normalised for a .tgs, the frames meant, each whole
+                    let whole = kept(&animation, (None, None), Some((first, after)));
+                    let colours: Vec<u8> = whole.0.iter().map(|&(colour, _)| colour).collect();
+                    let meant: Vec<u8> = (first..after).map(|index| 10 + index as u8).collect();
+                    // but those too short for a 60 fps frame
+                    assert!(colours.iter().all(|colour| meant.contains(colour)), "{what}");
+                    assert_eq!(kept(&animation, (start, length), None), whole, "{what}");
+                    // drawn for ffmpeg, read from a hair before the first,
+                    // for as long as the frames
+                    let options =
+                        tgradish_core::webm::Options { start, length, ..Default::default() };
+                    let cut = tgradish_core::webm::drawn_cut(&options, &frames.times);
+                    let times = &frames.times;
+                    let from = (first > 0).then(|| read_from(times[first], times[first - 1]));
+                    assert!(
+                        cut.start.zip(from).is_none_or(|(a, b)| (a - b).abs() < 1e-12),
+                        "{what}"
+                    );
+                    assert_eq!(cut.start.is_some(), first > 0, "{what}");
+                    let frames_length = times[after] - times[first];
+                    assert!(
+                        cut.length.is_none_or(|cut| (cut - frames_length).abs() < 1e-12),
+                        "{what}"
+                    );
+                    assert_eq!(cut.length.is_some(), after < count, "{what}");
+                }
+            }
+        }
+        // frames of whole milliseconds are cut at them
+        let (_, frames) = art(&[0.08; 9]);
+        let (mut start, mut length) = (None, None);
+        frames.set_part((2, 8), &mut start, &mut length);
+        assert_eq!((start, length), (Some(0.16), Some(0.48)));
     }
 }
