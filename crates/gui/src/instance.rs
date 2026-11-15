@@ -304,7 +304,7 @@ fn read_exact_by(
 /// How many GUIs are served at once at most, so one that keeps its
 /// connection open holds back no other, and many that do take no more
 /// than this; any beyond them are let go of unread.
-#[cfg_attr(not(unix), allow(dead_code))]
+#[cfg_attr(not(any(unix, windows)), allow(dead_code))]
 const AT_ONCE: usize = 4;
 /// How long a GUI is served from its connecting, to read its message,
 /// answer it and read that it leaves the files: a while longer than it
@@ -317,7 +317,7 @@ type Serve = dyn Fn(&mut dyn Link, Instant) + Send + Sync;
 
 /// Serves the GUIs that connect, each on a thread of its own, no more
 /// than [`AT_ONCE`] at once, and each by [`SERVING`] after it connected.
-#[cfg_attr(not(unix), allow(dead_code))]
+#[cfg_attr(not(any(unix, windows)), allow(dead_code))]
 struct Workers {
     serve: Box<Serve>,
     /// How many are being served.
@@ -325,7 +325,7 @@ struct Workers {
 }
 
 /// One GUI being served, which it no longer is as this goes.
-#[cfg_attr(not(unix), allow(dead_code))]
+#[cfg_attr(not(any(unix, windows)), allow(dead_code))]
 struct Busy(Arc<Workers>);
 
 impl Drop for Busy {
@@ -334,7 +334,7 @@ impl Drop for Busy {
     }
 }
 
-#[cfg_attr(not(unix), allow(dead_code))]
+#[cfg_attr(not(any(unix, windows)), allow(dead_code))]
 impl Workers {
     fn new(serve: impl Fn(&mut dyn Link, Instant) + Send + Sync + 'static) -> Arc<Workers> {
         Arc::new(Workers { serve: Box::new(serve), busy: 0.into() })
@@ -357,6 +357,13 @@ impl Workers {
             drop(link);
             drop(busy);
         });
+    }
+
+    /// Serves `link`, which connected just now, here, as where there is
+    /// nowhere else to wait for the next GUI on.
+    #[cfg(windows)]
+    fn serve_here(&self, link: &mut dyn Link) {
+        (self.serve)(link, Instant::now() + SERVING);
     }
 }
 
@@ -652,7 +659,7 @@ pub(crate) mod transport {
     use windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
     use windows_sys::core::BOOL;
 
-    use super::{AGAIN, Link, Refused};
+    use super::{AGAIN, Link, Refused, Workers};
 
     pub(crate) type Address = String;
 
@@ -676,8 +683,10 @@ pub(crate) mod transport {
 
     /// An instance of the pipe `name`, the first of them where `first`
     /// says, failing where another program has one.
-    fn create(name: &[u16], first: bool) -> std::io::Result<OwnedHandle> {
-        let open = PIPE_ACCESS_DUPLEX | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 };
+    fn create(name: &[u16], first: bool) -> std::io::Result<Pipe> {
+        let open = PIPE_ACCESS_DUPLEX
+            | FILE_FLAG_OVERLAPPED
+            | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 };
         let mode = PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS;
         // SAFETY: the name ends in a nul, and no security attributes give
         // the default ones
@@ -697,76 +706,56 @@ pub(crate) mod transport {
             return Err(std::io::Error::last_os_error());
         }
         // SAFETY: a handle just made, which nothing else owns
-        Ok(unsafe { OwnedHandle::from_raw_handle(handle as _) })
+        Pipe::new(unsafe { OwnedHandle::from_raw_handle(handle as _) })
     }
 
-    /// Waits for a GUI to connect to `pipe`.
-    fn accept(pipe: &OwnedHandle) -> std::io::Result<()> {
-        // SAFETY: the handle is open, and used synchronously
-        if unsafe { ConnectNamedPipe(pipe.as_raw_handle() as HANDLE, std::ptr::null_mut()) } != 0 {
-            return Ok(());
+    /// Waits for a GUI to connect to `pipe`, for as long as it takes.
+    fn accept(pipe: &Pipe) -> std::io::Result<()> {
+        let handle = pipe.raw();
+        // SAFETY: the handle is open, and `run` waits the operation out
+        let connected =
+            pipe.run(None, |overlapped| unsafe { ConnectNamedPipe(handle, overlapped) });
+        match connected {
+            // connected between the pipe's making and the wait
+            Err(err) if err.raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32) => Ok(()),
+            connected => connected.map(drop),
         }
-        let err = std::io::Error::last_os_error();
-        // connected between the pipe's making and the wait
-        if err.raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32) { Ok(()) } else { Err(err) }
     }
 
-    /// Listens on the pipe `name`, giving each connection to `serve` on a
-    /// thread of its own, as one that says nothing never ends.
+    /// Lets go of the GUI connected to `pipe`, so another may connect.
+    fn disconnect(pipe: &Pipe) {
+        // SAFETY: the handle is open, and nothing is pending on it
+        unsafe { DisconnectNamedPipe(pipe.raw()) };
+    }
+
+    /// Listens on the pipe `name`, giving each connection to `serve` as
+    /// [`Workers`] do, and closing it then.
     pub(crate) fn listen(
         name: &Address,
         serve: impl Fn(&mut dyn Link, Instant) + Send + Sync + 'static,
     ) -> std::io::Result<Bound> {
-        let serve = move |pipe: &mut std::fs::File| serve(pipe, Instant::now() + super::SERVING);
         let name = wide(name);
         let mut pipe = create(&name, true)?;
-        let serve = std::sync::Arc::new(serve);
+        let workers = Workers::new(serve);
         std::thread::Builder::new().name("other instances".into()).spawn(move || {
             loop {
                 if accept(&pipe).is_err() {
                     // as when one connected and left already
-                    // SAFETY: the handle is open
-                    unsafe { DisconnectNamedPipe(pipe.as_raw_handle() as HANDLE) };
+                    disconnect(&pipe);
                     std::thread::sleep(AGAIN);
                     continue;
                 }
                 // the next instance before this one is let go of, so there
                 // is always one
                 let Ok(next) = create(&name, false) else {
-                    let mut connected = std::fs::File::from(pipe);
-                    answer(&mut connected, &*serve);
-                    pipe = connected.into();
-                    // SAFETY: the handle is open
-                    unsafe { DisconnectNamedPipe(pipe.as_raw_handle() as HANDLE) };
+                    workers.serve_here(&mut pipe);
+                    disconnect(&pipe);
                     continue;
                 };
-                let mut connected = std::fs::File::from(std::mem::replace(&mut pipe, next));
-                let serve = serve.clone();
-                let _ = std::thread::Builder::new()
-                    .name("other instance".into())
-                    .spawn(move || answer(&mut connected, &*serve));
+                workers.take(std::mem::replace(&mut pipe, next));
             }
         })?;
         Ok(Bound)
-    }
-
-    /// Has `serve` read and answer the GUI connected to `pipe`, and waits
-    /// for that GUI to read the answer, which closing the pipe would
-    /// otherwise take from it.
-    fn answer(pipe: &mut std::fs::File, serve: &dyn Fn(&mut std::fs::File)) {
-        serve(pipe);
-        let _ = pipe.sync_all();
-    }
-
-    /// A pipe used synchronously, which waits as long as it takes.
-    impl Link for std::fs::File {
-        fn read_by(&mut self, buf: &mut [u8], _: Instant) -> std::io::Result<usize> {
-            std::io::Read::read(self, buf)
-        }
-
-        fn write_by(&mut self, buf: &[u8], _: Instant) -> std::io::Result<usize> {
-            std::io::Write::write(self, buf)
-        }
     }
 
     /// An end of a pipe opened for overlapped I/O, which is waited for as
@@ -779,7 +768,7 @@ pub(crate) mod transport {
 
     impl Pipe {
         /// The end `handle`, which was opened for overlapped I/O.
-        pub(crate) fn new(handle: OwnedHandle) -> std::io::Result<Pipe> {
+        fn new(handle: OwnedHandle) -> std::io::Result<Pipe> {
             // SAFETY: no attributes or name give an event of the process's
             // own, reset by hand
             let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
@@ -798,7 +787,7 @@ pub(crate) mod transport {
         /// Runs `start` with what it starts an operation with, and waits
         /// for that until `deadline`, or as long as it takes where there
         /// is none, cancelling it then: what it transferred.
-        pub(crate) fn run(
+        fn run(
             &self,
             deadline: Option<Instant>,
             start: impl FnOnce(*mut OVERLAPPED) -> BOOL,
@@ -1130,7 +1119,6 @@ mod tests {
         assert!(trickled < ANSWER * 2, "{trickled:?}");
     }
 
-    #[cfg(unix)]
     #[test]
     fn lets_go_of_more_than_it_serves_at_once_and_of_those_in_time() {
         let dir = tempfile::tempdir().unwrap();
@@ -1145,6 +1133,54 @@ mod tests {
         assert!(answer(&mut connect()).is_empty());
         assert!(started.elapsed() < ANSWER / 2, "{:?}", started.elapsed());
         // and once their time is up, they go, and the next is served
+        for mut link in silent {
+            assert!(answer(&mut link).is_empty());
+        }
+        assert!(started.elapsed() < SERVING + ANSWER / 2, "{:?}", started.elapsed());
+        let request = files(dir.path());
+        assert!(matches!(start(path, &request), Start::HandedOver));
+        assert_eq!(handed(&listener)[0].files, request.files);
+    }
+
+    #[test]
+    fn gives_up_waiting_by_the_deadline_and_goes_on_as_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = session(dir.path());
+        let (_store, listener) = first(&path);
+        let address = transport::address(&path).unwrap();
+        let mut link = transport::connect(&address, Instant::now() + ANSWER).unwrap();
+        // the GUI says nothing before it has a message
+        let started = Instant::now();
+        let read = link.read_by(&mut [0; 1], started + ANSWER / 5);
+        assert_eq!(read.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+        let waited = started.elapsed();
+        assert!(waited >= ANSWER / 6 && waited < ANSWER / 2, "{waited:?}");
+        // and what is said then is answered as ever
+        let deadline = Instant::now() + ANSWER / 2;
+        let request = files(dir.path());
+        write_all_by(&mut link, &request.encode().unwrap(), deadline).unwrap();
+        let mut answer = [0; ACCEPTED.len()];
+        read_exact_by(&mut link, &mut answer, deadline).unwrap();
+        assert_eq!(answer, ACCEPTED);
+        write_all_by(&mut link, CONFIRMED, deadline).unwrap();
+        assert_eq!(handed(&listener)[0].files, request.files);
+    }
+
+    // a pipe's worker, unlike a socket's, waits on overlapped I/O, which
+    // only Windows has
+    #[cfg(windows)]
+    #[test]
+    fn lets_go_of_a_pipe_that_says_nothing_in_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = session(dir.path());
+        let (_store, listener) = first(&path);
+        let address = transport::address(&path).unwrap();
+        // many more that say nothing than are served at once, which are all
+        // let go of by the time those served are, none kept for good
+        let started = Instant::now();
+        let silent: Vec<_> = (0..AT_ONCE * 3)
+            .map(|_| transport::connect(&address, Instant::now() + ANSWER).unwrap())
+            .collect();
         for mut link in silent {
             assert!(answer(&mut link).is_empty());
         }
