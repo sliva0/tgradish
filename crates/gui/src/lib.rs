@@ -144,7 +144,8 @@ static OPEN: std::sync::OnceLock<egui::Context> = std::sync::OnceLock::new();
 /// Closes the window, from any thread, as closing it does: conversions
 /// stop, taking their temporary files and ffmpeg with them, the session
 /// is kept, and [`run`] returns. For a signal to end, as SIGTERM when the
-/// session ends or SIGHUP when the terminal it was started from closes.
+/// session ends, SIGHUP when the terminal it was started from closes, or
+/// Ctrl-C there.
 /// Asked before the window opens, it closes as it opens.
 pub fn close() {
     CLOSING.store(true, std::sync::atomic::Ordering::SeqCst);

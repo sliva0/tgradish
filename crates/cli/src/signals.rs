@@ -4,11 +4,14 @@
 //! temporary files and a result cut short go as when cancelled. Then
 //! tgradish ends by the signal itself, as whoever sent it expects to see:
 //! a shell says "Terminated", and a service manager counts it a clean
-//! stop. Ctrl-C, SIGINT, is ctrlc's, see `main.rs`.
+//! stop. Ctrl-C, SIGINT, is ctrlc's in other commands, see `main.rs`; the
+//! GUI, where it has no other meaning, takes it here as the other two,
+//! closing as its window closes, and ends by it, as a shell expects of a
+//! program Ctrl-C ended: a script running it stops there.
 //!
-//! ctrlc can't say which signal it caught, so these two have a handler
-//! of their own which, as ctrlc's, only notes the signal and wakes a
-//! thread, here by a pipe; the thread does the rest.
+//! ctrlc can't say which signal it caught, so these have a handler of
+//! their own which, as ctrlc's, only notes the signal and wakes a thread,
+//! here by a pipe; the thread does the rest.
 
 #![allow(unsafe_code)]
 
@@ -32,14 +35,19 @@ static WAKE: AtomicI32 = AtomicI32::new(-1);
 /// something stuck takes longer, which a signal to end must not wait for.
 const AT_MOST: Duration = Duration::from_secs(10);
 
-/// Takes SIGTERM and SIGHUP from now on, calling `stop` on a thread of
+/// Takes SIGTERM and SIGHUP from now on, and SIGINT too where `interrupt`,
+/// as the GUI does, calling `stop` on a thread of
 /// its own as the first comes, to stop what is under way: after which
 /// whoever waits for it ends the program with [`end_by_received`], or the
 /// thread does, after [`AT_MOST`]. Nothing is written to stdout or stderr
 /// from then on: on SIGHUP the terminal may be gone, which writes would
 /// fail at, and the signal says why it ended. A signal ignored as the
-/// program started, as `nohup` ignores SIGHUP, stays ignored.
-pub fn on_termination(stop: impl FnOnce() + Send + 'static) -> std::io::Result<()> {
+/// program started, as `nohup` ignores SIGHUP and a shell SIGINT for what
+/// a script runs in the background, stays ignored.
+pub fn on_termination(
+    interrupt: bool,
+    stop: impl FnOnce() + Send + 'static,
+) -> std::io::Result<()> {
     let (mut reader, writer) = std::io::pipe()?;
     WAKE.store(writer.into_raw_fd(), Ordering::SeqCst);
     std::thread::Builder::new().name("termination".into()).spawn(move || {
@@ -53,7 +61,8 @@ pub fn on_termination(stop: impl FnOnce() + Send + 'static) -> std::io::Result<(
         end_by_received();
     })?;
     let action = SigAction::new(SigHandler::Handler(handle), SaFlags::SA_RESTART, SigSet::empty());
-    for signal in [Signal::SIGTERM, Signal::SIGHUP] {
+    let interrupt = interrupt.then_some(Signal::SIGINT);
+    for signal in [Signal::SIGTERM, Signal::SIGHUP].into_iter().chain(interrupt) {
         // SAFETY: `handle` does only what a signal handler may
         let before = unsafe { nix::sys::signal::sigaction(signal, &action) }?;
         if matches!(before.handler(), SigHandler::SigIgn) {
@@ -67,7 +76,8 @@ pub fn on_termination(stop: impl FnOnce() + Send + 'static) -> std::io::Result<(
 /// Notes the signal, and wakes the thread: async-signal-safe, as it
 /// touches atomics and write(2) alone, and errno as it found it. Only the
 /// first signal wakes it, as a second is asking for the same, which a
-/// terminal closing may send HUP twice for; so one byte at most is ever
+/// terminal closing may send HUP twice for, and Ctrl-C pressed again
+/// while the GUI closes cuts no shorter; so one byte at most is ever
 /// written, and the write never waits on a full pipe.
 extern "C" fn handle(signal: nix::libc::c_int) {
     if RECEIVED.compare_exchange(0, signal, Ordering::SeqCst, Ordering::SeqCst).is_err() {

@@ -330,7 +330,7 @@ impl Command {
         }
     }
 
-    /// Whether it opens the GUI, which takes Ctrl-C as any program does
+    /// Whether it opens the GUI, which takes Ctrl-C by closing its window,
     /// and sets the front-end written into its stickers itself.
     pub fn is_gui(&self) -> bool {
         #[cfg(feature = "gui")]

@@ -406,7 +406,8 @@ fn run(cli: Cli) -> Result<()> {
     let config_path = config_file.as_ref().map(|file| file.path.clone());
 
     let cancel = CANCEL.get_or_init(CancelToken::new).clone();
-    // the GUI never reads the token, so Ctrl-C there ends it as usual
+    // the GUI never reads the token, and takes Ctrl-C as it takes SIGTERM,
+    // closing, see stop_on_termination
     if !cli.command.is_gui() {
         // convert's first Ctrl-C keeps the best WebM encode so far, where
         // one fits. ffmpeg, in the terminal's process group, gets Ctrl-C
@@ -479,10 +480,11 @@ fn run(cli: Cli) -> Result<()> {
 
 /// Takes SIGTERM and SIGHUP as a plain cancel, see [`signals`]: of
 /// `cancel`, the command's token, or else by closing the GUI, as closing
-/// its window does. `main` ends by the signal once it has stopped.
+/// its window does, which takes Ctrl-C so too. `main` ends by the signal
+/// once it has stopped.
 #[cfg(unix)]
 fn stop_on_termination(cancel: Option<CancelToken>) -> std::io::Result<()> {
-    signals::on_termination(move || match cancel {
+    signals::on_termination(cancel.is_none(), move || match cancel {
         Some(cancel) => cancel.cancel(),
         #[cfg(feature = "gui")]
         None => tgradish_gui::close(),
