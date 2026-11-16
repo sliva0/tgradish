@@ -4,7 +4,7 @@ What changed in each release of tgradish, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - Unreleased
+## [2.0.0] - 2026-11-16
 
 tgradish rewritten in Rust: one program, with a GUI and a command line,
 that makes every kind of Telegram sticker and emoji.
