@@ -5,7 +5,7 @@ use std::io::Write;
 
 use super::Sprite;
 use super::blend::Colour;
-use crate::{Animation, DecodeOptions, Limits, Result};
+use crate::frames::{Animation, DecodeOptions, Limits, Result};
 
 pub(super) const RED: Colour = [255, 0, 0, 255];
 pub(super) const GREEN: Colour = [0, 255, 0, 255];

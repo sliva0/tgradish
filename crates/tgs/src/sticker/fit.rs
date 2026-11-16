@@ -1,7 +1,7 @@
 //! Fitting a sticker to the limit: reductions chosen by estimates of
 //! their size, and those estimates measured against the real encoder.
 
-use tgradish_frames::Animation;
+use crate::frames::Animation;
 
 use super::{
     Cancelled, Options, Progress, Rendered, Step, pack, parallel, render, share_of_limits, workers,
@@ -326,7 +326,7 @@ pub(super) fn likely_scale(
 /// normalising finds it.
 pub(super) fn normalise_likely_scale(anim: &PixelAnim) -> Option<u32> {
     let rgba: Vec<_> = (0..anim.frames().len())
-        .map(|frame| tgradish_frames::Frame {
+        .map(|frame| crate::frames::Frame {
             rgba: anim.rgba(frame),
             duration: std::time::Duration::from_millis(100),
         })

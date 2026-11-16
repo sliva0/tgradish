@@ -52,7 +52,6 @@ rustPlatform.buildRustPackage {
 
   cargoBuildFlags = [ "--package=tgradish" ];
   cargoTestFlags = [
-    "--package=tgradish-frames"
     "--package=tgradish-tgs"
     "--package=tgradish-core"
     "--package=tgradish"

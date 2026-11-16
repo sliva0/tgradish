@@ -3907,16 +3907,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tgradish-frames"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "image",
- "tgradish-corpus",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "tgradish-gui"
 version = "2.0.0"
 dependencies = [
@@ -3958,11 +3948,11 @@ name = "tgradish-tgs"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "image",
  "schemars",
  "serde",
  "serde_json",
  "tgradish-corpus",
- "tgradish-frames",
  "thiserror 2.0.21",
  "zopfli",
 ]

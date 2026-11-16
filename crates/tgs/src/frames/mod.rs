@@ -7,7 +7,7 @@
 //! by [`Limits`], so hostile files fail rather than exhaust memory.
 //!
 //! ```
-//! use tgradish_frames::{DEFAULT_FRAME_DURATION, DecodeOptions, Limits, decode};
+//! use tgradish_tgs::frames::{DEFAULT_FRAME_DURATION, DecodeOptions, Limits, decode};
 //!
 //! // a GIF of one black pixel
 //! let gif = b"GIF89a\x01\0\x01\0\x80\0\0\0\0\0\xff\xff\xff,\0\0\0\0\x01\0\x01\0\0\x02\x02D\x01\0;";
@@ -16,14 +16,11 @@
 //! // a frame that says nothing of its time shows for the default
 //! assert_eq!(animation.duration(), DEFAULT_FRAME_DURATION);
 //! assert_eq!(animation.pixel(0, 0, 0), Some([0, 0, 0, 255]));
-//! # Ok::<(), tgradish_frames::Error>(())
+//! # Ok::<(), tgradish_tgs::frames::Error>(())
 //! ```
 //!
 //! Aseprite files can be read for their tags and layers first, with
 //! [`aseprite::Sprite`]; [`DecodeOptions`] picks among them.
-
-#![warn(missing_docs)]
-#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::fmt;
 use std::time::Duration;

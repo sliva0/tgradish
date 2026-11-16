@@ -972,7 +972,7 @@ impl Sticker {
 
 #[cfg(test)]
 mod tests {
-    use tgradish_frames::{Animation, DecodeOptions, Limits, decode};
+    use crate::frames::{Animation, DecodeOptions, Limits, decode};
 
     use super::*;
     use crate::encode::{Effort, Settings, painter};

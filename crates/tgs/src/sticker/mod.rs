@@ -4,8 +4,8 @@
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
 
+use crate::frames::Animation;
 use serde::{Deserialize, Serialize};
-use tgradish_frames::Animation;
 
 use crate::check::{self, Issue, Severity};
 use crate::encode::{Effort, Settings, painter};
@@ -520,7 +520,7 @@ pub fn zopfli_iterations(effort: Effort) -> u64 {
 mod tests {
     use std::time::Duration;
 
-    use tgradish_frames::Frame;
+    use crate::frames::Frame;
 
     use super::fit::{Calibration, normalise_likely_scale};
     use super::*;
@@ -578,7 +578,7 @@ mod tests {
         {
             let file = files.iter().find(|file| file.name == name).unwrap();
             let input =
-                tgradish_frames::decode(&file.bytes, &Default::default(), &Default::default())
+                crate::frames::decode(&file.bytes, &Default::default(), &Default::default())
                     .unwrap();
             let made = |threads: Option<usize>| {
                 let threads = threads.and_then(NonZeroUsize::new);
@@ -664,8 +664,7 @@ mod tests {
     fn stops_inside_an_encode() {
         let walker = tgradish_corpus::files().into_iter().find(|f| f.name == "walker.gif").unwrap();
         let input =
-            tgradish_frames::decode(&walker.bytes, &Default::default(), &Default::default())
-                .unwrap();
+            crate::frames::decode(&walker.bytes, &Default::default(), &Default::default()).unwrap();
         let (anim, _) = normalise(input.clone(), &normalise::Options::default()).unwrap();
         // between colours, whatever the effort
         let best = Settings { effort: Effort::Best, ..Settings::default() };
@@ -695,7 +694,7 @@ mod tests {
         let forced = normalise::Options { pixel_scale: Some(2), ..Default::default() };
         for file in tgradish_corpus::files() {
             let input =
-                tgradish_frames::decode(&file.bytes, &Default::default(), &Default::default())
+                crate::frames::decode(&file.bytes, &Default::default(), &Default::default())
                     .unwrap();
             for options in [&normalise::Options::default(), &crop, &canvas, &forced] {
                 let (anim, report) = normalise(input.clone(), options).unwrap();

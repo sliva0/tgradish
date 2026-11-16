@@ -60,7 +60,7 @@ pub fn runs(anim: &PixelAnim) -> Scene {
 /// other tests of it, which can't see the painter without `internals`.
 #[cfg(test)]
 mod tests {
-    use tgradish_frames::{DecodeOptions, Limits, decode};
+    use crate::frames::{DecodeOptions, Limits, decode};
 
     use super::*;
     use crate::check::{Severity, check};

@@ -22,7 +22,7 @@ use blend::Colour;
 use chunks::{read_layer, read_old_palette, read_palette, read_tags, read_user_colour};
 use read::{Reader, budget, error, kept, spend};
 
-use crate::{
+use crate::frames::{
     Animation, DEFAULT_FRAME_DURATION, DecodeOptions, Error, Frame, Limits, Oversize, Result, check,
 };
 
@@ -196,7 +196,7 @@ struct Tileset {
 }
 
 /// A parsed Aseprite file, from which animations of its tags and layers
-/// are drawn. [`decode`](crate::decode) reads one and draws it at once;
+/// are drawn. [`decode`](crate::frames::decode) reads one and draws it at once;
 /// reading it here first lists its tags and layers to choose from.
 #[derive(Debug, Clone)]
 pub struct Sprite {
@@ -653,7 +653,7 @@ impl Sprite {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aseprite::testfile::*;
+    use crate::frames::aseprite::testfile::*;
 
     #[test]
     fn plays_tags_in_order() {

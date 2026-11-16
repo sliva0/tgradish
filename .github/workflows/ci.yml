@@ -68,7 +68,7 @@ jobs:
       # the libraries packaged as crates.io would get them, and built from
       # those packages, each against the others', in the order they depend
       # on each other
-      - run: cargo publish --dry-run --locked -p tgradish-frames -p tgradish-tgs -p tgradish-core
+      - run: cargo publish --dry-run --locked -p tgradish-tgs -p tgradish-core
         if: runner.os == 'Linux'
 
       # binaries carry the licences of their crates; they must list today's
@@ -153,7 +153,7 @@ jobs:
           --features rlottie --locked -- -D warnings
       - run: cargo test --manifest-path crates/tgs-lab/Cargo.toml --features rlottie
 
-  # the libraries a web page can run, with no files, processes or threads
+  # the library a web page can run, with no files, processes or threads
   wasm:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -161,4 +161,4 @@ jobs:
       - uses: actions/checkout@v7
       - run: rustup target add wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo check -p tgradish-frames -p tgradish-tgs --target wasm32-unknown-unknown --locked
+      - run: cargo check -p tgradish-tgs --target wasm32-unknown-unknown --locked

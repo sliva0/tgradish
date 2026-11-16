@@ -13,7 +13,7 @@ use image::codecs::webp::WebPDecoder;
 use image::error::LimitErrorKind;
 use image::{AnimationDecoder, DynamicImage, Frames, ImageDecoder, ImageError};
 
-use crate::{
+use crate::frames::{
     Animation, Cancelled, DEFAULT_FRAME_DURATION, Error, Format, Frame, Limits, Oversize, Result,
     check,
 };
@@ -147,7 +147,7 @@ mod tests {
     use tgradish_corpus::{Canvas, Sprite, encode};
 
     use super::*;
-    use crate::DecodeOptions;
+    use crate::frames::DecodeOptions;
 
     /// A sprite of 2x2 frames, each of another colour, shown for `delays`
     /// milliseconds.
@@ -169,8 +169,12 @@ mod tests {
 
     /// How long each frame of a decoded file shows, in milliseconds.
     fn delays(bytes: &[u8]) -> Vec<u128> {
-        let animation =
-            crate::decode(bytes, &DecodeOptions::default(), &crate::Limits::default()).unwrap();
+        let animation = crate::frames::decode(
+            bytes,
+            &DecodeOptions::default(),
+            &crate::frames::Limits::default(),
+        )
+        .unwrap();
         animation.frames().iter().map(|frame| frame.duration.as_millis()).collect()
     }
 

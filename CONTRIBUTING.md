@@ -4,8 +4,7 @@
 
 | Crate | What it holds |
 | --- | --- |
-| `crates/frames` (`tgradish-frames`) | Reads pictures, animations and Aseprite files into RGBA frames with durations. |
-| `crates/tgs` (`tgradish-tgs`) | Makes `.tgs` stickers from pixel art, and checks any `.tgs` against Telegram's limits. |
+| `crates/tgs` (`tgradish-tgs`) | Makes `.tgs` stickers from pixel art, and checks any `.tgs` against Telegram's limits. Its `frames` module reads pictures, animations and Aseprite files into RGBA frames with durations. |
 | `crates/core` (`tgradish-core`) | What the command line and the GUI share: conversion to every format, ffmpeg, presets, the config file and `inspect`. |
 | `crates/gui` (`tgradish-gui`) | The GUI, made with egui. |
 | `crates/cli` (`tgradish`) | The binary: arguments and terminal output. It includes the GUI unless built with `--no-default-features`. |
@@ -81,9 +80,9 @@ GPL parts.
    - set it in `Cargo.toml`, under `[workspace.package]` and for
      `tgradish-core` and `tgradish-gui` under `[workspace.dependencies]`,
      and as `pkgver` in each `packaging/aur/*/PKGBUILD`;
-   - `tgradish-frames` and `tgradish-tgs` have versions of their own:
-     raise one, in its manifest and under `[workspace.dependencies]`,
-     if it changed since it was last published;
+   - `tgradish-tgs` has a version of its own: raise it, in its manifest
+     and under `[workspace.dependencies]`, if it changed since it was last
+     published;
    - refresh both lock files: `cargo update --workspace`, and the same
      with `--manifest-path crates/tgs-lab/Cargo.toml`;
    - raise `RUSTUP_TOOLCHAIN` in `.github/workflows/release.yml` to the
@@ -100,10 +99,9 @@ GPL parts.
    .SRCINFO`, and push. The repository's own PKGBUILDs keep `SKIP` for
    checksums.
 5. `cargo publish -p` each crate whose version is new, in this order:
-   `tgradish-frames`, `tgradish-tgs`, `tgradish-core`, `tgradish-gui`,
-   `tgradish`. Before packaging again at a version already packaged,
-   delete the `tgradish-*` folders under cargo's `registry/src`, or the
-   old copies are used.
+   `tgradish-tgs`, `tgradish-core`, `tgradish-gui`, `tgradish`. Before
+   packaging again at a version already packaged, delete the `tgradish-*`
+   folders under cargo's `registry/src`, or the old copies are used.
 
 `rust-version` in `Cargo.toml` is the oldest Rust that builds every crate,
 which CI checks.

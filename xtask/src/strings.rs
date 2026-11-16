@@ -20,7 +20,7 @@ use crate::{cargo, run, workspace_root};
 const SOURCES: [(&str, &str); 3] = [
     ("crates/cli/src", "The command line"),
     ("crates/core/src", "tgradish-core, whose errors and warnings the command line prints"),
-    ("crates/tgs/src", "tgradish-tgs, whose checks of .tgs files both print"),
+    ("crates/tgs/src", "tgradish-tgs, whose decoding errors and checks of .tgs files both print"),
 ];
 
 /// Widest a picture shows on the page, in its pixels.

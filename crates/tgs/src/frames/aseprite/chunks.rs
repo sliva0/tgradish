@@ -4,7 +4,7 @@
 use super::blend::Colour;
 use super::read::{Reader, budget, error, inflate, kept, spend};
 use super::{Cel, Content, Direction, Layer, LayerKind, Sprite, Tag, Tileset};
-use crate::{Limits, Result};
+use crate::frames::{Limits, Result};
 
 impl Sprite {
     pub(super) fn read_cel(&self, chunk: &mut Reader, spent: &mut usize) -> Result<Cel> {
@@ -205,9 +205,9 @@ pub(super) fn read_old_palette(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aseprite::Sprite;
-    use crate::aseprite::testfile::*;
-    use crate::{Error, Limits};
+    use crate::frames::aseprite::Sprite;
+    use crate::frames::aseprite::testfile::*;
+    use crate::frames::{Error, Limits};
 
     #[test]
     fn reads_tag_colours() {

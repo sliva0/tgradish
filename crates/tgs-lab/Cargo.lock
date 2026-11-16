@@ -512,22 +512,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "tgradish-frames"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "image",
- "thiserror",
-]
-
-[[package]]
 name = "tgradish-tgs"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "image",
  "serde",
  "serde_json",
- "tgradish-frames",
  "thiserror",
  "zopfli",
 ]

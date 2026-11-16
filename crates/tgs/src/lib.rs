@@ -1,9 +1,11 @@
 //! Turns pixel art animations into Telegram animated stickers (`.tgs`,
-//! gzipped Lottie JSON), checks `.tgs` files, and previews its own. The
-//! art is read on its own pixel grid ([`normalise()`]),
-//! drawn as rectangles in layers, reduced until it fits Telegram's 64 KiB
-//! when that is allowed ([`reduce`]), packed, and checked against
-//! Telegram's limits ([`check`]). [`make`] does all of it:
+//! gzipped Lottie JSON), in pure Rust, checks `.tgs` files, and previews
+//! its own. The art is decoded from GIF, PNG and APNG, WebP, JPEG, BMP or
+//! Aseprite files, sprite sheets or image sequences ([`frames`]), read on
+//! its own pixel grid ([`normalise()`]), drawn as rectangles in layers,
+//! reduced until it fits Telegram's 64 KiB when that is allowed
+//! ([`reduce`]), packed, and checked against Telegram's limits
+//! ([`check`]). [`make`] does all but the decoding:
 //!
 //! ```
 //! use tgradish_tgs::frames::{DecodeOptions, Limits, decode};
@@ -23,6 +25,10 @@
 //! unpacks by [`file::unpack`]. What a sticker shows is drawn for previews
 //! by [`picture`], from the art it is made of or, the same, from the Lottie
 //! of a `.tgs` tgradish wrote.
+//!
+//! What decoding may allocate is bounded by [`frames::Limits`], so hostile
+//! files fail rather than exhaust memory. Aseprite files can be read for
+//! their tags and layers first, with [`frames::aseprite::Sprite`].
 //!
 //! Pure Rust that builds for `wasm32-unknown-unknown`: no ffmpeg,
 //! processes, filesystem or `tgradish-core`. The `threads` feature tries
@@ -56,6 +62,7 @@ macro_rules! internal {
 pub mod check;
 pub mod encode;
 pub mod file;
+pub mod frames;
 pub mod limits;
 // tgradish-core's own, and none of the API it promises
 #[doc(hidden)]
@@ -83,7 +90,6 @@ mod scene;
 
 pub use normalise::{PixelAnim, normalise};
 pub use sticker::{Options, Progress, Sticker, make};
-pub use tgradish_frames as frames;
 
 /// Why a sticker couldn't be made.
 #[derive(Debug, Clone, PartialEq, Error)]

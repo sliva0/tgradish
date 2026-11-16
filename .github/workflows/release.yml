@@ -404,7 +404,7 @@ jobs:
             pacman -R --noconfirm "$package"
           done
 
-      # the source package's check() runs the pure Rust crates' tests only:
+      # the source package's check() runs the pure Rust crate's tests only:
       # every crate's, ffmpeg's and the signals' among them, run here on
       # Arch, in the tree makepkg built, as its builder, as the tests of
       # unreadable files can't fail for root; every test binary, so that
@@ -417,7 +417,7 @@ jobs:
           version=$(sed -n 's/^pkgver=//p' packaging/aur/tgradish/PKGBUILD)
           cd "/tmp/aur/tgradish/src/tgradish-$version"
           runuser -u builder -- env TGRADISH_REQUIRE_FFMPEG=1 cargo test --locked --no-fail-fast \
-            -p tgradish-frames -p tgradish-tgs -p tgradish-core -p tgradish
+            -p tgradish-tgs -p tgradish-core -p tgradish
 
   # runs the Windows build on Windows
   test-windows:

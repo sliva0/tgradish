@@ -5,7 +5,7 @@ members = ["crates/*", "xtask"]
 exclude = ["crates/tgs-lab"]
 
 # the application's version, which core, the GUI and the command line
-# share; the two libraries, tgradish-frames and tgradish-tgs, have their own
+# share; the library, tgradish-tgs, has its own
 [workspace.package]
 version = "2.0.0"
 edition = "2024"
@@ -24,7 +24,6 @@ tgradish-core = { path = "crates/core", version = "=2.0.0" }
 # synthetic test art, the crates' dev-dependency: unpublished, so without
 # a version, which leaves it out of the packages cargo publishes
 tgradish-corpus = { path = "crates/corpus" }
-tgradish-frames = { path = "crates/frames", version = "=0.1.0" }
 tgradish-gui = { path = "crates/gui", version = "=2.0.0" }
 tgradish-tgs = { path = "crates/tgs", version = "=0.1.0" }
 

@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use tgradish_corpus::{File, Sprite, encode};
-use tgradish_frames::{
+use tgradish_tgs::frames::{
     Animation, DecodeOptions, Error, Limits, Sequence, Sheet, aseprite::Layers, decode, sequence,
     sprite_sheet,
 };
@@ -60,7 +60,8 @@ fn plays_aseprite_tags() {
     let idle = decode(&ase.bytes, &tagged, &Limits::default()).unwrap();
     assert_eq!(idle.frames().len(), 2);
     assert_frames(&idle, &ase.sprite, 0, "idle");
-    let sprite = tgradish_frames::aseprite::Sprite::read(&ase.bytes, &Limits::default()).unwrap();
+    let sprite =
+        tgradish_tgs::frames::aseprite::Sprite::read(&ase.bytes, &Limits::default()).unwrap();
     assert_eq!(sprite.tags()[0].colour, tgradish_corpus::encode::TAG_COLOURS[0]);
     let missing = DecodeOptions { tag: Some("run".into()), ..DecodeOptions::default() };
     assert!(matches!(

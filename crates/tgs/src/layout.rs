@@ -149,7 +149,7 @@ pub fn cost(scene: &Scene) -> usize {
 mod tests {
     use std::time::Duration;
 
-    use tgradish_frames::{Animation as Frames, Frame};
+    use crate::frames::{Animation as Frames, Frame};
 
     use super::*;
     use crate::check::check;

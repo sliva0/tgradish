@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::frames::Animation;
 use serde::Serialize;
-use tgradish_frames::Animation;
 
 pub use crate::grid::Grid;
 use crate::grid::{Edges, snap};
@@ -645,7 +645,7 @@ fn cut(pixels: &[u32], width: u32, crop: Rect) -> Vec<u32> {
 
 #[cfg(test)]
 mod tests {
-    use tgradish_frames::Frame;
+    use crate::frames::Frame;
 
     use super::*;
 

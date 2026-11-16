@@ -161,6 +161,6 @@ mod tests {
             .iter()
             .map(|dir| dir.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(names, ["cli", "core", "frames", "gui", "tgs"]);
+        assert_eq!(names, ["cli", "core", "gui", "tgs"]);
     }
 }

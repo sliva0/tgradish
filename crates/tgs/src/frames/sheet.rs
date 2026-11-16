@@ -4,7 +4,7 @@
 use std::fmt;
 use std::time::Duration;
 
-use crate::{Animation, Cancelled, DecodeOptions, Error, Frame, Limits, Result, decode};
+use crate::frames::{Animation, Cancelled, DecodeOptions, Error, Frame, Limits, Result, decode};
 
 /// How a sprite sheet is laid out: equal cells, frames row by row. Built
 /// with [`Sheet::new`], then changed field by field, so that what is added
@@ -19,14 +19,14 @@ pub struct Sheet {
     /// transparent cells at the end.
     pub frames: Option<u32>,
     /// How long each frame shows; zero stands for
-    /// [`DEFAULT_FRAME_DURATION`](crate::DEFAULT_FRAME_DURATION).
+    /// [`DEFAULT_FRAME_DURATION`](crate::frames::DEFAULT_FRAME_DURATION).
     pub frame_duration: Duration,
 }
 
 impl Sheet {
     /// `columns` by `rows` cells, every one holding a frame but fully
     /// transparent ones at the end, each shown for
-    /// [`DEFAULT_FRAME_DURATION`](crate::DEFAULT_FRAME_DURATION).
+    /// [`DEFAULT_FRAME_DURATION`](crate::frames::DEFAULT_FRAME_DURATION).
     pub fn new(columns: u32, rows: u32) -> Sheet {
         Sheet { columns, rows, frames: None, frame_duration: Duration::ZERO }
     }
@@ -98,7 +98,7 @@ pub fn split_sheet(image: &Animation, sheet: &Sheet, limits: &Limits) -> Result<
 
 /// Joins images of one size into an animation. Still images are shown for
 /// `frame_duration`, zero standing for
-/// [`DEFAULT_FRAME_DURATION`](crate::DEFAULT_FRAME_DURATION); animated ones
+/// [`DEFAULT_FRAME_DURATION`](crate::frames::DEFAULT_FRAME_DURATION); animated ones
 /// keep their own frames and timing. Each image is decoded as it comes,
 /// so an iterator that reads them one at a time holds one file at once;
 /// [`Sequence`] does the same for callers that loop themselves.
@@ -119,7 +119,7 @@ pub fn sequence(
 ///
 /// ```
 /// use std::time::Duration;
-/// use tgradish_frames::{Limits, Sequence};
+/// use tgradish_tgs::frames::{Limits, Sequence};
 ///
 /// // a GIF of one black pixel
 /// let gif = b"GIF89a\x01\0\x01\0\x80\0\0\0\0\0\xff\xff\xff,\0\0\0\0\x01\0\x01\0\0\x02\x02D\x01\0;";
@@ -128,7 +128,7 @@ pub fn sequence(
 ///     sequence.push(gif)?;
 /// }
 /// assert_eq!(sequence.finish()?.duration(), Duration::from_millis(150));
-/// # Ok::<(), tgradish_frames::Error>(())
+/// # Ok::<(), tgradish_tgs::frames::Error>(())
 /// ```
 pub struct Sequence<'a> {
     frame_duration: Duration,
@@ -217,7 +217,7 @@ mod tests {
     use tgradish_corpus::{Canvas, encode};
 
     use super::*;
-    use crate::DEFAULT_FRAME_DURATION;
+    use crate::frames::DEFAULT_FRAME_DURATION;
 
     #[test]
     fn shows_frames_of_no_time_for_the_default() {

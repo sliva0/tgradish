@@ -3,7 +3,7 @@
 
 use std::io::Read;
 
-use crate::{Error, Format, Limits, Oversize, Result};
+use crate::frames::{Error, Format, Limits, Oversize, Result};
 
 pub(super) fn error(message: impl ToString) -> Error {
     Error::Decode { format: Format::Aseprite, message: message.to_string() }
@@ -118,10 +118,10 @@ pub(super) fn spend(spent: &mut usize, bytes: usize, limits: &Limits) -> Result<
 
 #[cfg(test)]
 mod tests {
-    use crate::DecodeOptions;
-    use crate::aseprite::Sprite;
-    use crate::aseprite::testfile::*;
-    use crate::{Error, Limits};
+    use crate::frames::DecodeOptions;
+    use crate::frames::aseprite::Sprite;
+    use crate::frames::aseprite::testfile::*;
+    use crate::frames::{Error, Limits};
 
     #[test]
     fn keeps_within_limits() {

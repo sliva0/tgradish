@@ -55,12 +55,12 @@ build() {
   cargo build --frozen --release -p tgradish
 }
 
-# the pure Rust crates' tests only, which run no ffmpeg, processes or
+# the pure Rust crate's tests only, which run no ffmpeg, processes or
 # signals: the rest, which do, are the release workflow's to run on Arch
 check() {
   cd "$pkgname-$pkgver"
   _cargo_env
-  cargo test --frozen -p tgradish-frames -p tgradish-tgs
+  cargo test --frozen -p tgradish-tgs
 }
 
 package() {

@@ -7,7 +7,7 @@ use std::ops::Range;
 use super::blend::{self, Colour};
 use super::read::error;
 use super::{Cel, Content, Depth, Layer, LayerKind, Sprite};
-use crate::Result;
+use crate::frames::Result;
 
 /// A blend mode: the backdrop, what is drawn over it, and its opacity.
 type Mode = fn(Colour, Colour, u8) -> Colour;
@@ -358,10 +358,10 @@ fn tiles_on(at: i64, size: usize, count: usize, (from, to): (usize, usize)) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aseprite::testfile::*;
+    use crate::frames::aseprite::testfile::*;
     use std::time::Duration;
 
-    use crate::Error;
+    use crate::frames::Error;
 
     #[test]
     fn renders_layers() {
@@ -575,9 +575,9 @@ mod tests {
             cel[8..10].copy_from_slice(&x.to_le_bytes());
             let mut chunks = vec![vec![layer(1, 2, 0, 0, 255), tileset(), cel]];
             chunks.extend((1..frames).map(|_| vec![linked_cel(0, 0)]));
-            crate::aseprite::TILES.set(0);
+            crate::frames::aseprite::TILES.set(0);
             let animation = decode(&file(3, 1, 32, 1, &chunks)).unwrap();
-            (pixels(&animation, 0), crate::aseprite::TILES.get())
+            (pixels(&animation, 0), crate::frames::aseprite::TILES.get())
         };
         assert_eq!(drawn(&tiles, -30_000, 1000), (vec![GREEN, [0; 4], RED], 3 * 1000));
         // wholly off it at either side, none
