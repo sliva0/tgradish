@@ -43,6 +43,10 @@ shlex.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 
+# SIGTERM and SIGHUP, which ctrlc can't tell from Ctrl-C
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true
+
 # closes the console Windows opens for the GUI
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_System_Console"], optional = true }
@@ -62,3 +66,7 @@ workspace = true
 schemars.workspace = true
 tgradish-corpus.workspace = true
 tempfile.workspace = true
+
+# the signal tests keep the orphans of what they start, to see none is left
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+rustix = { workspace = true, features = ["process"] }

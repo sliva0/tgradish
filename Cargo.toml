@@ -57,6 +57,9 @@ libloading = "0.8.9"
 # the allocator of musl builds, see crates/cli/src/main.rs
 libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
 mimalloc = { version = "0.1.52", features = ["override"] }
+# SIGTERM and SIGHUP, see crates/cli/src/signals.rs: already ctrlc's, with
+# its signal feature
+nix = { version = "0.31.3", default-features = false, features = ["signal"] }
 # the accent colour on macOS, already in the GUI's dependencies there
 objc2 = "0.6.5"
 objc2-app-kit = { version = "0.3.2", default-features = false }

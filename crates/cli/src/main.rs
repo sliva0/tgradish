@@ -20,6 +20,8 @@ macro_rules! out {
 mod args;
 mod commands;
 mod convert;
+#[cfg(unix)]
+mod signals;
 mod term;
 mod ui;
 mod watch;
@@ -428,6 +430,8 @@ fn run(cli: Cli) -> Result<()> {
             }
         })?;
     }
+    #[cfg(unix)]
+    stop_on_termination((!cli.command.is_gui()).then(|| cancel.clone()))?;
 
     let ctx = Context { global: cli.global, config, config_file, cancel };
     match cli.command {
@@ -471,6 +475,20 @@ fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// Takes SIGTERM and SIGHUP as a plain cancel, see [`signals`]: of
+/// `cancel`, the command's token, or else by closing the GUI, as closing
+/// its window does. `main` ends by the signal once it has stopped.
+#[cfg(unix)]
+fn stop_on_termination(cancel: Option<CancelToken>) -> std::io::Result<()> {
+    signals::on_termination(move || match cancel {
+        Some(cancel) => cancel.cancel(),
+        #[cfg(feature = "gui")]
+        None => tgradish_gui::close(),
+        #[cfg(not(feature = "gui"))]
+        None => {}
+    })
 }
 
 /// Started without arguments from a file manager, desktop entry or the
@@ -574,7 +592,14 @@ fn main() -> ExitCode {
             return ExitCode::from(USAGE);
         }
         let (choice, path) = ffmpeg_given(None, None);
-        return match tgradish_gui::run(tgradish_gui::Launch::default().ffmpeg(choice, path)) {
+        // without it, as a signal would end it anyway
+        #[cfg(unix)]
+        let _ = stop_on_termination(None);
+        let opened = tgradish_gui::run(tgradish_gui::Launch::default().ffmpeg(choice, path));
+        // ended by a signal, it ends by it
+        #[cfg(unix)]
+        signals::end_by_received();
+        return match opened {
             // handed over or not, there is no terminal to say so in
             Ok(_) => ExitCode::SUCCESS,
             Err(err) => {
@@ -603,6 +628,9 @@ fn main() -> ExitCode {
     }
     let json = cli.global.json;
     let ran = run(cli);
+    // ended by a signal, it says nothing of what came of it, but ends by it
+    #[cfg(unix)]
+    signals::end_by_received();
     // whatever came of it, no one read it, so it goes unsaid
     let status = (!stdout_was_closed()).then(|| report(ran, json));
     // told only now, as saying what came of it may be what finds stdout

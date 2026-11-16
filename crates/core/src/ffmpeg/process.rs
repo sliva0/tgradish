@@ -44,8 +44,9 @@ impl Running<'_> {
         self.cancel.register(None);
         let status = status.map_err(Error::io(FileAction::Run, self.program))?;
         // Ctrl-C reaches ffmpeg as it reaches tgradish, in the terminal's
-        // process group: what it means, as cancelling or settling, may be
-        // decided only after ffmpeg has ended for it
+        // process group, as SIGTERM and SIGHUP may: what it means, as
+        // cancelling or settling, may be decided only after ffmpeg has
+        // ended for it
         if interrupted(&status) {
             self.cancel.await_interruption(INTERRUPT_GRACE);
         }
@@ -74,14 +75,14 @@ impl Drop for Running<'_> {
     }
 }
 
-/// Whether a process ended as interrupted: by SIGINT, or as ffmpeg ends
-/// once it has caught it, or another signal to stop, with 255.
+/// Whether a process ended as interrupted: by SIGINT, SIGTERM or SIGHUP,
+/// or as ffmpeg ends once it has caught one, with 255.
 fn interrupted(status: &std::process::ExitStatus) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;
-        // SIGINT
-        if status.signal() == Some(2) {
+        // SIGHUP, SIGINT, SIGTERM
+        if matches!(status.signal(), Some(1 | 2 | 15)) {
             return true;
         }
     }
@@ -266,9 +267,15 @@ mod tests {
         ran
     }
 
-    /// As ffmpeg ends on Ctrl-C, before whoever pressed it has said what
-    /// it means: by the signal, or with 255 once it has caught it.
-    const INTERRUPTED: [&str; 2] = ["sleep 0.05; kill -INT $$; sleep 5", "sleep 0.05; exit 255"];
+    /// As ffmpeg ends on Ctrl-C, or SIGTERM or SIGHUP sent to its group,
+    /// before tgradish has said what it means: by the signal, or with 255
+    /// once it has caught it.
+    const INTERRUPTED: [&str; 4] = [
+        "sleep 0.05; kill -INT $$; sleep 5",
+        "sleep 0.05; kill -TERM $$; sleep 5",
+        "sleep 0.05; kill -HUP $$; sleep 5",
+        "sleep 0.05; exit 255",
+    ];
 
     #[test]
     fn waits_a_moment_for_what_an_interrupt_meant() {

@@ -135,6 +135,29 @@ pub enum Started {
     HandedOver { files: usize },
 }
 
+/// Asked to close, by [`close`].
+static CLOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The window's, once [`run`] has opened it.
+static OPEN: std::sync::OnceLock<egui::Context> = std::sync::OnceLock::new();
+
+/// Closes the window, from any thread, as closing it does: conversions
+/// stop, taking their temporary files and ffmpeg with them, the session
+/// is kept, and [`run`] returns. For a signal to end, as SIGTERM when the
+/// session ends or SIGHUP when the terminal it was started from closes.
+/// Asked before the window opens, it closes as it opens.
+pub fn close() {
+    CLOSING.store(true, std::sync::atomic::Ordering::SeqCst);
+    if let Some(ctx) = OPEN.get() {
+        close_now(ctx);
+    }
+}
+
+fn close_now(ctx: &egui::Context) {
+    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    ctx.request_repaint();
+}
+
 /// Runs the GUI until its window is closed, or where one runs already,
 /// hands it the files to add and brings it forward instead.
 pub fn run(launch: Launch) -> Result<Started, Error> {
@@ -190,6 +213,11 @@ pub fn run(launch: Launch) -> Result<Started, Error> {
             };
             // the icon applies with the next frame
             cc.egui_ctx.request_repaint();
+            // asked to close as it opened: after, so either sees the other
+            let _ = OPEN.set(cc.egui_ctx.clone());
+            if CLOSING.load(std::sync::atomic::Ordering::SeqCst) {
+                close_now(&cc.egui_ctx);
+            }
             Ok(Box::new(app))
         }),
     )

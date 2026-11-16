@@ -520,6 +520,11 @@ fn cancels_from_stdin() {
 /// it starts shares: a signal to the group reaches them all, as Ctrl-C in
 /// a terminal does.
 fn fitting(inputs: &[&Path], dir: &Path, args: &[&str]) -> std::process::Child {
+    fitting_command(inputs, dir, args).spawn().unwrap()
+}
+
+/// The command [`fitting`] starts.
+fn fitting_command(inputs: &[&Path], dir: &Path, args: &[&str]) -> Command {
     use std::process::Stdio;
     let mut command = Command::new(env!("CARGO_BIN_EXE_tgradish"));
     command
@@ -531,9 +536,34 @@ fn fitting(inputs: &[&Path], dir: &Path, args: &[&str]) -> std::process::Child {
         .env("TGRADISH_CONFIG", no_config())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
+    in_a_group_of_its_own(&mut command);
+    command
+}
+
+/// Starts `command` in a process group of its own, as a shell starts a
+/// command, on Unix; and makes this process the one its orphans are
+/// given to, see [`keep_orphans`].
+fn in_a_group_of_its_own(command: &mut Command) {
     #[cfg(unix)]
-    std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    command.spawn().unwrap()
+    std::os::unix::process::CommandExt::process_group(command, 0);
+    #[cfg(target_os = "linux")]
+    keep_orphans();
+    #[cfg(not(unix))]
+    let _ = command;
+}
+
+/// Makes this process the one that the orphans of what it starts are given
+/// to, in place of init, and one that never reaps them: as in a container
+/// whose first process reaps nothing, as GitHub's job containers, an
+/// ffmpeg that tgradish ended without reaping stays, a zombie in its
+/// group, for [`left_in_group`] to find, rather than going unseen as init
+/// reaps it.
+#[cfg(target_os = "linux")]
+fn keep_orphans() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        rustix::process::set_child_subreaper(Some(rustix::process::getpid())).unwrap();
+    });
 }
 
 /// Sends `signal` to the process group of `child`, which leads it, as a
@@ -545,11 +575,10 @@ fn signal_group(child: &std::process::Child, signal: &str) {
     assert!(sent.unwrap().success());
 }
 
-/// What still runs in the process group `child` led, as `pid command`,
-/// once it is given a few seconds to end. A process that has ended but
-/// is not yet reaped, a zombie, runs no more and isn't counted: one whose
-/// parent, tgradish, ended first is reaped by init, and in a container
-/// whose first process reaps nothing, as GitHub's job containers, never.
+/// What is left in the process group `child` led, once it is given a few
+/// seconds to end, as `pid state (name) command`: what still runs, and what
+/// ended unreaped, a zombie, which [`keep_orphans`] keeps where tgradish
+/// ended without reaping its ffmpeg.
 #[cfg(target_os = "linux")]
 fn left_in_group(child: &std::process::Child) -> Vec<String> {
     let group = child.id().to_string();
@@ -561,11 +590,15 @@ fn left_in_group(child: &std::process::Child) -> Vec<String> {
             // after the command's name, in parentheses: state, parent, group
             let Some((_, rest)) = stat.rsplit_once(") ") else { continue };
             let fields: Vec<&str> = rest.split(' ').collect();
-            let ended = matches!(fields.first(), Some(&"Z" | &"X"));
-            if fields.get(2) == Some(&group.as_str()) && !ended {
+            if fields.get(2) == Some(&group.as_str()) {
+                // a zombie's is empty: its name, in the parentheses, is left
                 let command = std::fs::read(process.path().join("cmdline")).unwrap_or_default();
+                let name = stat.split_once(" (").map_or("", |(_, rest)| rest);
+                let name = name.rsplit_once(") ").map_or("", |(name, _)| name);
                 let pid = process.file_name().to_string_lossy().into_owned();
-                left.push(format!("{pid} {}", String::from_utf8_lossy(&command)));
+                let state = fields.first().unwrap_or(&"?");
+                let command = String::from_utf8_lossy(&command);
+                left.push(format!("{pid} {state} ({name}) {command}"));
             }
         }
         if left.is_empty() || std::time::Instant::now() > deadline {
@@ -675,31 +708,129 @@ fn keeps_the_best_so_far_as_ctrl_c_reaches_ffmpeg_too() {
     assert_eq!(left_in_group(&child), Vec::<String>::new());
 }
 
-/// Ended by a signal to all that runs in the terminal, as when it closes,
-/// tgradish leaves no ffmpeg behind, the signal reaching it too.
+/// SIGTERM or SIGHUP to tgradish alone, as `kill` or a service manager
+/// sends it, while a WebM is fitting with ffmpeg at work: it stops as
+/// cancelling does, ffmpeg stopped and reaped, nothing left of its
+/// temporary files or the result, and then ends by that signal.
 #[cfg(target_os = "linux")]
 #[test]
-fn leaves_no_ffmpeg_when_the_terminal_ends_it() {
+fn stops_cleanly_when_killed() {
+    let Some(input) = clip(Clip::Square) else { return };
+    for signal in ["TERM", "HUP"] {
+        terminated_while_fitting(&input, signal, false);
+    }
+}
+
+/// SIGTERM or SIGHUP to all that runs in the terminal, as when it closes,
+/// or in a service, as systemd stops one: ffmpeg gets it too, and
+/// tgradish stops as cancelling does, leaving nothing behind, and ends by
+/// that signal.
+#[cfg(target_os = "linux")]
+#[test]
+fn stops_cleanly_when_the_terminal_ends_it() {
+    let Some(input) = clip(Clip::Square) else { return };
+    for signal in ["TERM", "HUP"] {
+        terminated_while_fitting(&input, signal, true);
+    }
+}
+
+/// Sends `signal` to a conversion of `input` once ffmpeg is at work
+/// fitting it: to its whole group where `group`, or else to tgradish
+/// alone. Asserts that it ended by the signal, leaving nothing behind.
+#[cfg(target_os = "linux")]
+fn terminated_while_fitting(input: &Path, signal: &str, group: bool) {
     use std::io::{BufRead, BufReader};
+
+    let dir = tempfile::tempdir().unwrap();
+    let (temp, out) = (dir.path().join("tmp"), dir.path().join("out"));
+    std::fs::create_dir(&temp).unwrap();
+    let mut child = fitting_command(&[input], &out, &[]).env("TMPDIR", &temp).spawn().unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines().map_while(Result::ok);
+    let encoding = lines.by_ref().any(|line| {
+        let event: Value = serde_json::from_str(&line).unwrap();
+        let done = event["fraction"].as_f64();
+        event["event"] == "progress" && done.is_some_and(|done| done > 0.0 && done < 1.0)
+    });
+    assert!(encoding, "{signal}: never encoded");
+    match group {
+        true => signal_group(&child, signal),
+        false => signal_one(&child, signal),
+    }
+    // read on, as whoever reads it would, until it ends
+    lines.for_each(drop);
+    assert_terminated(child, signal, &temp, &out);
+}
+
+/// Asserts that `child`, sent `signal`, ended by it, leaving nothing in
+/// `temp`, its TMPDIR, nor in `out`, where results go, nor in its group.
+#[cfg(target_os = "linux")]
+fn assert_terminated(mut child: std::process::Child, signal: &str, temp: &Path, out: &Path) {
     use std::os::unix::process::ExitStatusExt;
 
+    let status = child.wait().unwrap();
+    let number = match signal {
+        "TERM" => 15,
+        "HUP" => 1,
+        _ => unreachable!("{signal}"),
+    };
+    assert_eq!(status.signal(), Some(number), "{signal}: {status}");
+    let left = |dir: &Path| -> Vec<_> {
+        let files = std::fs::read_dir(dir).into_iter().flatten();
+        files.map(|entry| entry.unwrap().path()).collect()
+    };
+    assert_eq!(left(temp), Vec::<PathBuf>::new(), "{signal}: temporary files left");
+    assert_eq!(left(out), Vec::<PathBuf>::new(), "{signal}: results left");
+    assert_eq!(left_in_group(&child), Vec::<String>::new(), "{signal}: left in its group");
+}
+
+/// Sends `signal` to `child` alone, as `kill PID` does.
+#[cfg(unix)]
+fn signal_one(child: &std::process::Child, signal: &str) {
+    let sent = Command::new("kill").args([&format!("-{signal}"), &child.id().to_string()]).status();
+    assert!(sent.unwrap().success());
+}
+
+/// SIGTERM to `watch` while it converts, as a service manager stops it,
+/// stops the conversion as cancelling does and ends it by the signal,
+/// leaving nothing behind; while it waits, it ends at once.
+#[cfg(target_os = "linux")]
+#[test]
+fn watch_stops_cleanly_when_killed() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+
     let Some(input) = clip(Clip::Square) else { return };
-    for (signal, number) in [("TERM", 15), ("HUP", 1)] {
+    for converting in [true, false] {
         let dir = tempfile::tempdir().unwrap();
-        let mut child = fitting(&[&input], dir.path(), &[]);
-        let stdout = BufReader::new(child.stdout.take().unwrap());
-        for line in stdout.lines() {
-            let event: Value = serde_json::from_str(&line.unwrap()).unwrap();
-            // ffmpeg at work
-            let encoding = event["fraction"].as_f64().is_some_and(|done| done > 0.0 && done < 1.0);
-            if event["event"] == "progress" && encoding {
-                signal_group(&child, signal);
-                break;
-            }
+        let (watched, temp, out) =
+            (dir.path().join("in"), dir.path().join("tmp"), dir.path().join("out"));
+        std::fs::create_dir(&watched).unwrap();
+        std::fs::create_dir(&temp).unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_tgradish"));
+        command
+            .args(["--json", "watch", watched.to_str().unwrap(), "--interval", "0.1"])
+            .args(["-t", "2", "--fit", "bitrate", "-b", "50", "--effort", "fast", "-O"])
+            .arg(&out)
+            .env("TGRADISH_CONFIG", no_config())
+            .env("TMPDIR", &temp)
+            .stdout(Stdio::piped());
+        in_a_group_of_its_own(&mut command);
+        let mut child = command.spawn().unwrap();
+        // files there when watching starts are left alone, so let it start
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines().map_while(Result::ok);
+        if converting {
+            std::fs::copy(&input, watched.join("clip.mp4")).unwrap();
+            let encoding = lines.by_ref().any(|line| {
+                let event: Value = serde_json::from_str(&line).unwrap();
+                let done = event["fraction"].as_f64();
+                event["event"] == "progress" && done.is_some_and(|done| done > 0.0 && done < 1.0)
+            });
+            assert!(encoding, "never encoded");
         }
-        let status = child.wait().unwrap();
-        assert_eq!(status.signal(), Some(number), "{signal}");
-        assert_eq!(left_in_group(&child), Vec::<String>::new(), "{signal}");
+        signal_one(&child, "TERM");
+        lines.for_each(drop);
+        assert_terminated(child, "TERM", &temp, &out);
     }
 }
 
