@@ -288,6 +288,8 @@ impl Inset {
         row.spacing_mut().item_spacing.x = 2.0;
         row.spacing_mut().button_padding = vec2(0.0, 0.0);
         row.spacing_mut().interact_size = Vec2::splat(SIZE_BUTTON);
+        // buttons to the pointer, among what drags the picture
+        row.visuals_mut().interact_cursor = Some(CursorIcon::PointingHand);
         let button = |text| egui::Button::new(text).min_size(vec2(SIZE_BUTTON, SIZE_BUTTON));
         // to the nearest size that shows it otherwise, past any that show it
         // as this one does, as two that both show it at its own size: on
@@ -584,6 +586,8 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         };
         harness.event(egui::Event::PointerMoved(start));
+        harness.run();
+        assert_eq!(harness.output().platform_output.cursor_icon, CursorIcon::PointingHand);
         harness.event(button(start, true));
         harness.run();
         for to in [start - vec2(40.0, 40.0), pos2(20.0, 20.0)] {

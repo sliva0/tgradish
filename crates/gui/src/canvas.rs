@@ -252,8 +252,17 @@ pub(crate) fn show(
         vec2(crop.width as f32, crop.height as f32) * scale,
     );
 
+    // the crop's size and its cross, over its top left corner and, near
+    // the stage's top, its top edge: there the pointer is on them, not on
+    // the edges. As they take no drags, egui gives this the drags that
+    // start on them, and has it hovered under them
+    let tag = cropping.crop.is_some().then(|| size_tag(&painter, crop, on_screen, rect).back);
+
     // what a drag starting at `point` would do
     let grab = |point: Pos2| -> Option<Drag> {
+        if tag.is_some_and(|tag| tag.contains(point)) {
+            return None;
+        }
         let near = |a: f32, b: f32| (a - b).abs() <= GRAB;
         let along_x = (on_screen.left() - GRAB..=on_screen.right() + GRAB).contains(&point.x);
         let along_y = (on_screen.top() - GRAB..=on_screen.bottom() + GRAB).contains(&point.y);
@@ -274,8 +283,24 @@ pub(crate) fn show(
         }
     };
 
+    let id = response.id.with("drag");
+    if response.drag_started_by(PointerButton::Primary) {
+        // none from the size or cross, nor what is left of a drag that
+        // ended while this wasn't shown
+        let origin = ui.input(|input| input.pointer.press_origin());
+        ui.data_mut(|data| match origin.and_then(grab) {
+            Some(drag) => {
+                data.insert_temp(id, drag);
+            }
+            None => data.remove::<Drag>(id),
+        });
+    }
+    let drag: Option<Drag> = ui.data(|data| data.get_temp(id));
+    let dragging = response.dragged_by(PointerButton::Primary);
     if let Some(point) = response.hover_pos() {
-        let icon = match grab(point) {
+        // what is being dragged, while it is, as past the size and cross,
+        // or else what would be
+        let icon = match if dragging { drag } else { grab(point) } {
             Some(Drag::Edges([true, true, false, false] | [false, false, true, true], _)) => {
                 CursorIcon::ResizeNwSe
             }
@@ -292,16 +317,7 @@ pub(crate) fn show(
         };
         ui.ctx().set_cursor_icon(icon);
     }
-
-    let id = response.id.with("drag");
-    if response.drag_started_by(PointerButton::Primary)
-        && let Some(origin) = ui.input(|input| input.pointer.press_origin())
-        && let Some(drag) = grab(origin)
-    {
-        ui.data_mut(|data| data.insert_temp(id, drag));
-    }
-    let drag: Option<Drag> = ui.data(|data| data.get_temp(id));
-    if let (Some(drag), true) = (drag, response.dragged_by(PointerButton::Primary))
+    if let (Some(drag), true) = (drag, dragging)
         && let Some(point) = response.interact_pointer_pos()
     {
         let point = to_pixels(point);
@@ -432,20 +448,9 @@ pub(crate) fn show(
         }
     }
     if cropping.crop.is_some() {
-        let text = format!("{} × {}", crop.width, crop.height);
-        let galley = painter.layout_no_wrap(text, egui::FontId::proportional(12.5), Color32::WHITE);
-        // the size, then a cross back to all of the picture, as wide as
-        // the tag is high
-        let side = galley.size().y + 8.0;
-        let tag = vec2(galley.size().x + side, galley.size().y);
-        // over the crop's corner, kept within the stage
-        let x = (on_screen.left() + 6.0).min(rect.right() - tag.x - 8.0);
-        let at =
-            pos2(x.max(rect.left() + 4.0), (on_screen.top() - tag.y - 8.0).max(rect.top() + 4.0));
-        let back = Rect::from_min_size(at, tag).expand(4.0);
+        let SizeTag { galley, at, back, cross } = size_tag(&painter, crop, on_screen, rect);
         painter.rect_filled(back, 4.0, Color32::from_black_alpha(170));
         painter.galley(at, galley, Color32::WHITE);
-        let cross = Rect::from_min_max(pos2(back.right() - side, back.top()), back.max);
         let hint = match cropping.exact {
             Some(_) => crate::l10n::fl!("whole-picture", "exact"),
             None => crate::l10n::fl!("whole-picture", "hint"),
@@ -462,6 +467,8 @@ pub(crate) fn show(
             ] {
                 (state.weak_bg_fill, state.bg_stroke) = (fill, Stroke::NONE);
             }
+            // a button to the pointer, not the edge under it
+            ui.visuals_mut().interact_cursor = Some(CursorIcon::PointingHand);
             let button = ui.place(cross, button);
             widgets::named(button, &crate::l10n::fl!("whole-picture")).on_hover_text(hint).clicked()
         });
@@ -469,6 +476,34 @@ pub(crate) fn show(
             whole_picture(cropping.crop);
         }
     }
+}
+
+/// The crop's size over its top left corner, with a cross after it back to
+/// all of the picture.
+struct SizeTag {
+    galley: std::sync::Arc<egui::Galley>,
+    /// Where the size's text goes.
+    at: Pos2,
+    /// All of it, the cross's square too.
+    back: Rect,
+    cross: Rect,
+}
+
+/// Where the size of `crop`, shown at `on_screen`, goes on the `stage`.
+fn size_tag(painter: &egui::Painter, crop: Crop, on_screen: Rect, stage: Rect) -> SizeTag {
+    let text = format!("{} × {}", crop.width, crop.height);
+    let galley = painter.layout_no_wrap(text, egui::FontId::proportional(12.5), Color32::WHITE);
+    // the size, then a cross back to all of the picture, as wide as the
+    // tag is high
+    let side = galley.size().y + 8.0;
+    let tag = vec2(galley.size().x + side, galley.size().y);
+    // over the crop's corner, kept within the stage
+    let x = (on_screen.left() + 6.0).min(stage.right() - tag.x - 8.0);
+    let at =
+        pos2(x.max(stage.left() + 4.0), (on_screen.top() - tag.y - 8.0).max(stage.top() + 4.0));
+    let back = Rect::from_min_size(at, tag).expand(4.0);
+    let cross = Rect::from_min_max(pos2(back.right() - side, back.top()), back.max);
+    SizeTag { galley, at, back, cross }
 }
 
 fn zoom_and_pan(
@@ -747,6 +782,87 @@ mod tests {
             harness.event(press(false));
             harness.step();
         }
+    }
+
+    #[test]
+    fn the_crops_size_and_cross_win_over_the_edges_under_them() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        // a crop at the picture's top, which is at the stage's, so its size
+        // and cross are held down over its top edge and the top left corner
+        let clip = Clip {
+            id: 1,
+            width: 64,
+            height: 48,
+            frames: vec![vec![255; 64 * 48 * 4]],
+            times: vec![0.0, 0.1],
+            pixelated: true,
+        };
+        let crop = Crop { x: 8, y: 0, width: 40, height: 30 };
+        type State = (Screen, Zoom, Clip, Option<Crop>, Rect);
+        let state: State = (Screen::default(), Zoom::default(), clip, Some(crop), Rect::NOTHING);
+        let mut harness = Harness::builder().with_size([600.0, 400.0]).build_ui_state(
+            |ui, (screen, zoom, clip, crop, stage): &mut State| {
+                *stage = ui.max_rect();
+                let picture = Picture { clip, frame: 0, size: (64, 48), square: false };
+                let cropping = Cropping { crop, ratio: None, kept: None, exact: None };
+                show(ui, screen, (*stage, *stage), &picture, zoom, Some(cropping));
+            },
+            state,
+        );
+        crate::widgets::test_fonts(&harness);
+        harness.run_steps(2);
+        let (shown, scale) = layout(harness.state().4, (64, 48), &Zoom::default());
+        let (left, top) = (shown.left() + 8.0 * scale, shown.top());
+        let cross = harness.get_by_label(&crate::l10n::fl!("whole-picture")).rect();
+        assert!(cross.y_range().contains(top) && cross.left() > left + GRAB, "{cross:?}");
+        // the size, over the corner's handle
+        let size = pos2(left + 5.0, top);
+        let beside = pos2(cross.right() + 20.0, top);
+        // four pixels down
+        let down = vec2(0.0, 4.0 * scale);
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let hover = |harness: &mut Harness<'_, State>, at| {
+            harness.event(egui::Event::PointerMoved(at));
+            harness.step();
+            harness.output().platform_output.cursor_icon
+        };
+        let drag = |harness: &mut Harness<'_, State>, from: Pos2| {
+            harness.event(egui::Event::PointerMoved(from));
+            harness.event(press(from, true));
+            harness.step();
+            for step in 1..=4 {
+                harness.event(egui::Event::PointerMoved(from + down * step as f32 / 4.0));
+                harness.step();
+            }
+            harness.event(press(from + down, false));
+            harness.step();
+            harness.step();
+            harness.state().3
+        };
+        assert_eq!(hover(&mut harness, cross.center()), CursorIcon::PointingHand);
+        assert_eq!(hover(&mut harness, size), CursorIcon::Default);
+        assert_eq!(hover(&mut harness, beside), CursorIcon::ResizeVertical);
+        // dragged from the cross or the size, nothing moves
+        assert_eq!(drag(&mut harness, cross.center()), Some(crop));
+        assert_eq!(drag(&mut harness, size), Some(crop));
+        // the edge beside them still moves
+        let moved = Crop { y: 4, height: 26, ..crop };
+        assert_eq!(drag(&mut harness, beside), Some(moved));
+        // and a click on the cross is all of the picture
+        harness.state_mut().3 = Some(crop);
+        harness.run_steps(2);
+        harness.event(egui::Event::PointerMoved(cross.center()));
+        harness.event(press(cross.center(), true));
+        harness.step();
+        harness.event(press(cross.center(), false));
+        harness.step();
+        assert_eq!(harness.state().3, None);
     }
 
     #[test]
