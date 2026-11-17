@@ -105,6 +105,8 @@ impl App {
             self.actions(ui, id);
             ui.add_space(crate::actions::below_bar(ui.style()));
         });
+        // the rest is the file's own, which a button held there changes
+        self.edit_frames.settings_in(ui.available_rect_before_wrap());
         let mut places =
             Places { side: Rect::NOTHING, settings: Rect::NOTHING, stage: Rect::NOTHING };
         let mut in_frames = self.config.gui.timeline_frames;

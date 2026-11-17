@@ -69,8 +69,9 @@ impl Settings {
 pub(crate) struct Frame {
     /// Seconds since the GUI started.
     pub(crate) now: f64,
-    /// Something is still being done: the pointer held down, or a field
-    /// typed in. What it changes is a step once it is over.
+    /// Something is still being done: the pointer held down on a control
+    /// of the picked file's preview or settings, or a field typed in. What
+    /// it changes is a step once it is over.
     pub(crate) busy: bool,
     /// The user did something: pressed, typed, turned the wheel, or let go
     /// of what they did in the frame before.
@@ -90,9 +91,17 @@ pub(crate) struct Frames {
     typing: Option<egui::Id>,
     busy: bool,
     selected: Option<u64>,
+    /// Where the picked file's preview and settings are this frame.
+    settings: Option<egui::Rect>,
 }
 
 impl Frames {
+    /// Has the frame know where the picked file's preview and settings
+    /// are, which a button held changes.
+    pub(crate) fn settings_in(&mut self, rect: egui::Rect) {
+        self.settings = Some(rect);
+    }
+
     /// What the frame ending in `ctx` was, for the file `selected`: the
     /// one the user changes, but in the frame it is picked, as it settles
     /// to be shown then.
@@ -120,7 +129,18 @@ impl Frames {
             });
             (input.time, input.pointer.any_down(), did, arrows)
         });
-        let busy = down || typing.is_some();
+        // a button held is what the user does only where it was pressed on
+        // a control in the picked file's preview or settings, not as it is
+        // held on the list, a notice or anywhere else, while the GUI
+        // changes the settings by itself
+        let settings = self.settings.take();
+        let origin = ctx.input(|input| input.pointer.press_origin());
+        let on_settings = origin.is_some_and(|at| {
+            let layer = ctx.layer_id_at(at).map(|layer| layer.order);
+            settings.is_some_and(|rect| rect.contains(at)) && layer == Some(egui::Order::Background)
+        });
+        let held = down && ctx.egui_is_using_pointer() && on_settings;
+        let busy = held || typing.is_some();
         let committed = self.typing.is_some() && self.typing != typing;
         let input = did || busy || self.busy;
         let picked = self.selected != selected;
@@ -654,6 +674,34 @@ mod tests {
         let mut store = crate::session::Store::open(path.clone()).unwrap();
         let saved = store.read().unwrap().session.restore(&path, 1).items;
         assert_eq!(saved[0].choices.crop.map(|crop| crop.width), Some(20));
+    }
+
+    #[test]
+    fn takes_what_the_gui_changes_as_its_own_while_the_pointer_is_held_elsewhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened_in(dir.path(), &["wide.png"], vec2(1280.0, 800.0));
+        // held down on the list, under its rows, as the GUI changes the
+        // file's settings by itself, as when something it worked out comes
+        let under = Pos2::new(100.0, 600.0);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: under,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        harness.event(egui::Event::PointerMoved(under));
+        harness.event(press(true));
+        harness.run_steps(3);
+        harness.state_mut().items[0].choices.target = Target::Emoji;
+        harness.run_steps(3);
+        harness.event(press(false));
+        harness.run_steps(3);
+        assert!(!selected(&harness).history.can_undo());
+        // while a drag of the crop is a step, the GUI's change with it
+        let (from, to) =
+            (on_picture(&harness, vec2(9.0, 5.0)), on_picture(&harness, vec2(27.0, 17.0)));
+        drag(&mut harness, from, to);
+        assert_eq!(steps(&harness), 1);
     }
 
     #[test]
