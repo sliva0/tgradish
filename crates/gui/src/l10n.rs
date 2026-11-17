@@ -29,16 +29,24 @@ pub(crate) static LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
 /// A message in the GUI's language, see the module's docs.
 macro_rules! fl {
     ($id:literal) => {
-        $crate::l10n::seen($id, i18n_embed_fl::fl!($crate::l10n::LOADER, $id))
+        $crate::l10n::seen(
+            $id,
+            $crate::l10n::unmarked(i18n_embed_fl::fl!($crate::l10n::LOADER, $id)),
+        )
     };
     ($id:literal, $attribute:literal $(, $($args:tt)*)?) => {
         $crate::l10n::seen(
             concat!($id, ".", $attribute),
-            i18n_embed_fl::fl!($crate::l10n::LOADER, $id, $attribute $(, $($args)*)?),
+            $crate::l10n::unmarked(i18n_embed_fl::fl!(
+                $crate::l10n::LOADER, $id, $attribute $(, $($args)*)?
+            )),
         )
     };
     ($id:literal, $($args:tt)*) => {
-        $crate::l10n::seen($id, i18n_embed_fl::fl!($crate::l10n::LOADER, $id, $($args)*))
+        $crate::l10n::seen(
+            $id,
+            $crate::l10n::unmarked(i18n_embed_fl::fl!($crate::l10n::LOADER, $id, $($args)*)),
+        )
     };
 }
 pub(crate) use fl;
@@ -121,6 +129,15 @@ pub(crate) fn english() {
     LOADER.load_languages(&Files, &[english]).expect("English is built in");
     settle(&LOADER, false);
     assert_eq!(LOADER.current_language().to_string(), "en-GB");
+}
+
+/// `text` without the marks Fluent puts around arguments, which [`settle`]
+/// turns off: messages loaded again, as each window opening and a change of
+/// language load them, have them until it has, and one given on another
+/// thread meanwhile would show them as boxes, or not match the same words.
+pub(crate) fn unmarked(text: String) -> String {
+    const MARKS: [char; 2] = ['\u{2068}', '\u{2069}'];
+    if text.contains(MARKS) { text.replace(MARKS, "") } else { text }
 }
 
 /// `text`, noted as shown for `id` while `seen` records, for the pictures
@@ -300,6 +317,30 @@ mod tests {
                 panic!("{tag} names something twice: {errors:?}");
             }
         }
+    }
+
+    #[test]
+    fn gives_arguments_without_marks_while_the_language_is_chosen_again() {
+        // a message given on one thread as another loads the language
+        // again, as every window opening and a change of language does
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let done = std::sync::Arc::new(AtomicBool::new(false));
+        let choosing = {
+            let done = done.clone();
+            std::thread::spawn(move || {
+                for _ in 0..200 {
+                    super::english();
+                }
+                done.store(true, Ordering::Relaxed);
+            })
+        };
+        let mut marked = None;
+        while !done.load(Ordering::Relaxed) && marked.is_none() {
+            let said = fl!("name-frames", name = "dance");
+            marked = said.contains(['\u{2068}', '\u{2069}']).then_some(said);
+        }
+        choosing.join().unwrap();
+        assert_eq!(marked, None);
     }
 
     #[test]
