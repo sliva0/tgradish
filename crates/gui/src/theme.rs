@@ -398,6 +398,22 @@ pub(crate) fn badge_edge(visuals: &egui::Visuals) -> Color32 {
     towards(scheme.inactive, scheme.text, &[rows[0], rows[1], scheme.window], SEEN)
 }
 
+/// The most of the text colour a [`spent`] bar's shade takes.
+const SPENT: f32 = 0.15;
+
+/// The fill of a bar of a step done with, whose words say how it went, as
+/// an encode too large to keep: the empty bar's shade moved towards the
+/// text, as far as both the text and a warning over it still read.
+pub(crate) fn spent(visuals: &egui::Visuals) -> Color32 {
+    let (scheme, (track, _)) = (scheme(visuals), track(visuals));
+    let reads = |fill: &Color32| {
+        [scheme.text, scheme.neutral].iter().all(|text| contrast(*text, *fill) >= READABLE)
+    };
+    let steps = (SPENT * 100.0).round() as i32;
+    let mut shades = (0..=steps).rev().map(|step| mix(track, scheme.text, step as f32 / 100.0));
+    shades.find(reads).unwrap_or(track)
+}
+
 /// What a bar's used part is hatched with past a limit, over [`span`]:
 /// the view's colour, which the bar's unused part is filled with, so it
 /// reads as used only in part, whatever the accent's hue.
@@ -639,6 +655,22 @@ mod tests {
                 }
             }
             assert!(contrast(scheme.link, scheme.window) >= READABLE);
+        }
+    }
+
+    #[test]
+    fn fills_a_spent_step_plainly_and_readably() {
+        for dark in [false, true] {
+            let visuals = visuals(dark, BREEZE_ACCENT);
+            let (scheme, fill, (track, _)) = (scheme(&visuals), spent(&visuals), track(&visuals));
+            // its words, and the warning among them
+            for text in [scheme.text, scheme.neutral] {
+                let ratio = contrast(text, fill);
+                assert!(ratio >= READABLE, "{text:?} on {fill:?}, dark {dark}: {ratio}");
+            }
+            // filled, as a step done with, unlike a bar not yet begun
+            let apart = (lightness(fill) - lightness(track)).abs();
+            assert!(apart >= 3.0, "{fill:?} on {track:?}, dark {dark}: {apart}");
         }
     }
 

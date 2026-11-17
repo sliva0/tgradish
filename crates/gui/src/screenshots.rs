@@ -923,6 +923,9 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     harness.set_size(egui::vec2(1280.0, 820.0));
     harness.run_steps(3);
     save(&mut harness, "converting");
+    set_theme(&harness.ctx, crate::config::Theme::Dark);
+    harness.run_steps(3);
+    save(&mut harness, "converting-dark");
     // a fractional scale, where the icon keeps to whole screen pixels
     let mut harness = Harness::builder()
         .with_size([1280.0, 820.0])

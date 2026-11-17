@@ -1265,6 +1265,29 @@ pub(crate) fn bar_sized(
     text: &str,
     colour: Color32,
 ) {
+    bar_drawn(ui, size, fill, text, colour, None);
+}
+
+/// A full [`bar`] of a step done with, as an encode too large to keep: in
+/// a neutral shade rather than a colour, as it is an ordinary step, its
+/// `text` from byte `from` on, which says how it went, in the warning
+/// colour.
+pub(crate) fn bar_spent(ui: &mut egui::Ui, text: &str, from: usize) {
+    let width = ui.available_width().min(380.0);
+    let (fill, ending) = (theme::spent(ui.visuals()), theme::warn(ui.visuals()));
+    bar_drawn(ui, egui::vec2(width, 22.0), Fill::Share(1.0), text, fill, Some((from, ending)));
+}
+
+/// A [`bar`] of `size`, its text from the byte `ending` gives on in the
+/// colour it gives.
+fn bar_drawn(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    fill: Fill,
+    text: &str,
+    colour: Color32,
+    ending: Option<(usize, Color32)>,
+) {
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
     let rounding = (size.y / 2.0).min(4.0);
     let painter = ui.painter_at(rect);
@@ -1297,7 +1320,12 @@ pub(crate) fn bar_sized(
     // cut short where the bar is narrower, said in full on hover
     let colour = ui.visuals().strong_text_color();
     let font = egui::FontId::proportional(12.5);
-    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, colour);
+    let mut job = egui::text::LayoutJob { break_on_newline: false, ..Default::default() };
+    let (from, ending) = ending.unwrap_or((text.len(), colour));
+    let from = (0..=from.min(text.len())).rev().find(|at| text.is_char_boundary(*at)).unwrap_or(0);
+    for (part, colour) in [(&text[..from], colour), (&text[from..], ending)] {
+        job.append(part, 0.0, egui::TextFormat::simple(font.clone(), colour));
+    }
     job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 16.0);
     let galley = painter.layout_job(job);
     let at = egui::pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0);

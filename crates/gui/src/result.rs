@@ -136,20 +136,24 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
                     Some(plan) => share(bytes, plan.limit),
                     None => widgets::kib(bytes),
                 };
-                let (text, colour) = if attempt.fits {
-                    (fl!("encode-done", number = number, fps = fps, rate = rate, size = size), done)
+                if attempt.fits {
+                    let text =
+                        fl!("encode-done", number = number, fps = fps, rate = rate, size = size);
+                    widgets::bar(ui, widgets::Fill::Share(1.0), &text, done);
                 } else {
+                    // too large is how fitting goes on, not a failure: a
+                    // plain bar, only its size and verdict a warning
                     let text = fl!(
                         "encode-done",
                         "too-large",
                         number = number,
                         fps = fps,
                         rate = rate,
-                        size = size
+                        size = size.as_str()
                     );
-                    (text, theme::NEGATIVE.gamma_multiply(0.45))
-                };
-                widgets::bar(ui, widgets::Fill::Share(1.0), &text, colour);
+                    let from = text.rfind(&size).unwrap_or(text.len());
+                    widgets::bar_spent(ui, &text, from);
+                }
             }
             None => widgets::bar(ui, widgets::Fill::working(progress.fraction), &text, running),
         }
