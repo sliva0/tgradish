@@ -39,9 +39,11 @@ pub(crate) fn parse_seconds(text: &str) -> Option<f64> {
     value.is_finite().then_some(value)
 }
 
-/// Size of a section's heading, in the headings' weight: hardly larger
-/// than the text under it, as the weight sets it apart.
-pub(crate) const HEADING: f32 = 14.5;
+/// Size of a section's heading, in the headings' weight: a step larger than
+/// the text under it, so that a section stands out of a column of settings
+/// and stands over the headings within it, as Preset's, which are only in
+/// that weight.
+pub(crate) const HEADING: f32 = 16.0;
 /// Size of a dialog's title, and of the other headings.
 pub(crate) const TITLE: f32 = 17.0;
 
