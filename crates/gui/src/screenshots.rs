@@ -415,6 +415,218 @@ fn with_pointer(harness: &Harness<App>, mut image: image::RgbaImage) -> image::R
     image
 }
 
+/// Only the pictures of [`moments`], to `$TGRADISH_SCREENSHOTS` as
+/// [`screenshots`] makes them, the pointer drawn where it is. Needs ffmpeg.
+#[test]
+#[ignore]
+fn moment_screenshots() {
+    let out =
+        PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
+    crate::l10n::choose(None);
+    moments(&mut |harness: &mut Harness<App>, name: &str| {
+        let image = harness.render().expect("rendering needs a GPU");
+        let image = with_pointer(harness, image);
+        image.save(out.join(format!("tgradish-{name}.png"))).unwrap();
+    });
+}
+
+/// What lasts a moment, or only while a button is held, at the usual
+/// width in both themes and at the narrowest: a number being typed, and
+/// one refused; a stepper held; the timeline's readout at either end of
+/// the bar and while its playhead is dragged; Undo in the menu; rows,
+/// a notice and Settings fading in, a row glowing as its result is made;
+/// the settings under the preview, the list and Settings scrolled to their
+/// ends. Needs ffmpeg.
+fn moments(save: &mut impl FnMut(&mut Harness<App>, &str)) {
+    use crate::banner::Message;
+    use crate::config::Theme;
+    use crate::l10n::fl;
+    use egui_kittest::kittest::NodeT;
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::default();
+    config.gui.output_dir = Some(dir.path().join("out"));
+    config.ffmpeg.choice = FfmpegChoice::System;
+    let Some(clip) = crate::testing::video_of(dir.path(), "640x360", 6) else { return };
+    let long = "holiday at the seaside with the whole family, the long cut, final edit (2)";
+    let arts: Vec<PathBuf> = (0..30)
+        .map(|n| {
+            let name = if n == 3 { format!("{long}.png") } else { format!("pixel {n:02}.png") };
+            let art = dir.path().join(name);
+            square(&art, [8 * n as u8, 160, 200 - 6 * n as u8, 255]);
+            art
+        })
+        .collect();
+    let filtering = egui_wgpu::RendererOptions {
+        predictable_texture_filtering: false,
+        ..egui_wgpu::RendererOptions::PREDICTABLE
+    };
+    let wheel = |harness: &mut Harness<App>, at: egui::Pos2, by: f32| {
+        harness.event(egui::Event::PointerMoved(at));
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -by),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        harness.run_steps(60);
+    };
+    let press = |harness: &mut Harness<App>, pos: egui::Pos2, pressed: bool| {
+        harness.event(egui::Event::PointerMoved(pos));
+        harness.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    };
+    let settle = |harness: &mut Harness<App>| {
+        harness.event(egui::Event::PointerGone);
+        for item in &mut harness.state_mut().items {
+            item.view.playing = false;
+        }
+        harness.run_steps(60);
+    };
+    for (width, theme) in
+        [(1280.0, Theme::Dark), (1280.0, Theme::Light), (crate::MIN_WIDTH, Theme::Dark)]
+    {
+        let theme_name = if theme == Theme::Dark { "dark" } else { "light" };
+        let name = |scene: &str| format!("moment-{scene}-{width}-{theme_name}");
+        let config = config.clone();
+        let mut harness = Harness::builder()
+            .with_size([width, 820.0])
+            .with_step_dt(1.0 / 60.0)
+            .with_max_steps(100_000)
+            .with_render_options(filtering)
+            .wgpu()
+            .build_eframe(move |cc| {
+                let app = App::with(config.clone(), None, Presets::builtin());
+                app.style(&cc.egui_ctx);
+                app
+            });
+        set_theme(&harness.ctx, theme);
+        harness.state_mut().add(vec![clip.clone()]);
+        finish(&mut harness);
+        settle(&mut harness);
+        // the crop's width, a number typed and not yet taken
+        let label = harness.get_by_label(&fl!("width")).rect();
+        let fields =
+            harness.query_all(egui_kittest::kittest::by().role(egui::accesskit::Role::SpinButton));
+        let field = fields
+            .filter(|node| {
+                let rect = node.rect();
+                rect.left() > label.right() && rect.y_range().contains(label.center().y)
+            })
+            .map(|node| node.accesskit_node().id())
+            .next()
+            .expect("the crop's width");
+        let by_id = move || egui_kittest::kittest::by().predicate(move |node| node.id() == field);
+        harness.get(by_id()).focus();
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("32".into()));
+        harness.run_steps(2);
+        save(&mut harness, &name("typing"));
+        // and what isn't a number, refused
+        harness.event(egui::Event::Text("x".into()));
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        save(&mut harness, &name("refused"));
+        harness.key_press(egui::Key::Escape);
+        settle(&mut harness);
+        // the timeline's readout at the start of the bar, at its end, and
+        // the playhead held and dragged
+        let track = timeline_bar(&harness).shrink2(egui::vec2(8.0, 0.0));
+        harness.event(egui::Event::PointerMoved(track.left_center() + egui::vec2(1.0, 0.0)));
+        harness.run_steps(3);
+        save(&mut harness, &name("readout-start"));
+        harness.event(egui::Event::PointerMoved(track.right_center() - egui::vec2(1.0, 0.0)));
+        harness.run_steps(3);
+        save(&mut harness, &name("readout-end"));
+        let from = track.left_center() + egui::vec2(track.width() * 0.3, 0.0);
+        press(&mut harness, from, true);
+        harness.step();
+        for step in 1..=4 {
+            harness.event(egui::Event::PointerMoved(from + egui::vec2(20.0 * step as f32, 0.0)));
+            harness.step();
+        }
+        save(&mut harness, &name("readout-dragged"));
+        press(&mut harness, from + egui::vec2(80.0, 0.0), false);
+        settle(&mut harness);
+        // a choice made, which Undo in the menu takes back
+        harness.get_by_label(&fl!("shape-preserve")).click();
+        harness.run_steps(3);
+        harness.get_by_label(&fl!("main-menu")).click();
+        harness.run_steps(30);
+        save(&mut harness, &name("menu-undo"));
+        harness.key_press(egui::Key::Escape);
+        settle(&mut harness);
+        // the settings under the preview scrolled to their end
+        let screen = harness.ctx.content_rect();
+        wheel(&mut harness, egui::pos2(screen.max.x - 300.0, screen.max.y - 150.0), 4000.0);
+        settle(&mut harness);
+        save(&mut harness, &name("settings-end"));
+        // rows fading in, a few frames after they are added
+        harness.state_mut().add(arts.clone());
+        harness.run_steps(4);
+        save(&mut harness, &name("rows-fading"));
+        finish(&mut harness);
+        settle(&mut harness);
+        // the list scrolled to its middle and its end
+        let list = egui::pos2(100.0, screen.center().y);
+        wheel(&mut harness, list, 900.0);
+        settle(&mut harness);
+        save(&mut harness, &name("list-middle"));
+        wheel(&mut harness, list, 4000.0);
+        settle(&mut harness);
+        save(&mut harness, &name("list-end"));
+        // a notice passing in, a few frames on
+        harness.state_mut().say(Message::info(fl!("files-gone", count = 2)));
+        harness.run_steps(4);
+        save(&mut harness, &name("notice-fading"));
+        harness.state_mut().banner = Default::default();
+        settle(&mut harness);
+        // a row made while another is chosen, glowing once, part of the way
+        let first = harness.state().items[0].id;
+        harness.state_mut().select(first);
+        let last = harness.state().items.last().unwrap().id;
+        harness.state_mut().enqueue(last);
+        for _ in 0..6000 {
+            harness.step();
+            let item = harness.state().items.last().unwrap();
+            if item.job.is_none() {
+                break;
+            }
+        }
+        harness.run_steps(12);
+        save(&mut harness, &name("glowing"));
+        harness.state_mut().select(last);
+        settle(&mut harness);
+        // Settings fading in, then scrolled to its end
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(4);
+        save(&mut harness, &name("settings-fading"));
+        harness.run_steps(30);
+        wheel(&mut harness, screen.center(), 4000.0);
+        settle(&mut harness);
+        save(&mut harness, &name("settings-dialog-end"));
+        // its scale's Larger held down
+        // the one on the row of the scale, rather than the result's
+        let row = harness.get_by_label(&fl!("scale")).rect().center().y;
+        let plus = harness
+            .get_all_by_label(&fl!("scale-larger"))
+            .map(|node| node.rect().center())
+            .min_by(|a, b| (a.y - row).abs().total_cmp(&(b.y - row).abs()))
+            .expect("the scale's Larger");
+        press(&mut harness, plus, true);
+        harness.run_steps(3);
+        save(&mut harness, &name("stepper-held"));
+        press(&mut harness, plus, false);
+        harness.run_steps(3);
+        harness.state_mut().config.gui.scale = 1.0;
+        harness.state_mut().settings_dialog = settings_dialog::SettingsDialog::default();
+        settle(&mut harness);
+    }
+}
+
 /// The bar of the timeline under the preview, which says what is past the
 /// limit, as long as the limit is on it.
 fn timeline_bar(harness: &Harness<App>) -> egui::Rect {
