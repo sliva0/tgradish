@@ -765,7 +765,8 @@ mod tests {
         harness.run_steps(2);
         finish(&mut harness);
         let first = [fl!("play"), fl!("frame-before")];
-        let cases: [(&str, fn(&mut Item)); 4] = [
+        type Case = (&'static str, fn(&mut Item));
+        let cases: [Case; 4] = [
             ("the result's player", |item| item.view.show = Show::Result),
             ("the timeline", |item| item.view.show = Show::Input),
             // the crop's tag over the stage
