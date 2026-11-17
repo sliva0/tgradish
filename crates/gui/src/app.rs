@@ -161,6 +161,8 @@ pub(crate) struct App {
     /// The accent the look was made with last: the one chosen, or
     /// else the system's.
     pub(crate) applied_accent: Option<Color32>,
+    /// Whether the system asks for less motion, as it changes.
+    pub(crate) system_motion: Option<crate::motion::System>,
 }
 
 impl App {
@@ -397,6 +399,7 @@ impl App {
             window: None,
             accent: None,
             applied_accent: None,
+            system_motion: None,
         }
     }
 
@@ -801,8 +804,7 @@ fn dialog_settings(from: &Config, to: &mut Config) {
     (gui.output_dir, gui.overwrite, gui.target) =
         (from.output_dir.clone(), from.overwrite, from.target);
     (gui.language, gui.theme, gui.accent) = (from.language.clone(), from.theme, from.accent);
-    (gui.scale, gui.reopen_files, gui.smooth_scrolling) =
-        (from.scale, from.reopen_files, from.smooth_scrolling);
+    (gui.scale, gui.reopen_files, gui.motion) = (from.scale, from.reopen_files, from.motion);
 }
 
 /// The settings at `path`, or the defaults where they can't be read, with
@@ -994,7 +996,10 @@ impl eframe::App for App {
         let working = self.items.iter().any(|item| item.job.is_some());
         self.probes.follow(&ctx, working);
         self.follow_accent(&ctx);
-        if !self.config.gui.smooth_scrolling {
+        let less = self.system_motion.as_ref().is_some_and(crate::motion::System::reduced);
+        let motion = self.config.gui.motion && !less;
+        crate::motion::set(&ctx, motion);
+        if !motion {
             direct_scrolling(&ctx);
         }
         self.take_input(&ctx);

@@ -79,7 +79,7 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     config.ffmpeg.choice = FfmpegChoice::System;
     // each turn of the wheel scrolled all the way at once, before what it
     // shows is noted
-    config.gui.smooth_scrolling = false;
+    config.gui.motion = false;
     let mut harness =
         Harness::builder().with_size([1280.0, 820.0]).wgpu().build_eframe(move |cc| {
             let app = App::with(config.clone(), None, Presets::builtin());

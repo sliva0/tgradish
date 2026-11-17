@@ -98,7 +98,7 @@ impl Inset {
             _ => {}
         }
         let drawn = match self.motion {
-            Some((from, since)) if now - since < EASING => {
+            Some((from, since)) if now - since < EASING && crate::motion::motion(ctx) => {
                 ctx.request_repaint();
                 let t = eased((now - since) / EASING);
                 (

@@ -316,7 +316,7 @@ mod portal {
 /// than the one chosen, where the GUI's fills, as Breeze's, are made from the
 /// accent itself. Plasma 5's portal has no accent at all.
 #[cfg(all(unix, not(target_os = "macos")))]
-mod kde {
+pub(crate) mod kde {
     use std::path::PathBuf;
 
     use eframe::egui::Color32;
@@ -327,22 +327,29 @@ mod kde {
     /// Elsewhere the portal's: other desktops may have left a `kdeglobals`
     /// behind, which isn't theirs to follow.
     pub(super) fn accent(portal: Option<Color32>) -> Option<Color32> {
-        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-        let plasma = desktop.split(':').any(|name| name.eq_ignore_ascii_case("KDE"))
-            || std::env::var_os("KDE_FULL_SESSION").is_some_and(|value| value == "true");
-        if !plasma {
+        if !plasma() {
             return portal;
         }
-        let files: Vec<String> =
-            paths().iter().filter_map(|path| std::fs::read_to_string(path).ok()).collect();
-        of(&files, portal)
+        of(&files(), portal)
+    }
+
+    /// Whether this is a Plasma session.
+    pub(crate) fn plasma() -> bool {
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        desktop.split(':').any(|name| name.eq_ignore_ascii_case("KDE"))
+            || std::env::var_os("KDE_FULL_SESSION").is_some_and(|value| value == "true")
+    }
+
+    /// What `kdeglobals` holds, the user's first, then the system's.
+    pub(crate) fn files() -> Vec<String> {
+        paths().iter().filter_map(|path| std::fs::read_to_string(path).ok()).collect()
     }
 
     /// The accent `files` say, the user's first, as KDE reads them: each
     /// key from the first of them that has it.
     pub(super) fn of(files: &[String], portal: Option<Color32>) -> Option<Color32> {
         let first = |section: &str, key: &str| {
-            files.iter().find_map(|text| value(text, section, key)).and_then(colour)
+            files.iter().find_map(|text| super::ini_value(text, section, key)).and_then(colour)
         };
         first("General", "AccentColor")
             .or(portal)
@@ -362,23 +369,6 @@ mod kde {
             .unwrap_or_else(|| "/etc/xdg".to_owned());
         let system = system.split(':').filter(|dir| dir.starts_with('/')).map(PathBuf::from);
         user.into_iter().chain(system).map(|dir| dir.join("kdeglobals")).collect()
-    }
-
-    /// The value of `key` in `[section]` of an INI file, as KConfig writes
-    /// them.
-    fn value<'a>(text: &'a str, section: &str, key: &str) -> Option<&'a str> {
-        let mut inside = false;
-        for line in text.lines().map(str::trim) {
-            if let Some(name) = line.strip_prefix('[') {
-                inside = name.strip_suffix(']') == Some(section);
-            } else if inside
-                && let Some((name, value)) = line.split_once('=')
-                && name.trim() == key
-            {
-                return Some(value.trim());
-            }
-        }
-        None
     }
 
     /// A colour as KConfig writes one: `r,g,b`, maybe with alpha, or
@@ -451,6 +441,24 @@ mod kde {
             assert_eq!(of(&[transparent, scheme], portal), portal);
         }
     }
+}
+
+/// The value of `key` in `[section]` of an INI file, as KConfig writes
+/// them.
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
+pub(crate) fn ini_value<'a>(text: &'a str, section: &str, key: &str) -> Option<&'a str> {
+    let mut inside = false;
+    for line in text.lines().map(str::trim) {
+        if let Some(name) = line.strip_prefix('[') {
+            inside = name.strip_suffix(']') == Some(section);
+        } else if inside
+            && let Some((name, value)) = line.split_once('=')
+            && name.trim() == key
+        {
+            return Some(value.trim());
+        }
+    }
+    None
 }
 
 /// Reads the accent every few seconds: Windows says when it changes only

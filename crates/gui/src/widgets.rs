@@ -1759,12 +1759,19 @@ impl egui::Widget for Number<'_> {
         if let Some(at) = ui.data(|data| data.get_temp::<f64>(refused)) {
             let age = ui.input(|input| input.time) - at;
             if (0.0..REFUSED_FOR).contains(&age) {
-                let fade = 1.0 - (age / REFUSED_FOR) as f32;
+                // still, for as long, without motion
+                let moving = crate::motion::motion(ui.ctx());
+                let fade = if moving { 1.0 - (age / REFUSED_FOR) as f32 } else { 1.0 };
                 let colour = theme::bad(ui.visuals()).gamma_multiply(fade);
                 let corner = ui.visuals().widgets.inactive.corner_radius;
                 let stroke = egui::Stroke::new(1.5, colour);
                 ui.painter().rect_stroke(response.rect, corner, stroke, egui::StrokeKind::Inside);
-                ui.ctx().request_repaint();
+                if moving {
+                    ui.ctx().request_repaint();
+                } else {
+                    let left = std::time::Duration::from_secs_f64(REFUSED_FOR - age);
+                    ui.ctx().request_repaint_after(left);
+                }
             } else {
                 ui.data_mut(|data| data.remove::<f64>(refused));
             }
@@ -2317,7 +2324,12 @@ fn bar_drawn(
         let part = egui::Rect::from_min_size(rect.min, egui::vec2(width, rect.height()));
         ui.painter_at(part).rect_filled(rect, rounding, colour);
     }
-    if !matches!(fill, Fill::Share(_)) {
+    let moving = crate::motion::motion(ui.ctx());
+    // still, at work with how far unknown: stripes over it all
+    if !moving && fill == Fill::Unknown {
+        hatch(&painter, rect, rect.left(), colour);
+    }
+    if moving && !matches!(fill, Fill::Share(_)) {
         let band = rect.width() * 0.3;
         let time = ui.input(|input| input.time) as f32;
         let left = rect.left() - band + (time * 0.7).fract() * (rect.width() + band);

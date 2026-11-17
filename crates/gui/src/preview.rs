@@ -109,7 +109,7 @@ impl App {
                             item,
                             (tempo, &mut in_frames),
                             (&webm, &tgs.unwrap_or_default()),
-                            (&mut look, self.config.gui.smooth_scrolling),
+                            (&mut look, crate::motion::motion(ui.ctx())),
                         );
                     },
                 );

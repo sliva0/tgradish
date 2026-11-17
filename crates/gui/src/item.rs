@@ -345,7 +345,7 @@ impl Default for Zoom {
 
 impl Zoom {
     /// Zooms out to all of the picture: eased from `now`, where `smooth`,
-    /// as scrolling is, or at once.
+    /// as with motion, or at once.
     pub(crate) fn zoom_out(&mut self, now: f64, smooth: bool) {
         match smooth {
             true => self.easing = Some((self.level, self.centre, now)),

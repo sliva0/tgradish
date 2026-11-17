@@ -982,8 +982,12 @@ accent-hex = Hex
     .wrong = Write it as # and six hexadecimal digits, as #3daee9
 files = Files
 reopen-files = Reopen the files of last time, with their settings
-scrolling = Scrolling
-smooth-scrolling = Smooth: ease it over a few frames
+# Whether scrolling eases and what changes moves into place, a checkbox
+# beside it; the system asking for less motion keeps everything still
+# whatever it says.
+motion = Motion
+    .hint = Where the system asks for less motion, nothing moves either way
+motion-on = Ease scrolling, and fade and move what changes
 new-files = New files
 preset-for-webm = Preset for WebM
 preset-for-tgs = Preset for TGS

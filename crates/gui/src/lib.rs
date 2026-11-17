@@ -34,6 +34,7 @@ mod jobs;
 mod keys;
 mod l10n;
 mod media;
+mod motion;
 mod outputs;
 mod predict;
 mod preset_dialogs;
@@ -196,6 +197,7 @@ pub fn run(launch: Launch) -> Result<Started, Error> {
         Box::new(|cc| {
             let app = App {
                 accent: Some(accent::Accent::watch(&cc.egui_ctx)),
+                system_motion: Some(motion::System::watch(&cc.egui_ctx)),
                 ..App::new(launch, store, listener)
             };
             app.style(&cc.egui_ctx);

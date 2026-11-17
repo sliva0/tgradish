@@ -820,13 +820,12 @@ const ZOOM_OUT: f64 = 0.15;
 /// settling, while it is on it.
 fn ease_out(ctx: &egui::Context, zoom: &mut Zoom) {
     let Some((level, centre, since)) = zoom.easing else { return };
-    let t = crate::inset::eased((ctx.input(|input| input.time) - since) / ZOOM_OUT);
+    // at its end at once where motion stops on the way
+    let t = crate::inset::eased(f64::from(crate::motion::along(ctx, since, ZOOM_OUT)));
     zoom.level = level + (1.0 - level) * t;
     zoom.centre = centre + (Vec2::splat(0.5) - centre) * t;
     if t >= 1.0 {
         zoom.easing = None;
-    } else {
-        ctx.request_repaint();
     }
 }
 
@@ -1612,7 +1611,7 @@ mod tests {
         assert!(levels.iter().filter(|level| (1.0..4.0).contains(*level)).count() >= 3);
         assert_eq!(harness.state().1.level, 1.0);
         assert_eq!(harness.state().1.centre, vec2(0.5, 0.5));
-        // or at once, without smooth scrolling
+        // or at once, without motion
         harness.state_mut().1 = zoomed;
         harness.step();
         harness.state_mut().1.zoom_out(now, false);

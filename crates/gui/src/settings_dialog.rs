@@ -335,14 +335,13 @@ fn placed(ctx: &egui::Context, dialog: &mut SettingsDialog) -> Placed {
     }
     let unplaced = Placed { corner: None, scroll: None, room };
     let Some((from, since)) = dialog.returning else { return unplaced };
-    let share = (ctx.input(|input| input.time) - since) / RETURNING;
+    let share = crate::motion::along(ctx, since, RETURNING);
     if share >= 1.0 {
         dialog.returning = None;
         return unplaced;
     }
-    ctx.request_repaint();
     let middle = window.center() - egui::vec2(drawn.x, height(room)) / 2.0;
-    let corner = within(from.lerp(middle, crate::inset::eased(share)), room);
+    let corner = within(from.lerp(middle, crate::inset::eased(f64::from(share))), room);
     Placed { corner: Some(corner), ..unplaced }
 }
 
@@ -645,8 +644,8 @@ fn sections(
     row(ui, &fl!("files"), "", Ok(()), |ui| {
         ui.checkbox(&mut gui.reopen_files, fl!("reopen-files"));
     });
-    row(ui, &fl!("scrolling"), "", Ok(()), |ui| {
-        ui.checkbox(&mut gui.smooth_scrolling, fl!("smooth-scrolling"));
+    row(ui, &fl!("motion"), &fl!("motion", "hint"), Ok(()), |ui| {
+        ui.checkbox(&mut gui.motion, fl!("motion-on")).on_hover_text(fl!("motion", "hint"));
     });
 
     widgets::section(ui, &fl!("new-files"));
@@ -1221,6 +1220,41 @@ mod tests {
         assert!(harness.state().settings_dialog.pinned.is_none());
         settle(&mut harness, 30);
         assert!(centred(&harness) && harness.state().settings_dialog.returning.is_none());
+    }
+
+    #[test]
+    fn goes_back_to_the_middle_at_once_without_motion() {
+        let mut config = Config::default();
+        config.gui.motion = false;
+        let mut harness = Harness::builder()
+            .with_size([1280.0, 900.0])
+            .with_step_dt(1.0 / 60.0)
+            .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin()));
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(16);
+        let centre = |harness: &Harness<App>| harness.state().settings_dialog.drawn.0.center();
+        let middle = centre(&harness);
+        // let go of in the corner, as the scale's buttons leave it
+        let leave = |harness: &mut Harness<App>| {
+            let now = harness.ctx.input(|input| input.time);
+            harness.state_mut().settings_dialog.returning = Some((egui::Pos2::ZERO, now));
+            harness.step();
+        };
+        leave(&mut harness);
+        assert!((centre(&harness) - middle).length() < 1.0);
+        assert!(harness.state().settings_dialog.returning.is_none());
+        // with motion: on its way a frame later, there once its time is up
+        harness.state_mut().config.gui.motion = true;
+        harness.step();
+        leave(&mut harness);
+        let away = (centre(&harness) - middle).length();
+        assert!(away > 50.0, "{away}");
+        harness.run_steps(4);
+        let nearer = (centre(&harness) - middle).length();
+        assert!(nearer > 1.0 && nearer < away, "{nearer}");
+        harness.run_steps(8);
+        assert!((centre(&harness) - middle).length() < 1.0);
+        assert!(harness.state().settings_dialog.returning.is_none());
     }
 
     /// How far `label`'s button is out of what shows of the settings, in

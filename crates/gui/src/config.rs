@@ -45,6 +45,10 @@ impl From<tgradish_core::config::Config> for Config {
         let gui = GuiConfig::read(&core.gui);
         let read = toml::Table::try_from(&gui).expect("the GUI's settings are a table");
         core.gui.retain(|key, value| !KEYS.contains(&key) || read.get(key) != Some(value));
+        // read as motion, which is written in its place
+        if get::<bool>(&core.gui, OLD_MOTION).is_some() {
+            core.gui.remove(OLD_MOTION);
+        }
         Config { core, gui }
     }
 }
@@ -98,8 +102,10 @@ pub(crate) struct GuiConfig {
     /// What new files become: stickers or emoji.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) target: Option<Target>,
-    /// Ease scrolling over a few frames instead of following the wheel.
-    pub(crate) smooth_scrolling: bool,
+    /// Ease scrolling over a few frames instead of following the wheel,
+    /// and let what changes move or fade rather than jump, unless the
+    /// system asks for less motion.
+    pub(crate) motion: bool,
     /// The GUI's language, as a tag like `de`; the system's when unset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) language: Option<String>,
@@ -123,7 +129,7 @@ impl Default for GuiConfig {
             output_dir: None,
             overwrite: false,
             target: None,
-            smooth_scrolling: true,
+            motion: true,
             language: None,
             theme: Theme::default(),
             accent: Accent::default(),
@@ -140,7 +146,7 @@ const KEYS: [&str; 11] = [
     "output-dir",
     "overwrite",
     "target",
-    "smooth-scrolling",
+    "motion",
     "language",
     "theme",
     "accent",
@@ -149,6 +155,10 @@ const KEYS: [&str; 11] = [
     "timeline-frames",
     "result-preview",
 ];
+
+/// What `motion` was called while it was smooth scrolling alone, read
+/// where `motion` is missing.
+const OLD_MOTION: &str = "smooth-scrolling";
 
 /// The scales the GUI may have, as egui's keys for zooming allow.
 pub(crate) const SCALES: std::ops::RangeInclusive<f64> = 0.2..=5.0;
@@ -181,7 +191,9 @@ impl GuiConfig {
                 .filter(|dir| !dir.as_os_str().is_empty()),
             overwrite: get(table, "overwrite").unwrap_or(default.overwrite),
             target: get(table, "target"),
-            smooth_scrolling: get(table, "smooth-scrolling").unwrap_or(default.smooth_scrolling),
+            motion: get(table, "motion")
+                .or_else(|| get(table, OLD_MOTION))
+                .unwrap_or(default.motion),
             language: get(table, "language"),
             theme: get(table, "theme").unwrap_or(default.theme),
             accent: get(table, "accent").unwrap_or(default.accent),
@@ -367,9 +379,21 @@ mod tests {
              [gui.result-preview]\nsize = 9\ncorner = 'top-left'\n",
         );
         assert!(gui.overwrite && !gui.reopen_files);
-        // scrolling eases unless it is said not to
-        assert!(gui.smooth_scrolling);
-        assert!(!read("[gui]\nsmooth-scrolling = false\n").smooth_scrolling);
+        // things move unless it is said not to, as scrolling did by its
+        // old name
+        assert!(gui.motion);
+        assert!(!read("[gui]\nmotion = false\n").motion);
+        assert!(!read("[gui]\nsmooth-scrolling = false\n").motion);
+        assert!(read("[gui]\nmotion = true\nsmooth-scrolling = false\n").motion);
+        // and written by its new name alone
+        let old: tgradish_core::config::Config =
+            toml::from_str("[gui]\nsmooth-scrolling = false\n").unwrap();
+        let mut config = Config::from(old);
+        let mut written = config.core.gui.clone();
+        config.forget_overridden();
+        config.gui.write(&mut written);
+        assert_eq!(written.get("motion"), Some(&toml::Value::Boolean(false)));
+        assert!(!written.contains_key("smooth-scrolling"), "{written:?}");
         // a theme it doesn't know, and a size out of range: the defaults
         assert_eq!(gui.theme, Theme::System);
         assert_eq!(gui.result_preview, ResultPreview { size: 3, corner: Corner::TopLeft });
