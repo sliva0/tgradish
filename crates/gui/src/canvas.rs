@@ -742,6 +742,11 @@ fn size_tag(painter: &egui::Painter, crop: Crop, on_screen: Rect, stage: Rect) -
         room.top()
     };
     let x = if top == within { on_screen.left() + clear } else { x };
+    // a crop kept from a larger picture lies past this one's edges, where
+    // the stage would cut the tag, and its cross with it
+    let width = tag.x + 2.0 * pad;
+    let x = x.min(room.right() - width).max(room.left());
+    let top = top.min(room.bottom() - high).max(room.top());
     let back = Rect::from_min_size(pos2(x, top), tag + Vec2::splat(2.0 * pad));
     let at = back.min + Vec2::splat(pad);
     let cross = Rect::from_min_max(pos2(back.right() - side, back.top()), back.max);
@@ -1518,6 +1523,10 @@ mod tests {
             Rect::from_min_size(pos2(100.0, 10.0), vec2(30.0, 30.0)),
             // as tall as the stage, and too narrow
             Rect::from_min_size(pos2(100.0, 10.0), vec2(30.0, 380.0)),
+            // past the stage's bottom right, as a crop kept from a larger
+            // picture is
+            Rect::from_min_size(pos2(590.0, 380.0), vec2(40.0, 40.0)),
+            Rect::from_min_size(pos2(700.0, 450.0), vec2(40.0, 40.0)),
         ];
         let mut tags = Vec::new();
         let mut output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
@@ -1525,7 +1534,10 @@ mod tests {
             tags = crops.map(|on_screen| size_tag(painter, crop, on_screen, stage).back).to_vec();
         });
         output.textures_delta.clear();
-        let [over, within, under, pinned] = tags[..] else { panic!("{tags:?}") };
+        let [over, within, under, pinned, past, beyond] = tags[..] else { panic!("{tags:?}") };
+        for tag in [past, beyond] {
+            assert!(stage.contains_rect(tag), "{tag:?}");
+        }
         assert!(over.bottom() < crops[0].top() - GRAB, "{over:?}");
         assert!(within.top() > crops[1].top() + GRAB, "{within:?}");
         assert!(within.left() > crops[1].left() + GRAB, "{within:?}");
