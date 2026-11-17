@@ -654,18 +654,27 @@ fn bar(
     }
 }
 
-/// Says `text` on a pill under the middle of the bar `rect`, at `x` as far
-/// as the bar lets it: at once, as a
-/// tooltip shows only once the pointer rests, and never while a button is
-/// held, as it is while dragging. Under the bar's track rather than over
-/// it, in the room the bar's row has under it, never over the picture.
+/// Says `text` on a pill under the middle of the bar `rect`, ending just
+/// left of `x`, where the pointer or the end dragged is: the pointer's
+/// arrow points up and left from where it is, and would hide what is
+/// right of it. Right of `x`, past the arrow, where it doesn't fit left of
+/// it, near the bar's start. At once, as a tooltip shows only once the
+/// pointer rests, and never while a button is held, as it is while
+/// dragging. Under the bar's track rather than over it, in the room the
+/// bar's row has under it, never over the picture.
 fn readout(ui: &egui::Ui, rect: Rect, x: f32, text: String) {
     let visuals = ui.visuals();
     let colour = visuals.strong_text_color();
     let painter = ui.ctx().layer_painter(ui.layer_id());
     let galley = painter.layout_no_wrap(text, READOUT, colour);
-    let size = galley.size() + vec2(10.0, 0.0);
-    let left = (x - size.x / 2.0).min(rect.right() - size.x).max(rect.left());
+    // a point shorter than the text's line, which leaves room under the
+    // glyphs, to keep clear of what is under the bar where it has a row
+    let size = galley.size() + vec2(2.0 * READOUT_PADDING, -1.0);
+    let left = match x - READOUT_GAP - size.x {
+        left if left >= rect.left() => left,
+        _ => x + READOUT_PAST,
+    };
+    let left = left.min(rect.right() - size.x).max(rect.left());
     let pill = Rect::from_min_size(pos2(left, rect.center().y + READOUT_DOWN), size);
     let radius = size.y / 2.0;
     painter.rect(
@@ -675,11 +684,19 @@ fn readout(ui: &egui::Ui, rect: Rect, x: f32, text: String) {
         theme::floating_outline(visuals),
         egui::StrokeKind::Inside,
     );
-    painter.galley(pill.min + vec2(5.0, 0.0), galley, colour);
+    painter.galley(pill.min + vec2(READOUT_PADDING, -0.5), galley, colour);
 }
 
-/// The readout's font, as small as the limit's label.
-const READOUT: egui::FontId = egui::FontId::proportional(10.5);
+/// The readout's font, a little smaller than the GUI's, as it is said
+/// under the pointer and goes as it moves.
+const READOUT: egui::FontId = egui::FontId::proportional(11.0);
+/// Room on either side of the readout's text, inside its pill.
+const READOUT_PADDING: f32 = 5.0;
+/// How far left of the pointer the readout ends.
+const READOUT_GAP: f32 = 6.0;
+/// How far right of the pointer the readout starts where it goes there:
+/// past the pointer's arrow, as wide as it is at its usual size.
+const READOUT_PAST: f32 = 14.0;
 /// How far under the middle of the bar the readout starts: under its
 /// track, and under the playhead's knob on the result's bar.
 const READOUT_DOWN: f32 = TRACK / 2.0 + 1.0;
@@ -1110,14 +1127,31 @@ mod tests {
                 _ => None,
             })
         };
-        // hovered, with tooltips as slow as they are: where the pointer is,
-        // under the track, within the room under the row
+        // hovered, with tooltips as slow as they are: just left of the
+        // pointer, clear of its arrow, which points up and left from where
+        // it is, under the track, within the room under the row, in text
+        // as large as it reads
         harness.event(egui::Event::PointerMoved(pos2(x_of(20.0), track.center().y)));
         harness.step();
         let said = place(&harness, "20.00 s").expect("said at once");
         let bar = track.expand2(vec2(8.0, (BAR - TRACK) / 2.0));
         assert!(said.top() > track.bottom() && said.bottom() < bar.bottom() + 12.0, "{said:?}");
-        assert!((said.center().x - x_of(20.0)).abs() < 1.0, "{said:?}");
+        let left_of = x_of(20.0) - said.right();
+        assert!((6.0..=12.0).contains(&left_of), "{said:?}: {left_of} left of the pointer");
+        let size = harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+            Shape::Text(text) if text.galley.text() == "20.00 s" => {
+                Some(text.galley.job.sections[0].format.font_id.size)
+            }
+            _ => None,
+        });
+        assert!(size.is_some_and(|size| (11.0..=12.0).contains(&size)), "{size:?}");
+        // near the bar's left end, where it wouldn't fit there: right of
+        // the pointer, past its arrow
+        harness.event(egui::Event::PointerMoved(pos2(x_of(1.0), track.center().y)));
+        harness.step();
+        let said = place(&harness, "1.00 s").expect("said at once");
+        assert!(said.left() >= x_of(1.0) + 12.0 && said.left() <= x_of(1.0) + 24.0, "{said:?}");
+        assert!(said.left() >= bar.left(), "{said:?}");
         // the end dragged, where it is at each step, with the button held
         let from = pos2(x_of(50.3) + 3.0, track.center().y);
         let press = |pos, pressed| egui::Event::PointerButton {

@@ -36,6 +36,7 @@ fn screenshots() {
     crate::l10n::choose(None);
     let mut save = |harness: &mut Harness<App>, name: &str| {
         let image = harness.render().expect("rendering needs a GPU");
+        let image = with_pointer(harness, image);
         image.save(out.join(format!("tgradish-{name}.png"))).unwrap();
     };
     walk(&mut save);
@@ -366,8 +367,52 @@ fn manipulation_screenshots() {
     crate::l10n::choose(None);
     manipulation(&mut |harness: &mut Harness<App>, name: &str| {
         let image = harness.render().expect("rendering needs a GPU");
+        let image = with_pointer(harness, image);
         image.save(out.join(format!("tgradish-{name}.png"))).unwrap();
     });
+}
+
+/// `image` of what `harness` shows with the pointer drawn on it where it
+/// is, as the usual arrow at its usual size, for a look at what it hides:
+/// a window's own pictures leave it out.
+fn with_pointer(harness: &Harness<App>, mut image: image::RgbaImage) -> image::RgbaImage {
+    let Some(at) = harness.ctx.input(|input| input.pointer.hover_pos()) else { return image };
+    let scale = harness.ctx.pixels_per_point();
+    // its outline, from its tip, in points
+    let arrow: Vec<egui::Pos2> =
+        [(0.0, 0.0), (0.0, 17.0), (4.0, 13.0), (7.0, 19.5), (9.5, 18.5), (6.5, 12.0), (12.0, 12.0)]
+            .iter()
+            .map(|&(x, y)| (at + egui::vec2(x, y)) * scale)
+            .collect();
+    let edges = || arrow.iter().zip(arrow.iter().cycle().skip(1));
+    let inside = |p: egui::Pos2| {
+        let crossings = edges().filter(|(a, b)| {
+            (a.y > p.y) != (b.y > p.y) && p.x < a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x)
+        });
+        crossings.count() % 2 == 1
+    };
+    let to_edge = |p: egui::Pos2| {
+        edges().fold(f32::MAX, |nearest, (a, b)| {
+            let along = (*b - *a).length_sq().max(f32::EPSILON);
+            let t = ((p - *a).dot(*b - *a) / along).clamp(0.0, 1.0);
+            nearest.min(p.distance(*a + (*b - *a) * t))
+        })
+    };
+    let bounds = egui::Rect::from_points(&arrow);
+    let (width, height) = (image.width() as f32, image.height() as f32);
+    let (left, top) = (bounds.left().max(0.0) as u32, bounds.top().max(0.0) as u32);
+    let (right, bottom) = (bounds.right().min(width - 1.0), bounds.bottom().min(height - 1.0));
+    for y in top..=bottom.max(0.0) as u32 {
+        for x in left..=right.max(0.0) as u32 {
+            let p = egui::pos2(x as f32 + 0.5, y as f32 + 0.5);
+            if inside(p) {
+                let edge = to_edge(p) < scale;
+                let shade = if edge { 0 } else { 255 };
+                image.put_pixel(x, y, image::Rgba([shade, shade, shade, 255]));
+            }
+        }
+    }
+    image
 }
 
 /// The bar of the timeline under the preview, which says what is past the
