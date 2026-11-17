@@ -262,9 +262,7 @@ impl App {
             let crossed = widgets::dialog_title(ui, widgets::title_text(ui, fl!("shortcuts")));
             // the dialog fits the window, the list scrolling within
             let room = (ctx.content_rect().height() - 160.0).max(200.0);
-            // that there is more below shows, as in Settings
-            ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
-            egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
+            widgets::scrolled(ui, egui::ScrollArea::vertical().max_height(room), |ui| {
                 widgets::settings_spacing(ui);
                 let groups = [
                     (Group::Files, fl!("shortcuts-files")),

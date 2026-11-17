@@ -120,22 +120,21 @@ impl App {
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         ui.set_width(side);
-                        egui::ScrollArea::vertical()
+                        let column = egui::ScrollArea::vertical()
                             .id_salt("side")
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                ui.set_max_width(side - 12.0);
-                                widgets::settings_spacing(ui);
-                                ui.add_space(6.0);
-                                file_settings::make(ui, item, &context);
-                                file_settings::blocked(ui, item);
-                                // what converting did, where the eye is once
-                                // Convert is pressed, before the plan, which
-                                // matters most before there is a result
-                                summary(ui, item, queued, copyable);
-                                details(ui, item);
-                                file_settings::plan(ui, item, &context);
-                            });
+                            .auto_shrink([false, false]);
+                        widgets::scrolled(ui, column, |ui| {
+                            widgets::settings_spacing(ui);
+                            ui.add_space(6.0);
+                            file_settings::make(ui, item, &context);
+                            file_settings::blocked(ui, item);
+                            // what converting did, where the eye is once
+                            // Convert is pressed, before the plan, which
+                            // matters most before there is a result
+                            summary(ui, item, queued, copyable);
+                            details(ui, item);
+                            file_settings::plan(ui, item, &context);
+                        });
                     },
                 );
             });
@@ -157,9 +156,8 @@ impl App {
         };
         ui.painter().hline(line.x_range(), line.center().y, egui::Stroke::new(1.0, colour));
         egui::CentralPanel::default().show(ui, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                // clear of the scroll bar, as the column beside the preview
-                ui.set_max_width(ui.available_width() - 12.0);
+            let settings = egui::ScrollArea::vertical().auto_shrink([false, false]);
+            widgets::scrolled(ui, settings, |ui| {
                 widgets::settings_spacing(ui);
                 file_settings::show(ui, item, &context);
                 ui.add_space(12.0);

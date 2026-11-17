@@ -279,7 +279,8 @@ impl App {
         self.banner.corner = Some(ui.available_rect_before_wrap());
         let now = ui.input(|input| input.time);
         self.rows.follow(&self.items, now);
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        let list = egui::ScrollArea::vertical().auto_shrink([false, false]);
+        widgets::scrolled(ui, list, |ui| {
             let mut clicked = None;
             let mut removed = None;
             let mut again = None;

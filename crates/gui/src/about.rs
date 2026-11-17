@@ -34,7 +34,8 @@ pub(crate) fn about(ui: &mut egui::Ui) {
     ui.add_space(6.0);
     widgets::note(ui, fl!("about-notices"));
     ui.add_space(4.0);
-    egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(360.0).show(ui, |ui| {
+    let area = egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(360.0);
+    widgets::scrolled(ui, area, |ui| {
         let notices = ui.ctx().memory_mut(|memory| {
             memory
                 .data

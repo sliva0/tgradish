@@ -279,7 +279,7 @@ fn settings_room(ctx: &egui::Context) -> f32 {
 
 /// How far within the settings that show the scale's button is kept from
 /// their top and bottom, where the last of them fade out: all of it shows.
-const KEPT_IN: f32 = FADE + 16.0;
+const KEPT_IN: f32 = widgets::SCROLL_FADE + 16.0;
 
 /// Where the dialog goes, and how its settings show.
 struct Placed {
@@ -358,10 +358,6 @@ fn release(dialog: &mut SettingsDialog, now: f64) {
     }
 }
 
-/// How much of the last of the settings that fit fades out, where there
-/// are more below.
-const FADE: f32 = 24.0;
-
 /// Shows the dialog if it is open. `ffmpeg_given` says an ffmpeg was given
 /// as tgradish was started, which it uses over the settings'.
 pub(crate) fn show(
@@ -396,24 +392,15 @@ pub(crate) fn show(
         ui.set_width(620.0);
         close = widgets::dialog_title(ui, widgets::title_text(ui, fl!("settings")));
         // the dialog fits the window, its settings scrolling within, and
-        // shown shorter where it is kept low in it. That there is more
-        // below shows: the bar is always drawn where
-        // they don't all fit, rather than as the pointer comes near, and
-        // the last of what fits fades out until scrolled to the end
-        let solid = egui::style::ScrollStyle::solid();
-        let scrolled = ui
-            .scope(|ui| {
-                ui.spacing_mut().scroll = solid;
-                let mut area = egui::ScrollArea::vertical().max_height(room);
-                if let Some(scroll) = scroll {
-                    area = area.vertical_scroll_offset(scroll);
-                }
-                area.show(ui, |ui| {
-                    widgets::settings_spacing(ui);
-                    sections(ui, dialog, config, ffmpeg_given, presets);
-                })
-            })
-            .inner;
+        // shown shorter where it is kept low in it
+        let mut area = egui::ScrollArea::vertical().max_height(room);
+        if let Some(scroll) = scroll {
+            area = area.vertical_scroll_offset(scroll);
+        }
+        let scrolled = widgets::scrolled(ui, area, |ui| {
+            widgets::settings_spacing(ui);
+            sections(ui, dialog, config, ffmpeg_given, presets);
+        });
         dialog.scrolled = Scrolled {
             offset: scrolled.state.offset.y,
             content: scrolled.content_size.y,
@@ -421,17 +408,6 @@ pub(crate) fn show(
             // from the window's top until it is drawn
             top: scrolled.inner_rect.top(),
         };
-        let hidden =
-            scrolled.content_size.y - scrolled.state.offset.y - scrolled.inner_rect.height();
-        if hidden > 1.0 {
-            let rect = scrolled.inner_rect;
-            let bar = solid.bar_width + solid.bar_inner_margin + solid.bar_outer_margin;
-            let fade = egui::Rect::from_min_max(
-                egui::pos2(rect.left(), rect.bottom() - FADE.min(hidden)),
-                egui::pos2(rect.right() - bar, rect.bottom()),
-            );
-            widgets::fade_out(ui.painter(), fade, ui.visuals().window_fill);
-        }
         // what writing them did, under the settings, where a path has
         // the dialog's width
         ui.add_space(4.0);

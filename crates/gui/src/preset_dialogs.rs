@@ -334,7 +334,7 @@ impl App {
             }
             // the list scrolls, its title and Close staying in sight
             let room = (ctx.content_rect().height() - 240.0).max(120.0);
-            egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
+            widgets::scrolled(ui, egui::ScrollArea::vertical().max_height(room), |ui| {
                 egui::Grid::new("presets").num_columns(3).spacing([8.0, 6.0]).show(ui, |ui| {
                     if !managing.rows.is_empty() {
                         ui.label(RichText::new(fl!("preset-name")).weak());

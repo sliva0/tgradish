@@ -2458,22 +2458,37 @@ pub(crate) fn problems(ui: &mut egui::Ui, problems: &[Problem]) {
     }
 }
 
-/// Fades what is drawn in `rect` out into `colour`, from none of it at
-/// the top to all of it at the bottom: what goes on below, cut off there.
-pub(crate) fn fade_out(painter: &egui::Painter, rect: egui::Rect, colour: Color32) {
-    let mut mesh = egui::Mesh::default();
-    let clear = Color32::TRANSPARENT;
-    for (at, colour) in [
-        (rect.left_top(), clear),
-        (rect.right_top(), clear),
-        (rect.right_bottom(), colour),
-        (rect.left_bottom(), colour),
-    ] {
-        mesh.colored_vertex(at, colour);
-    }
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(0, 2, 3);
-    painter.add(mesh);
+/// Room at the right of what scrolls for its bar, kept whether the bar
+/// shows or not, so nothing moves as it comes and goes.
+pub(crate) const GUTTER: f32 = 12.0;
+/// How far what is cut off at either end of what scrolls fades out.
+pub(crate) const SCROLL_FADE: f32 = 24.0;
+
+/// Shows `area`, with what `add` adds in it, as everything that scrolls
+/// is shown: that there is more shows, as its bar is always drawn where
+/// it doesn't all fit, rather than as the pointer comes near, in a gutter
+/// kept for it either way, and what is cut off fades out at the bottom
+/// until it is scrolled to its end, and at the top once scrolled.
+pub(crate) fn scrolled<R>(
+    ui: &mut egui::Ui,
+    area: egui::ScrollArea,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::scroll_area::ScrollAreaOutput<R> {
+    let width = ui.available_width();
+    let outer = ui.spacing().scroll;
+    ui.scope(|ui| {
+        let mut style = egui::style::ScrollStyle::solid();
+        style.bar_outer_margin = GUTTER - style.bar_width - style.bar_inner_margin;
+        style.fade = egui::style::ScrollFadeStyle { strength: 1.0, size: SCROLL_FADE };
+        ui.spacing_mut().scroll = style;
+        area.show(ui, |ui| {
+            // what scrolls within as it would elsewhere
+            ui.spacing_mut().scroll = outer;
+            ui.set_max_width(width - GUTTER);
+            add(ui)
+        })
+    })
+    .inner
 }
 
 /// Draws a checkerboard, so transparency shows, its squares counted from
@@ -2823,6 +2838,35 @@ mod tests {
             harness.state_mut().0 = false;
             harness.run_steps(2);
         }
+    }
+
+    #[test]
+    fn keeps_room_for_the_scroll_bar_whether_it_shows_or_not() {
+        // how many lines to show, and how wide they were and where they
+        // were seen from, as the bar comes and goes
+        type State = (usize, Option<(f32, f32)>);
+        let show = |ui: &mut egui::Ui, (lines, seen): &mut State| {
+            let area = egui::ScrollArea::vertical().max_height(200.0).auto_shrink([false, true]);
+            let shown = scrolled(ui, area, |ui| {
+                for _ in 0..*lines {
+                    ui.allocate_exact_size(vec2(40.0, 20.0), egui::Sense::hover());
+                }
+                ui.available_width()
+            });
+            *seen = Some((shown.inner, shown.inner_rect.width()));
+        };
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([400.0, 300.0])
+            .build_ui_state(show, (2, None));
+        harness.run_steps(3);
+        let (few, room) = harness.state().1.unwrap();
+        harness.state_mut().0 = 40;
+        harness.run_steps(30);
+        let (many, narrower) = harness.state().1.unwrap();
+        // the bar in the gutter kept for it, which the lines never had
+        assert_eq!(few, many);
+        assert!(narrower < room && few <= narrower, "{few} {narrower} {room}");
+        assert_eq!(few, harness.ctx.content_rect().width() - 16.0 - GUTTER);
     }
 
     #[test]
