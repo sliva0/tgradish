@@ -20,6 +20,13 @@ What changed in each release of tgradish, newest first. The format follows
   that fits whole, in a wide window, rather than cutting it short. The bar
   under it
   names the result's file, its folder said on hover, and stays on one line.
+- The GUI's number fields take a number typed once Enter, Tab or a click
+  elsewhere finishes it, and Escape puts back what was there, so what
+  follows from them, as the crop does from its ratio, no longer follows
+  each digit on the way. They read units and a decimal comma typed with
+  the number, and flash where what is typed isn't one. Up and Down, and
+  the wheel over a field being typed in, step them, further with Shift,
+  and dragging crosses a field's whole range in a few hundred points.
 
 ### Fixed
 

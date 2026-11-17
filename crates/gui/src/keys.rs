@@ -346,6 +346,7 @@ impl App {
         // text picked in a label is what Ctrl+C copies then
         use egui::text_selection::LabelSelectionState;
         let selecting = ctx.with_plugin::<LabelSelectionState, _>(|labels| labels.has_selection());
+        let waiting = self.keyed.waiting;
         self.keyed = Keyed::default();
         self.hovering = hovered || self.hovering;
         if !dropped.is_empty() {
@@ -375,10 +376,21 @@ impl App {
             })
             .is_some()
         };
-        let convert_all = take(Command::ConvertAll);
+        let mut convert_all = take(Command::ConvertAll);
         // both from a field too, its value typed in; Convert's for the bar
         // under the preview, which has its button
-        self.keyed.convert = take(Command::Convert);
+        let mut convert = take(Command::Convert);
+        // a number being typed is only taken as it is done with: taken this
+        // frame, as its field is drawn, and converted with it the next
+        if (convert || convert_all) && widgets::typing_number(ctx) {
+            widgets::take_typed_number(ctx);
+            self.keyed.waiting = Some((convert, convert_all));
+            (convert, convert_all) = (false, false);
+        }
+        if let Some((one, all)) = waiting {
+            (convert, convert_all) = (convert || one, convert_all || all);
+        }
+        self.keyed.convert = convert;
         if convert_all {
             self.convert_all();
         }
@@ -466,6 +478,9 @@ pub(crate) struct Keyed {
     pub(crate) copy: bool,
     /// Keep best so far pressed.
     pub(crate) keep_best: bool,
+    /// Convert and Convert all asked for as a number was typed, for the
+    /// next frame, once its field has taken it.
+    waiting: Option<(bool, bool)>,
 }
 
 impl App {
@@ -824,6 +839,49 @@ mod tests {
         harness.run_steps(2);
         finish(&mut harness);
         assert!(harness.state().items.iter().all(|item| item.made.is_some()));
+    }
+
+    #[test]
+    fn converts_a_number_typed_by_its_key_once_taken() {
+        use egui_kittest::kittest::Queryable;
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("wide.png");
+        image::RgbaImage::from_pixel(40, 24, image::Rgba([200, 40, 90, 255])).save(&art).unwrap();
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = harness(config);
+        // with fonts, as a field without has no text to put the cursor in
+        widgets::test_fonts(&harness);
+        harness.state_mut().add(vec![art]);
+        finish(&mut harness);
+        let width = || egui_kittest::kittest::by().role(egui::accesskit::Role::SpinButton);
+        let width = move || width().value("40 px");
+        let at = harness.get(width()).rect();
+        let typed = |harness: &mut egui_kittest::Harness<App>, text: &str| {
+            harness.get(width()).focus();
+            harness.run_steps(2);
+            harness.event(egui::Event::Text(text.into()));
+            harness.run_steps(2);
+        };
+        // typed, then put back: the crop as it was all along, and the
+        // field where it was
+        typed(&mut harness, "2");
+        assert_eq!(harness.state().items[0].choices.crop, None);
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+        assert_eq!(harness.state().items[0].choices.crop, None);
+        assert_eq!(harness.get(width()).rect(), at);
+        // typed, then converted by its key: with the width typed
+        typed(&mut harness, "20");
+        assert_eq!(harness.state().items[0].choices.crop, None);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Enter);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let item = &harness.state().items[0];
+        let made = item.made.as_ref().expect("converted");
+        let crop = made.choices.as_ref().and_then(|choices| choices.crop);
+        assert_eq!(crop.map(|crop| crop.width), Some(20));
+        assert_eq!(item.choices.crop.map(|crop| crop.width), Some(20));
     }
 
     #[test]

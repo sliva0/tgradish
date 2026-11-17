@@ -1136,7 +1136,7 @@ pub(crate) fn auto_number<T: egui::emath::Numeric>(
     automatic: (&str, &str),
     shown: Option<T>,
     start: T,
-    edit: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
+    edit: impl FnOnce(Number<'_>) -> Number<'_>,
 ) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
@@ -1155,7 +1155,7 @@ pub(crate) fn auto_number<T: egui::emath::Numeric>(
         // and say it changed
         let live = set && ui.is_enabled();
         let mut number = value.or(shown).unwrap_or(start);
-        let mut field = edit(egui::DragValue::new(&mut number)).clamp_existing_to_range(live);
+        let mut field = edit(Number::new(&mut number)).clamp_existing_to_range(live);
         // unknown: a dash, without the unit
         if !set && shown.is_none() {
             field = field.custom_formatter(|_, _| "—".to_owned()).prefix("").suffix("");
@@ -1171,11 +1171,7 @@ pub(crate) fn auto_number<T: egui::emath::Numeric>(
 
 /// A number field, where `set`; else the value it stands for as weak text
 /// in its place, which can't be typed into, so a box means it can.
-pub(crate) fn number_field(
-    ui: &mut egui::Ui,
-    set: bool,
-    field: egui::DragValue<'_>,
-) -> egui::Response {
+pub(crate) fn number_field(ui: &mut egui::Ui, set: bool, field: Number<'_>) -> egui::Response {
     if set {
         return ui.add(field);
     }
@@ -1200,6 +1196,840 @@ pub(crate) fn number_field(
     .inner
 }
 
+// Every number field is a [`Number`], so that they all take typing, keys,
+// dragging and the wheel alike. What is typed is only taken as it is done
+// with, by Enter, Tab or a click elsewhere: values that follow from the
+// field, as the crop does from a side of its ratio, would otherwise follow
+// each digit on the way, as 1 of 16, and stay where that left them. So
+// Escape can still put it back as it was.
+
+/// How far dragging a number field takes it across its whole range, in
+/// points, at the most: a field of a wide range is dragged faster than its
+/// speed says.
+const SCRUB_ACROSS: f64 = 400.0;
+/// How long a number field's outline shows that what was typed in it
+/// wasn't a number, in seconds.
+const REFUSED_FOR: f64 = 0.6;
+
+/// How a number field steps the number it holds, from it, by so many
+/// steps, back where negative, larger ones where the second is true.
+type Stepper<'a> = Box<dyn 'a + Fn(f64, f64, bool) -> f64>;
+type Formatter<'a> = Box<dyn 'a + Fn(f64, std::ops::RangeInclusive<usize>) -> String>;
+type Parser<'a> = Box<dyn 'a + Fn(&str) -> Option<f64>>;
+
+/// A field of a number, as [`egui::DragValue`] is, set up the same way,
+/// that takes what is typed only once it is done with; Escape puts back
+/// what it held as typing began. Up and Down step it while it is typed
+/// in, as does the wheel over it then, by its [`steps`](Number::steps),
+/// with Shift by its larger ones. Dragging goes across its range in
+/// [`SCRUB_ACROSS`] points at the most, ten times as slowly with Shift.
+/// It reads its own units typed with the number, and a decimal comma;
+/// what it can't read is not taken, and its outline flashes in the colour
+/// of what went wrong.
+pub(crate) struct Number<'a> {
+    get_set: Box<dyn 'a + FnMut(Option<f64>) -> f64>,
+    integral: bool,
+    range: std::ops::RangeInclusive<f64>,
+    clamp_existing: bool,
+    speed: f64,
+    steps: (f64, f64),
+    stepper: Option<Stepper<'a>>,
+    prefix: String,
+    suffix: String,
+    /// A unit read typed with the number, though not shown with it.
+    reads: &'static str,
+    max_decimals: Option<usize>,
+    formatter: Option<Formatter<'a>>,
+    parser: Option<Parser<'a>>,
+}
+
+/// What a number field being typed in holds.
+#[derive(Clone, Debug, Default)]
+struct Typing {
+    text: String,
+    /// The text as written from the value, which is left as it is unless
+    /// changed.
+    written: String,
+    /// The value as typing began, which Escape puts back.
+    start: f64,
+    /// The value as the text was written or taken: another one is a
+    /// change made elsewhere, after which the text is written again.
+    value: f64,
+    /// Notches of the wheel turned, short of a step.
+    wheel: f32,
+    /// The pass it last had the focus in: what was typed in a field that
+    /// lost it longer ago, as by going out of sight, is dropped.
+    pass: u64,
+}
+
+/// The id under which the number field being typed in is kept, and the
+/// pass that a [`take_typed_number`] asks it to be taken in.
+const TYPED: &str = "number typed";
+const TAKE_TYPED: &str = "take number typed";
+
+/// Whether a number field is being typed in.
+pub(crate) fn typing_number(ctx: &egui::Context) -> bool {
+    let id = ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new(TYPED)));
+    id.is_some_and(|id| ctx.memory(|memory| memory.has_focus(id)))
+}
+
+/// Has the number field being typed in take what is typed this frame, as
+/// Enter would, but keep its focus: for a key that goes on to use it.
+pub(crate) fn take_typed_number(ctx: &egui::Context) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(TAKE_TYPED), pass));
+}
+
+impl<'a> Number<'a> {
+    pub(crate) fn new<T: egui::emath::Numeric>(value: &'a mut T) -> Self {
+        let get_set = move |set: Option<f64>| {
+            if let Some(set) = set {
+                *value = T::from_f64(set);
+            }
+            value.to_f64()
+        };
+        Number {
+            get_set: Box::new(get_set),
+            integral: T::INTEGRAL,
+            range: f64::NEG_INFINITY..=f64::INFINITY,
+            clamp_existing: false,
+            speed: 1.0,
+            steps: (1.0, 10.0),
+            stepper: None,
+            prefix: String::new(),
+            suffix: String::new(),
+            reads: "",
+            max_decimals: None,
+            formatter: None,
+            parser: None,
+        }
+    }
+
+    pub(crate) fn range<N: egui::emath::Numeric>(
+        mut self,
+        range: std::ops::RangeInclusive<N>,
+    ) -> Self {
+        self.range = range.start().to_f64()..=range.end().to_f64();
+        self
+    }
+
+    /// Whether a value outside the range is brought into it as the field
+    /// is shown, rather than only as it is changed.
+    pub(crate) fn clamp_existing_to_range(mut self, clamp: bool) -> Self {
+        self.clamp_existing = clamp;
+        self
+    }
+
+    /// How much dragging a point changes it, at the least, which also sets
+    /// how many decimals it shows, as egui's fields have it.
+    pub(crate) fn speed(mut self, speed: f64) -> Self {
+        self.speed = speed;
+        self
+    }
+
+    /// What Up, Down and the wheel step it by: `small`, and `large` with
+    /// Shift. Whole numbers step by 1 and 10 otherwise.
+    pub(crate) fn steps(mut self, small: f64, large: f64) -> Self {
+        self.steps = (small, large);
+        self
+    }
+
+    /// Steps it as `stepper` says instead, from a value by so many steps,
+    /// larger ones where asked, as by frames, or a second.
+    pub(crate) fn stepper(mut self, stepper: impl 'a + Fn(f64, f64, bool) -> f64) -> Self {
+        self.stepper = Some(Box::new(stepper));
+        self
+    }
+
+    pub(crate) fn prefix(mut self, prefix: impl ToString) -> Self {
+        self.prefix = prefix.to_string();
+        self
+    }
+
+    pub(crate) fn suffix(mut self, suffix: impl ToString) -> Self {
+        self.suffix = suffix.to_string();
+        self
+    }
+
+    /// Reads `unit` typed with the number too, though it doesn't show it.
+    pub(crate) fn reads(mut self, unit: &'static str) -> Self {
+        self.reads = unit;
+        self
+    }
+
+    pub(crate) fn max_decimals(mut self, decimals: usize) -> Self {
+        self.max_decimals = Some(decimals);
+        self
+    }
+
+    pub(crate) fn custom_formatter(
+        mut self,
+        formatter: impl 'a + Fn(f64, std::ops::RangeInclusive<usize>) -> String,
+    ) -> Self {
+        self.formatter = Some(Box::new(formatter));
+        self
+    }
+
+    /// How it reads what is typed, once its units and spaces are taken
+    /// off it and a comma made a point.
+    pub(crate) fn custom_parser(mut self, parser: impl 'a + Fn(&str) -> Option<f64>) -> Self {
+        self.parser = Some(Box::new(parser));
+        self
+    }
+
+    fn get(&mut self) -> f64 {
+        (self.get_set)(None)
+    }
+
+    fn set(&mut self, value: f64) {
+        (self.get_set)(Some(value));
+    }
+
+    fn clamped(&self, value: f64) -> f64 {
+        let (low, high) = (*self.range.start(), *self.range.end());
+        value.clamp(low.min(high), high.max(low))
+    }
+
+    /// `value` as the field keeps one: whole where it holds whole
+    /// numbers, and within its range.
+    fn kept(&self, value: f64) -> f64 {
+        self.clamped(if self.integral { value.round() } else { value })
+    }
+
+    /// `value` stepped `steps` times, larger ones where `large` is true.
+    fn stepped(&self, value: f64, steps: f64, large: bool) -> f64 {
+        let next = match &self.stepper {
+            Some(stepper) => stepper(value, steps, large),
+            None => value + steps * if large { self.steps.1 } else { self.steps.0 },
+        };
+        // without what adding tenths leaves, as 0.30000000000000004
+        self.kept(egui::emath::round_to_decimals(next, 9))
+    }
+
+    /// How fast dragging changes it, a point at a time.
+    fn scrub_speed(&self) -> f64 {
+        let span = self.range.end() - self.range.start();
+        // a range egui's would have, as wide as numbers go, doesn't count
+        match span.is_finite() && span < 1e9 {
+            true => self.speed.max(span / SCRUB_ACROSS),
+            false => self.speed,
+        }
+    }
+
+    /// The decimals it shows, as egui's fields work them out.
+    fn decimals(&self, ui: &egui::Ui) -> std::ops::RangeInclusive<usize> {
+        let aim = f64::from(ui.input(|input| input.aim_radius()));
+        let auto = (aim / self.speed.abs()).log10().ceil().clamp(0.0, 15.0) as usize;
+        let most = self.max_decimals.unwrap_or(auto + 2);
+        auto.min(most)..=most
+    }
+
+    fn format(&self, ui: &egui::Ui, value: f64) -> String {
+        let decimals = self.decimals(ui);
+        match &self.formatter {
+            Some(formatter) => formatter(value, decimals),
+            None => ui.style().number_formatter.format(value, decimals),
+        }
+    }
+
+    /// What `text` typed says, if it is a number.
+    fn parse(&self, text: &str) -> Option<f64> {
+        let text = lenient(text, &[self.prefix.trim(), self.suffix.trim(), self.reads.trim()]);
+        let value = match &self.parser {
+            Some(parser) => parser(&text),
+            None => text.parse().ok(),
+        };
+        value.filter(|value: &f64| value.is_finite())
+    }
+
+    /// Takes what is typed, unless it is as it was written: kept as the
+    /// field keeps numbers, or, where it isn't one, nothing, the field's
+    /// outline flashing.
+    fn take(&mut self, ui: &egui::Ui, id: egui::Id, typing: &Typing) -> Option<f64> {
+        if typing.text == typing.written {
+            return None;
+        }
+        match self.parse(&typing.text) {
+            Some(value) => {
+                let value = self.kept(value);
+                self.set(value);
+                Some(value)
+            }
+            None => {
+                let now = ui.input(|input| input.time);
+                ui.data_mut(|data| data.insert_temp(id.with("refused"), now));
+                None
+            }
+        }
+    }
+
+    /// What the field holds as typing in it begins, or goes on from
+    /// `value`, written as it shows.
+    fn typing(&self, ui: &egui::Ui, value: f64, start: f64) -> Typing {
+        let text = self.format(ui, value);
+        Typing { written: text.clone(), text, start, value, ..Typing::default() }
+    }
+
+    /// What typed steps go from: the number typed, where one is, or else
+    /// the value.
+    fn typed_or(&self, typing: &Typing, value: f64) -> f64 {
+        let typed = (typing.text != typing.written).then(|| self.parse(&typing.text)).flatten();
+        typed.map_or(value, |typed| self.kept(typed))
+    }
+}
+
+/// `text` as a number field reads it: without spaces, nor `units` at
+/// either end, its own as it shows them, a comma for a decimal point, and
+/// the minus sign egui writes as a hyphen. × is read as x too.
+fn lenient(text: &str, units: &[&str]) -> String {
+    let mut text: String = text
+        .trim()
+        .chars()
+        .map(|c| match c {
+            ',' => '.',
+            '−' => '-',
+            c => c,
+        })
+        .collect();
+    let mut all: Vec<&str> = units.iter().copied().filter(|unit| !unit.is_empty()).collect();
+    if all.contains(&"×") {
+        all.extend(["x", "X"]);
+    }
+    // longer first, so that kbit/s goes before an s alone would
+    all.sort_by_key(|unit| std::cmp::Reverse(unit.len()));
+    loop {
+        let before = text.len();
+        for unit in &all {
+            let unit_lower = unit.to_lowercase();
+            let lower = text.to_lowercase();
+            // the same length lower-cased, as units are written in ASCII
+            // but for ×
+            if lower.len() != text.len() {
+                continue;
+            }
+            if lower.starts_with(&unit_lower) {
+                text = text[unit.len()..].trim().to_owned();
+            } else if lower.ends_with(&unit_lower) {
+                text = text[..text.len() - unit.len()].trim().to_owned();
+            }
+        }
+        if text.len() == before {
+            return text;
+        }
+    }
+}
+
+/// The wheel's notches turned over a number field this frame, up the
+/// positive way, as Shift says for each, and without those that zoom.
+fn notches(ui: &egui::Ui) -> (f32, f32) {
+    let line = ui.ctx().options(|options| options.input_options.line_scroll_speed);
+    ui.input(|input| {
+        let (mut plain, mut shifted) = (0.0, 0.0);
+        for event in &input.raw.events {
+            let egui::Event::MouseWheel { unit, delta, modifiers, .. } = event else { continue };
+            if modifiers.command || modifiers.ctrl {
+                continue;
+            }
+            // Shift turns the wheel sideways on some systems
+            let turned = if modifiers.shift { delta.x + delta.y } else { delta.y };
+            let turned = match unit {
+                egui::MouseWheelUnit::Line => turned,
+                egui::MouseWheelUnit::Point => turned / line.max(1.0),
+                egui::MouseWheelUnit::Page => turned.signum(),
+            };
+            match modifiers.shift {
+                true => shifted += turned,
+                false => plain += turned,
+            }
+        }
+        (plain, shifted)
+    })
+}
+
+/// Selects all of `text` in the field `id`, as typing in it begins, so
+/// that what is typed takes its place.
+fn select_all(ui: &egui::Ui, id: egui::Id, text: &str) {
+    use egui::text::{CCursor, CCursorRange};
+    let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+    let all = CCursorRange::two(CCursor::default(), CCursor::new(text.chars().count()));
+    state.cursor.set_char_range(Some(all));
+    state.store(ui.ctx(), id);
+}
+
+/// Puts the cursor of the field `id` at the end of `text`, as after a step.
+fn cursor_to_end(ui: &egui::Ui, id: egui::Id, text: &str) {
+    use egui::text::{CCursor, CCursorRange};
+    let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+    state.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(text.chars().count()))));
+    state.store(ui.ctx(), id);
+}
+
+impl egui::Widget for Number<'_> {
+    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
+        use egui::accesskit::{Action, ActionData};
+        // the same whether typed in or not, as egui's fields have it
+        let id = ui.next_auto_id();
+        let enabled = ui.is_enabled();
+        let editing = enabled
+            && ui.memory_mut(|memory| {
+                memory.interested_in_focus(id, ui.layer_id());
+                memory.has_focus(id)
+            });
+        let old = self.get();
+        let mut value = old;
+        let (asked, steps_asked) = ui.input(|input| {
+            let set = input.accesskit_action_requests(id, Action::SetValue).filter_map(|asked| {
+                match &asked.data {
+                    Some(ActionData::NumericValue(value)) => Some(*value),
+                    _ => None,
+                }
+            });
+            let steps = input.num_accesskit_action_requests(id, Action::Increment) as f64
+                - input.num_accesskit_action_requests(id, Action::Decrement) as f64;
+            (set.last(), steps)
+        });
+        if let Some(asked) = asked {
+            value = self.kept(asked);
+        }
+        if self.clamp_existing {
+            value = self.clamped(value);
+        }
+        if steps_asked != 0.0 {
+            value = self.stepped(value, steps_asked, false);
+        }
+        if value != old {
+            self.set(value);
+        }
+        let escaped = ui.input(|input| input.key_pressed(egui::Key::Escape));
+        let typing: Option<Typing> = ui.data(|data| data.get_temp(id));
+        // the focus gone before the field was drawn, as by Escape, Tab or
+        // another field taking it: what was typed is done with, unless the
+        // value changed elsewhere since, or the field went out of sight
+        // with the focus a while ago
+        if !editing && let Some(typing) = &typing {
+            ui.data_mut(|data| data.remove::<Typing>(id));
+            let lately = ui.ctx().cumulative_pass_nr() <= typing.pass + 2;
+            if lately && typing.value == value {
+                if escaped {
+                    value = typing.start;
+                    self.set(value);
+                } else if let Some(taken) = self.take(ui, id, typing) {
+                    value = taken;
+                }
+            }
+        }
+        let text_style = ui.style().drag_value_text_style.clone();
+        let mut response = if editing {
+            let mut typing = match typing.filter(|typing| typing.value == value) {
+                Some(typing) => typing,
+                None => {
+                    let typing = self.typing(ui, value, value);
+                    select_all(ui, id, &typing.text);
+                    typing
+                }
+            };
+            // a key that uses the value, as Convert's: taken first, the
+            // focus kept
+            let take_asked = ui.data(|data| data.get_temp::<u64>(egui::Id::new(TAKE_TYPED)))
+                == Some(ui.ctx().cumulative_pass_nr());
+            if take_asked && typing.text != typing.written {
+                if let Some(taken) = self.take(ui, id, &typing) {
+                    value = taken;
+                }
+                typing = self.typing(ui, value, value);
+                cursor_to_end(ui, id, &typing.text);
+            }
+            // Shift's first, as those without it take Shift's too
+            let (small, large) = ui.input_mut(|input| {
+                let mut count = |modifiers| {
+                    input.count_and_consume_key(modifiers, egui::Key::ArrowUp) as f64
+                        - input.count_and_consume_key(modifiers, egui::Key::ArrowDown) as f64
+                };
+                let large = count(egui::Modifiers::SHIFT);
+                (count(egui::Modifiers::NONE), large)
+            });
+            if small != 0.0 || large != 0.0 {
+                let mut next = self.typed_or(&typing, value);
+                if large != 0.0 {
+                    next = self.stepped(next, large, true);
+                }
+                if small != 0.0 {
+                    next = self.stepped(next, small, false);
+                }
+                value = next;
+                self.set(value);
+                typing = Typing { wheel: typing.wheel, ..self.typing(ui, value, typing.start) };
+                cursor_to_end(ui, id, &typing.text);
+            }
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut typing.text)
+                    .clip_text(false)
+                    .horizontal_align(ui.layout().horizontal_align())
+                    .vertical_align(ui.layout().vertical_align())
+                    .margin(ui.spacing().button_padding)
+                    .min_size(ui.spacing().interact_size)
+                    .id(id)
+                    .desired_width(
+                        ui.spacing().interact_size.x - 2.0 * ui.spacing().button_padding.x,
+                    )
+                    .font(text_style),
+            );
+            // the wheel steps it while it is typed in and under the
+            // pointer, rather than scrolling what it is in; only over it
+            // otherwise, it scrolls as ever
+            if response.contains_pointer() {
+                let (plain, shifted) = notches(ui);
+                ui.input_mut(|input| input.smooth_scroll_delta = egui::Vec2::ZERO);
+                typing.wheel += plain + shifted;
+                let whole = typing.wheel.trunc();
+                if whole != 0.0 {
+                    typing.wheel -= whole;
+                    let next = self.typed_or(&typing, value);
+                    let next = self.stepped(next, f64::from(whole), shifted != 0.0);
+                    value = next;
+                    self.set(value);
+                    typing = Typing { wheel: typing.wheel, ..self.typing(ui, value, typing.start) };
+                    cursor_to_end(ui, id, &typing.text);
+                    ui.ctx().request_repaint();
+                }
+            }
+            if ui.memory(|memory| memory.has_focus(id)) {
+                (typing.value, typing.pass) = (value, ui.ctx().cumulative_pass_nr());
+                ui.data_mut(|data| {
+                    data.insert_temp(id, typing);
+                    data.insert_temp(egui::Id::new(TYPED), id);
+                });
+            } else {
+                // done with by Enter, or a click elsewhere
+                ui.data_mut(|data| data.remove::<Typing>(id));
+                if escaped {
+                    value = typing.start;
+                    self.set(value);
+                } else if let Some(taken) = self.take(ui, id, &typing) {
+                    value = taken;
+                }
+            }
+            response
+        } else {
+            let text = format!("{}{}{}", self.prefix, self.format(ui, value), self.suffix);
+            let button = egui::Button::new(RichText::new(text).text_style(text_style))
+                .wrap_mode(egui::TextWrapMode::Extend)
+                .sense(egui::Sense::click_and_drag())
+                .min_size(ui.spacing().interact_size);
+            let (low, high) = (*self.range.start(), *self.range.end());
+            let cursor = if value <= low {
+                egui::CursorIcon::ResizeEast
+            } else if value < high {
+                egui::CursorIcon::ResizeHorizontal
+            } else {
+                egui::CursorIcon::ResizeWest
+            };
+            let response = ui.add(button).on_hover_cursor(cursor);
+            // the value dragged to, unrounded, from the press on
+            if ui.input(|input| input.pointer.any_pressed() || input.pointer.any_released()) {
+                ui.data_mut(|data| data.remove::<f64>(id));
+            }
+            if response.clicked() {
+                ui.data_mut(|data| data.remove::<Typing>(id));
+                ui.memory_mut(|memory| memory.request_focus(id));
+            } else if response.dragged() {
+                ui.set_cursor_icon(cursor);
+                let delta = response.drag_delta();
+                // larger to the right and up
+                let points = f64::from(delta.x - delta.y);
+                let fine = ui.input(|input| input.modifiers.shift_only());
+                let speed = self.scrub_speed() / if fine { 10.0 } else { 1.0 };
+                if points != 0.0 {
+                    let precise = ui.data(|data| data.get_temp::<f64>(id)).unwrap_or(value);
+                    let precise = precise + points * speed;
+                    let aim = f64::from(ui.input(|input| input.aim_radius())) * speed;
+                    let nice =
+                        egui::emath::smart_aim::best_in_range_f64(precise - aim, precise + aim);
+                    let decimals = *self.decimals(ui).start();
+                    value = self.kept(egui::emath::round_to_decimals(nice, decimals));
+                    self.set(value);
+                    ui.data_mut(|data| data.insert_temp(id, precise));
+                }
+            }
+            response
+        };
+        // what was typed refused: the outline in the colour of what went
+        // wrong a moment, fading, over what is drawn, so nothing moves
+        let refused = id.with("refused");
+        if let Some(at) = ui.data(|data| data.get_temp::<f64>(refused)) {
+            let age = ui.input(|input| input.time) - at;
+            if (0.0..REFUSED_FOR).contains(&age) {
+                let fade = 1.0 - (age / REFUSED_FOR) as f32;
+                let colour = theme::bad(ui.visuals()).gamma_multiply(fade);
+                let corner = ui.visuals().widgets.inactive.corner_radius;
+                let stroke = egui::Stroke::new(1.5, colour);
+                ui.painter().rect_stroke(response.rect, corner, stroke, egui::StrokeKind::Inside);
+                ui.ctx().request_repaint();
+            } else {
+                ui.data_mut(|data| data.remove::<f64>(refused));
+            }
+        }
+        if self.get() != old {
+            response.mark_changed();
+        }
+        response.widget_info(|| egui::WidgetInfo::drag_value(enabled, value));
+        let shown = format!("{}{}{}", self.prefix, self.format(ui, value), self.suffix);
+        let (low, high, step) = (*self.range.start(), *self.range.end(), self.steps.0);
+        ui.ctx().accesskit_node_builder(response.id, |builder| {
+            if low.is_finite() {
+                builder.set_min_numeric_value(low);
+            }
+            if high.is_finite() {
+                builder.set_max_numeric_value(high);
+            }
+            builder.set_numeric_value_step(step);
+            builder.add_action(Action::SetValue);
+            if value < high {
+                builder.add_action(Action::Increment);
+            }
+            if value > low {
+                builder.add_action(Action::Decrement);
+            }
+            builder.clear_label();
+            // as it shows, with its units; typed in, the text it holds
+            if !editing {
+                builder.set_value(shown);
+            }
+        });
+        response
+    }
+}
+
+#[cfg(test)]
+mod number_tests {
+    use super::*;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+
+    #[test]
+    fn reads_units_and_decimal_commas() {
+        assert_eq!(lenient(" 2,5 ", &[]), "2.5");
+        assert_eq!(lenient("16 px", &["px"]), "16");
+        assert_eq!(lenient("16px", &["px"]), "16");
+        assert_eq!(lenient("×1.5", &["×"]), "1.5");
+        assert_eq!(lenient("1.5x", &["×"]), "1.5");
+        assert_eq!(lenient("600 kbit/s", &["kbit/s"]), "600");
+        assert_eq!(lenient("29,97 FPS", &["fps"]), "29.97");
+        assert_eq!(lenient("−3", &[]), "-3");
+        // only its own
+        assert_eq!(lenient("3 fps", &["px"]), "3 fps");
+    }
+
+    /// A field of `value` set up by `field`, in a window, typed in once
+    /// focused, and where it is.
+    fn field_of<T: egui::emath::Numeric + Send + Sync>(
+        value: T,
+        field: impl Fn(Number<'_>) -> Number<'_> + 'static,
+    ) -> Harness<'static, (T, Option<egui::Rect>)> {
+        let mut harness = Harness::new_ui_state(
+            move |ui, (value, rect): &mut (T, Option<egui::Rect>)| {
+                // as wide as its widest, as the GUI has them
+                let added = steady_numbers(ui, 4, " px", |ui| ui.add(field(Number::new(value))));
+                *rect = Some(added.rect);
+            },
+            (value, None),
+        );
+        test_fonts(&harness);
+        harness.run_steps(2);
+        harness
+    }
+
+    fn focus<T>(harness: &mut Harness<'_, (T, Option<egui::Rect>)>) {
+        harness.get_by_role(egui::accesskit::Role::SpinButton).focus();
+        harness.run_steps(2);
+    }
+
+    #[test]
+    fn takes_what_is_typed_once_done_with_it() {
+        let mut harness = field_of(8_u32, |field| field.range(1..=100).suffix(" px"));
+        let rect = harness.state().1;
+        focus(&mut harness);
+        harness.event(egui::Event::Text("16".into()));
+        harness.run_steps(2);
+        // not until it is done with
+        assert_eq!(harness.state().0, 8);
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        assert_eq!(harness.state().0, 16);
+        // Tab is done with it too, units, commas and all
+        focus(&mut harness);
+        harness.event(egui::Event::Text("40 px".into()));
+        harness.key_press(egui::Key::Tab);
+        harness.run_steps(2);
+        assert_eq!(harness.state().0, 40);
+        // and outside the range, kept within it
+        focus(&mut harness);
+        harness.event(egui::Event::Text("500".into()));
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        assert_eq!(harness.state().0, 100);
+        // where it is, as it was all along
+        assert_eq!(harness.state().1, rect);
+        let mut fraction = field_of(1.0_f64, |field| field.range(0.0..=10.0));
+        focus(&mut fraction);
+        fraction.event(egui::Event::Text("2,5".into()));
+        fraction.key_press(egui::Key::Tab);
+        fraction.run_steps(2);
+        assert_eq!(fraction.state().0, 2.5);
+        let mut speed = field_of(1.0_f64, |field| field.range(0.1..=10.0).prefix("×"));
+        focus(&mut speed);
+        speed.event(egui::Event::Text("×1,5".into()));
+        speed.key_press(egui::Key::Enter);
+        speed.run_steps(2);
+        assert_eq!(speed.state().0, 1.5);
+    }
+
+    #[test]
+    fn puts_back_what_it_held_on_escape() {
+        let mut harness = field_of(8_u32, |field| field.range(1..=100));
+        let rect = harness.state().1;
+        focus(&mut harness);
+        harness.event(egui::Event::Text("16".into()));
+        harness.run_steps(2);
+        // stepped, then typed in, then let go of
+        harness.key_press(egui::Key::ArrowUp);
+        harness.run_steps(2);
+        assert_eq!(harness.state().0, 17);
+        harness.event(egui::Event::Text("3".into()));
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+        assert_eq!(harness.state().0, 8);
+        assert!(!harness.ctx.text_edit_focused());
+        assert_eq!(harness.state().1, rect);
+        // what is typed is undone as in any text field, before it is taken:
+        // back to the number as it was, which is left as it is
+        focus(&mut harness);
+        harness.event(egui::Event::Text("16".into()));
+        harness.run_steps(2);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        assert_eq!(harness.state().0, 8);
+    }
+
+    #[test]
+    fn keeps_its_value_for_what_is_not_a_number_and_says_so() {
+        let mut harness = field_of(8_u32, |field| field.range(1..=100));
+        let rect = harness.state().1;
+        focus(&mut harness);
+        harness.event(egui::Event::Text("lots".into()));
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(1);
+        assert_eq!(harness.state().0, 8);
+        let refused = |harness: &Harness<'_, (u32, Option<egui::Rect>)>| {
+            let id = harness.ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new(TYPED)));
+            let id = id.unwrap().with("refused");
+            harness.ctx.data(|data| data.get_temp::<f64>(id)).is_some()
+        };
+        assert!(refused(&harness));
+        assert_eq!(harness.state().1, rect);
+        // a moment, then gone, a quarter of a second a frame
+        harness.run_steps(4);
+        assert!(!refused(&harness));
+    }
+
+    #[test]
+    fn steps_by_its_keys_while_typed_in() {
+        let stepped = |field: fn(Number<'_>) -> Number<'_>, from: f64, shift: bool| {
+            let mut harness = field_of(from, field);
+            focus(&mut harness);
+            let modifiers = if shift { egui::Modifiers::SHIFT } else { egui::Modifiers::NONE };
+            harness.key_press_modifiers(modifiers, egui::Key::ArrowUp);
+            harness.run_steps(2);
+            // the value at once, not waiting to be done with
+            let up = harness.state().0;
+            harness.key_press_modifiers(modifiers, egui::Key::ArrowDown);
+            harness.key_press_modifiers(modifiers, egui::Key::ArrowDown);
+            harness.run_steps(2);
+            (up, harness.state().0)
+        };
+        fn px(field: Number<'_>) -> Number<'_> {
+            field.range(0..=1000).suffix(" px")
+        }
+        assert_eq!(stepped(px, 50.0, false), (51.0, 49.0));
+        assert_eq!(stepped(px, 50.0, true), (60.0, 40.0));
+        fn speed(field: Number<'_>) -> Number<'_> {
+            field.range(0.1..=10.0).steps(0.05, 0.25)
+        }
+        assert_eq!(stepped(speed, 1.0, false), (1.05, 0.95));
+        assert_eq!(stepped(speed, 1.0, true), (1.25, 0.75));
+        // stopping at its ends
+        assert_eq!(stepped(px, 1000.0, true), (1000.0, 980.0));
+    }
+
+    #[test]
+    fn drags_across_its_range_in_a_few_hundred_points() {
+        let mut harness = field_of(0_u32, |field| field.range(0..=1000).speed(0.25));
+        let rect = harness.state().1.unwrap();
+        let from = rect.center();
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        harness.event(egui::Event::PointerMoved(from));
+        harness.event(press(from, true));
+        harness.run_steps(1);
+        // 400 points to the right, a little at a time
+        for step in 1..=40 {
+            harness.event(egui::Event::PointerMoved(from + vec2(10.0 * step as f32, 0.0)));
+            harness.run_steps(1);
+        }
+        let to = from + vec2(400.0, 0.0);
+        harness.event(press(to, false));
+        harness.run_steps(2);
+        let dragged = harness.state().0;
+        assert!(dragged >= 950, "{dragged}");
+        assert_eq!(harness.state().1, Some(rect));
+    }
+
+    #[test]
+    fn steps_by_the_wheel_only_while_typed_in() {
+        type State = (u32, f32);
+        let show = |ui: &mut egui::Ui, (value, scrolled): &mut State| {
+            let area = egui::ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
+                ui.add(Number::new(value).range(0..=100));
+                ui.allocate_space(vec2(100.0, 400.0));
+            });
+            *scrolled = area.state.offset.y;
+        };
+        let mut harness = Harness::new_ui_state(show, (50, 0.0));
+        harness.run_steps(2);
+        let field = harness.get_by_role(egui::accesskit::Role::SpinButton).rect();
+        let wheel = |harness: &mut Harness<'_, State>, notches: f32| {
+            harness.event(egui::Event::PointerMoved(field.center()));
+            harness.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: vec2(0.0, notches),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run_steps(6);
+        };
+        // over it alone: the area scrolls, and it stays as it is
+        wheel(&mut harness, -1.0);
+        assert_eq!(harness.state().0, 50);
+        let scrolled = harness.state().1;
+        assert!(scrolled > 0.0);
+        // back up, then typed in: a step a notch, the area kept still
+        wheel(&mut harness, 3.0);
+        assert_eq!(harness.state().1, 0.0);
+        harness.get_by_role(egui::accesskit::Role::SpinButton).focus();
+        harness.run_steps(2);
+        wheel(&mut harness, 2.0);
+        assert_eq!(*harness.state(), (52, 0.0));
+        wheel(&mut harness, -1.0);
+        assert_eq!(*harness.state(), (51, 0.0));
+    }
+}
+
 /// An [`auto_number`] for a value a preset may set. While the preset sets
 /// one, that is what the automatic choice stands for: it is named the
 /// preset's and shows the preset's value, which a number of the user's own
@@ -1211,7 +2041,7 @@ pub(crate) fn preset_number<T: egui::emath::Numeric>(
     automatic: (&str, &str),
     shown: Option<T>,
     start: T,
-    edit: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
+    edit: impl FnOnce(Number<'_>) -> Number<'_>,
 ) -> bool {
     match preset {
         Some(preset) => {

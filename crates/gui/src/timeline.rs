@@ -91,8 +91,8 @@ pub(crate) fn boundary_field<'a>(
     frames: &'a Frames,
     in_frames: bool,
     end: bool,
-) -> egui::DragValue<'a> {
-    let field = egui::DragValue::new(boundary).range(range).speed(0.1);
+) -> widgets::Number<'a> {
+    let field = widgets::Number::new(boundary).range(range).speed(0.1);
     if in_frames {
         let shift = if end { 0.0 } else { 1.0 };
         field
@@ -103,6 +103,24 @@ pub(crate) fn boundary_field<'a>(
         field
             .custom_formatter(move |n, _| widgets::seconds(frames.times[(n as usize).min(last)]))
             .custom_parser(move |text| Some(frames.nearest(widgets::parse_seconds(text)?) as f64))
+            .stepper(move |n, steps, large| {
+                let time = frames.times[(n.max(0.0) as usize).min(last)];
+                by_seconds(n, steps, large, |seconds| frames.nearest(time + seconds))
+            })
+    }
+}
+
+/// A frame's or a boundary's `index` stepped `steps` frames, or, where
+/// `large`, as many seconds, to where `at` puts the time so far from its
+/// own: a frame at the least.
+fn by_seconds(index: f64, steps: f64, large: bool, at: impl Fn(f64) -> usize) -> f64 {
+    if !large {
+        return index + steps;
+    }
+    let to = at(steps) as f64;
+    match steps > 0.0 {
+        true => to.max(index + 1.0),
+        false => to.min(index - 1.0),
     }
 }
 
@@ -112,9 +130,9 @@ pub(crate) fn frame_field<'a>(
     index: &'a mut usize,
     frames: &'a Frames,
     in_frames: bool,
-) -> egui::DragValue<'a> {
+) -> widgets::Number<'a> {
     let last = frames.count() - 1;
-    let field = egui::DragValue::new(index).range(0..=last).speed(0.1);
+    let field = widgets::Number::new(index).range(0..=last).speed(0.1);
     if in_frames {
         field
             .custom_formatter(|n, _| format!("{}", n + 1.0))
@@ -123,6 +141,10 @@ pub(crate) fn frame_field<'a>(
         field
             .custom_formatter(move |n, _| widgets::seconds(frames.times[(n as usize).min(last)]))
             .custom_parser(move |text| Some(frames.at(widgets::parse_seconds(text)?) as f64))
+            .stepper(move |n, steps, large| {
+                let time = frames.times[(n.max(0.0) as usize).min(last)];
+                by_seconds(n, steps, large, |seconds| frames.at(time + seconds))
+            })
     }
 }
 
@@ -316,10 +338,11 @@ pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
 
 /// A field of a time in the input, written as [`widgets::seconds`] writes
 /// times, and read back so.
-pub(crate) fn seconds(value: &mut f64, length: f64) -> egui::DragValue<'_> {
-    egui::DragValue::new(value)
+pub(crate) fn seconds(value: &mut f64, length: f64) -> widgets::Number<'_> {
+    widgets::Number::new(value)
         .range(0.0..=length)
         .speed(0.01)
+        .steps(0.1, 1.0)
         .custom_formatter(|value, _| widgets::seconds(value))
         .custom_parser(widgets::parse_seconds)
 }

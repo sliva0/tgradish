@@ -185,7 +185,7 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
             let (value, default) = (&mut options.crf, DEFAULT_CRF);
             widgets::steady_numbers(ui, 2, "", |ui| {
                 preset_number(ui, value, base.crf, defaults, Some(default), default, |value| {
-                    value.range(CRFS)
+                    value.range(CRFS).steps(1.0, 1.0)
                 })
             });
         },
@@ -221,7 +221,12 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
         let digits = HIGHEST_BITRATE.to_string().len();
         widgets::steady_numbers(ui, digits, " kbit/s", |ui| {
             preset_number(ui, &mut options.bitrate, base.bitrate, automatic, None, 600.0, |value| {
-                value.range(1.0..=HIGHEST_BITRATE).speed(5.0).max_decimals(0).suffix(" kbit/s")
+                value
+                    .range(1.0..=HIGHEST_BITRATE)
+                    .speed(5.0)
+                    .steps(10.0, 100.0)
+                    .max_decimals(0)
+                    .suffix(" kbit/s")
             })
         });
     });
@@ -237,19 +242,21 @@ struct RangeBounds {
     takes: std::ops::RangeInclusive<f64>,
     decimals: usize,
     speed: f64,
+    /// What a field's keys step it by, and with Shift.
+    steps: (f64, f64),
     unit: &'static str,
 }
 
 impl RangeBounds {
     fn of(fit: Fit) -> Self {
         let takes = fit.range_limits();
-        let (range, decimals, speed, unit) = match fit.unit() {
-            FitUnit::Kbps => (1.0..=HIGHEST_BITRATE, 0, 5.0, " kbit/s"),
-            FitUnit::Fps => (takes.clone(), 0, 0.1, " fps"),
-            FitUnit::Seconds => (0.01..=3600.0, 2, 0.01, " s"),
-            FitUnit::Crf => (takes.clone(), 0, 0.1, ""),
+        let (range, decimals, speed, steps, unit) = match fit.unit() {
+            FitUnit::Kbps => (1.0..=HIGHEST_BITRATE, 0, 5.0, (10.0, 100.0), " kbit/s"),
+            FitUnit::Fps => (takes.clone(), 0, 0.1, (1.0, 5.0), " fps"),
+            FitUnit::Seconds => (0.01..=3600.0, 2, 0.01, (0.1, 1.0), " s"),
+            FitUnit::Crf => (takes.clone(), 0, 0.1, (1.0, 1.0), ""),
         };
-        Self { range, takes, decimals, speed, unit }
+        Self { range, takes, decimals, speed, steps, unit }
     }
 
     /// The widest text a field of an end shows.
@@ -262,12 +269,13 @@ impl RangeBounds {
     /// chooses the range then; whole numbers without a decimal point, and
     /// seconds to the hundredth. Only a `live` one, the user's own, is
     /// brought into what planning takes: a preset's shows as it is.
-    fn field<'a>(&self, value: &'a mut f64, known: bool, live: bool) -> egui::DragValue<'a> {
+    fn field<'a>(&self, value: &'a mut f64, known: bool, live: bool) -> widgets::Number<'a> {
         let refused = live && !self.takes.contains(value);
-        let field = egui::DragValue::new(value)
+        let field = widgets::Number::new(value)
             .range(self.range.clone())
             .clamp_existing_to_range(refused)
             .speed(self.speed)
+            .steps(self.steps.0, self.steps.1)
             .max_decimals(self.decimals);
         if known {
             let decimals = self.decimals;

@@ -136,9 +136,9 @@ pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item) {
                 ui.label(fl!("sheet-cells"));
                 // as wide as any count, so what follows stays put
                 let (a, b) = widgets::steady_numbers(ui, 3, "", |ui| {
-                    let a = ui.add(egui::DragValue::new(&mut columns).range(1..=256));
+                    let a = ui.add(widgets::Number::new(&mut columns).range(1..=256));
                     ui.label("×");
-                    (a, ui.add(egui::DragValue::new(&mut rows).range(1..=256)))
+                    (a, ui.add(widgets::Number::new(&mut rows).range(1..=256)))
                 });
                 if sheet && (a.changed() || b.changed()) {
                     options.sheet = Some(Sheet { columns, rows });

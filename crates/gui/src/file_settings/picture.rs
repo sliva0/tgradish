@@ -367,7 +367,7 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
     ui.horizontal_top(|ui| {
         let field = |ui: &mut egui::Ui, value: i64, most: i64, hint: &str| {
             let mut value = value;
-            let field = egui::DragValue::new(&mut value)
+            let field = widgets::Number::new(&mut value)
                 .range(0..=most.max(0))
                 .suffix(" px")
                 .clamp_existing_to_range(fits);
@@ -416,7 +416,7 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
                 grid.show(ui, |ui| {
                     let side = |ui: &mut egui::Ui, value: u32, most: u32| {
                         let mut value = value;
-                        let field = egui::DragValue::new(&mut value)
+                        let field = widgets::Number::new(&mut value)
                             .range(1..=most)
                             .suffix(" px")
                             .clamp_existing_to_range(fits);
@@ -683,8 +683,8 @@ fn aspect_ratio(
     let pick = fl!("shape-custom", "pick");
     ui.add_enabled_ui(custom, |ui| {
         ui.horizontal(|ui| {
-            fn side(value: &mut f64) -> egui::DragValue<'_> {
-                egui::DragValue::new(value)
+            fn side(value: &mut f64) -> widgets::Number<'_> {
+                widgets::Number::new(value)
                     .range(0.01..=10_000.0)
                     .speed(0.05)
                     .max_decimals(3)
@@ -695,7 +695,7 @@ fn aspect_ratio(
             // nothing made up for a crop not known yet, as before the input
             // is read: a dash
             let unknown = crop.is_none() && !custom;
-            fn shown(field: egui::DragValue<'_>, unknown: bool) -> egui::DragValue<'_> {
+            fn shown(field: widgets::Number<'_>, unknown: bool) -> widgets::Number<'_> {
                 match unknown {
                     true => field.custom_formatter(|_, _| "—".to_owned()),
                     false => field,
@@ -723,8 +723,9 @@ fn aspect_ratio(
             ui.add_enabled_ui(follows, |ui| {
                 ui.label(fl!("ratio-result")).on_disabled_hover_text(fl!("ratio-result", "fixed"));
                 let digits = box_w.max(box_h).to_string().len();
-                let across = egui::DragValue::new(&mut result_w).range(1..=box_w);
-                let down = egui::DragValue::new(&mut result_h).range(1..=box_h).suffix(" px");
+                // in pixels too, though its unit shows after the other
+                let across = widgets::Number::new(&mut result_w).range(1..=box_w).reads(" px");
+                let down = widgets::Number::new(&mut result_h).range(1..=box_h).suffix(" px");
                 // a dash where the crop, and so the result, isn't known yet
                 let (across, down) = match sizes {
                     Some(_) => (across, down),
@@ -838,9 +839,10 @@ fn integer_scale(
                 .unwrap_or_default();
             widgets::steady_width(ui, &widest, |ui| {
                 ui.add(
-                    egui::DragValue::new(&mut step)
+                    widgets::Number::new(&mut step)
                         .range(lowest..=highest)
                         .speed(0.05)
+                        .steps(1.0, 1.0)
                         .custom_formatter(|n, _| scale_text(step_scale(n as i64)))
                         .custom_parser(|text| parse_scale(text).map(|s| scale_step(s) as f64))
                         // a scale kept for integer scaling shows as it is

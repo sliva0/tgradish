@@ -169,6 +169,7 @@ pub(super) fn time(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
                             value
                                 .range(0.01..=telegram::MAX_SECONDS)
                                 .speed(0.01)
+                                .steps(0.1, 1.0)
                                 .max_decimals(2)
                                 .suffix(" s")
                                 .custom_formatter(|n, _| widgets::fixed(n, 2))
@@ -341,6 +342,7 @@ pub(crate) fn speed_field(
             value
                 .range(TEMPOS)
                 .speed(0.01)
+                .steps(0.05, 0.25)
                 .max_decimals(widgets::SPEED_DECIMALS)
                 .prefix("×")
                 .custom_formatter(|n, _| widgets::speed(n))
@@ -364,6 +366,7 @@ fn rate_field(
             value
                 .range(range)
                 .speed(0.1)
+                .steps(1.0, 5.0)
                 .max_decimals(widgets::FPS_DECIMALS)
                 .suffix(" fps")
                 .custom_formatter(|v, _| widgets::fps(v))
