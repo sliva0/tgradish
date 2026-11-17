@@ -294,8 +294,11 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
         // how like the input each looks, where any was scored
         let scored = progress.attempts.iter().any(|attempt| attempt.ssim.is_some());
         egui::ScrollArea::horizontal().id_salt(("attempts", item.id)).show(ui, |ui| {
-            let columns = if scored { 5 } else { 4 };
+            let columns = if scored { 6 } else { 5 };
+            // the tick has a column of its own, headed by nothing, so the
+            // numbers stay in line under theirs
             let headers = [
+                (String::new(), String::new()),
                 ("#".to_owned(), fl!("column-number")),
                 ("fps".to_owned(), fl!("column-fps")),
                 ("kbit/s".to_owned(), fl!("column-rate")),
@@ -310,11 +313,13 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
                     .collect(),
             ];
             for attempt in &progress.attempts {
-                // the kept one ticked before its number, which stays in
-                // line with the others
-                let number = match done.attempt == Some(attempt.number) {
-                    true => RichText::new(format!("✔ {}", attempt.number)).strong(),
-                    false => RichText::new(attempt.number.to_string()),
+                let kept = done.attempt == Some(attempt.number);
+                let (tick, number) = match kept {
+                    true => (
+                        RichText::new("✔").strong(),
+                        RichText::new(attempt.number.to_string()).strong(),
+                    ),
+                    false => (RichText::new(""), RichText::new(attempt.number.to_string())),
                 };
                 let rate = match attempt.params.rate {
                     tgradish_core::webm::Rate::Bitrate(kbps) => format!("{kbps:.0}"),
@@ -333,6 +338,7 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
                     None => (RichText::new("—"), String::new()),
                 };
                 let mut row = vec![
+                    (tick, String::new()),
                     (number, String::new()),
                     (RichText::new(widgets::trimmed(attempt.params.fps)), String::new()),
                     (RichText::new(rate), String::new()),
@@ -359,16 +365,22 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
             }
             let height = ui.text_style_height(&egui::TextStyle::Body);
             // no wider than its columns, as a grid makes them at least
-            // the width of a field otherwise
+            // the width of a field otherwise, and rows no taller than a
+            // line, so the headings sit right over what they head
             let grid = egui::Grid::new(("attempts", item.id))
                 .num_columns(columns)
                 .min_col_width(0.0)
-                .spacing([6.0, 4.0]);
+                .min_row_height(height)
+                .spacing([8.0, 4.0]);
             grid.striped(true).show(ui, |ui| {
                 let layout = egui::Layout::right_to_left(egui::Align::Center);
                 for row in rows {
                     for (column, (text, hint)) in row.into_iter().enumerate() {
                         let size = vec2(widths[column], height);
+                        if text.is_empty() {
+                            ui.allocate_exact_size(size, egui::Sense::hover());
+                            continue;
+                        }
                         let cell = ui.allocate_ui_with_layout(size, layout, |ui| ui.label(text));
                         if !hint.is_empty() {
                             cell.inner.on_hover_text(hint);
@@ -475,6 +487,7 @@ fn reduction(reduction: &tgradish_core::tgradish_tgs::reduce::Reduction) -> Stri
 
 #[cfg(test)]
 mod tests {
+    use tgradish_core::presets::Format;
     use tgradish_core::webm::{Params, Rate};
 
     use super::*;
@@ -488,6 +501,70 @@ mod tests {
 
     fn plan(attempts: u32) -> WebmPlan {
         WebmPlan { width: 512, height: 512, fps: 30.0, length: 1.0, attempts, limit: 262_144 }
+    }
+
+    #[test]
+    fn heads_each_column_of_the_encodes_over_it() {
+        use egui_kittest::kittest::Queryable;
+        let mut item = Item::new(1, vec!["clip.mp4".into()], false, Default::default());
+        let mut job = Job::waiting("clip.webm".into());
+        let kept = |number, fps, kbps, bytes, fits, ssim| Attempt {
+            number,
+            params: Params { fps, length: 1.0, rate: Rate::Bitrate(kbps) },
+            bytes: Some(bytes),
+            fits,
+            ssim: Some(ssim),
+        };
+        job.progress.webm = Some(plan(8));
+        job.progress.attempts = vec![
+            kept(1, 30.0, 2400.0, 300_000, false, 0.97),
+            kept(12, 25.0, 950.0, 158_600, true, 0.999),
+        ];
+        job.status = Status::Done(Box::new(jobs::Done {
+            output: "clip.webm".into(),
+            bytes: 158_600,
+            limit: 262_144,
+            changed: false,
+            attempt: Some(12),
+            spoofed: false,
+            settled: false,
+            json_bytes: None,
+            shapes: None,
+            problems: Vec::new(),
+            drawing: None,
+        }));
+        let choices = item.choices.clone();
+        item.made = Some(crate::item::Conversion::of(job, Format::Webm, choices));
+        let mut harness = egui_kittest::Harness::new_ui(move |ui| details(ui, &item));
+        harness.run();
+
+        let rect = |label: &str| harness.get_by_label(label).rect();
+        let size = fl!("column-size");
+        let alike = fl!("column-alike");
+        let columns: [(&str, [&str; 2]); 5] = [
+            ("#", ["1", "12"]),
+            ("fps", ["30", "25"]),
+            ("kbit/s", ["2400", "950"]),
+            (&size, ["114.4%", "60.5%"]),
+            (&alike, ["97.0%", "99.9%"]),
+        ];
+        for (heading, cells) in columns {
+            let heading = rect(heading);
+            for cell in cells {
+                let cell = rect(cell);
+                // numbers lined up by their last digit, the heading's too
+                let off = (heading.right() - cell.right()).abs();
+                assert!(off < 0.5, "{heading:?} over {cell:?}");
+                assert!(heading.bottom() <= cell.top(), "{heading:?} over {cell:?}");
+            }
+            // and close over the first row, not a field's height above it
+            let gap = rect(cells[0]).top() - heading.bottom();
+            assert!(gap < 8.0, "{gap} between {heading:?} and its first row");
+        }
+        // the tick in its own column, before the numbers, on the kept row
+        let (tick, number) = (rect("✔"), rect("12"));
+        assert!(tick.right() < rect("1").left(), "{tick:?}");
+        assert!((tick.center().y - number.center().y).abs() < 0.5, "{tick:?}");
     }
 
     #[test]
