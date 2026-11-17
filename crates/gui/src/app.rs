@@ -1074,6 +1074,11 @@ impl eframe::App for App {
         if !motion {
             direct_scrolling(&ctx);
         }
+        // a number being typed is taken as the window closes, as its field
+        // is drawn this last frame, so that it is saved with the rest
+        if ctx.input(|input| input.viewport().close_requested()) {
+            widgets::finish_typed_number(&ctx);
+        }
         self.take_input(&ctx);
         self.pump(&ctx);
         self.find_fonts(&ctx);

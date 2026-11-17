@@ -242,15 +242,32 @@ pub(crate) fn steady_width<R>(
 /// Shows what `add` adds as `part` of the file `file`'s, with ids of its
 /// own: what a widget keeps by its id, as the text being typed in a number
 /// field, stays the file's, rather than going to the widget in its place
-/// in another file's settings once that file is picked.
+/// in another file's settings once that file is picked. The same wherever
+/// it is drawn, so it can be drawn unseen for a field in it to take what
+/// was typed in it, as [`unseen_number`] has it.
 pub(crate) fn of_file<R>(
     ui: &mut egui::Ui,
     part: &str,
     file: u64,
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
+    of_file_in(ui, egui::UiBuilder::new(), part, file, add)
+}
+
+/// An [`of_file`] placed as `place` says.
+pub(crate) fn of_file_in<R>(
+    ui: &mut egui::Ui,
+    place: egui::UiBuilder,
+    part: &str,
+    file: u64,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
     let id = egui::Id::new((part, file));
-    ui.scope_builder(egui::UiBuilder::new().id(id), add).inner
+    let drawing = egui::Id::new(DRAWING);
+    ui.data_mut(|data| data.insert_temp(drawing, file));
+    let added = ui.scope_builder(place.id(id), add).inner;
+    ui.data_mut(|data| data.remove::<u64>(drawing));
+    added
 }
 
 /// A link to `url`, which takes a click as a link, rather than starting a
@@ -1345,15 +1362,56 @@ struct Typing {
     pass: u64,
 }
 
-/// The id under which the number field being typed in is kept, and the
-/// pass that a [`take_typed_number`] asks it to be taken in.
+/// The id under which the number field being typed in is kept, with the
+/// file it is of; the pass that a [`take_typed_number`] asks it to be taken
+/// in; and the file whose settings are being drawn, as [`of_file`] says.
 const TYPED: &str = "number typed";
 const TAKE_TYPED: &str = "take number typed";
+const DRAWING: &str = "file drawn";
+
+/// The number field typed in last, and the file whose settings it is in,
+/// where it is: kept apart from the field, so that what is typed in it
+/// can be seen to, as the file goes out of sight, without it being drawn.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Typed {
+    pub(crate) field: egui::Id,
+    pub(crate) file: Option<u64>,
+}
 
 /// Whether a number field is being typed in.
 pub(crate) fn typing_number(ctx: &egui::Context) -> bool {
-    let id = ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new(TYPED)));
-    id.is_some_and(|id| ctx.memory(|memory| memory.has_focus(id)))
+    let typed = ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)));
+    typed.is_some_and(|typed| ctx.memory(|memory| memory.has_focus(typed.field)))
+}
+
+/// The number field of a file other than `shown` that has what was typed
+/// in it not yet taken, as when another file was picked, or files were
+/// dropped, while it was typed in; forgotten once too long out of sight.
+pub(crate) fn unseen_number(ctx: &egui::Context, shown: Option<u64>) -> Option<Typed> {
+    let typed = ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)))?;
+    let file = typed.file.filter(|&file| Some(file) != shown)?;
+    let typing = ctx.data(|data| data.get_temp::<Typing>(typed.field))?;
+    // as the field itself would, drawn so long after
+    if ctx.cumulative_pass_nr() > typing.pass + 2 {
+        ctx.data_mut(|data| data.remove::<Typing>(typed.field));
+        return None;
+    }
+    Some(Typed { file: Some(file), ..typed })
+}
+
+/// Has the number field typed in be done with, as a click elsewhere does:
+/// it takes what was typed in it as it is next drawn, this frame.
+pub(crate) fn finish_typed_number(ctx: &egui::Context) {
+    let typed = ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)));
+    if let Some(typed) = typed {
+        ctx.memory_mut(|memory| memory.surrender_focus(typed.field));
+    }
+}
+
+/// Forgets what was typed in `typed`, which is not to be taken.
+pub(crate) fn forget_typed_number(ctx: &egui::Context, typed: Typed) {
+    ctx.memory_mut(|memory| memory.surrender_focus(typed.field));
+    ctx.data_mut(|data| data.remove::<Typing>(typed.field));
 }
 
 /// Has the number field being typed in take what is typed this frame, as
@@ -1790,9 +1848,10 @@ impl egui::Widget for Number<'_> {
             }
             if ui.memory(|memory| memory.has_focus(id)) {
                 (typing.value, typing.pass) = (value, ui.ctx().cumulative_pass_nr());
+                let file = ui.data(|data| data.get_temp::<u64>(egui::Id::new(DRAWING)));
                 ui.data_mut(|data| {
                     data.insert_temp(id, typing);
-                    data.insert_temp(egui::Id::new(TYPED), id);
+                    data.insert_temp(egui::Id::new(TYPED), Typed { field: id, file });
                 });
             } else {
                 // done with by Enter, or a press elsewhere
@@ -2141,8 +2200,8 @@ mod number_tests {
         harness.run_steps(1);
         assert_eq!(harness.state().0, 8);
         let refused = |harness: &Harness<'_, (u32, Option<egui::Rect>)>| {
-            let id = harness.ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new(TYPED)));
-            let id = id.unwrap().with("refused");
+            let typed = harness.ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)));
+            let id = typed.unwrap().field.with("refused");
             harness.ctx.data(|data| data.get_temp::<f64>(id)).is_some()
         };
         assert!(refused(&harness));

@@ -281,6 +281,19 @@ pub(crate) fn flush(item: &mut Item) {
     item.history = history;
 }
 
+/// Makes what changed of `item`'s settings since they were last seen a
+/// step of the user's, though the file isn't the one picked: a number
+/// typed into its settings, taken once they went out of sight.
+pub(crate) fn commit(item: &mut Item) {
+    let mut history = std::mem::take(&mut item.history);
+    if history.seen.as_ref().is_some_and(|seen| !seen.matches(item)) {
+        history.seen = Some(Settings::of(item));
+        history.pending = Some(Pending { user: true, nudge: false });
+    }
+    history.settle();
+    item.history = history;
+}
+
 /// Takes `item`'s settings as they are now as they were all along: a
 /// change the GUI made, which is no step of the user's.
 pub(crate) fn take_in(item: &mut Item) {
@@ -559,6 +572,83 @@ mod tests {
         harness.run_steps(2);
         undo(&mut harness);
         assert_eq!(width(&harness, 0), None);
+    }
+
+    /// The crop's width in the file at `at` in the list.
+    fn width_of(harness: &Harness<App>, at: usize) -> Option<u32> {
+        harness.state().items[at].choices.crop.map(|crop| crop.width)
+    }
+
+    #[test]
+    fn takes_a_number_typed_into_its_own_file_however_another_is_picked() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["first.png", "second.png"]);
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        // the other picked from the keyboard, its row clicked by a screen
+        // reader, which no pointer goes down for
+        harness.state_mut().select(ids[0]);
+        harness.run_steps(2);
+        type_width(&mut harness, "40 px", "25");
+        let name = harness.state().items[1].name();
+        let row = egui_kittest::kittest::by().label(&name).role(egui::accesskit::Role::Button);
+        harness.get(row).click_accesskit();
+        harness.run_steps(3);
+        assert_eq!(harness.state().selected, Some(ids[1]));
+        assert_eq!((width_of(&harness, 0), width_of(&harness, 1)), (Some(25), None));
+        assert_eq!(harness.state().items[0].history.undo.len(), 1);
+        assert!(!harness.state().items[1].history.can_undo());
+        // a file dropped while the second's is typed in, which picks it
+        type_width(&mut harness, "40 px", "30");
+        #[derive(Debug)]
+        struct Dropped(std::path::PathBuf);
+        impl egui::DroppedFile for Dropped {
+            fn path(&self) -> &Path {
+                &self.0
+            }
+            fn bytes(&self) -> Result<Vec<u8>, String> {
+                std::fs::read(&self.0).map_err(|err| err.to_string())
+            }
+        }
+        let third = Dropped(dir.path().join("first.png"));
+        harness.input_mut().dropped_files.push(std::sync::Arc::new(third));
+        harness.run_steps(3);
+        assert_eq!(harness.state().items.len(), 3);
+        assert_eq!(harness.state().selected, Some(harness.state().items[2].id));
+        assert_eq!(width_of(&harness, 1), Some(30));
+        assert_eq!(harness.state().items[1].history.undo.len(), 1);
+        // what isn't a number is dropped, as Enter would leave it
+        harness.state_mut().select(ids[0]);
+        harness.run_steps(2);
+        type_width(&mut harness, "25 px", "lots");
+        harness.state_mut().select(ids[1]);
+        harness.run_steps(3);
+        assert_eq!(width_of(&harness, 0), Some(25));
+        assert_eq!(harness.state().items[0].history.undo.len(), 1);
+        harness.state_mut().select(ids[0]);
+        harness.run_steps(2);
+        assert!(harness.query(width_field("25 px")).is_some());
+    }
+
+    #[test]
+    fn takes_a_number_typed_as_the_window_closes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["wide.png"]);
+        let path = dir.path().join("session");
+        harness.state_mut().session = crate::session::Store::open(path.clone());
+        type_width(&mut harness, "40 px", "20");
+        harness
+            .input_mut()
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .events
+            .push(egui::ViewportEvent::Close);
+        harness.step();
+        eframe::App::on_exit(harness.state_mut(), None);
+        harness.state_mut().session = None;
+        let mut store = crate::session::Store::open(path.clone()).unwrap();
+        let saved = store.read().unwrap().session.restore(&path, 1).items;
+        assert_eq!(saved[0].choices.crop.map(|crop| crop.width), Some(20));
     }
 
     #[test]

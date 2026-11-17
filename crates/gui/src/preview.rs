@@ -54,37 +54,75 @@ const UNDER_PANEL: f32 = 2.0 + HANDLE / 2.0;
 pub(crate) const LEAST_SHARE: f32 = 0.2;
 pub(crate) const MOST_SHARE: f32 = 0.85;
 
+/// Where the picked file's settings were drawn this frame, and its
+/// preview's stage: where another file's are drawn unseen, as wide.
+struct Places {
+    side: Rect,
+    settings: Rect,
+    stage: Rect,
+}
+
+/// What a file's settings are drawn with, but for what they borrow of
+/// the [`App`], which is borrowed otherwise as they are drawn.
+struct Drawn {
+    ffmpeg_args: bool,
+    ffmpeg: tgradish_core::config::FfmpegConfig,
+    output: Option<std::path::PathBuf>,
+    /// Where its result is in the queue to convert.
+    queued: Option<usize>,
+    /// Its result can be copied.
+    copyable: bool,
+}
+
 impl App {
+    /// What the settings of the file `id` are drawn with.
+    fn drawn(&self, id: u64) -> Drawn {
+        let ffmpeg_args = self.backend().as_ref().is_ok_and(Backend::supports_ffmpeg_args);
+        let output = self.item(id).map(|item| self.output_for(item));
+        let (choice, path) = self.ffmpeg_settings();
+        Drawn {
+            ffmpeg_args,
+            ffmpeg: tgradish_core::config::FfmpegConfig { choice, path },
+            queued: self.queue.iter().position(|&other| other == id),
+            copyable: self.copyable(id, output.as_deref()).is_some(),
+            output,
+        }
+    }
+
     pub(crate) fn main_panel(&mut self, ui: &mut egui::Ui) {
-        let Some(id) = self.selected.filter(|&id| self.item(id).is_some()) else {
+        let shown = self.selected.filter(|&id| self.item(id).is_some());
+        // a number typed into the settings of a file no longer shown
+        let unseen = widgets::unseen_number(ui.ctx(), shown);
+        let Some(id) = shown else {
+            if let Some(typed) = unseen {
+                widgets::forget_typed_number(ui.ctx(), typed);
+            }
             self.drop_zone(ui, ui.max_rect().shrink(28.0));
             return;
         };
-        let ffmpeg_args = self.backend().as_ref().is_ok_and(Backend::supports_ffmpeg_args);
-        let queued = self.queue.iter().position(|&other| other == id);
         egui::Panel::bottom("actions").show(ui, |ui| {
             ui.add_space(crate::actions::BAR_ABOVE);
             self.actions(ui, id);
             ui.add_space(crate::actions::below_bar(ui.style()));
         });
-        let output = self.item(id).map(|item| self.output_for(item));
-        let copyable = self.copyable(id, output.as_deref()).is_some();
-        let (choice, path) = self.ffmpeg_settings();
+        let mut places =
+            Places { side: Rect::NOTHING, settings: Rect::NOTHING, stage: Rect::NOTHING };
+        let mut in_frames = self.config.gui.timeline_frames;
+        let mut look = self.config.gui.result_preview;
+        let height = ui.available_height();
+        let preview_height =
+            (height * self.preview_share).clamp(240.0, (height - 140.0).max(240.0));
+        let Drawn { ffmpeg_args, ffmpeg, output, queued, copyable } = self.drawn(id);
         let context = file_settings::Context {
             presets: &self.presets,
             config: &self.config,
-            ffmpeg: tgradish_core::config::FfmpegConfig { choice, path },
+            ffmpeg,
             ffmpeg_args,
             output,
             config_path: self.config_path.as_deref(),
             presets_dir: self.presets_dir.as_deref(),
-            in_frames: self.config.gui.timeline_frames,
+            in_frames,
         };
-        let height = ui.available_height();
-        let preview_height =
-            (height * self.preview_share).clamp(240.0, (height - 140.0).max(240.0));
-        let mut in_frames = self.config.gui.timeline_frames;
-        let mut look = self.config.gui.result_preview;
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
         // the line under it is the handle's, which moves it
         let panel = egui::Panel::top("preview").exact_size(preview_height);
@@ -98,17 +136,13 @@ impl App {
                     vec2(width, ui.available_height()),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
-                        let tempo = item.tempo(&self.presets, &self.config);
-                        // what a .tgs is made with, the preset's included
-                        let tgs = item.choices.tgs_options(&self.presets, &self.config);
-                        let webm = item.choices.webm_options(&self.presets, &self.config);
-                        let webm = webm.unwrap_or_else(|_| item.choices.webm.clone());
-                        preview(
+                        let (tempo, webm, tgs) = made_with(item, &context);
+                        places.stage = preview(
                             ui,
                             (&mut self.screen, &mut self.inset),
                             item,
                             (tempo, &mut in_frames),
-                            (&webm, &tgs.unwrap_or_default()),
+                            (&webm, &tgs),
                             (&mut look, crate::motion::motion(ui.ctx())),
                         );
                     },
@@ -124,19 +158,8 @@ impl App {
                             .id_salt(("side", id))
                             .auto_shrink([false, false]);
                         widgets::scrolled(ui, column, |ui| {
-                            widgets::of_file(ui, "side", id, |ui| {
-                                widgets::settings_spacing(ui);
-                                ui.add_space(6.0);
-                                file_settings::make(ui, item, &context);
-                                file_settings::blocked(ui, item);
-                                // what converting did, where the eye is
-                                // once Convert is pressed, before the plan,
-                                // which matters most before there is a
-                                // result
-                                summary(ui, item, queued, copyable);
-                                details(ui, item);
-                                file_settings::plan(ui, item, &context);
-                            });
+                            places.side = ui.max_rect();
+                            side_settings(ui, item, &context, (queued, copyable));
                         });
                     },
                 );
@@ -173,11 +196,8 @@ impl App {
             let settings =
                 egui::ScrollArea::vertical().id_salt(("settings", id)).auto_shrink([false, false]);
             widgets::scrolled(ui, settings, |ui| {
-                widgets::of_file(ui, "settings", id, |ui| {
-                    widgets::settings_spacing(ui);
-                    file_settings::show(ui, item, &context);
-                    ui.add_space(12.0);
-                });
+                places.settings = ui.max_rect();
+                under_settings(ui, item, &context);
             });
         });
         if in_frames != self.config.gui.timeline_frames {
@@ -186,7 +206,93 @@ impl App {
         if look != self.config.gui.result_preview {
             self.save_setting(|gui| gui.result_preview = look);
         }
+        if let Some(typed) = unseen {
+            self.finish_unseen(ui, typed, &places);
+        }
     }
+
+    /// Has the number field `typed`, in the settings of a file no longer
+    /// shown, take what was typed in it, as a click elsewhere would have
+    /// before the file went out of sight: the file's settings, and the row
+    /// under its preview, are drawn once more, where the picked file's are
+    /// and as wide, so that they are laid out as they were, but unseen and
+    /// out of the pointer's reach. What it takes is a step of the file's.
+    fn finish_unseen(&mut self, ui: &mut egui::Ui, typed: widgets::Typed, places: &Places) {
+        let Some(at) = self.items.iter().position(|item| Some(item.id) == typed.file) else {
+            return widgets::forget_typed_number(ui.ctx(), typed);
+        };
+        widgets::finish_typed_number(ui.ctx());
+        let Drawn { ffmpeg_args, ffmpeg, output, queued, copyable } = self.drawn(self.items[at].id);
+        let mut item = self.items.remove(at);
+        let context = file_settings::Context {
+            presets: &self.presets,
+            config: &self.config,
+            ffmpeg,
+            ffmpeg_args,
+            output,
+            config_path: self.config_path.as_deref(),
+            presets_dir: self.presets_dir.as_deref(),
+            in_frames: self.config.gui.timeline_frames,
+        };
+        crate::history::flush(&mut item);
+        let unseen = |ui: &mut egui::Ui, rect: Rect| {
+            let layout = egui::Layout::top_down(egui::Align::Min);
+            let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(layout));
+            ui.set_clip_rect(Rect::NOTHING);
+            ui.set_opacity(0.0);
+            ui
+        };
+        side_settings(&mut unseen(ui, places.side), &mut item, &context, (queued, copyable));
+        under_settings(&mut unseen(ui, places.settings), &mut item, &context);
+        let (tempo, webm, tgs) = made_with(&item, &context);
+        let mut in_frames = context.in_frames;
+        let shown = item.shown();
+        let row = row_place(ui, &item, shown, places.stage);
+        let (timing, made) = ((tempo, &mut in_frames), (&webm, &tgs));
+        timeline_row(&mut unseen(ui, row), row, &mut item, shown, timing, made);
+        crate::history::commit(&mut item);
+        self.items.insert(at, item);
+    }
+}
+
+/// The side column of `item`'s settings: how it is made, and what came of
+/// converting it.
+fn side_settings(
+    ui: &mut egui::Ui,
+    item: &mut Item,
+    context: &file_settings::Context,
+    (queued, copyable): (Option<usize>, bool),
+) {
+    widgets::of_file(ui, "side", item.id, |ui| {
+        widgets::settings_spacing(ui);
+        ui.add_space(6.0);
+        file_settings::make(ui, item, context);
+        file_settings::blocked(ui, item);
+        // what converting did, where the eye is once Convert is pressed,
+        // before the plan, which matters most before there is a result
+        summary(ui, item, queued, copyable);
+        details(ui, item);
+        file_settings::plan(ui, item, context);
+    });
+}
+
+/// The rest of `item`'s settings, under its preview.
+fn under_settings(ui: &mut egui::Ui, item: &mut Item, context: &file_settings::Context) {
+    widgets::of_file(ui, "settings", item.id, |ui| {
+        widgets::settings_spacing(ui);
+        file_settings::show(ui, item, context);
+        ui.add_space(12.0);
+    });
+}
+
+/// How fast `item` plays, as its result will, and what its result is made
+/// with: a `.tgs`'s options with its preset's.
+fn made_with(item: &Item, context: &file_settings::Context) -> (f64, Options, tgs::Options) {
+    let (presets, config) = (context.presets, context.config);
+    let tgs = item.choices.tgs_options(presets, config).unwrap_or_default();
+    let webm = item.choices.webm_options(presets, config);
+    let webm = webm.unwrap_or_else(|_| item.choices.webm.clone());
+    (item.tempo(presets, config), webm, tgs)
 }
 
 /// The big preview of an item, its header and timeline. The input plays at
@@ -198,7 +304,7 @@ fn preview(
     (tempo, in_frames): (f64, &mut bool),
     (webm, tgs): (&Options, &tgs::Options),
     (look, smooth): (&mut ResultPreview, bool),
-) {
+) -> Rect {
     let has_result = item.result_clip.ready().is_some();
     // a change to what is used or how it is fitted shows on the input
     let framing = Framing::of(item);
@@ -312,16 +418,7 @@ fn preview(
     }
 
     let length = item.input_length();
-    let result_length =
-        item.result_clip.ready().filter(|clip| clip.is_animated()).map(|clip| clip.end());
-    let picker = item.format == Format::Webp;
-    let row_height = match shown {
-        Show::Input if length.is_some() => {
-            theme::CONTROL + timeline::extra_height(ui, ui.available_width(), picker)
-        }
-        Show::Result if result_length.is_some() => theme::CONTROL,
-        _ => 0.0,
-    };
+    let row_height = row_height(ui, item, shown, ui.available_width());
     let row_room = if row_height > 0.0 { row_height + AROUND_ROW } else { 0.0 };
     let size = ui.available_size() - vec2(0.0, row_room + AROUND_ROW - UNDER_PANEL);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
@@ -521,19 +618,53 @@ fn preview(
             }
         }
     }
-    if row_height == 0.0 {
-        return;
+    if row_height > 0.0 {
+        let row = row_place(ui, item, shown, rect);
+        timeline_row(ui, row, item, shown, (tempo, in_frames), (webm, tgs));
     }
-    // placed under the stage rather than after what was added last, which
-    // what is drawn over the stage would otherwise move
-    let row = Rect::from_min_size(
-        pos2(rect.left(), rect.bottom() + AROUND_ROW),
-        vec2(rect.width(), row_height),
-    );
+    rect
+}
+
+/// How high the row under the stage is for `item` showing `shown`, in a
+/// preview `width` wide: none where there is nothing to play.
+fn row_height(ui: &egui::Ui, item: &Item, shown: Show, width: f32) -> f32 {
+    let result_length = item.result_clip.ready().filter(|clip| clip.is_animated());
+    match shown {
+        Show::Input if item.input_length().is_some() => {
+            let picker = item.format == Format::Webp;
+            theme::CONTROL + timeline::extra_height(ui, width, picker)
+        }
+        Show::Result if result_length.is_some() => theme::CONTROL,
+        _ => 0.0,
+    }
+}
+
+/// Where the row under the `stage` goes: under it rather than after what
+/// was added last, which what is drawn over the stage would otherwise move.
+fn row_place(ui: &egui::Ui, item: &Item, shown: Show, stage: Rect) -> Rect {
+    let height = row_height(ui, item, shown, stage.width());
+    Rect::from_min_size(
+        pos2(stage.left(), stage.bottom() + AROUND_ROW),
+        vec2(stage.width(), height),
+    )
+}
+
+/// The row under the stage in `row`: the input's timeline, or its frame
+/// picker, or the result's player, as `shown` has it.
+fn timeline_row(
+    ui: &mut egui::Ui,
+    row: Rect,
+    item: &mut Item,
+    shown: Show,
+    (tempo, in_frames): (f64, &mut bool),
+    (webm, tgs): (&Options, &tgs::Options),
+) {
+    let length = item.input_length();
+    let result_length =
+        item.result_clip.ready().filter(|clip| clip.is_animated()).map(|clip| clip.end());
     let layout = egui::Layout::top_down(egui::Align::Min);
-    // with ids of the file's own, as [`widgets::of_file`] gives its settings
-    let id = egui::Id::new(("row", item.id));
-    ui.scope_builder(egui::UiBuilder::new().id(id).max_rect(row).layout(layout), |ui| {
+    let place = egui::UiBuilder::new().max_rect(row).layout(layout);
+    widgets::of_file_in(ui, place, "row", item.id, |ui| {
         match (shown, length, result_length) {
             (Show::Input, Some(_), _) if item.format == Format::Webp => {
                 if let Some(frames) = item.input_frames() {
