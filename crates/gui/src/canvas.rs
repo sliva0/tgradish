@@ -213,7 +213,8 @@ pub(crate) fn show(
 ) {
     // a part of the space the caller took: taking it again would move
     // what comes next
-    let response = ui.interact(rect, ui.id().with("canvas"), Sense::click_and_drag());
+    // not a stop of the keyboard's focus itself: the crop on it is
+    let response = ui.interact(rect, ui.id().with("canvas"), Sense::CLICK | Sense::DRAG);
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, theme::stage(ui.visuals().dark_mode));
 
@@ -406,6 +407,32 @@ pub(crate) fn show(
     if response.double_clicked() && cropping.crop.is_some() {
         whole_picture(cropping.crop);
     }
+    // the crop takes the keyboard's focus as it is pressed on, or drawn
+    let crop_id = response.id.with("crop");
+    let pressed_on =
+        |point: Option<Pos2>| point.and_then(grab).filter(|drag| !matches!(drag, Drag::New(_)));
+    let mut focus = (dragging && drag.is_some())
+        || (response.clicked() && pressed_on(response.interact_pointer_pos()).is_some());
+    // where it has the focus, the arrows move it a pixel, ten with Shift,
+    // and with Ctrl move its bottom right corner
+    if cropping.crop.is_some() && ui.memory(|memory| memory.has_focus(crop_id)) {
+        let arrows = egui::EventFilter {
+            horizontal_arrows: true,
+            vertical_arrows: true,
+            ..Default::default()
+        };
+        ui.memory_mut(|memory| memory.set_focus_lock_filter(crop_id, arrows));
+        if let Some(new) = keyed(ui, cropping.crop.unwrap_or(full), cropping.ratio, size) {
+            let new = match cropping.exact {
+                Some(exact) => exact.fit(new, (Keep::Start, Keep::Start), cropping.ratio, size),
+                None => Some(new),
+            };
+            if let Some(new) = new {
+                *cropping.crop = (new != full).then_some(new);
+            }
+            focus = true;
+        }
+    }
 
     // the crop as it is now
     let crop = cropping.crop.unwrap_or(full);
@@ -532,7 +559,75 @@ pub(crate) fn show(
         if clicked.inner {
             whole_picture(cropping.crop);
         }
+        // last, as egui takes the focus from it on a press elsewhere, which
+        // a press on its edges outside it is
+        let ring = on_screen.expand(RING);
+        let crop = ui.interact(ring, crop_id, Sense::focusable_noninteractive());
+        widgets::named(crop, &crate::l10n::fl!("crop-keys"));
+        // asked for again on the next frame, as in the window egui drops a
+        // focus asked for in the frame of a click by the end of that frame
+        let asked = crop_id.with("asked");
+        if ui.data_mut(|data| data.remove_temp::<bool>(asked)).is_some() {
+            ui.memory_mut(|memory| memory.request_focus(crop_id));
+        }
+        if focus && !clicked.inner {
+            ui.memory_mut(|memory| memory.request_focus(crop_id));
+            ui.data_mut(|data| data.insert_temp(asked, true));
+        }
     }
+}
+
+/// How far out of the crop the ring of the keyboard's focus is drawn, the
+/// handles inside it.
+const RING: f32 = 7.0;
+
+/// What the arrows pressed this frame make of `crop` in a `size` picture,
+/// with the `ratio` it keeps: moved a pixel each, ten with Shift, or with
+/// Ctrl its bottom right corner moved; taken from what else they do.
+fn keyed(ui: &egui::Ui, crop: Crop, ratio: Option<f64>, size: (u32, u32)) -> Option<Crop> {
+    use egui::Key;
+    let mut by = Vec2::ZERO;
+    let mut resize = false;
+    ui.input_mut(|input| {
+        input.events.retain(|event| match event {
+            egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                let step = if modifiers.shift { 10.0 } else { 1.0 };
+                let along = match key {
+                    Key::ArrowLeft => vec2(-step, 0.0),
+                    Key::ArrowRight => vec2(step, 0.0),
+                    Key::ArrowUp => vec2(0.0, -step),
+                    Key::ArrowDown => vec2(0.0, step),
+                    _ => return true,
+                };
+                if modifiers.alt {
+                    return true;
+                }
+                by += along;
+                resize = modifiers.command;
+                false
+            }
+            _ => true,
+        });
+    });
+    if by == Vec2::ZERO {
+        return None;
+    }
+    if !resize {
+        return Some(moved(crop, by, size));
+    }
+    let [left, top, mut right, mut bottom] = bounds(crop);
+    // no further than the picture, rather than moving it back in
+    right = (right + by.x).min(size.0 as f32).max(left + 1.0);
+    bottom = (bottom + by.y).min(size.1 as f32).max(top + 1.0);
+    // the shape kept from the side that moved
+    if let Some(ratio) = ratio.map(|r| r as f32) {
+        if by.x != 0.0 {
+            bottom = top + (right - left) / ratio;
+        } else {
+            right = left + (bottom - top) * ratio;
+        }
+    }
+    Some(settle([left, top, right, bottom], ratio, size))
 }
 
 /// The crop's size over its top left corner, with a cross after it back to
@@ -1184,6 +1279,54 @@ mod tests {
         press_and_move(&mut harness, right, vec2(23.0, 0.0) * scale, egui::Modifiers::NONE);
         let_go(&mut harness, right + vec2(23.0, 0.0) * scale);
         assert_eq!(harness.state().3, Some(Crop { width: 220, ..crop }));
+    }
+
+    #[test]
+    fn moves_and_resizes_the_crop_by_keys_once_it_is_clicked() {
+        let crop = Crop { x: 8, y: 8, width: 30, height: 20 };
+        let (mut harness, scale, corner) = cropped(Some(crop));
+        let id = harness.ctx.memory(|memory| memory.focused());
+        assert_eq!(id, None);
+        // clicked inside: it has the focus
+        let inside = corner + vec2(20.0, 20.0) * scale;
+        harness.event(egui::Event::PointerMoved(inside));
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: inside,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+        }
+        harness.step();
+        assert!(harness.ctx.memory(|memory| memory.focused()).is_some());
+        let keyed = |harness: &mut egui_kittest::Harness<'_, Cropped>, modifiers, key| {
+            harness.key_press_modifiers(modifiers, key);
+            harness.step();
+            harness.state().3.unwrap()
+        };
+        use egui::{Key, Modifiers};
+        assert_eq!(keyed(&mut harness, Modifiers::NONE, Key::ArrowRight), Crop { x: 9, ..crop });
+        assert_eq!(
+            keyed(&mut harness, Modifiers::SHIFT, Key::ArrowDown),
+            Crop { x: 9, y: 18, ..crop }
+        );
+        let moved = Crop { x: 9, y: 18, ..crop };
+        // with Ctrl, its bottom right corner, as far as the picture goes
+        let wider = Crop { width: 31, ..moved };
+        assert_eq!(keyed(&mut harness, Modifiers::COMMAND, Key::ArrowRight), wider);
+        let lower = Crop { height: 30, ..wider };
+        let both = Modifiers::COMMAND | Modifiers::SHIFT;
+        assert_eq!(keyed(&mut harness, both, Key::ArrowDown), lower);
+        assert_eq!(keyed(&mut harness, both, Key::ArrowDown), lower);
+        // still there after the arrows, which move nothing else's focus
+        assert!(harness.ctx.memory(|memory| memory.focused()).is_some());
+        // Escape lets go of it, the arrows doing nothing to it after
+        harness.key_press(Key::Escape);
+        harness.step();
+        assert_eq!(harness.ctx.memory(|memory| memory.focused()), None);
+        assert_eq!(keyed(&mut harness, Modifiers::NONE, Key::ArrowLeft), lower);
     }
 
     #[test]

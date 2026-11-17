@@ -285,6 +285,7 @@ impl App {
                     (fl!("mouse-centred"), fl!("mouse-centred", "does")),
                     (fl!("mouse-free"), fl!("mouse-free", "does")),
                     (fl!("mouse-cancel"), fl!("mouse-cancel", "does")),
+                    (fl!("mouse-crop-keys"), fl!("mouse-crop-keys", "does")),
                     (fl!("mouse-double-click"), fl!("mouse-double-click", "does")),
                     (fl!("mouse-wheel"), fl!("mouse-wheel", "does")),
                     (fl!("mouse-pan"), fl!("mouse-pan", "does")),
@@ -1058,5 +1059,52 @@ mod tests {
         let Status::Done(done) = &made.status else { panic!("{:?}", made.status) };
         let info = tgradish_core::webm::container::inspect_file(&done.output).unwrap();
         assert_eq!(info.video_frames, 5);
+    }
+
+    #[test]
+    fn leaves_the_arrows_to_the_crop_while_it_has_the_focus() {
+        use tgradish_core::options::Crop;
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video_of(dir.path(), "64x48", 1) else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        let crop = Crop { x: 8, y: 8, width: 30, height: 20 };
+        let frames = harness.state().items[0].input_frames().unwrap();
+        let item = &mut harness.state_mut().items[0];
+        (item.choices.crop, item.view.time, item.view.playing) =
+            (Some(crop), frames.times[5], false);
+        harness.run_steps(3);
+        // clicked in the middle of the crop
+        let view = &harness.state().items[0].view;
+        let (_, fit_in) = view.input_zoom.anchor.unwrap();
+        let (shown, scale) = crate::canvas::layout(fit_in, (64, 48), &view.input_zoom);
+        let inside = shown.min + vec2(23.0, 18.0) * scale;
+        harness.event(egui::Event::PointerMoved(inside));
+        for pressed in [true, false] {
+            let (button, modifiers) = (egui::PointerButton::Primary, egui::Modifiers::NONE);
+            harness.event(egui::Event::PointerButton { pos: inside, button, pressed, modifiers });
+            harness.step();
+        }
+        harness.run_steps(2);
+        let state = |harness: &egui_kittest::Harness<App>| {
+            let item = &harness.state().items[0];
+            (item.choices.crop.unwrap(), frames.at(item.view.time), item.choices.start)
+        };
+        // the arrows and Ctrl's move the crop, not the frame or the part used
+        harness.key_press(egui::Key::ArrowRight);
+        harness.run_steps(2);
+        assert_eq!(state(&harness), (Crop { x: 9, ..crop }, 5, None));
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::ArrowRight);
+        harness.run_steps(2);
+        assert_eq!(state(&harness), (Crop { x: 9, width: 31, ..crop }, 5, None));
+        // until Escape, after which they are the frames'
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+        harness.key_press(egui::Key::ArrowRight);
+        harness.run_steps(2);
+        assert_eq!(state(&harness), (Crop { x: 9, width: 31, ..crop }, 6, None));
     }
 }

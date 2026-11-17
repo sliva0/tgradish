@@ -470,6 +470,9 @@ width = Width
 height = Height
 # Under the crop's fields, and what screen readers call the cross on the
 # crop's size over the preview, which does the same.
+# What screen readers call the crop over the preview, which the keyboard's
+# focus goes to, and what its keys do.
+crop-keys = Crop: the arrows move it, Ctrl+arrows resize it; with Shift, by ten pixels
 whole-picture = Whole picture
     .hint = Use all of the picture
     .exact = Use all of the picture, or as much as the fixed scale takes from its top left
@@ -1297,12 +1300,14 @@ mouse-drag = Drag
     .does = Crop, or move the crop or its edges
 mouse-shape = Shift+drag a corner
     .does = Keep the crop's shape, unless an aspect ratio is set
-mouse-centred = Alt+drag an edge or corner
+mouse-centred = Alt+drag an edge
     .does = Resize the crop about its middle
 mouse-free = Ctrl+drag
     .does = Crop without snapping to the picture's edges and middle
 mouse-cancel = Esc while dragging
     .does = Put the crop back as it was
+mouse-crop-keys = Click crop, then arrows
+    .does = Move it a pixel, ten with Shift; Ctrl+arrows resize it
 mouse-double-click = Double-click
     .does = Back to the whole picture
 mouse-wheel = Wheel

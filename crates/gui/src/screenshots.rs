@@ -496,6 +496,14 @@ fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     press_and_move(&mut harness, inside, by);
     save(&mut harness, "crop-snapped");
     let_go(&mut harness, inside + by);
+    // which leaves it with the keyboard's focus, moved by the arrows
+    harness.event(egui::Event::PointerGone);
+    settle(&mut harness);
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::ArrowLeft);
+    settle(&mut harness);
+    save(&mut harness, "crop-focused");
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
     // the shortcuts, scrolled to what the mouse does
     harness.state_mut().shortcuts = true;
     settle(&mut harness);
