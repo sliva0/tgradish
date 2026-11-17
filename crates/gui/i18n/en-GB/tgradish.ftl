@@ -355,6 +355,7 @@ tgs-unseen = This TGS sticker has shapes tgradish can't draw
 # Turns on the result's small picture.
 result-preview = Result preview
     .hint = Show / hide small preview beside the input
+    .input-only = Shown beside the input, not the result
 zoom-out = Zoom out
     .hint = Show all of it
     .all = Already fully zoomed out

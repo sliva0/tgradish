@@ -569,8 +569,11 @@ fn sections(
         if elsewhere {
             problem(ui, wrong);
         }
+        // its room kept, so that choosing a folder moves nothing under it
         if elsewhere && gui.output_dir.is_none() {
             widgets::hint(ui, fl!("in-a-folder", "unchosen"));
+        } else {
+            widgets::hint_room(ui, fl!("in-a-folder", "unchosen"));
         }
     });
     row(ui, &fl!("existing-files"), &fl!("existing-files", "hint"), Ok(()), |ui| {
@@ -1593,11 +1596,18 @@ mod tests {
             App::with(Config::default(), Some(at.clone()), Presets::builtin())
         });
         harness.state_mut().settings_dialog.open();
-        harness.run_steps(2);
+        // which takes a few frames as its parts find their sizes
+        harness.run_steps(16);
+        let under =
+            |harness: &Harness<App>| harness.get_by_label(&fl!("replace-in-the-way")).rect();
+        let before = under(&harness);
+        assert!(harness.query_by_label(&fl!("in-a-folder", "unchosen")).is_none());
         harness.get_by_label(&fl!("in-a-folder")).click_accesskit();
         harness.run_steps(2);
-        // in a folder, said to be unchosen, yet none is kept
+        // in a folder, said to be unchosen, yet none is kept; said in room
+        // kept for it, so nothing under it moved
         harness.get_by_label(&fl!("in-a-folder", "unchosen"));
+        assert_eq!(under(&harness), before);
         assert_eq!(harness.state().config.gui.output_dir, None);
         harness.get_by_label(&fl!("replace-in-the-way")).click_accesskit();
         harness.run_steps(2);

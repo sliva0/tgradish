@@ -10,8 +10,6 @@ mod tgs;
 mod time;
 mod webm;
 
-use std::collections::HashMap;
-
 use eframe::egui::{self, RichText, vec2};
 use tgradish_core::config::FfmpegConfig;
 use tgradish_core::presets::{BUILTIN, Format, Presets};
@@ -275,31 +273,16 @@ pub(crate) fn show(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     commands(ui, item, context);
 }
 
-/// `parts` in two columns, each part where there is less so far.
+/// `parts` in two columns, each part in its own: the same ones for every
+/// file of a kind, whatever their heights, so that one growing or
+/// shrinking, as encoder options folding open, never moves another.
 fn columns(ui: &mut egui::Ui, item: &mut Item, context: &Context, parts: &[Part]) {
-    // how high each part was last drawn
-    let id = egui::Id::new("settings heights");
-    let mut heights: HashMap<Part, f32> = ui.data(|data| data.get_temp(id)).unwrap_or_default();
-    let height = |part: Part| heights.get(&part).copied().unwrap_or_default();
-    // the picture first on the left, the Aseprite file's on the right, and
-    // the rest each where there is less so far; to the right only where
-    // clearly less, so a part changing a little doesn't move another
-    let (mut left, mut right) = (vec![Part::Picture], Vec::new());
-    if parts.contains(&Part::Aseprite) {
-        right.push(Part::Aseprite);
-    }
-    let sum = |column: &[Part]| column.iter().map(|&part| height(part)).sum::<f32>();
-    for &part in parts.iter().filter(|&&part| !matches!(part, Part::Picture | Part::Aseprite)) {
-        if sum(&right) + BALANCE < sum(&left) {
-            right.push(part);
-        } else {
-            left.push(part);
-        }
-    }
+    let aseprite = parts.contains(&Part::Aseprite);
+    let (right, left): (Vec<Part>, Vec<Part>) =
+        parts.iter().partition(|&&part| part.on_the_right(aseprite));
     let width = (ui.available_width() - GUTTER) / 2.0;
     let layout = egui::Layout::top_down(egui::Align::Min);
     let spacing = ui.spacing().item_spacing;
-    let mut drawn = HashMap::new();
     let columns = ui.horizontal_top(|ui| {
         // the gutter alone between them, their own spacing within
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -312,9 +295,7 @@ fn columns(ui: &mut egui::Ui, item: &mut Item, context: &Context, parts: &[Part]
                 ui.set_width(width);
                 for part in column {
                     // in the column itself, so a part knows what is above it
-                    let top = ui.cursor().top();
                     part.show(ui, item, context);
-                    drawn.insert(part, (ui.min_rect().bottom() - top).max(0.0));
                 }
             });
         }
@@ -322,19 +303,7 @@ fn columns(ui: &mut egui::Ui, item: &mut Item, context: &Context, parts: &[Part]
     let rect = columns.response.rect;
     let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
     ui.painter().vline(rect.left() + width + GUTTER / 2.0, rect.y_range(), stroke);
-    // drawn at other heights: placed again on the next frame
-    let moved = drawn
-        .iter()
-        .any(|(part, height)| heights.get(part).is_none_or(|before| (before - height).abs() > 1.0));
-    if moved {
-        heights.extend(drawn);
-        ui.data_mut(|data| data.insert_temp(id, heights));
-        ui.ctx().request_repaint();
-    }
 }
-
-/// How much shorter the right column must be to take the next part.
-const BALANCE: f32 = 40.0;
 
 /// A part of the settings, which the columns share out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -367,6 +336,21 @@ impl Part {
             Format::Webp => parts.push(Part::Size),
         }
         parts
+    }
+
+    /// Whether the part goes in the right column, of a file that is an
+    /// Aseprite file where `aseprite` says: the picture's settings, the
+    /// tallest, on the left, and the rest shared out as they come out
+    /// about even with the picture's and the others' usual heights.
+    fn on_the_right(self, aseprite: bool) -> bool {
+        match self {
+            Part::Picture | Part::Advanced => false,
+            Part::Aseprite | Part::Time | Part::Size => true,
+            // under the picture, where the Aseprite file's settings take
+            // the top of the right
+            Part::Quality => !aseprite,
+            Part::Reading => aseprite,
+        }
     }
 
     fn show(self, ui: &mut egui::Ui, item: &mut Item, context: &Context) {
@@ -584,6 +568,43 @@ mod tests {
             assert!(wrapped || chip.width() >= natural, "{name} cut short in {chip:?}");
             // within the window
             assert!(chip.right() <= crate::MIN_WIDTH, "{name} beyond the window: {chip:?}");
+        }
+    }
+
+    #[test]
+    fn keeps_each_part_in_its_column_as_another_grows() {
+        use egui_kittest::kittest::Queryable;
+        let dir = tempfile::tempdir().unwrap();
+        let Some(clip) = crate::testing::video(dir.path(), "64x36") else { return };
+        let mut harness =
+            egui_kittest::Harness::builder().with_size([1920.0, 1080.0]).build_eframe(|cc| {
+                let app = crate::app::App::with(Config::default(), None, Presets::builtin());
+                app.style(&cc.egui_ctx);
+                app
+            });
+        harness.state_mut().add(vec![clip]);
+        crate::testing::finish(&mut harness);
+        let place = |harness: &egui_kittest::Harness<crate::app::App>, label: &str| {
+            harness.get_by_label(label).rect()
+        };
+        let right = [fl!("time"), fl!("size-and-quality")];
+        let before: Vec<_> = right.iter().map(|label| place(&harness, label)).collect();
+        let folded = place(&harness, &fl!("encoder-options"));
+        assert!(before.iter().all(|rect| rect.left() > folded.right()), "{before:?}");
+        // the left one taller by far: the right one's parts stay where they are
+        harness.get_by_label(&fl!("encoder-options")).click();
+        harness.run_steps(4);
+        let after: Vec<_> = right.iter().map(|label| place(&harness, label)).collect();
+        assert_eq!(before, after);
+        // and every kind of file has parts in both
+        for aseprite in [false, true] {
+            for parts in [
+                [Part::Picture, Part::Time, Part::Quality, Part::Advanced],
+                [Part::Picture, Part::Time, Part::Quality, Part::Reading],
+            ] {
+                let on_the_right = parts.iter().filter(|part| part.on_the_right(aseprite)).count();
+                assert!((1..parts.len()).contains(&on_the_right));
+            }
         }
     }
 }

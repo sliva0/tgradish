@@ -296,6 +296,22 @@ pub(crate) fn hint(ui: &mut egui::Ui, text: impl Into<String>) {
     weak_text(ui, text, width, HINT_TRIM);
 }
 
+/// The room a [`hint`] of `text` takes, left empty: kept where the hint
+/// shows only at times, so that nothing under it moves as it comes and
+/// goes.
+pub(crate) fn hint_room(ui: &mut egui::Ui, text: impl Into<String>) {
+    ui.add_space(BEFORE_HINT);
+    let text = RichText::new(text.into()).weak().size(12.5);
+    let width = ui.available_width().min(HINT_WIDTH);
+    let galley = egui::WidgetText::from(text).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Wrap),
+        width,
+        egui::TextStyle::Body,
+    );
+    ui.allocate_space((galley.size() - vec2(0.0, HINT_TRIM)).max(egui::Vec2::ZERO));
+}
+
 /// A [`hint`] holding a number that changes, as something is dragged or
 /// plays: its lines break where they would with the widest number it may
 /// hold, which `widest` says, the hint written with each of the widest

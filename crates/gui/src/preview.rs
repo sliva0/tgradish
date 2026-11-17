@@ -205,9 +205,13 @@ fn preview(
     let shown = item.shown();
     ui.add_space(6.0);
     // the result's small picture's toggle, or under the bar where it
-    // doesn't fit beside the rest
-    let toggle = |ui: &mut egui::Ui, inset: &mut bool| {
-        ui.toggle_value(inset, fl!("result-preview")).on_hover_text(fl!("result-preview", "hint"));
+    // doesn't fit beside the rest; there while the result shows too,
+    // greyed, so that nothing beside it moves as the two take turns
+    let toggle = |ui: &mut egui::Ui, inset: &mut bool, input: bool| {
+        ui.add_enabled_ui(input, |ui| ui.toggle_value(inset, fl!("result-preview")))
+            .inner
+            .on_hover_text(fl!("result-preview", "hint"))
+            .on_disabled_hover_text(fl!("result-preview", "input-only"));
     };
     let mut toggle_below = false;
     ui.horizontal(|ui| {
@@ -251,8 +255,8 @@ fn preview(
         }
         // what doesn't fit is left out
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if show == Show::Input && !toggle_below {
-                toggle(ui, &mut item.view.inset);
+            if !toggle_below {
+                toggle(ui, &mut item.view.inset, show == Show::Input);
             }
             // always there where there is room, so nothing beside them
             // moves as zooming starts
@@ -296,9 +300,9 @@ fn preview(
         }
     });
     let shown = item.shown();
-    if toggle_below && shown == Show::Input {
+    if toggle_below {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-            toggle(ui, &mut item.view.inset);
+            toggle(ui, &mut item.view.inset, shown == Show::Input);
         });
     }
 
@@ -1029,6 +1033,40 @@ mod tests {
             last.unwrap().click();
             harness.run_steps(2);
             assert_eq!(harness.state().items[0].choices.crop, None, "{width}");
+        }
+    }
+
+    #[test]
+    fn keeps_the_result_previews_toggle_greyed_while_the_result_shows() {
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        // where it is beside the rest, and where it goes under the bar
+        for width in [1280.0, crate::MIN_WIDTH] {
+            let mut harness = Harness::builder().with_size([width, 820.0]).build_eframe(|cc| {
+                let app = App::with(Config::default(), None, Presets::builtin());
+                app.style(&cc.egui_ctx);
+                app
+            });
+            harness.state_mut().add(vec![art.clone()]);
+            finish(&mut harness);
+            crate::testing::convert(&harness);
+            harness.run_steps(2);
+            finish(&mut harness);
+            let label = fl!("result-preview");
+            let place = |harness: &Harness<App>| {
+                let toggle = harness.get_by_label(&label);
+                let stage = harness.get_by_label(&fl!("show-input")).rect();
+                (toggle.rect(), toggle.accesskit_node().is_disabled(), stage)
+            };
+            harness.state_mut().items[0].view.show = Show::Input;
+            harness.run_steps(2);
+            let (input, disabled, stage) = place(&harness);
+            assert!(!disabled, "{width}");
+            harness.state_mut().items[0].view.show = Show::Result;
+            harness.run_steps(2);
+            // where it was, greyed, and nothing moved
+            assert_eq!(place(&harness), (input, true, stage), "{width}");
         }
     }
 
