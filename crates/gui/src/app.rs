@@ -1012,15 +1012,28 @@ impl eframe::App for App {
             Some(window) if !small => window.list,
             _ => FILES_WIDTH,
         };
-        let list = egui::Panel::left(id)
-            .resizable(true)
-            .default_size(width)
-            .size_range(NARROWEST_LIST..=widest)
-            .show(ui, |ui| {
-                self.files_panel(ui);
-            });
-        self.follow_window(&ctx, (!small).then(|| list.response.rect.width()));
-        egui::CentralPanel::default().show(ui, |ui| self.main_panel(ui));
+        // without files, the GUI is where they are dropped, until one is
+        // added; the list is then as wide as it was
+        if self.items.is_empty() {
+            self.follow_window(&ctx, None);
+            let frame = egui::Frame::side_top_panel(&ctx.global_style());
+            let width = egui::PanelState::load(&ctx, egui::Id::new(id))
+                .map_or(width, |state| state.size().x)
+                .clamp(NARROWEST_LIST, widest)
+                - frame.inner_margin.sum().x;
+            // its icon where the list's is
+            egui::CentralPanel::default().frame(frame).show(ui, |ui| self.welcome(ui, width));
+        } else {
+            let list = egui::Panel::left(id)
+                .resizable(true)
+                .default_size(width)
+                .size_range(NARROWEST_LIST..=widest)
+                .show(ui, |ui| {
+                    self.files_panel(ui);
+                });
+            self.follow_window(&ctx, (!small).then(|| list.response.rect.width()));
+            egui::CentralPanel::default().show(ui, |ui| self.main_panel(ui));
+        }
         let ffmpeg_given = self.ffmpeg_override != (None, None);
         settings_dialog::show(
             &ctx,
@@ -1575,6 +1588,10 @@ mod tests {
         let mut first = harness(Config::default());
         first.state_mut().reopen(state.clone());
         first.state_mut().preview_share = 0.4;
+        // the list, which shows with files
+        let art = dir.path().join("art.png");
+        crate::testing::square(&art, [255, 0, 0, 255]);
+        first.state_mut().add(vec![art]);
         first.run_steps(2);
         // the list made wider, by its edge
         let edge = first.state().window.unwrap().list;

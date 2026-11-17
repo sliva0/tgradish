@@ -15,6 +15,7 @@ What changed in each release of tgradish, newest first. The format follows
 - The GUI shows its accent plainly where it was faint: the timeline's used
   part on the light theme, and, with a grey or dark accent on the dark
   theme, what is chosen, the main button and progress.
+- The GUI without files is one drop zone, until the first file is added.
 
 ### Fixed
 

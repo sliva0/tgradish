@@ -226,7 +226,6 @@ remove-all = Remove all
 converting-batch = Converting { $current } of { $total }
 stop-all = Stop all
     .hint = Stop converting, and take the files waiting out of the queue
-no-files = Files you add show up here
 remove = Remove
 remove-file = Remove it from the list
 # A file's button that makes its result, before it has one.
@@ -244,7 +243,7 @@ row-stale = { $size } · outdated
 row-failed = failed
 row-exists = a file is in the way
 row-stopped = stopped
-# The large area shown while no files are open.
+# The large area that is the whole GUI while no files are open.
 drop-here = Drop videos, GIFs, images or Aseprite files here
 drop-here-note = To convert into a video, animated or static sticker or emoji
 paste = Paste

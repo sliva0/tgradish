@@ -142,7 +142,10 @@ impl App {
         }
     }
 
-    pub(crate) fn files_panel(&mut self, ui: &mut egui::Ui) {
+    /// The icon and name, and beside them Add files… with its menu where
+    /// `add`, the theme's button and the menu of the rest: over the list,
+    /// or over the whole GUI while it has no files.
+    fn header(&mut self, ui: &mut egui::Ui, add: bool) {
         // its buttons level with the bar over the preview beside it
         ui.add_space(4.0);
         let icon_side = icon::side(ui.ctx(), ICON_ROOM);
@@ -154,16 +157,15 @@ impl App {
             let name = fl!("main-menu");
             widgets::named(menu, &name).on_hover_text(name);
             self.theme_button(ui);
-            // a split button: files, or the rest from its arrow
-            ui.scope(|ui| {
-                ui.spacing_mut().item_spacing.x = 1.0;
-                let more = ui.menu_button("⏷", |ui| self.add_menu(ui)).response;
-                widgets::named(more, &fl!("add-more"));
-                let add = ui.button(fl!("add-files")).on_hover_text(keys_text(Command::AddFiles));
-                if add.clicked() {
-                    self.pick(ui.ctx(), Pick::Files);
-                }
-            });
+            // a split button: files, or the rest from its arrow; without
+            // files, the drop zone's own is the one
+            if add {
+                ui.scope(|ui| {
+                    ui.spacing_mut().item_spacing.x = 1.0;
+                    let add = egui::Button::new(fl!("add-files"));
+                    self.add_button(ui, add, egui::Button::new("⏷"));
+                });
+            }
             // the icon and name, where the buttons leave room for them, the
             // space after the last already left out; the icon smaller where
             // it must be, down to a screen pixel for each of its own
@@ -186,13 +188,38 @@ impl App {
             }
         });
         ui.add_space(4.0);
+    }
+
+    /// A split button: `add` for Add files…, and after it `more`, the
+    /// arrow of its menu of other ways to add files.
+    fn add_button(&mut self, ui: &mut egui::Ui, add: egui::Button<'_>, more: egui::Button<'_>) {
+        let files = |app: &mut App, ui: &mut egui::Ui| {
+            if ui.add(add).on_hover_text(keys_text(Command::AddFiles)).clicked() {
+                app.pick(ui.ctx(), Pick::Files);
+            }
+        };
+        let menu = |app: &mut App, ui: &mut egui::Ui| {
+            let button = egui::containers::menu::MenuButton::from_button(more);
+            let (response, _) = button.ui(ui, |ui| app.add_menu(ui));
+            widgets::named(response, &fl!("add-more"));
+        };
+        if ui.layout().prefer_right_to_left() {
+            menu(self, ui);
+            files(self, ui);
+        } else {
+            files(self, ui);
+            menu(self, ui);
+        }
+    }
+
+    pub(crate) fn files_panel(&mut self, ui: &mut egui::Ui) {
+        self.header(ui, true);
         ui.separator();
 
         // what Convert all converts, and what it leaves out
         let changed = self.items.iter().filter(|item| convertible(item)).count();
         let attention = self.items.iter().filter(|item| !item.is_busy() && item.blocked()).count();
-        // without files there is nothing to convert or remove, and the way
-        // to add them, beside the list, is the one thing to do
+        // without files there is nothing to convert or remove
         if !self.items.is_empty() {
             let mut stop = false;
             egui::Panel::bottom("files-footer").show(ui, |ui| {
@@ -251,13 +278,6 @@ impl App {
         // corner, mostly empty
         self.banner.corner = Some(ui.available_rect_before_wrap());
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            if self.items.is_empty() {
-                ui.vertical_centered(|ui| {
-                    let line = ui.text_style_height(&egui::TextStyle::Body);
-                    ui.add_space(((ui.available_height() - line) / 2.0).max(20.0));
-                    widgets::note(ui, fl!("no-files"));
-                });
-            }
             let mut clicked = None;
             let mut removed = None;
             let mut again = None;
@@ -345,8 +365,25 @@ impl App {
         Some(((total - waiting).clamp(1, total), total))
     }
 
-    pub(crate) fn empty(&mut self, ui: &mut egui::Ui) {
-        let zone = ui.max_rect().shrink(28.0);
+    /// The GUI while it has no files: the icon, name and buttons over a
+    /// drop zone taking the rest, as there is no list to show yet. What
+    /// passes is said in the zone's corner, where the list's would be,
+    /// `list` wide.
+    pub(crate) fn welcome(&mut self, ui: &mut egui::Ui, list: f32) {
+        self.header(ui, false);
+        ui.add_space(4.0);
+        // as far from the bottom as from the sides, which the panel's own
+        // margin is less than
+        let mut zone = ui.available_rect_before_wrap();
+        zone.max.y -= 8.0 - f32::from(egui::Frame::side_top_panel(ui.style()).inner_margin.bottom);
+        let right = (zone.left() + list).min(zone.right());
+        self.banner.corner = Some(egui::Rect::from_x_y_ranges(zone.left()..=right, zone.y_range()));
+        self.drop_zone(ui, zone);
+    }
+
+    /// Where files are dropped, framed in `zone`, with the buttons that add
+    /// them otherwise in its middle.
+    pub(crate) fn drop_zone(&mut self, ui: &mut egui::Ui, zone: egui::Rect) {
         let colour = if self.hovering {
             theme::mark(ui.visuals())
         } else {
@@ -365,38 +402,56 @@ impl App {
             6.0,
         );
         ui.painter().extend(dashes);
-        ui.vertical_centered(|ui| {
-            ui.add_space((ui.available_height() / 2.0 - 110.0).max(40.0));
-            ui.label(RichText::new(fl!("drop-here")).size(22.0));
+        let inside = zone.shrink(16.0);
+        let layout = egui::Layout::top_down(egui::Align::Center);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(inside).layout(layout), |ui| {
+            // a little over the middle, where the eye falls
+            ui.add_space((inside.height() / 2.0 - 110.0).max(0.0));
+            ui.add(egui::Label::new(RichText::new(fl!("drop-here")).size(22.0)).wrap());
             ui.add_space(6.0);
             widgets::note(ui, fl!("drop-here-note"));
             ui.add_space(18.0);
-            ui.horizontal(|ui| {
-                let width = 400.0;
-                ui.add_space((ui.available_width() - width).max(0.0) / 2.0);
-                let add = egui::Button::new(widgets::medium(ui, fl!("add-files"), 14.0))
-                    .min_size(vec2(130.0, 34.0));
-                let add = widgets::primary(ui, true, add);
-                if add.on_hover_text(keys_text(Command::AddFiles)).clicked() {
-                    self.pick(ui.ctx(), Pick::Files);
-                }
+            // in the middle, as wide as they were last drawn
+            let id = ui.id().with("buttons");
+            let width = ui.data(|data| data.get_temp::<f32>(id));
+            let row = ui.horizontal(|ui| {
+                ui.add_space((ui.available_width() - width.unwrap_or(0.0)).max(0.0) / 2.0);
+                let start = ui.cursor().left();
+                ui.scope(|ui| {
+                    ui.spacing_mut().item_spacing.x = 1.0;
+                    theme::primary(ui.visuals_mut());
+                    let add = egui::Button::new(widgets::medium(ui, fl!("add-files"), 14.0))
+                        .min_size(vec2(130.0, ZONE_BUTTON));
+                    let more = egui::Button::new("⏷").min_size(vec2(ZONE_BUTTON, ZONE_BUTTON));
+                    self.add_button(ui, add, more);
+                });
                 if ui
-                    .add(egui::Button::new(fl!("add-folder")).min_size(vec2(150.0, 34.0)))
+                    .add(egui::Button::new(fl!("add-folder")).min_size(vec2(150.0, ZONE_BUTTON)))
+                    .on_hover_text(fl!("add-folder", "hint"))
                     .clicked()
                 {
                     self.pick(ui.ctx(), Pick::Folder);
                 }
                 if ui
-                    .add(egui::Button::new(fl!("paste")).min_size(vec2(90.0, 34.0)))
+                    .add(egui::Button::new(fl!("paste")).min_size(vec2(90.0, ZONE_BUTTON)))
                     .on_hover_text(keys_text(Command::Paste))
                     .clicked()
                 {
                     self.paste();
                 }
+                ui.min_rect().right() - start
             });
+            if width != Some(row.inner) {
+                ui.data_mut(|data| data.insert_temp(id, row.inner));
+                ui.ctx().request_discard("drop zone's buttons measured");
+            }
         });
     }
 }
+
+/// Height of the drop zone's buttons, larger than others, as they are the
+/// one thing to do.
+const ZONE_BUTTON: f32 = 34.0;
 
 /// The space over the list's bar, and under it, which lay its buttons
 /// level with those of the bar under the preview beside it.
@@ -856,6 +911,69 @@ mod tests {
         assert!(!harness.state().about);
         menu(&mut harness, &fl!("about-and-licences"));
         assert!(harness.query_by_label_contains(&text).is_none());
+    }
+
+    #[test]
+    fn is_all_one_drop_zone_until_a_file_is_added() {
+        use crate::banner::Message;
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        let mut harness = harness(Config::default());
+        harness.run_steps(3);
+        let screen = harness.ctx.content_rect();
+        // the zone in the middle of the whole GUI, under the icon, the
+        // theme's button and the menu, with the one Add files…
+        let drop = harness.get_by_label(&fl!("drop-here")).rect();
+        assert!((drop.center().x - screen.center().x).abs() < 1.0, "{drop:?}");
+        let name = fl!("add-files");
+        let add: Vec<_> = harness.get_all_by_label(&name).map(|node| node.rect()).collect();
+        assert_eq!(add.len(), 1);
+        assert!(add[0].top() > drop.bottom() && add[0].top() - drop.bottom() < 80.0, "{add:?}");
+        let menu = harness.get_by_label(&fl!("main-menu")).rect();
+        assert!(menu.right() > screen.right() - 16.0 && menu.bottom() < drop.top());
+        harness.get_by_label(&fl!("light-theme"));
+        // and its other ways to add files, the menu's among them
+        harness.get_by_label(&fl!("add-folder"));
+        harness.get_by_label(&fl!("paste"));
+        harness.get_by_label(&fl!("add-more")).click();
+        harness.run_steps(2);
+        harness.get_by_label(&fl!("add-images")).click();
+        harness.run_steps(2);
+        assert_eq!(harness.state().asked_to_pick, [Pick::Frames]);
+        assert!(harness.query_by_label(&fl!("remove-all")).is_none());
+        // what passes, in the corner the list would have, and what stays
+        // clear of it, right of where the list would be
+        let area = |harness: &Harness<App>, id: &str| {
+            harness.ctx.memory(|memory| memory.area_rect(egui::Id::new(id))).unwrap()
+        };
+        harness.state_mut().say(Message::warning("Stays"));
+        harness.state_mut().say(Message::info("Passes"));
+        harness.run_steps(3);
+        let passes = area(&harness, "notices");
+        assert!(passes.left() < 20.0 && passes.bottom() > screen.bottom() - 20.0, "{passes:?}");
+        let stays = area(&harness, "banner");
+        assert!(stays.left() > passes.right(), "{stays:?} beside {passes:?}");
+
+        // a file brings the list, and the zone goes; what stays doesn't move
+        harness.state_mut().add(vec![art]);
+        finish(&mut harness);
+        assert!(harness.query_by_label(&fl!("drop-here")).is_none());
+        harness.get_by_label(&fl!("remove-all"));
+        assert!((area(&harness, "banner").left() - stays.left()).abs() < 1.0);
+        harness.state_mut().banner = Default::default();
+        let add = harness.get_by_label(&fl!("add-files")).rect();
+        assert!(add.right() < screen.center().x, "{add:?}");
+        // and comes back as the last goes
+        let id = harness.state().items[0].id;
+        harness.state_mut().remove(id);
+        harness.run_steps(3);
+        harness.get_by_label(&fl!("drop-here"));
+        harness.get_by_label(&fl!("undo-removing")).click();
+        harness.run_steps(3);
+        assert!(harness.query_by_label(&fl!("drop-here")).is_none());
     }
 
     #[test]

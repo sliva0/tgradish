@@ -215,7 +215,8 @@ pub(crate) struct Banner {
     pub(crate) rows: Vec<Said>,
     next_id: u64,
     /// Where the rows of the list of files are seen, under whose corner
-    /// what passes is shown, as the list last drew it.
+    /// what passes is shown, as the list last drew it; without files, the
+    /// part of the drop zone the list would take.
     pub(crate) corner: Option<egui::Rect>,
     /// When the messages were last drawn: hovering what passes holds it.
     drawn: Option<f64>,
@@ -381,7 +382,9 @@ impl Banner {
         if staying == 0 {
             return false;
         }
-        // in the middle of what is right of the list
+        // in the middle of what is right of the list, or of where it would
+        // be, clear of what passes in its corner, and where it stays as
+        // files are added
         let screen = ctx.content_rect();
         let left = self.corner.map_or(screen.left(), |corner| corner.right()).min(screen.right());
         let middle = (left + screen.right()) / 2.0;

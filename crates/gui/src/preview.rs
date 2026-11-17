@@ -57,7 +57,7 @@ pub(crate) const MOST_SHARE: f32 = 0.85;
 impl App {
     pub(crate) fn main_panel(&mut self, ui: &mut egui::Ui) {
         let Some(id) = self.selected.filter(|&id| self.item(id).is_some()) else {
-            self.empty(ui);
+            self.drop_zone(ui, ui.max_rect().shrink(28.0));
             return;
         };
         let ffmpeg_args = self.backend().as_ref().is_ok_and(Backend::supports_ffmpeg_args);
