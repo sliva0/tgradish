@@ -121,7 +121,7 @@ impl App {
                     |ui| {
                         ui.set_width(side);
                         let column = egui::ScrollArea::vertical()
-                            .id_salt("side")
+                            .id_salt(("side", id))
                             .auto_shrink([false, false]);
                         widgets::scrolled(ui, column, |ui| {
                             widgets::settings_spacing(ui);
@@ -140,23 +140,35 @@ impl App {
             });
         });
         // the line under the preview moves it
-        let (line, response) =
-            ui.allocate_exact_size(vec2(ui.available_width(), HANDLE), egui::Sense::drag());
+        let (line, response) = ui
+            .allocate_exact_size(vec2(ui.available_width(), HANDLE), egui::Sense::click_and_drag());
         let response = response.on_hover_cursor(egui::CursorIcon::ResizeVertical);
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Other, true, fl!("preview-divider"))
+        });
         // never so small the preview is no use, nor so large the settings
-        // below lose their first row
+        // below lose their first row; back to where it starts on a double
+        // click
         if response.dragged() {
             self.preview_share = ((preview_height + response.drag_delta().y) / height)
                 .clamp(LEAST_SHARE, MOST_SHARE);
         }
+        if response.double_clicked() {
+            self.preview_share = crate::app::PREVIEW_SHARE;
+        }
+        // thicker where it can be taken, within its handle
+        let line_width = if response.hovered() || response.dragged() { 2.0 } else { 1.0 };
         let colour = if response.hovered() || response.dragged() {
             ui.visuals().widgets.hovered.fg_stroke.color
         } else {
             ui.visuals().widgets.noninteractive.bg_stroke.color
         };
-        ui.painter().hline(line.x_range(), line.center().y, egui::Stroke::new(1.0, colour));
+        let stroke = egui::Stroke::new(line_width, colour);
+        ui.painter().hline(line.x_range(), line.center().y, stroke);
         egui::CentralPanel::default().show(ui, |ui| {
-            let settings = egui::ScrollArea::vertical().auto_shrink([false, false]);
+            // scrolled as each file was left
+            let settings =
+                egui::ScrollArea::vertical().id_salt(("settings", id)).auto_shrink([false, false]);
             widgets::scrolled(ui, settings, |ui| {
                 widgets::settings_spacing(ui);
                 file_settings::show(ui, item, &context);
@@ -1018,5 +1030,73 @@ mod tests {
             harness.run_steps(2);
             assert_eq!(harness.state().items[0].choices.crop, None, "{width}");
         }
+    }
+
+    #[test]
+    fn keeps_each_files_settings_scrolled_as_it_was_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a.png"), dir.path().join("b.png"));
+        square(&a, [255, 0, 0, 255]);
+        square(&b, [0, 0, 255, 255]);
+        let mut harness = Harness::builder().with_size([1280.0, 820.0]).build_eframe(|cc| {
+            let app = App::with(Config::default(), None, Presets::builtin());
+            app.style(&cc.egui_ctx);
+            app
+        });
+        harness.state_mut().add(vec![a, b]);
+        finish(&mut harness);
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        let select = |harness: &mut Harness<App>, id: u64| {
+            harness.state_mut().select(id);
+            harness.run_steps(3);
+        };
+        // the settings under the preview, by a row of them
+        let row = |harness: &Harness<App>| harness.get_by_label(&fl!("crop")).rect().top();
+        select(&mut harness, ids[0]);
+        let top = row(&harness);
+        let at = harness.get_by_label(&fl!("crop")).rect().center();
+        harness.event(egui::Event::PointerMoved(at));
+        let (unit, phase) = (egui::MouseWheelUnit::Point, egui::TouchPhase::Move);
+        let (delta, modifiers) = (vec2(0.0, -60.0), egui::Modifiers::NONE);
+        harness.event(egui::Event::MouseWheel { unit, delta, phase, modifiers });
+        harness.run_steps(6);
+        let scrolled = row(&harness);
+        assert!(scrolled < top - 20.0, "{scrolled} from {top}");
+        // the other file's from their top, and the first's as it was left
+        select(&mut harness, ids[1]);
+        assert_eq!(row(&harness), top);
+        select(&mut harness, ids[0]);
+        assert_eq!(row(&harness), scrolled);
+    }
+
+    #[test]
+    fn puts_the_line_under_the_preview_back_on_a_double_click() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.png");
+        square(&a, [255, 0, 0, 255]);
+        let mut harness = Harness::builder()
+            .with_size([1280.0, 820.0])
+            .with_step_dt(1.0 / 60.0)
+            .build_eframe(|_| App::with(Config::default(), None, Presets::builtin()));
+        harness.state_mut().add(vec![a]);
+        finish(&mut harness);
+        harness.state_mut().preview_share = 0.4;
+        harness.run_steps(2);
+        let line = || fl!("preview-divider");
+        let at = harness.get_by_label(&line()).rect().center();
+        harness.event(egui::Event::PointerMoved(at));
+        harness.step();
+        for _ in 0..2 {
+            for pressed in [true, false] {
+                let (button, modifiers) = (egui::PointerButton::Primary, egui::Modifiers::NONE);
+                harness.event(egui::Event::PointerButton { pos: at, button, pressed, modifiers });
+                harness.step();
+            }
+        }
+        harness.run_steps(2);
+        assert_eq!(harness.state().preview_share, crate::app::PREVIEW_SHARE);
+        // where it was, then, on the line, which stays where it was
+        let moved = harness.get_by_label(&line()).rect();
+        assert!(moved.center().y > at.y, "{moved:?}");
     }
 }

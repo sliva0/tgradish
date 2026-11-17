@@ -364,6 +364,9 @@ crop-hint = Drag the crop or its edges · double-click for all
 result-hint = Wheel to zoom · right button to pan
 unreadable = Couldn't read it: { $error }
 reading = Reading…
+# What screen readers call the line under the preview, dragged to share
+# the height between the preview and the settings under it.
+preview-divider = Line under the preview
 
 
 ## The timeline under the preview
