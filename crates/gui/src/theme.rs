@@ -363,9 +363,20 @@ pub(crate) fn floating_shadow(visuals: &egui::Visuals) -> egui::Shadow {
 }
 
 /// What a bar lays over the part of it that is used, as the timeline lays
-/// it over its track: half of [`mark`], over the window.
+/// it over its track: half of [`mark`], over the window, or as much more
+/// as it takes to be seen there and on the unused part, as half of a light
+/// accent, or of one darkened only as far as an outline needs, is too pale
+/// on Breeze Light.
 pub(crate) fn span(visuals: &egui::Visuals) -> Color32 {
-    tint(mark(visuals), 0.5)
+    let (scheme, mark) = (scheme(visuals), mark(visuals));
+    let seen = |used: Color32| {
+        [scheme.window, visuals.extreme_bg_color].iter().all(|under| contrast(used, *under) >= SEEN)
+    };
+    // the mark itself is seen on the window, and further from the view
+    (50..=100)
+        .map(|amount| tint(mark, amount as f32 / 100.0))
+        .find(|span| seen(over(scheme.window, *span)))
+        .unwrap_or(mark)
 }
 
 /// The colours of a mark drawn over what the accent fills, as a tick
@@ -778,6 +789,10 @@ mod tests {
                 // unused part, the track
                 let used = over(scheme.window, span(&visuals));
                 let track = visuals.extreme_bg_color;
+                // the used part seen beside the window and the unused part,
+                // not only its ends' ticks
+                seen(used, scheme.window, "the used part on the window");
+                seen(used, track, "the used part beside the unused part");
                 let Cased { core, casing } = over_fill(&visuals);
                 // a tick's core, as the playhead and the ends of the used
                 // part, seen on either, and on the stripes past the limit
