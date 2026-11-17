@@ -199,16 +199,6 @@ fn fit(rect: Rect, size: (u32, u32)) -> f32 {
 /// a smooth picture blurs them, and you can't put a crop on a pixel's edge.
 const SHARP_FROM: f32 = 2.0;
 
-/// What [`show`] drew over the picture, which what else is drawn there
-/// keeps clear of.
-#[derive(Default)]
-pub(crate) struct Marks {
-    /// The crop's size, with its way back to all of the picture.
-    pub(crate) tag: Option<Rect>,
-    /// The crop's outline, with its handles on it.
-    pub(crate) outline: Option<Rect>,
-}
-
 /// Shows `picture` in `rect`, with `cropping` over it if given, which
 /// dragging changes. The picture fits `fit_in`, a part of `rect`, and
 /// zooms from there, over the rest of `rect`: nothing moves when zooming
@@ -220,7 +210,7 @@ pub(crate) fn show(
     picture: &Picture,
     zoom: &mut Zoom,
     cropping: Option<Cropping>,
-) -> Marks {
+) {
     // a part of the space the caller took: taking it again would move
     // what comes next
     let response = ui.interact(rect, ui.id().with("canvas"), Sense::click_and_drag());
@@ -248,8 +238,7 @@ pub(crate) fn show(
     let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
     painter.image(texture, shown, uv, Color32::WHITE);
 
-    let mut marks = Marks::default();
-    let Some(cropping) = cropping else { return marks };
+    let Some(cropping) = cropping else { return };
     let size = picture.size;
     let to_pixels = |point: Pos2| {
         let x = ((point.x - shown.min.x) / scale).clamp(0.0, size.0 as f32);
@@ -434,7 +423,6 @@ pub(crate) fn show(
     }
     let hovered = response.hovered() || response.dragged();
     if cropping.crop.is_some() || hovered {
-        marks.outline = Some(on_screen);
         let stroke = Stroke::new(1.5, Color32::WHITE);
         painter.rect_stroke(
             on_screen,
@@ -461,7 +449,6 @@ pub(crate) fn show(
     }
     if cropping.crop.is_some() {
         let SizeTag { galley, at, back, cross } = size_tag(&painter, crop, on_screen, rect);
-        marks.tag = Some(back);
         painter.rect_filled(back, 4.0, Color32::from_black_alpha(170));
         painter.galley(at, galley, Color32::WHITE);
         let hint = match cropping.exact {
@@ -489,7 +476,6 @@ pub(crate) fn show(
             whole_picture(cropping.crop);
         }
     }
-    marks
 }
 
 /// The crop's size over its top left corner, with a cross after it back to

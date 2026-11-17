@@ -4,7 +4,7 @@
 //! preview itself is `canvas`'s, and its timeline `timeline`'s.
 
 use crate::config::ResultPreview;
-use eframe::egui::{self, Color32, Rect, pos2, vec2};
+use eframe::egui::{self, Color32, Rect, RichText, pos2, vec2};
 use tgradish_core::backend::Backend;
 use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::picture;
@@ -217,6 +217,13 @@ fn preview(
         // zooming's buttons only while zoomed in where there is no room
         let compact = shows + zooming + preview > room;
         toggle_below = room < shows + preview;
+        // what the mouse does, in what is left with every button at its
+        // widest and the longest of its hints, so that it neither comes and
+        // goes nor moves as they change; whole, or not at all
+        let right = zooming + if toggle_below { 0.0 } else { preview };
+        let hint_at = shows + gap + HINT_ROOM;
+        let hint_fits = hint_at + widest_mouse_hint(ui) + HINT_ROOM + right <= room;
+        let bar_left = ui.cursor().left();
         let outdated = has_result && !item.result_is_current();
         let result = if outdated { fl!("show-result", "outdated") } else { fl!("show-result") };
         let result_hint = if outdated { fl!("show-result", "hint") } else { String::new() };
@@ -263,6 +270,19 @@ fn preview(
                 }
             }
         });
+        if hint_fits {
+            // where the result's segment ends at its widest, so that its
+            // mark doesn't move it
+            let row = ui.min_rect().y_range();
+            let at = pos2(bar_left + hint_at, row.min);
+            let place = Rect::from_min_size(at, vec2(room - hint_at - right, row.span()));
+            let text = RichText::new(mouse_hint(show, item.choices.crop.is_some()));
+            let label = egui::Label::new(text.font(HINT_FONT).weak()).extend().selectable(false);
+            let layout = egui::Layout::left_to_right(egui::Align::Center);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(place).layout(layout), |ui| {
+                ui.add(label);
+            });
+        }
     });
     let shown = item.shown();
     if toggle_below && shown == Show::Input {
@@ -314,9 +334,6 @@ fn preview(
         f64::from(width) / f64::from(height)
     });
 
-    // where a picture is shown, and what is drawn over it, which the hint
-    // of what the mouse does keeps clear of
-    let mut stage: Option<Stage> = None;
     match shown {
         Show::Input => {
             // for want of ffmpeg, which is said otherwise, nothing is wrong
@@ -359,7 +376,6 @@ fn preview(
                 let widest = inset::widest_label(item.format != Format::Tgs);
                 let text = ui.visuals().text_color();
                 let label = ui.painter().layout_no_wrap(widest, inset::INSET_LABEL, text);
-                let label_box = inset::label_box(label.size());
                 // the setting counts sizes from 1, for people
                 let largest = inset::INSET_SIZES.len() as u8;
                 let step = usize::from(look.size.clamp(1, largest)) - 1;
@@ -400,17 +416,9 @@ fn preview(
                 };
                 let cropping = Cropping { crop: &mut item.choices.crop, ratio, kept, exact };
                 let zoom = &mut item.view.input_zoom;
-                let marks =
-                    canvas::show(ui, screen, (rect, input_area), &picture, zoom, Some(cropping));
+                canvas::show(ui, screen, (rect, input_area), &picture, zoom, Some(cropping));
                 // after the crop moved
                 let showing = on || inset.leaving();
-                // the small picture, its frame, and its label over or under
-                // it, which may be wider, on either side
-                let wider = (label_box.x - room.width()).max(0.0);
-                let footprint = vec2(wider + INSET_FRAME, label_box.y + INSET_FRAME + 12.0);
-                let small = showing.then(|| room.expand2(footprint));
-                let drawn = marks.tag.into_iter().chain(small).collect();
-                stage = Some(Stage { picture: input_area, drawn, outline: marks.outline });
                 let mut change = None;
                 let place = ((rect, room, align), (corner, step, on));
                 if let Some(label) = inset_label(item, size, webm).filter(|_| showing) {
@@ -490,19 +498,9 @@ fn preview(
                 };
                 let zoom = &mut item.view.result_zoom;
                 canvas::show(ui, screen, (rect, rect), &picture, zoom, None);
-                stage = Some(Stage { picture: rect, drawn: Vec::new(), outline: None });
             }
         }
     }
-    if let Some(stage) = stage {
-        let hint = match (shown, item.choices.crop.is_some()) {
-            (Show::Input, false) => fl!("input-hint"),
-            (Show::Input, true) => fl!("crop-hint"),
-            (Show::Result, _) => fl!("result-hint"),
-        };
-        mouse_hint(ui, rect, hint, &stage);
-    }
-
     if row_height == 0.0 {
         return;
     }
@@ -547,77 +545,31 @@ fn preview(
     });
 }
 
-/// Room kept around the small picture of the result for its frame.
-const INSET_FRAME: f32 = 8.0;
-/// Room between the hint of what the mouse does and the stage's edges.
-const HINT_ROOM: f32 = 8.0;
-/// Room kept around the crop's outline, for its handles.
-const HANDLE_ROOM: f32 = 8.0;
+/// Room on either side of what the mouse does, in the bar over the
+/// preview, so that it doesn't run into the buttons on either side.
+const HINT_ROOM: f32 = 12.0;
+/// Smaller than the bar's buttons, as it matters less.
+const HINT_FONT: egui::FontId = egui::FontId::proportional(12.5);
 
-/// What is shown on the stage, which the hint of what the mouse does
-/// keeps clear of.
-struct Stage {
-    /// Where the picture is fitted.
-    picture: Rect,
-    /// What is drawn over it.
-    drawn: Vec<Rect>,
-    /// The crop's outline, along which its handles are.
-    outline: Option<Rect>,
+/// What the mouse does on the preview, as it shows the input, cropped or
+/// not, or the result.
+fn mouse_hint(show: Show, cropped: bool) -> String {
+    match (show, cropped) {
+        (Show::Input, false) => fl!("input-hint"),
+        (Show::Input, true) => fl!("crop-hint"),
+        (Show::Result, _) => fl!("result-hint"),
+    }
 }
 
-/// What the mouse does on the stage `rect`, on a pill at its bottom left,
-/// while the pointer is over the stage and nothing is dragged: under the
-/// picture where there is room, or else inside the crop's corner, or at
-/// the stage's bottom right. Never over what is drawn on the stage, the
-/// crop's handles, the middle of the picture or the pointer, and whole,
-/// or not shown at all.
-fn mouse_hint(ui: &egui::Ui, rect: Rect, text: String, stage: &Stage) {
-    let font = egui::FontId::proportional(12.5);
-    let galley = ui.painter().layout_no_wrap(text, font, Color32::WHITE);
-    let pill = galley.size() + vec2(2.0 * 10.0, 2.0 * 4.0);
-    let middle = Rect::from_center_size(stage.picture.center(), stage.picture.size() * 0.5);
-    let bottom_left = |left: f32, bottom: f32| {
-        Rect::from_min_size(pos2(left + HINT_ROOM, bottom - HINT_ROOM - pill.y), pill)
+/// Width of the longest of what the mouse does.
+fn widest_mouse_hint(ui: &egui::Ui) -> f32 {
+    let states = [(Show::Input, false), (Show::Input, true), (Show::Result, false)];
+    let width = |(show, cropped)| {
+        let galley =
+            ui.painter().layout_no_wrap(mouse_hint(show, cropped), HINT_FONT, Color32::WHITE);
+        galley.size().x
     };
-    let inside = stage.outline.map(|outline| outline.intersect(rect).shrink(HANDLE_ROOM));
-    let places = [
-        Some(bottom_left(rect.left(), rect.bottom())),
-        inside.map(|inside| bottom_left(inside.left(), inside.bottom())),
-        Some(Rect::from_min_size(
-            pos2(rect.right() - HINT_ROOM - pill.x, rect.bottom() - HINT_ROOM - pill.y),
-            pill,
-        )),
-    ];
-    // a handle is on each corner and in the middle of each side
-    let on_handles = |place: &Rect| {
-        stage.outline.is_some_and(|outline| {
-            place.intersects(outline.expand(HANDLE_ROOM))
-                && !outline.shrink(HANDLE_ROOM).contains_rect(*place)
-        })
-    };
-    let clear = |place: &Rect| {
-        rect.shrink(HINT_ROOM - 0.5).contains_rect(*place)
-            && !place.intersects(middle)
-            && !on_handles(place)
-            && !stage.drawn.iter().any(|over| over.is_positive() && over.intersects(*place))
-    };
-    let Some(place) = places.into_iter().flatten().find(clear) else { return };
-    // out of the way of a pointer going to what is under it
-    let pointer = ui.ctx().pointer_hover_pos();
-    let near = pointer.is_some_and(|pointer| place.expand(12.0).contains(pointer));
-    let idle = !ui.input(|input| input.pointer.any_down());
-    let shown = ui.rect_contains_pointer(rect) && idle && !near;
-    let opacity = ui.ctx().animate_bool_with_time(ui.id().with("mouse hint"), shown, 0.15);
-    if opacity == 0.0 {
-        return;
-    }
-    // dark and translucent, so it reads over any picture in either theme
-    let painter = ui.painter_at(rect);
-    let fill = Color32::from_black_alpha(150).gamma_multiply(opacity);
-    painter.rect_filled(place, pill.y / 2.0, fill);
-    let at = place.center() - galley.size() / 2.0;
-    let text = Color32::from_white_alpha(220).gamma_multiply(opacity);
-    painter.galley_with_override_text_color(at, galley, text);
+    states.into_iter().map(width).fold(0.0, f32::max).ceil()
 }
 
 /// Least room between Zoom out's words and how far it is zoomed in, and
@@ -761,7 +713,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let art = dir.path().join("art.png");
         square(&art, [255, 0, 0, 255]);
-        for width in [crate::MIN_WIDTH, 1280.0] {
+        for width in [crate::MIN_WIDTH, 1280.0, 1920.0] {
             let mut harness = Harness::builder().with_size([width, 820.0]).build_eframe(|cc| {
                 let app = App::with(Config::default(), None, Presets::builtin());
                 app.style(&cc.egui_ctx);
@@ -791,18 +743,15 @@ mod tests {
             harness.run_steps(2);
             harness.get_by_label(&fl!("show-result", "outdated"));
             harness.get_by_label_contains(&fl!("zoom-level", percent = 6400));
-            // the buttons at the right stay; only the hint after the
-            // result's segment, which grows by its mark, moves
+            // the buttons at the right stay, and the segments at the left
             let (out, preview, result) = place(&harness);
             assert_eq!((out, preview), (before.0, before.1), "{width}");
             assert_eq!(result.left(), before.2.left(), "{width}");
-            // nothing cut short, the hint of what the mouse does no longer
-            // in it, and no way to the folders over the preview
-            for shape in &harness.output().shapes {
-                if let egui::Shape::Text(text) = &shape.shape {
+            // nothing cut short, and no way to the folders over the preview
+            for shape in shapes(&harness) {
+                if let egui::Shape::Text(text) = &shape {
                     let said = text.galley.text();
                     assert!(!text.galley.elided, "{width}: {said:?} cut short");
-                    assert!(!said.contains(&fl!("crop-hint")), "{width}: {said:?} in the bar");
                 }
             }
             assert!(
@@ -930,34 +879,17 @@ mod tests {
         }
     }
 
-    /// The text shapes drawn last frame that say `text`: where they are,
-    /// and whether they were cut short.
-    fn drawn_text(harness: &Harness<App>, text: &str) -> Vec<(Rect, bool)> {
-        let shapes = shapes(harness).into_iter().filter_map(|shape| match shape {
-            egui::Shape::Text(shape) if shape.galley.text() == text => {
-                Some((shape.galley.rect.translate(shape.pos.to_vec2()), shape.galley.elided))
-            }
-            _ => None,
-        });
-        shapes.collect()
-    }
-
-    /// What the mouse does, said over the preview while the pointer is
-    /// over it: whole, clear of what else is there, and gone as it drags
-    /// or leaves.
+    /// What the mouse does, in the bar over the preview where it fits
+    /// whole, in the same place whatever is shown, cropped or zoomed; not at
+    /// all where it doesn't; and never over the preview.
     #[test]
-    fn says_what_the_mouse_does_over_the_preview_while_it_is_there() {
+    fn says_what_the_mouse_does_in_the_bar_where_it_fits_whole() {
         use tgradish_core::options::Crop;
         crate::l10n::english();
         let dir = tempfile::tempdir().unwrap();
         let art = dir.path().join("art.png");
         square(&art, [255, 0, 0, 255]);
-        let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
-            pos: at,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: egui::Modifiers::NONE,
-        };
+        let hints = [fl!("input-hint"), fl!("crop-hint"), fl!("result-hint")];
         for width in [crate::MIN_WIDTH, 1280.0, 1920.0] {
             let mut harness = Harness::builder().with_size([width, 820.0]).build_eframe(|cc| {
                 let app = App::with(Config::default(), None, Presets::builtin());
@@ -966,50 +898,68 @@ mod tests {
             });
             harness.state_mut().add(vec![art.clone()]);
             finish(&mut harness);
+            crate::testing::convert(&harness);
+            harness.run_steps(2);
+            finish(&mut harness);
+            // the pointer over the preview, where it was once said
             let input = harness.get_by_label(&fl!("show-input")).rect();
-            let over = input.left_bottom() + vec2(100.0, 120.0);
-            let hover = |harness: &mut Harness<App>, at: egui::Pos2| {
-                harness.event(egui::Event::PointerMoved(at));
-                harness.run_steps(2);
-                std::thread::sleep(std::time::Duration::from_millis(200));
-                harness.run_steps(2);
-            };
-            // not until the pointer is over it
-            assert!(drawn_text(&harness, &fl!("input-hint")).is_empty(), "{width}");
-            hover(&mut harness, over);
-            let hint = drawn_text(&harness, &fl!("input-hint"));
-            // whole wherever it shows, as it does where there is room
-            assert!(hint.iter().all(|(_, elided)| !elided), "{width}");
-            if width > crate::MIN_WIDTH {
-                assert_eq!(hint.len(), 1, "{width}");
-                assert!(hint[0].0.top() > over.y && hint[0].0.left() < over.x, "{width}");
+            harness.event(egui::Event::PointerMoved(input.left_bottom() + vec2(100.0, 120.0)));
+            type Case = (&'static str, fn(&mut Item));
+            let cases: [Case; 6] = [
+                ("the input", |item| item.view.show = Show::Input),
+                ("zoomed in", |item| item.view.input_zoom.level = 2.0),
+                ("zoomed in further", |item| item.view.input_zoom.level = canvas::MAX_ZOOM),
+                ("cropped", |item| {
+                    item.choices.crop = Some(Crop { x: 1, y: 1, width: 2, height: 2 })
+                }),
+                ("out of date", |item| item.choices.tgs.keep_canvas = Some(true)),
+                ("the result", |item| item.view.show = Show::Result),
+            ];
+            let mut seen = Vec::new();
+            for (case, set) in cases {
+                set(&mut harness.state_mut().items[0]);
+                harness.run_steps(3);
+                let bar = harness.get_by_label_contains(&fl!("zoom-out")).rect();
+                let segments = harness.get_by_label(&fl!("show-input")).rect();
+                let texts: Vec<_> = shapes(&harness)
+                    .into_iter()
+                    .filter_map(|shape| match shape {
+                        egui::Shape::Text(text) => Some(text),
+                        _ => None,
+                    })
+                    .collect();
+                // none of it cut short, nor said anywhere but in the bar
+                for text in &texts {
+                    let said = text.galley.text().trim_end_matches('…');
+                    let place = text.galley.rect.translate(text.pos.to_vec2());
+                    if !said.is_empty() && hints.iter().any(|hint| hint.starts_with(said)) {
+                        assert_eq!(said, text.galley.text(), "{width}, {case}: cut short");
+                        assert!(!text.galley.elided, "{width}, {case}: {said:?} cut short");
+                        assert!(place.bottom() <= bar.bottom() + 1.0, "{width}, {case}: {place:?}");
+                    }
+                }
+                let hint = texts
+                    .iter()
+                    .filter(|text| hints.iter().any(|hint| hint == text.galley.text()))
+                    .map(|text| text.galley.rect.translate(text.pos.to_vec2()))
+                    .collect::<Vec<_>>();
+                assert!(hint.len() <= 1, "{width}, {case}: {hint:?}");
+                if let Some(hint) = hint.first() {
+                    // between the segments and Zoom out
+                    assert!(hint.left() > segments.right() && hint.right() < bar.left(), "{width}");
+                    assert!(bar.y_range().contains(hint.center().y), "{width}, {case}");
+                }
+                seen.push(hint.first().map(|hint| hint.left()));
             }
-            // gone while dragging, and back after
-            harness.event(press(over, true));
-            hover(&mut harness, over + vec2(10.0, 10.0));
-            assert!(drawn_text(&harness, &fl!("input-hint")).is_empty(), "{width}");
-            harness.event(press(over + vec2(10.0, 10.0), false));
-            harness.state_mut().items[0].choices.crop =
-                Some(Crop { x: 2, y: 0, width: 2, height: 2 });
-            hover(&mut harness, over);
-            let hint = drawn_text(&harness, &fl!("crop-hint"));
-            assert!(hint.iter().all(|(_, elided)| !elided), "{width}");
-            if width > crate::MIN_WIDTH {
-                assert_eq!(hint.len(), 1, "{width}");
+            // there in full where there is room, as in a wide window, and
+            // in one place, or never there
+            if width >= 1920.0 {
+                assert!(seen.iter().all(Option::is_some), "{width}: {seen:?}");
             }
-            // clear of the crop's size and of the result's small picture
-            let tag = drawn_text(&harness, "2 × 2");
-            assert_eq!(tag.len(), 1, "{width}");
-            let sizes = [fl!("inset-smaller"), fl!("inset-larger")];
-            let buttons: Vec<Rect> =
-                sizes.iter().map(|name| harness.get_by_label(name).rect()).collect();
-            for (place, _) in &hint {
-                assert!(!tag[0].0.intersects(*place), "{width}: {place:?}");
-                assert!(buttons.iter().all(|button| !button.intersects(*place)), "{width}");
+            if width <= crate::MIN_WIDTH {
+                assert!(seen.iter().all(Option::is_none), "{width}: {seen:?}");
             }
-            // and gone once the pointer leaves
-            hover(&mut harness, egui::pos2(5.0, 5.0));
-            assert!(drawn_text(&harness, &fl!("crop-hint")).is_empty(), "{width}");
+            assert!(seen.windows(2).all(|pair| pair[0] == pair[1]), "{width}: {seen:?}");
         }
     }
 

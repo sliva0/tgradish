@@ -372,11 +372,10 @@ fn window(config: Config, size: egui::Vec2) -> Harness<'static, App> {
     )
 }
 
-/// The bar over the preview at its fullest, at the narrowest window, the
-/// usual one and a wide one: a video made, cropped, zoomed in and changed
-/// since, and what the mouse does said over the preview, its result and
-/// its crop as the pointer is over it; and the result's small picture of
-/// pixel art, at its smallest and largest. Needs ffmpeg.
+/// The bar over the preview, at the narrowest window, the usual one and a
+/// wide one, where what the mouse does fits: a video made, its result and
+/// its input, then cropped, zoomed in and changed since; and the result's
+/// small picture of pixel art, at its smallest and largest. Needs ffmpeg.
 fn bars_and_insets(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     use crate::config::Corner;
     let dir = tempfile::tempdir().unwrap();
@@ -394,20 +393,6 @@ fn bars_and_insets(save: &mut impl FnMut(&mut Harness<App>, &str)) {
             harness.run_steps(3);
             save(harness, name);
         };
-    // the pointer over the preview, where it shows what the mouse does
-    let hinted = |harness: &mut Harness<App>,
-                  save: &mut dyn FnMut(&mut Harness<App>, &str),
-                  name: &str| {
-        for item in &mut harness.state_mut().items {
-            item.view.playing = false;
-        }
-        let input = harness.get_by_label(&crate::l10n::fl!("show-input")).rect();
-        harness.event(egui::Event::PointerMoved(input.left_bottom() + egui::vec2(160.0, 160.0)));
-        harness.run_steps(3);
-        std::thread::sleep(Duration::from_millis(300));
-        harness.run_steps(3);
-        save(harness, name);
-    };
     let Some(clip) = video(dir.path(), "640x360") else { return };
     for width in [crate::MIN_WIDTH, 1280.0, 1920.0] {
         let mut harness = window(config.clone(), egui::vec2(width, 820.0));
@@ -416,12 +401,12 @@ fn bars_and_insets(save: &mut impl FnMut(&mut Harness<App>, &str)) {
         convert(&harness);
         harness.run_steps(2);
         finish(&mut harness);
-        hinted(&mut harness, save, &format!("hint-result-{width}"));
+        shot(&mut harness, save, &format!("bar-result-{width}"));
         harness.state_mut().items[0].view.show = Show::Input;
-        hinted(&mut harness, save, &format!("hint-input-{width}"));
-        if width == 1280.0 {
+        shot(&mut harness, save, &format!("bar-input-{width}"));
+        if width == 1920.0 {
             set_theme(&harness.ctx, crate::config::Theme::Light);
-            hinted(&mut harness, save, &format!("hint-input-{width}-light"));
+            shot(&mut harness, save, &format!("bar-input-{width}-light"));
             set_theme(&harness.ctx, crate::config::Theme::Dark);
         }
         let item = &mut harness.state_mut().items[0];
@@ -429,7 +414,6 @@ fn bars_and_insets(save: &mut impl FnMut(&mut Harness<App>, &str)) {
         item.choices.crop = Some(Crop { x: 120, y: 60, width: 320, height: 200 });
         item.view.input_zoom.level = 1.5;
         shot(&mut harness, save, &format!("bar-crop-zoomed-{width}"));
-        hinted(&mut harness, save, &format!("hint-crop-{width}"));
         // changed since it was made
         harness.state_mut().items[0].choices.webm.tempo = Some(2.0);
         shot(&mut harness, save, &format!("bar-outdated-{width}"));
