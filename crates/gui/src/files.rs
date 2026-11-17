@@ -292,7 +292,12 @@ impl App {
 
         // under the bar and over the footer: what passes is said in its
         // corner, mostly empty
-        self.banner.corner = Some(ui.available_rect_before_wrap());
+        let corner = ui.available_rect_before_wrap();
+        self.banner.corner = Some(corner);
+        // the room under the header's line, which the list ends with too:
+        // its last row, scrolled to, and its drop highlight stand as far
+        // over the footer's
+        let under = corner.top() - (ui.painter().round_to_pixel_center(rule) + 0.5);
         let now = ui.input(|input| input.time);
         self.rows.follow(&self.items, now);
         let list = egui::ScrollArea::vertical().auto_shrink([false, false]);
@@ -358,6 +363,8 @@ impl App {
                 });
             }
             gap(ui, &self.rows, None);
+            // after the spacing that follows the last row
+            ui.add_space((under - ui.spacing().item_spacing.y).max(0.0));
             if let Some(id) = clicked {
                 self.select(id);
             }
@@ -372,8 +379,6 @@ impl App {
             }
         });
         if let Some(list) = self.banner.corner {
-            // as far over the footer's line as it is under the header's
-            let under = list.top() - (rule + 0.5);
             self.drop_target(ui, list.with_max_y(list.bottom() - under));
         }
     }
@@ -1436,6 +1441,36 @@ mod tests {
         harness.run_steps(2);
         harness.get_by_label(&fl!("remove"));
         assert_eq!(shown(&harness), before);
+    }
+
+    #[test]
+    fn ends_the_list_as_far_over_the_footer_as_it_starts_under_the_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths: Vec<PathBuf> = (0..20)
+            .map(|n| {
+                let path = dir.path().join(format!("{n:02}.png"));
+                square(&path, [255, 0, 0, 255]);
+                path
+            })
+            .collect();
+        let mut harness = stepped(Config::default());
+        // spaced as the GUI is
+        let ctx = harness.ctx.clone();
+        harness.state().style(&ctx);
+        harness.state_mut().add(paths);
+        finish(&mut harness);
+        let list = harness.state().banner.corner.unwrap();
+        harness.event(egui::Event::PointerMoved(list.center()));
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -10_000.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        harness.run_steps(60);
+        let last = harness.state().items.last().unwrap().name();
+        let under = list.bottom() - list_row(&harness, &last).rect().bottom();
+        assert!((7.5..=8.5).contains(&under), "{under}");
     }
 
     #[test]
