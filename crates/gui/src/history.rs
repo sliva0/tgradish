@@ -102,9 +102,9 @@ impl Frames {
         self.settings = Some(rect);
     }
 
-    /// What the frame ending in `ctx` was, for the file `selected`: the
-    /// one the user changes, but in the frame it is picked, as it settles
-    /// to be shown then.
+    /// What the frame ending in `ctx` was, for the file `selected`, whose
+    /// settings were drawn: the one the user changes, but in the frame it
+    /// is first shown, as it settles to be shown then.
     pub(crate) fn end(&mut self, ctx: &egui::Context, selected: Option<u64>) -> Frame {
         let typing = ctx.text_edit_focused() || widgets::typing_number(ctx);
         let typing = typing.then(|| ctx.memory(|memory| memory.focused())).flatten();
@@ -298,19 +298,6 @@ pub(crate) fn follow<'a>(items: impl Iterator<Item = (&'a mut Item, Frame)>) -> 
 pub(crate) fn flush(item: &mut Item) {
     let mut history = std::mem::take(&mut item.history);
     history.flush(item);
-    item.history = history;
-}
-
-/// Makes what changed of `item`'s settings since they were last seen a
-/// step of the user's, though the file isn't the one picked: a number
-/// typed into its settings, taken once they went out of sight.
-pub(crate) fn commit(item: &mut Item) {
-    let mut history = std::mem::take(&mut item.history);
-    if history.seen.as_ref().is_some_and(|seen| !seen.matches(item)) {
-        history.seen = Some(Settings::of(item));
-        history.pending = Some(Pending { user: true, nudge: false });
-    }
-    history.settle();
     item.history = history;
 }
 
@@ -652,6 +639,67 @@ mod tests {
         harness.state_mut().select(ids[0]);
         harness.run_steps(2);
         assert!(harness.query(width_field("25 px")).is_some());
+    }
+
+    #[test]
+    fn shows_one_files_settings_at_a_time_as_a_number_typed_is_taken() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["first.png", "second.png"]);
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        harness.state_mut().select(ids[0]);
+        harness.run_steps(2);
+        let fields = |harness: &Harness<App>| {
+            harness.query_all_by_role(egui::accesskit::Role::SpinButton).count()
+        };
+        let one = fields(&harness);
+        type_width(&mut harness, "40 px", "25");
+        let name = harness.state().items[1].name();
+        let row = egui_kittest::kittest::by().label(&name).role(egui::accesskit::Role::Button);
+        harness.get(row).click_accesskit();
+        // never two files' fields for a screen reader, frame by frame
+        for frame in 0..5 {
+            harness.step();
+            assert_eq!(fields(&harness), one, "frame {frame}");
+        }
+        assert_eq!(harness.state().selected, Some(ids[1]));
+        assert_eq!(width_of(&harness, 0), Some(25));
+        assert_eq!(harness.state().items[0].history.undo.len(), 1);
+        assert_eq!(
+            (width_of(&harness, 1), harness.state().items[1].history.can_undo()),
+            (None, false)
+        );
+        // the second's own settings shown by now
+        assert!(harness.query(width_field("40 px")).is_some());
+    }
+
+    #[test]
+    fn takes_a_number_typed_into_a_file_before_it_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["first.png", "second.png"]);
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        harness.state_mut().select(ids[0]);
+        harness.run_steps(2);
+        type_width(&mut harness, "40 px", "25");
+        // its row's ✖, shown as the row is hovered, as a screen reader
+        // presses it
+        let name = harness.state().items[0].name();
+        let row = egui_kittest::kittest::by().label(&name).role(egui::accesskit::Role::Button);
+        let row = harness.get(row).rect();
+        harness.event(egui::Event::PointerMoved(row.center()));
+        harness.run_steps(2);
+        let remove = fl!("remove");
+        let cross = harness
+            .get_all_by_label(&remove)
+            .find(|node| row.contains(node.rect().center()))
+            .unwrap();
+        cross.click_accesskit();
+        harness.run_steps(4);
+        assert!(harness.state().item(ids[0]).is_none());
+        // put back with what was typed, as its own step
+        undo(&mut harness);
+        let first = harness.state().item(ids[0]).unwrap();
+        assert_eq!(first.choices.crop.map(|crop| crop.width), Some(25));
+        assert_eq!(first.history.undo.len(), 1);
     }
 
     #[test]

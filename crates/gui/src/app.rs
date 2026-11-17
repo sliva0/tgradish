@@ -132,6 +132,14 @@ pub(crate) struct App {
     /// What the last frames were, for which changes to files' settings
     /// are steps to undo.
     pub(crate) edit_frames: crate::history::Frames,
+    /// The file whose settings were drawn last, which is the one picked
+    /// but for the frame a number typed in another's is taken.
+    pub(crate) drawn: Option<u64>,
+    /// The file with a number typed in its settings, not yet taken, as the
+    /// frame began.
+    pub(crate) typed: Option<u64>,
+    /// Files to remove once the number typed in one of them is taken.
+    pub(crate) removing: Vec<u64>,
     /// The settings as they were before Settings put them back to their
     /// defaults a moment ago, which may be put back.
     pub(crate) settings_reset: Option<Config>,
@@ -389,6 +397,9 @@ impl App {
             banner: Banner::default(),
             removed: None,
             edit_frames: Default::default(),
+            drawn: None,
+            typed: None,
+            removing: Vec::new(),
             settings_reset: None,
             clipboard: system::Clipboard::default(),
             paste_key: crate::keys::PasteKey::default(),
@@ -615,6 +626,12 @@ impl App {
     /// they are kept, with their settings and results, while a notice
     /// offers to put them back, with those removed just before.
     pub(crate) fn remove_all(&mut self, ids: &[u64]) {
+        // a number typed in one of them taken first, in the next frame,
+        // which shows that file a frame more for it
+        if self.typed.is_some_and(|file| ids.contains(&file)) {
+            self.removing.extend_from_slice(ids);
+            return;
+        }
         let selected = self.selected.filter(|id| ids.contains(id));
         let mut taken = Vec::new();
         let mut index = 0;
@@ -716,9 +733,9 @@ impl App {
     /// Takes in the changes to files' settings this frame made, which are
     /// steps once at rest; another frame is drawn while they aren't.
     fn follow_edits(&mut self, ctx: &egui::Context) {
-        let frame = self.edit_frames.end(ctx, self.selected);
-        let selected = self.selected;
-        // only the selected file is changed by hand
+        let frame = self.edit_frames.end(ctx, self.drawn);
+        let selected = self.drawn;
+        // only the file whose settings were drawn is changed by hand
         let other = crate::history::Frame { input: false, ..frame };
         let items = self.items.iter_mut().map(|item| match Some(item.id) == selected {
             true => (item, frame),
@@ -1078,6 +1095,12 @@ impl eframe::App for App {
         // is drawn this last frame, so that it is saved with the rest
         if ctx.input(|input| input.viewport().close_requested()) {
             widgets::finish_typed_number(&ctx);
+        }
+        self.typed = widgets::typed_number(&ctx);
+        if !self.removing.is_empty() && self.typed.is_none_or(|file| !self.removing.contains(&file))
+        {
+            let removing = std::mem::take(&mut self.removing);
+            self.remove_all(&removing);
         }
         self.take_input(&ctx);
         self.pump(&ctx);

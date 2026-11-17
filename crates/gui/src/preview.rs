@@ -54,52 +54,32 @@ const UNDER_PANEL: f32 = 2.0 + HANDLE / 2.0;
 pub(crate) const LEAST_SHARE: f32 = 0.2;
 pub(crate) const MOST_SHARE: f32 = 0.85;
 
-/// Where the picked file's settings were drawn this frame, and its
-/// preview's stage: where another file's are drawn unseen, as wide.
-struct Places {
-    side: Rect,
-    settings: Rect,
-    stage: Rect,
-}
-
-/// What a file's settings are drawn with, but for what they borrow of
-/// the [`App`], which is borrowed otherwise as they are drawn.
-struct Drawn {
-    ffmpeg_args: bool,
-    ffmpeg: tgradish_core::config::FfmpegConfig,
-    output: Option<std::path::PathBuf>,
-    /// Where its result is in the queue to convert.
-    queued: Option<usize>,
-    /// Its result can be copied.
-    copyable: bool,
-}
-
 impl App {
-    /// What the settings of the file `id` are drawn with.
-    fn drawn(&self, id: u64) -> Drawn {
-        let ffmpeg_args = self.backend().as_ref().is_ok_and(Backend::supports_ffmpeg_args);
-        let output = self.item(id).map(|item| self.output_for(item));
-        let (choice, path) = self.ffmpeg_settings();
-        Drawn {
-            ffmpeg_args,
-            ffmpeg: tgradish_core::config::FfmpegConfig { choice, path },
-            queued: self.queue.iter().position(|&other| other == id),
-            copyable: self.copyable(id, output.as_deref()).is_some(),
-            output,
-        }
-    }
-
     pub(crate) fn main_panel(&mut self, ui: &mut egui::Ui) {
-        let shown = self.selected.filter(|&id| self.item(id).is_some());
-        // a number typed into the settings of a file no longer shown
-        let unseen = widgets::unseen_number(ui.ctx(), shown);
-        let Some(id) = shown else {
-            if let Some(typed) = unseen {
-                widgets::forget_typed_number(ui.ctx(), typed);
-            }
+        let ctx = ui.ctx().clone();
+        let selected = self.selected.filter(|&id| self.item(id).is_some());
+        // a number typed in the file shown, which is no longer the one
+        // picked, or is being removed: shown a frame more, as it was, for
+        // its field to take what was typed as Tab would, in its own file,
+        // before the one picked is shown
+        let typed = widgets::typed_number(&ctx);
+        if typed.is_some_and(|file| self.item(file).is_none()) {
+            widgets::forget_typed_number(&ctx);
+        }
+        let held = typed.filter(|&file| {
+            let leaving = Some(file) != selected || self.removing.contains(&file);
+            leaving && Some(file) == self.drawn && self.item(file).is_some()
+        });
+        if held.is_some() {
+            widgets::finish_typed_number(&ctx);
+        }
+        self.drawn = held.or(selected);
+        let Some(id) = self.drawn else {
             self.drop_zone(ui, ui.max_rect().shrink(28.0));
             return;
         };
+        let ffmpeg_args = self.backend().as_ref().is_ok_and(Backend::supports_ffmpeg_args);
+        let queued = self.queue.iter().position(|&other| other == id);
         egui::Panel::bottom("actions").show(ui, |ui| {
             ui.add_space(crate::actions::BAR_ABOVE);
             self.actions(ui, id);
@@ -107,24 +87,24 @@ impl App {
         });
         // the rest is the file's own, which a button held there changes
         self.edit_frames.settings_in(ui.available_rect_before_wrap());
-        let mut places =
-            Places { side: Rect::NOTHING, settings: Rect::NOTHING, stage: Rect::NOTHING };
+        let output = self.item(id).map(|item| self.output_for(item));
+        let copyable = self.copyable(id, output.as_deref()).is_some();
+        let (choice, path) = self.ffmpeg_settings();
         let mut in_frames = self.config.gui.timeline_frames;
         let mut look = self.config.gui.result_preview;
-        let height = ui.available_height();
-        let preview_height =
-            (height * self.preview_share).clamp(240.0, (height - 140.0).max(240.0));
-        let Drawn { ffmpeg_args, ffmpeg, output, queued, copyable } = self.drawn(id);
         let context = file_settings::Context {
             presets: &self.presets,
             config: &self.config,
-            ffmpeg,
+            ffmpeg: tgradish_core::config::FfmpegConfig { choice, path },
             ffmpeg_args,
             output,
             config_path: self.config_path.as_deref(),
             presets_dir: self.presets_dir.as_deref(),
             in_frames,
         };
+        let height = ui.available_height();
+        let preview_height =
+            (height * self.preview_share).clamp(240.0, (height - 140.0).max(240.0));
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
         // the line under it is the handle's, which moves it
         let panel = egui::Panel::top("preview").exact_size(preview_height);
@@ -139,7 +119,7 @@ impl App {
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         let (tempo, webm, tgs) = made_with(item, &context);
-                        places.stage = preview(
+                        preview(
                             ui,
                             (&mut self.screen, &mut self.inset),
                             item,
@@ -160,7 +140,6 @@ impl App {
                             .id_salt(("side", id))
                             .auto_shrink([false, false]);
                         widgets::scrolled(ui, column, |ui| {
-                            places.side = ui.max_rect();
                             side_settings(ui, item, &context, (queued, copyable));
                         });
                     },
@@ -198,7 +177,6 @@ impl App {
             let settings =
                 egui::ScrollArea::vertical().id_salt(("settings", id)).auto_shrink([false, false]);
             widgets::scrolled(ui, settings, |ui| {
-                places.settings = ui.max_rect();
                 under_settings(ui, item, &context);
             });
         });
@@ -208,52 +186,6 @@ impl App {
         if look != self.config.gui.result_preview {
             self.save_setting(|gui| gui.result_preview = look);
         }
-        if let Some(typed) = unseen {
-            self.finish_unseen(ui, typed, &places);
-        }
-    }
-
-    /// Has the number field `typed`, in the settings of a file no longer
-    /// shown, take what was typed in it, as a click elsewhere would have
-    /// before the file went out of sight: the file's settings, and the row
-    /// under its preview, are drawn once more, where the picked file's are
-    /// and as wide, so that they are laid out as they were, but unseen and
-    /// out of the pointer's reach. What it takes is a step of the file's.
-    fn finish_unseen(&mut self, ui: &mut egui::Ui, typed: widgets::Typed, places: &Places) {
-        let Some(at) = self.items.iter().position(|item| Some(item.id) == typed.file) else {
-            return widgets::forget_typed_number(ui.ctx(), typed);
-        };
-        widgets::finish_typed_number(ui.ctx());
-        let Drawn { ffmpeg_args, ffmpeg, output, queued, copyable } = self.drawn(self.items[at].id);
-        let mut item = self.items.remove(at);
-        let context = file_settings::Context {
-            presets: &self.presets,
-            config: &self.config,
-            ffmpeg,
-            ffmpeg_args,
-            output,
-            config_path: self.config_path.as_deref(),
-            presets_dir: self.presets_dir.as_deref(),
-            in_frames: self.config.gui.timeline_frames,
-        };
-        crate::history::flush(&mut item);
-        let unseen = |ui: &mut egui::Ui, rect: Rect| {
-            let layout = egui::Layout::top_down(egui::Align::Min);
-            let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(layout));
-            ui.set_clip_rect(Rect::NOTHING);
-            ui.set_opacity(0.0);
-            ui
-        };
-        side_settings(&mut unseen(ui, places.side), &mut item, &context, (queued, copyable));
-        under_settings(&mut unseen(ui, places.settings), &mut item, &context);
-        let (tempo, webm, tgs) = made_with(&item, &context);
-        let mut in_frames = context.in_frames;
-        let shown = item.shown();
-        let row = row_place(ui, &item, shown, places.stage);
-        let (timing, made) = ((tempo, &mut in_frames), (&webm, &tgs));
-        timeline_row(&mut unseen(ui, row), row, &mut item, shown, timing, made);
-        crate::history::commit(&mut item);
-        self.items.insert(at, item);
     }
 }
 
@@ -306,7 +238,7 @@ fn preview(
     (tempo, in_frames): (f64, &mut bool),
     (webm, tgs): (&Options, &tgs::Options),
     (look, smooth): (&mut ResultPreview, bool),
-) -> Rect {
+) {
     let has_result = item.result_clip.ready().is_some();
     // a change to what is used or how it is fitted shows on the input
     let framing = Framing::of(item);
@@ -624,7 +556,6 @@ fn preview(
         let row = row_place(ui, item, shown, rect);
         timeline_row(ui, row, item, shown, (tempo, in_frames), (webm, tgs));
     }
-    rect
 }
 
 /// How high the row under the stage is for `item` showing `shown`, in a

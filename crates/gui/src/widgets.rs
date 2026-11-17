@@ -242,9 +242,8 @@ pub(crate) fn steady_width<R>(
 /// Shows what `add` adds as `part` of the file `file`'s, with ids of its
 /// own: what a widget keeps by its id, as the text being typed in a number
 /// field, stays the file's, rather than going to the widget in its place
-/// in another file's settings once that file is picked. The same wherever
-/// it is drawn, so it can be drawn unseen for a field in it to take what
-/// was typed in it, as [`unseen_number`] has it.
+/// in another file's settings once that file is picked; and a number
+/// typed in it is known to be the file's, as [`typed_number`] has it.
 pub(crate) fn of_file<R>(
     ui: &mut egui::Ui,
     part: &str,
@@ -1392,8 +1391,8 @@ const TAKE_TYPED: &str = "take number typed";
 const DRAWING: &str = "file drawn";
 
 /// The number field typed in last, and the file whose settings it is in,
-/// where it is: kept apart from the field, so that what is typed in it
-/// can be seen to, as the file goes out of sight, without it being drawn.
+/// where it is: so that what is typed in it is taken before the file goes
+/// out of sight.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Typed {
     pub(crate) field: egui::Id,
@@ -1406,19 +1405,18 @@ pub(crate) fn typing_number(ctx: &egui::Context) -> bool {
     typed.is_some_and(|typed| ctx.memory(|memory| memory.has_focus(typed.field)))
 }
 
-/// The number field of a file other than `shown` that has what was typed
-/// in it not yet taken, as when another file was picked, or files were
-/// dropped, while it was typed in; forgotten once too long out of sight.
-pub(crate) fn unseen_number(ctx: &egui::Context, shown: Option<u64>) -> Option<Typed> {
+/// The file whose number field holds what was typed in it, not yet
+/// taken: a number typed but not finished with; forgotten once its field
+/// has been out of sight too long.
+pub(crate) fn typed_number(ctx: &egui::Context) -> Option<u64> {
     let typed = ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)))?;
-    let file = typed.file.filter(|&file| Some(file) != shown)?;
     let typing = ctx.data(|data| data.get_temp::<Typing>(typed.field))?;
     // as the field itself would, drawn so long after
     if ctx.cumulative_pass_nr() > typing.pass + 2 {
         ctx.data_mut(|data| data.remove::<Typing>(typed.field));
         return None;
     }
-    Some(Typed { file: Some(file), ..typed })
+    typed.file.filter(|_| typing.text != typing.written)
 }
 
 /// Has the number field typed in be done with, as a click elsewhere does:
@@ -1430,10 +1428,14 @@ pub(crate) fn finish_typed_number(ctx: &egui::Context) {
     }
 }
 
-/// Forgets what was typed in `typed`, which is not to be taken.
-pub(crate) fn forget_typed_number(ctx: &egui::Context, typed: Typed) {
-    ctx.memory_mut(|memory| memory.surrender_focus(typed.field));
-    ctx.data_mut(|data| data.remove::<Typing>(typed.field));
+/// Forgets what was typed in the number field typed in last, which is
+/// not to be taken, as its file is gone.
+pub(crate) fn forget_typed_number(ctx: &egui::Context) {
+    let typed = ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)));
+    if let Some(typed) = typed {
+        ctx.memory_mut(|memory| memory.surrender_focus(typed.field));
+        ctx.data_mut(|data| data.remove::<Typing>(typed.field));
+    }
 }
 
 /// Has the number field being typed in take what is typed this frame, as
