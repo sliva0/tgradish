@@ -265,16 +265,7 @@ pub(crate) fn show(
         if tag.is_some_and(|tag| tag.contains(point)) {
             return None;
         }
-        let near = |a: f32, b: f32| (a - b).abs() <= GRAB;
-        let along_x = (on_screen.left() - GRAB..=on_screen.right() + GRAB).contains(&point.x);
-        let along_y = (on_screen.top() - GRAB..=on_screen.bottom() + GRAB).contains(&point.y);
-        let edges = [
-            along_y && near(point.x, on_screen.left()),
-            along_x && near(point.y, on_screen.top()),
-            along_y && near(point.x, on_screen.right()),
-            along_x && near(point.y, on_screen.bottom()),
-        ];
-        if edges.iter().any(|&edge| edge) {
+        if let Some(edges) = edges_at(point, on_screen) {
             Some(Drag::Edges(edges, crop))
         } else if cropped && on_screen.contains(point) {
             Some(Drag::Move(crop, to_pixels(point)))
@@ -580,6 +571,39 @@ pub(crate) fn show(
 /// How far out of the crop the ring of the keyboard's focus is drawn, the
 /// handles inside it.
 const RING: f32 = 7.0;
+
+/// How near a corner of the crop, in points, the pointer takes it, across
+/// and down: a larger target than an edge, which it wins over.
+const CORNER: f32 = 10.0;
+
+/// The edges of the crop shown at `crop` that the pointer at `point` takes,
+/// `[left, top, right, bottom]`: a corner's two where it is near one, or
+/// an edge. Within the crop, each reaches at most a quarter of its width
+/// or height, so that the middle of even a small crop is left to move it
+/// by.
+fn edges_at(point: Pos2, crop: Rect) -> Option<[bool; 4]> {
+    // near the start of a side `low` to `high` along an axis, and its end
+    let near = |at: f32, (low, high): (f32, f32), reach: f32| {
+        let inside = reach.min((high - low) / 4.0);
+        let start = (low - reach..=low + inside).contains(&at);
+        let end = (high - inside..=high + reach).contains(&at);
+        (start, end)
+    };
+    let across = (crop.left(), crop.right());
+    let down = (crop.top(), crop.bottom());
+    let (left, right) = near(point.x, across, CORNER);
+    let (top, bottom) = near(point.y, down, CORNER);
+    if (left || right) && (top || bottom) {
+        return Some([left, top, right, bottom]);
+    }
+    let along = |at: f32, (low, high): (f32, f32)| (low - GRAB..=high + GRAB).contains(&at);
+    let (left, right) = near(point.x, across, GRAB);
+    let (top, bottom) = near(point.y, down, GRAB);
+    let (left, right) = (left && along(point.y, down), right && along(point.y, down));
+    let (top, bottom) = (top && along(point.x, across), bottom && along(point.x, across));
+    let edges = [left, top, right, bottom];
+    edges.contains(&true).then_some(edges)
+}
 
 /// What the arrows pressed this frame make of `crop` in a `size` picture,
 /// with the `ratio` it keeps: moved a pixel each, ten with Shift, or with
@@ -1327,6 +1351,26 @@ mod tests {
         harness.step();
         assert_eq!(harness.ctx.memory(|memory| memory.focused()), None);
         assert_eq!(keyed(&mut harness, Modifiers::NONE, Key::ArrowLeft), lower);
+    }
+
+    #[test]
+    fn takes_corners_from_further_than_edges_and_leaves_a_small_crop_its_middle() {
+        let crop = Rect::from_min_size(pos2(100.0, 100.0), vec2(200.0, 100.0));
+        let corner = [true, true, false, false];
+        // a corner, from 9 points out both ways, where an edge isn't taken
+        assert_eq!(edges_at(pos2(91.0, 91.0), crop), Some(corner));
+        assert_eq!(edges_at(pos2(91.0, 150.0), crop), None);
+        // from beside it on either edge, too
+        assert_eq!(edges_at(pos2(109.0, 95.0), crop), Some(corner));
+        assert_eq!(edges_at(pos2(150.0, 95.0), crop), Some([false, true, false, false]));
+        assert_eq!(edges_at(pos2(150.0, 150.0), crop), None);
+        // a crop 16 points across: its edges and corners reach 4 into it,
+        // and its middle is left to move it by
+        let small = Rect::from_min_size(pos2(100.0, 100.0), vec2(16.0, 16.0));
+        assert_eq!(edges_at(pos2(108.0, 108.0), small), None);
+        assert_eq!(edges_at(pos2(103.0, 103.0), small), Some(corner));
+        assert_eq!(edges_at(pos2(114.0, 108.0), small), Some([false, false, true, false]));
+        assert_eq!(edges_at(pos2(90.0, 90.0), small), Some(corner));
     }
 
     #[test]
