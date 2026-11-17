@@ -457,12 +457,65 @@ pub(crate) fn text_field(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> 
 /// Room inside a dialog's frame.
 const DIALOG_MARGIN: i8 = 16;
 
+/// How long a dialog takes to fade in as it opens, in seconds. It is where
+/// it goes, as large as it is, and takes the keyboard from its first
+/// frame, so nothing waits for it.
+const DIALOG_FADE: f64 = 0.11;
+/// How dark the rest of the GUI goes behind a dialog.
+const BACKDROP: f32 = 100.0;
+
 /// A dialog over the rest of the GUI, `id` telling it from others, framed
 /// as every dialog is: its [`dialog_title`] first, its [`dialog_buttons`]
 /// last.
-pub(crate) fn dialog(ctx: &egui::Context, id: &str) -> egui::Modal {
-    let frame = egui::Frame::popup(&ctx.global_style()).inner_margin(DIALOG_MARGIN);
-    egui::Modal::new(egui::Id::new(id)).frame(frame)
+pub(crate) fn dialog(_ctx: &egui::Context, id: &str) -> Dialog {
+    let id = egui::Id::new(id);
+    Dialog { id, area: egui::Modal::default_area(id) }
+}
+
+/// A dialog to show: an [`egui::Modal`] that fades in, with what is
+/// behind it, a little faster than egui's own easings.
+pub(crate) struct Dialog {
+    id: egui::Id,
+    area: egui::Area,
+}
+
+impl Dialog {
+    /// Places it as `area` says, rather than in the window's middle.
+    pub(crate) fn area(self, area: egui::Area) -> Dialog {
+        Dialog { area, ..self }
+    }
+
+    pub(crate) fn show<R>(
+        self,
+        ctx: &egui::Context,
+        content: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> egui::ModalResponse<R> {
+        let opacity = opening(ctx, self.id);
+        let backdrop = Color32::from_black_alpha((BACKDROP * opacity).round() as u8);
+        let frame = egui::Frame::popup(&ctx.global_style()).inner_margin(DIALOG_MARGIN);
+        egui::Modal::new(self.id)
+            .area(self.area.fade_in(false))
+            .frame(egui::Frame::NONE)
+            .backdrop_color(backdrop)
+            .show(ctx, |ui| {
+                ui.multiply_opacity(opacity);
+                frame.show(ui, content).inner
+            })
+    }
+}
+
+/// How far the dialog `id` has faded in: from nothing as it opens, that
+/// is when it wasn't shown the pass before.
+fn opening(ctx: &egui::Context, id: egui::Id) -> f32 {
+    let (key, pass) = (id.with("opened"), ctx.cumulative_pass_nr());
+    let now = ctx.input(|input| input.time);
+    let shown: Option<(f64, u64)> = ctx.data(|data| data.get_temp(key));
+    let since = match shown {
+        Some((since, last)) if last + 1 >= pass => since,
+        _ => now,
+    };
+    ctx.data_mut(|data| data.insert_temp(key, (since, pass)));
+    crate::motion::along(ctx, since, DIALOG_FADE)
 }
 
 /// A dialog's title, cut short where it is long, with a cross in the
@@ -2730,6 +2783,46 @@ mod tests {
         // and at work with how far unknown, striped and still
         harness.state_mut().0 = Fill::Unknown;
         harness.try_run().expect("still once there");
+    }
+
+    #[test]
+    fn fades_a_dialog_in_where_it_goes_from_its_first_frame() {
+        // whether it is open, and each frame how much of it shows and where
+        // what is in it is
+        type State = (bool, Vec<(f32, egui::Rect)>);
+        let show = |ui: &mut egui::Ui, (open, drawn): &mut State| {
+            if *open {
+                let modal = dialog(ui.ctx(), "test").show(ui.ctx(), |ui| {
+                    ui.set_width(200.0);
+                    (ui.opacity(), ui.label("Inside").rect)
+                });
+                drawn.push(modal.inner);
+            }
+        };
+        let mut harness = egui_kittest::Harness::builder()
+            .with_step_dt(1.0 / 60.0)
+            .with_max_steps(60)
+            .build_ui_state(show, (false, Vec::new()));
+        for motion in [true, false] {
+            crate::motion::set(&harness.ctx, motion);
+            harness.state_mut().1.clear();
+            harness.state_mut().0 = true;
+            harness.run_steps(10);
+            let drawn = &harness.state().1;
+            let (opacities, places): (Vec<f32>, Vec<egui::Rect>) = drawn.iter().copied().unzip();
+            if motion {
+                // from nothing, about halfway three frames on, whole in 0.11 s
+                assert!(opacities[0] < 0.01 && opacities[3] > 0.3 && opacities[3] < 0.7);
+                assert!(opacities[7..].iter().all(|&opacity| opacity == 1.0), "{opacities:?}");
+            } else {
+                assert!(opacities.iter().all(|&opacity| opacity == 1.0), "{opacities:?}");
+            }
+            // where it goes from the first frame it is seen, once measured
+            assert!(places[1..].iter().all(|&place| place == places[9]), "{places:?}");
+            harness.try_run().expect("still once shown");
+            harness.state_mut().0 = false;
+            harness.run_steps(2);
+        }
     }
 
     #[test]

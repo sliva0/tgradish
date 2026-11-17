@@ -354,6 +354,34 @@ impl App {
                 self.enqueue(id);
             }
         });
+        if let Some(list) = self.banner.corner {
+            self.drop_target(ui, list);
+        }
+    }
+
+    /// The list lit up as where files dragged over the window go, with
+    /// words that say so in its middle, fading in and out.
+    fn drop_target(&self, ui: &egui::Ui, list: egui::Rect) {
+        let time = if crate::motion::motion(ui.ctx()) { DROP_FADE } else { 0.0 };
+        let shown = ui.ctx().animate_bool_with_time(drop_id(), self.hovering, time);
+        if shown == 0.0 {
+            return;
+        }
+        let painter = ui.painter_at(list);
+        let visuals = ui.visuals();
+        let accent = theme::mark(visuals);
+        painter.rect_filled(list, 6.0, accent.gamma_multiply(0.12 * shown));
+        let edge = egui::Stroke::new(2.0, accent.gamma_multiply(shown));
+        painter.rect_stroke(list, 6.0, edge, egui::StrokeKind::Inside);
+        // on the panel's colour, to read over the rows
+        let colour = visuals.strong_text_color().gamma_multiply(shown);
+        let font = FontId::proportional(18.0);
+        let galley = painter.layout(fl!("drop-to-add"), font, colour, list.width() - 48.0);
+        let card = egui::Rect::from_center_size(list.center(), galley.size() + vec2(24.0, 16.0));
+        painter.rect_filled(card, 6.0, visuals.panel_fill.gamma_multiply(shown));
+        let outline = egui::Stroke::new(1.0, accent.gamma_multiply(shown));
+        painter.rect_stroke(card, 6.0, outline, egui::StrokeKind::Inside);
+        painter.galley(card.center() - galley.size() / 2.0, galley, colour);
     }
 
     /// Converts every file Convert all says it does.
@@ -541,6 +569,14 @@ const RESULT_FADE: f64 = 0.18;
 /// much of the accent shows through at the most.
 const PULSE: f64 = 0.7;
 const PULSE_MOST: f32 = 0.25;
+/// How long the list takes to light up as files are dragged over the
+/// window, and to go back.
+const DROP_FADE: f32 = 0.12;
+
+/// How far the list is lit up as where files go, in egui's memory.
+fn drop_id() -> egui::Id {
+    egui::Id::new("files dropping")
+}
 /// How long a row's tint takes to follow it being chosen or let go of;
 /// its outline follows at once.
 const SELECTING: f32 = 0.09;
@@ -1335,5 +1371,38 @@ mod tests {
         assert_eq!(selected(&harness, "a.png"), Some(Toggled::True));
         assert_eq!(selected(&harness, "b.png"), Some(Toggled::False));
         harness.try_run().expect("still once the tint is there");
+    }
+
+    #[test]
+    fn lights_up_the_list_rather_than_the_window_as_files_are_dragged_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.png");
+        square(&a, [255, 0, 0, 255]);
+        let mut harness = stepped(Config::default());
+        harness.state_mut().add(vec![a]);
+        finish(&mut harness);
+        // as far as it is lit: asked again in the same frame, it stays
+        let lit = |harness: &egui_kittest::Harness<App>, over: bool| {
+            harness.ctx.animate_bool_with_time(drop_id(), over, DROP_FADE)
+        };
+        assert_eq!(lit(&harness, false), 0.0);
+        // files over the window, as egui says each frame
+        let over = |harness: &mut egui_kittest::Harness<App>, frames: usize| {
+            for _ in 0..frames {
+                harness.state_mut().hovering = true;
+                harness.step();
+            }
+        };
+        over(&mut harness, 2);
+        let start = lit(&harness, true);
+        assert!(start > 0.0 && start < 0.4, "{start}");
+        over(&mut harness, 2);
+        let middle = lit(&harness, true);
+        assert!(middle > start && middle < 0.8, "{middle}");
+        over(&mut harness, 6);
+        assert_eq!(lit(&harness, true), 1.0);
+        // and back as they leave
+        harness.run_steps(10);
+        assert_eq!(lit(&harness, false), 0.0);
     }
 }

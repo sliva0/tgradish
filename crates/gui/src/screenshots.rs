@@ -845,6 +845,14 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         harness.state_mut().items[0].view.playing = false;
         harness.run_steps(3);
         save(&mut harness, "video");
+        // files dragged over the window, which the list takes, as egui says
+        // each frame
+        for _ in 0..2 {
+            harness.state_mut().hovering = true;
+            harness.step();
+        }
+        save(&mut harness, "dropping");
+        harness.run_steps(2);
         // the menus of adding files and of the folders
         harness.get_by_label(&crate::l10n::fl!("add-more")).click();
         harness.run_steps(2);

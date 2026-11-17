@@ -200,6 +200,11 @@ pub(crate) struct Said {
     pub(crate) details_open: bool,
     /// What an action said of itself, as "Copied", and until when.
     pub(crate) flash: Option<(String, f64)>,
+    /// When it was first drawn, from which it fades in.
+    came: Option<f64>,
+    /// How tall it was last drawn, with the room after it, which closes
+    /// up as it goes.
+    height: f32,
 }
 
 impl Said {
@@ -224,6 +229,9 @@ pub(crate) struct Banner {
     /// they are drawn again, is its as it was then, however long, as
     /// nothing may be drawn while the pointer rests.
     held: bool,
+    /// What was said and is no longer, fading out where it was while its
+    /// room closes up, from when.
+    leaving: Vec<(Said, Option<f64>)>,
 }
 
 /// How long information shows unless hovered; warnings stay until
@@ -254,6 +262,9 @@ const COUNTDOWN: f32 = 2.0;
 const COUNTDOWN_STEP: f64 = 1.0 / 15.0;
 /// The tallest the details get before they scroll.
 const DETAIL_HEIGHT: f32 = 160.0;
+/// How long what is said takes to fade in, and what goes to fade out as
+/// its room closes up, in seconds.
+const FADE: f64 = 0.15;
 
 impl Banner {
     /// Shows `message` under what is already said. What is showing
@@ -284,18 +295,30 @@ impl Banner {
             since: None,
             details_open: false,
             flash: None,
+            came: None,
+            height: 0.0,
         });
         // the oldest passing notice goes for the newest
         if self.rows.iter().filter(|said| said.passes()).count() > MOST_PASSING
             && let Some(oldest) = self.rows.iter().position(Said::passes)
         {
-            self.rows.remove(oldest);
+            let oldest = self.rows[oldest].id;
+            self.take_out(|said| said.id == oldest, None);
         }
     }
 
     /// Stops showing what was said about `subject`.
     pub(crate) fn forget(&mut self, subject: Subject) {
-        self.rows.retain(|said| said.message.subject != Some(subject));
+        self.take_out(|said| said.message.subject == Some(subject), None);
+    }
+
+    /// Takes what `gone` picks out of what is said, to fade out and close
+    /// up from `now`, or from when it is next drawn.
+    fn take_out(&mut self, gone: impl Fn(&Said) -> bool, now: Option<f64>) {
+        let (out, kept) = std::mem::take(&mut self.rows).into_iter().partition(|said| gone(said));
+        self.rows = kept;
+        let out: Vec<Said> = out;
+        self.leaving.extend(out.into_iter().map(|said| (said, now)));
     }
 
     /// Shows a moment's `text` beside the buttons of `message`, or of
@@ -317,6 +340,11 @@ impl Banner {
         let mut clicked = Vec::new();
         let mut dismissed = Vec::new();
         let now = ctx.input(|input| input.time);
+        for (_, since) in &mut self.leaving {
+            since.get_or_insert(now);
+        }
+        let gone = |since: &Option<f64>| crate::motion::along(ctx, since.unwrap_or(now), FADE);
+        self.leaving.retain(|(_, since)| gone(since) < 1.0);
         let all = self.banner(ctx, now, &mut clicked, &mut dismissed);
         let held = self.passing(ctx, now, &mut clicked, &mut dismissed);
         // hovering what passes holds it where it is, for as long: the time
@@ -344,9 +372,9 @@ impl Banner {
             }
         }
         if all {
-            self.rows.retain(Said::passes);
+            self.take_out(|said| !said.passes(), Some(now));
         }
-        self.rows.retain(|said| !dismissed.contains(&said.id));
+        self.take_out(|said| dismissed.contains(&said.id), Some(now));
         // drawn again as the first goes or stops flashing, and as the line
         // of what passes shortens, and not more often
         let passing = self.rows.iter().any(Said::passes);
@@ -379,7 +407,7 @@ impl Banner {
         dismissed: &mut Vec<u64>,
     ) -> bool {
         let staying = self.rows.iter().filter(|said| !said.passes()).count();
-        if staying == 0 {
+        if staying == 0 && self.leaving.iter().all(|(said, _)| said.passes()) {
             return false;
         }
         // in the middle of what is right of the list, or of where it would
@@ -398,16 +426,21 @@ impl Banner {
                     ui,
                     |ui| {
                         let room = widest - 24.0 - ICON - 2.0 * GAP - DISMISS;
-                        let rows = self.rows.iter().filter(|said| !said.passes());
-                        let column = rows.map(|said| needs(ui, said, room)).fold(0.0, f32::max);
+                        let entries = entries(&mut self.rows, &mut self.leaving, false);
+                        let column = entries
+                            .iter()
+                            .map(|(said, _)| needs(ui, said, room))
+                            .fold(0.0, f32::max);
                         let column = column.clamp(160.0_f32.min(room), room);
                         ui.set_width(ICON + 2.0 * GAP + column + DISMISS);
-                        let rows = self.rows.iter_mut().filter(|said| !said.passes());
-                        for (index, said) in rows.enumerate() {
-                            if index > 0 {
-                                hairline(ui);
-                            }
-                            let row = draw(ui, said, column, now, false);
+                        for (index, (said, leaving)) in entries.into_iter().enumerate() {
+                            let row = shown(ui, said, now, leaving, |ui, said| {
+                                if index > 0 {
+                                    hairline(ui);
+                                }
+                                draw(ui, said, column, now, false)
+                            });
+                            let Some(row) = row else { continue };
                             clicked
                                 .extend(row.actions.into_iter().map(|a| (said.message.clone(), a)));
                             if row.dismissed {
@@ -463,29 +496,32 @@ impl Banner {
             });
             ui.spacing_mut().item_spacing.y = CORNER_ROOM;
             let room = width - NOTICE_MARGIN.sum().x - ICON - 2.0 * GAP - DISMISS;
-            for said in self.rows.iter_mut().filter(|said| said.passes()) {
-                let card = egui::Frame::new()
-                    .fill(ui.visuals().panel_fill)
-                    .stroke(theme::floating_outline(ui.visuals()))
-                    .corner_radius(ui.visuals().window_corner_radius)
-                    .shadow(theme::floating_shadow(ui.visuals()))
-                    .inner_margin(NOTICE_MARGIN)
-                    .show(ui, |ui| {
-                        ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
-                            node.set_role(egui::accesskit::Role::Status);
+            for (said, leaving) in entries(&mut self.rows, &mut self.leaving, true) {
+                let row = shown(ui, said, now, leaving, |ui, said| {
+                    let card = egui::Frame::new()
+                        .fill(ui.visuals().panel_fill)
+                        .stroke(theme::floating_outline(ui.visuals()))
+                        .corner_radius(ui.visuals().window_corner_radius)
+                        .shadow(theme::floating_shadow(ui.visuals()))
+                        .inner_margin(NOTICE_MARGIN)
+                        .show(ui, |ui| {
+                            ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
+                                node.set_role(egui::accesskit::Role::Status);
+                            });
+                            ui.set_width(width - NOTICE_MARGIN.sum().x);
+                            draw(ui, said, room, now, true)
                         });
-                        ui.set_width(width - NOTICE_MARGIN.sum().x);
-                        draw(ui, said, room, now, true)
-                    });
-                let row = card.inner;
+                    // the time left, held while hovered
+                    let left = said.since.map_or(1.0, |since| (1.0 - (now - since) / SHOWN) as f32);
+                    countdown(ui, card.response.rect, left.clamp(0.0, 1.0));
+                    card.inner
+                });
+                let Some(row) = row else { continue };
                 focused |= row.focused;
                 clicked.extend(row.actions.into_iter().map(|a| (said.message.clone(), a)));
                 if row.dismissed {
                     dismissed.push(said.id);
                 }
-                // the time left, held while hovered
-                let left = said.since.map_or(1.0, |since| (1.0 - (now - since) / SHOWN) as f32);
-                countdown(ui, card.response.rect, left.clamp(0.0, 1.0));
             }
         });
         // drawn again at once where the notices take more room or less
@@ -501,6 +537,55 @@ impl Banner {
         }
         area.response.contains_pointer() || focused
     }
+}
+
+/// What is said in the corner where `passing`, else in the banner, with
+/// what is going there, in the order it was said: whether each is going,
+/// and since when.
+fn entries<'a>(
+    rows: &'a mut [Said],
+    leaving: &'a mut [(Said, Option<f64>)],
+    passing: bool,
+) -> Vec<(&'a mut Said, Option<f64>)> {
+    let staying = rows.iter_mut().map(|said| (said, None));
+    let going = leaving.iter_mut().map(|(said, since)| (said, *since));
+    let mut entries: Vec<_> = staying.chain(going).filter(|(s, _)| s.passes() == passing).collect();
+    entries.sort_by_key(|(said, _)| said.id);
+    entries
+}
+
+/// Draws `said` with `add`, fading in as it is first drawn, and where it is
+/// `leaving`, since then, fading out as its room closes up from below,
+/// what it does then left undone. Gives what `add` gave, unless leaving.
+fn shown<R>(
+    ui: &mut egui::Ui,
+    said: &mut Said,
+    now: f64,
+    leaving: Option<f64>,
+    add: impl FnOnce(&mut egui::Ui, &mut Said) -> R,
+) -> Option<R> {
+    let ctx = ui.ctx().clone();
+    let Some(since) = leaving else {
+        let came = crate::motion::along(&ctx, *said.came.get_or_insert(now), FADE);
+        let (top, opacity) = (ui.cursor().top(), ui.opacity());
+        ui.multiply_opacity(came);
+        let inner = add(ui, said);
+        ui.set_opacity(opacity);
+        said.height = ui.cursor().top() - top;
+        return Some(inner);
+    };
+    let left = 1.0 - crate::inset::eased(f64::from(crate::motion::along(&ctx, since, FADE)));
+    let at = ui.cursor().min;
+    let width = ui.available_width();
+    ui.add_space(said.height * left);
+    let whole = egui::Rect::from_min_size(at, vec2(width, said.height));
+    let shown = egui::Rect::from_min_size(at, vec2(width, said.height * left));
+    let layout = *ui.layout();
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(whole).layout(layout));
+    child.set_clip_rect(shown.intersect(ui.clip_rect()));
+    child.multiply_opacity(left);
+    add(&mut child, said);
+    None
 }
 
 /// A line along the bottom of `card`, as long as the `left` of its time.
@@ -1007,6 +1092,56 @@ fn elided(ui: &egui::Ui, text: &str, font: &egui::FontId, width: f32) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The GUI drawn a sixtieth of a second apart, as on a screen.
+    fn stepped() -> Harness<'static, App> {
+        Harness::builder().with_size([1280.0, 820.0]).with_step_dt(1.0 / 60.0).build_eframe(|_| {
+            App::with(Config::default(), None, tgradish_core::presets::Presets::builtin())
+        })
+    }
+
+    #[test]
+    fn fades_what_goes_out_as_its_room_closes_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.png");
+        crate::testing::square(&art, [200, 80, 0, 255]);
+        let mut harness = stepped();
+        harness.state_mut().add(vec![art]);
+        for headline in ["Stays", "Goes"] {
+            harness.state_mut().say(Message::warning(headline));
+        }
+        for headline in ["Above", "Below"] {
+            harness.state_mut().say(Message::info(headline));
+        }
+        harness.run_steps(20);
+        let top = |harness: &Harness<App>, label: &str| harness.get_by_label(label).rect().top();
+        let (stays, above) = (top(&harness, "Stays"), top(&harness, "Above"));
+        // the banner's lower row, and the lower notice, dismissed: what is
+        // above them moves down into their room from where it was, as
+        // they fade out, both laid out from below
+        let ids: Vec<u64> = harness.state().banner.rows.iter().map(|said| said.id).collect();
+        let (goes, below) = (ids[1], ids[3]);
+        harness.state_mut().banner.take_out(|said| said.id == goes || said.id == below, None);
+        harness.step();
+        let shift =
+            |harness: &Harness<App>| (top(harness, "Stays") - stays, top(harness, "Above") - above);
+        let (banner, corner) = shift(&harness);
+        assert!(banner < 8.0 && corner < 8.0, "{banner}, {corner}");
+        assert_eq!(harness.state().banner.leaving.len(), 2);
+        harness.run_steps(4);
+        let (banner, corner) = shift(&harness);
+        assert!(banner > 8.0 && corner > 8.0, "{banner}, {corner}");
+        harness.run_steps(8);
+        let (end_banner, end_corner) = shift(&harness);
+        assert!(end_banner > banner && end_corner > corner);
+        assert!(harness.state().banner.leaving.is_empty());
+        // where it ends, as if they had never been
+        let rows: Vec<_> =
+            harness.state().banner.rows.iter().map(|said| &said.message.headline).collect();
+        assert_eq!(rows, ["Stays", "Above"]);
+        harness.run_steps(2);
+        assert_eq!(shift(&harness), (end_banner, end_corner));
+    }
 
     #[test]
     fn says_the_same_once() {

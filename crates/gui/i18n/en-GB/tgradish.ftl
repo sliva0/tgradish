@@ -156,8 +156,9 @@ pick-failed = The file dialog crashed, so nothing was chosen
 
 ## Dropping files
 
-# Over the window while files are dragged over it.
-drop-to-add = Drop to add
+# In the middle of the list of files while files are dragged over the
+# window.
+drop-to-add = Drop to add files
 
 
 ## The system's file dialogs: their titles, which say what each is for,

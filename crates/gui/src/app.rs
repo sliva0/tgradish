@@ -1103,18 +1103,9 @@ impl eframe::App for App {
             self.act(&ctx, &Message::info(""), action);
         }
         theme::focus_ring(&ctx);
+        // files dropped are shown where they go: on the list, or the drop
+        // zone without one, never over the preview
         if self.hovering {
-            let painter =
-                ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, "drop".into()));
-            let screen = ctx.content_rect();
-            painter.rect_filled(screen, 0.0, Color32::from_black_alpha(170));
-            painter.text(
-                screen.center(),
-                egui::Align2::CENTER_CENTER,
-                fl!("drop-to-add"),
-                egui::FontId::proportional(30.0),
-                Color32::WHITE,
-            );
             // egui says each frame whether files hover; Wayland says when they leave
             #[cfg(all(unix, not(target_os = "macos")))]
             let reported = self.drops.is_some();

@@ -1075,6 +1075,8 @@ mod tests {
         harness.run_steps(3);
         assert!(harness.state().config.gui.overwrite);
         assert!(kept().overwrite && kept().theme == crate::config::Theme::Dark);
+        // the message gone, once it has faded out
+        harness.run_steps(3);
         assert!(harness.query_by_label(&fl!("settings-reset")).is_none());
         // and from the message once Settings has closed
         harness.get_by_label(&fl!("reset-settings")).click_accesskit();
