@@ -13,6 +13,12 @@ What changed in each release of tgradish, newest first. The format follows
 - The GUI shows a bar for fitting a `.tgs` only while it is being fitted,
   not for one that fits or is kept exactly as it is.
 
+### Fixed
+
+- On KDE Plasma 6, the GUI's accent as the system has it is the accent
+  chosen in Plasma's settings, the same as choosing that colour in the
+  GUI, not the darker selection colour Plasma makes from it.
+
 ## [2.0.0] - 2026-11-16
 
 tgradish rewritten in Rust: one program, with a GUI and a command line,

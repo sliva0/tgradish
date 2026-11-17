@@ -1,9 +1,9 @@
 //! The system's accent colour, where it has one: on Linux from the desktop
-//! portal, which Plasma 6, GNOME 47 and later and others answer, and in a
-//! Plasma session without one there, as Plasma 5's, from KDE's
-//! `kdeglobals`; on Windows from the registry; on macOS from AppKit. Read
-//! on a thread, as the portal may take a while to start, and followed as it
-//! changes.
+//! portal, which Plasma 6, GNOME 47 and later and others answer, but in a
+//! Plasma session from KDE's `kdeglobals` first, as Plasma's portal answers
+//! with a colour made from the accent rather than the accent; on Windows
+//! from the registry; on macOS from AppKit. Read on a thread, as the portal
+//! may take a while to start, and followed as it changes.
 
 use std::sync::{Arc, Mutex};
 
@@ -61,7 +61,7 @@ mod portal {
     /// KDE's to its settings, on a connection of its own, until the session
     /// bus goes away. Without the bus, KDE's settings are read once.
     pub(super) fn follow(set: impl Fn(Option<Color32>)) {
-        let Some(dbus) = Dbus::load() else { return set(super::kde::accent()) };
+        let Some(dbus) = Dbus::load() else { return set(super::kde::accent(None)) };
         // SAFETY: the connection, and each message until it is unreferenced,
         // stay valid, and only this thread uses them
         unsafe {
@@ -70,7 +70,7 @@ mod portal {
             let connection = (dbus.dbus_bus_get_private)(SESSION, &mut error);
             (dbus.dbus_error_free)(&mut error);
             if connection.is_null() {
-                return set(super::kde::accent());
+                return set(super::kde::accent(None));
             }
             // libdbus ends the process when the bus goes away, unless told
             (dbus.dbus_connection_set_exit_on_disconnect)(connection, 0);
@@ -85,9 +85,8 @@ mod portal {
                 (dbus.dbus_bus_add_match)(connection, rule.as_ptr(), &mut error);
                 (dbus.dbus_error_free)(&mut error);
             }
-            // the portal's, or else KDE's
             let mut portal = read(&dbus, connection);
-            set(portal.or_else(super::kde::accent));
+            set(super::kde::accent(portal));
             loop {
                 // what came while reading, then while waiting
                 loop {
@@ -103,12 +102,11 @@ mod portal {
                         && let Some(accent) = changed(&dbus, message)
                     {
                         portal = accent;
-                        set(portal.or_else(super::kde::accent));
-                    } else if portal.is_none()
-                        && (is(c"org.kde.kconfig.notify", c"ConfigChanged")
-                            || is(c"org.kde.KGlobalSettings", c"notifyChange"))
+                        set(super::kde::accent(portal));
+                    } else if is(c"org.kde.kconfig.notify", c"ConfigChanged")
+                        || is(c"org.kde.KGlobalSettings", c"notifyChange")
                     {
-                        set(super::kde::accent());
+                        set(super::kde::accent(portal));
                     }
                     (dbus.dbus_message_unref)(message);
                 }
@@ -299,6 +297,9 @@ mod portal {
                 accent
             };
             assert_eq!(read(KEY, [1.0, 0.5, 0.0], 1), Some(Some(Color32::from_rgb(255, 128, 0))));
+            // Plasma's violet, as the portal gives it
+            let violet = read(KEY, [0.5725, 0.4314, 0.8941], 1);
+            assert_eq!(violet, Some(Some(Color32::from_rgb(0x92, 0x6e, 0xe4))));
             // wrapped once more, as Read answers
             assert_eq!(read(KEY, [0.0, 0.0, 1.0], 2), Some(Some(Color32::from_rgb(0, 0, 255))));
             // out of range: no accent set
@@ -309,36 +310,43 @@ mod portal {
     }
 }
 
-/// KDE's accent, from `kdeglobals`, which the portal answers with in Plasma
-/// 6, but not in Plasma 5.
+/// KDE's accent, from `kdeglobals`. Plasma 6's portal answers with the
+/// palette's highlight, which Plasma makes, once an accent is chosen, of 70%
+/// of it over the view's background: on Breeze Dark a darker, duller colour
+/// than the one chosen, where the GUI's fills, as Breeze's, are made from the
+/// accent itself. Plasma 5's portal has no accent at all.
 #[cfg(all(unix, not(target_os = "macos")))]
 mod kde {
     use std::path::PathBuf;
 
     use eframe::egui::Color32;
 
-    /// The accent of a Plasma session: the one chosen, or where it follows
-    /// the colour scheme, the scheme's selection colour. Other desktops may
-    /// have left a `kdeglobals` behind, which isn't theirs to follow.
-    pub(super) fn accent() -> Option<Color32> {
+    /// The accent of a Plasma session, given the `portal`'s: the one chosen,
+    /// from the wallpaper too, or where it follows the colour scheme, the
+    /// portal's, or else the scheme's selection colour, which is the same.
+    /// Elsewhere the portal's: other desktops may have left a `kdeglobals`
+    /// behind, which isn't theirs to follow.
+    pub(super) fn accent(portal: Option<Color32>) -> Option<Color32> {
         let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
         let plasma = desktop.split(':').any(|name| name.eq_ignore_ascii_case("KDE"))
             || std::env::var_os("KDE_FULL_SESSION").is_some_and(|value| value == "true");
         if !plasma {
-            return None;
+            return portal;
         }
         let files: Vec<String> =
             paths().iter().filter_map(|path| std::fs::read_to_string(path).ok()).collect();
-        of(&files)
+        of(&files, portal)
     }
 
     /// The accent `files` say, the user's first, as KDE reads them: each
     /// key from the first of them that has it.
-    pub(super) fn of(files: &[String]) -> Option<Color32> {
+    pub(super) fn of(files: &[String], portal: Option<Color32>) -> Option<Color32> {
         let first = |section: &str, key: &str| {
             files.iter().find_map(|text| value(text, section, key)).and_then(colour)
         };
-        first("General", "AccentColor").or_else(|| first("Colors:Selection", "BackgroundNormal"))
+        first("General", "AccentColor")
+            .or(portal)
+            .or_else(|| first("Colors:Selection", "BackgroundNormal"))
     }
 
     /// `kdeglobals` in the user's settings, then in the system's.
@@ -374,7 +382,8 @@ mod kde {
     }
 
     /// A colour as KConfig writes one: `r,g,b`, maybe with alpha, or
-    /// `#rrggbb`.
+    /// `#rrggbb`. Transparent is none: what Plasma's settings mean by an
+    /// accent that follows the scheme.
     fn colour(value: &str) -> Option<Color32> {
         if let Some(digits) = value.strip_prefix('#') {
             if digits.len() != 6 || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -387,6 +396,7 @@ mod kde {
         let channels: Vec<u8> =
             value.split(',').map(|part| part.trim().parse().ok()).collect::<Option<_>>()?;
         match channels[..] {
+            [_, _, _, 0] => None,
             [red, green, blue] | [red, green, blue, _] => Some(Color32::from_rgb(red, green, blue)),
             _ => None,
         }
@@ -401,8 +411,9 @@ mod kde {
             let scheme = "[Colors:Selection]\nBackgroundAlternate=30,87,116\n\
                           BackgroundNormal=61,174,233\n[General]\nColorScheme=BreezeDark\n";
             let chosen = "[General]\nAccentColor=233,100,58\n";
-            let read =
-                |files: &[&str]| of(&files.iter().map(|text| text.to_string()).collect::<Vec<_>>());
+            let files =
+                |files: &[&str]| files.iter().map(|text| text.to_string()).collect::<Vec<_>>();
+            let read = |texts: &[&str]| of(&files(texts), None);
             // following the scheme: its selection colour
             assert_eq!(read(&[scheme]), Some(Color32::from_rgb(61, 174, 233)));
             // chosen, in the user's file or the system's
@@ -418,6 +429,26 @@ mod kde {
             assert_eq!(read(&[]), None);
             assert_eq!(read(&["[Other]\nAccentColor=1,2,3\n"]), None);
             assert_eq!(read(&["[General]\nAccentColor=1,2,300\n"]), None);
+            assert_eq!(read(&["[General]\nAccentColor=0,0,0,0\n"]), None);
+        }
+
+        #[test]
+        fn prefers_the_accent_chosen_to_the_portals() {
+            // Breeze Dark with Plasma's violet chosen, as System Settings
+            // writes it, and the portal's answer: the selection colour
+            let violet = "[Colors:Selection]\nBackgroundNormal=108,83,166\n\
+                          [Colors:View]\nBackgroundNormal=20,22,24\n\
+                          [General]\nAccentColor=146,110,228\nColorScheme=BreezeDark\n";
+            let selection = Some(Color32::from_rgb(108, 83, 166));
+            let violet = of(&[violet.to_owned()], selection);
+            assert_eq!(violet, Some(Color32::from_rgb(146, 110, 228)));
+            assert_eq!(violet, crate::config::Accent::Named("violet").colour());
+            // following the scheme: the portal's, which is its selection
+            let scheme = "[Colors:Selection]\nBackgroundNormal=61,174,233\n".to_owned();
+            let portal = Some(Color32::from_rgb(1, 2, 3));
+            assert_eq!(of(std::slice::from_ref(&scheme), portal), portal);
+            let transparent = "[General]\nAccentColor=0,0,0,0\n".to_owned();
+            assert_eq!(of(&[transparent, scheme], portal), portal);
         }
     }
 }
