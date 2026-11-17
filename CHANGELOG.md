@@ -59,6 +59,9 @@ What changed in each release of tgradish, newest first. The format follows
 - On KDE Plasma 6, the GUI's accent as the system has it is the accent
   chosen in Plasma's settings, the same as choosing that colour in the
   GUI, not the darker selection colour Plasma makes from it.
+- The GUI's list no longer cuts "outdated" short under a file whose result
+  is out of date where the list is narrow: it says the result's size
+  alone then, as the badge on the file's picture says it is out of date.
 
 ## [2.0.0] - 2026-11-16
 

@@ -927,10 +927,19 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>, fading: f32) {
         }
         (None, Some(made)) => match &made.job.status {
             // out of date, it says nothing of how it went: the badge on
-            // its picture says to make it again
+            // its picture says to make it again, so where the size and that
+            // it is out of date don't fit together, the size alone, whole
             Status::Done(done) if !item.result_is_current() => {
-                let stale = small(fl!("row-stale", size = widgets::kib(done.bytes))).weak();
-                ui.add(egui::Label::new(stale).truncate());
+                let size = widgets::kib(done.bytes);
+                let stale = fl!("row-stale", size = size.as_str());
+                let font = egui::TextStyle::Small.resolve(ui.style());
+                let fits = |text: &str| {
+                    let colour = ui.visuals().text_color();
+                    let galley = ui.painter().layout_no_wrap(text.to_owned(), font.clone(), colour);
+                    galley.size().x <= ui.available_width()
+                };
+                let said = if fits(&stale) { stale } else { size };
+                ui.add(egui::Label::new(small(said).weak()).truncate());
             }
             Status::Done(done) => {
                 let refused = done.problems.iter().any(|p| p.refused);

@@ -84,8 +84,15 @@ pub(crate) fn walk(width: f32, mut visit: impl FnMut(&mut Harness<App>, &str)) {
     item.view.show = Show::Result;
     settle(&mut harness, Some(row));
     visit(&mut harness, "result");
-    // changed since, so made again from the list or the bar
-    harness.state_mut().items.last_mut().unwrap().choices.tgs.keep_canvas = Some(true);
+    // changed since, so made again from the list or the bar; as large as
+    // a sticker gets, which says the most under its name
+    let item = harness.state_mut().items.last_mut().unwrap();
+    item.choices.tgs.keep_canvas = Some(true);
+    if let Some(crate::jobs::Status::Done(done)) =
+        item.made.as_mut().map(|made| &mut made.job.status)
+    {
+        done.bytes = 255 * 1024 + 900;
+    }
     settle(&mut harness, Some(row));
     visit(&mut harness, "outdated");
     folds(&mut harness);
@@ -303,9 +310,10 @@ fn cuts_no_buttons_english_words_short() {
                 if !elided {
                     continue;
                 }
+                // on a file's row, its name alone, not what is said under it
                 let on = buttons.iter().find(|(button, _)| button.contains(rect.center()));
                 if let Some((_, label)) = on
-                    && !names.contains(label)
+                    && !(names.contains(label) && label.starts_with(text.trim_end_matches('…')))
                 {
                     cut.push(format!("{width}, {scene}: {text:?} of {label:?}"));
                 }
