@@ -845,6 +845,50 @@ mod tests {
     }
 
     #[test]
+    fn takes_a_scale_typed_before_its_buttons_step_it() {
+        if !has_ffmpeg() {
+            return;
+        }
+        use tgradish_core::options::IntegerScale;
+        let half = Some(IntegerScale { up: 1, down: 2 });
+        let stepped = [
+            (fl!("smaller"), Some(IntegerScale { up: 1, down: 3 })),
+            (fl!("larger"), Some(IntegerScale { up: 1, down: 1 })),
+        ];
+        for (button, then) in stepped {
+            let dir = tempfile::tempdir().unwrap();
+            let mut harness = opened(dir.path(), &["wide.png"]);
+            for label in [fl!("format-image"), fl!("scaling-integer"), fl!("scale-fixed")] {
+                harness.get_by_label(&label).click_accesskit();
+                harness.run_steps(2);
+                finish(&mut harness);
+            }
+            let set = selected(&harness).choices.webm.integer_scale;
+            assert_eq!(steps(&harness), 3);
+            // ½ typed, then the button clicked: ½ taken, then stepped from
+            let scale = egui_kittest::kittest::by().role(egui::accesskit::Role::SpinButton);
+            harness
+                .get_all(scale)
+                .rfind(|node| node.value().is_some_and(|value| value.starts_with('×')))
+                .unwrap()
+                .focus();
+            harness.run_steps(2);
+            harness.event(egui::Event::Text("1/2".into()));
+            harness.run_steps(2);
+            let all = harness.get_all_by_label(&button);
+            let at = all.map(|node| node.rect()).max_by(|a, b| a.top().total_cmp(&b.top()));
+            pointer_click(&mut harness, at.unwrap().center());
+            assert_eq!(selected(&harness).choices.webm.integer_scale, then, "{button}");
+            // each a step of its own
+            assert_eq!(steps(&harness), 5, "{button}");
+            undo(&mut harness);
+            assert_eq!(selected(&harness).choices.webm.integer_scale, half, "{button}");
+            undo(&mut harness);
+            assert_eq!(selected(&harness).choices.webm.integer_scale, set, "{button}");
+        }
+    }
+
+    #[test]
     fn forgets_what_was_undone_once_something_else_changes() {
         let dir = tempfile::tempdir().unwrap();
         let mut harness = opened(dir.path(), &["wide.png"]);

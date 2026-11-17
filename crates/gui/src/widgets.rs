@@ -1389,6 +1389,9 @@ struct Typing {
 const TYPED: &str = "number typed";
 const TAKE_TYPED: &str = "take number typed";
 const DRAWING: &str = "file drawn";
+/// The pass in which a number field last took, or tried to take, what was
+/// typed in it.
+const TAKEN: &str = "number taken";
 
 /// The number field typed in last, and the file whose settings it is in,
 /// where it is: so that what is typed in it is taken before the file goes
@@ -1409,6 +1412,11 @@ pub(crate) fn typing_number(ctx: &egui::Context) -> bool {
 /// taken: a number typed but not finished with; forgotten once its field
 /// has been out of sight too long.
 pub(crate) fn typed_number(ctx: &egui::Context) -> Option<u64> {
+    draft(ctx).and_then(|typed| typed.file)
+}
+
+/// The number field that holds what was typed in it, not yet taken.
+fn draft(ctx: &egui::Context) -> Option<Typed> {
     let typed = ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)))?;
     let typing = ctx.data(|data| data.get_temp::<Typing>(typed.field))?;
     // as the field itself would, drawn so long after
@@ -1416,7 +1424,15 @@ pub(crate) fn typed_number(ctx: &egui::Context) -> Option<u64> {
         ctx.data_mut(|data| data.remove::<Typing>(typed.field));
         return None;
     }
-    typed.file.filter(|_| typing.text != typing.written)
+    (typing.text != typing.written).then_some(typed)
+}
+
+/// Whether a number field holds what was typed in it, not yet taken, or
+/// took it this frame: a control pressed then leaves the field to take it
+/// as a step of its own, before it changes what the field holds.
+fn number_typed_now(ctx: &egui::Context) -> bool {
+    let taken = ctx.data(|data| data.get_temp::<u64>(egui::Id::new(TAKEN)));
+    draft(ctx).is_some() || taken == Some(ctx.cumulative_pass_nr())
 }
 
 /// Has the number field typed in be done with, as a click elsewhere does:
@@ -1614,6 +1630,8 @@ impl<'a> Number<'a> {
         if typing.text == typing.written {
             return None;
         }
+        let pass = ui.ctx().cumulative_pass_nr();
+        ui.data_mut(|data| data.insert_temp(egui::Id::new(TAKEN), pass));
         match self.parse(&typing.text) {
             Some(value) => {
                 let value = self.kept(value);
@@ -2057,6 +2075,12 @@ pub(crate) fn stepper(
     let held = enabled && response.is_pointer_button_down_on();
     let over = response.contains_pointer();
     let stepped = match (held, since) {
+        // not as it is pressed while a number is typed, which is taken then
+        // as a step of its own, but on the next frame, from what it took
+        (true, None) if number_typed_now(ui.ctx()) => {
+            ui.data_mut(|data| data.insert_temp(id, (now, 0_u32)));
+            false
+        }
         (true, None) => {
             if over {
                 ui.data_mut(|data| data.insert_temp(id, (now, 1_u32)));
@@ -2070,8 +2094,9 @@ pub(crate) fn stepper(
         }
         (false, since) => {
             ui.data_mut(|data| data.remove::<(f64, u32)>(id));
-            // a click it wasn't held for, as by the keyboard
-            since.is_none() && response.clicked()
+            // a click it wasn't held for, as by the keyboard, or that let go
+            // before the step it put off for a number typed
+            since.is_none_or(|(_, taken)| taken == 0) && response.clicked()
         }
     };
     if held {
