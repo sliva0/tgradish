@@ -2740,6 +2740,13 @@ pub(crate) fn problems(ui: &mut egui::Ui, problems: &[Problem]) {
 /// Room at the right of what scrolls for its bar, kept whether the bar
 /// shows or not, so nothing moves as it comes and goes.
 pub(crate) const GUTTER: f32 = 12.0;
+/// How wide a scroll bar is, at the outer edge of its gutter: flush with
+/// the edge of what holds it, as the buttons beside and under it are, the
+/// rest of the gutter a gap between it and what scrolls.
+pub(crate) const SCROLL_BAR: f32 = 6.0;
+/// The least length of a scroll bar's handle, so one over a long list is
+/// still there to take hold of.
+const LEAST_HANDLE: f32 = 24.0;
 /// How far what is cut off at either end of what scrolls fades out.
 pub(crate) const SCROLL_FADE: f32 = 24.0;
 
@@ -2754,15 +2761,33 @@ pub(crate) fn scrolled<R>(
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::scroll_area::ScrollAreaOutput<R> {
     let width = ui.available_width();
-    let outer = ui.spacing().scroll;
+    let outer = ui.style().clone();
     ui.scope(|ui| {
         let mut style = egui::style::ScrollStyle::solid();
-        style.bar_outer_margin = GUTTER - style.bar_width - style.bar_inner_margin;
+        style.bar_width = SCROLL_BAR;
+        style.bar_inner_margin = GUTTER - SCROLL_BAR;
+        style.bar_outer_margin = 0.0;
+        style.handle_min_length = LEAST_HANDLE;
         style.fade = egui::style::ScrollFadeStyle { strength: 1.0, size: SCROLL_FADE };
         ui.spacing_mut().scroll = style;
+        // egui paints the track in the extreme background and the handle in
+        // the fill of a widget resting, hovered or pressed: here a checkbox's,
+        // the view's colour, as the track's, so the handle wouldn't show
+        let colours = theme::scroll_bar(ui.visuals());
+        let visuals = ui.visuals_mut();
+        visuals.extreme_bg_color = colours.track;
+        let round = egui::CornerRadius::same((SCROLL_BAR / 2.0) as u8);
+        let widgets = &mut visuals.widgets;
+        for (state, handle) in [&mut widgets.inactive, &mut widgets.hovered, &mut widgets.active]
+            .into_iter()
+            .zip(colours.handle)
+        {
+            state.bg_fill = handle;
+            state.corner_radius = round;
+        }
         area.show(ui, |ui| {
             // what scrolls within as it would elsewhere
-            ui.spacing_mut().scroll = outer;
+            ui.set_style(outer);
             ui.set_max_width(width - GUTTER);
             let added = add(ui);
             // never shorter while the pointer is held than as the frame

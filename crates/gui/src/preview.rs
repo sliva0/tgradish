@@ -131,6 +131,9 @@ impl App {
                 );
                 ui.add_space(8.0);
                 ui.separator();
+                // to the panel's edge, whatever the gap took, so its bar
+                // is in line with the bar of the settings under it
+                let side = ui.available_width().max(side);
                 ui.allocate_ui_with_layout(
                     vec2(side, ui.available_height()),
                     egui::Layout::top_down(egui::Align::Min),
@@ -790,6 +793,34 @@ mod tests {
         let [start, end] = fields[..] else { panic!("{fields:?}") };
         assert!(end.x0 - start.x1 >= 160.0, "{start:?} to {end:?}");
         assert!((row.x1 - end.x1).abs() < 1.0, "{row:?} under {end:?}");
+    }
+
+    #[test]
+    fn lines_up_the_bars_of_the_column_and_the_settings_with_the_edge() {
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        // short enough that the column and the settings both scroll
+        let mut harness =
+            Harness::builder().with_size([crate::MIN_WIDTH, 560.0]).build_eframe(|cc| {
+                let app = App::with(Config::default(), None, Presets::builtin());
+                app.style(&cc.egui_ctx);
+                app
+            });
+        harness.state_mut().add(vec![art]);
+        finish(&mut harness);
+        let bar = egui_kittest::kittest::by().role(egui::accesskit::Role::ScrollBar);
+        let bars: Vec<_> = harness
+            .query_all(bar)
+            .map(|node| node.accesskit_node().bounding_box().unwrap())
+            .filter(|bar| bar.x0 > f64::from(crate::MIN_WIDTH) / 2.0)
+            .collect();
+        let [first, second] = bars[..] else { panic!("{bars:?}") };
+        // one above the other, at the edge of the panel within the
+        // window's margin and its own, where the buttons under them end
+        assert!((first.x1 - second.x1).abs() < 0.5, "{first:?} beside {second:?}");
+        let edge = f64::from(crate::MIN_WIDTH) - 16.0;
+        assert!((first.x1 - edge).abs() < 0.5, "{first:?} short of {edge}");
     }
 
     /// Its words whole in British English; another language's, often

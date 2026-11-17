@@ -585,6 +585,150 @@ fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     settle(&mut harness);
 }
 
+/// Only the pictures of [`scroll_bars`], to `$TGRADISH_SCREENSHOTS` as
+/// [`screenshots`] makes them.
+#[test]
+#[ignore]
+fn scroll_bar_screenshots() {
+    let out =
+        PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
+    crate::l10n::choose(None);
+    scroll_bars(&mut |harness: &mut Harness<App>, name: &str| {
+        let image = harness.render().expect("rendering needs a GPU");
+        image.save(out.join(format!("tgradish-{name}.png"))).unwrap();
+    });
+}
+
+/// Every place that scrolls with its bar showing, scrolled part of the
+/// way: the list, the column beside the preview and the settings under it,
+/// of pixel art made into an animated sticker, at the narrowest window, the
+/// usual one, and one tall enough that only the list scrolls; in both
+/// themes, with a purple accent and the grey, then Settings scrolled.
+fn scroll_bars(save: &mut impl FnMut(&mut Harness<App>, &str)) {
+    use crate::config::{Accent, Theme};
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::default();
+    config.gui.output_dir = Some(dir.path().join("out"));
+    config.gui.accent = Accent::Named("purple");
+    let walker = tgradish_corpus::sprite("walker_2x");
+    let ase = dir.path().join("walker.ase");
+    std::fs::write(&ase, tgradish_corpus::encode::aseprite_with(&walker, &[], &[])).unwrap();
+    // enough others that the list scrolls in the usual window
+    let mut files = vec![ase];
+    for n in 0..24 {
+        let other = dir.path().join(format!("pixel {n:02}.png"));
+        square(&other, [30, 160 - 4 * n as u8, 60, 255]);
+        files.push(other);
+    }
+    let mut harness = window(config, egui::vec2(crate::MIN_WIDTH, 900.0));
+    harness.state_mut().add(files);
+    finish(&mut harness);
+    let first = harness.state().items[0].id;
+    harness.state_mut().select(first);
+    let item = &mut harness.state_mut().items[0];
+    (item.format, item.format_guessed) = (Format::Tgs, false);
+    finish(&mut harness);
+    convert(&harness);
+    harness.run_steps(2);
+    finish(&mut harness);
+    // out of date, as it is changed after it was made
+    harness.state_mut().items[0].choices.tgs.tempo = Some(2.0);
+    let wheel = |harness: &mut Harness<App>, at: egui::Pos2, by: f32| {
+        harness.event(egui::Event::PointerMoved(at));
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -by),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        harness.run_steps(8);
+    };
+    let shot =
+        |harness: &mut Harness<App>, save: &mut dyn FnMut(&mut Harness<App>, &str), name: &str| {
+            harness.event(egui::Event::PointerGone);
+            for item in &mut harness.state_mut().items {
+                item.view.playing = false;
+            }
+            harness.run_steps(3);
+            std::thread::sleep(Duration::from_millis(300));
+            harness.run_steps(3);
+            save(harness, name);
+        };
+    for size in
+        [egui::vec2(crate::MIN_WIDTH, 900.0), egui::vec2(1280.0, 820.0), egui::vec2(1280.0, 2400.0)]
+    {
+        harness.set_size(size);
+        harness.run_steps(3);
+        let screen = harness.ctx.content_rect();
+        // the list, the column beside the preview and the settings under
+        // it, each scrolled part of the way
+        wheel(&mut harness, egui::pos2(100.0, screen.center().y), 160.0);
+        wheel(&mut harness, egui::pos2(screen.max.x - 120.0, 200.0), 60.0);
+        wheel(&mut harness, egui::pos2(screen.max.x - 300.0, screen.max.y - 200.0), 60.0);
+        for (name, accent) in [("purple", Accent::Named("purple")), ("grey", Accent::Named("grey"))]
+        {
+            harness.state_mut().config.gui.accent = accent;
+            for theme in [Theme::Dark, Theme::Light] {
+                set_theme(&harness.ctx, theme);
+                let theme = if theme == Theme::Dark { "dark" } else { "light" };
+                let (width, height) = (size.x, size.y);
+                shot(&mut harness, save, &format!("scroll-{width}x{height}-{name}-{theme}"));
+            }
+        }
+        harness.state_mut().config.gui.accent = Accent::Named("purple");
+        set_theme(&harness.ctx, Theme::Dark);
+    }
+    // the handle of the settings' bar under the pointer, and held, in the
+    // narrowest window: found where it is drawn, at the edge of the panel,
+    // within the window's margin and its own
+    harness.set_size(egui::vec2(crate::MIN_WIDTH, 900.0));
+    for theme in [Theme::Dark, Theme::Light] {
+        set_theme(&harness.ctx, theme);
+        harness.event(egui::Event::PointerGone);
+        harness.run_steps(3);
+        let resting = crate::theme::scroll_bar(&harness.ctx.global_style().visuals).handle[0];
+        let image = harness.render().expect("rendering needs a GPU");
+        let screen = harness.ctx.content_rect();
+        let x = screen.max.x - 16.0 - crate::widgets::SCROLL_BAR / 2.0;
+        let handle = (screen.center().y as u32..screen.max.y as u32)
+            .find(|&y| {
+                let pixel = image.get_pixel(x as u32, y).0;
+                let near = |a: u8, b: u8| a.abs_diff(b) <= 3;
+                near(pixel[0], resting.r())
+                    && near(pixel[1], resting.g())
+                    && near(pixel[2], resting.b())
+            })
+            .expect("the settings' handle");
+        let at = egui::pos2(x, handle as f32 + 12.0);
+        let theme = if theme == Theme::Dark { "dark" } else { "light" };
+        harness.hover_at(at);
+        harness.run_steps(3);
+        save(&mut harness, &format!("scroll-hovered-{theme}"));
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        harness.event(press(true));
+        harness.run_steps(3);
+        save(&mut harness, &format!("scroll-held-{theme}"));
+        harness.event(press(false));
+        harness.run_steps(3);
+    }
+    // Settings, scrolled part of the way, in the narrowest window
+    harness.set_size(egui::vec2(crate::MIN_WIDTH, 820.0));
+    harness.state_mut().settings_dialog.open();
+    harness.run_steps(6);
+    let screen = harness.ctx.content_rect();
+    wheel(&mut harness, screen.center(), 200.0);
+    for theme in [Theme::Dark, Theme::Light] {
+        set_theme(&harness.ctx, theme);
+        let theme = if theme == Theme::Dark { "dark" } else { "light" };
+        shot(&mut harness, save, &format!("scroll-settings-{theme}"));
+    }
+}
+
 /// The GUI drawn as the screenshots draw it, of `config`, in a window
 /// `size` large.
 fn window(config: Config, size: egui::Vec2) -> Harness<'static, App> {

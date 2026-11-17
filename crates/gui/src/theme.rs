@@ -498,6 +498,39 @@ pub(crate) fn track(visuals: &egui::Visuals) -> (Color32, Stroke) {
     }
 }
 
+/// How far a scroll bar's handle lightens on Breeze Dark, or darkens on
+/// Breeze Light, as the pointer is over it, and further as it is held, in
+/// L*: enough to see it answer at a glance.
+const HANDLE_HOVERED: f32 = 10.0;
+const HANDLE_HELD: f32 = 20.0;
+
+/// The colours of a scroll bar: its track, faint, and its handle, resting,
+/// hovered and held.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ScrollBar {
+    pub(crate) track: Color32,
+    pub(crate) handle: [Color32; 3],
+}
+
+/// A scroll bar's colours, greys of the scheme whatever the accent, as
+/// Breeze's are: a track a shade off the window, so the bar's length shows
+/// without drawing the eye, and a handle seen on both it and the window, as
+/// an outline is, nearer the text as the pointer is over it and held.
+/// egui would draw its handle in a checkbox's fill, the view's colour, as
+/// its track is, which leaves nothing of the handle to see.
+pub(crate) fn scroll_bar(visuals: &egui::Visuals) -> ScrollBar {
+    let scheme = scheme(visuals);
+    let track = mix(scheme.window, scheme.text, 0.06);
+    let resting = towards(track, scheme.text, &[scheme.window, track], SEEN);
+    let further = |step: f32| {
+        (1..=40)
+            .map(|amount| mix(resting, scheme.text, amount as f32 / 40.0))
+            .find(|shade| (lightness(*shade) - lightness(resting)).abs() >= step)
+            .unwrap_or(scheme.text)
+    };
+    ScrollBar { track, handle: [resting, further(HANDLE_HOVERED), further(HANDLE_HELD)] }
+}
+
 /// `visuals` for a primary button, the one way on in its place: filled
 /// with the accent, its words black or white, whichever reads better on
 /// it, and the accent made as much darker or lighter as it takes for them
@@ -857,6 +890,41 @@ mod tests {
                 reads(accent_text(&visuals), scheme.window, "accent text");
                 // outlines and the keyboard's focus, seen on the window
                 seen(mark(&visuals), "outline");
+            }
+        }
+    }
+
+    #[test]
+    fn shows_a_scroll_bars_handle_on_its_track_and_the_window() {
+        for given in every_accent() {
+            for (dark, scheme) in [(false, &LIGHT), (true, &DARK)] {
+                let visuals = visuals(dark, given);
+                let ScrollBar { track, handle } = scroll_bar(&visuals);
+                // resting, hovered and held, each seen on the track under
+                // it and on the window at its ends, as an outline is
+                for (state, colour) in ["resting", "hovered", "held"].into_iter().zip(handle) {
+                    for (under, what) in [(track, "track"), (scheme.window, "window")] {
+                        let ratio = contrast(colour, under);
+                        assert!(
+                            ratio >= SEEN,
+                            "{state} handle on the {what} with {given:?}, dark {dark}: {ratio}"
+                        );
+                    }
+                }
+                // nearer the text as the pointer is over it, and held
+                let from = |shade: Color32| (lightness(shade) - lightness(handle[0])).abs();
+                let towards_text = |shade: Color32| {
+                    (lightness(scheme.text) - lightness(shade)).abs()
+                        < (lightness(scheme.text) - lightness(handle[0])).abs()
+                };
+                assert!(from(handle[1]) >= HANDLE_HOVERED && towards_text(handle[1]));
+                assert!(from(handle[2]) >= HANDLE_HELD && towards_text(handle[2]));
+                // the track a faint shade of the window, never as strong as
+                // the handle, and unlike egui's, the view's near black
+                let faint = (lightness(track) - lightness(scheme.window)).abs();
+                assert!((1.5..CHOSEN_STEP).contains(&faint), "track, dark {dark}: {faint}");
+                assert_ne!(handle[0], track);
+                assert_ne!(track, visuals.extreme_bg_color);
             }
         }
     }
