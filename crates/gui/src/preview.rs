@@ -124,16 +124,19 @@ impl App {
                             .id_salt(("side", id))
                             .auto_shrink([false, false]);
                         widgets::scrolled(ui, column, |ui| {
-                            widgets::settings_spacing(ui);
-                            ui.add_space(6.0);
-                            file_settings::make(ui, item, &context);
-                            file_settings::blocked(ui, item);
-                            // what converting did, where the eye is once
-                            // Convert is pressed, before the plan, which
-                            // matters most before there is a result
-                            summary(ui, item, queued, copyable);
-                            details(ui, item);
-                            file_settings::plan(ui, item, &context);
+                            widgets::of_file(ui, "side", id, |ui| {
+                                widgets::settings_spacing(ui);
+                                ui.add_space(6.0);
+                                file_settings::make(ui, item, &context);
+                                file_settings::blocked(ui, item);
+                                // what converting did, where the eye is
+                                // once Convert is pressed, before the plan,
+                                // which matters most before there is a
+                                // result
+                                summary(ui, item, queued, copyable);
+                                details(ui, item);
+                                file_settings::plan(ui, item, &context);
+                            });
                         });
                     },
                 );
@@ -170,9 +173,11 @@ impl App {
             let settings =
                 egui::ScrollArea::vertical().id_salt(("settings", id)).auto_shrink([false, false]);
             widgets::scrolled(ui, settings, |ui| {
-                widgets::settings_spacing(ui);
-                file_settings::show(ui, item, &context);
-                ui.add_space(12.0);
+                widgets::of_file(ui, "settings", id, |ui| {
+                    widgets::settings_spacing(ui);
+                    file_settings::show(ui, item, &context);
+                    ui.add_space(12.0);
+                });
             });
         });
         if in_frames != self.config.gui.timeline_frames {
@@ -526,7 +531,9 @@ fn preview(
         vec2(rect.width(), row_height),
     );
     let layout = egui::Layout::top_down(egui::Align::Min);
-    ui.scope_builder(egui::UiBuilder::new().max_rect(row).layout(layout), |ui| {
+    // with ids of the file's own, as [`widgets::of_file`] gives its settings
+    let id = egui::Id::new(("row", item.id));
+    ui.scope_builder(egui::UiBuilder::new().id(id).max_rect(row).layout(layout), |ui| {
         match (shown, length, result_length) {
             (Show::Input, Some(_), _) if item.format == Format::Webp => {
                 if let Some(frames) = item.input_frames() {

@@ -239,6 +239,20 @@ pub(crate) fn steady_width<R>(
     .inner
 }
 
+/// Shows what `add` adds as `part` of the file `file`'s, with ids of its
+/// own: what a widget keeps by its id, as the text being typed in a number
+/// field, stays the file's, rather than going to the widget in its place
+/// in another file's settings once that file is picked.
+pub(crate) fn of_file<R>(
+    ui: &mut egui::Ui,
+    part: &str,
+    file: u64,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let id = egui::Id::new((part, file));
+    ui.scope_builder(egui::UiBuilder::new().id(id), add).inner
+}
+
 /// A link to `url`, which takes a click as a link, rather than starting a
 /// selection as text does.
 pub(crate) fn link(
@@ -1267,10 +1281,10 @@ pub(crate) fn number_field(ui: &mut egui::Ui, set: bool, field: Number<'_>) -> e
 
 // Every number field is a [`Number`], so that they all take typing, keys,
 // dragging and the wheel alike. What is typed is only taken as it is done
-// with, by Enter, Tab or a click elsewhere: values that follow from the
-// field, as the crop does from a side of its ratio, would otherwise follow
-// each digit on the way, as 1 of 16, and stay where that left them. So
-// Escape can still put it back as it was.
+// with, by Enter, Tab or the pointer pressed elsewhere: values that follow
+// from the field, as the crop does from a side of its ratio, would
+// otherwise follow each digit on the way, as 1 of 16, and stay where that
+// left them. So Escape can still put it back as it was.
 
 /// How far dragging a number field takes it across its whole range, in
 /// points, at the most: a field of a wide range is dragged faster than its
@@ -1762,6 +1776,18 @@ impl egui::Widget for Number<'_> {
                     ui.ctx().request_repaint();
                 }
             }
+            // done with as the pointer goes down elsewhere, as in a browser,
+            // rather than as it comes up: what was typed is then taken in
+            // the frame before what the click does, which may show another
+            // file's settings, and is a step of its own
+            let elsewhere = ui.input(|input| {
+                let pressed = input.pointer.any_pressed();
+                let origin = input.pointer.press_origin();
+                pressed && origin.is_some_and(|at| !response.interact_rect.contains(at))
+            });
+            if elsewhere {
+                ui.memory_mut(|memory| memory.surrender_focus(id));
+            }
             if ui.memory(|memory| memory.has_focus(id)) {
                 (typing.value, typing.pass) = (value, ui.ctx().cumulative_pass_nr());
                 ui.data_mut(|data| {
@@ -1769,7 +1795,7 @@ impl egui::Widget for Number<'_> {
                     data.insert_temp(egui::Id::new(TYPED), id);
                 });
             } else {
-                // done with by Enter, or a click elsewhere
+                // done with by Enter, or a press elsewhere
                 ui.data_mut(|data| data.remove::<Typing>(id));
                 if escaped {
                     value = typing.start;

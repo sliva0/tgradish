@@ -77,8 +77,9 @@ pub(crate) struct Frame {
     pub(crate) input: bool,
     /// An arrow key was pressed.
     pub(crate) arrows: bool,
-    /// A field typed in was done with, by Enter, Tab or a click elsewhere:
-    /// what it took is a step then, apart from what the click goes on to do.
+    /// A field typed in was done with, by Enter, Tab or the pointer
+    /// pressed elsewhere: what it took is a step then, apart from what the
+    /// press goes on to do.
     pub(crate) committed: bool,
 }
 
@@ -509,6 +510,75 @@ mod tests {
         assert_eq!(selected(&harness).choices.crop, None);
         redo(&mut harness);
         assert_eq!(selected(&harness).choices.crop, crop);
+    }
+
+    /// A click of the pointer at `at`, pressed and let go of a frame apart.
+    fn pointer_click(harness: &mut Harness<App>, at: Pos2) {
+        harness.event(egui::Event::PointerMoved(at));
+        harness.step();
+        for pressed in [true, false] {
+            let (button, modifiers) = (PointerButton::Primary, Modifiers::NONE);
+            harness.event(egui::Event::PointerButton { pos: at, button, pressed, modifiers });
+            harness.step();
+        }
+        harness.run_steps(3);
+    }
+
+    /// `text` typed into the crop's width field, which holds `holds`,
+    /// without taking it.
+    fn type_width(harness: &mut Harness<App>, holds: &str, text: &str) {
+        harness.get(width_field(holds)).focus();
+        harness.run_steps(2);
+        harness.event(egui::Event::Text(text.into()));
+        harness.run_steps(2);
+    }
+
+    #[test]
+    fn takes_a_number_typed_into_its_own_file_as_another_is_clicked() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["first.png", "second.png"]);
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        harness.state_mut().select(ids[0]);
+        harness.run_steps(2);
+        type_width(&mut harness, "40 px", "20");
+        let name = harness.state().items[1].name();
+        let row = egui_kittest::kittest::by().label(&name).role(egui::accesskit::Role::Button);
+        let at = harness.get(row).rect().center();
+        pointer_click(&mut harness, at);
+        assert_eq!(harness.state().selected, Some(ids[1]));
+        let width = |harness: &Harness<App>, at: usize| {
+            harness.state().items[at].choices.crop.map(|crop| crop.width)
+        };
+        // the first's, as its own step, and nothing of the second's
+        assert_eq!((width(&harness, 0), width(&harness, 1)), (Some(20), None));
+        assert_eq!(harness.state().items[0].history.undo.len(), 1);
+        assert!(!harness.state().items[1].history.can_undo());
+        // and the second's field is its own
+        assert!(harness.query(width_field("40 px")).is_some());
+        harness.state_mut().select(ids[0]);
+        harness.run_steps(2);
+        undo(&mut harness);
+        assert_eq!(width(&harness, 0), None);
+    }
+
+    #[test]
+    fn makes_a_number_typed_and_the_click_that_takes_it_two_steps() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["wide.png"]);
+        type_width(&mut harness, "40 px", "20");
+        let at = harness.get_by_label(&fl!("target-emoji")).rect().center();
+        pointer_click(&mut harness, at);
+        let crop = selected(&harness).choices.crop;
+        assert_eq!(crop.map(|crop| crop.width), Some(20));
+        assert_eq!(selected(&harness).choices.target, Target::Emoji);
+        assert_eq!(steps(&harness), 2);
+        undo(&mut harness);
+        assert_eq!(
+            (selected(&harness).choices.crop, selected(&harness).choices.target),
+            (crop, Target::Sticker)
+        );
+        undo(&mut harness);
+        assert_eq!(selected(&harness).choices.crop, None);
     }
 
     #[test]
