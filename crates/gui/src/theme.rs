@@ -385,10 +385,10 @@ pub(crate) fn over_fill(visuals: &egui::Visuals) -> Cased {
 }
 
 /// The outline of a badge on a list row, as a result out of date has: seen
-/// on the row whatever the accent lit it with, where the badge's orange may
-/// not be. On Breeze Light the text colour; on Breeze Dark, whose white
-/// text outlines it heavily, the weaker text's grey, or as much nearer the
-/// text as it takes to be seen.
+/// on the row whatever the accent lit it with, and on the picture under it,
+/// where the badge's fill, a button's, may not be. On Breeze Light the text
+/// colour; on Breeze Dark, whose white text outlines it heavily, the weaker
+/// text's grey, or as much nearer the text as it takes to be seen.
 pub(crate) fn badge_edge(visuals: &egui::Visuals) -> Color32 {
     let scheme = scheme(visuals);
     if !visuals.dark_mode {

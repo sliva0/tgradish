@@ -517,13 +517,12 @@ fn row(
         if stale && !item.is_busy() && !item.blocked() {
             let badge =
                 egui::Rect::from_min_size(result.right_top() - vec2(20.0, 0.0), vec2(20.0, 20.0));
+            // a button as the others are, solid over any picture, and
             // outlined in what is seen on the selected row whatever its
-            // accent, where the badge's orange may not be
+            // accent, and on the picture under it
             let edge = egui::Stroke::new(1.0, theme::badge_edge(ui.visuals()));
-            let button = egui::Button::new(RichText::new("⟳").size(13.0).color(Color32::BLACK))
-                .fill(theme::NEUTRAL)
-                .stroke(edge)
-                .corner_radius(4.0);
+            let glyph = RichText::new("⟳").size(13.0).color(ui.visuals().strong_text_color());
+            let button = egui::Button::new(glyph).stroke(edge).corner_radius(4.0);
             // placed, so the rows below don't move
             let again = widgets::named(ui.place(badge, button), &fl!("row-convert-again"));
             if again.on_hover_text(fl!("row-convert-again")).clicked() {
