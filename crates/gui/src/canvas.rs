@@ -173,16 +173,25 @@ enum Drag {
 pub(crate) const MARGIN: f32 = 14.0;
 /// How near an edge the pointer grabs it, in points.
 const GRAB: f32 = 7.0;
-/// The most a picture is zoomed in to, from where it fits.
-const MOST_LEVEL: f32 = 64.0;
+/// How many of the screen's pixels a pixel of a picture takes, zoomed in
+/// as far as it goes: enough to see each and put a crop on its edge,
+/// however large the picture.
+const MOST_PIXELS: f32 = 32.0;
+/// How far a picture is zoomed in at least, from where it fits, where its
+/// pixels take more than that there already, as a small sprite's do.
+const LEAST_MOST_LEVEL: f32 = 4.0;
 /// The most of the screen's pixels a pixel of a picture takes zoomed in,
 /// which Zoom out has room to say.
 pub(crate) const MOST_TIMES: f32 = 9999.0;
 
 /// How far a picture is zoomed in to at most, from where it fits, where a
-/// pixel of it takes `fit` of the screen's pixels.
+/// pixel of it takes `fit` of the screen's pixels: until a pixel takes
+/// [`MOST_PIXELS`], rather than so many times where it fits, which for a
+/// sprite would be pixels larger than the screen and for a photo would
+/// stop short of seeing its pixels.
 fn most_level(fit: f32) -> f32 {
-    MOST_LEVEL.min(MOST_TIMES / fit).max(1.0)
+    let most = MOST_PIXELS.max(fit * LEAST_MOST_LEVEL).min(MOST_TIMES);
+    (most / fit).max(1.0)
 }
 /// Side of the squares that show transparency, in points.
 const CHECKER: f32 = 8.0;
@@ -1498,6 +1507,18 @@ mod tests {
         // a touchpad's 40 points, as far as egui scrolls by a notch
         let points = zoomed(egui::MouseWheelUnit::Point, 40.0);
         assert!((points - (40.0 * PER_POINT).exp()).abs() < 0.01, "{points}");
+    }
+
+    #[test]
+    fn zooms_in_until_a_pixel_takes_32_of_the_screens() {
+        // a sticker, fitted a little larger than its pixels
+        assert_eq!(most_level(1.25), 25.6);
+        // a photo, fitted at a tenth
+        assert_eq!(most_level(0.1), 320.0);
+        // a sprite, fitted 30 times larger: four times that still
+        assert_eq!(most_level(30.0), 4.0);
+        // never short of where it fits
+        assert_eq!(most_level(20_000.0), 1.0);
     }
 
     #[test]

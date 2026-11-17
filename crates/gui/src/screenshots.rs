@@ -513,6 +513,12 @@ fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
         settle(&mut harness);
         save(&mut harness, name);
     }
+    // zoomed in as far as it goes, into the crop's corner
+    harness.state_mut().items[0].view.input_zoom.level = f32::MAX;
+    settle(&mut harness);
+    save(&mut harness, "zoomed-most");
+    harness.state_mut().items[0].view.input_zoom = Zoom::default();
+    settle(&mut harness);
     // the shortcuts, scrolled to what the mouse does
     harness.state_mut().shortcuts = true;
     settle(&mut harness);
