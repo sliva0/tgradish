@@ -1687,6 +1687,12 @@ fn notches(ui: &egui::Ui) -> (f32, f32) {
     })
 }
 
+/// Takes this frame's Escape, which put back what a field held: it is the
+/// field's, not a dialog's around it to close by, nor anything else's.
+pub(crate) fn escape_taken(ui: &egui::Ui) {
+    ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+}
+
 /// Selects all of `text` in the field `id`, as typing in it begins, so
 /// that what is typed takes its place.
 fn select_all(ui: &egui::Ui, id: egui::Id, text: &str) {
@@ -1754,6 +1760,7 @@ impl egui::Widget for Number<'_> {
                 if escaped {
                     value = typing.start;
                     self.set(value);
+                    escape_taken(ui);
                 } else if let Some(taken) = self.take(ui, id, typing) {
                     value = taken;
                 }
@@ -1859,6 +1866,7 @@ impl egui::Widget for Number<'_> {
                 if escaped {
                     value = typing.start;
                     self.set(value);
+                    escape_taken(ui);
                 } else if let Some(taken) = self.take(ui, id, &typing) {
                     value = taken;
                 }

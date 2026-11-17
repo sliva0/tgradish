@@ -932,6 +932,36 @@ mod tests {
     }
 
     #[test]
+    fn leaves_the_first_escape_to_a_field_typed_in() {
+        let mut harness = crate::testing::harness(Config::default());
+        harness.run_steps(2);
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(3);
+        // the threads, of one's own number, typed in
+        harness.get_all_by_label(&fl!("custom")).last().unwrap().click_accesskit();
+        harness.run_steps(3);
+        let threads = |harness: &Harness<crate::app::App>| harness.state().config.threads;
+        let set = threads(&harness);
+        assert_ne!(set, tgradish_core::config::Threads::Auto);
+        let field = harness.query_all_by_role(egui::accesskit::Role::SpinButton).last().unwrap();
+        field.focus();
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("3".into()));
+        harness.run_steps(2);
+        // put back as it was, Settings still open
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(3);
+        assert!(harness.state().settings_dialog.is_open());
+        assert!(!harness.ctx.text_edit_focused());
+        assert_eq!(threads(&harness), set);
+        // and closed by the next
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(3);
+        assert!(!harness.state().settings_dialog.is_open());
+        assert_eq!(threads(&harness), set);
+    }
+
+    #[test]
     fn keeps_each_change_as_it_is_made() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");

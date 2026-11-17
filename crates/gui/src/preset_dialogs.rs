@@ -344,14 +344,21 @@ impl App {
                         ui.label(RichText::new(fl!("preset-description")).weak());
                         ui.end_row();
                     }
+                    // a field left by Escape puts back what it held, rather
+                    // than renaming or describing by what was typed, and the
+                    // presets stay open, for the next Escape
+                    let escaped = ui.input(|input| input.key_pressed(egui::Key::Escape));
                     for row in &mut managing.rows {
                         // sized, as a grid keeps a column as narrow as its header
                         let line = ui.spacing().interact_size.y;
                         let name = widgets::text_field(&mut row.typed_name);
-                        if ui.add_sized(vec2(170.0, line), name).lost_focus()
-                            && row.typed_name.trim_end() != row.name
-                        {
-                            changes.push(Change::Rename(row.id));
+                        if ui.add_sized(vec2(170.0, line), name).lost_focus() {
+                            if escaped {
+                                row.typed_name.clone_from(&row.name);
+                                widgets::escape_taken(ui);
+                            } else if row.typed_name.trim_end() != row.name {
+                                changes.push(Change::Rename(row.id));
+                            }
                         }
                         match &row.broken {
                             Some(why) => {
@@ -361,10 +368,13 @@ impl App {
                             None => {
                                 let field = widgets::text_field(&mut row.typed_description)
                                     .hint_text(fl!("preset-description", "none"));
-                                if ui.add_sized(vec2(300.0, line), field).lost_focus()
-                                    && row.typed_description.trim() != row.description
-                                {
-                                    changes.push(Change::Describe(row.id));
+                                if ui.add_sized(vec2(300.0, line), field).lost_focus() {
+                                    if escaped {
+                                        row.typed_description.clone_from(&row.description);
+                                        widgets::escape_taken(ui);
+                                    } else if row.typed_description.trim() != row.description {
+                                        changes.push(Change::Describe(row.id));
+                                    }
                                 }
                             }
                         }
@@ -640,6 +650,48 @@ mod tests {
         let saved = state.presets.webm("by quality").unwrap();
         assert_eq!((saved.fit, saved.title), (Some(Fit::Crf), None));
         assert!(dir.path().join("presets/by quality.toml").is_file());
+    }
+
+    #[test]
+    fn leaves_the_first_escape_to_a_name_typed_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let presets_dir = dir.path().join("presets");
+        let webm = Options { crf: Some(20), fit: Some(Fit::Crf), ..Options::default() };
+        presets::save(&presets_dir, "mine", "", (&webm, &tgs::Options::default()), false).unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        let mut harness = harness(Config::default());
+        let state = harness.state_mut();
+        state.presets_dir = Some(presets_dir.clone());
+        state.presets = Presets::load(Some(&presets_dir)).unwrap();
+        state.add(vec![art]);
+        finish(&mut harness);
+        harness.get_by_label(&fl!("manage-presets")).click();
+        harness.run_steps(2);
+        let name = egui_kittest::kittest::by()
+            .role(eframe::egui::accesskit::Role::TextInput)
+            .value("mine");
+        harness.get(name).focus();
+        harness.run_steps(2);
+        harness.event(eframe::egui::Event::Text("s".into()));
+        harness.run_steps(2);
+        let managing = |harness: &egui_kittest::Harness<crate::app::App>| {
+            matches!(harness.state().preset_dialog, Some(Dialog::Manage(_)))
+        };
+        // the name put back, not taken, the presets still open
+        harness.key_press(eframe::egui::Key::Escape);
+        harness.run_steps(3);
+        assert!(managing(&harness));
+        assert!(harness.state().presets.get("mine").is_ok());
+        let name = egui_kittest::kittest::by()
+            .role(eframe::egui::accesskit::Role::TextInput)
+            .value("mine");
+        assert!(harness.query(name).is_some());
+        // and closed by the next
+        harness.key_press(eframe::egui::Key::Escape);
+        harness.run_steps(3);
+        assert!(!managing(&harness));
+        assert!(harness.state().presets.get("mine").is_ok());
     }
 
     #[test]
