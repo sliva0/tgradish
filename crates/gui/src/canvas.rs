@@ -200,17 +200,24 @@ const CHECKER: f32 = 8.0;
 /// takes.
 pub(crate) fn layout(rect: Rect, size: (u32, u32), zoom: &Zoom) -> (Rect, f32) {
     let (width, height) = (size.0.max(1) as f32, size.1.max(1) as f32);
-    let scale = fit(rect, size) * zoom.level;
+    let scale = fit(rect, size, zoom.grid) * zoom.level;
     let shown = vec2(width, height) * scale;
     let min = rect.center() - vec2(zoom.centre.x * shown.x, zoom.centre.y * shown.y);
     (Rect::from_min_size(min, shown), scale)
 }
 
 /// How many points an input pixel takes where a `size` picture fits
-/// `rect`.
-fn fit(rect: Rect, size: (u32, u32)) -> f32 {
+/// `rect`: for pixel art, whose pixels take `grid` of the screen's for
+/// each point an input pixel takes, a whole number of the screen's pixels
+/// to each of its own from two up, as nearest neighbour draws them, so
+/// that they are all as wide, rather than some a screen pixel wider.
+fn fit(rect: Rect, size: (u32, u32), grid: Option<f32>) -> f32 {
     let (width, height) = (size.0.max(1) as f32, size.1.max(1) as f32);
     let fit = ((rect.width() - 2.0 * MARGIN) / width).min((rect.height() - 2.0 * MARGIN) / height);
+    let fit = match grid {
+        Some(grid) if fit * grid >= 2.0 => (fit * grid).floor() / grid,
+        _ => fit,
+    };
     fit.max(1e-3)
 }
 
@@ -231,15 +238,19 @@ pub(crate) fn show(
     cropping: Option<Cropping>,
 ) {
     // a part of the space the caller took: taking it again would move
-    // what comes next
-    // not a stop of the keyboard's focus itself: the crop on it is
+    // what comes next. Not a stop of the keyboard's focus itself: the crop
+    // on it is
     let response = ui.interact(rect, ui.id().with("canvas"), Sense::CLICK | Sense::DRAG);
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, theme::stage(ui.visuals().dark_mode));
 
     let side = picture.size.0.max(picture.size.1);
     let canvas = if picture.square { (side, side) } else { picture.size };
-    hold(zoom, (rect, fit_in), canvas, ui.ctx().pixels_per_point());
+    // pixel art's pixels to the screen's, for each input pixel's point
+    let ppp = ui.ctx().pixels_per_point();
+    let art = picture.clip.width as f32 / picture.size.0.max(1) as f32;
+    zoom.grid = picture.clip.pixelated.then_some(ppp / art);
+    hold(zoom, (rect, fit_in), canvas, ppp);
     zoom_and_pan(ui, &response, fit_in, canvas, zoom);
     let (whole, scale) = layout(fit_in, canvas, zoom);
     zoom.scale = Some(scale * ui.ctx().pixels_per_point());
@@ -732,7 +743,7 @@ fn zoom_and_pan(
     size: (u32, u32),
     zoom: &mut Zoom,
 ) {
-    let most = most_level(fit(rect, size) * ui.ctx().pixels_per_point());
+    let most = most_level(fit(rect, size, zoom.grid) * ui.ctx().pixels_per_point());
     // as far as it goes in the room there is now
     zoom.level = zoom.level.min(most);
     if let Some(pointer) = response.hover_pos() {
@@ -801,7 +812,7 @@ fn hold(zoom: &mut Zoom, (view, fit_in): (Rect, Rect), size: (u32, u32), ppp: f3
         && zoom.level > 1.0
     {
         let (shown, scale) = layout(before, size, zoom);
-        let fit = fit(fit_in, size);
+        let fit = fit(fit_in, size, zoom.grid);
         zoom.level = (scale / fit).clamp(1.0, most_level(fit * ppp));
         let (now, _) = layout(fit_in, size, zoom);
         zoom.centre = (fit_in.center() - shown.min) / now.size();
@@ -1163,7 +1174,7 @@ mod tests {
         );
         crate::widgets::test_fonts(&harness);
         harness.run_steps(2);
-        let (shown, scale) = layout(harness.state().4, (64, 48), &Zoom::default());
+        let (shown, scale) = layout(harness.state().4, (64, 48), &harness.state().1);
         let (left, top) = (shown.left() + 8.0 * scale, shown.top());
         let cross = harness.get_by_label(&crate::l10n::fl!("whole-picture")).rect();
         // clear of where the pointer takes its top edge and corner
@@ -1253,7 +1264,7 @@ mod tests {
             );
         crate::widgets::test_fonts(&harness);
         harness.run_steps(2);
-        let (shown, scale) = layout(harness.state().4, size, &Zoom::default());
+        let (shown, scale) = layout(harness.state().4, size, &harness.state().1);
         (harness, scale, shown.min)
     }
 
@@ -1519,6 +1530,25 @@ mod tests {
         assert_eq!(most_level(30.0), 4.0);
         // never short of where it fits
         assert_eq!(most_level(20_000.0), 1.0);
+    }
+
+    #[test]
+    fn fits_pixel_art_a_whole_number_of_the_screens_pixels_to_its_own() {
+        let stage = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
+        // 7.75 points a pixel where it fits, as smooth pictures stay
+        assert_eq!(fit(stage, (64, 48), None), 7.75);
+        assert_eq!(fit(stage, (64, 48), Some(1.0)), 7.0);
+        // at a scale of 1.25, 9 of the screen's pixels, rather than 9.69
+        assert_eq!(fit(stage, (64, 48), Some(1.25)), 9.0 / 1.25);
+        // art of twice the input's pixels: 3 of the screen's pixels to
+        // each of its own, where 3.875 would fit
+        assert_eq!(fit(stage, (64, 48), Some(0.5)), 6.0);
+        // under two of the screen's pixels, as it fits
+        let small = Rect::from_min_size(pos2(0.0, 0.0), vec2(100.0, 100.0));
+        assert_eq!(fit(small, (64, 48), Some(1.0)), 72.0 / 64.0);
+        // as the preview shows it
+        let (harness, scale, _) = cropped(None);
+        assert_eq!((scale, harness.state().1.scale), (7.0, Some(7.0)));
     }
 
     #[test]

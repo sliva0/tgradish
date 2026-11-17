@@ -327,11 +327,15 @@ pub(crate) struct Zoom {
     /// How many of the screen's pixels a pixel of the picture took, as it
     /// was last shown.
     pub(crate) scale: Option<f32>,
+    /// Of pixel art, how many of the screen's pixels its pixels take for
+    /// each point an input pixel takes, as it was last shown: where it
+    /// fits, they take a whole number of them.
+    pub(crate) grid: Option<f32>,
 }
 
 impl Default for Zoom {
     fn default() -> Zoom {
-        Zoom { level: 1.0, centre: egui::vec2(0.5, 0.5), anchor: None, scale: None }
+        Zoom { level: 1.0, centre: egui::vec2(0.5, 0.5), anchor: None, scale: None, grid: None }
     }
 }
 
