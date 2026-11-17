@@ -556,6 +556,9 @@ mod tests {
     /// `text` typed into the crop's width field, which holds `holds`,
     /// without taking it.
     fn type_width(harness: &mut Harness<App>, holds: &str, text: &str) {
+        // a file picked just now is read again first, which a few frames
+        // may not be time enough for on a busy machine
+        finish(harness);
         harness.get(width_field(holds)).focus();
         harness.run_steps(2);
         harness.event(egui::Event::Text(text.into()));
