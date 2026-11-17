@@ -111,6 +111,20 @@ const CHOSEN_STEP: f32 = 10.0;
 /// which takes about 6; its outline in the accent marks it too.
 const ROW_STEP: f32 = 5.0;
 
+/// How far apart, as [`difference`] measures it, what is chosen looks from
+/// what isn't: a chosen segment from a resting button, the selected list
+/// row from the window, and a primary button from other buttons. Hue sets
+/// a colourful accent's tint apart as much as lightness does, so these
+/// leave Plasma's colours as their steps of lightness alone set them; a
+/// grey, a black or an accent like the window has only lightness to stand
+/// apart by, which takes about twice the step, and a primary button over it
+/// takes the words and fill that let it differ as much as a coloured one.
+/// A chosen segment differs by about as much as Breeze's blue sets its tint
+/// apart by.
+const CHOSEN_APART: f32 = 19.0;
+const ROW_APART: f32 = 8.0;
+const PRIMARY_APART: f32 = 30.0;
+
 /// The most of the accent a chosen segment lets through, and a list row,
 /// where less doesn't stand apart enough.
 const MOST_CHOSEN: f32 = 0.5;
@@ -230,21 +244,25 @@ fn grounds(scheme: &Scheme) -> [Color32; 5] {
 }
 
 /// The accent at `opacity`, or less, as far as it takes for the text over
-/// it to read, over anything the scheme draws text on.
+/// it to read, over anything the scheme draws text on, as a bar is filled:
+/// standing apart from the bar's empty part as a chosen segment does from a
+/// button, lighter or darker where it is grey.
 pub(crate) fn fill(visuals: &egui::Visuals, opacity: f32) -> Color32 {
-    let (accent, scheme) = (tinted(visuals), scheme(visuals));
-    tint(accent, bounded(accent, opacity, &[scheme.text], &grounds(scheme)))
+    let (scheme, (empty, _)) = (scheme(visuals), track(visuals));
+    let (apart, amounts) = ((CHOSEN_STEP, CHOSEN_APART), (opacity, opacity));
+    lit(visuals, empty, apart, amounts, &[scheme.text], &grounds(scheme))
 }
 
 /// What a list row lays over the window, `selected` or hovered: little
 /// enough of the accent that the row's small coloured text still reads,
-/// and the selected one [`ROW_STEP`] apart from the window at the least.
+/// and the selected one [`ROW_STEP`] apart from the window at the least,
+/// and [`ROW_APART`] as far as that text leaves room for.
 pub(crate) fn row(visuals: &egui::Visuals, selected: bool) -> Color32 {
     let (accent, scheme) = (tinted(visuals), scheme(visuals));
     let texts = small_texts(scheme);
     if selected {
-        let amounts = (ROW_SELECTED, MOST_ROW);
-        return lit(visuals, scheme.window, ROW_STEP, amounts, &texts, &[scheme.window]);
+        let (amounts, apart) = ((ROW_SELECTED, MOST_ROW), (ROW_STEP, ROW_APART));
+        return lit(visuals, scheme.window, apart, amounts, &texts, &[scheme.window]);
     }
     tint(accent, bounded(accent, ROW_HOVERED, &texts, &[scheme.window]))
 }
@@ -264,11 +282,38 @@ pub(crate) fn lightness(colour: Color32) -> f32 {
 
 /// The relative luminance of a colour, as WCAG has it: 0 to 1.
 fn luminance(colour: Color32) -> f32 {
+    let [r, g, b] = linear(colour);
+    0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/// A colour's channels as light, 0 to 1, undoing sRGB's curve.
+fn linear(colour: Color32) -> [f32; 3] {
     let channel = |value: u8| {
         let value = f32::from(value) / 255.0;
         if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
     };
-    0.2126 * channel(colour.r()) + 0.7152 * channel(colour.g()) + 0.0722 * channel(colour.b())
+    [channel(colour.r()), channel(colour.g()), channel(colour.b())]
+}
+
+/// A colour in CIE L*a*b*, in daylight (D65): its lightness, as
+/// [`lightness`], then how red or green and how yellow or blue it is.
+fn lab(colour: Color32) -> [f32; 3] {
+    let [r, g, b] = linear(colour);
+    let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.950_47;
+    let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.088_83;
+    let f =
+        |t: f32| if t > 216.0 / 24389.0 { t.cbrt() } else { (24389.0 / 27.0 * t + 16.0) / 116.0 };
+    [116.0 * f(y) - 16.0, 500.0 * (f(x) - f(y)), 200.0 * (f(y) - f(z))]
+}
+
+/// How unlike two colours look, as CIE's ΔE*ab of 1976 measures it: by
+/// lightness, hue and colourfulness alike, so a grey stands apart from
+/// another grey only by its lightness, where a colour of the same
+/// lightness stands apart by its hue.
+pub(crate) fn difference(a: Color32, b: Color32) -> f32 {
+    let (a, b) = (lab(a), lab(b));
+    a.iter().zip(b).map(|(a, b)| (a - b).powi(2)).sum::<f32>().sqrt()
 }
 
 /// `tint` laid over `background`, as it is drawn.
@@ -285,15 +330,17 @@ fn over(background: Color32, tint: Color32) -> Color32 {
 
 /// The tint of the accent that marks something chosen over the window,
 /// standing `step` apart in lightness from `resting`, what isn't chosen
-/// looks like: `wanted` of the accent, or more, up to `most`, as long as
-/// each of `texts` reads over each of `backgrounds`. Where the accent can't
-/// stand apart so, as a grey, black or one like the window can't, it is
-/// moved towards the text colour, which is away from what rests on either
-/// scheme: lighter on Breeze Dark, darker on Breeze Light, its hue kept.
+/// looks like, and `apart` as [`difference`] measures it: `wanted` of the
+/// accent, or more, up to `most`, as long as each of `texts` reads over
+/// each of `backgrounds`. Where the accent can't stand apart so, as a grey,
+/// black or one like the window can't, it is moved towards the text
+/// colour, which is away from what rests on either scheme: lighter on
+/// Breeze Dark, darker on Breeze Light, its hue kept. Where nothing the
+/// texts read on stands so far apart, the furthest that does.
 fn lit(
     visuals: &egui::Visuals,
     resting: Color32,
-    step: f32,
+    (step, apart): (f32, f32),
     (wanted, most): (f32, f32),
     texts: &[Color32],
     backgrounds: &[Color32],
@@ -306,12 +353,14 @@ fn lit(
         let first = (wanted.min(top) * 100.0).round() as i32;
         for amount in first..=(top * 100.0).round() as i32 {
             let chosen = tint(colour, amount as f32 / 100.0);
-            let apart = (lightness(over(scheme.window, chosen)) - lightness(resting)).abs();
-            if apart >= step {
+            let seen = over(scheme.window, chosen);
+            let stepped = (lightness(seen) - lightness(resting)).abs() / step;
+            let differs = difference(seen, resting) / apart;
+            if stepped >= 1.0 && differs >= 1.0 {
                 return chosen;
             }
-            if apart > best.0 {
-                best = (apart, chosen);
+            if stepped.min(differs) > best.0 {
+                best = (stepped.min(differs), chosen);
             }
         }
     }
@@ -453,7 +502,10 @@ pub(crate) fn track(visuals: &egui::Visuals) -> (Color32, Stroke) {
 /// with the accent, its words black or white, whichever reads better on
 /// it, and the accent made as much darker or lighter as it takes for them
 /// to read at [`PRIMARY_WORDS`], and to stand apart from other buttons by
-/// [`CHOSEN_STEP`]. Hovered and pressed, the fill moves further from the
+/// [`CHOSEN_STEP`] and [`PRIMARY_APART`]; where no fill under those words
+/// stands so far apart, as under white words on a grey on Breeze Dark,
+/// whose buttons are as dark as such a fill, the other words, on a fill as
+/// light as they need. Hovered and pressed, the fill moves further from the
 /// words. The shortcut beside the words, weaker text, is a shade between
 /// them and the fill that still reads on each; it is outlined in the
 /// accent, as it is seen on the window.
@@ -488,23 +540,33 @@ pub(crate) fn primary_disabled(visuals: &mut egui::Visuals) {
 /// fill.
 fn primary_colours(accent: Color32, resting: Color32) -> ([Color32; 3], Color32, Color32) {
     let (dark, light) = (LIGHT.text, DARK.text);
-    let words = if contrast(dark, accent) >= contrast(light, accent) { dark } else { light };
+    let better = if contrast(dark, accent) >= contrast(light, accent) { dark } else { light };
+    let other = if better == dark { light } else { dark };
     // away from the words: lighter under dark ones, darker under light ones
-    let away = if words == dark { Color32::WHITE } else { Color32::BLACK };
+    let away = |words: Color32| if words == dark { Color32::WHITE } else { Color32::BLACK };
     let steps =
         |from: Color32, to: Color32| (0..=40).map(move |step| mix(from, to, step as f32 / 40.0));
-    let mut fill =
-        steps(accent, away).find(|fill| contrast(words, *fill) >= PRIMARY_WORDS).unwrap_or(away);
-    // apart from other buttons, the way there is room
-    if (lightness(fill) - lightness(resting)).abs() < CHOSEN_STEP {
-        let apart = |fill: &Color32| {
-            (lightness(*fill) - lightness(resting)).abs() >= CHOSEN_STEP
-                && contrast(words, *fill) >= PRIMARY_WORDS
-        };
-        let darker = steps(fill, Color32::BLACK).find(apart);
-        let lighter = steps(fill, Color32::WHITE).find(apart);
-        fill = darker.or(lighter).unwrap_or(fill);
-    }
+    let stands = |fill: Color32, words: Color32| {
+        (lightness(fill) - lightness(resting)).abs() >= CHOSEN_STEP
+            && difference(fill, resting) >= PRIMARY_APART
+            && contrast(words, fill) >= PRIMARY_WORDS
+    };
+    // under `words`, the accent as near as they read on, then apart from
+    // other buttons the way there is room
+    let under = |words: Color32| {
+        let reads = |fill: &Color32| contrast(words, *fill) >= PRIMARY_WORDS;
+        let fill = steps(accent, away(words)).find(reads).unwrap_or(away(words));
+        let apart = |fill: &Color32| stands(*fill, words);
+        let darker = || steps(fill, Color32::BLACK).find(apart);
+        let lighter = || steps(fill, Color32::WHITE).find(apart);
+        (stands(fill, words).then_some(fill).or_else(darker).or_else(lighter), fill)
+    };
+    let (words, fill) = match (under(better), under(other)) {
+        ((Some(fill), _), _) => (better, fill),
+        (_, (Some(fill), _)) => (other, fill),
+        ((None, fill), _) => (better, fill),
+    };
+    let away = away(words);
     // hovered and pressed, further from the words; where the fill can't
     // go further, or would come nearer other buttons, towards them, as
     // long as they read as well
@@ -513,9 +575,7 @@ fn primary_colours(accent: Color32, resting: Color32) -> ([Color32; 3], Color32,
             .into_iter()
             .flat_map(|to| (1..=40).map(move |amount| mix(fill, to, amount as f32 / 40.0)))
             .find(|shade| {
-                (lightness(*shade) - lightness(fill)).abs() >= step
-                    && (lightness(*shade) - lightness(resting)).abs() >= CHOSEN_STEP
-                    && contrast(words, *shade) >= PRIMARY_WORDS
+                (lightness(*shade) - lightness(fill)).abs() >= step && stands(*shade, words)
             })
             .unwrap_or(fill)
     };
@@ -564,8 +624,8 @@ pub(crate) fn visuals(dark: bool, accent: Color32) -> egui::Visuals {
     // what is chosen lets 30% of the accent through, as Breeze does, or as
     // much more or lighter as it takes to stand apart from a button
     let amounts = (BLEND, MOST_CHOSEN);
-    let chosen =
-        lit(&visuals, scheme.button, CHOSEN_STEP, amounts, &[scheme.text], &grounds(scheme));
+    let apart = (CHOSEN_STEP, CHOSEN_APART);
+    let chosen = lit(&visuals, scheme.button, apart, amounts, &[scheme.text], &grounds(scheme));
     visuals.selection =
         egui::style::Selection { bg_fill: chosen, stroke: Stroke::new(1.0, scheme.text) };
     visuals.weak_text_color = Some(scheme.inactive);
@@ -691,6 +751,12 @@ mod tests {
         assert!((lightness(Color32::WHITE) - 100.0).abs() < 0.01);
         // middle grey, 18% of the light, is about half way
         assert!((lightness(Color32::from_gray(119)) - 50.0).abs() < 0.5);
+        // greys differ by lightness alone; a colour by its hue as well
+        let (grey, red) = (Color32::from_gray(119), Color32::from_rgb(233, 61, 88));
+        let lighter = Color32::from_gray(150);
+        assert!((difference(grey, lighter) - (lightness(lighter) - 50.0)).abs() < 0.5);
+        assert!((difference(Color32::BLACK, Color32::WHITE) - 100.0).abs() < 0.01);
+        assert!(difference(grey, red) > 60.0, "{}", difference(grey, red));
     }
 
     /// Plasma's accents, and those no scheme suits: as light or as dark as
@@ -721,6 +787,10 @@ mod tests {
                     let apart = (lightness(a) - lightness(b)).abs();
                     assert!(apart >= step, "{what} with {given:?}, dark {dark}: {apart}");
                 };
+                let differs = |a: Color32, b: Color32, least: f32, what: &str| {
+                    let apart = difference(a, b);
+                    assert!(apart >= least, "{what} with {given:?}, dark {dark}: {apart}");
+                };
                 let seen = |colour: Color32, what: &str| {
                     for background in [scheme.window, scheme.window_alternate] {
                         let ratio = contrast(colour, background);
@@ -732,10 +802,19 @@ mod tests {
                     reads(scheme.text, over(background, visuals.selection.bg_fill), "selection");
                     reads(scheme.text, over(background, fill(&visuals, 0.5)), "a fill");
                 }
+                // a bar's fill apart from its empty part
+                let (filled, (empty, _)) =
+                    (over(scheme.window, fill(&visuals, 0.5)), track(&visuals));
+                apart(filled, empty, CHOSEN_STEP, "a bar's fill");
+                differs(filled, empty, CHOSEN_APART, "a bar's fill");
                 // and what is chosen stands apart from what isn't, and
                 // is outlined where it is seen
                 let chosen = over(scheme.window, visuals.selection.bg_fill);
                 apart(chosen, scheme.button, CHOSEN_STEP, "a chosen segment");
+                // by hue, or where it has none as a grey hasn't, by more
+                // lightness, beside a resting button and on the window
+                differs(chosen, scheme.button, CHOSEN_APART, "a chosen segment by a button");
+                differs(chosen, scheme.window, CHOSEN_STEP, "a chosen segment on the window");
                 seen(on_outline(&visuals).color, "the outline of what is chosen");
                 // a list row's small coloured text, lit or hovered, and the
                 // lit one apart from the window
@@ -747,6 +826,11 @@ mod tests {
                 }
                 let lit = over(scheme.window, row(&visuals, true));
                 apart(lit, scheme.window, ROW_STEP, "the selected list row");
+                // and by its hue, or more lightness, where its small text
+                // leaves room, as Breeze Dark's does
+                if dark {
+                    differs(lit, scheme.window, ROW_APART, "the selected list row");
+                }
                 // the primary button's words and shortcut, hovered and
                 // pressed too, and it apart from other buttons
                 let mut primary_visuals = visuals.clone();
@@ -757,6 +841,7 @@ mod tests {
                     reads(state.fg_stroke.color, state.weak_bg_fill, "the primary button");
                     reads(hint, state.weak_bg_fill, "the primary button's shortcut");
                     apart(state.weak_bg_fill, scheme.button, CHOSEN_STEP, "the primary button");
+                    differs(state.weak_bg_fill, scheme.button, PRIMARY_APART, "the primary button");
                 }
                 // a shortcut weaker than the words, and a press that shows
                 assert_ne!(hint, widgets.inactive.fg_stroke.color, "{given:?}, dark {dark}");

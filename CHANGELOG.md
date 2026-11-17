@@ -12,6 +12,9 @@ What changed in each release of tgradish, newest first. The format follows
   the GUI, the command line or `--json`'s `decided` events.
 - The GUI shows a bar for fitting a `.tgs` only while it is being fitted,
   not for one that fits or is kept exactly as it is.
+- The GUI shows its accent plainly where it was faint: the timeline's used
+  part on the light theme, and, with a grey or dark accent on the dark
+  theme, what is chosen, the main button and progress.
 
 ### Fixed
 
