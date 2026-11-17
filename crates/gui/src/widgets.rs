@@ -1800,6 +1800,106 @@ impl egui::Widget for Number<'_> {
     }
 }
 
+/// How long a stepper's button is held before it steps again, how often
+/// it steps then, and how long until it steps faster, how often then.
+const REPEAT_AFTER: f64 = 0.4;
+const REPEAT_EVERY: f64 = 1.0 / 8.0;
+const FASTER_AFTER: f64 = 1.5;
+const FASTER_EVERY: f64 = 1.0 / 20.0;
+
+/// How many steps a stepper's button held for `held` seconds has taken:
+/// one as it was pressed, and those it repeats.
+fn steps_held(held: f64) -> u32 {
+    let slow = match held < REPEAT_AFTER {
+        true => 0,
+        false => {
+            let most = ((FASTER_AFTER - REPEAT_AFTER) / REPEAT_EVERY).ceil() as u32;
+            (((held - REPEAT_AFTER) / REPEAT_EVERY).floor() as u32 + 1).min(most)
+        }
+    };
+    let fast = match held < FASTER_AFTER {
+        true => 0,
+        false => ((held - FASTER_AFTER) / FASTER_EVERY).floor() as u32 + 1,
+    };
+    1 + slow + fast
+}
+
+/// How long after `held` seconds a stepper's button next steps.
+fn next_step(held: f64) -> f64 {
+    if held < REPEAT_AFTER {
+        REPEAT_AFTER - held
+    } else if held < FASTER_AFTER {
+        let next =
+            REPEAT_AFTER + (((held - REPEAT_AFTER) / REPEAT_EVERY).floor() + 1.0) * REPEAT_EVERY;
+        next.min(FASTER_AFTER) - held
+    } else {
+        FASTER_EVERY - (held - FASTER_AFTER) % FASTER_EVERY
+    }
+}
+
+/// A − or + button, `text`, as tall as a row and as wide, named `name`
+/// and saying it on hover: true as it steps, once as it is pressed, or
+/// clicked from the keyboard, and again while it is held there, faster
+/// after a while, until it is let go of or greyed out, as at the end of
+/// what it steps through; not while the pointer is off it.
+pub(crate) fn stepper(
+    ui: &mut egui::Ui,
+    text: &str,
+    enabled: bool,
+    name: &str,
+) -> (egui::Response, bool) {
+    // as tall as a row, and square
+    let side = ui.spacing().interact_size.y;
+    // dragging too, as egui forgets a press that lasts too long for a click
+    let sense = egui::Sense::click_and_drag();
+    let button = egui::Button::new(text).min_size(vec2(side, side)).sense(sense);
+    let response = named(ui.add_enabled(enabled, button), name);
+    let (id, here) = (response.id.with("held"), response.id.with("stepped here"));
+    let now = ui.input(|input| input.time);
+    // since when it is held, and how many steps it took since
+    let since: Option<(f64, u32)> = ui.data(|data| data.get_temp(id));
+    // pressed on it, and held; while the pointer is off it, the steps
+    // due then are skipped, as for the frame its scale changes, before
+    // egui finds it under the pointer again
+    let held = enabled && response.is_pointer_button_down_on();
+    let over = response.contains_pointer();
+    let stepped = match (held, since) {
+        (true, None) => {
+            if over {
+                ui.data_mut(|data| data.insert_temp(id, (now, 1_u32)));
+            }
+            over
+        }
+        (true, Some((from, taken))) => {
+            let due = steps_held(now - from);
+            ui.data_mut(|data| data.insert_temp(id, (from, due)));
+            over && due > taken
+        }
+        (false, since) => {
+            ui.data_mut(|data| data.remove::<(f64, u32)>(id));
+            // a click it wasn't held for, as by the keyboard
+            since.is_none() && response.clicked()
+        }
+    };
+    if held {
+        let from = since.map_or(now, |(from, _)| from);
+        let wait = next_step(now - from).max(1e-3);
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(wait));
+    }
+    // what it is said once the pointer comes back to it, rather than
+    // after a step as it rests there: the scale a step changes moves the
+    // pointer for egui, which then doesn't take the press for a click,
+    // after which it would say nothing
+    if stepped {
+        ui.data_mut(|data| data.insert_temp(here, true));
+    } else if !over && !held {
+        ui.data_mut(|data| data.remove::<bool>(here));
+    }
+    let quiet = ui.data(|data| data.get_temp::<bool>(here)).is_some();
+    let response = if quiet { response } else { response.on_hover_text(name) };
+    (response, stepped)
+}
+
 #[cfg(test)]
 mod number_tests {
     use super::*;
@@ -1818,6 +1918,22 @@ mod number_tests {
         assert_eq!(lenient("−3", &[]), "-3");
         // only its own
         assert_eq!(lenient("3 fps", &["px"]), "3 fps");
+    }
+
+    #[test]
+    fn steps_held_down_faster_after_a_while() {
+        assert_eq!(steps_held(0.0), 1);
+        assert_eq!(steps_held(0.39), 1);
+        assert_eq!(steps_held(0.41), 2);
+        // 8 a second
+        assert_eq!(steps_held(0.41 + 0.125), 3);
+        assert_eq!(steps_held(1.45), 10);
+        // 20 a second after 1.5 s
+        assert_eq!(steps_held(1.51), 11);
+        assert_eq!(steps_held(2.01), 21);
+        assert!((next_step(0.1) - 0.3).abs() < 1e-9);
+        assert!((next_step(0.45) - 0.075).abs() < 1e-9);
+        assert!((next_step(1.52) - 0.03).abs() < 1e-9);
     }
 
     /// A field of `value` set up by `field`, in a window, typed in once
@@ -2027,6 +2143,75 @@ mod number_tests {
         assert_eq!(*harness.state(), (52, 0.0));
         wheel(&mut harness, -1.0);
         assert_eq!(*harness.state(), (51, 0.0));
+    }
+
+    #[test]
+    fn repeats_a_step_held_down() {
+        type State = (u32, bool);
+        let show = |ui: &mut egui::Ui, (steps, enabled): &mut State| {
+            if stepper(ui, "+", *enabled, "Larger").1 {
+                *steps += 1;
+            }
+        };
+        let mut harness = Harness::builder().with_step_dt(0.01).build_ui_state(show, (0, true));
+        theme::apply(&harness.ctx, None);
+        harness.run_steps(2);
+        let at = harness.get_by_label("Larger").rect();
+        assert!(at.height() >= 28.0 && at.width() >= 28.0, "{at:?}");
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at.center(),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        harness.event(egui::Event::PointerMoved(at.center()));
+        harness.run_steps(1);
+        // a click: one step
+        harness.event(button(true));
+        harness.event(button(false));
+        harness.run_steps(2);
+        assert_eq!(harness.state().0, 1);
+        // held: one as it is pressed, then after 0.4 s at 8 a second, and
+        // after 1.5 s at 20
+        harness.state_mut().0 = 0;
+        harness.event(button(true));
+        harness.run_steps(1);
+        assert_eq!(harness.state().0, 1);
+        harness.run_steps(35);
+        assert_eq!(harness.state().0, 1);
+        harness.run_steps(10);
+        assert_eq!(harness.state().0, 2);
+        harness.run_steps(55);
+        // at 1.0 s: 0.4, 0.525 .. 0.9
+        assert_eq!(harness.state().0, 6);
+        harness.run_steps(101);
+        // at 2.01 s: 9 slow, to 1.4 s, and 1.5 to 2.0 fast
+        assert_eq!(harness.state().0, 1 + 9 + 11);
+        // let go: no more
+        harness.event(button(false));
+        harness.run_steps(100);
+        assert_eq!(harness.state().0, 21);
+        // pressed and left: stops
+        harness.state_mut().0 = 0;
+        harness.event(button(true));
+        harness.run_steps(50);
+        harness.event(egui::Event::PointerMoved(at.center() + vec2(0.0, 100.0)));
+        harness.run_steps(1);
+        let left = harness.state().0;
+        harness.run_steps(100);
+        assert_eq!(harness.state().0, left);
+        harness.event(button(false));
+        harness.run_steps(2);
+        // greyed out, at its end: stops
+        harness.event(egui::Event::PointerMoved(at.center()));
+        harness.state_mut().0 = 0;
+        harness.event(button(true));
+        harness.run_steps(50);
+        harness.state_mut().1 = false;
+        harness.run_steps(1);
+        let ended = harness.state().0;
+        harness.run_steps(100);
+        assert_eq!(harness.state().0, ended);
     }
 }
 

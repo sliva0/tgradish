@@ -739,11 +739,11 @@ fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 3.0;
         let side = ui.spacing().interact_size.y;
-        let button = |text| egui::Button::new(text).min_size(egui::vec2(side, side));
+        // held, each steps on, kept under the pointer as all around it
+        // grows or shrinks, until the end of the scales
         let least = *scale <= *config::SCALES.start() + 1e-6;
-        let smaller = widgets::named(ui.add_enabled(!least, button("−")), &fl!("scale-smaller"))
-            .on_hover_text(fl!("scale-smaller"));
-        if smaller.clicked() {
+        let (smaller, step) = widgets::stepper(ui, "−", !least, &fl!("scale-smaller"));
+        if step {
             changed = Some(config::scale_step(*scale, -1));
             stepped = Some(smaller.rect);
         }
@@ -753,9 +753,8 @@ fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
         let width = widgets::text_width(ui, &widgets::zeros(&widest), 4.0);
         ui.add_sized(egui::vec2(width, side), egui::Label::new(percent));
         let most = *scale >= *config::SCALES.end() - 1e-6;
-        let larger = widgets::named(ui.add_enabled(!most, button("+")), &fl!("scale-larger"))
-            .on_hover_text(fl!("scale-larger"));
-        if larger.clicked() {
+        let (larger, step) = widgets::stepper(ui, "+", !most, &fl!("scale-larger"));
+        if step {
             changed = Some(config::scale_step(*scale, 1));
             stepped = Some(larger.rect);
         }
@@ -1409,6 +1408,39 @@ mod tests {
         screen.frames(4);
         assert_eq!(screen.harness.state().config.gui.scale, 1.4);
         assert!(screen.on(&larger));
+    }
+
+    #[test]
+    fn steps_on_while_held_with_the_button_kept_under_the_pointer() {
+        let larger = fl!("scale-larger");
+        let mut screen = on_the_scale(1.0, [1600.0, 1400.0], &larger);
+        let under = screen.pixels(&larger);
+        let scale = |screen: &crate::testing::Screen| screen.harness.state().config.gui.scale;
+        let kept = |screen: &crate::testing::Screen| {
+            let now = screen.pixels(&larger);
+            assert!((now - under).length() < 2.0, "{now:?}, not {under:?}");
+            assert!(screen.on(&larger));
+        };
+        // a step as it is pressed, then none for a while, frames a 60th of
+        // a second apart
+        screen.press(true);
+        assert_eq!(scale(&screen), 1.1);
+        screen.frames(20);
+        assert_eq!(scale(&screen), 1.1);
+        kept(&screen);
+        // then from 0.4 s on, 8 a second, the button where it was: at
+        // 0.4, 0.525 and 0.65 s, and on to 1.275 s
+        screen.frames(20);
+        assert_eq!(scale(&screen), 1.4);
+        screen.frames(40);
+        assert_eq!(scale(&screen), 1.9);
+        kept(&screen);
+        // none once let go of
+        screen.press(false);
+        let last = scale(&screen);
+        screen.frames(60);
+        assert_eq!(scale(&screen), last);
+        kept(&screen);
     }
 
     #[test]

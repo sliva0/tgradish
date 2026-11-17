@@ -102,11 +102,17 @@ impl Screen {
     /// The primary button pressed and let go where the pointer is, without
     /// it moving, a frame each.
     pub(crate) fn click(&mut self) {
-        let pos = self.said.expect("the pointer is on the window");
         for pressed in [true, false] {
-            let (button, modifiers) = (egui::PointerButton::Primary, egui::Modifiers::NONE);
-            self.frame(vec![egui::Event::PointerButton { pos, button, pressed, modifiers }]);
+            self.press(pressed);
         }
+    }
+
+    /// The primary button pressed, or let go of, where the pointer is, in
+    /// a frame.
+    pub(crate) fn press(&mut self, pressed: bool) {
+        let pos = self.said.expect("the pointer is on the window");
+        let (button, modifiers) = (egui::PointerButton::Primary, egui::Modifiers::NONE);
+        self.frame(vec![egui::Event::PointerButton { pos, button, pressed, modifiers }]);
     }
 
     /// `key` pressed with the command key, in a frame.

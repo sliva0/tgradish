@@ -27,6 +27,9 @@ What changed in each release of tgradish, newest first. The format follows
   the number, and flash where what is typed isn't one. Up and Down, and
   the wheel over a field being typed in, step them, further with Shift,
   and dragging crosses a field's whole range in a few hundred points.
+- Held, the − and + of the integer scale and of Settings' scale step on,
+  faster after a while; the integer scale's are as tall as the controls
+  beside them.
 
 ### Fixed
 
