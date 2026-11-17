@@ -1060,7 +1060,7 @@ column-alike = alike
 # A quality, short, in the table's rate column.
 rate-quality-short = q { $crf }
 # Under the table: why fitting stopped where it did, or tried a lower
-# frame rate or not. Shares are of the file size limit, as the table's
+# frame rate. Shares are of the file size limit, as the table's
 # sizes; "looks … like the input" is the table's alike.
 decided-in-band = Stopped: encode { $number } uses { $share } of the limit, at least the { $least } aimed for
 decided-alike-enough = Stopped: encode { $number } already looks { $alike } like the input, so more bits would only make it larger
@@ -1072,8 +1072,6 @@ decided-out-of-attempts = { $count ->
     [one] Stopped: the { $count } encode allowed is made
    *[other] Stopped: all { $count } encodes allowed are made
 }
-decided-keeps-frame-rate = Not trying a lower frame rate: encode { $number } at { $fps } fps already looks { $alike } like the input
-decided-frame-rate-wont-help = Not trying a lower frame rate: at { $fps } fps, how like the input it looks hardly changed with the bitrate, so more bits a frame wouldn't help
 decided-lowers-to-fit = Trying { $fps } fps: nothing fit at { $from } fps
 decided-lowers-for-looks = Trying { $fps } fps: encode { $number } at { $from } fps looks only { $alike } like the input
 decided-settled = Stopped early: kept encode { $number }

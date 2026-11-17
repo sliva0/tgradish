@@ -71,7 +71,7 @@ pub(crate) trait Encoder {
     fn encode(&mut self, params: Params) -> Result<Attempt>;
     /// Similarity to the source, higher is better.
     fn score(&mut self, attempt: &Attempt) -> Result<f64>;
-    /// Hears why fitting stopped, or tried a change or not.
+    /// Hears why fitting stopped, or tried a change.
     fn decided(&mut self, _decision: Decision) {}
     /// Whether fitting was asked to settle on the best that fits so far,
     /// see [`CancelToken::settle`](crate::CancelToken::settle): asked only
@@ -587,14 +587,12 @@ fn fit_auto(f: &mut Fitter, plan: &Plan) -> Result<Search> {
         kept = Some((candidate, ssim, fps));
         let Some(lower) = lower else { break };
         // fewer frames give each more bits, which only helps where bits
-        // made it look more like the input
+        // made it look more like the input, and is only worth jerkier
+        // motion where it looks poor
         let more_bits = search.alike_slope(f.limit).map(|(slope, ..)| slope.max(0.0));
-        if more_bits.is_some_and(|slope| slope * (fps / lower).ln() < ALIKE_NOISE) {
-            f.decide(Decision::FrameRateWontHelp { fps });
-            break;
-        }
-        if ssim >= ALIKE_GOOD {
-            f.decide(Decision::KeepsFrameRate { attempt: number, fps, ssim });
+        if more_bits.is_some_and(|slope| slope * (fps / lower).ln() < ALIKE_NOISE)
+            || ssim >= ALIKE_GOOD
+        {
             break;
         }
         if f.left() == 0 {
@@ -1071,8 +1069,12 @@ mod tests {
         assert_eq!(best.number, 2);
         assert_good_fit(&best);
         assert!(encoder.calls.iter().all(|params| params.fps == 30.0));
-        assert!(encoder.decided(|d| matches!(d, Decision::InBand { attempt: 2, .. })));
-        assert!(encoder.decided(|d| matches!(d, Decision::KeepsFrameRate { attempt: 2, .. })));
+        // the frame rate kept as planned goes unsaid
+        assert!(
+            matches!(encoder.decisions[..], [Decision::InBand { attempt: 2, .. }]),
+            "{:?}",
+            encoder.decisions
+        );
     }
 
     #[test]
@@ -1096,7 +1098,12 @@ mod tests {
         let best = auto(length, &mut encoder);
         assert_eq!(encoder.calls.len(), 2, "{:?}", encoder.calls());
         assert_good_fit(&best);
-        assert!(encoder.decided(|d| matches!(d, Decision::FrameRateWontHelp { fps: 30.0 })));
+        assert!(encoder.calls.iter().all(|params| params.fps == 30.0));
+        assert!(
+            matches!(encoder.decisions[..], [Decision::InBand { attempt: 2, .. }]),
+            "{:?}",
+            encoder.decisions
+        );
     }
 
     #[test]

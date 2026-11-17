@@ -59,8 +59,9 @@ pub struct Params {
     pub rate: Rate,
 }
 
-/// Why fitting stopped where it did, or tried a change or left it
-/// untried, said as it decides. Serialised tagged by `reason`, shares of
+/// Why fitting stopped where it did, or tried a change, said as it
+/// decides; a change left untried leaves the result as planned, which
+/// needs no reason. Serialised tagged by `reason`, shares of
 /// the limit and SSIM from 0 to 1, as `{"reason":"in-band","attempt":2,
 /// "share":0.99,"least":0.96}`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
@@ -120,23 +121,6 @@ pub enum Decision {
     OutOfAttempts {
         /// How many.
         attempts: u32,
-    },
-    /// Not trying a lower frame rate: `attempt`, at `fps`, already looks
-    /// `ssim` like the input.
-    KeepsFrameRate {
-        /// The encode.
-        attempt: u32,
-        /// Its frame rate.
-        fps: f64,
-        /// Its SSIM.
-        ssim: f64,
-    },
-    /// Not trying a lower frame rate: at `fps`, how like the input
-    /// encodes look hardly changed with their bitrate, so more bits for
-    /// each frame would not help either.
-    FrameRateWontHelp {
-        /// The frame rate kept.
-        fps: f64,
     },
     /// Trying `fps`: nothing fit at `from`.
     LowersFrameRateToFit {
@@ -220,19 +204,6 @@ impl std::fmt::Display for Decision {
             Decision::OutOfAttempts { attempts } => {
                 write!(f, "stopped: all {attempts} attempts are made")
             }
-            Decision::KeepsFrameRate { attempt, fps: rate, ssim } => write!(
-                f,
-                "not trying a lower frame rate: attempt {attempt} at {} fps already looks {} like \
-                 the input",
-                fps(rate),
-                percent(ssim)
-            ),
-            Decision::FrameRateWontHelp { fps: rate } => write!(
-                f,
-                "not trying a lower frame rate: at {} fps quality did not depend on the bitrate, \
-                 so more bits a frame would not help",
-                fps(rate)
-            ),
             Decision::LowersFrameRateToFit { from, fps: rate } => {
                 write!(f, "trying {} fps: nothing fit at {} fps", fps(rate), fps(from))
             }

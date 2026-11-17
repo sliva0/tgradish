@@ -74,7 +74,7 @@ pub enum Event {
         /// Its SSIM.
         ssim: f64,
     },
-    /// WebM: fitting decided to stop, or to try a change or not: why, for
+    /// WebM: fitting decided to stop, or to try a change: why, for
     /// front-ends to say.
     Decided {
         /// What, and why.

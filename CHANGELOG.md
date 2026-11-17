@@ -4,6 +4,13 @@ What changed in each release of tgradish, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Fitting a WebM no longer says why it didn't try a lower frame rate, in
+  the GUI, the command line or `--json`'s `decided` events.
+
 ## [2.0.0] - 2026-11-16
 
 tgradish rewritten in Rust: one program, with a GUI and a command line,
@@ -53,4 +60,5 @@ that makes every kind of Telegram sticker and emoji.
 The last release of the Python tgradish, which converted videos to video
 stickers with ffmpeg and spoofed their duration.
 
+[Unreleased]: https://github.com/sliva0/tgradish/compare/v2.0.0...HEAD
 [2.0.0]: https://github.com/sliva0/tgradish/compare/11d7f0d...v2.0.0

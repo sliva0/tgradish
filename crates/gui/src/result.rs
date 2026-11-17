@@ -411,8 +411,8 @@ fn percent(share: f64) -> String {
     format!("{:.1}%", share * 100.0)
 }
 
-/// Why fitting stopped where it did, or tried a lower frame rate or not,
-/// in the GUI's words.
+/// Why fitting stopped where it did, or tried a lower frame rate, in the
+/// GUI's words.
 fn decision_text(decision: &tgradish_core::webm::Decision) -> String {
     use tgradish_core::webm::Decision;
     let fps = widgets::trimmed;
@@ -437,15 +437,6 @@ fn decision_text(decision: &tgradish_core::webm::Decision) -> String {
         }
         Decision::NothingLeft => fl!("decided-nothing-left"),
         Decision::OutOfAttempts { attempts } => fl!("decided-out-of-attempts", count = attempts),
-        Decision::KeepsFrameRate { attempt, fps: rate, ssim } => fl!(
-            "decided-keeps-frame-rate",
-            number = attempt,
-            fps = fps(rate),
-            alike = percent(ssim)
-        ),
-        Decision::FrameRateWontHelp { fps: rate } => {
-            fl!("decided-frame-rate-wont-help", fps = fps(rate))
-        }
         Decision::LowersFrameRateToFit { from, fps: rate } => {
             fl!("decided-lowers-to-fit", fps = fps(rate), from = fps(from))
         }
@@ -514,9 +505,9 @@ mod tests {
         use tgradish_core::webm::Decision;
         let stopped = decision_text(&Decision::InBand { attempt: 2, share: 0.99, least: 0.96 });
         assert_eq!(stopped, fl!("decided-in-band", number = 2, share = "99.0%", least = "96.0%"));
-        let kept = Decision::KeepsFrameRate { attempt: 2, fps: 29.97, ssim: 0.967 };
-        let kept = decision_text(&kept);
-        assert!(kept.contains("29.97") && kept.contains("96.7%"), "{kept}");
+        let lowered = Decision::LowersFrameRateToFit { from: 29.97, fps: 20.0 };
+        let lowered = decision_text(&lowered);
+        assert_eq!(lowered, fl!("decided-lowers-to-fit", fps = "20", from = "29.97"));
     }
 
     #[test]

@@ -75,7 +75,7 @@ pub(crate) struct Progress {
     pub(crate) webm: Option<WebmPlan>,
     pub(crate) attempts: Vec<Attempt>,
     /// Why fitting a WebM stopped where it did, or tried a lower frame
-    /// rate or not.
+    /// rate.
     pub(crate) decisions: Vec<Decision>,
     /// What reading the pixel art found.
     pub(crate) report: Option<Box<Report>>,

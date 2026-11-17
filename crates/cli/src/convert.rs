@@ -615,7 +615,7 @@ impl Printer {
                 self.bar
                     .line(ui::status("Compared", ui::dim(format!("likeness (SSIM) {ssim:.4}"))));
             }
-            // why fitting stops, or tries a lower frame rate or not
+            // why fitting stops, or tries a lower frame rate
             Event::Decided { message, .. } if !self.quiet => {
                 self.bar.line(ui::status("Decided", ui::dim(message)));
             }
