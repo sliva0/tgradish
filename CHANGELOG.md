@@ -36,6 +36,9 @@ What changed in each release of tgradish, newest first. The format follows
 - The GUI's crop snaps to the picture's edges and middle but with Ctrl,
   keeps its shape with Shift and its middle with Alt, goes back on Escape
   while dragged, moves by the arrows once clicked, and has larger corners.
+- The GUI's preview zooms by a quarter a wheel notch, as far as 32 screen
+  pixels a pixel, says that scale on Zoom out, eases out, and pans across
+  with Shift+wheel; pixel art fits whole screen pixels to each of its own.
 
 ### Fixed
 

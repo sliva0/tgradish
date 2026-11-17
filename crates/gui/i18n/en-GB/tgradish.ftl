@@ -1313,5 +1313,7 @@ mouse-wheel = Wheel
     .does = Zoom in or out
 mouse-pan = Right or middle drag
     .does = Pan, when zoomed in
+mouse-pan-across = Shift+wheel
+    .does = Pan across, when zoomed in
 mouse-slide = Shift+drag a bracket
     .does = Slide the timeline's used part, keeping its length

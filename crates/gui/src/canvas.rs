@@ -250,6 +250,7 @@ pub(crate) fn show(
     let ppp = ui.ctx().pixels_per_point();
     let art = picture.clip.width as f32 / picture.size.0.max(1) as f32;
     zoom.grid = picture.clip.pixelated.then_some(ppp / art);
+    ease_out(ui.ctx(), zoom);
     hold(zoom, (rect, fit_in), canvas, ppp);
     zoom_and_pan(ui, &response, fit_in, canvas, zoom);
     let (whole, scale) = layout(fit_in, canvas, zoom);
@@ -754,6 +755,7 @@ fn zoom_and_pan(
             ui.ctx().input_mut(|input| input.smooth_scroll_delta.y = 0.0);
         }
         if (factor - 1.0).abs() > 1e-4 {
+            zoom.easing = None;
             let (shown, _) = layout(rect, size, zoom);
             let at = (pointer - shown.min) / shown.size();
             let level = (zoom.level * factor).clamp(1.0, most);
@@ -764,7 +766,16 @@ fn zoom_and_pan(
             zoom.level = level;
         }
     }
+    // scrolled across, as with Shift held, it pans across where zoomed in
+    let across = ui.input(|input| input.smooth_scroll_delta.x);
+    if response.hovered() && across != 0.0 && zoom.level > 1.0 {
+        zoom.easing = None;
+        let (shown, _) = layout(rect, size, zoom);
+        zoom.centre.x -= across / shown.width();
+        ui.ctx().input_mut(|input| input.smooth_scroll_delta.x = 0.0);
+    }
     if response.dragged_by(PointerButton::Secondary) || response.dragged_by(PointerButton::Middle) {
+        zoom.easing = None;
         let (shown, _) = layout(rect, size, zoom);
         zoom.centre -= response.drag_delta() / shown.size();
     }
@@ -799,6 +810,23 @@ fn wheel_rate(ui: &egui::Ui) -> f32 {
     match notched {
         true => NOTCH.ln() / ui.ctx().options(|options| options.input_options.line_scroll_speed),
         false => PER_POINT,
+    }
+}
+
+/// How long zooming out to all of the picture eases, in seconds.
+const ZOOM_OUT: f64 = 0.15;
+
+/// Moves `zoom` on its way out to all of the picture, fast and then
+/// settling, while it is on it.
+fn ease_out(ctx: &egui::Context, zoom: &mut Zoom) {
+    let Some((level, centre, since)) = zoom.easing else { return };
+    let t = crate::inset::eased((ctx.input(|input| input.time) - since) / ZOOM_OUT);
+    zoom.level = level + (1.0 - level) * t;
+    zoom.centre = centre + (Vec2::splat(0.5) - centre) * t;
+    if t >= 1.0 {
+        zoom.easing = None;
+    } else {
+        ctx.request_repaint();
     }
 }
 
@@ -1549,6 +1577,46 @@ mod tests {
         // as the preview shows it
         let (harness, scale, _) = cropped(None);
         assert_eq!((scale, harness.state().1.scale), (7.0, Some(7.0)));
+    }
+
+    #[test]
+    fn eases_out_to_all_of_it_and_pans_across_with_shift() {
+        let (mut harness, ..) = cropped(None);
+        let zoomed = Zoom { level: 4.0, centre: vec2(0.3, 0.6), ..Zoom::default() };
+        harness.state_mut().1 = zoomed;
+        harness.step();
+        // the wheel scrolled with Shift, across: panned that way
+        harness.event(egui::Event::PointerMoved(pos2(300.0, 200.0)));
+        let centre = harness.state().1.centre;
+        harness.event(egui::Event::ModifiersChanged(egui::Modifiers::SHIFT));
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: vec2(0.0, -1.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::SHIFT,
+        });
+        harness.run_steps(30);
+        let panned = harness.state().1;
+        assert!(panned.centre.x > centre.x + 0.01, "{panned:?}");
+        assert_eq!((panned.level, panned.centre.y), (4.0, centre.y));
+        harness.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        // out, a step at a time, to where it fits
+        let now = harness.ctx.input(|input| input.time);
+        harness.state_mut().1.zoom_out(now, true);
+        let mut levels = vec![];
+        for _ in 0..20 {
+            harness.step();
+            levels.push(harness.state().1.level);
+        }
+        assert!(levels.windows(2).all(|pair| pair[1] <= pair[0]), "{levels:?}");
+        assert!(levels.iter().filter(|level| (1.0..4.0).contains(*level)).count() >= 3);
+        assert_eq!(harness.state().1.level, 1.0);
+        assert_eq!(harness.state().1.centre, vec2(0.5, 0.5));
+        // or at once, without smooth scrolling
+        harness.state_mut().1 = zoomed;
+        harness.step();
+        harness.state_mut().1.zoom_out(now, false);
+        assert_eq!((harness.state().1.level, harness.state().1.centre), (1.0, vec2(0.5, 0.5)));
     }
 
     #[test]

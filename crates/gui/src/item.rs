@@ -331,11 +331,26 @@ pub(crate) struct Zoom {
     /// each point an input pixel takes, as it was last shown: where it
     /// fits, they take a whole number of them.
     pub(crate) grid: Option<f32>,
+    /// Zooming out to all of it, from this level and centre, since this
+    /// time, while it eases.
+    pub(crate) easing: Option<(f32, egui::Vec2, f64)>,
 }
 
 impl Default for Zoom {
     fn default() -> Zoom {
-        Zoom { level: 1.0, centre: egui::vec2(0.5, 0.5), anchor: None, scale: None, grid: None }
+        let centre = egui::vec2(0.5, 0.5);
+        Zoom { level: 1.0, centre, anchor: None, scale: None, grid: None, easing: None }
+    }
+}
+
+impl Zoom {
+    /// Zooms out to all of the picture: eased from `now`, where `smooth`,
+    /// as scrolling is, or at once.
+    pub(crate) fn zoom_out(&mut self, now: f64, smooth: bool) {
+        match smooth {
+            true => self.easing = Some((self.level, self.centre, now)),
+            false => (self.level, self.centre, self.easing) = (1.0, egui::vec2(0.5, 0.5), None),
+        }
     }
 }
 

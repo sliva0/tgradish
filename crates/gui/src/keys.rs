@@ -289,6 +289,7 @@ impl App {
                     (fl!("mouse-double-click"), fl!("mouse-double-click", "does")),
                     (fl!("mouse-wheel"), fl!("mouse-wheel", "does")),
                     (fl!("mouse-pan"), fl!("mouse-pan", "does")),
+                    (fl!("mouse-pan-across"), fl!("mouse-pan-across", "does")),
                     (fl!("mouse-slide"), fl!("mouse-slide", "does")),
                 ];
                 shortcut_rows(ui, &fl!("shortcuts-mouse"), mouse);

@@ -16,7 +16,7 @@ use tgradish_core::webm::Options;
 use crate::app::App;
 use crate::canvas::{self, Cropping, Kept, Picture, Screen};
 use crate::inset::{self, Inset, InsetChange};
-use crate::item::{Framing, Item, Show, Zoom};
+use crate::item::{Framing, Item, Show};
 use crate::l10n::fl;
 use crate::media::{Clip, Load};
 use crate::result::{details, summary};
@@ -109,7 +109,7 @@ impl App {
                             item,
                             (tempo, &mut in_frames),
                             (&webm, &tgs.unwrap_or_default()),
-                            &mut look,
+                            (&mut look, self.config.gui.smooth_scrolling),
                         );
                     },
                 );
@@ -182,7 +182,7 @@ fn preview(
     item: &mut Item,
     (tempo, in_frames): (f64, &mut bool),
     (webm, tgs): (&Options, &tgs::Options),
-    look: &mut ResultPreview,
+    (look, smooth): (&mut ResultPreview, bool),
 ) {
     let has_result = item.result_clip.ready().is_some();
     // a change to what is used or how it is fitted shows on the input
@@ -247,7 +247,8 @@ fn preview(
             // always there where there is room, so nothing beside them
             // moves as zooming starts
             let zoom = item.view.zoom_mut(show);
-            let zoomed = zoom.level > 1.0;
+            // not while it eases out
+            let zoomed = zoom.level > 1.0 && zoom.easing.is_none();
             if zoomed || !compact {
                 // how large its pixels show, as the result's small picture
                 // says it, on the button that zooms out, which is as wide
@@ -266,7 +267,7 @@ fn preview(
                     .on_hover_text(fl!("zoom-out", "hint"))
                     .on_disabled_hover_text(fl!("zoom-out", "all"));
                 if out.clicked() {
-                    *zoom = Zoom::default();
+                    zoom.zoom_out(ui.input(|input| input.time), smooth);
                 }
             }
         });

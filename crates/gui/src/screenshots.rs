@@ -517,6 +517,10 @@ fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().items[0].view.input_zoom.level = f32::MAX;
     settle(&mut harness);
     save(&mut harness, "zoomed-most");
+    // eased out by Zoom out, to where it fits
+    harness.get_by_label_contains(&crate::l10n::fl!("zoom-out")).click();
+    harness.run_steps(20);
+    save(&mut harness, "zoomed-out");
     harness.state_mut().items[0].view.input_zoom = Zoom::default();
     settle(&mut harness);
     // the shortcuts, scrolled to what the mouse does
