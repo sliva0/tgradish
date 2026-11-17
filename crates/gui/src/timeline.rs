@@ -79,7 +79,32 @@ fn left_out(from: f64, to: f64, limit: f64, past: PastLimit) -> Option<(f64, f64
 enum Grab {
     Start,
     End,
+    /// One of the ends, where they meet on the bar, until the pointer
+    /// moves one way or the other from where it was pressed, at this x.
+    Either(f32),
     Seek,
+}
+
+/// How near one of the used part's ends, in points, the pointer takes it.
+const REACH: f32 = 8.0;
+
+/// What the pointer at `x` takes on a bar whose used part's ends are at
+/// `ends`: the nearer end within reach, the one on the pointer's side of
+/// the middle between them, as a short part's ends are both in reach;
+/// where that doesn't tell, as where they meet, the one the pointer moves
+/// `towards`, on its way left below 0. Otherwise it seeks.
+fn grab_at(x: f32, (start, end): (f32, f32), towards: f32) -> Grab {
+    if (x - start).abs().min((x - end).abs()) > REACH {
+        return Grab::Seek;
+    }
+    let middle = (start + end) / 2.0;
+    match x - middle {
+        side if side < -0.25 => Grab::Start,
+        side if side > 0.25 => Grab::End,
+        _ if towards < 0.0 => Grab::Start,
+        _ if towards > 0.0 => Grab::End,
+        _ => Grab::Either(x),
+    }
 }
 
 /// A field of a boundary between frames: its frame counted from 1, or
@@ -382,28 +407,29 @@ fn bar(
     };
     let (from, to) = ends(*start, *used);
 
-    let grab_at = |x: f32| {
-        if (x - x_of(from)).abs() <= 8.0 {
-            Grab::Start
-        } else if (x - x_of(to)).abs() <= 8.0 {
-            Grab::End
-        } else {
-            Grab::Seek
-        }
-    };
-    if let Some(pointer) = response.hover_pos()
-        && grab_at(pointer.x) != Grab::Seek
-    {
+    let ends_x = (x_of(from), x_of(to));
+    let hovered = response.hover_pos().map(|pointer| grab_at(pointer.x, ends_x, 0.0));
+    if hovered.is_some_and(|grab| grab != Grab::Seek) {
         ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
     }
     let id = response.id.with("grab");
-    if response.drag_started_by(PointerButton::Primary)
-        && let Some(origin) = ui.input(|input| input.pointer.press_origin())
-    {
-        ui.data_mut(|data| data.insert_temp(id, grab_at(origin.x)));
-    }
-    let grabbed: Option<Grab> = ui.data(|data| data.get_temp(id));
     let pointer = response.interact_pointer_pos();
+    if response.drag_started_by(PointerButton::Primary)
+        && let (Some(origin), Some(pointer)) =
+            (ui.input(|input| input.pointer.press_origin()), pointer)
+    {
+        let grab = grab_at(origin.x, ends_x, pointer.x - origin.x);
+        ui.data_mut(|data| data.insert_temp(id, grab));
+    }
+    // ends that meet go the way the pointer first moves
+    let mut grabbed: Option<Grab> = ui.data(|data| data.get_temp(id));
+    if let (Some(Grab::Either(origin)), Some(pointer)) = (grabbed, pointer)
+        && pointer.x != origin
+    {
+        let grab = if pointer.x < origin { Grab::Start } else { Grab::End };
+        ui.data_mut(|data| data.insert_temp(id, grab));
+        grabbed = Some(grab);
+    }
     if let (Some(grab), Some(pointer)) = (grabbed, pointer)
         && response.dragged_by(PointerButton::Primary)
     {
@@ -432,6 +458,7 @@ fn bar(
                 *time = (at - 0.5).max(from);
             }
             (Grab::Seek, _) => *time = at,
+            (Grab::Either(_), _) => {}
         }
     }
     if response.clicked()
@@ -526,10 +553,19 @@ fn bar(
         };
         response.clone().on_hover_text_at_pointer(text);
     }
-    // brackets at both ends of the used part
+    // brackets at both ends of the used part, the one a press would take,
+    // or that is taken, in the accent: both where either would be
     let marks = ui.visuals().strong_text_color();
-    let bracket = Stroke::new(2.5, marks);
-    for (x, inward) in [(x_of(from), 4.0), (x_of(to), -4.0)] {
+    let lit = match grabbed {
+        Some(grab) if response.dragged() => Some(grab),
+        _ => hovered.filter(|_| !response.dragged()),
+    };
+    let lit = |end: Grab| lit.is_some_and(|lit| lit == end || matches!(lit, Grab::Either(_)));
+    for (x, inward, end) in [(x_of(from), 4.0, Grab::Start), (x_of(to), -4.0, Grab::End)] {
+        let bracket = match lit(end) {
+            true => Stroke::new(3.0, theme::mark(visuals)),
+            false => Stroke::new(2.5, marks),
+        };
         let (top, bottom) = (track.top() - 3.0, track.bottom() + 3.0);
         painter.add(Shape::line(
             vec![pos2(x + inward, top), pos2(x, top), pos2(x, bottom), pos2(x + inward, bottom)],
@@ -821,6 +857,123 @@ mod tests {
             harness.run_steps(2);
             assert!(harness.query_by_label(&text).is_none(), "{past:?}: {text}");
             assert!(harness.query_by_label("2.00 s").is_some());
+        }
+    }
+
+    #[test]
+    fn takes_the_nearer_end_of_the_used_part() {
+        // apart, each within reach of the pointer
+        assert_eq!(grab_at(98.0, (100.0, 103.0), 0.0), Grab::Start);
+        assert_eq!(grab_at(101.0, (100.0, 103.0), 0.0), Grab::Start);
+        assert_eq!(grab_at(102.0, (100.0, 103.0), 0.0), Grab::End);
+        assert_eq!(grab_at(110.0, (100.0, 103.0), 0.0), Grab::End);
+        assert_eq!(grab_at(112.0, (100.0, 103.0), 0.0), Grab::Seek);
+        // met: the way the pointer goes, once it does
+        assert_eq!(grab_at(100.0, (100.0, 100.0), -1.0), Grab::Start);
+        assert_eq!(grab_at(100.0, (100.0, 100.0), 1.0), Grab::End);
+        assert_eq!(grab_at(100.0, (100.0, 100.0), 0.0), Grab::Either(100.0));
+    }
+
+    /// A harness of a timeline 640 points wide over 100 seconds, used from
+    /// `from` to `to`, without frames, and the track of its bar.
+    fn long_timeline(from: f64, to: f64) -> (egui_kittest::Harness<'static, Trim>, Rect) {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let mut harness =
+            egui_kittest::Harness::builder().with_size(vec2(640.0, 80.0)).build_ui_state(
+                |ui, (start, used, time): &mut Trim| {
+                    let (mut playing, mut in_frames) = (false, false);
+                    show(
+                        ui,
+                        Timeline {
+                            length: 100.0,
+                            start,
+                            used,
+                            time,
+                            playing: &mut playing,
+                            limit: 3.0,
+                            past: PastLimit::Cut,
+                            frames: None,
+                            in_frames: &mut in_frames,
+                        },
+                    );
+                },
+                (Some(from), Some(to - from), from),
+            );
+        widgets::test_fonts(&harness);
+        harness.run_steps(2);
+        // the bar, which says what becomes of the part past the limit
+        let text = PastLimit::Cut.text();
+        let bar = harness
+            .query_all(egui_kittest::kittest::by())
+            .find(|node| node.accesskit_node().description().as_ref() == Some(&text))
+            .unwrap()
+            .rect();
+        (harness, track_of(bar))
+    }
+
+    type Trim = (Option<f64>, Option<f64>, f64);
+
+    /// Drags in `harness` from `from` by `by` points across, a step at a
+    /// time, with `modifiers` held.
+    fn drag_across(
+        harness: &mut egui_kittest::Harness<'_, Trim>,
+        from: egui::Pos2,
+        by: f32,
+        modifiers: egui::Modifiers,
+    ) {
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers,
+        };
+        harness.event(egui::Event::PointerMoved(from));
+        harness.event(press(from, true));
+        harness.step();
+        for step in 1..=4 {
+            harness.event(egui::Event::PointerMoved(from + vec2(by * step as f32 / 4.0, 0.0)));
+            harness.step();
+        }
+        harness.event(press(from + vec2(by, 0.0), false));
+        harness.step();
+        harness.step();
+    }
+
+    #[test]
+    fn drags_either_end_of_a_short_part_of_a_long_input() {
+        // three tenths of a second of a hundred, both ends within reach of
+        // either: the one on the pointer's side moves
+        let (mut harness, track) = long_timeline(50.0, 50.3);
+        let x_of = |seconds: f32| track.left() + seconds / 100.0 * track.width();
+        let ends = |harness: &egui_kittest::Harness<'_, Trim>| {
+            let (start, used, _) = *harness.state();
+            (start.unwrap(), start.unwrap() + used.unwrap())
+        };
+        drag_across(
+            &mut harness,
+            pos2(x_of(50.3) + 3.0, track.center().y),
+            40.0,
+            Default::default(),
+        );
+        let (from, to) = ends(&harness);
+        assert!((from - 50.0).abs() < 1e-6 && to > 55.0, "{from} to {to}");
+        let (mut harness, track) = long_timeline(50.0, 50.3);
+        drag_across(
+            &mut harness,
+            pos2(x_of(50.0) - 3.0, track.center().y),
+            -40.0,
+            Default::default(),
+        );
+        let (from, to) = ends(&harness);
+        assert!(from < 45.0 && (to - 50.3).abs() < 1e-6, "{from} to {to}");
+        // met, as the least part used, the way the pointer goes
+        for (by, start_moves) in [(-40.0, true), (40.0, false)] {
+            let (mut harness, track) = long_timeline(50.0, 50.05);
+            let middle = pos2(x_of(50.025), track.center().y);
+            drag_across(&mut harness, middle, by, Default::default());
+            let (from, to) = ends(&harness);
+            assert_eq!(from < 49.0, start_moves, "{by}: {from} to {to}");
+            assert_eq!(to > 51.0, !start_moves, "{by}: {from} to {to}");
         }
     }
 

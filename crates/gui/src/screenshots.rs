@@ -42,6 +42,7 @@ fn screenshots() {
     edges(&mut save);
     empties(&mut save);
     accents(&mut save);
+    manipulation(&mut save);
 }
 
 /// Only the pictures of [`accents`], to `$TGRADISH_SCREENSHOTS` as
@@ -353,6 +354,59 @@ fn limit_screenshots() {
             image.save(out.join(format!("limit-{handling}-hovered-{theme}.png"))).unwrap();
         }
     }
+}
+
+/// Only the pictures of [`manipulation`], to `$TGRADISH_SCREENSHOTS` as
+/// [`screenshots`] makes them.
+#[test]
+#[ignore]
+fn manipulation_screenshots() {
+    let out =
+        PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
+    crate::l10n::choose(None);
+    manipulation(&mut |harness: &mut Harness<App>, name: &str| {
+        let image = harness.render().expect("rendering needs a GPU");
+        image.save(out.join(format!("tgradish-{name}.png"))).unwrap();
+    });
+}
+
+/// The bar of the timeline under the preview, which says what is past the
+/// limit, as long as the limit is on it.
+fn timeline_bar(harness: &Harness<App>) -> egui::Rect {
+    use egui_kittest::kittest::NodeT;
+    let said = [PastLimit::Spoofed, PastLimit::SpedUp, PastLimit::Cut].map(PastLimit::text);
+    let bar = harness
+        .query_all(egui_kittest::kittest::by())
+        .find(|node| node.accesskit_node().description().is_some_and(|text| said.contains(&text)));
+    bar.expect("the timeline says what is past the limit").rect()
+}
+
+/// What the pointer does on the timeline and the preview, as it does it:
+/// an end of a short part of a long video hovered. Needs ffmpeg.
+fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::default();
+    config.gui.output_dir = Some(dir.path().join("out"));
+    config.ffmpeg.choice = FfmpegChoice::System;
+    let Some(clip) = crate::testing::video_of(dir.path(), "640x360", 8) else { return };
+    let mut harness = window(config, egui::vec2(1280.0, 820.0));
+    harness.state_mut().add(vec![clip]);
+    finish(&mut harness);
+    let settle = |harness: &mut Harness<App>| {
+        for item in &mut harness.state_mut().items {
+            item.view.playing = false;
+        }
+        harness.run_steps(3);
+    };
+    // a third of a second used, from 3 seconds in
+    let item = &mut harness.state_mut().items[0];
+    (item.choices.start, item.choices.length, item.view.time) = (Some(3.0), Some(0.3), 3.1);
+    settle(&mut harness);
+    let track = timeline_bar(&harness).shrink2(egui::vec2(8.0, 0.0));
+    let x_of = |seconds: f32| track.left() + seconds / 8.0 * track.width();
+    harness.event(egui::Event::PointerMoved(egui::pos2(x_of(3.3) + 2.0, track.center().y)));
+    settle(&mut harness);
+    save(&mut harness, "trim-end-hovered");
 }
 
 /// The GUI drawn as the screenshots draw it, of `config`, in a window
