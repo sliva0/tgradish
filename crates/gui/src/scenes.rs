@@ -264,6 +264,12 @@ fn lays_the_lists_bars_level_with_those_beside_them() {
             let all = place(harness, by().label(&remove));
             let convert = place(harness, by().label_contains(&keys));
             assert_eq!(all.0 + all.1, convert.0 + convert.1, "{all:?} {convert:?}");
+            // as far from the window's bottom as those over them are from
+            // its top
+            let screen = harness.ctx.content_rect();
+            let over = place(harness, by().label(&input)).0 - f64::from(screen.top());
+            let under = f64::from(screen.bottom()) - convert.1;
+            assert_eq!(over, under, "{over} over the one, {under} under the other");
         });
     }
     assert_eq!(seen, 2);

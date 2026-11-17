@@ -65,7 +65,7 @@ impl App {
         egui::Panel::bottom("actions").show(ui, |ui| {
             ui.add_space(crate::actions::BAR_ABOVE);
             self.actions(ui, id);
-            ui.add_space(crate::actions::BAR_BELOW);
+            ui.add_space(crate::actions::below_bar(ui.style()));
         });
         let output = self.item(id).map(|item| self.output_for(item));
         let copyable = self.copyable(id, output.as_deref()).is_some();

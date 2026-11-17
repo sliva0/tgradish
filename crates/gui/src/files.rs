@@ -401,11 +401,11 @@ impl App {
 /// The space over the list's bar, and under it, which lay its buttons
 /// level with those of the bar under the preview beside it.
 fn footer_spaces(style: &egui::Style) -> (f32, f32) {
-    use crate::actions::{BAR_ABOVE, BAR_BELOW, BAR_ROW};
+    use crate::actions::{BAR_ABOVE, BAR_ROW, below_bar};
     let taller = (BAR_ROW - theme::CONTROL) / 2.0;
     let central = egui::Frame::central_panel(style).inner_margin.bottom;
     let side = egui::Frame::side_top_panel(style).inner_margin.bottom;
-    (BAR_ABOVE + taller, BAR_BELOW + taller + f32::from(central - side))
+    (BAR_ABOVE + taller, below_bar(style) + taller + f32::from(central - side))
 }
 
 /// What a file dialog asks for.

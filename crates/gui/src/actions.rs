@@ -26,9 +26,18 @@ fn within<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R
 }
 
 /// Space over the bar's row, under it, and how high it is, as its first
-/// button is: the list of files lays its own bar out level with it.
+/// button is: the list of files lays its own bar out level with it. Under
+/// it, with the margins of its panel and of the window, it is as far from
+/// the window's bottom as the bar over the preview is from its top; the
+/// space egui leaves after a row is part of it.
 pub(crate) const BAR_ABOVE: f32 = 8.0;
 pub(crate) const BAR_BELOW: f32 = 6.0;
+
+/// What to add after the bar's row for [`BAR_BELOW`] under it, past the
+/// space egui leaves after a row in `style`.
+pub(crate) fn below_bar(style: &egui::Style) -> f32 {
+    BAR_BELOW - style.spacing.item_spacing.y
+}
 pub(crate) const BAR_ROW: f32 = 32.0;
 
 /// Whether the bar is on two lines, as it last needed, kept under this
