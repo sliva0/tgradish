@@ -1427,12 +1427,29 @@ fn draft(ctx: &egui::Context) -> Option<Typed> {
     (typing.text != typing.written).then_some(typed)
 }
 
+/// The pass in which a control did what the user asked of it a frame or
+/// more before: a number field took what was typed, or a stepper clicked
+/// while it was typed stepped.
+const ACTED: &str = "acted for the user";
+
+/// Whether a control did, this frame, what the user asked of it before.
+pub(crate) fn acted_now(ctx: &egui::Context) -> bool {
+    let acted = ctx.data(|data| data.get_temp::<u64>(egui::Id::new(ACTED)));
+    acted == Some(ctx.cumulative_pass_nr())
+}
+
+/// Whether a number field took, or tried to take, what was typed in it
+/// this frame.
+pub(crate) fn number_taken_now(ctx: &egui::Context) -> bool {
+    let taken = ctx.data(|data| data.get_temp::<u64>(egui::Id::new(TAKEN)));
+    taken == Some(ctx.cumulative_pass_nr())
+}
+
 /// Whether a number field holds what was typed in it, not yet taken, or
 /// took it this frame: a control pressed then leaves the field to take it
 /// as a step of its own, before it changes what the field holds.
 fn number_typed_now(ctx: &egui::Context) -> bool {
-    let taken = ctx.data(|data| data.get_temp::<u64>(egui::Id::new(TAKEN)));
-    draft(ctx).is_some() || taken == Some(ctx.cumulative_pass_nr())
+    draft(ctx).is_some() || number_taken_now(ctx)
 }
 
 /// Has the number field typed in be done with, as a click elsewhere does:
@@ -1630,8 +1647,13 @@ impl<'a> Number<'a> {
         if typing.text == typing.written {
             return None;
         }
+        // the user's doing, as when the field went out of their hands a
+        // frame before, by a click on a control drawn after it
         let pass = ui.ctx().cumulative_pass_nr();
-        ui.data_mut(|data| data.insert_temp(egui::Id::new(TAKEN), pass));
+        ui.data_mut(|data| {
+            data.insert_temp(egui::Id::new(TAKEN), pass);
+            data.insert_temp(egui::Id::new(ACTED), pass);
+        });
         match self.parse(&typing.text) {
             Some(value) => {
                 let value = self.kept(value);
@@ -2074,10 +2096,22 @@ pub(crate) fn stepper(
     // egui finds it under the pointer again
     let held = enabled && response.is_pointer_button_down_on();
     let over = response.contains_pointer();
+    // a click put off for a number typed, as by a screen reader, which
+    // steps once the field has taken it, a frame of its own
+    let pending = response.id.with("pending");
+    let typed = number_typed_now(ui.ctx());
+    let put_off = ui.data(|data| data.get_temp::<bool>(pending)).is_some();
+    if put_off {
+        if typed {
+            ui.ctx().request_repaint();
+        } else {
+            ui.data_mut(|data| data.remove::<bool>(pending));
+        }
+    }
     let stepped = match (held, since) {
         // not as it is pressed while a number is typed, which is taken then
         // as a step of its own, but on the next frame, from what it took
-        (true, None) if number_typed_now(ui.ctx()) => {
+        (true, None) if typed => {
             ui.data_mut(|data| data.insert_temp(id, (now, 0_u32)));
             false
         }
@@ -2096,9 +2130,23 @@ pub(crate) fn stepper(
             ui.data_mut(|data| data.remove::<(f64, u32)>(id));
             // a click it wasn't held for, as by the keyboard, or that let go
             // before the step it put off for a number typed
-            since.is_none_or(|(_, taken)| taken == 0) && response.clicked()
+            let clicked = since.is_none_or(|(_, taken)| taken == 0) && response.clicked();
+            if clicked && typed {
+                finish_typed_number(ui.ctx());
+                ui.data_mut(|data| data.insert_temp(pending, true));
+                ui.ctx().request_repaint();
+            }
+            clicked && !typed
         }
     };
+    // not where it reached the end of what it steps through meanwhile
+    let late = put_off && !typed && enabled;
+    let stepped = stepped || late;
+    if late {
+        // the user's doing, though nothing was pressed this frame
+        let pass = ui.ctx().cumulative_pass_nr();
+        ui.data_mut(|data| data.insert_temp(egui::Id::new(ACTED), pass));
+    }
     if held {
         let from = since.map_or(now, |(from, _)| from);
         let wait = next_step(now - from).max(1e-3);

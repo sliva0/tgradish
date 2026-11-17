@@ -141,7 +141,11 @@ impl Frames {
         });
         let held = down && ctx.egui_is_using_pointer() && on_settings;
         let busy = held || typing.is_some();
-        let committed = self.typing.is_some() && self.typing != typing;
+        let did = did || widgets::acted_now(ctx);
+        // or taken a frame after it was left, as its field was drawn before
+        // what took the focus from it
+        let committed =
+            (self.typing.is_some() && self.typing != typing) || widgets::number_taken_now(ctx);
         let input = did || busy || self.busy;
         let picked = self.selected != selected;
         (self.typing, self.busy, self.selected) = (typing, busy, selected);
@@ -855,7 +859,10 @@ mod tests {
             (fl!("smaller"), Some(IntegerScale { up: 1, down: 3 })),
             (fl!("larger"), Some(IntegerScale { up: 1, down: 1 })),
         ];
-        for (button, then) in stepped {
+        // clicked by the pointer, pressed and let go of a frame apart or in
+        // the same, or by a screen reader, with no press at all
+        let ways = ["pointer", "quick", "screen reader"];
+        for ((button, then), way) in stepped.iter().flat_map(|step| ways.map(|way| (step, way))) {
             let dir = tempfile::tempdir().unwrap();
             let mut harness = opened(dir.path(), &["wide.png"]);
             for label in [fl!("format-image"), fl!("scaling-integer"), fl!("scale-fixed")] {
@@ -875,16 +882,35 @@ mod tests {
             harness.run_steps(2);
             harness.event(egui::Event::Text("1/2".into()));
             harness.run_steps(2);
-            let all = harness.get_all_by_label(&button);
-            let at = all.map(|node| node.rect()).max_by(|a, b| a.top().total_cmp(&b.top()));
-            pointer_click(&mut harness, at.unwrap().center());
-            assert_eq!(selected(&harness).choices.webm.integer_scale, then, "{button}");
+            let all = harness.get_all_by_label(button);
+            let node = all.max_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap();
+            let at = node.rect().center();
+            match way {
+                "pointer" => pointer_click(&mut harness, at),
+                "quick" => {
+                    harness.event(egui::Event::PointerMoved(at));
+                    harness.step();
+                    for pressed in [true, false] {
+                        let (button, modifiers) = (PointerButton::Primary, Modifiers::NONE);
+                        let press =
+                            egui::Event::PointerButton { pos: at, button, pressed, modifiers };
+                        harness.event(press);
+                    }
+                    harness.run_steps(4);
+                }
+                _ => {
+                    node.click_accesskit();
+                    harness.run_steps(4);
+                }
+            }
+            let what = format!("{button}, {way}");
+            assert_eq!(selected(&harness).choices.webm.integer_scale, *then, "{what}");
             // each a step of its own
-            assert_eq!(steps(&harness), 5, "{button}");
+            assert_eq!(steps(&harness), 5, "{what}");
             undo(&mut harness);
-            assert_eq!(selected(&harness).choices.webm.integer_scale, half, "{button}");
+            assert_eq!(selected(&harness).choices.webm.integer_scale, half, "{what}");
             undo(&mut harness);
-            assert_eq!(selected(&harness).choices.webm.integer_scale, set, "{button}");
+            assert_eq!(selected(&harness).choices.webm.integer_scale, set, "{what}");
         }
     }
 
