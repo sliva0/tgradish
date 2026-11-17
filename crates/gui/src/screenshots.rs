@@ -504,6 +504,15 @@ fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     save(&mut harness, "crop-focused");
     harness.key_press(egui::Key::Escape);
     settle(&mut harness);
+    // at the top of the picture, its size within it; and smaller, under it
+    for (crop, name) in [
+        (Crop { x: 100, y: 0, width: 240, height: 160 }, "crop-at-top"),
+        (Crop { x: 100, y: 0, width: 40, height: 30 }, "crop-small-at-top"),
+    ] {
+        harness.state_mut().items[0].choices.crop = Some(crop);
+        settle(&mut harness);
+        save(&mut harness, name);
+    }
     // the shortcuts, scrolled to what the mouse does
     harness.state_mut().shortcuts = true;
     settle(&mut harness);

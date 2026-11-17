@@ -253,10 +253,10 @@ pub(crate) fn show(
         vec2(crop.width as f32, crop.height as f32) * scale,
     );
 
-    // the crop's size and its cross, over its top left corner and, near
-    // the stage's top, its top edge: there the pointer is on them, not on
-    // the edges. As they take no drags, egui gives this the drags that
-    // start on them, and has it hovered under them
+    // the crop's size and its cross, over its top left corner, or within
+    // it near the stage's top: there the pointer is on them, not on the
+    // crop. As they take no drags, egui gives this the drags that start on
+    // them, and has it hovered under them
     let tag = cropping.crop.is_some().then(|| size_tag(&painter, crop, on_screen, rect).back);
 
     // what a drag starting at `point` would do
@@ -665,7 +665,11 @@ struct SizeTag {
     cross: Rect,
 }
 
-/// Where the size of `crop`, shown at `on_screen`, goes on the `stage`.
+/// Where the size of `crop`, shown at `on_screen`, goes on the `stage`:
+/// over its top left corner, clear of where the pointer takes its top
+/// edge; where the stage has no room for that, within it, clear of its
+/// edges, or else under it; and only where there is no room for any of
+/// those, over its top edge at the stage's top.
 fn size_tag(painter: &egui::Painter, crop: Crop, on_screen: Rect, stage: Rect) -> SizeTag {
     let text = format!("{} × {}", crop.width, crop.height);
     let galley = painter.layout_no_wrap(text, egui::FontId::proportional(12.5), Color32::WHITE);
@@ -673,11 +677,30 @@ fn size_tag(painter: &egui::Painter, crop: Crop, on_screen: Rect, stage: Rect) -
     // tag is high
     let side = galley.size().y + 8.0;
     let tag = vec2(galley.size().x + side, galley.size().y);
-    // over the crop's corner, kept within the stage
-    let x = (on_screen.left() + 6.0).min(stage.right() - tag.x - 8.0);
-    let at =
-        pos2(x.max(stage.left() + 4.0), (on_screen.top() - tag.y - 8.0).max(stage.top() + 4.0));
-    let back = Rect::from_min_size(at, tag).expand(4.0);
+    let pad = 4.0;
+    // its back's left, from the left of the crop, within the stage
+    let x = (on_screen.left() + 6.0).min(stage.right() - tag.x - 8.0).max(stage.left() + 4.0);
+    let x = x - pad;
+    let clear = GRAB + 1.0;
+    let high = tag.y + 2.0 * pad;
+    let room = stage.shrink(pad);
+    let over = on_screen.top() - clear - high;
+    let within = on_screen.top() + clear;
+    let under = on_screen.bottom() + clear;
+    let fits_within = on_screen.width() >= tag.x + 2.0 * (pad + clear)
+        && on_screen.height() >= high + 2.0 * clear;
+    let top = if over >= room.top() {
+        over
+    } else if fits_within {
+        within
+    } else if under + high <= room.bottom() {
+        under
+    } else {
+        room.top()
+    };
+    let x = if top == within { on_screen.left() + clear } else { x };
+    let back = Rect::from_min_size(pos2(x, top), tag + Vec2::splat(2.0 * pad));
+    let at = back.min + Vec2::splat(pad);
     let cross = Rect::from_min_max(pos2(back.right() - side, back.top()), back.max);
     SizeTag { galley, at, back, cross }
 }
@@ -1058,7 +1081,7 @@ mod tests {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
         // a crop at the picture's top, which is at the stage's, so its size
-        // and cross are held down over its top edge and the top left corner
+        // and cross go within it, over what would move it
         let clip = Clip {
             id: 1,
             width: 64,
@@ -1084,10 +1107,11 @@ mod tests {
         let (shown, scale) = layout(harness.state().4, (64, 48), &Zoom::default());
         let (left, top) = (shown.left() + 8.0 * scale, shown.top());
         let cross = harness.get_by_label(&crate::l10n::fl!("whole-picture")).rect();
-        assert!(cross.y_range().contains(top) && cross.left() > left + GRAB, "{cross:?}");
-        // the size, over the corner's handle
-        let size = pos2(left + 5.0, top);
-        let beside = pos2(cross.right() + 20.0, top);
+        // clear of where the pointer takes its top edge and corner
+        assert!(cross.top() > top + GRAB && cross.left() > left + GRAB, "{cross:?}");
+        // the size, before the cross, and the top edge over them
+        let size = pos2(cross.left() - 10.0, cross.center().y);
+        let beside = pos2(cross.center().x, top);
         // four pixels down
         let down = vec2(0.0, 4.0 * scale);
         let press = |pos, pressed| egui::Event::PointerButton {
@@ -1120,7 +1144,7 @@ mod tests {
         // dragged from the cross or the size, nothing moves
         assert_eq!(drag(&mut harness, cross.center()), Some(crop));
         assert_eq!(drag(&mut harness, size), Some(crop));
-        // the edge beside them still moves
+        // the edge over them moves
         let moved = Crop { y: 4, height: 26, ..crop };
         assert_eq!(drag(&mut harness, beside), Some(moved));
         // and a click on the cross is all of the picture
@@ -1371,6 +1395,36 @@ mod tests {
         assert_eq!(edges_at(pos2(103.0, 103.0), small), Some(corner));
         assert_eq!(edges_at(pos2(114.0, 108.0), small), Some([false, false, true, false]));
         assert_eq!(edges_at(pos2(90.0, 90.0), small), Some(corner));
+    }
+
+    #[test]
+    fn puts_the_crops_size_clear_of_where_its_edges_are_taken() {
+        let stage = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
+        let crop = Crop { x: 0, y: 0, width: 10, height: 10 };
+        let crops = [
+            // with room over it
+            Rect::from_min_size(pos2(100.0, 100.0), vec2(200.0, 100.0)),
+            // at the stage's top, large enough to hold it
+            Rect::from_min_size(pos2(100.0, 10.0), vec2(200.0, 100.0)),
+            // at the stage's top, too small to hold it
+            Rect::from_min_size(pos2(100.0, 10.0), vec2(30.0, 30.0)),
+            // as tall as the stage, and too narrow
+            Rect::from_min_size(pos2(100.0, 10.0), vec2(30.0, 380.0)),
+        ];
+        let mut tags = Vec::new();
+        let mut output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.painter();
+            tags = crops.map(|on_screen| size_tag(painter, crop, on_screen, stage).back).to_vec();
+        });
+        output.textures_delta.clear();
+        let [over, within, under, pinned] = tags[..] else { panic!("{tags:?}") };
+        assert!(over.bottom() < crops[0].top() - GRAB, "{over:?}");
+        assert!(within.top() > crops[1].top() + GRAB, "{within:?}");
+        assert!(within.left() > crops[1].left() + GRAB, "{within:?}");
+        assert!(crops[1].contains_rect(within), "{within:?}");
+        assert!(under.top() > crops[2].bottom() + GRAB, "{under:?}");
+        // and only where there is no room for any of those, over its edge
+        assert!(pinned.y_range().contains(crops[3].top()), "{pinned:?}");
     }
 
     #[test]

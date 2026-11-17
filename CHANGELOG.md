@@ -33,6 +33,9 @@ What changed in each release of tgradish, newest first. The format follows
 - The GUI's timeline says the time under the pointer at once, dragging too,
   takes the nearer end of a short part used, seeks as the button goes down,
   and slides the part used by an end dragged with Shift.
+- The GUI's crop snaps to the picture's edges and middle but with Ctrl,
+  keeps its shape with Shift and its middle with Alt, goes back on Escape
+  while dragged, moves by the arrows once clicked, and has larger corners.
 
 ### Fixed
 
