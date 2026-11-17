@@ -111,15 +111,9 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     let running = running_colour(ui);
     let done = theme::POSITIVE.gamma_multiply(0.45);
     if let Some(stage) = progress.tgs {
-        use jobs::TgsStage;
-        // too large, and never to be changed: packed quickly, in red
-        let hopeless = progress.tgs_exact && progress.unchanged_bytes.is_some();
-        for (each, text) in stages(progress, stage) {
+        for (each, text) in stages(progress) {
             use widgets::Fill;
             let (fill, colour) = match each.cmp(&stage) {
-                std::cmp::Ordering::Less if hopeless && each == TgsStage::Fitting => {
-                    (Fill::Share(1.0), theme::NEGATIVE.gamma_multiply(0.45))
-                }
                 std::cmp::Ordering::Less => (Fill::Share(1.0), done),
                 std::cmp::Ordering::Equal => (stage_fill(progress, stage), running),
                 std::cmp::Ordering::Greater => (Fill::Share(0.0), running),
@@ -174,39 +168,33 @@ fn running_colour(ui: &egui::Ui) -> Color32 {
     theme::fill(ui.visuals(), 0.5)
 }
 
-/// What each stage of a `.tgs` conversion says, once it is at `stage`.
-fn stages(progress: &jobs::Progress, stage: jobs::TgsStage) -> [(jobs::TgsStage, String); 4] {
+/// What each stage of a `.tgs` conversion says, a bar each. Fitting has
+/// one only once the sticker is found too large and fitting starts: one
+/// that fits, or one kept exactly as it is, is never fitted, and a bar for
+/// it would stand for nothing.
+fn stages(progress: &jobs::Progress) -> Vec<(jobs::TgsStage, String)> {
     use jobs::TgsStage;
-    let fits = progress.unchanged_bytes.is_none() && stage > TgsStage::Fitting;
     let hopeless = progress.tgs_exact && progress.unchanged_bytes.is_some();
+    let fitting = match (progress.unchanged_bytes, progress.steps.last()) {
+        _ if progress.tgs_exact => None,
+        (_, Some(step)) => {
+            let (count, size) = (progress.steps.len(), widgets::kib(step.bytes as u64));
+            Some(fl!("stage-fitting-steps", count = count, size = size))
+        }
+        (Some(bytes), None) => Some(fl!("stage-fitting-from", size = widgets::kib(bytes as u64))),
+        (None, None) => None,
+    };
+    let compressing =
+        if hopeless { fl!("stage-compressing", "hopeless") } else { fl!("stage-compressing") };
     [
-        (TgsStage::Reading, fl!("stage-reading")),
-        (TgsStage::Drawing, fl!("stage-drawing")),
-        (
-            TgsStage::Fitting,
-            match (progress.unchanged_bytes, progress.steps.last()) {
-                // never changed: nothing is fitted
-                (Some(bytes), _) if progress.tgs_exact => {
-                    fl!("stage-kept-too-large", size = widgets::kib(bytes as u64))
-                }
-                (None, _) if progress.tgs_exact => fl!("stage-kept"),
-                (Some(_), Some(step)) => {
-                    let count = progress.steps.len();
-                    let size = widgets::kib(step.bytes as u64);
-                    fl!("stage-fitting-steps", count = count, size = size)
-                }
-                (Some(bytes), None) => {
-                    fl!("stage-fitting-from", size = widgets::kib(bytes as u64))
-                }
-                (None, _) if fits => fl!("stage-fits"),
-                (None, _) => fl!("stage-fitting"),
-            },
-        ),
-        (
-            TgsStage::Compressing,
-            if hopeless { fl!("stage-compressing", "hopeless") } else { fl!("stage-compressing") },
-        ),
+        Some((TgsStage::Reading, fl!("stage-reading"))),
+        Some((TgsStage::Drawing, fl!("stage-drawing"))),
+        fitting.map(|text| (TgsStage::Fitting, text)),
+        Some((TgsStage::Compressing, compressing)),
     ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// How far the stage at work has got. It moves even while its share stays
@@ -235,7 +223,7 @@ fn rate_text(attempt: &jobs::Attempt) -> String {
 fn current_step(progress: &jobs::Progress) -> (widgets::Fill, String) {
     use widgets::Fill;
     if let Some(stage) = progress.tgs {
-        let text = stages(progress, stage).into_iter().find(|(each, _)| *each == stage);
+        let text = stages(progress).into_iter().find(|(each, _)| *each == stage);
         return (stage_fill(progress, stage), text.map(|(_, text)| text).unwrap_or_default());
     }
     let Some(attempt) = progress.attempts.last() else {
@@ -291,7 +279,9 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
         let size = widgets::kib(json);
         ui.label(fl!("art-shapes", layers = layers, rectangles = rectangles, size = size));
     }
-    if let Some(bytes) = progress.unchanged_bytes {
+    // kept as it is, or with nothing fitting could take off, it wasn't
+    // changed to fit, however large it was
+    if let (Some(bytes), false) = (progress.unchanged_bytes, progress.steps.is_empty()) {
         ui.label(fl!("art-before-fitting", size = widgets::kib(bytes as u64)));
     }
     for step in &progress.steps {
@@ -540,5 +530,41 @@ mod tests {
         let (fill, text) = current_step(&compressing);
         assert!(matches!(fill, Fill::Unknown));
         assert_eq!(text, fl!("stage-compressing"));
+    }
+
+    #[test]
+    fn a_tgs_shows_fitting_only_where_it_fits() {
+        use tgradish_core::tgradish_tgs::{reduce::Reduction, sticker::Step};
+        let bars = |progress: &Progress| -> Vec<TgsStage> {
+            stages(progress).into_iter().map(|(stage, _)| stage).collect()
+        };
+        let unfitted = vec![TgsStage::Reading, TgsStage::Drawing, TgsStage::Compressing];
+        // small enough as it is, and kept exactly as it is
+        let mut progress = Progress { tgs: Some(TgsStage::Compressing), ..Progress::default() };
+        assert_eq!(bars(&progress), unfitted);
+        progress.tgs_exact = true;
+        assert_eq!(bars(&progress), unfitted);
+        // too large, and kept so all the same: compressed as it is
+        progress.unchanged_bytes = Some(200_000);
+        assert_eq!(bars(&progress), unfitted);
+        assert_eq!(stages(&progress)[2].1, fl!("stage-compressing", "hopeless"));
+
+        // too large, and fitted
+        let mut progress = Progress {
+            tgs: Some(TgsStage::Fitting),
+            unchanged_bytes: Some(200_000),
+            ..Progress::default()
+        };
+        let fitted =
+            vec![TgsStage::Reading, TgsStage::Drawing, TgsStage::Fitting, TgsStage::Compressing];
+        assert_eq!(bars(&progress), fitted);
+        assert_eq!(
+            current_step(&progress).1,
+            fl!("stage-fitting-from", size = widgets::kib(200_000))
+        );
+        progress.steps.push(Step::new(Reduction::Despeckle, 60_000, 0.0));
+        assert_eq!(bars(&progress), fitted);
+        let fitting = fl!("stage-fitting-steps", count = 1, size = widgets::kib(60_000));
+        assert_eq!(current_step(&progress).1, fitting);
     }
 }

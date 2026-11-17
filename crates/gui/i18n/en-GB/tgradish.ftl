@@ -1002,18 +1002,16 @@ result-webm = { $width } × { $height } px, { $fps } fps, { $length }
 changed-to-fit = Changed to fit: how is listed below
 replaced-earlier = Replaced an earlier result made by tgradish
 converting = Converting
-# The stages of making a TGS animation, each a bar.
+# The stages of making a TGS animation, each a bar. Fitting shows only
+# once the animation is found too large: from its size then, and after
+# each change made to fit, with how many there are and the size after.
 stage-reading = Reading the pixel art
 stage-drawing = Converting to vector
-stage-kept-too-large = Kept as it is: about { $size }, too large
-stage-kept = Kept as it is
 stage-fitting-steps = { $count ->
     [one] Fitting into 64 KiB: { $count } step, about { $size }
    *[other] Fitting into 64 KiB: { $count } steps, about { $size }
 }
 stage-fitting-from = Fitting into 64 KiB from { $size }
-stage-fits = Fits as it is
-stage-fitting = Fitting into 64 KiB, if it has to
 stage-compressing = Compressing
     .hopeless = Compressing quickly: it can't fit
 # Each encode of a WebM, a bar: its frame rate and rate, then its size as

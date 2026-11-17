@@ -613,7 +613,10 @@ fn follow(event: Event, update: Update) {
         }
         Event::TooLarge { bytes } => update(Box::new(move |progress| {
             progress.unchanged_bytes = Some(bytes as usize);
-            progress.tgs = Some(TgsStage::Fitting);
+            // kept exactly as it is, it goes on to be compressed as it is
+            if !progress.tgs_exact {
+                progress.tgs = Some(TgsStage::Fitting);
+            }
         })),
         Event::Reduced { step } => update(Box::new(move |progress| {
             progress.steps.push(step);
@@ -655,6 +658,24 @@ mod tests {
         assert_eq!(progress.tgs_fitting(), Some(1.0));
         progress.steps.push(step(8 * limit));
         assert_eq!(progress.tgs_fitting(), Some(0.0));
+    }
+
+    /// `progress` after `event`.
+    fn followed(progress: Progress, event: Event) -> Progress {
+        let progress = std::cell::RefCell::new(progress);
+        follow(event, &|change| change(&mut progress.borrow_mut()));
+        progress.into_inner()
+    }
+
+    #[test]
+    fn a_tgs_too_large_is_fitted_unless_kept_exactly() {
+        let drawing = Progress { tgs: Some(TgsStage::Drawing), ..Progress::default() };
+        let fitting = followed(drawing.clone(), Event::TooLarge { bytes: 200_000 });
+        assert_eq!(fitting.tgs, Some(TgsStage::Fitting));
+        // kept exactly, it goes from drawing to compressing as it is
+        let exact = Progress { tgs_exact: true, ..drawing };
+        let kept = followed(exact, Event::TooLarge { bytes: 200_000 });
+        assert_eq!((kept.tgs, kept.unchanged_bytes), (Some(TgsStage::Drawing), Some(200_000)));
     }
 
     #[test]

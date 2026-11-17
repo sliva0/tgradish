@@ -10,6 +10,8 @@ What changed in each release of tgradish, newest first. The format follows
 
 - Fitting a WebM no longer says why it didn't try a lower frame rate, in
   the GUI, the command line or `--json`'s `decided` events.
+- The GUI shows a bar for fitting a `.tgs` only while it is being fitted,
+  not for one that fits or is kept exactly as it is.
 
 ## [2.0.0] - 2026-11-16
 
