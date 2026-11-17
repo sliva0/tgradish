@@ -259,6 +259,7 @@ pub(crate) fn show(
     let tag = cropping.crop.is_some().then(|| size_tag(&painter, crop, on_screen, rect).back);
 
     // what a drag starting at `point` would do
+    let cropped = cropping.crop.is_some();
     let grab = |point: Pos2| -> Option<Drag> {
         if tag.is_some_and(|tag| tag.contains(point)) {
             return None;
@@ -274,7 +275,7 @@ pub(crate) fn show(
         ];
         if edges.iter().any(|&edge| edge) {
             Some(Drag::Edges(edges, crop))
-        } else if cropping.crop.is_some() && on_screen.contains(point) {
+        } else if cropped && on_screen.contains(point) {
             Some(Drag::Move(crop, to_pixels(point)))
         } else if shown.contains(point) {
             Some(Drag::New(to_pixels(point)))
@@ -286,17 +287,27 @@ pub(crate) fn show(
     let id = response.id.with("drag");
     if response.drag_started_by(PointerButton::Primary) {
         // none from the size or cross, nor what is left of a drag that
-        // ended while this wasn't shown
+        // ended while this wasn't shown; with the crop it started from
         let origin = ui.input(|input| input.pointer.press_origin());
         ui.data_mut(|data| match origin.and_then(grab) {
             Some(drag) => {
-                data.insert_temp(id, drag);
+                data.insert_temp(id, (drag, *cropping.crop));
             }
-            None => data.remove::<Drag>(id),
+            None => data.remove::<(Drag, Option<Crop>)>(id),
         });
     }
-    let drag: Option<Drag> = ui.data(|data| data.get_temp(id));
     let dragging = response.dragged_by(PointerButton::Primary);
+    // Escape takes a drag back, the crop as it was before it, as egui ends
+    // the drag on it, rather than leaving the crop where it was dragged
+    let held = ui.input(|input| input.pointer.primary_down());
+    if held
+        && let Some((_, before)) = ui.data(|data| data.get_temp::<(Drag, Option<Crop>)>(id))
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        *cropping.crop = before;
+        ui.data_mut(|data| data.remove::<(Drag, Option<Crop>)>(id));
+    }
+    let drag = ui.data(|data| data.get_temp::<(Drag, Option<Crop>)>(id)).map(|(drag, _)| drag);
     if let Some(point) = response.hover_pos() {
         // what is being dragged, while it is, as past the size and cross,
         // or else what would be
@@ -346,8 +357,9 @@ pub(crate) fn show(
             }
         }
     }
-    if response.drag_stopped() {
-        ui.data_mut(|data| data.remove::<Drag>(id));
+    // nor kept once the button is up, wherever it was let go
+    if response.drag_stopped() || !held {
+        ui.data_mut(|data| data.remove::<(Drag, Option<Crop>)>(id));
     }
     // all of the picture, or as much of it as the integer scale takes
     let whole_picture = |crop: &mut Option<Crop>| {
@@ -862,6 +874,99 @@ mod tests {
         harness.step();
         harness.event(press(cross.center(), false));
         harness.step();
+        assert_eq!(harness.state().3, None);
+    }
+
+    type Cropped = (Screen, Zoom, Clip, Option<Crop>, Rect);
+
+    /// A harness of a 64 × 48 picture of pixel art on a 600 × 400 stage,
+    /// cropped to `crop`, and the scale it shows at and where its top left
+    /// corner is.
+    fn cropped(crop: Option<Crop>) -> (egui_kittest::Harness<'static, Cropped>, f32, Pos2) {
+        let clip = Clip {
+            id: 1,
+            width: 64,
+            height: 48,
+            frames: vec![vec![255; 64 * 48 * 4]],
+            times: vec![0.0, 0.1],
+            pixelated: true,
+        };
+        let state: Cropped = (Screen::default(), Zoom::default(), clip, crop, Rect::NOTHING);
+        let mut harness =
+            egui_kittest::Harness::builder().with_size([600.0, 400.0]).build_ui_state(
+                |ui, (screen, zoom, clip, crop, stage): &mut Cropped| {
+                    *stage = ui.max_rect();
+                    let picture = Picture { clip, frame: 0, size: (64, 48), square: false };
+                    let cropping = Cropping { crop, ratio: None, kept: None, exact: None };
+                    show(ui, screen, (*stage, *stage), &picture, zoom, Some(cropping));
+                },
+                state,
+            );
+        crate::widgets::test_fonts(&harness);
+        harness.run_steps(2);
+        let (shown, scale) = layout(harness.state().4, (64, 48), &Zoom::default());
+        (harness, scale, shown.min)
+    }
+
+    /// Presses the primary button at `from`, held with `modifiers`, and
+    /// moves the pointer by `by` in four steps, without letting go.
+    fn press_and_move(
+        harness: &mut egui_kittest::Harness<'_, Cropped>,
+        from: Pos2,
+        by: Vec2,
+        modifiers: egui::Modifiers,
+    ) {
+        harness.event(egui::Event::ModifiersChanged(modifiers));
+        harness.event(egui::Event::PointerMoved(from));
+        harness.event(egui::Event::PointerButton {
+            pos: from,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers,
+        });
+        harness.step();
+        for step in 1..=4 {
+            harness.event(egui::Event::PointerMoved(from + by * step as f32 / 4.0));
+            harness.step();
+        }
+    }
+
+    /// Lets go of the primary button at `at`.
+    fn let_go(harness: &mut egui_kittest::Harness<'_, Cropped>, at: Pos2) {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.step();
+        harness.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        harness.step();
+    }
+
+    #[test]
+    fn takes_a_drag_back_on_escape() {
+        let crop = Crop { x: 8, y: 8, width: 30, height: 20 };
+        let (mut harness, scale, corner) = cropped(Some(crop));
+        // its right edge dragged out, then Escape, then on: as it was
+        let right = corner + vec2(38.0, 18.0) * scale;
+        press_and_move(&mut harness, right, vec2(60.0, 0.0), egui::Modifiers::NONE);
+        assert_ne!(harness.state().3, Some(crop));
+        harness.key_press(egui::Key::Escape);
+        harness.step();
+        assert_eq!(harness.state().3, Some(crop));
+        harness.event(egui::Event::PointerMoved(right + vec2(90.0, 0.0)));
+        harness.step();
+        let_go(&mut harness, right + vec2(90.0, 0.0));
+        assert_eq!(harness.state().3, Some(crop));
+        // a new one drawn, then Escape: none
+        let (mut harness, scale, corner) = cropped(None);
+        let from = corner + vec2(4.0, 4.0) * scale;
+        press_and_move(&mut harness, from, vec2(80.0, 60.0), egui::Modifiers::NONE);
+        assert!(harness.state().3.is_some());
+        harness.key_press(egui::Key::Escape);
+        harness.step();
+        let_go(&mut harness, from + vec2(80.0, 60.0));
         assert_eq!(harness.state().3, None);
     }
 
