@@ -357,6 +357,13 @@ mod tests {
     /// The GUI with a 40 × 24 picture of `name` open and read, which is
     /// made a `.tgs` of, as one colour reads as pixel art.
     fn opened(dir: &Path, names: &[&str]) -> Harness<'static, App> {
+        // tall enough that the settings don't scroll, so the controls
+        // pressed are in sight
+        opened_in(dir, names, vec2(1280.0, 1400.0))
+    }
+
+    /// [`opened`] in a window of `size`.
+    fn opened_in(dir: &Path, names: &[&str], size: egui::Vec2) -> Harness<'static, App> {
         let arts = names.iter().map(|name| {
             let art = dir.join(name);
             let image = image::RgbaImage::from_pixel(40, 24, image::Rgba([200, 40, 90, 255]));
@@ -365,10 +372,8 @@ mod tests {
         });
         let mut config = Config::default();
         config.gui.output_dir = Some(dir.join("out"));
-        // tall enough that the settings don't scroll, which they would as
-        // what is said under them grows and shrinks
         let mut harness = Harness::builder()
-            .with_size([1280.0, 1400.0])
+            .with_size(size)
             .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin()));
         widgets::test_fonts(&harness);
         harness.state_mut().add(arts.collect());
@@ -677,22 +682,43 @@ mod tests {
             return;
         }
         let dir = tempfile::tempdir().unwrap();
-        let mut harness = opened(dir.path(), &["wide.png"]);
+        let mut harness = opened_in(dir.path(), &["wide.png"], vec2(1280.0, 800.0));
         // a static sticker scaled by whole multiples, of a scale set
-        click(&mut harness, &fl!("format-image"));
+        let pick = |harness: &mut Harness<App>, label: &str| {
+            harness.get_by_label(label).click_accesskit();
+            harness.run_steps(2);
+        };
+        pick(&mut harness, &fl!("format-image"));
         finish(&mut harness);
-        click(&mut harness, &fl!("scaling-integer"));
-        click(&mut harness, &fl!("scale-fixed"));
+        pick(&mut harness, &fl!("scaling-integer"));
+        pick(&mut harness, &fl!("scale-fixed"));
         let set = selected(&harness).choices.webm.integer_scale;
         assert!(set.is_some());
         assert_eq!(steps(&harness), 3);
-        // the scale's − held for a while, stepping several times: the
-        // lower of those so named, as the small picture of the result has
-        // one too
+        // the settings scrolled to their end, as far as they go
         let smaller = fl!("smaller");
-        let all = harness.get_all_by_label(&smaller);
-        let at = all.map(|node| node.rect()).max_by(|a, b| a.top().total_cmp(&b.top()));
-        let at = at.unwrap().center();
+        let minus = |harness: &Harness<App>| {
+            // the lower of those so named, as the small picture of the
+            // result has one too
+            let all = harness.get_all_by_label(&smaller);
+            all.map(|node| node.rect()).max_by(|a, b| a.top().total_cmp(&b.top())).unwrap()
+        };
+        // over the settings, under the preview
+        let over = minus(&harness).center();
+        harness.event(egui::Event::PointerMoved(Pos2::new(over.x, over.y.min(600.0))));
+        for _ in 0..20 {
+            harness.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, -400.0),
+                modifiers: Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            });
+            harness.step();
+        }
+        harness.run_steps(20);
+        // its − held for a while, stepping several times, staying under
+        // the pointer
+        let at = minus(&harness).center();
         let press = |pressed| egui::Event::PointerButton {
             pos: at,
             button: PointerButton::Primary,
@@ -704,6 +730,7 @@ mod tests {
         let mut scales = vec![set];
         for _ in 0..10 {
             harness.step();
+            assert!(minus(&harness).contains(at), "{:?} moved from {at:?}", minus(&harness));
             let scale = selected(&harness).choices.webm.integer_scale;
             if scales.last() != Some(&scale) {
                 scales.push(scale);

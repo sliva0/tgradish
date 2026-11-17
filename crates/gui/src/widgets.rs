@@ -343,6 +343,28 @@ pub(crate) fn hint_room(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.allocate_space((galley.size() - vec2(0.0, HINT_TRIM)).max(egui::Vec2::ZERO));
 }
 
+/// A [`hint`] in room for the tallest of `forms`, what it may say in turn,
+/// laid out as wide: so that what is under it stays where it is as it
+/// says another, as a control over it is stepped.
+pub(crate) fn hint_in_room(ui: &mut egui::Ui, text: impl Into<String>, forms: &[String]) {
+    ui.add_space(BEFORE_HINT);
+    let width = ui.available_width().min(HINT_WIDTH);
+    let tallest = forms.iter().fold(0.0_f32, |tallest, form| {
+        let galley = egui::WidgetText::from(RichText::new(form).weak().size(12.5)).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Wrap),
+            width,
+            egui::TextStyle::Body,
+        );
+        tallest.max(galley.size().y - HINT_TRIM)
+    });
+    let said = weak_text(ui, RichText::new(text.into()).weak().size(12.5), width, HINT_TRIM);
+    let short = tallest - said.rect.height();
+    if short > 0.0 {
+        ui.add_space(short);
+    }
+}
+
 /// A [`hint`] holding a number that changes, as something is dragged or
 /// plays: its lines break where they would with the widest number it may
 /// hold, which `widest` says, the hint written with each of the widest
@@ -2633,7 +2655,21 @@ pub(crate) fn scrolled<R>(
             // what scrolls within as it would elsewhere
             ui.spacing_mut().scroll = outer;
             ui.set_max_width(width - GUTTER);
-            add(ui)
+            let added = add(ui);
+            // never shorter while the pointer is held than as the frame
+            // before left it: scrolled to its end, what is in sight would
+            // move down as it shrinks, and from under the pointer, as a
+            // button held to repeat whose step shortens what follows
+            let tallest = ui.id().with("tallest while held");
+            let before = ui.data(|data| data.get_temp::<f32>(tallest));
+            if let Some(before) = before
+                && ui.input(|input| input.pointer.any_down())
+            {
+                ui.set_min_height(before);
+            }
+            let height = ui.min_rect().height();
+            ui.data_mut(|data| data.insert_temp(tallest, height));
+            added
         })
     })
     .inner
@@ -2767,6 +2803,57 @@ pub(crate) fn test_fonts<State>(harness: &egui_kittest::Harness<'_, State>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keeps_what_scrolls_as_long_while_the_pointer_is_held() {
+        // a button with lines after it, scrolled to their end, and where
+        // the button is
+        type State = (usize, egui::Rect);
+        let show = |ui: &mut egui::Ui, (lines, at): &mut State| {
+            ui.set_height(200.0);
+            let area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+            scrolled(ui, area, |ui| {
+                for line in 0..20 {
+                    ui.label(format!("line {line}"));
+                }
+                *at = ui.button("held").rect;
+                for line in 0..*lines {
+                    ui.label(format!("after {line}"));
+                }
+            });
+        };
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([300.0, 220.0])
+            .build_ui_state(show, (3, egui::Rect::NOTHING));
+        test_fonts(&harness);
+        harness.run();
+        harness.event(egui::Event::PointerMoved(egui::pos2(150.0, 100.0)));
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -2000.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        harness.run_steps(10);
+        let at = harness.state().1.center();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        harness.event(egui::Event::PointerMoved(at));
+        harness.event(press(true));
+        harness.step();
+        // shorter while it is held: what is at the end stays put
+        harness.state_mut().0 = 1;
+        harness.run_steps(3);
+        assert!(harness.state().1.contains(at), "{:?} from {at:?}", harness.state().1);
+        // and once let go of, scrolled as far as it then goes
+        harness.event(press(false));
+        harness.run_steps(3);
+        assert!(!harness.state().1.contains(at));
+    }
 
     #[test]
     fn takes_clicks_on_links_rather_than_selecting() {

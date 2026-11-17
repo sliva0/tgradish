@@ -865,44 +865,57 @@ fn integer_scale(
         }
     });
     // greyed out, the scale is only shown, and kept for integer scaling
+    let mut effective = effective.clone();
     if integer && chosen != scale {
         item.choices.webm.integer_scale = chosen.filter(|&chosen| Some(chosen) != preset);
-        return;
+        effective.integer_scale = item.choices.webm.integer_scale.or(preset);
     }
-    if !integer {
-        widgets::hint(ui, fl!("scale-unused"));
-        return;
-    }
-    let Some(sizes) = webm_sizes(item.format, effective, crop) else {
-        widgets::hint(ui, fl!("scale-unsuited"));
-        return;
-    };
-    let makes = |scale: String| {
-        let (width, height) = sizes.scaled;
-        if sizes.pads() {
-            let (box_width, box_height) = (sizes.width, sizes.height);
-            fl!(
-                "scale-makes-padded",
-                scale = scale,
-                width = width,
-                height = height,
-                box_width = box_width,
-                box_height = box_height
-            )
-        } else {
-            fl!("scale-makes", scale = scale, width = width, height = height)
+    let scale = item.choices.webm.integer_scale.or(preset);
+    let sizes = webm_sizes(item.format, &effective, crop);
+    let said = match &sizes {
+        _ if !integer => fl!("scale-unused"),
+        None => fl!("scale-unsuited"),
+        Some(sizes) => {
+            let made = (sizes.scaled.0.to_string(), sizes.scaled.1.to_string());
+            let padded = sizes.pads().then_some((sizes.width, sizes.height));
+            match scale {
+                Some(scale) => makes(scale_text(scale), made, padded),
+                None if sizes.scaling == Scaling::Integer => {
+                    makes(multiples(sizes, (crop.width, crop.height)), made, padded)
+                }
+                None => fl!("scale-shrinks"),
+            }
         }
     };
-    widgets::hint(
-        ui,
-        match scale {
-            Some(scale) => makes(scale_text(scale)),
-            None if sizes.scaling == Scaling::Integer => {
-                makes(multiples(&sizes, (crop.width, crop.height)))
-            }
-            None => fl!("scale-shrinks"),
-        },
-    );
+    // in room for the longest of what it may say, so that nothing under it
+    // moves as the scale steps: at the end of what scrolls, the column
+    // would move with it, and the button held slide from under the pointer
+    let widest = [lowest, highest].map(|step| widgets::zeros(&scale_text(step_scale(step))));
+    let most = widgets::zeros(&box_w.max(box_h).to_string());
+    let made = (most.clone(), most);
+    let mut forms = vec![fl!("scale-unused"), fl!("scale-unsuited"), fl!("scale-shrinks")];
+    let each_way = widgets::zeros(&fl!("scale-each-way", across = 10, down = 10));
+    for scale in widest.into_iter().chain([each_way]) {
+        forms.push(makes(scale.clone(), made.clone(), None));
+        forms.push(makes(scale, made.clone(), Some((box_w, box_h))));
+    }
+    widgets::hint_in_room(ui, said, &forms);
+}
+
+/// What a whole `scale` makes of the crop: `width` × `height`, where its
+/// box isn't `padded` with margins around it.
+fn makes(scale: String, (width, height): (String, String), padded: Option<(u32, u32)>) -> String {
+    match padded {
+        Some((box_width, box_height)) => fl!(
+            "scale-makes-padded",
+            scale = scale,
+            width = width,
+            height = height,
+            box_width = box_width,
+            box_height = box_height
+        ),
+        None => fl!("scale-makes", scale = scale, width = width, height = height),
+    }
 }
 
 /// The whole multiples a `used` picture is scaled by, as ×3, or each way
