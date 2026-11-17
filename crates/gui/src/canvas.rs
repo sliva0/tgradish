@@ -179,7 +179,7 @@ const CHECKER: f32 = 8.0;
 
 /// Where the picture goes in `rect`, and how many points an input pixel
 /// takes.
-fn layout(rect: Rect, size: (u32, u32), zoom: &Zoom) -> (Rect, f32) {
+pub(crate) fn layout(rect: Rect, size: (u32, u32), zoom: &Zoom) -> (Rect, f32) {
     let (width, height) = (size.0.max(1) as f32, size.1.max(1) as f32);
     let scale = fit(rect, size) * zoom.level;
     let shown = vec2(width, height) * scale;
@@ -328,17 +328,30 @@ pub(crate) fn show(
         };
         ui.ctx().set_cursor_icon(icon);
     }
+    // the lines of the picture the crop is snapped to, across and down
+    let mut guides: Vec<(bool, f32)> = Vec::new();
     if let (Some(drag), true) = (drag, dragging)
         && let Some(point) = response.interact_pointer_pos()
     {
-        let point = to_pixels(point);
+        let mut point = to_pixels(point);
         let side = |end: bool| if end { Keep::End } else { Keep::Start };
-        let held = ui.input(|input| input.modifiers);
+        let keys = ui.input(|input| input.modifiers);
+        // to the picture's edges and middle, where near enough, unless Ctrl
+        // is held for a crop anywhere
+        let snaps = if keys.command { [vec![], vec![]] } else { snaps(drag, keys.alt, size) };
+        let within = SNAP / scale;
+        for (across, snaps) in [true, false].into_iter().zip(snaps) {
+            let value = if across { &mut point.x } else { &mut point.y };
+            if let Some((at, line)) = nearest_snap(*value, &snaps, within) {
+                *value = at;
+                guides.push((across, line));
+            }
+        }
         // a corner dragged with Shift keeps the shape the crop had, unless
         // one is set; with Alt, the crop grows and shrinks about its middle
         let ratio = match drag {
             Drag::Edges([left, top, right, bottom], start)
-                if held.shift && (left || right) && (top || bottom) =>
+                if keys.shift && (left || right) && (top || bottom) =>
             {
                 let shape = f64::from(start.width) / f64::from(start.height);
                 cropping.ratio.or(Some(shape))
@@ -346,7 +359,7 @@ pub(crate) fn show(
             _ => cropping.ratio,
         };
         let (new, keep) = match drag {
-            Drag::Edges(edges, start) if held.alt => {
+            Drag::Edges(edges, start) if keys.alt => {
                 (resized(start, edges, point, (ratio, true), size), (Keep::Middle, Keep::Middle))
             }
             Drag::Edges(edges, start) => (
@@ -371,6 +384,10 @@ pub(crate) fn show(
                 *cropping.crop = new;
             }
         }
+        // only those it is still on, as a shape kept or an integer scale
+        // may take it off them
+        let crop = cropping.crop.unwrap_or(full);
+        guides.retain(|&(across, line)| on_line(crop, across, line));
     }
     // nor kept once the button is up, wherever it was let go
     if response.drag_stopped() || !held {
@@ -447,6 +464,19 @@ pub(crate) fn show(
             Stroke::new(1.0, Color32::from_white_alpha(140)),
             egui::StrokeKind::Middle,
         );
+    }
+    // a line of the accent across the picture where the crop is snapped
+    let ppp = ui.ctx().pixels_per_point();
+    for (across, line) in guides {
+        let guide = Stroke::new(1.0 / ppp, theme::mark(ui.visuals()));
+        let at = shown.min + vec2(line, line) * scale;
+        // on a whole pixel, as a line a pixel wide is sharp only there
+        let pixel = |x: f32| ((x * ppp).floor() + 0.5) / ppp;
+        let ends = match across {
+            true => [pos2(pixel(at.x), shown.top()), pos2(pixel(at.x), shown.bottom())],
+            false => [pos2(shown.left(), pixel(at.y)), pos2(shown.right(), pixel(at.y))],
+        };
+        painter.line_segment(ends, guide);
     }
     let hovered = response.hovered() || response.dragged();
     if cropping.crop.is_some() || hovered {
@@ -585,6 +615,69 @@ fn cover(zoom: &mut Zoom, rect: Rect, size: (u32, u32)) {
     let seen = (rect.size() - Vec2::splat(2.0 * MARGIN)) / shown.size();
     let leeway = (Vec2::splat(0.5) - seen * 0.5).max(Vec2::ZERO);
     zoom.centre = zoom.centre.clamp(Vec2::splat(0.5) - leeway, Vec2::splat(0.5) + leeway);
+}
+
+/// How near the picture's edges and middle, in points, a crop's edges and
+/// middle are snapped to them.
+const SNAP: f32 = 6.0;
+
+/// What `drag` snaps across and down: each a place for the pointer, in
+/// the picture's pixels, that would put the crop's edge or middle on a
+/// line of the picture, its edges or middle, with that line. A crop
+/// resized about its middle, as with `centred`, keeps it.
+fn snaps(drag: Drag, centred: bool, size: (u32, u32)) -> [Vec<(f32, f32)>; 2] {
+    let sides = [size.0 as f32, size.1 as f32];
+    std::array::from_fn(|axis| {
+        let side = sides[axis];
+        let lines = [0.0, side / 2.0, side];
+        // the crop's ends along this axis, as numbers
+        let ends = |crop: Crop| {
+            let [left, top, right, bottom] = bounds(crop);
+            if axis == 0 { (left, right) } else { (top, bottom) }
+        };
+        match drag {
+            Drag::Edges(edges, start) if edges[axis] || edges[axis + 2] => {
+                let mut snaps: Vec<(f32, f32)> = lines.iter().map(|&line| (line, line)).collect();
+                // the middle, from the edge that stays
+                let (from, to) = ends(start);
+                if !centred {
+                    let stays = if edges[axis] { to } else { from };
+                    snaps.push((side - stays, side / 2.0));
+                }
+                snaps
+            }
+            Drag::Edges(..) => vec![],
+            Drag::Move(start, from) => {
+                let (low, high) = ends(start);
+                let grabbed = if axis == 0 { from.x } else { from.y };
+                let parts = [low, (low + high) / 2.0, high];
+                // each part of the crop onto each line
+                let pairs =
+                    parts.iter().flat_map(|part| lines.iter().map(move |line| (part, line)));
+                pairs.map(|(part, &line)| (grabbed + line - part, line)).collect()
+            }
+            Drag::New(corner) => {
+                let corner = if axis == 0 { corner.x } else { corner.y };
+                let mut snaps: Vec<(f32, f32)> = lines.iter().map(|&line| (line, line)).collect();
+                snaps.push((side - corner, side / 2.0));
+                snaps
+            }
+        }
+    })
+}
+
+/// The nearest of `snaps` to `value`, within `within`.
+fn nearest_snap(value: f32, snaps: &[(f32, f32)], within: f32) -> Option<(f32, f32)> {
+    let distance = |at: f32| (at - value).abs();
+    let near = snaps.iter().filter(|(at, _)| distance(*at) <= within);
+    near.min_by(|a, b| distance(a.0).total_cmp(&distance(b.0))).copied()
+}
+
+/// Whether an edge or the middle of `crop`, `across` or down, is on `line`.
+fn on_line(crop: Crop, across: bool, line: f32) -> bool {
+    let [left, top, right, bottom] = bounds(crop);
+    let (low, high) = if across { (left, right) } else { (top, bottom) };
+    [low, (low + high) / 2.0, high].iter().any(|part| (part - line).abs() < 0.01)
 }
 
 /// Edges `[left, top, right, bottom]` as numbers.
@@ -928,20 +1021,29 @@ mod tests {
     /// cropped to `crop`, and the scale it shows at and where its top left
     /// corner is.
     fn cropped(crop: Option<Crop>) -> (egui_kittest::Harness<'static, Cropped>, f32, Pos2) {
+        cropped_of((64, 48), crop)
+    }
+
+    /// As [`cropped`], of a picture `size` large.
+    fn cropped_of(
+        size: (u32, u32),
+        crop: Option<Crop>,
+    ) -> (egui_kittest::Harness<'static, Cropped>, f32, Pos2) {
+        let (width, height) = (size.0 as usize, size.1 as usize);
         let clip = Clip {
             id: 1,
-            width: 64,
-            height: 48,
-            frames: vec![vec![255; 64 * 48 * 4]],
+            width: size.0,
+            height: size.1,
+            frames: vec![vec![255; width * height * 4]],
             times: vec![0.0, 0.1],
             pixelated: true,
         };
         let state: Cropped = (Screen::default(), Zoom::default(), clip, crop, Rect::NOTHING);
         let mut harness =
             egui_kittest::Harness::builder().with_size([600.0, 400.0]).build_ui_state(
-                |ui, (screen, zoom, clip, crop, stage): &mut Cropped| {
+                move |ui, (screen, zoom, clip, crop, stage): &mut Cropped| {
                     *stage = ui.max_rect();
-                    let picture = Picture { clip, frame: 0, size: (64, 48), square: false };
+                    let picture = Picture { clip, frame: 0, size, square: false };
                     let cropping = Cropping { crop, ratio: None, kept: None, exact: None };
                     show(ui, screen, (*stage, *stage), &picture, zoom, Some(cropping));
                 },
@@ -949,7 +1051,7 @@ mod tests {
             );
         crate::widgets::test_fonts(&harness);
         harness.run_steps(2);
-        let (shown, scale) = layout(harness.state().4, (64, 48), &Zoom::default());
+        let (shown, scale) = layout(harness.state().4, size, &Zoom::default());
         (harness, scale, shown.min)
     }
 
@@ -1038,6 +1140,50 @@ mod tests {
         press_and_move(&mut harness, right, vec2(4.0, 0.0) * scale, egui::Modifiers::ALT);
         let_go(&mut harness, right + vec2(4.0, 0.0) * scale);
         assert_eq!(harness.state().3, Some(Crop { x: 4, width: 38, ..crop }));
+    }
+
+    #[test]
+    fn snaps_to_the_pictures_edges_and_middle_unless_ctrl_is_held() {
+        let crop = Crop { x: 100, y: 100, width: 200, height: 150 };
+        let size = (640, 480);
+        // whether a line of the accent is drawn
+        let guided = |harness: &egui_kittest::Harness<'_, Cropped>| {
+            harness.output().shapes.iter().any(|clipped| match &clipped.shape {
+                egui::Shape::LineSegment { stroke, .. } => {
+                    stroke.color == theme::mark(&harness.ctx.global_style().visuals)
+                }
+                _ => false,
+            })
+        };
+        // moved to five pixels from the left edge: onto it
+        let moves = |by: Vec2, modifiers| {
+            let (mut harness, scale, corner) = cropped_of(size, Some(crop));
+            let inside = corner + vec2(150.0, 150.0) * scale;
+            press_and_move(&mut harness, inside, by * scale, modifiers);
+            let guide = guided(&harness);
+            let_go(&mut harness, inside + by * scale);
+            (harness.state().3.unwrap(), guide)
+        };
+        let (snapped, guide) = moves(vec2(-95.0, 0.0), egui::Modifiers::NONE);
+        assert_eq!((snapped.x, snapped.y), (0, 100));
+        assert!(guide);
+        // not with Ctrl held
+        let (free, guide) = moves(vec2(-95.0, 0.0), egui::Modifiers::COMMAND);
+        assert_eq!((free.x, free.y), (5, 100));
+        assert!(!guide);
+        // its middle onto the picture's, from four pixels off it
+        let (middle, _) = moves(vec2(116.0, 0.0), egui::Modifiers::NONE);
+        assert_eq!(middle.x, 220);
+        // and far from any line, none
+        let (away, guide) = moves(vec2(40.0, 30.0), egui::Modifiers::NONE);
+        assert_eq!((away.x, away.y), (140, 130));
+        assert!(!guide);
+        // an edge dragged to near the picture's middle: onto it
+        let (mut harness, scale, corner) = cropped_of(size, Some(crop));
+        let right = corner + vec2(300.0, 175.0) * scale;
+        press_and_move(&mut harness, right, vec2(23.0, 0.0) * scale, egui::Modifiers::NONE);
+        let_go(&mut harness, right + vec2(23.0, 0.0) * scale);
+        assert_eq!(harness.state().3, Some(Crop { width: 220, ..crop }));
     }
 
     #[test]

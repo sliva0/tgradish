@@ -381,6 +381,43 @@ fn timeline_bar(harness: &Harness<App>) -> egui::Rect {
     bar.expect("the timeline says what is past the limit").rect()
 }
 
+/// Where the input is shown on the preview, and how many points a pixel
+/// of it takes.
+fn input_picture(harness: &Harness<App>) -> (egui::Rect, f32) {
+    let item = &harness.state().items[0];
+    let zoom = &item.view.input_zoom;
+    let (_, fit_in) = zoom.anchor.expect("shown");
+    crate::canvas::layout(fit_in, item.input_size().unwrap(), zoom)
+}
+
+/// Presses the primary button at `from` and moves the pointer by `by`, a
+/// step at a time, without letting go.
+fn press_and_move(harness: &mut Harness<App>, from: egui::Pos2, by: egui::Vec2) {
+    harness.event(egui::Event::PointerMoved(from));
+    harness.event(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.step();
+    for step in 1..=4 {
+        harness.event(egui::Event::PointerMoved(from + by * step as f32 / 4.0));
+        harness.step();
+    }
+}
+
+/// Lets go of the primary button at `at`.
+fn let_go(harness: &mut Harness<App>, at: egui::Pos2) {
+    harness.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+}
+
 /// What the pointer does on the timeline and the preview, as it does it:
 /// an end of a short part of a long video hovered. Needs ffmpeg.
 fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
@@ -449,6 +486,16 @@ fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().items[0].view.show = Show::Input;
     harness.event(egui::Event::PointerGone);
     settle(&mut harness);
+    // a crop moved, snapped to the picture's middle, the button held
+    let item = &mut harness.state_mut().items[0];
+    item.choices.crop = Some(Crop { x: 100, y: 60, width: 240, height: 160 });
+    settle(&mut harness);
+    let (shown, scale) = input_picture(&harness);
+    let inside = shown.min + egui::vec2(200.0, 120.0) * scale;
+    let by = egui::vec2(117.0, 37.0) * scale;
+    press_and_move(&mut harness, inside, by);
+    save(&mut harness, "crop-snapped");
+    let_go(&mut harness, inside + by);
     // the shortcuts, scrolled to what the mouse does
     harness.state_mut().shortcuts = true;
     settle(&mut harness);
