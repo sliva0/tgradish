@@ -2097,17 +2097,24 @@ pub(crate) fn stepper(
     let held = enabled && response.is_pointer_button_down_on();
     let over = response.contains_pointer();
     // a click put off for a number typed, as by a screen reader, which
-    // steps once the field has taken it, a frame of its own
+    // steps once the field has taken it, a frame of its own; kept with
+    // the pass it was last seen in, as only a stepper drawn every pass
+    // since, as its file stays shown, and live, steps for it, and not once
+    // a number is typed again
     let pending = response.id.with("pending");
     let typed = number_typed_now(ui.ctx());
-    let put_off = ui.data(|data| data.get_temp::<bool>(pending)).is_some();
-    if put_off {
-        if typed {
-            ui.ctx().request_repaint();
-        } else {
-            ui.data_mut(|data| data.remove::<bool>(pending));
+    let pass = ui.ctx().cumulative_pass_nr();
+    let live = enabled && ui.is_enabled();
+    let put_off = match ui.data_mut(|data| data.remove_temp::<u64>(pending)) {
+        Some(seen) if seen + 1 == pass && live && draft(ui.ctx()).is_none() => {
+            if typed {
+                ui.data_mut(|data| data.insert_temp(pending, pass));
+                ui.ctx().request_repaint();
+            }
+            !typed
         }
-    }
+        _ => false,
+    };
     let stepped = match (held, since) {
         // not as it is pressed while a number is typed, which is taken then
         // as a step of its own, but on the next frame, from what it took
@@ -2133,18 +2140,15 @@ pub(crate) fn stepper(
             let clicked = since.is_none_or(|(_, taken)| taken == 0) && response.clicked();
             if clicked && typed {
                 finish_typed_number(ui.ctx());
-                ui.data_mut(|data| data.insert_temp(pending, true));
+                ui.data_mut(|data| data.insert_temp(pending, pass));
                 ui.ctx().request_repaint();
             }
             clicked && !typed
         }
     };
-    // not where it reached the end of what it steps through meanwhile
-    let late = put_off && !typed && enabled;
-    let stepped = stepped || late;
-    if late {
+    let stepped = stepped || put_off;
+    if put_off {
         // the user's doing, though nothing was pressed this frame
-        let pass = ui.ctx().cumulative_pass_nr();
         ui.data_mut(|data| data.insert_temp(egui::Id::new(ACTED), pass));
     }
     if held {
@@ -2293,6 +2297,36 @@ mod number_tests {
         harness.key_press(egui::Key::Enter);
         harness.run_steps(2);
         assert_eq!(harness.state().0, 8);
+    }
+
+    #[test]
+    fn forgets_a_step_put_off_once_greyed_out() {
+        // a number, and a stepper beside it, greyed out where told, and how
+        // many times it stepped
+        let show = |ui: &mut egui::Ui, (value, live, stepped): &mut (i32, bool, u32)| {
+            ui.add(Number::new(value));
+            ui.add_enabled_ui(*live, |ui| {
+                if stepper(ui, "+", true, "Larger").1 {
+                    *stepped += 1;
+                }
+            });
+        };
+        let mut harness = Harness::new_ui_state(show, (10, true, 0));
+        harness.run_steps(2);
+        harness.get_by_role(egui::accesskit::Role::SpinButton).focus();
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("20".into()));
+        harness.run_steps(2);
+        // clicked by a screen reader: what was typed taken, the step put off
+        harness.get_by_label("Larger").click_accesskit();
+        harness.step();
+        harness.step();
+        assert!(harness.state().0 != 10 && harness.state().2 == 0, "{:?}", harness.state());
+        harness.state_mut().1 = false;
+        harness.run_steps(3);
+        harness.state_mut().1 = true;
+        harness.run_steps(3);
+        assert_eq!(harness.state().2, 0);
     }
 
     #[test]

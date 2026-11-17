@@ -849,6 +849,49 @@ mod tests {
     }
 
     #[test]
+    fn forgets_a_step_put_off_once_its_file_goes_out_of_sight() {
+        if !has_ffmpeg() {
+            return;
+        }
+        use tgradish_core::options::IntegerScale;
+        let half = Some(IntegerScale { up: 1, down: 2 });
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["first.png", "second.png"]);
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        harness.state_mut().select(ids[0]);
+        harness.run_steps(2);
+        for label in [fl!("format-image"), fl!("scaling-integer"), fl!("scale-fixed")] {
+            harness.get_by_label(&label).click_accesskit();
+            harness.run_steps(2);
+            finish(&mut harness);
+        }
+        // ½ typed, + clicked by a screen reader: ½ taken, its step put off
+        let scale = egui_kittest::kittest::by().role(egui::accesskit::Role::SpinButton);
+        harness
+            .get_all(scale)
+            .rfind(|node| node.value().is_some_and(|value| value.starts_with('×')))
+            .unwrap()
+            .focus();
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("1/2".into()));
+        harness.run_steps(2);
+        let larger = fl!("larger");
+        let all = harness.get_all_by_label(&larger);
+        all.max_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap().click_accesskit();
+        harness.step();
+        harness.step();
+        assert_eq!(selected(&harness).choices.webm.integer_scale, half);
+        let taken = steps(&harness);
+        // another file shown before it steps, and this one again
+        harness.state_mut().select(ids[1]);
+        harness.run_steps(5);
+        harness.state_mut().select(ids[0]);
+        harness.run_steps(5);
+        assert_eq!(selected(&harness).choices.webm.integer_scale, half);
+        assert_eq!(steps(&harness), taken);
+    }
+
+    #[test]
     fn takes_a_scale_typed_before_its_buttons_step_it() {
         if !has_ffmpeg() {
             return;
