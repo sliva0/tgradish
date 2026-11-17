@@ -230,7 +230,7 @@ impl App {
 
     pub(crate) fn files_panel(&mut self, ui: &mut egui::Ui) {
         self.header(ui, true);
-        ui.separator();
+        let rule = ui.separator().rect.center().y;
 
         // what Convert all converts, and what it leaves out
         let changed = self.items.iter().filter(|item| convertible(item)).count();
@@ -372,7 +372,9 @@ impl App {
             }
         });
         if let Some(list) = self.banner.corner {
-            self.drop_target(ui, list);
+            // as far over the footer's line as it is under the header's
+            let under = list.top() - (rule + 0.5);
+            self.drop_target(ui, list.with_max_y(list.bottom() - under));
         }
     }
 
@@ -384,6 +386,7 @@ impl App {
         if shown == 0.0 {
             return;
         }
+        ui.data_mut(|data| data.insert_temp(drop_id(), list));
         let painter = ui.painter_at(list);
         let visuals = ui.visuals();
         let accent = theme::mark(visuals);
@@ -1441,6 +1444,9 @@ mod tests {
         let a = dir.path().join("a.png");
         square(&a, [255, 0, 0, 255]);
         let mut harness = stepped(Config::default());
+        // spaced as the GUI is
+        let ctx = harness.ctx.clone();
+        harness.state().style(&ctx);
         harness.state_mut().add(vec![a]);
         finish(&mut harness);
         // as far as it is lit: asked again in the same frame, it stays
@@ -1463,6 +1469,13 @@ mod tests {
         assert!(middle > start && middle < 0.8, "{middle}");
         over(&mut harness, 6);
         assert_eq!(lit(&harness, true), 1.0);
+        // as far over the footer's line, where the list ends, as under the
+        // header's, which is the list's own spacing above it
+        let shown = harness.ctx.data(|data| data.get_temp::<egui::Rect>(drop_id())).unwrap();
+        let list = harness.state().banner.corner.unwrap();
+        assert_eq!(shown.top(), list.top());
+        let under = list.bottom() - shown.bottom();
+        assert!((7.5..=8.5).contains(&under), "{under}");
         // and back as they leave
         harness.run_steps(10);
         assert_eq!(lit(&harness, false), 0.0);
