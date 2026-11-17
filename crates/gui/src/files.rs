@@ -277,6 +277,8 @@ impl App {
         // under the bar and over the footer: what passes is said in its
         // corner, mostly empty
         self.banner.corner = Some(ui.available_rect_before_wrap());
+        let now = ui.input(|input| input.time);
+        self.rows.follow(&self.items, now);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let mut clicked = None;
             let mut removed = None;
@@ -286,10 +288,22 @@ impl App {
             let delete = ui.input(|input| pressed(input, Command::Remove).is_some());
             let mut focus_next = None;
             let reveal = std::mem::take(&mut self.reveal_selected);
+            let gap = |ui: &mut egui::Ui, rows: &Rows, before: Option<u64>| {
+                let closing = rows.closing(ui.ctx(), before);
+                if closing > 0.0 {
+                    let step = ROW_HEIGHT + ui.spacing().item_spacing.y;
+                    ui.add_space(step * closing);
+                }
+            };
             for (index, item) in self.items.iter().enumerate() {
+                gap(ui, &self.rows, Some(item.id));
                 let selected = self.selected == Some(item.id);
                 let queued = self.queue.iter().position(|&id| id == item.id);
-                let (response, action) = row(ui, item, selected, queued, &self.fallbacks);
+                let shown = self.rows.shown(ui.ctx(), item.id);
+                let opacity = ui.opacity();
+                ui.multiply_opacity(shown.row);
+                let (response, action) = row(ui, item, selected, queued, &self.fallbacks, shown);
+                ui.set_opacity(opacity);
                 if selected && reveal {
                     response.scroll_to_me(None);
                 }
@@ -326,6 +340,7 @@ impl App {
                     }
                 });
             }
+            gap(ui, &self.rows, None);
             if let Some(id) = clicked {
                 self.select(id);
             }
@@ -515,6 +530,116 @@ pub(crate) enum Picked {
     OutputDir(PathBuf),
 }
 
+/// Height of a row of the list.
+const ROW_HEIGHT: f32 = THUMB + 12.0;
+/// How long a row added takes to fade in, and the room of one removed to
+/// close up, in seconds.
+const ROW_CHANGE: f64 = 0.15;
+/// How long a result's size and picture take to fade in as it is made.
+const RESULT_FADE: f64 = 0.18;
+/// How long a row not selected glows once as its result is made, and how
+/// much of the accent shows through at the most.
+const PULSE: f64 = 0.7;
+const PULSE_MOST: f32 = 0.25;
+/// How long a row's tint takes to follow it being chosen or let go of;
+/// its outline follows at once.
+const SELECTING: f32 = 0.09;
+
+/// How the rows change as files come and go and are made, for each to
+/// move as it does.
+#[derive(Default)]
+pub(crate) struct Rows {
+    /// The files listed last frame, in order; none before the first, when
+    /// the rows there are already show as they are.
+    listed: Option<Vec<u64>>,
+    /// The files being made last frame.
+    busy: std::collections::HashSet<u64>,
+    /// When each row came, while it fades in.
+    came: std::collections::HashMap<u64, f64>,
+    /// When each file's result was made, while it fades in.
+    made: std::collections::HashMap<u64, f64>,
+    /// The room of rows taken out, closing up before the row of the file
+    /// named, or at the end, and since when.
+    gone: Vec<(Option<u64>, f64)>,
+}
+
+/// How a row shows as it changes, from 0 to 1: how far it has faded in,
+/// and its result, and how much of the accent it glows with.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Shown {
+    pub(crate) row: f32,
+    pub(crate) result: f32,
+    pub(crate) glow: f32,
+}
+
+impl Rows {
+    /// Notes what changed since the last frame of `items`, at `now`.
+    pub(crate) fn follow(&mut self, items: &[Item], now: f64) {
+        let ids: Vec<u64> = items.iter().map(|item| item.id).collect();
+        if let Some(listed) = &self.listed {
+            // where a row was: before the first after it that stays
+            let next = |id: u64| {
+                let at = listed.iter().position(|&other| other == id)?;
+                listed[at + 1..].iter().find(|other| ids.contains(other)).copied()
+            };
+            for before in self.gone.iter_mut().map(|(before, _)| before) {
+                if let Some(id) = *before
+                    && !ids.contains(&id)
+                {
+                    *before = next(id);
+                }
+            }
+            for &id in listed.iter().filter(|id| !ids.contains(id)) {
+                self.gone.push((next(id), now));
+            }
+            for &id in ids.iter().filter(|id| !listed.contains(id)) {
+                self.came.insert(id, now);
+            }
+        }
+        for item in items {
+            let last = item.failed.as_ref().or(item.made.as_ref());
+            let done = last.is_some_and(|last| matches!(last.job.status, Status::Done(_)));
+            if item.job.is_none() && done && self.busy.contains(&item.id) {
+                self.made.insert(item.id, now);
+            }
+        }
+        self.busy = items.iter().filter(|item| item.job.is_some()).map(|item| item.id).collect();
+        self.listed = Some(ids);
+        self.came.retain(|_, since| now - *since < ROW_CHANGE);
+        self.made.retain(|_, since| now - *since < PULSE);
+        self.gone.retain(|(_, since)| now - *since < ROW_CHANGE);
+    }
+
+    /// How the row of file `id` shows now.
+    pub(crate) fn shown(&self, ctx: &egui::Context, id: u64) -> Shown {
+        let along = |since: Option<&f64>, time| {
+            since.map_or(1.0, |since| crate::motion::along(ctx, *since, time))
+        };
+        let made = self.made.get(&id);
+        Shown {
+            row: along(self.came.get(&id), ROW_CHANGE),
+            result: along(made, RESULT_FADE),
+            glow: made.map_or(0.0, |_| glow(along(made, PULSE))),
+        }
+    }
+
+    /// How many rows' room is still closing up before the row of file
+    /// `before`, or at the end.
+    pub(crate) fn closing(&self, ctx: &egui::Context, before: Option<u64>) -> f32 {
+        let gone = self.gone.iter().filter(|(at, _)| *at == before);
+        gone.map(|(_, since)| {
+            1.0 - crate::inset::eased(f64::from(crate::motion::along(ctx, *since, ROW_CHANGE)))
+        })
+        .sum()
+    }
+}
+
+/// How much of the accent a row glows with, `share` of the way through its
+/// glow: none, up to the most halfway, and none again.
+fn glow(share: f32) -> f32 {
+    PULSE_MOST * (share.clamp(0.0, 1.0) * std::f32::consts::PI).sin()
+}
+
 /// What a row's own buttons ask for.
 enum RowAction {
     Remove,
@@ -529,10 +654,11 @@ fn row(
     selected: bool,
     queued: Option<usize>,
     fallbacks: &fallback::Fallbacks,
+    shown: Shown,
 ) -> (egui::Response, Option<RowAction>) {
     let width = ui.available_width();
     // by the file, so the focus stays with it as rows come and go
-    let (_, rect) = ui.allocate_space(vec2(width, THUMB + 12.0));
+    let (_, rect) = ui.allocate_space(vec2(width, ROW_HEIGHT));
     let response = ui.interact(rect, row_id(ui, item.id), egui::Sense::click());
     // read out as a choice of the list, by its file's name
     let name = item.name();
@@ -542,25 +668,35 @@ fn row(
     let visuals = ui.visuals();
     // as Breeze marks items: the accent let through, more for the
     // selected one, which is outlined in it too, yet little enough that
-    // the row's small coloured text still reads
+    // the row's small coloured text still reads. The tint follows a
+    // moment behind, the outline at once, so which is chosen is plain
+    // from the click on
+    let time = if crate::motion::motion(ui.ctx()) { SELECTING } else { 0.0 };
+    let chosen = ui.ctx().animate_bool_with_time(response.id.with("chosen"), selected, time);
+    let under = if response.hovered() { theme::row(visuals, false) } else { Color32::TRANSPARENT };
+    let tint = under.lerp_to_gamma(theme::row(visuals, true), chosen);
+    if tint != Color32::TRANSPARENT {
+        ui.painter().rect_filled(rect, 6.0, tint);
+    }
+    // made a moment ago while another is chosen: it glows once, to be seen
+    if !selected && shown.glow > 0.0 {
+        ui.painter().rect_filled(rect, 6.0, theme::mark(visuals).gamma_multiply(shown.glow));
+    }
     if selected {
-        ui.painter().rect_filled(rect, 6.0, theme::row(visuals, true));
         let outline = egui::Stroke::new(1.0, theme::mark(visuals));
         ui.painter().rect_stroke(rect, 6.0, outline, egui::StrokeKind::Inside);
-    } else if response.hovered() {
-        ui.painter().rect_filled(rect, 6.0, theme::row(visuals, false));
     }
     let inner = rect.shrink2(vec2(6.0, 6.0));
     let input = egui::Rect::from_min_size(inner.min, vec2(THUMB, THUMB));
     // unread for want of ffmpeg, which is said otherwise, isn't broken
     let broken = item.input_error().is_some() && !item.blockers.contains(&Blocker::NeedsFfmpeg);
-    thumb(ui, input, item.input_thumb.as_ref(), broken, false);
+    thumb(ui, input, item.input_thumb.as_ref(), broken, false, 1.0);
     let result =
         egui::Rect::from_min_size(egui::pos2(inner.max.x - THUMB, inner.min.y), vec2(THUMB, THUMB));
     let mut action = None;
     if let Some(made) = &item.made {
         let stale = !item.result_is_current();
-        thumb(ui, result, item.result_thumb.as_ref(), false, stale);
+        thumb(ui, result, item.result_thumb.as_ref(), false, stale, shown.result);
         // a result with no picture yet, or none to show, as a .tgs made in
         // an earlier run: its format where the picture would be
         if item.result_thumb.is_none() {
@@ -627,7 +763,7 @@ fn row(
     child.add(egui::Label::new(name).truncate());
     let what = kind(item.format, item.choices.target);
     child.add(egui::Label::new(RichText::new(what).small().weak()));
-    status(&mut child, item, queued);
+    status(&mut child, item, queued, shown.result);
     let response = response.on_hover_ui(|ui| {
         let plain = text_format(ui, ui.visuals().text_color());
         let mut missing = Vec::new();
@@ -663,15 +799,18 @@ fn offers_convert(item: &Item) -> bool {
     item.last_result().is_none() && !item.is_busy() && !item.blocked()
 }
 
-/// A thumbnail in `rect`, marked when it is out of date.
+/// A thumbnail in `rect`, marked when it is out of date, `opacity` of it
+/// drawn.
 fn thumb(
     ui: &egui::Ui,
     rect: egui::Rect,
     texture: Option<&egui::TextureHandle>,
     failed: bool,
     stale: bool,
+    opacity: f32,
 ) {
-    let painter = ui.painter_at(rect);
+    let mut painter = ui.painter_at(rect);
+    painter.multiply_opacity(opacity);
     painter.rect_filled(rect, 4.0, theme::stage(ui.visuals().dark_mode));
     match texture {
         Some(texture) => {
@@ -696,7 +835,9 @@ fn thumb(
     }
 }
 
-fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
+/// What is said of `item` under its name; a result made a moment ago,
+/// `fading` of it faded in.
+fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>, fading: f32) {
     let small = |text: String| RichText::new(text).small();
     let job = item.job.as_ref().map(|conversion| &conversion.job);
     // what keeps it from being converted, said where its settings are
@@ -740,7 +881,10 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>) {
                     if refused { theme::bad(ui.visuals()) } else { theme::good(ui.visuals()) };
                 let mark = if refused { "✖" } else { "✔" };
                 let size = widgets::kib(done.bytes);
+                let opacity = ui.opacity();
+                ui.multiply_opacity(fading);
                 ui.colored_label(colour, small(format!("{mark} {size}")));
+                ui.set_opacity(opacity);
             }
             Status::Failed(_) => {
                 ui.colored_label(
@@ -1064,5 +1208,132 @@ mod tests {
         // the .tgs, which has none to show, is made all the same
         assert_eq!(items[1].made.as_ref().map(|made| made.format), Some(Format::Tgs));
         assert!(items.iter().all(|item| !offers_convert(item)));
+    }
+
+    /// The list's row of the file `name`, which is named elsewhere too.
+    fn list_row<'a>(
+        harness: &'a egui_kittest::Harness<App>,
+        name: &'a str,
+    ) -> egui_kittest::Node<'a> {
+        use egui_kittest::kittest::{Queryable, by};
+        harness.get(by().label(name).role(egui::accesskit::Role::Button))
+    }
+
+    /// The GUI drawn a sixtieth of a second apart, as on a screen.
+    fn stepped(config: Config) -> egui_kittest::Harness<'static, App> {
+        egui_kittest::Harness::builder()
+            .with_size([1280.0, 820.0])
+            .with_step_dt(1.0 / 60.0)
+            .with_max_steps(120)
+            .build_eframe(move |_| {
+                App::with(config.clone(), None, tgradish_core::presets::Presets::builtin())
+            })
+    }
+
+    #[test]
+    fn fades_rows_in_and_closes_up_the_room_of_those_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let names = ["a.png", "b.png", "c.png"];
+        let paths: Vec<PathBuf> = names.iter().map(|name| dir.path().join(name)).collect();
+        paths.iter().for_each(|path| square(path, [255, 0, 0, 255]));
+        let mut harness = stepped(Config::default());
+        harness.state_mut().add(paths[..2].to_vec());
+        finish(&mut harness);
+        // the third fades in over 150 ms
+        harness.state_mut().add(vec![paths[2].clone()]);
+        harness.step();
+        let id = harness.state().items[2].id;
+        let row =
+            |harness: &egui_kittest::Harness<App>| harness.state().rows.shown(&harness.ctx, id).row;
+        assert!(row(&harness) < 0.15, "{}", row(&harness));
+        harness.run_steps(4);
+        assert!((0.3..0.7).contains(&row(&harness)), "{}", row(&harness));
+        harness.run_steps(6);
+        assert_eq!(row(&harness), 1.0);
+        // the first taken out: those after it move up into its room, from
+        // where they were
+        let top =
+            |harness: &egui_kittest::Harness<App>, name: &str| list_row(harness, name).rect().top();
+        let (first, second) = (top(&harness, "a.png"), top(&harness, "b.png"));
+        let id = harness.state().items[0].id;
+        harness.state_mut().remove(id);
+        harness.step();
+        // most of the way where it was: the notice of it, laid out again,
+        // draws the frame again a moment on
+        let start = top(&harness, "b.png");
+        assert!(start > first + 0.6 * (second - first) && start <= second, "{start}");
+        harness.run_steps(4);
+        let mid = top(&harness, "b.png");
+        assert!(mid < second - 5.0 && mid > first + 5.0, "{mid}");
+        harness.run_steps(6);
+        assert_eq!(top(&harness, "b.png"), first);
+        assert_eq!(top(&harness, "c.png"), second);
+        // and nothing is drawn again once done
+        harness.try_run().expect("still once done");
+    }
+
+    #[test]
+    fn shows_a_result_made_as_it_is_and_lets_its_row_glow_once_unless_selected() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a.png"), dir.path().join("b.png"));
+        square(&a, [255, 0, 0, 255]);
+        square(&b, [0, 0, 255, 255]);
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = stepped(config);
+        harness.state_mut().add(vec![a, b]);
+        finish(&mut harness);
+        // the first is converted while the second is chosen
+        let (first, second) = (harness.state().items[0].id, harness.state().items[1].id);
+        harness.state_mut().select(second);
+        harness.state_mut().enqueue(first);
+        let mut waited = 0;
+        while harness.state().item(first).is_some_and(|item| item.job.is_some() || waited == 0) {
+            harness.step();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            waited += 1;
+            assert!(waited < 2000, "never made");
+        }
+        assert!(harness.state().item(first).unwrap().made.is_some());
+        let shown =
+            |harness: &egui_kittest::Harness<App>| harness.state().rows.shown(&harness.ctx, first);
+        // from nothing, its size and picture over 180 ms, its glow up to a
+        // quarter of the accent halfway through 700 ms, and none at its end
+        let start = shown(&harness);
+        assert!(start.result < 0.15 && start.glow < 0.05, "{start:?}");
+        harness.run_steps(5);
+        let fading = shown(&harness);
+        assert!((0.3..0.8).contains(&fading.result), "{fading:?}");
+        harness.run_steps(15);
+        let middle = shown(&harness);
+        assert_eq!(middle.result, 1.0);
+        assert!((middle.glow - PULSE_MOST).abs() < 0.03, "{middle:?}");
+        harness.run_steps(30);
+        assert_eq!(shown(&harness), Shown { row: 1.0, result: 1.0, glow: 0.0 });
+        assert!(glow(0.0) == 0.0 && glow(1.0).abs() < 1e-6 && glow(0.5) == PULSE_MOST);
+        harness.try_run().expect("still once done");
+    }
+
+    #[test]
+    fn marks_a_row_chosen_at_once() {
+        use egui_kittest::kittest::NodeT;
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a.png"), dir.path().join("b.png"));
+        square(&a, [255, 0, 0, 255]);
+        square(&b, [0, 0, 255, 255]);
+        let mut harness = stepped(Config::default());
+        harness.state_mut().add(vec![a, b]);
+        finish(&mut harness);
+        list_row(&harness, "a.png").click();
+        // chosen as the click is taken, and drawn so the frame after, its
+        // tint following
+        harness.run_steps(2);
+        let selected = |harness: &egui_kittest::Harness<App>, name: &str| {
+            list_row(harness, name).accesskit_node().toggled()
+        };
+        use egui::accesskit::Toggled;
+        assert_eq!(selected(&harness, "a.png"), Some(Toggled::True));
+        assert_eq!(selected(&harness, "b.png"), Some(Toggled::False));
+        harness.try_run().expect("still once the tint is there");
     }
 }

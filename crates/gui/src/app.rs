@@ -163,6 +163,8 @@ pub(crate) struct App {
     pub(crate) applied_accent: Option<Color32>,
     /// Whether the system asks for less motion, as it changes.
     pub(crate) system_motion: Option<crate::motion::System>,
+    /// How the list's rows change, as they fade in and close up.
+    pub(crate) rows: crate::files::Rows,
 }
 
 impl App {
@@ -400,6 +402,7 @@ impl App {
             accent: None,
             applied_accent: None,
             system_motion: None,
+            rows: crate::files::Rows::default(),
         }
     }
 
