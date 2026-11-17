@@ -64,6 +64,9 @@ What changed in each release of tgradish, newest first. The format follows
 - The GUI's list no longer cuts "outdated" short under a file whose result
   is out of date where the list is narrow: it says the result's size
   alone then, as the badge on the file's picture says it is out of date.
+- The GUI's small picture of the crop in the Picture settings draws all
+  four sides of the crop's dashed outline, where the picture is as wide
+  or as tall as it has room for, not cutting the right or bottom one off.
 
 ## [2.0.0] - 2026-11-16
 

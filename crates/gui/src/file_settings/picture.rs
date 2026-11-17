@@ -550,12 +550,13 @@ fn sketch(ui: &mut egui::Ui, (width, height): (u32, u32), crop: Crop, wide: f32)
         egui::vec2(crop.width as f32 * across, crop.height as f32 * down),
     );
     painter.rect_filled(cut, 0.0, accent.gamma_multiply(0.15));
-    let dashed = egui::Stroke::new(1.0, mark);
+    let (line, width) = dashes_within(cut, ui.ctx().pixels_per_point());
+    let dashed = egui::Stroke::new(width, mark);
     for [from, to] in [
-        [cut.left_top(), cut.right_top()],
-        [cut.right_top(), cut.right_bottom()],
-        [cut.right_bottom(), cut.left_bottom()],
-        [cut.left_bottom(), cut.left_top()],
+        [line.left_top(), line.right_top()],
+        [line.right_top(), line.right_bottom()],
+        [line.right_bottom(), line.left_bottom()],
+        [line.left_bottom(), line.left_top()],
     ] {
         painter.extend(egui::Shape::dashed_line(&[from, to], dashed, 3.0, 3.0));
     }
@@ -564,6 +565,18 @@ fn sketch(ui: &mut egui::Ui, (width, height): (u32, u32), crop: Crop, wide: f32)
     let at = |x: f32, y: f32| cut.center() + egui::vec2(x * side, y * side);
     let peaks = vec![at(-0.5, 0.3), at(-0.15, -0.25), at(0.05, 0.05), at(0.25, -0.1), at(0.5, 0.3)];
     painter.with_clip_rect(cut).add(egui::Shape::line(peaks, egui::Stroke::new(1.5, weak)));
+}
+
+/// Where the dashes around `cut` go at `ppp` screen pixels to a point, and
+/// how wide they are: a whole number of pixels, about a point, just within
+/// its edges as they fall on the pixels. A line on its edges is half out
+/// of it, and egui moves one a pixel wide onto the pixels after an edge
+/// between two, so where the picture fills the room, across or down, its
+/// right or bottom dashes would fall past the room and be cut off.
+fn dashes_within(cut: egui::Rect, ppp: f32) -> (egui::Rect, f32) {
+    use egui::emath::GuiRounding as _;
+    let width = ppp.round().max(1.0) / ppp;
+    (cut.round_to_pixels(ppp).shrink(width / 2.0), width)
 }
 
 /// The aspect of a square crop.
@@ -958,6 +971,39 @@ mod tests {
 
     use super::*;
     use crate::testing::{finish, harness, video};
+
+    #[test]
+    fn draws_the_crops_dashes_whole_within_it_at_any_scale() {
+        for ppp in [1.0, 1.25, 1.5, 2.0] {
+            for at in [10.0, 10.3, 10.5, 10.7] {
+                for (width, height) in [(64.0, 25.25), (36.0, 36.0), (17.6, 36.0)] {
+                    let cut = egui::Rect::from_min_size(
+                        egui::pos2(at, at + 0.4),
+                        egui::vec2(width, height),
+                    );
+                    let (line, wide) = dashes_within(cut, ppp);
+                    let stroke = egui::Stroke::new(wide, egui::Color32::WHITE);
+                    // the pixels a side's dashes cover, where egui puts them,
+                    // flush with those of the edge the room is clipped to
+                    let covers = |mut middle: f32| {
+                        stroke.round_center_to_pixel(ppp, &mut middle);
+                        let half = wide * ppp / 2.0;
+                        (middle * ppp - half, middle * ppp + half)
+                    };
+                    let edge = |at: f32| (at * ppp).round();
+                    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+                    let case = format!("{cut:?} at {ppp}");
+                    assert!(near(covers(line.left()).0, edge(cut.left())), "{case}");
+                    assert!(near(covers(line.top()).0, edge(cut.top())), "{case}");
+                    assert!(near(covers(line.right()).1, edge(cut.right())), "{case}");
+                    assert!(near(covers(line.bottom()).1, edge(cut.bottom())), "{case}");
+                    // a whole number of pixels, about a point
+                    assert!(near(wide * ppp, (wide * ppp).round()) && wide * ppp >= 1.0, "{case}");
+                    assert!((wide - 1.0).abs() <= 0.34, "{case}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn reshapes_crops_around_their_middle() {
