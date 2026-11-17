@@ -629,26 +629,26 @@ fn bar(
         marks,
         Stroke::NONE,
     ));
-    // the end being dragged where it is, as its field says it, or where
-    // the pointer is
+    // the end being dragged, as its field says it, or what is where the
+    // pointer is; beside the pointer either way, as an end snapped to
+    // frames may be half a frame from it, under the pointer's arrow
     let dragged = grabbed.filter(|_| response.dragged());
-    let at = match (dragged, frames) {
+    let x = (response.hover_pos().or(pointer)).map(|at| at.x.clamp(track.left(), track.right()));
+    let said = match (dragged, frames) {
         (Some(Grab::Start | Grab::Slide(..)), Some(frames)) if in_frames => {
             let (first, _) = frames.part(length, *start, *used);
             let number = first + 1;
-            Some((x_of(from), fl!("frame-number", number = number)))
+            Some(fl!("frame-number", number = number))
         }
         (Some(Grab::End), Some(frames)) if in_frames => {
             let (_, after) = frames.part(length, *start, *used);
-            Some((x_of(to), fl!("frame-number", number = after)))
+            Some(fl!("frame-number", number = after))
         }
-        (Some(Grab::Start | Grab::Slide(..)), _) => Some((x_of(from), widgets::seconds(from))),
-        (Some(Grab::End), _) => Some((x_of(to), widgets::seconds(to))),
-        _ => (response.hover_pos().or(pointer)).map(|pointer| {
-            let x = pointer.x.clamp(track.left(), track.right());
-            (x, time_text(seconds_at(x), frames, in_frames))
-        }),
+        (Some(Grab::Start | Grab::Slide(..)), _) => Some(widgets::seconds(from)),
+        (Some(Grab::End), _) => Some(widgets::seconds(to)),
+        _ => x.map(|x| time_text(seconds_at(x), frames, in_frames)),
     };
+    let at = x.zip(said);
     if let Some((x, text)) = at.filter(|_| response.hovered() || response.dragged()) {
         readout(ui, rect, x, text);
     }
@@ -1112,6 +1112,47 @@ mod tests {
             assert_eq!(from < 49.0, start_moves, "{by}: {from} to {to}");
             assert_eq!(to > 51.0, !start_moves, "{by}: {from} to {to}");
         }
+    }
+
+    #[test]
+    fn reads_out_an_end_snapped_to_frames_beside_the_pointer_dragging_it() {
+        // a frame every two seconds, a dozen points wide
+        let (mut harness, track) = timeline_of(50.0, 52.0, Some(0.5));
+        let x_of = |seconds: f32| track.left() + seconds / 100.0 * track.width();
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let from = pos2(x_of(52.0) + 2.0, track.center().y);
+        harness.event(egui::Event::PointerMoved(from));
+        harness.event(press(from, true));
+        harness.step();
+        for step in 1..=6 {
+            let at = from + vec2(5.0 * step as f32, 0.0);
+            harness.event(egui::Event::PointerMoved(at));
+            harness.step();
+            // once dragged, past egui's threshold
+            if step == 1 {
+                continue;
+            }
+            // what the end is, said just left of the pointer, under the track
+            let (start, used, _) = *harness.state();
+            let end = widgets::seconds(start.unwrap() + used.unwrap());
+            let said = harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+                Shape::Text(text) if text.galley.text() == end => {
+                    let place = text.galley.rect.translate(text.pos.to_vec2());
+                    (place.top() > track.bottom()).then_some(place)
+                }
+                _ => None,
+            });
+            let said = said.unwrap_or_else(|| panic!("{step}: {end} not said"));
+            let left_of = at.x - said.right();
+            assert!((6.0..=12.0).contains(&left_of), "{step}: {said:?}, {left_of} left of {at:?}");
+        }
+        harness.event(press(from + vec2(30.0, 0.0), false));
+        harness.step();
     }
 
     #[test]
