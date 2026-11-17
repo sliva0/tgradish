@@ -56,12 +56,28 @@ impl App {
         }
     }
 
-    /// The menu behind the gear over the list: Settings, inspecting a
-    /// sticker, the keyboard's shortcuts, and what isn't about the files at
-    /// all, feedback and About.
+    /// The menu behind the gear over the list: undoing and redoing,
+    /// Settings, inspecting a sticker, the keyboard's shortcuts, and what
+    /// isn't about the files at all, feedback and About.
     fn main_menu(&mut self, ui: &mut egui::Ui) {
         let item =
             |text: String, command| egui::Button::new(text).shortcut_text(keys_text(command));
+        // greyed out, rather than gone, where there is nothing to undo
+        let undo = ui.add_enabled(self.can_undo(), item(fl!("menu-undo"), Command::Undo));
+        if undo.on_hover_text(fl!("menu-undo", "hint")).clicked() {
+            self.undo(ui.ctx());
+            ui.close();
+        }
+        // its first keys alone: both would make the menu wider than the
+        // rest need, and leave its name little room
+        let first = crate::keys::key_text(&crate::keys::shortcut_of(Command::Redo).keys[0]);
+        let redo = egui::Button::new(fl!("menu-redo")).shortcut_text(first);
+        let redo = ui.add_enabled(self.can_redo(), redo);
+        if redo.on_hover_text(fl!("menu-redo", "hint")).clicked() {
+            self.redo(ui.ctx());
+            ui.close();
+        }
+        ui.separator();
         if ui.add(item(fl!("menu-settings"), Command::Settings)).clicked() {
             self.settings_dialog.open();
             ui.close();

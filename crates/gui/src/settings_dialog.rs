@@ -867,8 +867,10 @@ impl App {
     /// Makes `name` the default preset for `format`. The items without a
     /// preset of their own follow it, and may then fit another way, as
     /// when they pick another preset: their own range to search goes
-    /// where it counts in another unit.
+    /// where it counts in another unit. That is no step to undo of theirs,
+    /// but how they are from then on.
     pub(crate) fn set_default_preset(&mut self, format: Format, name: String) {
+        self.settle_edits();
         let fit = |choices: &_, config: &_| file_settings::fit_of(choices, &self.presets, config);
         let before: Vec<_> =
             self.items.iter().map(|item| fit(&item.choices, &self.config)).collect();
@@ -880,6 +882,7 @@ impl App {
             let after = fit(&item.choices, &self.config);
             file_settings::follow_fit(&mut item.choices.webm, before, after);
         }
+        self.take_in_edits();
     }
 }
 

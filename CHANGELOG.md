@@ -6,6 +6,15 @@ What changed in each release of tgradish, newest first. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The GUI undoes changes to each file's settings with Ctrl+Z, and makes
+  them again with Ctrl+Shift+Z or Ctrl+Y, or from the menu behind the
+  gear. Each file keeps its own history while it is open. A drag, a button
+  held down, a number typed or a click is one step; the crop nudged by
+  the arrows a moment apart is one too. Ctrl+Z still puts back the files
+  just removed first, while that is offered, with their history.
+
 ### Changed
 
 - Fitting a WebM no longer says why it didn't try a lower frame rate, in

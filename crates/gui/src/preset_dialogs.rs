@@ -301,9 +301,12 @@ impl App {
         let description = saving.description.trim().to_owned();
         match presets::save(dir, &name, &description, (&webm, &tgs), exists) {
             Ok(_) => {
+                // the same settings, as a preset now: no step to undo
+                self.settle_edits();
                 if let Some(item) = self.item_mut(saving.item) {
                     take_up(item, &name);
                 }
+                self.take_in_edits();
                 self.reload_presets();
                 None
             }
@@ -400,7 +403,16 @@ impl App {
         (!close && !modal.should_close()).then_some(managing)
     }
 
+    /// Makes `change`. What it changes of the files' settings, as they
+    /// follow a preset renamed or deleted, is no step to undo, but how
+    /// they are from then on.
     fn change_preset(&mut self, dir: &Path, managing: &mut Managing, change: Change) {
+        self.settle_edits();
+        self.make_change(dir, managing, change);
+        self.take_in_edits();
+    }
+
+    fn make_change(&mut self, dir: &Path, managing: &mut Managing, change: Change) {
         let file = |name: &str| dir.join(format!("{name}.toml"));
         let row = |id: u64| managing.rows.iter().position(|row| row.id == id);
         match change {
@@ -525,6 +537,11 @@ impl App {
         for item in &mut self.items {
             if item.choices.preset.as_deref() == Some(from) {
                 item.choices.preset = to.map(str::to_owned);
+            }
+            // as the steps back name it, or undoing would name one gone; one
+            // deleted they go on naming, as the dialog's Undo may put it back
+            if let Some(to) = to {
+                item.history.rename_preset(from, to);
             }
         }
         let names = |name: &Option<String>| name.as_deref() == Some(from);

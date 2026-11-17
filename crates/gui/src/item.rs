@@ -650,6 +650,8 @@ pub(crate) struct Item {
     /// What keeps it from being converted, worked out from `blocking`.
     pub(crate) blockers: Vec<Blocker>,
     pub(crate) blocking: Option<Blocking>,
+    /// Its settings as they were, for undoing changes to them.
+    pub(crate) history: crate::history::History,
 }
 
 impl Item {
@@ -686,6 +688,7 @@ impl Item {
             facts: None,
             blockers: Vec::new(),
             blocking: None,
+            history: Default::default(),
         }
     }
 
@@ -698,6 +701,7 @@ impl Item {
         if self.format_guessed {
             self.format = kind.first_format();
             self.format_guessed = kind == Kind::Image;
+            self.history.follow_guess(self.format, self.format_guessed);
         }
     }
 

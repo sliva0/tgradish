@@ -25,6 +25,7 @@ mod fallback;
 mod file_settings;
 mod files;
 mod fonts;
+mod history;
 mod icon;
 mod inset;
 mod inspect;

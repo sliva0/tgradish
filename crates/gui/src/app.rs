@@ -129,6 +129,9 @@ pub(crate) struct App {
     pub(crate) banner: Banner,
     /// Files removed a moment ago, which may be put back.
     pub(crate) removed: Option<Removed>,
+    /// What the last frames were, for which changes to files' settings
+    /// are steps to undo.
+    pub(crate) edit_frames: crate::history::Frames,
     /// The settings as they were before Settings put them back to their
     /// defaults a moment ago, which may be put back.
     pub(crate) settings_reset: Option<Config>,
@@ -385,6 +388,7 @@ impl App {
             fonts_checked: None,
             banner: Banner::default(),
             removed: None,
+            edit_frames: Default::default(),
             settings_reset: None,
             clipboard: system::Clipboard::default(),
             paste_key: crate::keys::PasteKey::default(),
@@ -657,6 +661,71 @@ impl App {
         }
         if let Some(id) = removed.selected {
             self.select(id);
+        }
+    }
+
+    /// Ctrl+Z: puts back the files just removed while a notice offers
+    /// to, else undoes the last change to the selected file's settings.
+    pub(crate) fn undo(&mut self, ctx: &egui::Context) {
+        if self.removed.is_some() {
+            return self.undo_removing();
+        }
+        self.step_history(ctx, true);
+    }
+
+    /// Ctrl+Shift+Z: makes the last change undone to the selected file's
+    /// settings again.
+    pub(crate) fn redo(&mut self, ctx: &egui::Context) {
+        self.step_history(ctx, false);
+    }
+
+    /// Whether [`App::undo`] has anything to do.
+    pub(crate) fn can_undo(&self) -> bool {
+        let selected = self.selected.and_then(|id| self.item(id));
+        self.removed.is_some() || selected.is_some_and(|item| item.history.can_undo())
+    }
+
+    pub(crate) fn can_redo(&self) -> bool {
+        let selected = self.selected.and_then(|id| self.item(id));
+        selected.is_some_and(|item| item.history.can_redo())
+    }
+
+    fn step_history(&mut self, ctx: &egui::Context, back: bool) {
+        // not halfway through a drag, whose step isn't over
+        if ctx.input(|input| input.pointer.any_down()) {
+            return;
+        }
+        let Some(item) = self.selected.and_then(|id| self.item_mut(id)) else { return };
+        if crate::history::step(item, back) {
+            ctx.request_repaint();
+        }
+    }
+
+    /// Makes what the user changed of each file's settings so far a step,
+    /// before the GUI changes them by itself, as a dialog changes
+    /// presets: such a change is no step of theirs, but what the settings
+    /// are from then on, which [`App::take_in_edits`] takes in after it.
+    pub(crate) fn settle_edits(&mut self) {
+        self.items.iter_mut().for_each(crate::history::flush);
+    }
+
+    pub(crate) fn take_in_edits(&mut self) {
+        self.items.iter_mut().for_each(crate::history::take_in);
+    }
+
+    /// Takes in the changes to files' settings this frame made, which are
+    /// steps once at rest; another frame is drawn while they aren't.
+    fn follow_edits(&mut self, ctx: &egui::Context) {
+        let frame = self.edit_frames.end(ctx, self.selected);
+        let selected = self.selected;
+        // only the selected file is changed by hand
+        let other = crate::history::Frame { input: false, ..frame };
+        let items = self.items.iter_mut().map(|item| match Some(item.id) == selected {
+            true => (item, frame),
+            false => (item, other),
+        });
+        if crate::history::follow(items) {
+            ctx.request_repaint();
         }
     }
 
@@ -1128,6 +1197,7 @@ impl eframe::App for App {
             })
         });
         links.iter().for_each(|url| system::browse(url));
+        self.follow_edits(&ctx);
         // last, as egui would take them
         self.scaling.keys(&ctx);
         // every few seconds, so a crash loses little; what changed is kept

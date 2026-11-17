@@ -32,7 +32,10 @@ pub(crate) enum Command {
     /// egui-winit passes on as [`egui::Event::Copy`] instead.
     CopyResult,
     Remove,
-    UndoRemoving,
+    /// The files just removed put back, while that is offered, else the
+    /// last change to the selected file's settings undone.
+    Undo,
+    Redo,
     Play,
     /// A frame back or on, ten with Shift.
     Step,
@@ -113,7 +116,13 @@ pub(crate) const SHORTCUTS: &[Shortcut] = {
             &[key(M::NONE, Key::Delete), key(M::NONE, Key::Backspace)],
             false,
         ),
-        shortcut(C::UndoRemoving, G::Files, &[key(M::COMMAND, Key::Z)], false),
+        shortcut(C::Undo, G::Files, &[key(M::COMMAND, Key::Z)], false),
+        shortcut(
+            C::Redo,
+            G::Files,
+            &[key(M::COMMAND.plus(M::SHIFT), Key::Z), key(M::COMMAND, Key::Y)],
+            false,
+        ),
         shortcut(C::Play, G::Playing, &[key(M::NONE, Key::Space)], false),
         shortcut(
             C::Step,
@@ -234,7 +243,8 @@ fn what(command: Command) -> String {
         Command::KeepBest => fl!("shortcut-keep-best"),
         Command::CopyResult => fl!("shortcut-copy-result"),
         Command::Remove => fl!("shortcut-remove"),
-        Command::UndoRemoving => fl!("shortcut-undo"),
+        Command::Undo => fl!("shortcut-undo"),
+        Command::Redo => fl!("shortcut-redo"),
         Command::Play => fl!("shortcut-play"),
         Command::Step => fl!("shortcut-step"),
         Command::Ends => fl!("shortcut-ends"),
@@ -332,11 +342,12 @@ impl App {
             (dropped, !input.raw.hovered_files.is_empty())
         });
         let asked = |command| ctx.input(|input| pressed(input, command));
-        let (space, delete, undo, shortcuts) = (
+        let (space, delete, undo, redo, shortcuts) = (
             asked(Command::Play).is_some(),
             // Delete alone, as Backspace is for the row with the focus
             asked(Command::Remove).is_some_and(|(at, _)| at == 0),
-            asked(Command::UndoRemoving).is_some(),
+            asked(Command::Undo).is_some(),
+            asked(Command::Redo).is_some(),
             asked(Command::Shortcuts).is_some(),
         );
         let (add, settings, inspect, keep_best) = (
@@ -423,10 +434,14 @@ impl App {
         // for the bar under the preview, which has the buttons they press
         self.keyed.copy = copy && selecting != Some(true);
         self.keyed.keep_best = keep_best;
-        // while a notice offers it, as after a row with the focus was
-        // removed by its key
+        // a field typed in undoes its own text, as it has the keys above;
+        // a button with the focus has no undoing of its own, as after a row
+        // with the focus was removed by its key
         if undo {
-            self.undo_removing();
+            self.undo(ctx);
+        }
+        if redo {
+            self.redo(ctx);
         }
         // the rest are a focused button's own, as Space and the arrows
         if ctx.memory(|memory| memory.focused().is_some()) {

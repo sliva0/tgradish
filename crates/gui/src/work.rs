@@ -354,6 +354,7 @@ fn settle(ctx: &egui::Context, item: &mut Item) {
             // a photo or a drawing stays a picture
             item.format = Format::Webp;
         }
+        item.history.follow_guess(item.format, false);
     }
     if item.input_thumb.is_none()
         && let Some(clip) = item.input_clip()

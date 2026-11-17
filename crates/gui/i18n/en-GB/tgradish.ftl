@@ -188,9 +188,17 @@ settings = Settings
 light-theme = Switch to the light theme
 dark-theme = Switch to the dark theme
 # What screen readers call the button that shows a gear, which opens a menu
-# of Settings, inspecting a sticker, feedback and About.
+# of Undo and Redo, Settings, inspecting a sticker, feedback and About.
 main-menu = Settings and more
-# Its items: Settings opens the Settings dialog.
+# Its items, each with its keys beside it. Undo takes back the last change
+# to the settings of the file picked, or puts back the files just removed
+# while a notice offers to; Redo makes a change undone again. Each is
+# greyed out while there is nothing to undo or redo. .hint is said on hover.
+menu-undo = Undo
+    .hint = The last change to the file's settings, or the files just removed
+menu-redo = Redo
+    .hint = The last change undone
+# Settings opens the Settings dialog.
 menu-settings = Settings…
 # .hint is said on hover.
 inspect = Inspect a sticker…
@@ -1286,7 +1294,8 @@ shortcut-convert-all = Convert all: every file without an up-to-date result
 shortcut-keep-best = Keep the best encode so far, while a WebM is fitted
 shortcut-copy-result = Copy the result of the file picked, to paste into Telegram
 shortcut-remove = Remove the file picked, or the one whose row has the focus
-shortcut-undo = Put back the files just removed
+shortcut-undo = Undo a change to the file picked, or put back files removed
+shortcut-redo = Redo a change undone
 shortcut-play = Play or pause
 shortcut-step = A frame back or on; with Shift, ten
 shortcut-ends = The first or the last frame used
