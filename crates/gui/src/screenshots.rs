@@ -753,7 +753,8 @@ fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     press_and_move(&mut harness, inside, by);
     save(&mut harness, "crop-snapped");
     let_go(&mut harness, inside + by);
-    // which leaves it with the keyboard's focus, moved by the arrows
+    // which leaves it with the keyboard's focus, its ring shown once the
+    // arrows move it
     harness.event(egui::Event::PointerGone);
     settle(&mut harness);
     harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::ArrowLeft);

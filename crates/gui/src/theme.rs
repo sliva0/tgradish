@@ -710,6 +710,11 @@ pub(crate) fn focus_ring(ctx: &egui::Context) {
     if ctx.text_edit_focused() {
         return;
     }
+    // the crop's, only once the arrows moved it: it takes the focus as it
+    // is pressed on or drawn too, where a second frame around it is noise
+    if crate::canvas::crop_focused(ctx) && !crate::canvas::crop_ringed(ctx) {
+        return;
+    }
     let Some(response) = ctx.read_response(id) else { return };
     if !response.interact_rect.is_positive() {
         return;

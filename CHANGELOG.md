@@ -53,6 +53,8 @@ What changed in each release of tgradish, newest first. The format follows
   ease rather than jump, and nothing moves where the system asks for less.
 - What scrolls in the GUI shows a bar and fades where there is more, each
   file keeps its scroll, and clicking a control moves nothing around it.
+- The GUI's crop shows the ring of the keyboard's focus only once the
+  arrows move it, until it is pressed again, not around it on every drag.
 
 ### Fixed
 

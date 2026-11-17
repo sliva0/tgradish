@@ -437,6 +437,13 @@ pub(crate) fn show(
         |point: Option<Pos2>| point.and_then(grab).filter(|drag| !matches!(drag, Drag::New(_)));
     let mut focus = (dragging && drag.is_some())
         || (response.clicked() && pressed_on(response.interact_pointer_pos()).is_some());
+    // its ring is shown once the arrows move it, till the canvas is
+    // pressed again or the focus goes elsewhere: a press takes the focus
+    // too, and the crop's own frame is enough to see it by then
+    let keyed_id = crop_id.with(KEYED);
+    if response.is_pointer_button_down_on() || !ui.memory(|memory| memory.has_focus(crop_id)) {
+        ui.data_mut(|data| data.remove::<bool>(keyed_id));
+    }
     // where it has the focus, the arrows move it a pixel, ten with Shift,
     // and with Ctrl move its bottom right corner
     if cropping.crop.is_some() && ui.memory(|memory| memory.has_focus(crop_id)) {
@@ -455,6 +462,7 @@ pub(crate) fn show(
                 *cropping.crop = (new != full).then_some(new);
             }
             focus = true;
+            ui.data_mut(|data| data.insert_temp(keyed_id, true));
         }
     }
 
@@ -609,6 +617,19 @@ const CROP: &str = "crop";
 pub(crate) fn crop_focused(ctx: &egui::Context) -> bool {
     let crop = ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new(CROP)));
     crop.is_some() && ctx.memory(|memory| memory.focused()) == crop
+}
+
+/// The id under the crop's own of whether the arrows moved it, for
+/// [`crop_ringed`].
+const KEYED: &str = "keyed";
+
+/// Whether the crop shows the ring of the keyboard's focus: only once the
+/// arrows moved it, as it takes the focus with each press on it too, and
+/// only till the canvas is pressed again.
+pub(crate) fn crop_ringed(ctx: &egui::Context) -> bool {
+    let crop = ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new(CROP)));
+    let keyed = |crop: egui::Id| ctx.data(|data| data.get_temp::<bool>(crop.with(KEYED)));
+    crop_focused(ctx) && crop.and_then(keyed).is_some()
 }
 
 /// How far out of the crop the ring of the keyboard's focus is drawn, the
@@ -1488,6 +1509,48 @@ mod tests {
         harness.step();
         assert_eq!(harness.ctx.memory(|memory| memory.focused()), None);
         assert_eq!(keyed(&mut harness, Modifiers::NONE, Key::ArrowLeft), lower);
+    }
+
+    #[test]
+    fn rings_the_crop_only_once_the_arrows_move_it() {
+        let crop = Crop { x: 8, y: 8, width: 30, height: 20 };
+        let (mut harness, scale, corner) = cropped(Some(crop));
+        let focused = |harness: &egui_kittest::Harness<'_, Cropped>| {
+            (crop_focused(&harness.ctx), crop_ringed(&harness.ctx))
+        };
+        // moved by a drag: the focus, and no ring
+        let inside = corner + vec2(20.0, 15.0) * scale;
+        press_and_move(&mut harness, inside, vec2(2.0, 0.0) * scale, egui::Modifiers::NONE);
+        assert_eq!(focused(&harness), (true, false));
+        let_go(&mut harness, inside + vec2(2.0, 0.0) * scale);
+        harness.step();
+        assert_eq!(focused(&harness), (true, false));
+        // moved by an arrow: the ring
+        harness.key_press(egui::Key::ArrowRight);
+        harness.step();
+        assert_eq!(harness.state().3, Some(Crop { x: 11, ..crop }));
+        assert_eq!(focused(&harness), (true, true));
+        // pressed again, and clicked: the focus kept, the ring gone
+        let inside = corner + vec2(23.0, 15.0) * scale;
+        harness.event(egui::Event::PointerMoved(inside));
+        harness.event(egui::Event::PointerButton {
+            pos: inside,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.step();
+        assert!(!crop_ringed(&harness.ctx));
+        let_go(&mut harness, inside);
+        harness.step();
+        assert_eq!(focused(&harness), (true, false));
+        // and once more by an arrow, then let go of with Escape
+        harness.key_press(egui::Key::ArrowLeft);
+        harness.step();
+        assert_eq!(focused(&harness), (true, true));
+        harness.key_press(egui::Key::Escape);
+        harness.step();
+        assert_eq!(focused(&harness), (false, false));
     }
 
     #[test]
