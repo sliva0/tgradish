@@ -648,6 +648,12 @@ fn bar(
         (Some(Grab::End), _) => Some(widgets::seconds(to)),
         _ => x.map(|x| time_text(seconds_at(x), frames, in_frames)),
     };
+    // but the part slid along by an end, whose start is said: under the
+    // start, or it would read as the time where the pointer is
+    let x = match dragged {
+        Some(Grab::Slide(..)) => x.map(|_| x_of(from).clamp(track.left(), track.right())),
+        _ => x,
+    };
     let at = x.zip(said);
     if let Some((x, text)) = at.filter(|_| response.hovered() || response.dragged()) {
         readout(ui, rect, x, text);
@@ -1229,6 +1235,45 @@ mod tests {
         });
         harness.step();
         assert!((harness.state().2 - 40.0).abs() < 0.01, "{}", harness.state().2);
+    }
+
+    #[test]
+    fn reads_out_the_start_of_the_part_slid_under_it() {
+        // slid by its end, which the pointer is by, its start said under
+        // the start, not by the pointer, where it would read as the time
+        // there
+        let (mut harness, track) = timeline_of(20.0, 23.0, None);
+        let x_of = |seconds: f64| track.left() + (seconds / 100.0) as f32 * track.width();
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::SHIFT,
+        };
+        harness.event(egui::Event::ModifiersChanged(egui::Modifiers::SHIFT));
+        let from = pos2(x_of(23.0), track.center().y);
+        harness.event(egui::Event::PointerMoved(from));
+        harness.event(press(from, true));
+        harness.step();
+        for step in 1..=4 {
+            harness.event(egui::Event::PointerMoved(from + vec2(10.0 * step as f32, 0.0)));
+            harness.step();
+        }
+        let start = harness.state().0.unwrap();
+        assert!(start > 20.0, "{start}");
+        let said = widgets::seconds(start);
+        let place = harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+            Shape::Text(text) if text.galley.text() == said => {
+                let place = text.galley.rect.translate(text.pos.to_vec2());
+                (place.top() > track.bottom()).then_some(place)
+            }
+            _ => None,
+        });
+        let place = place.unwrap_or_else(|| panic!("{said} not said"));
+        let left_of = x_of(start) - place.right();
+        assert!((6.0..=12.0).contains(&left_of), "{place:?}, {left_of} left of its start");
+        harness.event(press(from + vec2(40.0, 0.0), false));
+        harness.step();
     }
 
     #[test]
