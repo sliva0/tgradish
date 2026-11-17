@@ -17,7 +17,8 @@ What changed in each release of tgradish, newest first. The format follows
   theme, what is chosen, the main button and progress.
 - The GUI without files is one drop zone, until the first file is added.
   What the mouse does on the preview shows over it, whole, as the pointer
-  is there, rather than cut short in the bar above it.
+  is there, rather than cut short in the bar above it. The bar under it
+  names the result's file, its folder said on hover, and stays on one line.
 
 ### Fixed
 

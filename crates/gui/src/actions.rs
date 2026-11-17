@@ -1,9 +1,10 @@
 //! The bar under the selected item: converting it, stopping or not
 //! converting it after all and how far it has got, copying its result,
-//! what went wrong last time, and where its result goes. Where that doesn't fit on a line,
-//! where the result goes is on a second, under the rest.
+//! what went wrong last time, and the name of the file its result goes
+//! to, cut short in its middle where the line has little room for it, and
+//! on a second line, under the rest, only where even that doesn't fit.
 
-use std::path::{MAIN_SEPARATOR, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, RichText, vec2};
 
@@ -350,16 +351,17 @@ impl Said {
     }
 }
 
-/// The least room for where the result goes, which is left out with less.
-const FOLDER_LEAST: f32 = 60.0;
+/// Characters of a result's name kept, beside its ending, where it is
+/// cut shortest; with less room, the bar goes on two lines instead.
+const NAME_LEAST: usize = 8;
 
 /// What copying the result last did, and when, kept under this name.
 const COPIED: &str = "result copied";
 /// How long what copying did is said on its button.
 const COPIED_SHOWN: f64 = 2.0;
 
-/// The right of the bar: where the result goes, its name, and the button
-/// that shows its folder.
+/// The right of the bar: the name of the file the result goes to, and
+/// the button that shows its folder, its path said on both on hover.
 struct Right<'a> {
     output: &'a Path,
     /// Something is there, whose folder can be shown.
@@ -368,7 +370,9 @@ struct Right<'a> {
     saved: bool,
     name: String,
     replaces: Option<String>,
-    /// How wide it all is at the least: its folder as short as it gets.
+    /// How wide the name is as short as it gets.
+    shortest: f32,
+    /// How wide it all is at the least: its name as short as it gets.
     least: f32,
 }
 
@@ -381,14 +385,16 @@ impl<'a> Right<'a> {
     ) -> Right<'a> {
         let name = output.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let replaces = replaces.map(|replaces| format!("⚠ {replaces}"));
-        let mut right = Right { output, there, saved, name, replaces, least: 0.0 };
+        let mut right = Right { output, there, saved, name, replaces, shortest: 0.0, least: 0.0 };
         let gap = ui.spacing().item_spacing.x;
-        let shortest = folders(output).pop().unwrap_or_default();
-        let mut least = right.buttons_width(ui)
-            + gap
-            + right.name_width(ui, fallbacks)
-            + gap
-            + right.saves_width(ui, fallbacks, &shortest);
+        let kept = ending(&right.name);
+        let cut = middle_cut(&right.name, kept, |text| {
+            text.chars().count() <= NAME_LEAST + 1 + kept.chars().count()
+        });
+        right.shortest =
+            right.name_width(ui, fallbacks, &cut).min(right.name_width(ui, fallbacks, &right.name));
+        let mut least =
+            right.buttons_width(ui) + gap + right.shortest + gap + right.saves_width(ui, fallbacks);
         if let Some(replaces) = &right.replaces {
             least += gap + widgets::text_width(ui, replaces, 0.0);
         }
@@ -396,33 +402,27 @@ impl<'a> Right<'a> {
         right
     }
 
-    fn name_width(&self, ui: &egui::Ui, fallbacks: &crate::fallback::Fallbacks) -> f32 {
+    fn name_width(&self, ui: &egui::Ui, fallbacks: &crate::fallback::Fallbacks, name: &str) -> f32 {
         let strong = text_format(ui, ui.visuals().strong_text_color());
-        let job = drawable(ui, fallbacks, &self.name, strong).0;
+        let job = drawable(ui, fallbacks, name, strong).0;
         ui.painter().layout_job(job).size().x
     }
 
-    /// "Saves to" and `folder`, or "Saved to", as it is drawn.
+    /// "Saves as", or "Saved as", before the name, as it is drawn.
     fn saves(
         &self,
         ui: &egui::Ui,
         fallbacks: &crate::fallback::Fallbacks,
-        folder: &str,
     ) -> egui::text::LayoutJob {
         let text = match self.saved {
-            true => fl!("result-saved-to", folder = folder),
-            false => fl!("saves-to", folder = folder),
+            true => fl!("result-saved-as"),
+            false => fl!("saves-as"),
         };
         drawable(ui, fallbacks, &text, text_format(ui, ui.visuals().weak_text_color())).0
     }
 
-    fn saves_width(
-        &self,
-        ui: &egui::Ui,
-        fallbacks: &crate::fallback::Fallbacks,
-        folder: &str,
-    ) -> f32 {
-        ui.painter().layout_job(self.saves(ui, fallbacks, folder)).size().x
+    fn saves_width(&self, ui: &egui::Ui, fallbacks: &crate::fallback::Fallbacks) -> f32 {
+        ui.painter().layout_job(self.saves(ui, fallbacks)).size().x
     }
 
     /// The button's room.
@@ -433,11 +433,13 @@ impl<'a> Right<'a> {
         }
     }
 
-    /// Draws it, from the right: its folder shortened from its middle
-    /// where it has less room than it would take, and its name only where
-    /// it alone is wider than that, its ending kept.
+    /// Draws it, from the right: the name whole where there is room for
+    /// it, else cut short in its middle, its ending kept, and what it is
+    /// saved as before it where there is room for that too.
     fn show(&self, ui: &mut egui::Ui, fallbacks: &crate::fallback::Fallbacks) {
-        if self.there && ui.button(fl!("show-in-folder")).clicked() {
+        let path = self.output.display().to_string();
+        let show = self.there.then(|| ui.button(fl!("show-in-folder")).on_hover_text(&path));
+        if show.is_some_and(|show| show.clicked()) {
             system::reveal(self.output);
         }
         if let Some(replaces) = &self.replaces {
@@ -445,49 +447,34 @@ impl<'a> Right<'a> {
             ui.add(egui::Label::new(warning).wrap_mode(egui::TextWrapMode::Extend));
         }
         let gap = ui.spacing().item_spacing.x;
-        let room = ui.available_width();
-        // the name whole, unless it alone is wider than all the room there
-        // is, then its ending kept; the folder as long as the rest leaves
-        // room for
+        let saves_width = self.saves_width(ui, fallbacks) + gap;
+        // what it is saved as only where the name has room beside it, as
+        // short as it gets
+        let said = ui.available_width() - saves_width >= self.shortest - 0.5;
+        let room = ui.available_width() - if said { saves_width } else { 0.0 };
         let strong = text_format(ui, ui.visuals().strong_text_color());
-        let name = if self.name_width(ui, fallbacks) <= room {
+        let name = if self.name_width(ui, fallbacks, &self.name) <= room {
             self.name.clone()
         } else {
-            let fits = |text: &str| {
-                let job = drawable(ui, fallbacks, text, strong.clone()).0;
-                ui.painter().layout_job(job).size().x <= room
-            };
+            let fits = |text: &str| self.name_width(ui, fallbacks, text) <= room;
             middle_cut(&self.name, ending(&self.name), fits)
         };
         let (job, missing) = drawable(ui, fallbacks, &name, strong);
-        let named = ui.painter().layout_job(job.clone()).size().x;
-        let output = self.output;
-        ui.add(egui::Label::new(job).wrap_mode(egui::TextWrapMode::Extend)).on_hover_ui(|ui| {
+        let hint = format!("{path}\n{}", fl!("saves-as", "hint"));
+        let label = egui::Label::new(job).wrap_mode(egui::TextWrapMode::Extend);
+        ui.add(label).on_hover_ui(|ui| {
             let plain = text_format(ui, ui.visuals().text_color());
-            ui.label(drawable(ui, fallbacks, &output.display().to_string(), plain).0);
+            ui.label(drawable(ui, fallbacks, &path, plain).0);
+            widgets::note(ui, fl!("saves-as", "hint"));
             if let Some(note) = missing_note(&missing) {
                 widgets::note(ui, note);
             }
         });
-        let room = room - named - gap;
-        let folders = folders(self.output);
-        let folder = folders
-            .iter()
-            .find(|folder| self.saves_width(ui, fallbacks, folder) <= room)
-            .or(folders.last())
-            .cloned()
-            .unwrap_or_default();
-        // none of it where hardly any would show
-        if room < FOLDER_LEAST {
-            return;
+        if said {
+            let saves = self.saves(ui, fallbacks);
+            let label = egui::Label::new(saves).wrap_mode(egui::TextWrapMode::Extend);
+            ui.add(label).on_hover_text(hint);
         }
-        let saves = self.saves(ui, fallbacks, &folder);
-        // shortened: said in full on hover
-        let hint = match folders.first().filter(|whole| **whole != folder) {
-            Some(whole) => format!("{whole}\n{}", fl!("saves-to", "hint")),
-            None => fl!("saves-to", "hint"),
-        };
-        ui.add(egui::Label::new(saves).truncate()).on_hover_text(hint);
     }
 }
 
@@ -535,20 +522,6 @@ fn copy_width(ui: &egui::Ui) -> f32 {
         .iter()
         .map(|text| widgets::text_width(ui, text, button_padding(ui)))
         .fold(0.0, f32::max)
-}
-
-/// The folder of `output` as the bar may write it, longest first: whole,
-/// then ever less of its start, "…" in its place, down to its own name.
-fn folders(output: &Path) -> Vec<String> {
-    let folder = output.parent().map(|p| p.display().to_string()).unwrap_or_default();
-    let whole = format!("{folder}{MAIN_SEPARATOR}");
-    let parts: Vec<&str> = folder.split(MAIN_SEPARATOR).filter(|part| !part.is_empty()).collect();
-    let mut all = vec![whole];
-    for kept in (1..parts.len()).rev() {
-        let end = parts[parts.len() - kept..].join(std::path::MAIN_SEPARATOR_STR);
-        all.push(format!("…{MAIN_SEPARATOR}{end}{MAIN_SEPARATOR}"));
-    }
-    all
 }
 
 /// How much of the end of a result's `name` is kept whole as it is cut
@@ -641,7 +614,7 @@ mod tests {
     }
 
     #[test]
-    fn puts_where_the_result_goes_under_the_rest_where_they_dont_fit() {
+    fn keeps_the_name_of_the_result_beside_the_rest_cut_short_only_without_room() {
         let dir = tempfile::tempdir().unwrap();
         let long = "holiday at the seaside with the whole family, the long cut, final edit (2)";
         let art = dir.path().join(format!("{long}.png"));
@@ -661,20 +634,29 @@ mod tests {
         finish(&mut harness);
         let name = format!("{long}.sticker.tgs");
         let keys = crate::keys::keys_text(crate::keys::Command::Convert);
-        let button = harness.get(egui_kittest::kittest::by().label_contains(&keys)).rect();
-        // the name whole, on a line under Convert, its folder cut short
-        let shown = harness.get_by_label(&name).rect();
-        assert!(shown.top() > button.bottom(), "{shown:?} beside {button:?}");
-        let short = fl!("saves-to", folder = format!("…{0}Stickers{0}", std::path::MAIN_SEPARATOR));
-        harness.get_by_label(&short);
-        // a wide window has room for all of it on one
+        let level = |harness: &Harness<App>, label: &str| {
+            let button = harness.get(egui_kittest::kittest::by().label_contains(&keys)).rect();
+            let shown = harness.get_by_label(label).rect();
+            assert!((shown.center().y - button.center().y).abs() < 2.0, "{shown:?} by {button:?}");
+            shown
+        };
+        // on the row of Convert, cut short in its middle, its ending kept,
+        // and no folder said
+        let cut = harness
+            .query_all_by_role(egui::accesskit::Role::Label)
+            .filter_map(|node| node.accesskit_node().value().map(|value| value.to_string()))
+            .find(|label| label.contains("…") && label.contains(".sticker"))
+            .expect("the name cut short");
+        assert!(cut.ends_with(".sticker.tgs") && cut.len() < name.len(), "{cut}");
+        level(&harness, &cut);
+        level(&harness, &fl!("saves-as"));
+        assert!(harness.query_by_label_contains("Stickers").is_none());
+        // a wide window has room for it whole
         harness.set_size(egui::vec2(1920.0, 820.0));
         harness.run_steps(3);
-        let button = harness.get(egui_kittest::kittest::by().label_contains(&keys)).rect();
-        let shown = harness.get_by_label(&name).rect();
-        assert!((shown.center().y - button.center().y).abs() < 2.0, "{shown:?} under {button:?}");
-        let folder = format!("{}{}", deep.display(), std::path::MAIN_SEPARATOR);
-        harness.get_by_label(&fl!("saves-to", folder = folder));
+        let shown = level(&harness, &name);
+        let saves = level(&harness, &fl!("saves-as"));
+        assert!(saves.right() < shown.left(), "{saves:?} before {shown:?}");
     }
 
     #[test]
@@ -824,13 +806,13 @@ mod tests {
         use tgradish_core::presets::Format;
         let dir = tempfile::tempdir().unwrap();
         let mut harness = with_art(dir.path(), 1);
-        let folder = format!("{}{}", dir.path().join("out").display(), std::path::MAIN_SEPARATOR);
-        harness.get_by_label(&fl!("saves-to", folder = folder.as_str()));
+        harness.get_by_label(&fl!("saves-as"));
+        harness.get_by_label("0.sticker.tgs");
         assert!(harness.query_by_label(&fl!("copy-result")).is_none());
         convert(&harness);
         harness.run_steps(2);
         finish(&mut harness);
-        harness.get_by_label(&fl!("result-saved-to", folder = folder.as_str()));
+        harness.get_by_label(&fl!("result-saved-as"));
         // beside Convert again, as high, and pointed at by the result
         let keys = crate::keys::keys_text(crate::keys::Command::Convert);
         let again = harness.get(egui_kittest::kittest::by().label_contains(&keys)).rect();
@@ -847,7 +829,7 @@ mod tests {
         // another format: none made of it yet, to be saved, and made first
         harness.state_mut().items[0].format = Format::Webp;
         harness.run_steps(2);
-        harness.get_by_label(&fl!("saves-to", folder = folder.as_str()));
+        harness.get_by_label(&fl!("saves-as"));
         let keys = crate::keys::keys_text(crate::keys::Command::Convert);
         let button = harness.get(egui_kittest::kittest::by().label_contains(&keys));
         let label = button.accesskit_node().label().unwrap_or_default();
@@ -890,8 +872,7 @@ mod tests {
     fn takes_a_file_put_in_place_of_a_result_for_another() {
         let dir = tempfile::tempdir().unwrap();
         let mut harness = with_art(dir.path(), 2);
-        let folder = format!("{}{}", dir.path().join("out").display(), std::path::MAIN_SEPARATOR);
-        let saved = fl!("result-saved-to", folder = folder.as_str());
+        let saved = fl!("result-saved-as");
         convert_all(&harness).click();
         harness.run_steps(2);
         finish(&mut harness);

@@ -287,11 +287,12 @@ in-the-way = A file not from tgradish is in the way:
 replace-it = Replace it
 stopped = Stopped
 show-in-folder = Show in folder
-# Before the folder a file's result goes to.
-saves-to = Saves to { $folder }
+# Before the name of the file a file's result goes to, whose path is
+# said on hover.
+saves-as = Saves as
     .hint = Where results go is set in "{ settings }"
-# Before the folder of a result made as the settings are now.
-result-saved-to = Saved to { $folder }
+# Before the name of a result made as the settings are now.
+result-saved-as = Saved as
 # Beside Convert, once there is a result: copies it as a file, to paste
 # into Telegram's chat.
 copy-result = Copy
