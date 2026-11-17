@@ -325,7 +325,8 @@ inset-label = Result at { $scale }
     .plain = Result
     .drag = Drag it to another corner
 # How large it is shown: as a share of its own pixels, or, where it is
-# shown pixel for pixel larger, as so many times its size.
+# shown pixel for pixel larger, as so many times its size. On Zoom out too,
+# how large the pixels of what the preview shows are.
 inset-scale = { $percent }%
     .times = { $times }×
 # .same, on hover, where the next size would show it no otherwise, as it
@@ -356,8 +357,6 @@ result-preview = Result preview
 zoom-out = Zoom out
     .hint = Show all of it
     .all = Already fully zoomed out
-# How far the preview is zoomed in, as a percentage.
-zoom-level = { $percent }%
 # How the mouse works on the preview.
 input-hint = Drag to crop · wheel to zoom · right button to pan
 crop-hint = Drag the crop or its edges · double-click for all

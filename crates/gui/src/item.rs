@@ -324,11 +324,14 @@ pub(crate) struct Zoom {
     /// The view and the part of it the picture fits, as last shown: zoomed
     /// in, the picture stays where it is when only that part changes.
     pub(crate) anchor: Option<(egui::Rect, egui::Rect)>,
+    /// How many of the screen's pixels a pixel of the picture took, as it
+    /// was last shown.
+    pub(crate) scale: Option<f32>,
 }
 
 impl Default for Zoom {
     fn default() -> Zoom {
-        Zoom { level: 1.0, centre: egui::vec2(0.5, 0.5), anchor: None }
+        Zoom { level: 1.0, centre: egui::vec2(0.5, 0.5), anchor: None, scale: None }
     }
 }
 

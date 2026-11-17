@@ -173,7 +173,17 @@ enum Drag {
 pub(crate) const MARGIN: f32 = 14.0;
 /// How near an edge the pointer grabs it, in points.
 const GRAB: f32 = 7.0;
-pub(crate) const MAX_ZOOM: f32 = 64.0;
+/// The most a picture is zoomed in to, from where it fits.
+const MOST_LEVEL: f32 = 64.0;
+/// The most of the screen's pixels a pixel of a picture takes zoomed in,
+/// which Zoom out has room to say.
+pub(crate) const MOST_TIMES: f32 = 9999.0;
+
+/// How far a picture is zoomed in to at most, from where it fits, where a
+/// pixel of it takes `fit` of the screen's pixels.
+fn most_level(fit: f32) -> f32 {
+    MOST_LEVEL.min(MOST_TIMES / fit).max(1.0)
+}
 /// Side of the squares that show transparency, in points.
 const CHECKER: f32 = 8.0;
 
@@ -220,9 +230,10 @@ pub(crate) fn show(
 
     let side = picture.size.0.max(picture.size.1);
     let canvas = if picture.square { (side, side) } else { picture.size };
-    hold(zoom, (rect, fit_in), canvas);
+    hold(zoom, (rect, fit_in), canvas, ui.ctx().pixels_per_point());
     zoom_and_pan(ui, &response, fit_in, canvas, zoom);
     let (whole, scale) = layout(fit_in, canvas, zoom);
+    zoom.scale = Some(scale * ui.ctx().pixels_per_point());
     // its squares still on the stage, as the picture zooms and pans over
     // them: counted from a corner of the picture, they would race along
     // with it while zooming eases in, all but those near that corner
@@ -712,6 +723,9 @@ fn zoom_and_pan(
     size: (u32, u32),
     zoom: &mut Zoom,
 ) {
+    let most = most_level(fit(rect, size) * ui.ctx().pixels_per_point());
+    // as far as it goes in the room there is now
+    zoom.level = zoom.level.min(most);
     if let Some(pointer) = response.hover_pos() {
         let (scroll, pinch) = ui.input(|input| (input.smooth_scroll_delta.y, input.zoom_delta()));
         let factor = pinch * (scroll * wheel_rate(ui)).exp();
@@ -722,7 +736,7 @@ fn zoom_and_pan(
         if (factor - 1.0).abs() > 1e-4 {
             let (shown, _) = layout(rect, size, zoom);
             let at = (pointer - shown.min) / shown.size();
-            let level = (zoom.level * factor).clamp(1.0, MAX_ZOOM);
+            let level = (zoom.level * factor).clamp(1.0, most);
             let shown = shown.size() * (level / zoom.level);
             // the picture point under the pointer stays there
             let min = pointer - vec2(at.x * shown.x, at.y * shown.y);
@@ -771,14 +785,15 @@ fn wheel_rate(ui: &egui::Ui) -> f32 {
 /// Zoomed in, keeps a `size` picture where it is on the screen when the
 /// part `fit_in` of the `view` it fits changes, as for the small picture
 /// beside it.
-fn hold(zoom: &mut Zoom, (view, fit_in): (Rect, Rect), size: (u32, u32)) {
+fn hold(zoom: &mut Zoom, (view, fit_in): (Rect, Rect), size: (u32, u32), ppp: f32) {
     if let Some((seen, before)) = zoom.anchor
         && seen == view
         && before != fit_in
         && zoom.level > 1.0
     {
         let (shown, scale) = layout(before, size, zoom);
-        zoom.level = (scale / fit(fit_in, size)).clamp(1.0, MAX_ZOOM);
+        let fit = fit(fit_in, size);
+        zoom.level = (scale / fit).clamp(1.0, most_level(fit * ppp));
         let (now, _) = layout(fit_in, size, zoom);
         zoom.centre = (fit_in.center() - shown.min) / now.size();
     }
@@ -1009,10 +1024,10 @@ mod tests {
         let size = (300, 200);
         // zoomed in, the picture stays put as the small picture's strip
         // changes beside it
-        let mut zoom = Zoom { level: 2.0, centre: vec2(0.3, 0.6), anchor: None };
-        hold(&mut zoom, (view, beside), size);
+        let mut zoom = Zoom { level: 2.0, centre: vec2(0.3, 0.6), ..Zoom::default() };
+        hold(&mut zoom, (view, beside), size, 1.0);
         let before = layout(beside, size, &zoom).0;
-        hold(&mut zoom, (view, smaller), size);
+        hold(&mut zoom, (view, smaller), size, 1.0);
         let after = layout(smaller, size, &zoom).0;
         assert!((before.min - after.min).length() < 1e-3, "{before:?} {after:?}");
         assert!((before.size() - after.size()).length() < 1e-3, "{before:?} {after:?}");

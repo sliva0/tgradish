@@ -332,8 +332,8 @@ fn shown_scale(room: Vec2, full: Vec2, ppp: f32, whole_times: bool) -> f32 {
 }
 
 /// How large a result shows, as `scale` says: as a share of its size, or
-/// as so many times it.
-fn scale_text(scale: f32) -> String {
+/// as so many times it. The preview's zoom says so too.
+pub(crate) fn scale_text(scale: f32) -> String {
     if scale >= 2.0 {
         fl!("inset-scale", "times", times = scale.round())
     } else {

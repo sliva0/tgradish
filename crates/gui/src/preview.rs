@@ -249,12 +249,12 @@ fn preview(
             let zoom = item.view.zoom_mut(show);
             let zoomed = zoom.level > 1.0;
             if zoomed || !compact {
-                // how far it is zoomed in, on the button that zooms out,
-                // which is as wide as the widest it gets, so nothing moves
-                // as it changes
-                let level = fl!("zoom-level", percent = (zoom.level * 100.0).round());
+                // how large its pixels show, as the result's small picture
+                // says it, on the button that zooms out, which is as wide
+                // as the widest it gets, so nothing moves as it changes
+                let scale = zoom.scale.map(inset::scale_text).unwrap_or_default();
                 let button = egui::Button::new(fl!("zoom-out"))
-                    .shortcut_text(level)
+                    .shortcut_text(scale)
                     .gap(ZOOM_GAP)
                     .min_size(vec2(zoom_out, 0.0));
                 let out = ui
@@ -578,14 +578,16 @@ fn widest_mouse_hint(ui: &egui::Ui) -> f32 {
 const ZOOM_GAP: f32 = 2.0;
 const ZOOM_PADDING: f32 = 6.0;
 
-/// Width of Zoom out, with how far it is zoomed in on it: as wide as the
-/// widest it gets, so that nothing moves as it changes.
+/// Width of Zoom out, with how large the picture's pixels show on it: as
+/// wide as the widest it gets, so that nothing moves as it changes, the
+/// most digits of a share of their size, or of times it.
 fn zoom_out_width(ui: &egui::Ui) -> f32 {
-    let widest = fl!("zoom-level", percent = (canvas::MAX_ZOOM * 100.0).round());
+    let widest = [inset::scale_text(1.99), inset::scale_text(canvas::MOST_TIMES)];
+    let widest = widest.map(|text| widgets::text_width(ui, &widgets::zeros(&text), 0.0));
     // the gap on either side of the room between the two
     let padding = 2.0 * (ZOOM_PADDING + ZOOM_GAP);
     let words = widgets::text_width(ui, &fl!("zoom-out"), padding);
-    (words + widgets::text_width(ui, &widgets::zeros(&widest), 0.0)).ceil()
+    (words + widest[0].max(widest[1])).ceil()
 }
 
 /// What of `clip` a `.tgs` result shows, before it is made square: the
@@ -738,11 +740,14 @@ mod tests {
             };
             let before = place(&harness);
             // zoomed in as far as it goes, and out of date
-            harness.state_mut().items[0].view.input_zoom.level = crate::canvas::MAX_ZOOM;
+            harness.state_mut().items[0].view.input_zoom.level = f32::MAX;
             harness.state_mut().items[0].choices.tgs.keep_canvas = Some(true);
             harness.run_steps(2);
             harness.get_by_label(&fl!("show-result", "outdated"));
-            harness.get_by_label_contains(&fl!("zoom-level", percent = 6400));
+            let out = fl!("zoom-out");
+            let times = harness.get_by_label_contains(&out).accesskit_node().label();
+            let times = times.unwrap_or_default();
+            assert!(times.ends_with(&fl!("inset-scale", "times", times = "")), "{times}");
             // the buttons at the right stay, and the segments at the left
             let (out, preview, result) = place(&harness);
             assert_eq!((out, preview), (before.0, before.1), "{width}");
@@ -908,7 +913,7 @@ mod tests {
             let cases: [Case; 6] = [
                 ("the input", |item| item.view.show = Show::Input),
                 ("zoomed in", |item| item.view.input_zoom.level = 2.0),
-                ("zoomed in further", |item| item.view.input_zoom.level = canvas::MAX_ZOOM),
+                ("zoomed in further", |item| item.view.input_zoom.level = f32::MAX),
                 ("cropped", |item| {
                     item.choices.crop = Some(Crop { x: 1, y: 1, width: 2, height: 2 })
                 }),
