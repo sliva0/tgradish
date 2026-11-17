@@ -134,6 +134,18 @@ const MARKED_FRAME: f32 = 6.0;
 /// of the row is in line.
 const BAR: f32 = theme::CONTROL;
 
+/// How high the track is, in the middle of the bar, so that it is in line
+/// with the middle of the buttons and fields beside it: what is left over
+/// it holds the playhead's head and the limit's label, and as much under it.
+const TRACK: f32 = 12.0;
+
+/// The track of the bar `rect`, where the input runs from end to end: in
+/// its middle, and in from its ends by room for the brackets and the
+/// playhead's head, so that they show whole at the ends.
+fn track_of(rect: Rect) -> Rect {
+    Rect::from_center_size(rect.center(), vec2(rect.width() - 16.0, TRACK))
+}
+
 /// Width of the fields of where the used part starts and ends.
 const FIELD: f32 = 64.0;
 
@@ -333,10 +345,7 @@ fn bar(
     (limit, past): (f64, PastLimit),
 ) {
     let length = length.max(1e-6);
-    let track = Rect::from_min_max(
-        pos2(rect.left() + 8.0, rect.top() + 8.0),
-        pos2(rect.right() - 8.0, rect.bottom() - 6.0),
-    );
+    let track = track_of(rect);
     let x_of = |seconds: f64| track.left() + (seconds / length) as f32 * track.width();
     let seconds_at =
         |x: f32| (f64::from((x - track.left()) / track.width()) * length).clamp(0.0, length);
@@ -504,16 +513,16 @@ fn bar(
             bracket,
         ));
     }
-    // the playhead, with a small head
+    // the playhead, with a small head, reaching as far under the track as
+    // its head does over it: a line drawn half its width past its end
     let x = x_of(time.clamp(0.0, length));
-    painter.line_segment(
-        [pos2(x, track.top() - 2.0), pos2(x, rect.bottom())],
-        Stroke::new(1.0, marks),
-    );
+    let (reach, stroke) = (7.0, Stroke::new(1.0, marks));
+    let end = track.bottom() + reach - stroke.width / 2.0;
+    painter.line_segment([pos2(x, track.top() - 2.0), pos2(x, end)], stroke);
     painter.add(Shape::convex_polygon(
         vec![
-            pos2(x - 4.5, track.top() - 7.0),
-            pos2(x + 4.5, track.top() - 7.0),
+            pos2(x - 4.5, track.top() - reach),
+            pos2(x + 4.5, track.top() - reach),
             pos2(x, track.top() - 1.0),
         ],
         marks,
@@ -527,7 +536,13 @@ pub(crate) fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &m
     ui.horizontal(|ui| {
         play_button(ui, playing);
         let text = format!("{} / {}", widgets::seconds(*time), widgets::seconds(length));
-        let label_width = 120.0;
+        // the time at the end of the row, which ends where the preview does,
+        // as the timeline of the input does; the bar takes what it leaves,
+        // with room for the widest the time gets, so the bar keeps its width
+        // as it plays
+        let longest = widgets::zeros(&widgets::seconds(length));
+        let widest = widgets::text_width(ui, &format!("{longest} / {longest}"), 0.0).ceil() + 1.0;
+        let label_width = widest + ui.spacing().item_spacing.x;
         let width = (ui.available_width() - label_width).max(80.0);
         let (rect, response) = ui.allocate_exact_size(vec2(width, BAR), Sense::click_and_drag());
         let track = Rect::from_min_max(
@@ -552,7 +567,7 @@ pub(crate) fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &m
         // clipped rather than shrunk, so the start of the bar keeps its shape
         ui.painter_at(played).rect_filled(track, 3.0, theme::span(visuals));
         painter.circle_filled(pos2(x, track.center().y), 6.0, visuals.strong_text_color());
-        ui.label(text);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(text));
     });
 }
 
@@ -595,10 +610,7 @@ pub(crate) fn frame_picker(
         let (width, unit_room) = bar_width(ui, 0.0, alone);
         let (rect, response) = ui.allocate_exact_size(vec2(width, BAR), Sense::click_and_drag());
         // as the bar of the used part in the other modes
-        let track = Rect::from_min_max(
-            pos2(rect.left() + 8.0, rect.top() + 8.0),
-            pos2(rect.right() - 8.0, rect.bottom() - 6.0),
-        );
+        let track = track_of(rect);
         let x_of = |seconds: f64| track.left() + (seconds / length) as f32 * track.width();
         let seconds_at =
             |x: f32| (f64::from((x - track.left()) / track.width()) * length).clamp(0.0, length);

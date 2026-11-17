@@ -35,9 +35,18 @@ pub(crate) const NARROWEST_MAIN: f32 = 656.0;
 /// Side of a `.tgs` result's small picture at its largest: shapes have no
 /// pixels, so this is as sharp as it needs.
 const TGS_INSET: usize = 256;
-/// Height kept for the timeline under a preview that plays: its row, as
-/// high as a button, and the space around it.
-const TIMELINE: f32 = 38.0;
+/// Room between the stage and the timeline's row under it, and as much
+/// between that row and the line under the preview, so that the row sits in
+/// the middle of the room it has; without a row, the stage ends as far over
+/// the line.
+const AROUND_ROW: f32 = 12.0;
+/// How high the line under the preview is to drag; it is drawn in its
+/// middle.
+const HANDLE: f32 = 8.0;
+/// What lies between the bottom of what the preview's panel holds and the
+/// line under it: the margin egui's top panels keep inside them, and half
+/// the line's handle.
+const UNDER_PANEL: f32 = 2.0 + HANDLE / 2.0;
 
 /// The least and most of the height beside the list the preview takes, as
 /// the line under it is dragged: never so small it is no use, nor so large
@@ -133,7 +142,7 @@ impl App {
         });
         // the line under the preview moves it
         let (line, response) =
-            ui.allocate_exact_size(vec2(ui.available_width(), 8.0), egui::Sense::drag());
+            ui.allocate_exact_size(vec2(ui.available_width(), HANDLE), egui::Sense::drag());
         let response = response.on_hover_cursor(egui::CursorIcon::ResizeVertical);
         // never so small the preview is no use, nor so large the settings
         // below lose their first row
@@ -276,14 +285,15 @@ fn preview(
     let result_length =
         item.result_clip.ready().filter(|clip| clip.is_animated()).map(|clip| clip.end());
     let picker = item.format == Format::Webp;
-    let timeline_height = match shown {
+    let row_height = match shown {
         Show::Input if length.is_some() => {
-            TIMELINE + timeline::extra_height(ui, ui.available_width(), picker)
+            theme::CONTROL + timeline::extra_height(ui, ui.available_width(), picker)
         }
-        Show::Result if result_length.is_some() => TIMELINE,
+        Show::Result if result_length.is_some() => theme::CONTROL,
         _ => 0.0,
     };
-    let size = ui.available_size() - vec2(0.0, timeline_height + 6.0);
+    let row_room = if row_height > 0.0 { row_height + AROUND_ROW } else { 0.0 };
+    let size = ui.available_size() - vec2(0.0, row_room + AROUND_ROW - UNDER_PANEL);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     // after a stall, playing goes on where it was rather than jumping ahead
     let dt = ui.input(|input| f64::from(input.stable_dt.min(0.1)));
@@ -482,40 +492,48 @@ fn preview(
         }
     }
 
-    if timeline_height == 0.0 {
+    if row_height == 0.0 {
         return;
     }
-    ui.add_space(6.0);
-    match (shown, length, result_length) {
-        (Show::Input, Some(_), _) if item.format == Format::Webp => {
-            if let Some(frames) = item.input_frames() {
-                timeline::frame_picker(ui, &frames, &mut item.choices.frame, in_frames);
+    // placed under the stage rather than after what was added last, which
+    // what is drawn over the stage would otherwise move
+    let row = Rect::from_min_size(
+        pos2(rect.left(), rect.bottom() + AROUND_ROW),
+        vec2(rect.width(), row_height),
+    );
+    let layout = egui::Layout::top_down(egui::Align::Min);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(row).layout(layout), |ui| {
+        match (shown, length, result_length) {
+            (Show::Input, Some(_), _) if item.format == Format::Webp => {
+                if let Some(frames) = item.input_frames() {
+                    timeline::frame_picker(ui, &frames, &mut item.choices.frame, in_frames);
+                }
             }
+            (Show::Input, Some(length), _) => {
+                let frames = item.input_frames();
+                timeline::show(
+                    ui,
+                    timeline::Timeline {
+                        length,
+                        start: &mut item.choices.start,
+                        used: &mut item.choices.length,
+                        time: &mut item.view.time,
+                        playing: &mut item.view.playing,
+                        // in the input's seconds, which the tempo makes 3 of the
+                        // result's
+                        limit: telegram::MAX_SECONDS * tempo,
+                        past: timeline::PastLimit::of(item.format, webm, tgs),
+                        frames: frames.as_deref(),
+                        in_frames,
+                    },
+                )
+            }
+            (Show::Result, _, Some(length)) => {
+                timeline::player(ui, length, &mut item.view.result_time, &mut item.view.playing);
+            }
+            _ => {}
         }
-        (Show::Input, Some(length), _) => {
-            let frames = item.input_frames();
-            timeline::show(
-                ui,
-                timeline::Timeline {
-                    length,
-                    start: &mut item.choices.start,
-                    used: &mut item.choices.length,
-                    time: &mut item.view.time,
-                    playing: &mut item.view.playing,
-                    // in the input's seconds, which the tempo makes 3 of the
-                    // result's
-                    limit: telegram::MAX_SECONDS * tempo,
-                    past: timeline::PastLimit::of(item.format, webm, tgs),
-                    frames: frames.as_deref(),
-                    in_frames,
-                },
-            )
-        }
-        (Show::Result, _, Some(length)) => {
-            timeline::player(ui, length, &mut item.view.result_time, &mut item.view.playing);
-        }
-        _ => {}
-    }
+    });
 }
 
 /// Least room between Zoom out's words and how far it is zoomed in, and
@@ -710,6 +728,122 @@ mod tests {
                     .query_by_label(&fl!("show-in-folder"))
                     .is_none_or(|button| { button.rect().top() > out.bottom() + 200.0 })
             );
+        }
+    }
+
+    /// Every shape drawn, those drawn in lists of shapes too.
+    fn shapes(harness: &Harness<App>) -> Vec<egui::Shape> {
+        fn flatten(shape: egui::Shape, into: &mut Vec<egui::Shape>) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.into_iter().for_each(|s| flatten(s, into)),
+                shape => into.push(shape),
+            }
+        }
+        let mut all = Vec::new();
+        for clipped in &harness.output().shapes {
+            flatten(clipped.shape.clone(), &mut all);
+        }
+        all
+    }
+
+    #[test]
+    fn puts_the_row_under_the_preview_in_the_middle_of_its_room() {
+        use tgradish_core::options::Crop;
+        let dir = tempfile::tempdir().unwrap();
+        let frames = dir.path().join("walk");
+        std::fs::create_dir(&frames).unwrap();
+        square(&frames.join("1.png"), [255, 0, 0, 255]);
+        square(&frames.join("2.png"), [0, 0, 255, 255]);
+        let mut harness = Harness::builder().with_size([1280.0, 820.0]).build_eframe(|cc| {
+            let app = App::with(Config::default(), None, Presets::builtin());
+            app.style(&cc.egui_ctx);
+            app
+        });
+        harness.state_mut().add(vec![frames]);
+        finish(&mut harness);
+        crate::testing::convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let first = [fl!("play"), fl!("frame-before")];
+        let cases: [(&str, fn(&mut Item)); 4] = [
+            ("the result's player", |item| item.view.show = Show::Result),
+            ("the timeline", |item| item.view.show = Show::Input),
+            // the crop's tag over the stage
+            ("the timeline, cropped", |item| {
+                item.choices.crop = Some(Crop { x: 1, y: 1, width: 2, height: 2 });
+            }),
+            ("the frame picker", |item| item.format = Format::Webp),
+        ];
+        for (case, set) in cases {
+            set(&mut harness.state_mut().items[0]);
+            harness.state_mut().items[0].view.playing = false;
+            finish(&mut harness);
+            harness.run_steps(2);
+            let row = harness
+                .query_all(egui_kittest::kittest::by())
+                .find(|node| {
+                    node.accesskit_node().label().is_some_and(|label| first.contains(&label))
+                })
+                .unwrap_or_else(|| panic!("{case}: no row"))
+                .rect();
+            let shapes = shapes(&harness);
+            let stage = [theme::stage(true), theme::stage(false)];
+            let stage = shapes
+                .iter()
+                .filter_map(|shape| match shape {
+                    egui::Shape::Rect(rect) if stage.contains(&rect.fill) => Some(rect.rect),
+                    _ => None,
+                })
+                .max_by(|a, b| a.area().total_cmp(&b.area()))
+                .unwrap();
+            // the line under the preview, across all of it
+            let line = shapes
+                .iter()
+                .filter_map(|shape| match shape {
+                    egui::Shape::LineSegment { points: [a, b], .. }
+                        if a.y == b.y && (b.x - a.x).abs() >= stage.width() =>
+                    {
+                        Some(a.y)
+                    }
+                    _ => None,
+                })
+                .filter(|&y| y > stage.bottom())
+                .min_by(f32::total_cmp)
+                .unwrap();
+            let (above, below) = (row.top() - stage.bottom(), line - row.bottom());
+            assert!((above - below).abs() <= 0.5, "{case}: {above} over it, {below} under it");
+            // from one end of the preview to the other
+            let end = harness
+                .query_all(egui_kittest::kittest::by())
+                .filter(|node| {
+                    node.accesskit_node().role() != egui::accesskit::Role::GenericContainer
+                })
+                .map(|node| node.rect())
+                .filter(|rect| {
+                    row.y_range().contains(rect.center().y) && rect.left() < stage.right()
+                })
+                .map(|rect| rect.right())
+                .fold(f32::MIN, f32::max);
+            assert_eq!(row.left(), stage.left(), "{case}");
+            assert!((end - stage.right()).abs() <= 1.0, "{case}: ends at {end}, not {stage:?}");
+            // the track and what is drawn on it, in line with the buttons
+            // and fields beside it
+            let tracks: Vec<Rect> = shapes
+                .iter()
+                .filter_map(|shape| match shape {
+                    egui::Shape::Rect(rect) => Some(rect.rect),
+                    _ => None,
+                })
+                .filter(|rect| {
+                    let within = row.top() <= rect.top() && rect.bottom() <= row.bottom();
+                    within && rect.left() > row.right() && rect.height() < row.height() - 4.0
+                })
+                .collect();
+            assert!(!tracks.is_empty(), "{case}");
+            for track in tracks {
+                let off = track.center().y - row.center().y;
+                assert!(off.abs() <= 0.5, "{case}: {track:?} beside {row:?}");
+            }
         }
     }
 
