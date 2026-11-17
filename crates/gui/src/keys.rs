@@ -281,6 +281,8 @@ impl App {
                 // no key does
                 let mouse = vec![
                     (fl!("mouse-drag"), fl!("mouse-drag", "does")),
+                    (fl!("mouse-shape"), fl!("mouse-shape", "does")),
+                    (fl!("mouse-centred"), fl!("mouse-centred", "does")),
                     (fl!("mouse-cancel"), fl!("mouse-cancel", "does")),
                     (fl!("mouse-double-click"), fl!("mouse-double-click", "does")),
                     (fl!("mouse-wheel"), fl!("mouse-wheel", "does")),

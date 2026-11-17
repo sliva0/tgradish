@@ -1295,6 +1295,10 @@ with-keys = { $hint } ({ $keys })
 # Ways of using the mouse, and what each does.
 mouse-drag = Drag
     .does = Crop, or move the crop or its edges
+mouse-shape = Shift+drag a corner
+    .does = Keep the crop's shape, unless an aspect ratio is set
+mouse-centred = Alt+drag an edge or corner
+    .does = Resize the crop about its middle
 mouse-cancel = Esc while dragging
     .does = Put the crop back as it was
 mouse-double-click = Double-click

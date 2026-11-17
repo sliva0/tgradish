@@ -333,21 +333,36 @@ pub(crate) fn show(
     {
         let point = to_pixels(point);
         let side = |end: bool| if end { Keep::End } else { Keep::Start };
+        let held = ui.input(|input| input.modifiers);
+        // a corner dragged with Shift keeps the shape the crop had, unless
+        // one is set; with Alt, the crop grows and shrinks about its middle
+        let ratio = match drag {
+            Drag::Edges([left, top, right, bottom], start)
+                if held.shift && (left || right) && (top || bottom) =>
+            {
+                let shape = f64::from(start.width) / f64::from(start.height);
+                cropping.ratio.or(Some(shape))
+            }
+            _ => cropping.ratio,
+        };
         let (new, keep) = match drag {
+            Drag::Edges(edges, start) if held.alt => {
+                (resized(start, edges, point, (ratio, true), size), (Keep::Middle, Keep::Middle))
+            }
             Drag::Edges(edges, start) => (
-                resized(start, edges, point, cropping.ratio, size),
+                resized(start, edges, point, (ratio, false), size),
                 (side(edges[0]), side(edges[1])),
             ),
             Drag::Move(start, from) => {
                 (Some(moved(start, point - from, size)), (Keep::Start, Keep::Start))
             }
             Drag::New(corner) => (
-                drawn(corner, point, cropping.ratio, size),
+                drawn(corner, point, ratio, size),
                 (side(point.x < corner.x), side(point.y < corner.y)),
             ),
         };
         let new = match cropping.exact {
-            Some(exact) => new.and_then(|new| exact.fit(new, keep, cropping.ratio, size)),
+            Some(exact) => new.and_then(|new| exact.fit(new, keep, ratio, size)),
             None => new,
         };
         if let Some(new) = new {
@@ -610,14 +625,46 @@ fn moved(start: Crop, by: egui::Vec2, size: (u32, u32)) -> Crop {
     settle([left + shift.x, top + shift.y, right + shift.x, bottom + shift.y], None, size)
 }
 
+/// `start` with its `edges` dragged to `point`, keeping a `ratio` if one is
+/// given, and about its middle if `centred`, the opposite edges moving
+/// the other way, as far as the picture goes on both sides.
 fn resized(
     start: Crop,
     edges: [bool; 4],
     point: Pos2,
-    ratio: Option<f64>,
+    (ratio, centred): (Option<f64>, bool),
     size: (u32, u32),
 ) -> Option<Crop> {
     let [mut left, mut top, mut right, mut bottom] = bounds(start);
+    let middle = pos2((left + right) / 2.0, (top + bottom) / 2.0);
+    if centred {
+        // half its size at least, and no further than the nearer edge of
+        // the picture
+        let room =
+            vec2(middle.x.min(size.0 as f32 - middle.x), middle.y.min(size.1 as f32 - middle.y));
+        if edges[0] || edges[2] {
+            let half = (point.x - middle.x).abs().clamp(0.5, room.x.max(0.5));
+            (left, right) = (middle.x - half, middle.x + half);
+        }
+        if edges[1] || edges[3] {
+            let half = (point.y - middle.y).abs().clamp(0.5, room.y.max(0.5));
+            (top, bottom) = (middle.y - half, middle.y + half);
+        }
+        if let Some(ratio) = ratio.map(|r| r as f32) {
+            // the larger of both, or of the edge dragged, shrunk to fit
+            let (width, height) = (right - left, bottom - top);
+            let width = match (edges[0] || edges[2], edges[1] || edges[3]) {
+                (true, false) => width,
+                (false, true) => height * ratio,
+                _ => width.max(height * ratio),
+            };
+            let half = vec2(width, width / ratio) / 2.0;
+            let half = half * (room.x / half.x).min(room.y / half.y).min(1.0);
+            (left, right) = (middle.x - half.x, middle.x + half.x);
+            (top, bottom) = (middle.y - half.y, middle.y + half.y);
+        }
+        return Some(settle([left, top, right, bottom], ratio, size));
+    }
     if edges[0] {
         left = point.x.min(right - 1.0);
     }
@@ -637,12 +684,10 @@ fn resized(
         match (sideways, upright) {
             // an edge: the other side follows, around the middle
             (true, false) => {
-                let middle = (top + bottom) / 2.0;
-                (top, bottom) = (middle - width / ratio / 2.0, middle + width / ratio / 2.0);
+                (top, bottom) = (middle.y - width / ratio / 2.0, middle.y + width / ratio / 2.0);
             }
             (false, true) => {
-                let middle = (left + right) / 2.0;
-                (left, right) = (middle - height * ratio / 2.0, middle + height * ratio / 2.0);
+                (left, right) = (middle.x - height * ratio / 2.0, middle.x + height * ratio / 2.0);
             }
             // a corner: the larger of both, from the opposite corner
             _ => {
@@ -971,6 +1016,31 @@ mod tests {
     }
 
     #[test]
+    fn keeps_the_shape_with_shift_and_the_middle_with_alt() {
+        // 3:2, its bottom right corner dragged with Shift: still 3:2
+        let crop = Crop { x: 8, y: 8, width: 30, height: 20 };
+        let (mut harness, scale, corner) = cropped(Some(crop));
+        let bottom_right = corner + vec2(38.0, 28.0) * scale;
+        press_and_move(&mut harness, bottom_right, vec2(9.0, 2.0) * scale, egui::Modifiers::SHIFT);
+        let_go(&mut harness, bottom_right + vec2(9.0, 2.0) * scale);
+        let shaped = harness.state().3.unwrap();
+        assert_eq!((shaped.x, shaped.y), (8, 8), "{shaped:?}");
+        assert_eq!(shaped.width * 2, shaped.height * 3, "{shaped:?}");
+        assert!(shaped.width > 30, "{shaped:?}");
+        // without, it follows the pointer
+        let (mut harness, ..) = cropped(Some(crop));
+        press_and_move(&mut harness, bottom_right, vec2(9.0, 2.0) * scale, egui::Modifiers::NONE);
+        let_go(&mut harness, bottom_right + vec2(9.0, 2.0) * scale);
+        assert_eq!(harness.state().3, Some(Crop { width: 39, height: 22, ..crop }));
+        // its right edge dragged with Alt: the left edge goes the other way
+        let (mut harness, ..) = cropped(Some(crop));
+        let right = corner + vec2(38.0, 18.0) * scale;
+        press_and_move(&mut harness, right, vec2(4.0, 0.0) * scale, egui::Modifiers::ALT);
+        let_go(&mut harness, right + vec2(4.0, 0.0) * scale);
+        assert_eq!(harness.state().3, Some(Crop { x: 4, width: 38, ..crop }));
+    }
+
+    #[test]
     fn keeps_crops_within_the_picture() {
         let crop = Crop { x: 150, y: 50, width: 40, height: 40 };
         assert_eq!(
@@ -984,16 +1054,30 @@ mod tests {
     fn resizes_by_edges_and_corners() {
         let crop = Crop { x: 50, y: 20, width: 100, height: 60 };
         // the right edge
-        let wider = resized(crop, [false, false, true, false], pos2(170.0, 0.0), None, SIZE);
+        let free = (None, false);
+        let wider = resized(crop, [false, false, true, false], pos2(170.0, 0.0), free, SIZE);
         assert_eq!(wider, Some(Crop { width: 120, ..crop }));
         // the top left corner, square: the larger side wins, shrunk to fit
         let square =
-            resized(crop, [true, true, false, false], pos2(40.0, 10.0), Some(1.0), SIZE).unwrap();
+            resized(crop, [true, true, false, false], pos2(40.0, 10.0), (Some(1.0), false), SIZE)
+                .unwrap();
         assert_eq!(square, Crop { x: 40, y: 0, width: 100, height: 100 });
         // an edge keeps the ratio around the middle
         let wide =
-            resized(crop, [false, false, true, false], pos2(170.0, 0.0), Some(2.0), SIZE).unwrap();
+            resized(crop, [false, false, true, false], pos2(170.0, 0.0), (Some(2.0), false), SIZE)
+                .unwrap();
         assert_eq!((wide.width, wide.height, wide.y), (120, 60, 20));
+        // about its middle: the left edge goes out as far as the right
+        let right = [false, false, true, false];
+        let both = resized(crop, right, pos2(160.0, 0.0), (None, true), SIZE).unwrap();
+        assert_eq!(both, Crop { x: 40, width: 120, ..crop });
+        // only as far as the nearer edge of the picture
+        let most = resized(crop, right, pos2(200.0, 0.0), (None, true), SIZE).unwrap();
+        assert_eq!(most, Crop { x: 0, width: 200, ..crop });
+        // a corner, square, about the middle, shrunk to fit the picture
+        let corner = [false, false, true, true];
+        let square = resized(crop, corner, pos2(160.0, 60.0), (Some(1.0), true), SIZE).unwrap();
+        assert_eq!(square, Crop { x: 50, y: 0, width: 100, height: 100 });
     }
 
     #[test]
