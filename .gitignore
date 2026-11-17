@@ -1,4 +1,7 @@
 /target/
+# the maintainer's clones of the AUR packages, which `cargo xtask release
+# aur` updates
+/.aur/
 # tgs-lab, a workspace of its own
 /crates/tgs-lab/target/
 

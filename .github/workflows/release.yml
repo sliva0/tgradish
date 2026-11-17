@@ -4,10 +4,11 @@ name: release
 # Linux (x86-64 and aarch64, for glibc and for musl) and Windows
 # (cross-compiled with mingw-w64), the glibc ones also as .deb and .rpm
 # packages and the Windows one also alone, and glibc binaries that use the
-# system's ffmpeg instead, all named without the version. Tests
-# them, and on a version tag drafts a GitHub release with them and the
-# ffmpeg sources the LGPL asks for. Pull requests that touch the ffmpeg
-# build run it too.
+# system's ffmpeg instead, all named without the version, once the
+# version is checked to be written alike everywhere. Tests them, and on a
+# version tag drafts a GitHub release with them and the ffmpeg sources the
+# LGPL asks for, its notes the changelog's. Pull requests that touch the
+# ffmpeg build run it too.
 on:
   push:
     tags: ["v*"]
@@ -50,10 +51,48 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # the version written alike everywhere, with a dated section in the
+  # changelog, and on a tag the tag's: the release is named after the tag,
+  # and the AUR packages download it by their pkgver, while the folders in
+  # the archives, the packages and the binaries take Cargo.toml's version
+  # as they are built. A version not raised everywhere fails here, before
+  # the builds
+  version:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the version
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            cargo xtask release check --tag "$GITHUB_REF_NAME"
+          else
+            cargo xtask release check
+          fi
+
+  # every crate packaged as crates.io would get it, and built from that
+  # package against the others', in the order `cargo xtask release crates`
+  # publishes them: on a tag, before they are published by hand, and when
+  # started by hand. CI does the libraries alone on every push, as the
+  # GUI and the command line take minutes more
+  crates:
+    needs: version
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: >
+          cargo publish --dry-run --locked
+          -p tgradish-tgs -p tgradish-core -p tgradish-gui -p tgradish
+
   build:
+    needs: version
     # the Rust releases are built with, over rust-toolchain.toml's newest
-    # stable, so that building a tag again makes the same binaries; raise
-    # it as a release is prepared, see CONTRIBUTING.md
+    # stable, so that building a tag again makes the same binaries; `cargo
+    # xtask release prepare` raises it, see CONTRIBUTING.md
     env:
       RUSTUP_TOOLCHAIN: "1.99.0"
     strategy:
@@ -96,26 +135,6 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
-
-      # the release is named after the tag, and the AUR packages download
-      # it by their pkgver; the folders in the archives, the packages and
-      # the binaries take Cargo.toml's version as they are built. The files
-      # themselves are named without it, alike in every release
-      - name: Check the tag is the version
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        run: |
-          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
-          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "the tag is $GITHUB_REF_NAME, but Cargo.toml says $version"
-            exit 1
-          fi
-          for pkgbuild in packaging/aur/*/PKGBUILD; do
-            if ! grep -qx "pkgver=$version" "$pkgbuild"; then
-              echo "$pkgbuild doesn't say pkgver=$version"
-              exit 1
-            fi
-          done
 
       - name: Install build tools (Linux)
         if: matrix.container
@@ -519,13 +538,8 @@ jobs:
       # version, which the tag is; fails where there is none
       - name: Take the notes from the changelog
         run: |
-          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
           mkdir notes
-          awk -v heading="## [$version]" '
-            /^## \[/ { if (on) exit; on = index($0, heading) == 1; next }
-            on
-          ' CHANGELOG.md > notes/notes.md
-          grep -q . notes/notes.md || { echo "CHANGELOG.md has no $version"; exit 1; }
+          cargo xtask release notes > notes/notes.md
           cat notes/notes.md
       - uses: actions/upload-artifact@v7
         with:
@@ -552,12 +566,20 @@ jobs:
           name: notes
           path: notes
 
-      # the changelog's section, then what GitHub lists of the changes
+      # the changelog's section, then what GitHub lists of the changes; a
+      # draft, which a person publishes. The run's summary links it and says
+      # what follows
       - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: >
-          gh release create "$GITHUB_REF_NAME" --draft --verify-tag
-          --title "tgradish $GITHUB_REF_NAME" --notes-file notes/notes.md
-          --generate-notes artifacts/*
+        run: |
+          url=$(gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "tgradish $GITHUB_REF_NAME" --notes-file notes/notes.md \
+            --generate-notes artifacts/*)
+          {
+            echo "Drafted [tgradish $GITHUB_REF_NAME]($url). Check it and publish it, then:"
+            echo
+            echo '    cargo xtask release aur --push'
+            echo '    cargo xtask release crates'
+          } >> "$GITHUB_STEP_SUMMARY"

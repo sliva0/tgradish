@@ -42,6 +42,25 @@
 //! built from another recipe. Windows needs mingw-w64, musl musl-gcc. The
 //! archives and binaries end up in `target/release-artifacts`.
 //!
+//! `cargo xtask release` makes a release, with CONTRIBUTING.md's steps:
+//! - `prepare X.Y.Z [--tgs X.Y.Z]` sets the version everywhere it is
+//!   written, and tgradish-tgs's where given, dates the changelog's
+//!   Unreleased as its section and refreshes both lock files, on a tree
+//!   with nothing uncommitted; it says whether tgradish-tgs changed since
+//!   the last release, and what to commit, tag and push;
+//! - `check [--tag vX.Y.Z]` fails unless every place agrees, with the tag
+//!   too where given, and the changelog has a dated section for the
+//!   version: CI runs it, and the release workflow before building;
+//! - `notes [X.Y.Z]` prints the changelog's section for a version,
+//!   Cargo.toml's unless given, which the release workflow drafts the
+//!   release with;
+//! - `aur [--push]`, once the release is published on GitHub, brings the
+//!   maintainer's clones of the AUR packages in `.aur/` up to
+//!   `packaging/aur`, cloning them where missing, with the checksums of
+//!   what they download, and commits there; `--push` pushes them;
+//! - `crates [--dry-run]` publishes to crates.io the crates whose version
+//!   it hasn't, in the order they depend on each other, once asked.
+//!
 //! `cargo xtask licenses [--check]` writes the licences of the Rust crates
 //! in tgradish to `crates/core/licenses/THIRD-PARTY-CRATES.txt`, which
 //! binaries carry, and copies `LICENSE.txt` into every crate that is
@@ -92,6 +111,7 @@ fn main() -> Result<()> {
         Some("licenses") => licenses::crate_licenses(&args[1..]),
         Some("icons") => icons::icons(&args[1..]),
         Some("local-release") => release::local_release(&args[1..]),
+        Some("release") => release::release(&args[1..]),
         Some("strings") => strings::strings(&args[1..]),
         Some("man") => man(&args[1..]),
         _ => bail!(
@@ -102,6 +122,7 @@ fn main() -> Result<()> {
              cargo xtask licenses [--check]\n       \
              cargo xtask icons [--check]\n       \
              cargo xtask local-release [--targets TARGET,...] [--no-asm]\n       \
+             cargo xtask release prepare|check|notes|aur|crates ...\n       \
              cargo xtask strings [--no-pictures]\n       \
              cargo xtask man [DIR]\n\
              targets: {}",

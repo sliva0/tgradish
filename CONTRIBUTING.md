@@ -10,7 +10,7 @@
 | `crates/cli` (`tgradish`) | The binary: arguments and terminal output. It includes the GUI unless built with `--no-default-features`. |
 | `crates/corpus` | Test inputs drawn in code, so nothing in the repository belongs to anyone else. |
 | `crates/tgs-lab` | Encoder research: benchmarks, and renders checked against tlottie and rlottie. A workspace of its own: run it from its folder. |
-| `xtask` | Release builds with ffmpeg built in, packages, licences and icons. |
+| `xtask` | Release builds with ffmpeg built in, packages, releasing, licences and icons. |
 
 Each crate's own docs (`cargo doc --open`) say how it is laid out.
 
@@ -36,7 +36,7 @@ is built and tested for Linux and Windows.
   `.github/screenshot.png`.
 
 CI also runs rustfmt, clippy with `-D warnings`, `cargo xtask icons
---check` and `cargo xtask licenses --check`;
+--check`, `cargo xtask licenses --check` and `cargo xtask release check`;
 `.github/workflows/ci.yml` has the exact commands.
 
 Keep your own test files in `references/`, which git ignores.
@@ -74,34 +74,32 @@ GPL parts.
 
 ## Releasing
 
-1. Prepare the version:
-   - give it a dated section in `CHANGELOG.md`, which becomes the
-     release's notes;
-   - set it in `Cargo.toml`, under `[workspace.package]` and for
-     `tgradish-core` and `tgradish-gui` under `[workspace.dependencies]`,
-     and as `pkgver` in each `packaging/aur/*/PKGBUILD`;
-   - `tgradish-tgs` has a version of its own: raise it, in its manifest
-     and under `[workspace.dependencies]`, if it changed since it was last
-     published;
-   - refresh both lock files: `cargo update --workspace`, and the same
-     with `--manifest-path crates/tgs-lab/Cargo.toml`;
-   - raise `RUSTUP_TOOLCHAIN` in `.github/workflows/release.yml` to the
-     newest stable Rust.
+1. `cargo xtask release prepare X.Y.Z` sets the version everywhere it is
+   written, dates the changelog's Unreleased as its section, which becomes
+   the release's notes, and refreshes both lock files. `tgradish-tgs` has
+   a version of its own: `prepare` says whether it changed since the last
+   release, and `--tgs X.Y.Z` raises it. It also raises `RUSTUP_TOOLCHAIN`
+   in `.github/workflows/release.yml`, the Rust releases are built with,
+   to the stable Rust here, so `rustup update` first. It commits nothing,
+   and says what to commit, tag and push. `cargo xtask release check`,
+   which CI runs, says whether every place agrees.
 2. `cargo xtask local-release` builds every variant into
    `target/release-artifacts`, named as the release names them; it needs
-   mingw-w64 for Windows and musl-gcc for musl. Try them. The files are
-   named without the version, alike in every release, as the README's
-   links to the latest release's need.
-3. Push a `vX.Y.Z` tag. The release workflow builds and tests
-   everything, and drafts a release. Check the draft, then publish it.
-4. Copy each `packaging/aur/*/PKGBUILD` into your clone of that package
-   on the AUR, and there run `updpkgsums`, then `makepkg --printsrcinfo >
-   .SRCINFO`, and push. The repository's own PKGBUILDs keep `SKIP` for
-   checksums.
-5. `cargo publish -p` each crate whose version is new, in this order:
-   `tgradish-tgs`, `tgradish-core`, `tgradish-gui`, `tgradish`. Before
-   packaging again at a version already packaged, delete the `tgradish-*`
-   folders under cargo's `registry/src`, or the old copies are used.
+   mingw-w64 for Windows and musl-gcc for musl. Try them.
+3. Commit, and push the `vX.Y.Z` tag. The release workflow checks the
+   tag is the version, builds and tests everything, and drafts a release
+   with the changelog's notes. Check the draft, then publish it.
+4. `cargo xtask release aur` brings the AUR packages, cloned in `.aur/`,
+   which git ignores, up to `packaging/aur`, with the checksums of the
+   published release, and commits each; `--push` pushes them. It needs
+   makepkg, and an SSH key the AUR knows. The repository's own PKGBUILDs
+   keep `SKIP` for checksums. To change the AUR packages alone, raise
+   `pkgrel` in the PKGBUILD and its `.SRCINFO`, commit, and run it.
+5. `cargo xtask release crates` publishes to crates.io the crates whose
+   version it lacks, in the order they depend on each other, once asked;
+   with `--dry-run` it packages and builds them instead. Before packaging
+   again at a version already packaged, delete the `tgradish-*` folders
+   under cargo's `registry/src`, or the old copies are used.
 
 `rust-version` in `Cargo.toml` is the oldest Rust that builds every crate,
 which CI checks.

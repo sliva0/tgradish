@@ -59,6 +59,9 @@ jobs:
       - run: cargo test -p tgradish-tgs
       # the icons for menus and Windows, made from the GUI's
       - run: cargo xtask icons --check
+      # the version written alike everywhere it is, see CONTRIBUTING.md
+      - run: cargo xtask release check
+        if: runner.os == 'Linux'
       # public docs that link to what readers of them can't see, or to
       # nothing; the same on every system, so once
       - run: cargo doc --workspace --no-deps
