@@ -665,10 +665,14 @@ mod tests {
         let mut harness = with_art(dir.path(), 4);
         let all = |harness: &Harness<App>| convert_all(harness).rect();
         let before = all(&harness);
-        convert_all(&harness).click();
-        harness.run_steps(1);
+        // all four asked for, the first as if converting, for as long as it
+        // takes, so the rest wait
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        ids.iter().for_each(|&id| harness.state_mut().enqueue(id));
+        harness.state_mut().queue.pop_front();
+        harness.state_mut().items[0].job.as_mut().unwrap().job.status = Status::Running;
         assert_eq!(harness.state().batch_progress(), Some((1, 4)));
-        harness.run_steps(1);
+        harness.run_steps(2);
         harness.get_by_label(&fl!("converting-batch", current = 1, total = 4));
         // its button as wide and where it was along, though it counts fewer
         // now, under the line that says how far it got
@@ -676,15 +680,16 @@ mod tests {
         assert_eq!((after.left(), after.width()), (before.left(), before.width()));
         harness.get_by_label(&fl!("stop-all")).click_accesskit();
         harness.run_steps(2);
-        finish(&mut harness);
         let app = harness.state();
-        assert!(app.queue.is_empty() && app.batch_progress().is_none());
-        // the one at work stopped, the rest never begun
-        let made = app.items.iter().filter(|item| item.made.is_some() || item.failed.is_some());
-        assert!(made.count() <= 1);
-        // and counted afresh next time
-        let id = app.items[3].id;
-        harness.state_mut().enqueue(id);
+        assert!(app.queue.is_empty());
+        // the one at work asked to stop, the rest never begun
+        assert!(app.items[0].job.as_ref().is_some_and(|conversion| conversion.job.is_stopping()));
+        for item in &app.items[1..] {
+            assert!(item.job.is_none() && item.made.is_none() && item.failed.is_none());
+        }
+        // and, once it has stopped, counted afresh next time
+        harness.state_mut().items[0].job = None;
+        harness.state_mut().enqueue(ids[3]);
         assert_eq!(harness.state().batch_progress(), Some((1, 1)));
     }
 
