@@ -714,7 +714,11 @@ fn zoom_and_pan(
 ) {
     if let Some(pointer) = response.hover_pos() {
         let (scroll, pinch) = ui.input(|input| (input.smooth_scroll_delta.y, input.zoom_delta()));
-        let factor = pinch * (scroll * 0.002).exp();
+        let factor = pinch * (scroll * wheel_rate(ui)).exp();
+        // taken, so that nothing under the preview scrolls with it too
+        if scroll != 0.0 {
+            ui.ctx().input_mut(|input| input.smooth_scroll_delta.y = 0.0);
+        }
         if (factor - 1.0).abs() > 1e-4 {
             let (shown, _) = layout(rect, size, zoom);
             let at = (pointer - shown.min) / shown.size();
@@ -731,6 +735,37 @@ fn zoom_and_pan(
         zoom.centre -= response.drag_delta() / shown.size();
     }
     cover(zoom, rect, size);
+}
+
+/// How much a wheel notch zooms in, or out.
+const NOTCH: f32 = 1.25;
+/// How fast scrolling by points zooms, as a touchpad scrolls, for each.
+const PER_POINT: f32 = 0.002;
+
+/// How fast scrolling zooms, by each point scrolled, as the wheel's last
+/// turn came: a notch of a mouse wheel, which egui scrolls by so many
+/// points, zooms by [`NOTCH`]; a touchpad's scrolling, by points, as far
+/// as it scrolls, finer.
+fn wheel_rate(ui: &egui::Ui) -> f32 {
+    let id = egui::Id::new("wheel in notches");
+    let notched = ui.input(|input| {
+        input.events.iter().rev().find_map(|event| match event {
+            egui::Event::MouseWheel { unit, .. } => Some(*unit != egui::MouseWheelUnit::Point),
+            _ => None,
+        })
+    });
+    // the turn eases in over a few frames after its event
+    let notched = match notched {
+        Some(notched) => {
+            ui.data_mut(|data| data.insert_temp(id, notched));
+            notched
+        }
+        None => ui.data(|data| data.get_temp(id)).unwrap_or(false),
+    };
+    match notched {
+        true => NOTCH.ln() / ui.ctx().options(|options| options.input_options.line_scroll_speed),
+        false => PER_POINT,
+    }
 }
 
 /// Zoomed in, keeps a `size` picture where it is on the screen when the
@@ -1425,6 +1460,29 @@ mod tests {
         assert!(under.top() > crops[2].bottom() + GRAB, "{under:?}");
         // and only where there is no room for any of those, over its edge
         assert!(pinned.y_range().contains(crops[3].top()), "{pinned:?}");
+    }
+
+    #[test]
+    fn zooms_by_a_quarter_a_notch_and_finer_by_points() {
+        let zoomed = |unit, delta: f32| {
+            let (mut harness, ..) = cropped(None);
+            harness.event(egui::Event::PointerMoved(pos2(300.0, 200.0)));
+            harness.event(egui::Event::MouseWheel {
+                unit,
+                delta: vec2(0.0, delta),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run_steps(60);
+            harness.state().1.level
+        };
+        let notch = zoomed(egui::MouseWheelUnit::Line, 1.0);
+        assert!((notch - 1.25).abs() < 0.01, "{notch}");
+        let two = zoomed(egui::MouseWheelUnit::Line, 2.0);
+        assert!((two - 1.25 * 1.25).abs() < 0.01, "{two}");
+        // a touchpad's 40 points, as far as egui scrolls by a notch
+        let points = zoomed(egui::MouseWheelUnit::Point, 40.0);
+        assert!((points - (40.0 * PER_POINT).exp()).abs() < 0.01, "{points}");
     }
 
     #[test]
