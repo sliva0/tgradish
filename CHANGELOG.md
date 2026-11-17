@@ -16,6 +16,8 @@ What changed in each release of tgradish, newest first. The format follows
   part on the light theme, and, with a grey or dark accent on the dark
   theme, what is chosen, the main button and progress.
 - The GUI without files is one drop zone, until the first file is added.
+  What the mouse does on the preview shows over it, whole, as the pointer
+  is there, rather than cut short in the bar above it.
 
 ### Fixed
 
