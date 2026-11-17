@@ -277,12 +277,14 @@ impl App {
                         rows.map(|shortcut| (keys_text(shortcut.command), what(shortcut.command)));
                     shortcut_rows(ui, &title, rows.collect());
                 }
-                // what the mouse does over the preview, which no key does
+                // what the mouse does on the preview and the timeline, which
+                // no key does
                 let mouse = vec![
                     (fl!("mouse-drag"), fl!("mouse-drag", "does")),
                     (fl!("mouse-double-click"), fl!("mouse-double-click", "does")),
                     (fl!("mouse-wheel"), fl!("mouse-wheel", "does")),
                     (fl!("mouse-pan"), fl!("mouse-pan", "does")),
+                    (fl!("mouse-slide"), fl!("mouse-slide", "does")),
                 ];
                 shortcut_rows(ui, &fl!("shortcuts-mouse"), mouse);
             });

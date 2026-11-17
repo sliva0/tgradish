@@ -82,6 +82,9 @@ enum Grab {
     /// One of the ends, where they meet on the bar, until the pointer
     /// moves one way or the other from where it was pressed, at this x.
     Either(f32),
+    /// All of the used part, keeping its length, from where it was, in
+    /// seconds, and where the pointer was pressed, at this x.
+    Slide((f64, f64), f32),
     Seek,
 }
 
@@ -409,17 +412,32 @@ fn bar(
     let (from, to) = ends(*start, *used);
 
     let ends_x = (x_of(from), x_of(to));
-    let hovered = response.hover_pos().map(|pointer| grab_at(pointer.x, ends_x, 0.0));
-    if hovered.is_some_and(|grab| grab != Grab::Seek) {
-        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
-    }
+    // with Shift, an end takes all of the used part along
+    let sliding = ui.input(|input| input.modifiers.shift_only());
+    let hovered = response.hover_pos().map(|pointer| match grab_at(pointer.x, ends_x, 0.0) {
+        Grab::Seek => Grab::Seek,
+        _ if sliding => Grab::Slide((from, to), pointer.x),
+        grab => grab,
+    });
     let id = response.id.with("grab");
     let pointer = response.interact_pointer_pos();
-    if response.drag_started_by(PointerButton::Primary)
-        && let (Some(origin), Some(pointer)) =
-            (ui.input(|input| input.pointer.press_origin()), pointer)
+    let origin = ui.input(|input| input.pointer.press_origin());
+    // a press away from the ends seeks at once, rather than once let go
+    if response.is_pointer_button_down_on()
+        && ui.input(|input| input.pointer.primary_pressed())
+        && let Some(origin) = origin
+        && grab_at(origin.x, ends_x, 0.0) == Grab::Seek
     {
-        let grab = grab_at(origin.x, ends_x, pointer.x - origin.x);
+        *time = seconds_at(origin.x);
+    }
+    if response.drag_started_by(PointerButton::Primary)
+        && let (Some(origin), Some(pointer)) = (origin, pointer)
+    {
+        let grab = match grab_at(origin.x, ends_x, pointer.x - origin.x) {
+            Grab::Seek => Grab::Seek,
+            _ if sliding => Grab::Slide((from, to), origin.x),
+            grab => grab,
+        };
         ui.data_mut(|data| data.insert_temp(id, grab));
     }
     // ends that meet go the way the pointer first moves
@@ -458,9 +476,32 @@ fn bar(
                 set_part(length, (from, at), start, used);
                 *time = (at - 0.5).max(from);
             }
+            (Grab::Slide((was_from, was_to), origin), Some(frames)) => {
+                // as many frames, from the boundary nearest where it moved
+                let count = frames.nearest(was_to) - frames.nearest(was_from);
+                let by = at - seconds_at(origin);
+                let first = frames.nearest(was_from + by).min(frames.count() - count);
+                frames.set_part((first, first + count), start, used);
+                *time = frames.times[first];
+            }
+            (Grab::Slide((was_from, was_to), origin), None) => {
+                let by = at - seconds_at(origin);
+                let from = (was_from + by).clamp(0.0, length - (was_to - was_from));
+                set_part(length, (from, from + was_to - was_from), start, used);
+                *time = from;
+            }
             (Grab::Seek, _) => *time = at,
             (Grab::Either(_), _) => {}
         }
+    }
+    let cursor = match grabbed.filter(|_| response.dragged()).or(hovered) {
+        Some(Grab::Slide(..)) if response.dragged() => Some(CursorIcon::Grabbing),
+        Some(Grab::Slide(..)) => Some(CursorIcon::Grab),
+        Some(Grab::Start | Grab::End | Grab::Either(_)) => Some(CursorIcon::ResizeHorizontal),
+        _ => None,
+    };
+    if let Some(cursor) = cursor {
+        ui.ctx().set_cursor_icon(cursor);
     }
     if response.clicked()
         && let Some(pointer) = pointer
@@ -559,7 +600,9 @@ fn bar(
         Some(grab) if response.dragged() => Some(grab),
         _ => hovered.filter(|_| !response.dragged()),
     };
-    let lit = |end: Grab| lit.is_some_and(|lit| lit == end || matches!(lit, Grab::Either(_)));
+    let lit = |end: Grab| {
+        lit.is_some_and(|lit| lit == end || matches!(lit, Grab::Either(_) | Grab::Slide(..)))
+    };
     for (x, inward, end) in [(x_of(from), 4.0, Grab::Start), (x_of(to), -4.0, Grab::End)] {
         let bracket = match lit(end) {
             true => Stroke::new(3.0, theme::mark(visuals)),
@@ -590,7 +633,7 @@ fn bar(
     // the pointer is
     let dragged = grabbed.filter(|_| response.dragged());
     let at = match (dragged, frames) {
-        (Some(Grab::Start), Some(frames)) if in_frames => {
+        (Some(Grab::Start | Grab::Slide(..)), Some(frames)) if in_frames => {
             let (first, _) = frames.part(length, *start, *used);
             let number = first + 1;
             Some((x_of(from), fl!("frame-number", number = number)))
@@ -599,7 +642,7 @@ fn bar(
             let (_, after) = frames.part(length, *start, *used);
             Some((x_of(to), fl!("frame-number", number = after)))
         }
-        (Some(Grab::Start), _) => Some((x_of(from), widgets::seconds(from))),
+        (Some(Grab::Start | Grab::Slide(..)), _) => Some((x_of(from), widgets::seconds(from))),
         (Some(Grab::End), _) => Some((x_of(to), widgets::seconds(to))),
         _ => (response.hover_pos().or(pointer)).map(|pointer| {
             let x = pointer.x.clamp(track.left(), track.right());
@@ -662,8 +705,9 @@ pub(crate) fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &m
         );
         let seconds_at =
             |x: f32| (f64::from((x - track.left()) / track.width()) * length).clamp(0.0, length);
+        // from the press on, rather than once let go
         if let Some(pointer) = response.interact_pointer_pos()
-            && (response.dragged() || response.clicked())
+            && (response.is_pointer_button_down_on() || response.clicked())
         {
             *time = seconds_at(pointer.x).min(length - 1e-6);
         }
@@ -728,7 +772,7 @@ pub(crate) fn frame_picker(
         let seconds_at =
             |x: f32| (f64::from((x - track.left()) / track.width()) * length).clamp(0.0, length);
         if let Some(pointer) = response.interact_pointer_pos()
-            && (response.dragged() || response.clicked())
+            && (response.is_pointer_button_down_on() || response.clicked())
         {
             picked = Some(frames.at(seconds_at(pointer.x)));
         }
@@ -943,10 +987,20 @@ mod tests {
     /// A harness of a timeline 640 points wide over 100 seconds, used from
     /// `from` to `to`, without frames, and the track of its bar.
     fn long_timeline(from: f64, to: f64) -> (egui_kittest::Harness<'static, Trim>, Rect) {
+        timeline_of(from, to, None)
+    }
+
+    /// As [`long_timeline`], of `fps` frames a second where given.
+    fn timeline_of(
+        from: f64,
+        to: f64,
+        fps: Option<f64>,
+    ) -> (egui_kittest::Harness<'static, Trim>, Rect) {
         use egui_kittest::kittest::{NodeT, Queryable};
+        let frames = fps.and_then(|fps| Frames::even(100.0, fps, Cut::Video));
         let mut harness =
             egui_kittest::Harness::builder().with_size(vec2(640.0, 80.0)).build_ui_state(
-                |ui, (start, used, time): &mut Trim| {
+                move |ui, (start, used, time): &mut Trim| {
                     let (mut playing, mut in_frames) = (false, false);
                     show(
                         ui,
@@ -958,7 +1012,7 @@ mod tests {
                             playing: &mut playing,
                             limit: 3.0,
                             past: PastLimit::Cut,
-                            frames: None,
+                            frames: frames.as_ref(),
                             in_frames: &mut in_frames,
                         },
                     );
@@ -1088,6 +1142,48 @@ mod tests {
     }
 
     #[test]
+    fn seeks_as_the_button_goes_down() {
+        let (mut harness, track) = long_timeline(10.0, 90.0);
+        let at = pos2(track.left() + 0.4 * track.width(), track.center().y);
+        harness.event(egui::Event::PointerMoved(at));
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.step();
+        assert!((harness.state().2 - 40.0).abs() < 0.01, "{}", harness.state().2);
+    }
+
+    #[test]
+    fn slides_the_used_part_by_an_end_with_shift() {
+        // with frames and without, by either end
+        for fps in [None, Some(10.0)] {
+            for end in [20.0, 23.0] {
+                let (mut harness, track) = timeline_of(20.0, 23.0, fps);
+                let x_of = |seconds: f32| track.left() + seconds / 100.0 * track.width();
+                let from = pos2(x_of(end), track.center().y);
+                // ten seconds on
+                let by = x_of(30.0) - x_of(20.0);
+                harness.event(egui::Event::ModifiersChanged(egui::Modifiers::SHIFT));
+                drag_across(&mut harness, from, by, egui::Modifiers::SHIFT);
+                let (start, used, time) = *harness.state();
+                let (start, used) = (start.unwrap(), used.unwrap());
+                assert!((start - 30.0).abs() < 0.11, "{fps:?}, {end}: {start}");
+                assert!((used - 3.0).abs() < 1e-6, "{fps:?}, {end}: {used}");
+                assert!((time - start).abs() < 0.01, "{fps:?}, {end}: {time}");
+                // and no further than the input's end
+                let from = pos2(x_of(end + 10.0), track.center().y);
+                drag_across(&mut harness, from, 10.0 * by, egui::Modifiers::SHIFT);
+                let (start, used, _) = *harness.state();
+                let (start, end) = part(100.0, start, used);
+                assert!((start - 97.0).abs() < 0.01 && end == 100.0, "{fps:?}, {end}: {start}");
+            }
+        }
+    }
+
+    #[test]
     fn reads_out_where_the_pointer_is_on_the_results_bar() {
         let mut harness =
             egui_kittest::Harness::builder().with_size(vec2(640.0, 80.0)).build_ui_state(
@@ -1102,6 +1198,15 @@ mod tests {
         let said = painted(&harness);
         let readout = said.iter().filter(|text| !text.contains('/') && text.ends_with(" s"));
         assert_eq!(readout.count(), 1, "{said:?}");
+        // and seeks as the button goes down
+        harness.event(egui::Event::PointerButton {
+            pos: pos2(300.0, 8.0 + BAR / 2.0),
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.step();
+        assert!(harness.state().0 > 3.0, "{}", harness.state().0);
     }
 
     #[test]

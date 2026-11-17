@@ -449,6 +449,21 @@ fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().items[0].view.show = Show::Input;
     harness.event(egui::Event::PointerGone);
     settle(&mut harness);
+    // the shortcuts, scrolled to what the mouse does
+    harness.state_mut().shortcuts = true;
+    settle(&mut harness);
+    let middle = harness.ctx.content_rect().center();
+    harness.event(egui::Event::PointerMoved(middle));
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -2000.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+    });
+    harness.run_steps(8);
+    save(&mut harness, "shortcuts-mouse");
+    harness.state_mut().shortcuts = false;
+    settle(&mut harness);
 }
 
 /// The GUI drawn as the screenshots draw it, of `config`, in a window

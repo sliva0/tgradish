@@ -1264,7 +1264,7 @@ key-down = Down
 shortcuts-files = Files
 shortcuts-playing = The preview and its timeline
 shortcuts-general = General
-shortcuts-mouse = The mouse, over the preview
+shortcuts-mouse = The mouse, on the preview and the timeline
 # What each does. Where there are two keys, the first goes back and the
 # second on, or the first to the start and the second to the end.
 shortcut-add-files = Add files
@@ -1301,3 +1301,5 @@ mouse-wheel = Wheel
     .does = Zoom in or out
 mouse-pan = Right or middle drag
     .does = Pan, when zoomed in
+mouse-slide = Shift+drag a bracket
+    .does = Slide the timeline's used part, keeping its length

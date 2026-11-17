@@ -30,6 +30,9 @@ What changed in each release of tgradish, newest first. The format follows
 - Held, the − and + of the integer scale and of Settings' scale step on,
   faster after a while; the integer scale's are as tall as the controls
   beside them.
+- The GUI's timeline says the time under the pointer at once, dragging too,
+  takes the nearer end of a short part used, seeks as the button goes down,
+  and slides the part used by an end dragged with Shift.
 
 ### Fixed
 
