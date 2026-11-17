@@ -57,6 +57,35 @@ pub(crate) fn along(ctx: &egui::Context, since: f64, duration: f64) -> f32 {
     share as f32
 }
 
+/// A value eased toward `target` as time passes, kept by `id`, a share `1 - 1/e`
+/// of the way in each `time_constant`: what was shown last is kept, so
+/// each frame goes on from it. At the target at once without motion, or
+/// where `jump` says. Drawn again until it is there.
+pub(crate) fn approach(
+    ctx: &egui::Context,
+    id: egui::Id,
+    target: f32,
+    time_constant: f32,
+    jump: impl FnOnce(f32) -> bool,
+) -> f32 {
+    let now = ctx.input(|input| input.time);
+    let last: Option<(f32, f64)> = ctx.data(|data| data.get_temp(id));
+    let shown = match last {
+        Some((shown, at)) if motion(ctx) && !jump(shown) => {
+            let gone = (now - at).max(0.0) as f32;
+            let eased = target + (shown - target) * (-gone / time_constant).exp();
+            // the last thousandth is no change to see
+            if (eased - target).abs() < 0.001 { target } else { eased }
+        }
+        _ => target,
+    };
+    ctx.data_mut(|data| data.insert_temp(id, (shown, now)));
+    if shown != target {
+        ctx.request_repaint();
+    }
+    shown
+}
+
 /// Whether the system asks for less motion, read on a thread, as the
 /// portal may take a while to answer, and followed as it changes.
 pub(crate) struct System {

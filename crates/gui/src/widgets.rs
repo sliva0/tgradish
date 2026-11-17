@@ -2302,6 +2302,31 @@ pub(crate) fn bar_spent(ui: &mut egui::Ui, text: &str, from: usize) {
     bar_drawn(ui, egui::vec2(width, 22.0), Fill::Share(1.0), text, fill, Some((from, ending)));
 }
 
+/// How long a bar's fill takes to go most of the way to a share it moved
+/// up to, a share `1 - 1/e` of it, in seconds: progress comes a few times a
+/// second, and would step otherwise.
+const FILL_EASING: f32 = 0.12;
+/// How long the band over a bar at work takes to cross it, in seconds.
+const SHEEN: f64 = 1.6;
+
+/// How much of the bar `id` shows filled for `fill`: the share eased up
+/// toward, and at once where it went down, as for a new encode, or is
+/// whole; `None` where how far is unknown.
+fn shown_share(ctx: &egui::Context, id: egui::Id, fill: Fill) -> Option<f32> {
+    let (Fill::Share(share) | Fill::Working(share)) = fill else { return None };
+    let share = share.clamp(0.0, 1.0);
+    let jump = |shown: f32| share < shown || share >= 1.0;
+    Some(crate::motion::approach(ctx, id.with("fill"), share, FILL_EASING, jump))
+}
+
+/// Where the band over a bar at work is at `time`, from 0, before its
+/// start, to 1, past its end: slow at each end and fast across the middle,
+/// so that it eases in and out of sight rather than sweeping on and on.
+fn sheen_at(time: f64) -> f32 {
+    let phase = (time / SHEEN).fract() as f32;
+    phase * phase * (3.0 - 2.0 * phase)
+}
+
 /// A [`bar`] of `size`, its text from the byte `ending` gives on in the
 /// colour it gives.
 fn bar_drawn(
@@ -2319,8 +2344,8 @@ fn bar_drawn(
     painter.rect_filled(rect, rounding, track);
     // the whole bar's shape, cut to how far it got: no blob at its start
     // when it is nearly empty
-    if let Fill::Share(share) | Fill::Working(share) = fill {
-        let width = rect.width() * share.clamp(0.0, 1.0);
+    if let Some(share) = shown_share(ui.ctx(), response.id, fill) {
+        let width = rect.width() * share;
         let part = egui::Rect::from_min_size(rect.min, egui::vec2(width, rect.height()));
         ui.painter_at(part).rect_filled(rect, rounding, colour);
     }
@@ -2331,8 +2356,8 @@ fn bar_drawn(
     }
     if moving && !matches!(fill, Fill::Share(_)) {
         let band = rect.width() * 0.3;
-        let time = ui.input(|input| input.time) as f32;
-        let left = rect.left() - band + (time * 0.7).fract() * (rect.width() + band);
+        let across = sheen_at(ui.input(|input| input.time));
+        let left = rect.left() - band + across * (rect.width() + band);
         let part = egui::Rect::from_min_max(
             egui::pos2(left, rect.top()),
             egui::pos2(left + band, rect.bottom()),
@@ -2654,5 +2679,68 @@ mod tests {
         assert_eq!(parse_seconds(" 4 "), Some(4.0));
         assert_eq!(parse_seconds("1:75"), None);
         assert_eq!(parse_seconds("x"), None);
+    }
+
+    #[test]
+    fn eases_a_bar_up_and_jumps_it_down_or_whole() {
+        // a bar's fill, as it shows each frame, a sixtieth of a second apart
+        type State = (Fill, Option<f32>);
+        let show = |ui: &mut egui::Ui, (fill, shown): &mut State| {
+            *shown = shown_share(ui.ctx(), egui::Id::new("bar"), *fill);
+            bar(ui, *fill, "", Color32::RED);
+        };
+        let mut harness = egui_kittest::Harness::builder()
+            .with_step_dt(1.0 / 60.0)
+            .with_max_steps(120)
+            .build_ui_state(show, (Fill::Working(0.2), None));
+        harness.run_steps(2);
+        assert_eq!(harness.state().1, Some(0.2));
+        harness.state_mut().0 = Fill::Working(0.8);
+        harness.step();
+        // eased from where it was: a little way at first
+        let first = harness.state().1.unwrap();
+        assert!(first > 0.2 && first < 0.35, "{first}");
+        // most of the way a time constant on, and there in the end
+        harness.run_steps(6);
+        let mid = harness.state().1.unwrap();
+        let expected = 0.8 - 0.6 * (-7.0 / 60.0 / FILL_EASING).exp();
+        assert!((mid - expected).abs() < 0.03, "{mid}, not {expected}");
+        harness.run_steps(60);
+        assert_eq!(harness.state().1, Some(0.8));
+        // a new encode, from nothing: at once
+        harness.state_mut().0 = Fill::Working(0.05);
+        harness.step();
+        assert_eq!(harness.state().1, Some(0.05));
+        // done: whole at once, and nothing drawn again after
+        harness.state_mut().0 = Fill::Share(1.0);
+        harness.step();
+        assert_eq!(harness.state().1, Some(1.0));
+        harness.try_run().expect("still once there");
+        // a share done with: eased, then still
+        harness.state_mut().0 = Fill::Share(0.3);
+        harness.step();
+        harness.state_mut().0 = Fill::Share(0.6);
+        harness.try_run().expect("still once there");
+        assert_eq!(harness.state().1, Some(0.6));
+        // without motion, there at once
+        crate::motion::set(&harness.ctx, false);
+        harness.state_mut().0 = Fill::Share(0.9);
+        harness.step();
+        assert_eq!(harness.state().1, Some(0.9));
+        // and at work with how far unknown, striped and still
+        harness.state_mut().0 = Fill::Unknown;
+        harness.try_run().expect("still once there");
+    }
+
+    #[test]
+    fn eases_the_band_over_a_bar_at_work_in_and_out() {
+        assert_eq!(sheen_at(0.0), 0.0);
+        // slow from the start, halfway at half its time, fast across it
+        assert!(sheen_at(SHEEN * 0.1) < 0.05);
+        assert!((sheen_at(SHEEN * 0.5) - 0.5).abs() < 1e-4);
+        assert!(sheen_at(SHEEN * 0.55) - sheen_at(SHEEN * 0.45) > 0.14);
+        assert!(sheen_at(SHEEN * 0.99) > 0.99);
+        // and over again
+        assert!(sheen_at(SHEEN * 1.1) < 0.05);
     }
 }
