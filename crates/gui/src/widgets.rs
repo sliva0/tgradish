@@ -2687,15 +2687,20 @@ pub(crate) fn scrolled<R>(
             // before left it: scrolled to its end, what is in sight would
             // move down as it shrinks, and from under the pointer, as a
             // button held to repeat whose step shortens what follows
+            // that frame's only, not one it was shown in long before, at
+            // another width
             let tallest = ui.id().with("tallest while held");
-            let before = ui.data(|data| data.get_temp::<f32>(tallest));
-            if let Some(before) = before
+            let pass = ui.ctx().cumulative_pass_nr();
+            let before = ui.data(|data| data.get_temp::<(u64, f32)>(tallest));
+            if let Some((_, before)) = before.filter(|&(at, _)| at + 1 == pass)
                 && ui.input(|input| input.pointer.any_down())
             {
-                ui.set_min_height(before);
+                // from its top, where `set_min_height` would add it after
+                // what was added, and it would grow each frame
+                ui.expand_to_include_y(ui.min_rect().top() + before);
             }
             let height = ui.min_rect().height();
-            ui.data_mut(|data| data.insert_temp(tallest, height));
+            ui.data_mut(|data| data.insert_temp(tallest, (pass, height)));
             added
         })
     })
@@ -2830,6 +2835,45 @@ pub(crate) fn test_fonts<State>(harness: &egui_kittest::Harness<'_, State>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keeps_what_scrolls_as_long_only_as_it_was_the_frame_before() {
+        // lines, shown or not, and how tall what scrolls was
+        type State = (usize, bool, f32);
+        let show = |ui: &mut egui::Ui, (lines, shown, tall): &mut State| {
+            if !*shown {
+                return;
+            }
+            let area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+            *tall = scrolled(ui, area, |ui| {
+                for line in 0..*lines {
+                    ui.label(format!("line {line}"));
+                }
+            })
+            .content_size
+            .y;
+        };
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([300.0, 400.0])
+            .build_ui_state(show, (10, true, 0.0));
+        test_fonts(&harness);
+        harness.run_steps(2);
+        let tall = harness.state().2;
+        // out of sight a while, the pointer held, then shown shorter
+        harness.state_mut().1 = false;
+        let at = egui::pos2(150.0, 350.0);
+        harness.event(egui::Event::PointerMoved(at));
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+        *harness.state_mut() = (2, true, 0.0);
+        harness.run_steps(3);
+        assert!(harness.state().2 < tall / 2.0, "{} of {tall}", harness.state().2);
+    }
 
     #[test]
     fn keeps_what_scrolls_as_long_while_the_pointer_is_held() {
