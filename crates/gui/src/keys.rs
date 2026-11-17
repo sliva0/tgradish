@@ -443,11 +443,14 @@ impl App {
         if redo {
             self.redo(ctx);
         }
-        // the rest are a focused button's own, as Space and the arrows
-        if ctx.memory(|memory| memory.focused().is_some()) {
+        // the rest are a focused button's own, as Space and the arrows; the
+        // crop, which has the focus once it is drawn or moved, takes only
+        // the arrows it moves by, so that Space plays right after
+        let crop = crate::canvas::crop_focused(ctx);
+        if ctx.memory(|memory| memory.focused().is_some()) && !crop {
             return;
         }
-        if let Some((at, _)) = asked(Command::Select) {
+        if let Some((at, _)) = asked(Command::Select).filter(|_| !crop) {
             self.select_beside(at == 0);
         }
         if space
@@ -465,9 +468,14 @@ impl App {
             })
         };
         let (ends, cut) = (asked(Command::Ends), asked(Command::CutHere));
+        // Alt with the arrows, which move the end, is left by the crop
+        let (step, move_start) = match crop {
+            true => (0, 0),
+            false => (by(Command::Step), by(Command::MoveStart)),
+        };
         let keys = Keys {
-            by: by(Command::Step),
-            move_start: by(Command::MoveStart),
+            by: step,
+            move_start,
             move_end: by(Command::MoveEnd),
             first: ends.is_some_and(|(at, _)| at == 0),
             last: ends.is_some_and(|(at, _)| at == 1),
@@ -1120,5 +1128,109 @@ mod tests {
         harness.key_press(egui::Key::ArrowRight);
         harness.run_steps(2);
         assert_eq!(state(&harness), (Crop { x: 9, width: 31, ..crop }, 6, None));
+    }
+
+    #[test]
+    fn keeps_the_other_keys_while_the_crop_has_the_focus() {
+        use egui::{Key, Modifiers};
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video_of(dir.path(), "64x48", 1) else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        let frames = harness.state().items[0].input_frames().unwrap();
+        let item = &mut harness.state_mut().items[0];
+        (item.view.time, item.view.playing) = (frames.times[5], false);
+        harness.run_steps(3);
+        // a crop drawn, which takes the focus
+        let view = &harness.state().items[0].view;
+        let (_, fit_in) = view.input_zoom.anchor.unwrap();
+        let (shown, scale) = crate::canvas::layout(fit_in, (64, 48), &view.input_zoom);
+        let (from, to) = (shown.min + vec2(8.0, 8.0) * scale, shown.min + vec2(40.0, 30.0) * scale);
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        harness.event(egui::Event::PointerMoved(from));
+        harness.event(press(from, true));
+        harness.step();
+        for step in 1..=4 {
+            harness.event(egui::Event::PointerMoved(from + (to - from) * step as f32 / 4.0));
+            harness.step();
+        }
+        harness.event(press(to, false));
+        harness.run_steps(3);
+        assert!(harness.state().items[0].choices.crop.is_some());
+        assert!(crate::canvas::crop_focused(&harness.ctx));
+        // clicked inside, as after another file was shown
+        let inside = shown.min + vec2(24.0, 19.0) * scale;
+        let focus_crop = |harness: &mut egui_kittest::Harness<App>| {
+            harness.event(egui::Event::PointerMoved(inside));
+            for pressed in [true, false] {
+                harness.event(press(inside, pressed));
+                harness.step();
+            }
+            harness.run_steps(2);
+            assert!(crate::canvas::crop_focused(&harness.ctx));
+        };
+        let state = |harness: &egui_kittest::Harness<App>| {
+            let item = &harness.state().items[0];
+            let used =
+                frames.part(item.input_length().unwrap(), item.choices.start, item.choices.length);
+            (item.view.playing, frames.at(item.view.time), used)
+        };
+        // Space plays, and stops
+        harness.key_press(Key::Space);
+        harness.run_steps(1);
+        assert!(harness.state().items[0].view.playing);
+        harness.key_press(Key::Space);
+        harness.run_steps(2);
+        let item = &mut harness.state_mut().items[0];
+        item.view.time = frames.times[5];
+        harness.run_steps(1);
+        // the end cut at the frame shown, and the first frame shown
+        harness.key_press(Key::CloseBracket);
+        harness.run_steps(2);
+        assert_eq!(state(&harness), (false, 5, (0, 6)));
+        harness.key_press(Key::Home);
+        harness.run_steps(2);
+        assert_eq!(state(&harness), (false, 0, (0, 6)));
+        // the end moved by Alt and the arrows, which the crop leaves
+        harness.key_press_modifiers(Modifiers::ALT, Key::ArrowRight);
+        harness.run_steps(2);
+        assert_eq!(state(&harness), (false, 6, (0, 7)));
+        // the arrows still move the crop, not the frame shown
+        let crop = harness.state().items[0].choices.crop.unwrap();
+        harness.key_press(Key::ArrowRight);
+        harness.run_steps(2);
+        assert_eq!(harness.state().items[0].choices.crop.unwrap().x, crop.x + 1);
+        assert_eq!(state(&harness), (false, 6, (0, 7)));
+        // pasting: whatever the clipboard holds is added, or why not said
+        let said = |harness: &egui_kittest::Harness<App>| harness.state().banner.rows.len();
+        let before = (harness.state().items.len(), said(&harness));
+        for pressed in [true, false] {
+            harness.event(egui::Event::Key {
+                key: Key::V,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: Modifiers::COMMAND,
+            });
+            harness.step();
+        }
+        harness.run_steps(2);
+        assert_ne!((harness.state().items.len(), said(&harness)), before);
+        // and Delete removes the file
+        let first = harness.state().items[0].id;
+        harness.state_mut().select(first);
+        harness.run_steps(2);
+        focus_crop(&mut harness);
+        harness.key_press(Key::Delete);
+        harness.run_steps(2);
+        assert!(harness.state().item(first).is_none());
     }
 }

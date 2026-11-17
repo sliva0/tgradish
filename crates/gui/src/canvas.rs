@@ -432,6 +432,7 @@ pub(crate) fn show(
     }
     // the crop takes the keyboard's focus as it is pressed on, or drawn
     let crop_id = response.id.with("crop");
+    ui.data_mut(|data| data.insert_temp(egui::Id::new(CROP), crop_id));
     let pressed_on =
         |point: Option<Pos2>| point.and_then(grab).filter(|drag| !matches!(drag, Drag::New(_)));
     let mut focus = (dragging && drag.is_some())
@@ -598,6 +599,16 @@ pub(crate) fn show(
             ui.data_mut(|data| data.insert_temp(asked, true));
         }
     }
+}
+
+/// The id under which the crop's own is kept, for [`crop_focused`].
+const CROP: &str = "crop";
+
+/// Whether the crop has the keyboard's focus, which takes only the arrows
+/// that move it: the GUI's other shortcuts are kept as they are.
+pub(crate) fn crop_focused(ctx: &egui::Context) -> bool {
+    let crop = ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new(CROP)));
+    crop.is_some() && ctx.memory(|memory| memory.focused()) == crop
 }
 
 /// How far out of the crop the ring of the keyboard's focus is drawn, the
