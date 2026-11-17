@@ -39,6 +39,11 @@ What changed in each release of tgradish, newest first. The format follows
 - The GUI's preview zooms by a quarter a wheel notch, as far as 32 screen
   pixels a pixel, says that scale on Zoom out, eases out, and pans across
   with Shift+wheel; pixel art fits whole screen pixels to each of its own.
+- The GUI's Smooth scrolling is Motion (`motion` in the config file, which
+  still reads `smooth-scrolling`): progress, the list, notices and dialogs
+  ease rather than jump, and nothing moves where the system asks for less.
+- What scrolls in the GUI shows a bar and fades where there is more, each
+  file keeps its scroll, and clicking a control moves nothing around it.
 
 ### Fixed
 

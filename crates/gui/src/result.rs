@@ -118,7 +118,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
                 std::cmp::Ordering::Equal => (stage_fill(progress, stage), running),
                 std::cmp::Ordering::Greater => (Fill::Share(0.0), running),
             };
-            widgets::bar(ui, fill, &text, colour);
+            widgets::steady_bar(ui, fill, &text, &widest_stage(each), colour);
             ui.add_space(2.0);
         }
         return;
@@ -130,6 +130,15 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
         let rate = rate_text(attempt);
         let (number, fps) = (attempt.number, widgets::trimmed(attempt.params.fps));
         let text = fl!("encode", number = number, fps = fps.as_str(), rate = rate.as_str());
+        // as it says once done, too large, the most it says
+        let widest = widgets::zeros(&fl!(
+            "encode-done",
+            "too-large",
+            number = number,
+            fps = fps.as_str(),
+            rate = rate.as_str(),
+            size = if progress.webm.is_some() { "100.0%" } else { "1000.0 KiB" }
+        ));
         match attempt.bytes {
             Some(bytes) => {
                 let size = match &progress.webm {
@@ -139,7 +148,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
                 if attempt.fits {
                     let text =
                         fl!("encode-done", number = number, fps = fps, rate = rate, size = size);
-                    widgets::bar(ui, widgets::Fill::Share(1.0), &text, done);
+                    widgets::steady_bar(ui, widgets::Fill::Share(1.0), &text, &widest, done);
                 } else {
                     // too large is how fitting goes on, not a failure: a
                     // plain bar, only its size and verdict a warning
@@ -155,7 +164,10 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
                     widgets::bar_spent(ui, &text, from);
                 }
             }
-            None => widgets::bar(ui, widgets::Fill::working(progress.fraction), &text, running),
+            None => {
+                let fill = widgets::Fill::working(progress.fraction);
+                widgets::steady_bar(ui, fill, &text, &widest, running);
+            }
         }
         ui.add_space(2.0);
     }
@@ -199,6 +211,24 @@ fn stages(progress: &jobs::Progress) -> Vec<(jobs::TgsStage, String)> {
     .into_iter()
     .flatten()
     .collect()
+}
+
+/// The most the bar of `stage` of a `.tgs` conversion says as it goes on.
+fn widest_stage(stage: jobs::TgsStage) -> String {
+    use jobs::TgsStage;
+    let size = "1000.0 KiB";
+    let texts = match stage {
+        TgsStage::Reading => vec![fl!("stage-reading")],
+        TgsStage::Drawing => vec![fl!("stage-drawing")],
+        TgsStage::Fitting => vec![
+            fl!("stage-fitting-steps", count = 100, size = size),
+            fl!("stage-fitting-from", size = size),
+        ],
+        TgsStage::Compressing => {
+            vec![fl!("stage-compressing"), fl!("stage-compressing", "hopeless")]
+        }
+    };
+    texts.into_iter().max_by_key(String::len).unwrap_or_default()
 }
 
 /// How far the stage at work has got. It moves even while its share stays
@@ -505,6 +535,85 @@ mod tests {
 
     fn plan(attempts: u32) -> WebmPlan {
         WebmPlan { width: 512, height: 512, fps: 30.0, length: 1.0, attempts, limit: 262_144 }
+    }
+
+    /// Every text drawn last, and whether it was cut short.
+    fn drawn(output: &egui::FullOutput) -> Vec<(String, bool)> {
+        fn walk(shape: &egui::Shape, found: &mut Vec<(String, bool)>) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+                egui::Shape::Text(text) => {
+                    found.push((text.galley.text().to_owned(), text.galley.elided));
+                }
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        output.shapes.iter().for_each(|shape| walk(&shape.shape, &mut found));
+        found
+    }
+
+    /// In British English the bars of a conversion say all they say,
+    /// their longest too, in the column beside the preview at its
+    /// narrowest, in the smallest window, and at its usual width, and
+    /// the bar beside Stop as narrow as it gets there; each bar keeping its
+    /// height as what it says changes.
+    #[test]
+    fn says_every_step_of_converting_whole_and_keeps_each_bars_height() {
+        use tgradish_core::tgradish_tgs::{reduce::Reduction, sticker::Step};
+        crate::l10n::english();
+        // the most each says: many steps of a large sticker, one that can't
+        // fit, and encodes with long numbers, too large
+        let step = Step::new(Reduction::Despeckle, 999_999, 0.0);
+        let tgs = |stage, hopeless: bool| Progress {
+            tgs: Some(stage),
+            unchanged_bytes: Some(999_999),
+            tgs_exact: hopeless,
+            steps: vec![step.clone(); 100],
+            ..Progress::default()
+        };
+        let long = |number, bytes| Attempt {
+            number,
+            params: Params { fps: 29.97, length: 1.0, rate: Rate::Bitrate(12_345.0) },
+            bytes,
+            fits: false,
+            ssim: None,
+        };
+        let webm = |done: bool| Progress {
+            webm: Some(plan(12)),
+            attempts: vec![long(10, Some(999_999)), long(12, done.then_some(999_999))],
+            fraction: Some(0.5),
+            ..Progress::default()
+        };
+        let progresses = [
+            tgs(TgsStage::Fitting, false),
+            tgs(TgsStage::Compressing, true),
+            webm(false),
+            webm(true),
+        ];
+        for width in [216.0, 288.0] {
+            let mut heights = Vec::new();
+            for progress in &progresses {
+                let mut job = Job::waiting("clip.webm".into());
+                job.status = Status::Running;
+                job.progress = progress.clone();
+                let mut harness =
+                    egui_kittest::Harness::builder().with_size([400.0, 600.0]).build_ui(|ui| {
+                        ui.set_max_width(width);
+                        progress_column(ui, &job, None);
+                        step_bar(ui, &job, egui::vec2(320.0, crate::actions::BAR_ROW));
+                    });
+                widgets::test_fonts(&harness);
+                harness.run_steps(2);
+                let output = harness.output().clone();
+                for (text, elided) in drawn(&output) {
+                    assert!(!elided, "{width}: {text:?} cut short");
+                }
+                heights.push(harness.ctx.globally_used_rect().height());
+            }
+            // an encode done, too large, as tall as it was at work
+            assert_eq!(heights[2], heights[3], "{width}");
+        }
     }
 
     #[test]

@@ -190,6 +190,29 @@ fn folder_problem(path: &Path) -> Option<String> {
     }
 }
 
+/// What checking ffmpeg found, in `colour`, on as many lines as there is
+/// room for, two, and cut short only past them, as an error naming a long
+/// path may be, said in full on hover.
+fn ffmpeg_status(ui: &mut egui::Ui, status: &str, colour: egui::Color32) {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let mut job = egui::text::LayoutJob::single_section(
+        status.to_owned(),
+        egui::TextFormat::simple(font, colour),
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_rows: 2,
+        ..egui::text::TextWrapping::wrap_at_width(ui.available_width())
+    };
+    let galley = ui.painter().layout_job(job);
+    let (rect, response) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, status));
+    let elided = galley.elided;
+    ui.painter().galley(rect.min, galley, colour);
+    if elided {
+        response.on_hover_text(status);
+    }
+}
+
 /// What is wrong with a field's content, said under it.
 fn problem(ui: &mut egui::Ui, wrong: Option<String>) {
     if let Some(wrong) = wrong {
@@ -522,13 +545,22 @@ fn sections(
                 }));
                 dialog.ffmpeg_status = None;
             }
-            if dialog.checking.is_some() {
-                ui.spinner();
-                note(ui, fl!("checking-ffmpeg"));
-            } else if let Some((ok, status)) = &dialog.ffmpeg_status {
-                let colour = if *ok { theme::good(ui.visuals()) } else { theme::bad(ui.visuals()) };
-                ui.add(egui::Label::new(egui::RichText::new(status).color(colour)).truncate());
-            }
+            // in room for two lines, kept from the start, so the settings
+            // under it stay where they are as it is checked
+            let lines = 2.0 * ui.text_style_height(&egui::TextStyle::Body);
+            let room = egui::vec2(ui.available_width(), lines.max(theme::CONTROL));
+            let layout = egui::Layout::left_to_right(egui::Align::Center);
+            ui.allocate_ui_with_layout(room, layout, |ui| {
+                ui.set_min_size(room);
+                if dialog.checking.is_some() {
+                    ui.spinner();
+                    note(ui, fl!("checking-ffmpeg"));
+                } else if let Some((ok, status)) = &dialog.ffmpeg_status {
+                    let visuals = ui.visuals();
+                    let colour = if *ok { theme::good(visuals) } else { theme::bad(visuals) };
+                    ffmpeg_status(ui, status, colour);
+                }
+            });
         });
     });
 
@@ -1585,6 +1617,34 @@ mod tests {
         harness.run_steps(2);
         assert_eq!(harness.state().config.gui.accent, Accent::System);
         assert_eq!(shown(&harness), theme::BREEZE_ACCENT);
+    }
+
+    /// What checking ffmpeg found is said whole in the smallest window, in
+    /// room kept for it, so that nothing under it moves.
+    #[test]
+    fn says_what_checking_ffmpeg_found_whole_in_room_kept_for_it() {
+        crate::l10n::english();
+        let mut harness =
+            Harness::builder().with_size([crate::MIN_WIDTH, 820.0]).build_eframe(|cc| {
+                let app = App::with(Config::default(), None, Presets::builtin());
+                app.style(&cc.egui_ctx);
+                app
+            });
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(16);
+        let under = |harness: &Harness<App>| harness.get_by_label(&fl!("threads")).rect();
+        let before = under(&harness);
+        let version = "8.0.1-full_build-www.gyan.dev Copyright (c) 2000-2025";
+        let status = fl!("ffmpeg-no-vp9", version = version);
+        harness.state_mut().settings_dialog.ffmpeg_status = Some((false, status.clone()));
+        harness.run_steps(2);
+        harness.get_by_label(&status);
+        assert_eq!(under(&harness), before);
+        let cut = harness.output().shapes.iter().any(|shape| match &shape.shape {
+            egui::Shape::Text(text) => text.galley.elided && text.galley.text().contains("VP9"),
+            _ => false,
+        });
+        assert!(!cut, "{status:?} cut short");
     }
 
     #[test]

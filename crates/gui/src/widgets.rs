@@ -2347,7 +2347,35 @@ impl Fill {
 /// A bar filled as `fill` says, `text` over it.
 pub(crate) fn bar(ui: &mut egui::Ui, fill: Fill, text: &str, colour: Color32) {
     let width = ui.available_width().min(380.0);
-    bar_sized(ui, egui::vec2(width, 22.0), fill, text, colour);
+    bar_sized(ui, egui::vec2(width, BAR), fill, text, colour);
+}
+
+/// Height of a [`bar`] of a line.
+const BAR: f32 = 22.0;
+/// The font of what a bar says.
+const BAR_FONT: f32 = 12.5;
+
+/// A [`bar`] as tall as `widest` needs, the longest it may say as it
+/// goes on, its words wrapped onto as many lines as they take where the
+/// bar is narrow, so that it says all of `text` and keeps its height as
+/// that changes.
+pub(crate) fn steady_bar(ui: &mut egui::Ui, fill: Fill, text: &str, widest: &str, colour: Color32) {
+    let width = ui.available_width().min(380.0);
+    let size = egui::vec2(width, bar_height(ui, &[text, widest], width));
+    bar_drawn(ui, size, fill, text, colour, None);
+}
+
+/// How tall a bar `width` wide is to say the longest of `texts` whole.
+fn bar_height(ui: &egui::Ui, texts: &[&str], width: f32) -> f32 {
+    let font = egui::FontId::proportional(BAR_FONT);
+    let lines = |text: &str| {
+        let galley =
+            ui.painter().layout(text.to_owned(), font.clone(), Color32::WHITE, width - 16.0);
+        galley.rows.len().max(1)
+    };
+    let most = texts.iter().map(|text| lines(text)).max().unwrap_or(1);
+    let row = ui.fonts_mut(|fonts| fonts.row_height(&font));
+    BAR + (most - 1) as f32 * row
 }
 
 /// A [`bar`] of `size`.
@@ -2368,7 +2396,8 @@ pub(crate) fn bar_sized(
 pub(crate) fn bar_spent(ui: &mut egui::Ui, text: &str, from: usize) {
     let width = ui.available_width().min(380.0);
     let (fill, ending) = (theme::spent(ui.visuals()), theme::warn(ui.visuals()));
-    bar_drawn(ui, egui::vec2(width, 22.0), Fill::Share(1.0), text, fill, Some((from, ending)));
+    let size = egui::vec2(width, bar_height(ui, &[text], width));
+    bar_drawn(ui, size, Fill::Share(1.0), text, fill, Some((from, ending)));
 }
 
 /// How long a bar's fill takes to go most of the way to a share it moved
@@ -2440,16 +2469,26 @@ fn bar_drawn(
         ui.ctx().request_repaint();
     }
     painter.rect_stroke(rect, rounding, outline, egui::StrokeKind::Inside);
-    // cut short where the bar is narrower, said in full on hover
+    // on as many lines as the bar is tall enough for, and cut short only
+    // where it isn't, said in full on hover
     let colour = ui.visuals().strong_text_color();
-    let font = egui::FontId::proportional(12.5);
+    let font = egui::FontId::proportional(BAR_FONT);
+    let row = ui.fonts_mut(|fonts| fonts.row_height(&font));
     let mut job = egui::text::LayoutJob { break_on_newline: false, ..Default::default() };
     let (from, ending) = ending.unwrap_or((text.len(), colour));
     let from = (0..=from.min(text.len())).rev().find(|at| text.is_char_boundary(*at)).unwrap_or(0);
     for (part, colour) in [(&text[..from], colour), (&text[from..], ending)] {
         job.append(part, 0.0, egui::TextFormat::simple(font.clone(), colour));
     }
-    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 16.0);
+    let rows = 1 + ((rect.height() - BAR) / row.max(1.0)).round().clamp(0.0, 8.0) as usize;
+    job.wrap = if rows == 1 {
+        egui::text::TextWrapping::truncate_at_width(rect.width() - 16.0)
+    } else {
+        egui::text::TextWrapping {
+            max_rows: rows,
+            ..egui::text::TextWrapping::wrap_at_width(rect.width() - 16.0)
+        }
+    };
     let galley = painter.layout_job(job);
     let at = egui::pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0);
     let elided = galley.elided;
