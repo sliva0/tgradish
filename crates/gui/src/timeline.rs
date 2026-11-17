@@ -329,7 +329,8 @@ pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
         let (width, unit_room) = bar_width(ui, FIELD + ui.spacing().item_spacing.x, alone);
         let (rect, response) = ui.allocate_exact_size(vec2(width, BAR), Sense::click_and_drag());
         let limit = (limit, past);
-        bar(ui, rect, &response, (length, frames, *in_frames), (start, used), time, limit);
+        let numbers = (length, frames, *in_frames);
+        bar(ui, rect, &response, numbers, (start, used), time, limit);
         match frames {
             Some(frames) => {
                 let (first, mut after) = frames.part(length, *start, *used);
@@ -541,17 +542,15 @@ fn bar(
         let text = past.text();
         ui.ctx().accesskit_node_builder(response.id, |node| node.set_description(text));
     }
-    // where the pointer is, or over the limit's mark what becomes of the
-    // used part past it, but for where a drag takes its ends
-    if let Some(pointer) = response.hover_pos() {
-        let on_mark = mark.is_some_and(|(label, tick)| {
+    // over the limit's mark, what becomes of the used part past it, but
+    // for where a drag takes its ends
+    if let Some(pointer) = response.hover_pos()
+        && !response.dragged()
+        && mark.is_some_and(|(label, tick)| {
             label.expand(1.0).contains(pointer) || tick.expand2(vec2(1.0, 0.0)).contains(pointer)
-        });
-        let text = match on_mark && !response.dragged() {
-            true => past.text(),
-            false => time_text(seconds_at(pointer.x), frames, in_frames),
-        };
-        response.clone().on_hover_text_at_pointer(text);
+        })
+    {
+        response.clone().on_hover_text_at_pointer(past.text());
     }
     // brackets at both ends of the used part, the one a press would take,
     // or that is taken, in the accent: both where either would be
@@ -587,7 +586,60 @@ fn bar(
         marks,
         Stroke::NONE,
     ));
+    // the end being dragged where it is, as its field says it, or where
+    // the pointer is
+    let dragged = grabbed.filter(|_| response.dragged());
+    let at = match (dragged, frames) {
+        (Some(Grab::Start), Some(frames)) if in_frames => {
+            let (first, _) = frames.part(length, *start, *used);
+            let number = first + 1;
+            Some((x_of(from), fl!("frame-number", number = number)))
+        }
+        (Some(Grab::End), Some(frames)) if in_frames => {
+            let (_, after) = frames.part(length, *start, *used);
+            Some((x_of(to), fl!("frame-number", number = after)))
+        }
+        (Some(Grab::Start), _) => Some((x_of(from), widgets::seconds(from))),
+        (Some(Grab::End), _) => Some((x_of(to), widgets::seconds(to))),
+        _ => (response.hover_pos().or(pointer)).map(|pointer| {
+            let x = pointer.x.clamp(track.left(), track.right());
+            (x, time_text(seconds_at(x), frames, in_frames))
+        }),
+    };
+    if let Some((x, text)) = at.filter(|_| response.hovered() || response.dragged()) {
+        readout(ui, rect, x, text);
+    }
 }
+
+/// Says `text` on a pill under the middle of the bar `rect`, at `x` as far
+/// as the bar lets it: at once, as a
+/// tooltip shows only once the pointer rests, and never while a button is
+/// held, as it is while dragging. Under the bar's track rather than over
+/// it, in the room the bar's row has under it, never over the picture.
+fn readout(ui: &egui::Ui, rect: Rect, x: f32, text: String) {
+    let visuals = ui.visuals();
+    let colour = visuals.strong_text_color();
+    let painter = ui.ctx().layer_painter(ui.layer_id());
+    let galley = painter.layout_no_wrap(text, READOUT, colour);
+    let size = galley.size() + vec2(10.0, 0.0);
+    let left = (x - size.x / 2.0).min(rect.right() - size.x).max(rect.left());
+    let pill = Rect::from_min_size(pos2(left, rect.center().y + READOUT_DOWN), size);
+    let radius = size.y / 2.0;
+    painter.rect(
+        pill,
+        radius,
+        visuals.window_fill,
+        theme::floating_outline(visuals),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(pill.min + vec2(5.0, 0.0), galley, colour);
+}
+
+/// The readout's font, as small as the limit's label.
+const READOUT: egui::FontId = egui::FontId::proportional(10.5);
+/// How far under the middle of the bar the readout starts: under its
+/// track, and under the playhead's knob on the result's bar.
+const READOUT_DOWN: f32 = TRACK / 2.0 + 1.0;
 
 /// Plays a result: a play button and a bar to seek in it.
 pub(crate) fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &mut bool) {
@@ -615,9 +667,6 @@ pub(crate) fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &m
         {
             *time = seconds_at(pointer.x).min(length - 1e-6);
         }
-        if let Some(pointer) = response.hover_pos() {
-            response.clone().on_hover_text_at_pointer(widgets::seconds(seconds_at(pointer.x)));
-        }
         let painter = ui.painter_at(rect);
         let visuals = ui.visuals();
         painter.rect_filled(track, 3.0, visuals.extreme_bg_color);
@@ -626,6 +675,11 @@ pub(crate) fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &m
         // clipped rather than shrunk, so the start of the bar keeps its shape
         ui.painter_at(played).rect_filled(track, 3.0, theme::span(visuals));
         painter.circle_filled(pos2(x, track.center().y), 6.0, visuals.strong_text_color());
+        let pointer = response.hover_pos().or(response.interact_pointer_pos());
+        if let Some(pointer) = pointer.filter(|_| response.hovered() || response.dragged()) {
+            let x = pointer.x.clamp(track.left(), track.right());
+            readout(ui, rect, x, widgets::seconds(seconds_at(x)));
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(text));
     });
 }
@@ -678,11 +732,7 @@ pub(crate) fn frame_picker(
         {
             picked = Some(frames.at(seconds_at(pointer.x)));
         }
-        let hovered = response.hover_pos().map(|pointer| {
-            let text = time_text(seconds_at(pointer.x), Some(frames), *in_frames);
-            response.clone().on_hover_text_at_pointer(text);
-            frames.at(seconds_at(pointer.x))
-        });
+        let hovered = response.hover_pos().map(|pointer| frames.at(seconds_at(pointer.x)));
         if let Some(picked) = picked {
             index = picked;
             *frame = frames.start_of(picked);
@@ -718,6 +768,12 @@ pub(crate) fn frame_picker(
         // which is the accent at its strongest, too
         if let Some(hovered) = hovered {
             widgets::cased_outline(&painter, visuals, span(hovered), 2.0);
+        }
+        let pointer = response.hover_pos().or(response.interact_pointer_pos());
+        if let Some(pointer) = pointer.filter(|_| response.hovered() || response.dragged()) {
+            let x = pointer.x.clamp(track.left(), track.right());
+            let text = time_text(seconds_at(x), Some(frames), *in_frames);
+            readout(ui, rect, x, text);
         }
     });
     if alone {
@@ -856,8 +912,18 @@ mod tests {
             harness.hover_at(at(2.0));
             harness.run_steps(2);
             assert!(harness.query_by_label(&text).is_none(), "{past:?}: {text}");
-            assert!(harness.query_by_label("2.00 s").is_some());
+            assert!(painted(&harness).contains(&"2.00 s".to_owned()), "{past:?}");
         }
+    }
+
+    /// The texts `harness` drew last.
+    fn painted<State>(harness: &egui_kittest::Harness<'_, State>) -> Vec<String> {
+        let shapes = harness.output().shapes.iter();
+        let texts = shapes.filter_map(|clipped| match &clipped.shape {
+            Shape::Text(text) => Some(text.galley.text().to_owned()),
+            _ => None,
+        });
+        texts.collect()
     }
 
     #[test]
@@ -975,6 +1041,67 @@ mod tests {
             assert_eq!(from < 49.0, start_moves, "{by}: {from} to {to}");
             assert_eq!(to > 51.0, !start_moves, "{by}: {from} to {to}");
         }
+    }
+
+    #[test]
+    fn reads_out_where_the_pointer_is_and_where_a_drag_takes_an_end_at_once() {
+        let (mut harness, track) = long_timeline(50.0, 50.3);
+        let x_of = |seconds: f32| track.left() + seconds / 100.0 * track.width();
+        // where a text was drawn
+        let place = |harness: &egui_kittest::Harness<'_, Trim>, said: &str| {
+            harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+                Shape::Text(text) if text.galley.text() == said => {
+                    Some(text.galley.rect.translate(text.pos.to_vec2()))
+                }
+                _ => None,
+            })
+        };
+        // hovered, with tooltips as slow as they are: where the pointer is,
+        // under the track, within the room under the row
+        harness.event(egui::Event::PointerMoved(pos2(x_of(20.0), track.center().y)));
+        harness.step();
+        let said = place(&harness, "20.00 s").expect("said at once");
+        let bar = track.expand2(vec2(8.0, (BAR - TRACK) / 2.0));
+        assert!(said.top() > track.bottom() && said.bottom() < bar.bottom() + 12.0, "{said:?}");
+        assert!((said.center().x - x_of(20.0)).abs() < 1.0, "{said:?}");
+        // the end dragged, where it is at each step, with the button held
+        let from = pos2(x_of(50.3) + 3.0, track.center().y);
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        harness.event(egui::Event::PointerMoved(from));
+        harness.event(press(from, true));
+        harness.step();
+        for step in 1..=4 {
+            harness.event(egui::Event::PointerMoved(from + vec2(10.0 * step as f32, 0.0)));
+            harness.step();
+            let (start, used, _) = *harness.state();
+            let end = start.unwrap() + used.unwrap();
+            assert!(end > 50.3, "{end}");
+            assert!(place(&harness, &widgets::seconds(end)).is_some(), "{step}: {end}");
+        }
+        harness.event(press(from + vec2(40.0, 0.0), false));
+        harness.step();
+    }
+
+    #[test]
+    fn reads_out_where_the_pointer_is_on_the_results_bar() {
+        let mut harness =
+            egui_kittest::Harness::builder().with_size(vec2(640.0, 80.0)).build_ui_state(
+                |ui, (time, playing): &mut (f64, bool)| player(ui, 10.0, time, playing),
+                (0.0, false),
+            );
+        widgets::test_fonts(&harness);
+        harness.run_steps(2);
+        // on the bar, in the middle of the row
+        harness.event(egui::Event::PointerMoved(pos2(300.0, 8.0 + BAR / 2.0)));
+        harness.step();
+        let said = painted(&harness);
+        let readout = said.iter().filter(|text| !text.contains('/') && text.ends_with(" s"));
+        assert_eq!(readout.count(), 1, "{said:?}");
     }
 
     #[test]

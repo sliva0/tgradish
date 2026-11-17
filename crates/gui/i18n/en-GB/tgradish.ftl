@@ -393,7 +393,8 @@ part-start = Where the used part starts
     .frame = Where the used part starts: its first frame
 part-end = Where the used part ends
     .frame = Where the used part ends: its last frame
-# Where the pointer is over the timeline, counting frames from 1.
+# Where the pointer is over the timeline, or the end of the used part being
+# dragged, counting frames from 1.
 frame-number = frame { $number }
 # The mark of Telegram's 3 seconds on the timeline, on hover: what becomes
 # of the used part past it, as "Spoof duration" and the speed choose. The

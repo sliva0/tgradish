@@ -407,6 +407,48 @@ fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     harness.event(egui::Event::PointerMoved(egui::pos2(x_of(3.3) + 2.0, track.center().y)));
     settle(&mut harness);
     save(&mut harness, "trim-end-hovered");
+    // dragged on, the button held, where it is said under the bar
+    let press = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let from = egui::pos2(x_of(3.3) + 2.0, track.center().y);
+    harness.event(press(from, true));
+    harness.step();
+    for step in 1..=4 {
+        harness.event(egui::Event::PointerMoved(from + egui::vec2(10.0 * step as f32, 0.0)));
+        harness.step();
+    }
+    save(&mut harness, "trim-end-dragged");
+    harness.event(press(from + egui::vec2(40.0, 0.0), false));
+    settle(&mut harness);
+    // the pointer near the bar's end, in the narrowest window, where the
+    // unit's segments go under the bar
+    for width in [crate::MIN_WIDTH, 1920.0] {
+        harness.set_size(egui::vec2(width, 820.0));
+        harness.event(egui::Event::PointerGone);
+        settle(&mut harness);
+        let track = timeline_bar(&harness).shrink2(egui::vec2(8.0, 0.0));
+        harness.event(egui::Event::PointerMoved(track.right_center() - egui::vec2(4.0, 0.0)));
+        settle(&mut harness);
+        save(&mut harness, &format!("timeline-hovered-{width}"));
+    }
+    harness.set_size(egui::vec2(1280.0, 820.0));
+    // the result's bar, hovered
+    convert(&harness);
+    harness.run_steps(2);
+    finish(&mut harness);
+    harness.event(egui::Event::PointerGone);
+    settle(&mut harness);
+    let play = harness.get_by_label(&crate::l10n::fl!("play")).rect();
+    harness.event(egui::Event::PointerMoved(play.right_center() + egui::vec2(200.0, 0.0)));
+    settle(&mut harness);
+    save(&mut harness, "player-hovered");
+    harness.state_mut().items[0].view.show = Show::Input;
+    harness.event(egui::Event::PointerGone);
+    settle(&mut harness);
 }
 
 /// The GUI drawn as the screenshots draw it, of `config`, in a window
