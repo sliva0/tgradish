@@ -773,14 +773,15 @@ fn row(
             action = Some(RowAction::Convert);
         }
     }
-    let mut text = egui::Rect::from_min_max(
+    let text = egui::Rect::from_min_max(
         egui::pos2(input.max.x + 10.0, inner.min.y),
         egui::pos2(result.min.x - 8.0, inner.max.y),
     );
+    // at the end of the name's line while the row is hovered, which the
+    // name always leaves room for, so that it isn't cut short again then
+    let button =
+        egui::Rect::from_min_size(egui::pos2(text.max.x - 20.0, text.min.y), vec2(20.0, 20.0));
     if response.hovered() || response.contains_pointer() {
-        let button =
-            egui::Rect::from_min_size(egui::pos2(text.max.x - 20.0, text.min.y), vec2(20.0, 20.0));
-        text.max.x = button.min.x - 4.0;
         // placed, so the rows below don't move
         let remove = ui.place(button, egui::Button::new("✖").small().frame(false));
         if widgets::named(remove, &fl!("remove")).on_hover_text(fl!("remove-file")).clicked() {
@@ -797,7 +798,10 @@ fn row(
     let mut strong = text_format(&child, child.visuals().strong_text_color());
     strong.font_id.family = crate::fonts::medium_in(child.ctx());
     let (name, _) = drawable(&child, fallbacks, &name, strong);
-    child.add(egui::Label::new(name).truncate());
+    child.scope(|ui| {
+        ui.set_max_width(button.min.x - 4.0 - text.min.x);
+        ui.add(egui::Label::new(name).truncate());
+    });
     let what = kind(item.format, item.choices.target);
     child.add(egui::Label::new(RichText::new(what).small().weak()));
     status(&mut child, item, queued, shown.result);
@@ -1372,6 +1376,38 @@ mod tests {
         assert_eq!(selected(&harness, "a.png"), Some(Toggled::True));
         assert_eq!(selected(&harness, "b.png"), Some(Toggled::False));
         harness.try_run().expect("still once the tint is there");
+    }
+
+    #[test]
+    fn cuts_a_long_name_short_the_same_whether_its_row_is_hovered_or_not() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let dir = tempfile::tempdir().unwrap();
+        let long = dir.path().join(format!("{}.png", "a_rather_long_name_of_a_file".repeat(3)));
+        square(&long, [255, 0, 0, 255]);
+        let mut harness =
+            egui_kittest::Harness::builder().with_size([1280.0, 820.0]).build_eframe(|cc| {
+                let app =
+                    App::with(Config::default(), None, tgradish_core::presets::Presets::builtin());
+                app.style(&cc.egui_ctx);
+                app
+            });
+        harness.state_mut().add(vec![long]);
+        finish(&mut harness);
+        // the name as the row shows it, cut short
+        let shown = |harness: &egui_kittest::Harness<App>| {
+            let labels = harness.query_all_by_role(egui::accesskit::Role::Label);
+            let values = labels.filter_map(|node| node.accesskit_node().value());
+            values
+                .filter(|value| value.starts_with("a_rather") && value.contains('…'))
+                .collect::<Vec<_>>()
+        };
+        let before = shown(&harness);
+        assert_eq!(before.len(), 1, "{before:?}");
+        let row = list_row(&harness, &harness.state().items[0].name()).rect().center();
+        harness.event(egui::Event::PointerMoved(row));
+        harness.run_steps(2);
+        harness.get_by_label(&fl!("remove"));
+        assert_eq!(shown(&harness), before);
     }
 
     #[test]
