@@ -198,12 +198,12 @@ impl Inset {
         if controls {
             let id = ui.id().with("inset");
             let at = label_at(frame);
-            let behind = Rect::from_min_size(at, boxed).expand(3.0);
+            let behind = Rect::from_min_size(at, boxed).expand(LABEL_PADDING);
             // the buttons are buttons, until a drag starts on them
             let on_buttons = ui.rect_contains_pointer(buttons_at(at));
             let label = ui.interact(behind, id.with("label"), Sense::drag());
             let held = [
-                ui.interact(frame.expand(4.0), id, Sense::drag()),
+                ui.interact(frame.expand(FRAME_PADDING), id, Sense::drag()),
                 if on_buttons { label } else { label.on_hover_text(fl!("inset-label", "drag")) },
             ];
             let pointer = ui.input(|input| input.pointer.latest_pos());
@@ -251,10 +251,15 @@ impl Inset {
             let chosen = Stroke::new(2.0, crate::theme::mark(ui.visuals()));
             for (corner, place) in places(view, shown, boxed.y) {
                 let stroke = if corner == aimed { chosen } else { stroke };
-                painter.rect_stroke(place.expand(4.0), 4.0, stroke, egui::StrokeKind::Outside);
+                painter.rect_stroke(
+                    place.expand(FRAME_PADDING),
+                    4.0,
+                    stroke,
+                    egui::StrokeKind::Outside,
+                );
             }
         }
-        painter.rect(frame.expand(4.0), 4.0, back, edge, egui::StrokeKind::Outside);
+        painter.rect(frame.expand(FRAME_PADDING), 4.0, back, edge, egui::StrokeKind::Outside);
         widgets::checkerboard(&painter, frame, 6.0);
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
         painter.image(texture.id(), frame, uv, Color32::WHITE);
@@ -264,7 +269,7 @@ impl Inset {
 
         // the label, and the buttons that change the size after it
         let at = label_at(frame);
-        let behind = Rect::from_min_size(at, boxed).expand(3.0);
+        let behind = Rect::from_min_size(at, boxed).expand(LABEL_PADDING);
         painter.rect(behind, 3.0, back, edge, egui::StrokeKind::Outside);
         // a grip, for dragging it by
         for row in 0..3 {
@@ -358,6 +363,10 @@ const LABEL_GAP: f32 = 12.0;
 const LABEL_SPACE: f32 = 8.0;
 /// The frame around the small picture, beyond it.
 const FRAME: f32 = 5.0;
+/// How far the frame's fill reaches past the small picture, and the
+/// label's past its text and buttons, each outlined round that.
+const FRAME_PADDING: f32 = 4.0;
+const LABEL_PADDING: f32 = 3.0;
 /// The smallest the small picture gets beside the input, on its longer
 /// side.
 const SMALLEST_INSET: f32 = 64.0;
@@ -388,15 +397,19 @@ pub(crate) fn widest_label(detailed: bool) -> String {
 /// the buttons at the label's end do too.
 fn label_place(view: Rect, boxed: Vec2, corner: Corner) -> impl Fn(Rect) -> Pos2 {
     move |frame: Rect| {
-        let x = if corner.left() { frame.left() } else { frame.right() - boxed.x };
+        // its box's outline on the frame's at the side they share, as the
+        // frame reaches further past the picture than the box past the label
+        let out = FRAME_PADDING - LABEL_PADDING;
+        let x = if corner.left() { frame.left() - out } else { frame.right() - boxed.x + out };
         let y = if corner.top() {
             frame.top() - boxed.y - LABEL_SPACE
         } else {
             frame.bottom() + LABEL_SPACE
         };
         // within the view, where the picture is dragged near its edge
-        let x = x.min(view.right() - MARGIN - boxed.x).max(view.left() + 3.0);
-        pos2(x, y.min(view.bottom() - boxed.y - 3.0).max(view.top() + 3.0))
+        let x = x.min(view.right() - MARGIN - boxed.x + out).max(view.left() + LABEL_PADDING);
+        let y = y.min(view.bottom() - boxed.y - LABEL_PADDING).max(view.top() + LABEL_PADDING);
+        pos2(x, y)
     }
 }
 
@@ -550,6 +563,34 @@ mod tests {
         let small = Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 150.0));
         let (input, room) = split(small, (400, 300), label, INSET_SIZES[0], Corner::BottomLeft);
         assert_eq!((input, room.left()), (small, MARGIN));
+    }
+
+    #[test]
+    fn lines_the_label_up_with_the_frame() {
+        let view = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 400.0));
+        // narrower than the picture and wider
+        for boxed in [vec2(100.0, 30.0), vec2(200.0, 30.0)] {
+            for corner in Corner::ALL {
+                let frame = docked(view, vec2(150.0, 150.0), boxed.y + LABEL_GAP, corner);
+                let at = label_place(view, boxed, corner)(frame);
+                let label = Rect::from_min_size(at, boxed).expand(LABEL_PADDING);
+                let frame = frame.expand(FRAME_PADDING);
+                // the outlines of both at the side they share, and where
+                // they meet, one line
+                let side = if corner.left() {
+                    label.left() - frame.left()
+                } else {
+                    label.right() - frame.right()
+                };
+                assert_eq!(side, 0.0, "{corner:?} {boxed:?}");
+                let meet = if corner.top() {
+                    frame.top() - label.bottom()
+                } else {
+                    label.top() - frame.bottom()
+                };
+                assert_eq!(meet, 1.0, "{corner:?} {boxed:?}");
+            }
+        }
     }
 
     #[test]
