@@ -143,6 +143,43 @@ mod tests {
     }
 
     #[test]
+    fn stops_at_the_least_scale_however_it_is_made_smaller() {
+        let mut config = Config::default();
+        config.gui.scale = 0.6;
+        let mut screen = Screen::new(config, [1280.0, 900.0], false);
+        let scale = |screen: &Screen| {
+            (screen.harness.state().config.gui.scale, screen.harness.ctx.zoom_factor())
+        };
+        for _ in 0..3 {
+            screen.command(Key::Minus);
+            screen.frames(2);
+            assert_eq!(scale(&screen), (0.5, 0.5));
+        }
+        // as by egui's own keys, were they to set it
+        screen.harness.ctx.set_zoom_factor(0.2);
+        screen.frames(3);
+        assert_eq!(scale(&screen), (0.5, 0.5));
+    }
+
+    #[test]
+    fn starts_at_the_least_scale_from_a_config_below_it_leaving_the_file_be() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let text = "[gui]\nscale = 0.2\n";
+        std::fs::write(&path, text).unwrap();
+        let config = Config::load(&path).unwrap();
+        let mut harness =
+            egui_kittest::Harness::builder().with_size([1280.0, 900.0]).build_eframe(move |_| {
+                let presets = tgradish_core::presets::Presets::builtin();
+                crate::app::App::with(config.clone(), Some(path.clone()), presets)
+            });
+        harness.run_steps(4);
+        assert_eq!(harness.ctx.zoom_factor(), 0.5);
+        let path = dir.path().join("config.toml");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
     fn says_the_pointer_again_at_the_scale_egui_reads_it_at() {
         use eframe::egui::{Context, Event, Modifiers, PointerButton, RawInput};
         let ctx = Context::default();

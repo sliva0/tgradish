@@ -1484,13 +1484,18 @@ mod tests {
         // to the least, then − can't be clicked, and nothing else is: the
         // pointer on it still
         let smaller = fl!("scale-smaller");
-        let mut screen = on_the_scale(0.4, [1280.0, 900.0], &smaller);
-        for scale in [0.3, 0.2, 0.2, 0.2] {
+        let mut screen = on_the_scale(0.7, [1280.0, 900.0], &smaller);
+        for scale in [0.6, 0.5, 0.5, 0.5] {
             screen.click();
             screen.frames(4);
             assert_eq!(screen.harness.state().config.gui.scale, scale);
             assert!(screen.on(&smaller), "at {scale}");
         }
+        let disabled = |screen: &crate::testing::Screen, label: &str| {
+            screen.harness.get_by_label(label).accesskit_node().is_disabled()
+        };
+        assert_eq!(screen.harness.ctx.zoom_factor(), 0.5);
+        assert!(disabled(&screen, &smaller) && !disabled(&screen, &fl!("scale-larger")));
         // and to the most, where + can't be either, on a screen large
         // enough for the dialog then
         let larger = fl!("scale-larger");

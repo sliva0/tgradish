@@ -437,11 +437,15 @@ impl App {
             None => self.scaling.set(ctx, set),
             // what was asked, now applied
             Some(shown) if alike(zoom, shown) => return,
-            // by the keys, Settings open or not
+            // by the keys, Settings open or not; or by egui, were it to
+            // zoom past the scales the setting has
             Some(_) => {
-                let scale = crate::config::rounded_scale(f64::from(zoom));
+                let scale = crate::config::within_scales(f64::from(zoom));
                 self.save_setting(|gui| gui.scale = scale);
-                self.scale_shown = Some(zoom);
+                if !alike(zoom, scale as f32) {
+                    self.scaling.set(ctx, scale as f32);
+                }
+                self.scale_shown = Some(scale as f32);
                 return;
             }
         }

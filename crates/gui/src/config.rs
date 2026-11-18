@@ -114,7 +114,8 @@ pub(crate) struct GuiConfig {
     /// The colour that marks what is chosen, hovered and focused.
     pub(crate) accent: Accent,
     /// How large everything is drawn, 1 as the system has it: as
-    /// Ctrl++ (or Ctrl+=) and Ctrl+- change it, from [`SCALES`]'s start to its end.
+    /// Ctrl++ (or Ctrl+=) and Ctrl+- change it, from [`SCALES`]'s start to
+    /// its end; a value out of it is read as its nearer end.
     pub(crate) scale: f64,
     /// Start with the files open when the GUI last closed.
     pub(crate) reopen_files: bool,
@@ -160,8 +161,15 @@ const KEYS: [&str; 11] = [
 /// where `motion` is missing.
 const OLD_MOTION: &str = "smooth-scrolling";
 
-/// The scales the GUI may have, as egui's keys for zooming allow.
-pub(crate) const SCALES: std::ops::RangeInclusive<f64> = 0.2..=5.0;
+/// The scales the GUI may have, on top of the system's: up to the most
+/// egui's keys for zooming allow, and down to half, below which the list
+/// is too narrow to use and the icon over it has no room.
+pub(crate) const SCALES: std::ops::RangeInclusive<f64> = 0.5..=5.0;
+
+/// `scale` within [`SCALES`], to the hundredth.
+pub(crate) fn within_scales(scale: f64) -> f64 {
+    rounded_scale(scale.clamp(*SCALES.start(), *SCALES.end()))
+}
 
 /// `scale` a step of a tenth larger, or `by` steps, within [`SCALES`], as
 /// egui's keys step it.
@@ -197,9 +205,10 @@ impl GuiConfig {
             language: get(table, "language"),
             theme: get(table, "theme").unwrap_or(default.theme),
             accent: get(table, "accent").unwrap_or(default.accent),
+            // out of range, its nearer end
             scale: get::<f64>(table, "scale")
-                .filter(|scale| SCALES.contains(scale))
-                .map_or(default.scale, rounded_scale),
+                .filter(|scale| scale.is_finite())
+                .map_or(default.scale, within_scales),
             reopen_files: get(table, "reopen-files").unwrap_or(default.reopen_files),
             timeline_frames: get(table, "timeline-frames").unwrap_or(default.timeline_frames),
             result_preview: match table.get("result-preview") {
@@ -439,8 +448,12 @@ mod tests {
     fn reads_and_writes_the_scale_as_it_is_stepped() {
         let scale = |value: &str| read(&format!("[gui]\nscale = {value}\n")).scale;
         assert_eq!(scale("1.25"), 1.25);
-        // out of egui's range, or no number: 100%
-        for unread in ["0.1", "9.0", "'big'", "nan"] {
+        // out of the range: its nearer end
+        for (value, read) in [("0.2", 0.5), ("0.1", 0.5), ("0", 0.5), ("-2", 0.5), ("9.0", 5.0)] {
+            assert_eq!(scale(value), read, "{value}");
+        }
+        // no number: 100%
+        for unread in ["'big'", "nan", "inf"] {
             assert_eq!(scale(unread), 1.0, "{unread}");
         }
         // egui's steps as an f32 are written as they read
@@ -450,7 +463,27 @@ mod tests {
         assert_eq!(written["scale"].as_float(), Some(1.1));
         // stepped as egui's keys step it, within its range
         assert_eq!((scale_step(1.0, 1), scale_step(1.1, -1), scale_step(1.25, 1)), (1.1, 1.0, 1.4));
-        assert_eq!((scale_step(5.0, 1), scale_step(0.2, -1)), (5.0, 0.2));
+        assert_eq!((scale_step(5.0, 1), scale_step(0.5, -1), scale_step(0.6, -1)), (5.0, 0.5, 0.5));
+    }
+
+    #[test]
+    fn reads_a_scale_below_the_least_as_the_least_and_leaves_it_be() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[gui]\nscale = 0.2\n").unwrap();
+        let mut config = Config::load(&path).unwrap();
+        assert_eq!(config.gui.scale, 0.5);
+        // saved for another setting, the value stays as it was written
+        config.gui.timeline_frames = true;
+        config.save(&path).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("scale = 0.2") && saved.contains("timeline-frames"), "{saved}");
+        assert_eq!(Config::load(&path).unwrap().gui.scale, 0.5);
+        // until the scale itself changes
+        config.gui.scale = 0.6;
+        config.save(&path).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("scale = 0.6") && !saved.contains("0.2"), "{saved}");
     }
 
     #[test]

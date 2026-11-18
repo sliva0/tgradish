@@ -170,4 +170,42 @@ mod tests {
             assert!(f64::from(icon.max.x) <= first.x0, "{ppp}: {icon:?} {first:?}");
         }
     }
+
+    #[test]
+    fn shows_the_icon_over_the_list_at_the_least_scale() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.png");
+        crate::testing::square(&path, [255, 0, 0, 255]);
+        let least = *crate::config::SCALES.start();
+        for ppp in [1.0, 1.25, 1.5, 2.0] {
+            let mut config = crate::config::Config::default();
+            config.gui.scale = least;
+            // the window's size in the system's points, as the scale changes
+            let size = vec2(1280.0, 820.0);
+            let mut harness = egui_kittest::Harness::builder()
+                .with_size(size)
+                .with_pixels_per_point(ppp)
+                .build_eframe(move |cc| {
+                    let presets = tgradish_core::presets::Presets::builtin();
+                    let app = crate::app::App::with(config.clone(), None, presets);
+                    app.style(&cc.egui_ctx);
+                    app
+                });
+            let settle = |harness: &mut egui_kittest::Harness<'_, crate::app::App>| {
+                for _ in 0..4 {
+                    let zoom = harness.ctx.zoom_factor();
+                    harness.set_size(size / zoom);
+                    harness.step();
+                }
+            };
+            settle(&mut harness);
+            harness.state_mut().add(vec![path.clone()]);
+            crate::testing::finish(&mut harness);
+            settle(&mut harness);
+            assert_eq!(harness.ctx.zoom_factor(), least as f32);
+            let icon = drawn(&harness).unwrap_or_else(|| panic!("no icon at {ppp}"));
+            let pixels = icon.width() * harness.ctx.pixels_per_point();
+            assert!(pixels >= 48.0 - 1e-3, "{ppp}: {icon:?}");
+        }
+    }
 }

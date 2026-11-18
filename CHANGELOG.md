@@ -6,6 +6,12 @@ What changed in each release of tgradish, newest first. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The GUI's scale goes down to 50% rather than 20%, where the list and its
+  icon still fit; a `scale` in the config file outside 0.5 to 5 is read as
+  the nearer end rather than as 1.
+
 ### Fixed
 
 - The GUI's number fields of whole numbers, as the crop's pixels, no longer
