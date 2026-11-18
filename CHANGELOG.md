@@ -38,6 +38,7 @@ What changed in each release of tgradish, newest first. The format follows
   by one that is gone.
 - Escape in a GUI number field left as it was closes the dialog it is in
   at once; only a field with something to put back keeps the first one.
+- The GUI shows its icon and name over the list at a scale below 1 too.
 
 ## [2.1.0] - 2026-11-18
 

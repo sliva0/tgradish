@@ -184,7 +184,8 @@ impl App {
             }
             // the icon and name, where the buttons leave room for them, the
             // space after the last already left out; the icon smaller where
-            // it must be, down to a screen pixel for each of its own
+            // it must be, down to a screen pixel for each of its own; below
+            // a scale of 1 that is more than its room, as tall as the header
             let title = egui::WidgetText::from(RichText::new("tgradish").heading().strong());
             let galley = title.into_galley(
                 ui,
@@ -194,9 +195,9 @@ impl App {
             );
             let gap = ui.spacing().item_spacing.x;
             let room = ui.available_width();
-            if let Some(shown) = icon::fitting(ui.ctx(), room.min(ICON_ROOM)) {
+            if let Some(shown) = icon::fitting(ui.ctx(), room.min(icon_side)) {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    icon::show(ui, room.min(ICON_ROOM));
+                    icon::show(ui, room.min(icon_side));
                     if shown + gap + galley.size().x <= room {
                         ui.label(galley);
                     }

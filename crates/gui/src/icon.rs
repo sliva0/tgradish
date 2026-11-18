@@ -143,7 +143,7 @@ mod tests {
     fn shows_the_icon_over_the_list_at_the_smallest_size() {
         use egui_kittest::kittest::{NodeT, Queryable};
         // at whole scales and fractional ones
-        for ppp in [1.0, 1.25, 1.5, 2.0] {
+        for ppp in [0.75, 0.9, 1.0, 1.25, 1.5, 2.0] {
             let mut harness = egui_kittest::Harness::builder()
                 .with_size([crate::MIN_WIDTH, crate::MIN_HEIGHT])
                 .with_pixels_per_point(ppp)
