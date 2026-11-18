@@ -24,6 +24,9 @@ What changed in each release of tgradish, newest first. The format follows
   picture when Delete or Ctrl+Z shows another file halfway through it.
 - The GUI's preview says a hair under twice as large as 2×, as it says
   twice, rather than as 200%.
+- A file put back after it was removed names a preset renamed meanwhile
+  by its new name, as do the steps Ctrl+Z goes back through, rather than
+  by one that is gone.
 
 ## [2.1.0] - 2026-11-18
 

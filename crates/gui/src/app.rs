@@ -879,7 +879,7 @@ pub(crate) struct Removed {
 }
 
 impl Removed {
-    fn items_mut(&mut self) -> impl Iterator<Item = &mut Item> {
+    pub(crate) fn items_mut(&mut self) -> impl Iterator<Item = &mut Item> {
         self.batches.iter_mut().flatten().map(|(_, item)| item)
     }
 }

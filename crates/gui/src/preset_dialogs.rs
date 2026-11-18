@@ -554,6 +554,16 @@ impl App {
                 item.history.rename_preset(from, to);
             }
         }
+        // those removed a moment ago too, as they may be put back; one
+        // deleted they go on naming, as the steps back do
+        if let Some(to) = to {
+            for item in self.removed.iter_mut().flat_map(crate::app::Removed::items_mut) {
+                if item.choices.preset.as_deref() == Some(from) {
+                    item.choices.preset = Some(to.to_owned());
+                }
+                item.history.rename_preset(from, to);
+            }
+        }
         let names = |name: &Option<String>| name.as_deref() == Some(from);
         if names(&self.config.preset) || names(&self.config.tgs_preset) {
             self.save_config_setting(|config| {
@@ -759,6 +769,53 @@ mod tests {
         state.change_preset(&presets_dir, &mut managing, Change::Rename(0));
         assert!(managing.rows[0].problem.is_some());
         assert_eq!(state.presets.webm("fast").unwrap().crf, None);
+    }
+
+    #[test]
+    fn renames_a_preset_in_files_removed_a_moment_ago_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let presets_dir = dir.path().join("presets");
+        let webm = Options { crf: Some(20), fit: Some(Fit::Crf), ..Options::default() };
+        presets::save(&presets_dir, "mine", "", (&webm, &tgs::Options::default()), false).unwrap();
+        let arts = ["first.png", "second.png"].map(|name| dir.path().join(name));
+        arts.iter().for_each(|art| square(art, [255, 0, 0, 255]));
+        let mut harness = harness(Config::default());
+        let state = harness.state_mut();
+        state.presets_dir = Some(presets_dir.clone());
+        state.presets = Presets::load(Some(&presets_dir)).unwrap();
+        state.add(arts.to_vec());
+        finish(&mut harness);
+        for item in &mut harness.state_mut().items {
+            item.choices.preset = Some("mine".into());
+        }
+        harness.run_steps(2);
+        // the second, with a step back that names it too, removed
+        let removed = harness.state().items[1].id;
+        harness.state_mut().select(removed);
+        finish(&mut harness);
+        harness.get_by_label(&fl!("target-emoji")).click();
+        harness.run_steps(3);
+        assert!(harness.state().item(removed).unwrap().history.can_undo());
+        harness.state_mut().remove(removed);
+        harness.run_steps(2);
+        harness.get_by_label(&fl!("manage-presets")).click();
+        harness.run_steps(2);
+        let state = harness.state_mut();
+        let Some(Dialog::Manage(mut managing)) = state.preset_dialog.take() else { panic!() };
+        managing.rows[0].typed_name = "yours".into();
+        state.change_preset(&presets_dir, &mut managing, Change::Rename(0));
+        assert_eq!(state.items[0].choices.preset.as_deref(), Some("yours"));
+        // put back, it names the preset as it is called now, and so does
+        // each step back
+        state.undo_removing();
+        let item = state.item(removed).unwrap();
+        assert_eq!(item.choices.preset.as_deref(), Some("yours"));
+        let id = item.id;
+        harness.state_mut().select(id);
+        harness.run_steps(2);
+        let item = harness.state_mut().item_mut(id).unwrap();
+        while crate::history::step(item, true) {}
+        assert_eq!(item.choices.preset.as_deref(), Some("yours"));
     }
 
     #[cfg(unix)]
