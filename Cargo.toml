@@ -7,7 +7,7 @@ exclude = ["crates/tgs-lab"]
 # the application's version, which core, the GUI and the command line
 # share; the library, tgradish-tgs, has its own
 [workspace.package]
-version = "2.1.0"
+version = "2.1.1"
 edition = "2024"
 # the oldest Rust that builds every crate: `if let` guards in matches need
 # it, as does the GUI's egui
@@ -20,11 +20,11 @@ repository = "https://github.com/sliva0/tgradish"
 # released together, and `cargo install` resolves afresh rather than read
 # Cargo.lock, so a looser requirement could pair crates never built as one.
 [workspace.dependencies]
-tgradish-core = { path = "crates/core", version = "=2.1.0" }
+tgradish-core = { path = "crates/core", version = "=2.1.1" }
 # synthetic test art, the crates' dev-dependency: unpublished, so without
 # a version, which leaves it out of the packages cargo publishes
 tgradish-corpus = { path = "crates/corpus" }
-tgradish-gui = { path = "crates/gui", version = "=2.1.0" }
+tgradish-gui = { path = "crates/gui", version = "=2.1.1" }
 tgradish-tgs = { path = "crates/tgs", version = "=0.2.0" }
 
 anyhow = "1.0.104"

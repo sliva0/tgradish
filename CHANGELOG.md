@@ -6,6 +6,8 @@ What changed in each release of tgradish, newest first. The format follows
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-11-18
+
 ### Changed
 
 - The GUI's scale goes down to 50% rather than 20%, where the list and its
@@ -14,44 +16,35 @@ What changed in each release of tgradish, newest first. The format follows
 
 ### Fixed
 
-- The GUI's number fields of whole numbers, as the crop's pixels, no longer
-  show a decimal, as "235.0 px", at a scale below 1.
-- The GUI's bar of an encode that comes out too large keeps its height,
-  rather than at times losing a line and moving what is under it.
-- The GUI's integer scale, its field emptied, keeps its scale rather than
-  going to ×1/2.
-- The GUI's number fields take numbers typed with spaces between their
-  thousands, as "1 200", again.
-- Ctrl and the arrows no longer push the GUI's crop back from the
-  picture's edge while it keeps a shape: it stops growing there instead.
-- A corner of the GUI's crop dragged while it keeps a shape no longer
-  pushes the opposite corner along at the picture's edge, and a crop drawn
-  with a shape starts where the press began.
-- The GUI's crop shows the ring of the keyboard's focus as Tab or
-  Shift+Tab brings the focus to it, not only once the arrows move it.
 - The GUI no longer crashes showing a picture wider or taller than the
-  graphics card takes, as a long strip of sprites or a large panorama
-  paused at its full size: the preview shows it scaled down to fit, and
-  converting still reads all of it.
-- Ctrl and the arrows make the GUI's crop larger again where an integer
-  scale such as ½ holds it to whole blocks, a block at a time.
+  graphics card takes, as a long strip of sprites or a large panorama: the
+  preview shows it scaled down to fit, and converting still reads all of
+  it.
 - A drag on the GUI's preview no longer goes on to crop another file's
   picture when Delete or Ctrl+Z shows another file halfway through it.
-- The GUI's preview says a hair under twice as large as 2×, as it says
-  twice, rather than as 200%.
-- A file put back after it was removed names a preset renamed meanwhile
-  by its new name, as do the steps Ctrl+Z goes back through, rather than
-  by one that is gone.
+- The GUI's crop, while it keeps a shape, stops at the picture's edge
+  rather than being pushed back from it by Ctrl and the arrows or by a
+  dragged corner, and one drawn starts where the press began.
+- Ctrl and the arrows make the GUI's crop larger again where an integer
+  scale such as ½ holds it to whole blocks, a block at a time.
+- The GUI's crop shows the ring of the keyboard's focus as Tab or
+  Shift+Tab brings the focus to it, not only once the arrows move it.
+- The GUI's number fields of whole numbers no longer show a decimal, as
+  "235.0 px", at a scale below 1, take numbers typed with spaces between
+  their thousands, as "1 200", again, and the integer scale's, emptied,
+  keeps its scale.
 - Escape in a GUI number field left as it was closes the dialog it is in
   at once; only a field with something to put back keeps the first one.
+- The GUI shows its icon and name over the list at a scale below 1 too,
+  and its buttons there are level with those over the preview at a scale
+  such as 125% or 150%.
 - The GUI's settings no longer go blank under the preview while the file
-  list's edge is dragged with them scrolled to their end: they reflow at
-  once, rather than once the button is let go of.
-- The GUI shows its icon and name over the list at a scale below 1 too.
-- The GUI's buttons over the list are level with those over the preview at
-  a scale such as 125% or 150% too.
-- The GUI's bar of fitting a `.tgs` keeps saying what its first try came
-  to while fitting tries again, rather than counting the later steps in.
+  list's edge is dragged with them scrolled to their end.
+- The GUI's bar of an encode that comes out too large keeps its height,
+  and that of fitting a `.tgs` keeps saying what its first try came to
+  while fitting tries again.
+- A file put back after it was removed names a preset renamed meanwhile
+  by its new name, as do the steps Ctrl+Z goes back through.
 
 ## [2.1.0] - 2026-11-18
 
@@ -147,6 +140,7 @@ that makes every kind of Telegram sticker and emoji.
 The last release of the Python tgradish, which converted videos to video
 stickers with ffmpeg and spoofed their duration.
 
-[Unreleased]: https://github.com/sliva0/tgradish/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/sliva0/tgradish/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/sliva0/tgradish/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/sliva0/tgradish/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/sliva0/tgradish/compare/11d7f0d...v2.0.0

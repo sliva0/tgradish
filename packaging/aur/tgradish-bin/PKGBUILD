@@ -2,7 +2,7 @@
 
 pkgname=tgradish-bin
 _pkgname=tgradish
-pkgver=2.1.0
+pkgver=2.1.1
 pkgrel=1
 pkgdesc='Telegram stickers and emoji from videos, images or pixel art'
 arch=(x86_64 aarch64)
