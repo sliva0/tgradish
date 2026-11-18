@@ -112,7 +112,7 @@ fn tried_bar(ui: &mut egui::Ui, tried: Tried, text: &str, widest: &str) {
         }
         // too large is how fitting goes on, not a failure: a plain bar,
         // only its size and verdict a warning
-        Tried::TooLarge { from } => widgets::bar_spent(ui, text, from),
+        Tried::TooLarge { from } => widgets::bar_spent(ui, text, widest, from),
     }
     ui.add_space(2.0);
 }
@@ -705,6 +705,35 @@ mod tests {
             }
             // an encode done, too large, as tall as it was at work
             assert_eq!(heights[2], heights[3], "{width}");
+        }
+    }
+
+    #[test]
+    fn keeps_an_encodes_height_as_it_comes_out_too_large_by_fewer_digits() {
+        crate::l10n::english();
+        // too large by fewer digits than the most it may say, 76.3%, at
+        // the widths of the column beside the preview, from its narrowest
+        let webm = |done: bool| Progress {
+            webm: Some(plan(4)),
+            attempts: vec![encode(1, done.then_some(200_000))],
+            fraction: Some(0.5),
+            ..Progress::default()
+        };
+        for width in (216..=288).step_by(2) {
+            let height = |progress: Progress| {
+                let mut job = Job::waiting("clip.webm".into());
+                job.status = Status::Running;
+                job.progress = progress;
+                let mut harness =
+                    egui_kittest::Harness::builder().with_size([400.0, 600.0]).build_ui(|ui| {
+                        ui.set_max_width(width as f32);
+                        progress_column(ui, &job, None);
+                    });
+                widgets::test_fonts(&harness);
+                harness.run_steps(2);
+                harness.ctx.globally_used_rect().height()
+            };
+            assert_eq!(height(webm(false)), height(webm(true)), "{width}");
         }
     }
 

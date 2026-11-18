@@ -10,6 +10,8 @@ What changed in each release of tgradish, newest first. The format follows
 
 - The GUI's number fields of whole numbers, as the crop's pixels, no longer
   show a decimal, as "235.0 px", at a scale below 1.
+- The GUI's bar of an encode that comes out too large keeps its height,
+  rather than at times losing a line and moving what is under it.
 
 ## [2.1.0] - 2026-11-18
 

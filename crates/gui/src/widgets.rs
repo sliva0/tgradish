@@ -2687,11 +2687,12 @@ pub(crate) fn bar_sized(
 /// A full [`bar`] of a step done with, as an encode too large to keep: in
 /// a neutral shade rather than a colour, as it is an ordinary step, its
 /// `text` from byte `from` on, which says how it went, in the warning
-/// colour.
-pub(crate) fn bar_spent(ui: &mut egui::Ui, text: &str, from: usize) {
+/// colour; as tall as `widest` needs, as a [`steady_bar`] is, so that it
+/// keeps the height it had at work.
+pub(crate) fn bar_spent(ui: &mut egui::Ui, text: &str, widest: &str, from: usize) {
     let width = ui.available_width().min(380.0);
     let (fill, ending) = (theme::spent(ui.visuals()), theme::warn(ui.visuals()));
-    let size = egui::vec2(width, bar_height(ui, &[text], width));
+    let size = egui::vec2(width, bar_height(ui, &[text, widest], width));
     bar_drawn(ui, size, Fill::Share(1.0), text, fill, Some((from, ending)));
 }
 
