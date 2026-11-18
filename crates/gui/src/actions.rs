@@ -32,7 +32,7 @@ fn within<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R
 /// the window's bottom as the bar over the preview is from its top; the
 /// space egui leaves after a row is part of it.
 pub(crate) const BAR_ABOVE: f32 = 8.0;
-pub(crate) const BAR_BELOW: f32 = 6.0;
+pub(crate) const BAR_BELOW: f32 = 9.0;
 
 /// What to add after the bar's row for [`BAR_BELOW`] under it, past the
 /// space egui leaves after a row in `style`.

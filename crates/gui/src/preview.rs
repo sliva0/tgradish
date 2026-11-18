@@ -251,7 +251,8 @@ fn preview(
     item.view.framing = Some(framing);
     // the result chosen shows once it is read; the input meanwhile
     let shown = item.shown();
-    ui.add_space(6.0);
+    // level with the buttons of the header over the list beside it
+    ui.add_space(9.0);
     // the result's small picture's toggle, or under the bar where it
     // doesn't fit beside the rest; there while the result shows too,
     // greyed, so that nothing beside it moves as the two take turns

@@ -162,8 +162,11 @@ impl App {
     /// `add`, the theme's button and the menu of the rest: over the list,
     /// or over the whole GUI while it has no files.
     fn header(&mut self, ui: &mut egui::Ui, add: bool) {
-        // its buttons level with the bar over the preview beside it
-        ui.add_space(4.0);
+        // as far over the row as the line is under it, past the space egui
+        // leaves after the row and the line's half of its own; its buttons
+        // level with the bar over the preview beside it
+        let margin = egui::Frame::side_top_panel(ui.style()).inner_margin.top;
+        ui.add_space(under_header(ui.style()) - f32::from(margin));
         let icon_side = icon::side(ui.ctx(), ICON_ROOM);
         // as tall as the icon, with the buttons beside its middle
         let header = vec2(ui.available_width(), icon_side);
@@ -204,7 +207,6 @@ impl App {
                 });
             }
         });
-        ui.add_space(4.0);
     }
 
     /// A split button: `add` for Add files…, and after it `more`, the
@@ -439,8 +441,9 @@ impl App {
     /// passes is said in the zone's corner, where the list's would be,
     /// `list` wide.
     pub(crate) fn welcome(&mut self, ui: &mut egui::Ui, list: f32) {
+        // the zone's edge as far under the header's row as the list's line
         self.header(ui, false);
-        ui.add_space(4.0);
+        ui.add_space(SEPARATOR / 2.0);
         // as far from the bottom as from the sides, which the panel's own
         // margin is less than
         let mut zone = ui.available_rect_before_wrap();
@@ -516,6 +519,15 @@ impl App {
             }
         });
     }
+}
+
+/// The room egui's separator takes, its line in the middle.
+const SEPARATOR: f32 = 6.0;
+
+/// How far under the header's row the line under it is: the space egui
+/// leaves after the row, and the line's half of the separator's room.
+fn under_header(style: &egui::Style) -> f32 {
+    style.spacing.item_spacing.y + SEPARATOR / 2.0
 }
 
 /// Height of the drop zone's buttons, larger than others, as they are the
@@ -1472,6 +1484,62 @@ mod tests {
         let last = harness.state().items.last().unwrap().name();
         let under = list.bottom() - list_row(&harness, &last).rect().bottom();
         assert!((7.5..=8.5).contains(&under), "{under}");
+    }
+
+    #[test]
+    fn centres_the_headers_row_between_the_top_and_the_line_under_it() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.png");
+        square(&path, [255, 0, 0, 255]);
+        for ppp in [0.75, 0.9, 1.0, 1.25, 1.5, 2.0] {
+            let mut harness = egui_kittest::Harness::builder()
+                .with_size([1280.0, 820.0])
+                .with_pixels_per_point(ppp)
+                .build_eframe(|cc| {
+                    let app = App::with(Config::default(), None, tgradish_core::presets::Presets::builtin());
+                    app.style(&cc.egui_ctx);
+                    app
+                });
+            // the buttons' top and bottom, in points
+            let buttons = |harness: &egui_kittest::Harness<'_, App>| {
+                let name = fl!("main-menu");
+                let menu = harness.get_by_label(&name);
+                let rect = menu.accesskit_node().bounding_box().unwrap();
+                (rect.y0 as f32 / ppp, rect.y1 as f32 / ppp)
+            };
+            // without files, the drop zone's edge is the line
+            harness.run_steps(3);
+            let (top, bottom) = buttons(&harness);
+            let zone = harness.state().banner.corner.unwrap().top();
+            assert!(((zone - bottom) - top).abs() * ppp <= 1.0, "{ppp}: {top} {bottom} {zone}");
+            harness.state_mut().add(vec![path.clone()]);
+            finish(&mut harness);
+            harness.run_steps(3);
+            let (top, bottom) = buttons(&harness);
+            let line = harness
+                .output()
+                .shapes
+                .iter()
+                .find_map(|clipped| match clipped.shape {
+                    egui::Shape::LineSegment { points: [from, to], .. }
+                        if from.y == to.y && from.y > bottom && to.x - from.x > 100.0 =>
+                    {
+                        Some(from.y)
+                    }
+                    _ => None,
+                })
+                .expect("the line under the header");
+            assert!(((line - bottom) - top).abs() * ppp <= 1.0, "{ppp}: {top} {bottom} {line}");
+            // level with the bar over the preview where the icon is as tall
+            // as its room
+            if ppp == 1.0 || ppp == 2.0 {
+                let name = fl!("show-input");
+                let input = harness.get_by_label(&name);
+                let input = input.accesskit_node().bounding_box().unwrap().y0 as f32 / ppp;
+                assert!((input - top).abs() * ppp <= 1.0, "{ppp}: {top} {input}");
+            }
+        }
     }
 
     #[test]
