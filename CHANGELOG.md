@@ -16,6 +16,8 @@ What changed in each release of tgradish, newest first. The format follows
   going to ×1/2.
 - The GUI's number fields take numbers typed with spaces between their
   thousands, as "1 200", again.
+- Ctrl and the arrows no longer push the GUI's crop back from the
+  picture's edge while it keeps a shape: it stops growing there instead.
 
 ## [2.1.0] - 2026-11-18
 

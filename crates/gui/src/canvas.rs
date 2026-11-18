@@ -707,13 +707,18 @@ fn keyed(ui: &egui::Ui, crop: Crop, ratio: Option<f64>, size: (u32, u32)) -> Opt
     // no further than the picture, rather than moving it back in
     right = (right + by.x).min(size.0 as f32).max(left + 1.0);
     bottom = (bottom + by.y).min(size.1 as f32).max(top + 1.0);
-    // the shape kept from the side that moved
+    // the shape kept from the side that moved, and no further than the
+    // picture the other way either
     if let Some(ratio) = ratio.map(|r| r as f32) {
         if by.x != 0.0 {
             bottom = top + (right - left) / ratio;
         } else {
             right = left + (bottom - top) * ratio;
         }
+        let (width, height) = (right - left, bottom - top);
+        let room = ((size.0 as f32 - left) / width).min((size.1 as f32 - top) / height);
+        let shrink = room.min(1.0);
+        (right, bottom) = (left + width * shrink, top + height * shrink);
     }
     Some(settle([left, top, right, bottom], ratio, size))
 }
@@ -1306,6 +1311,16 @@ mod tests {
         size: (u32, u32),
         crop: Option<Crop>,
     ) -> (egui_kittest::Harness<'static, Cropped>, f32, Pos2) {
+        cropped_with(size, crop, None, None)
+    }
+
+    /// As [`cropped_of`], the crop keeping `ratio` and held to `exact`.
+    fn cropped_with(
+        size: (u32, u32),
+        crop: Option<Crop>,
+        ratio: Option<f64>,
+        exact: Option<Exact>,
+    ) -> (egui_kittest::Harness<'static, Cropped>, f32, Pos2) {
         let (width, height) = (size.0 as usize, size.1 as usize);
         let clip = Clip {
             id: 1,
@@ -1321,7 +1336,7 @@ mod tests {
                 move |ui, (screen, zoom, clip, crop, stage): &mut Cropped| {
                     *stage = ui.max_rect();
                     let picture = Picture { clip, frame: 0, size, square: false };
-                    let cropping = Cropping { crop, ratio: None, kept: None, exact: None };
+                    let cropping = Cropping { crop, ratio, kept: None, exact };
                     show(ui, screen, (*stage, *stage), &picture, zoom, Some(cropping));
                 },
                 state,
@@ -1330,6 +1345,33 @@ mod tests {
         harness.run_steps(2);
         let (shown, scale) = layout(harness.state().4, size, &harness.state().1);
         (harness, scale, shown.min)
+    }
+
+    /// Clicks inside the crop of `harness`, at `at`, which gives it the
+    /// keyboard's focus.
+    fn focus_crop(harness: &mut egui_kittest::Harness<'_, Cropped>, at: Pos2) {
+        harness.event(egui::Event::PointerMoved(at));
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+        }
+        harness.step();
+    }
+
+    /// The crop of `harness` once `key` is pressed with `modifiers`.
+    fn keyed_to(
+        harness: &mut egui_kittest::Harness<'_, Cropped>,
+        modifiers: egui::Modifiers,
+        key: egui::Key,
+    ) -> Crop {
+        harness.key_press_modifiers(modifiers, key);
+        harness.step();
+        harness.state().3.unwrap()
     }
 
     /// Presses the primary button at `from`, held with `modifiers`, and
@@ -1509,6 +1551,29 @@ mod tests {
         harness.step();
         assert_eq!(harness.ctx.memory(|memory| memory.focused()), None);
         assert_eq!(keyed(&mut harness, Modifiers::NONE, Key::ArrowLeft), lower);
+    }
+
+    #[test]
+    fn resizes_a_crop_keeping_its_shape_by_keys_only_as_far_as_the_picture_goes() {
+        use egui::{Key, Modifiers};
+        // square, on the picture's bottom edge: wider would be taller, past
+        // it, so it stays where it is, as large as it is
+        let crop = Crop { x: 8, y: 18, width: 30, height: 30 };
+        let (mut harness, scale, corner) = cropped_with((64, 48), Some(crop), Some(1.0), None);
+        focus_crop(&mut harness, corner + vec2(20.0, 30.0) * scale);
+        assert_eq!(keyed_to(&mut harness, Modifiers::COMMAND, Key::ArrowRight), crop);
+        assert_eq!(keyed_to(&mut harness, Modifiers::COMMAND, Key::ArrowDown), crop);
+        let smaller = Crop { width: 29, height: 29, ..crop };
+        assert_eq!(keyed_to(&mut harness, Modifiers::COMMAND, Key::ArrowLeft), smaller);
+        // and up to the picture's edge, from its top left corner
+        assert_eq!(keyed_to(&mut harness, Modifiers::COMMAND, Key::ArrowDown), crop);
+        // on its right edge, likewise
+        let crop = Crop { x: 34, y: 4, width: 30, height: 30 };
+        let (mut harness, scale, corner) = cropped_with((64, 48), Some(crop), Some(1.0), None);
+        focus_crop(&mut harness, corner + vec2(50.0, 20.0) * scale);
+        assert_eq!(keyed_to(&mut harness, Modifiers::COMMAND, Key::ArrowDown), crop);
+        let both = Modifiers::COMMAND | Modifiers::SHIFT;
+        assert_eq!(keyed_to(&mut harness, both, Key::ArrowDown), crop);
     }
 
     #[test]
