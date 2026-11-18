@@ -1497,7 +1497,11 @@ mod tests {
                 .with_size([1280.0, 820.0])
                 .with_pixels_per_point(ppp)
                 .build_eframe(|cc| {
-                    let app = App::with(Config::default(), None, tgradish_core::presets::Presets::builtin());
+                    let app = App::with(
+                        Config::default(),
+                        None,
+                        tgradish_core::presets::Presets::builtin(),
+                    );
                     app.style(&cc.egui_ctx);
                     app
                 });

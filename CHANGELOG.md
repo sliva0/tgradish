@@ -39,6 +39,8 @@ What changed in each release of tgradish, newest first. The format follows
 - Escape in a GUI number field left as it was closes the dialog it is in
   at once; only a field with something to put back keeps the first one.
 - The GUI shows its icon and name over the list at a scale below 1 too.
+- The GUI's bar of fitting a `.tgs` keeps saying what its first try came
+  to while fitting tries again, rather than counting the later steps in.
 
 ## [2.1.0] - 2026-11-18
 

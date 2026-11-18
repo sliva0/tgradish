@@ -228,10 +228,13 @@ fn running_colour(ui: &egui::Ui) -> Color32 {
 fn stages(progress: &jobs::Progress) -> Vec<(jobs::TgsStage, String)> {
     use jobs::TgsStage;
     let hopeless = progress.tgs_exact && progress.unchanged_bytes.is_some();
-    let fitting = match (progress.unchanged_bytes, progress.steps.last()) {
+    // the first try's, which tries again after it missed don't change
+    let first = progress.first_steps.unwrap_or(usize::MAX).min(progress.steps.len());
+    let steps = &progress.steps[..first];
+    let fitting = match (progress.unchanged_bytes, steps.last()) {
         _ if progress.tgs_exact => None,
         (_, Some(step)) => {
-            let (count, size) = (progress.steps.len(), widgets::kib(step.bytes as u64));
+            let (count, size) = (steps.len(), widgets::kib(step.bytes as u64));
             Some(fl!("stage-fitting-steps", count = count, size = size))
         }
         (Some(bytes), None) => Some(fl!("stage-fitting-from", size = widgets::kib(bytes as u64))),
@@ -871,6 +874,18 @@ mod tests {
         };
         // the first try's compressing, then each try again's bar
         let compressing = stages(&progress).pop().unwrap().1;
+        // its fitting as it ended, whatever the tries again take off
+        use tgradish_core::tgradish_tgs::{reduce::Reduction, sticker::Step};
+        let step = |bytes| Step::new(Reduction::Despeckle, bytes, 0.0);
+        let fitted = Progress {
+            unchanged_bytes: Some(200_000),
+            steps: vec![step(110_000), step(64_000), step(63_000)],
+            first_steps: Some(2),
+            ..progress.clone()
+        };
+        let fitting = stages(&fitted).into_iter().find(|(each, _)| *each == TgsStage::Fitting);
+        let size = widgets::kib(64_000);
+        assert_eq!(fitting.unwrap().1, fl!("stage-fitting-steps", count = 2, size = size));
         assert_eq!(compressing, fl!("stage-compressing", "missed", size = widgets::kib(66_000)));
         let aim = widgets::kib(62_000);
         let (second, widest) = retry_texts(0, 62_000, progress.missed.get(1).copied());

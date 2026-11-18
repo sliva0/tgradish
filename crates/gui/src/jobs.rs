@@ -100,6 +100,9 @@ pub(crate) struct Progress {
     /// For `.tgs`: the estimate each try again after a miss aimed at, in
     /// bytes, the second try first.
     pub(crate) retries: Vec<u64>,
+    /// For `.tgs`: how many of the steps the first try took, once it
+    /// missed; tries again add theirs after them.
+    pub(crate) first_steps: Option<usize>,
 }
 
 impl Progress {
@@ -635,6 +638,7 @@ fn follow(event: Event, update: Update) {
             }
         })),
         Event::Missed { bytes, aim } => update(Box::new(move |progress| {
+            progress.first_steps.get_or_insert(progress.steps.len());
             progress.missed.push(bytes);
             progress.retries.push(aim);
             at_stage(progress, TgsStage::Compressing);
@@ -702,6 +706,8 @@ mod tests {
         let missed = followed(missed, Event::Reduced { step: step(60_000) });
         let missed = followed(missed, Event::Packing);
         assert_eq!((missed.tgs, missed.stage_done), (Some(TgsStage::Compressing), 0.3));
+        // the first try's steps, without those of the tries again
+        assert_eq!((missed.steps.len(), missed.first_steps), (1, Some(0)));
         // and again, too large to be worth compressing
         let again = followed(missed, Event::Missed { bytes: None, aim: 57_000 });
         assert_eq!((again.missed.len(), again.retries.len(), again.stage_done), (2, 2, 0.0));
