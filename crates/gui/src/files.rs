@@ -168,8 +168,10 @@ impl App {
         let margin = egui::Frame::side_top_panel(ui.style()).inner_margin.top;
         ui.add_space(under_header(ui.style()) - f32::from(margin));
         let icon_side = icon::side(ui.ctx(), ICON_ROOM);
-        // as tall as the icon, with the buttons beside its middle
-        let header = vec2(ui.available_width(), icon_side);
+        // as tall as the icon's room, or as the icon where it takes more,
+        // with the buttons beside its middle: a fractional scale's icon
+        // is smaller, by whole screen pixels, and the buttons stay level
+        let header = vec2(ui.available_width(), icon_side.max(ICON_ROOM));
         let layout = egui::Layout::right_to_left(egui::Align::Center);
         ui.allocate_ui_with_layout(header, layout, |ui| {
             let menu = ui.menu_button("⚙", |ui| self.main_menu(ui)).response;
@@ -1535,9 +1537,9 @@ mod tests {
                 })
                 .expect("the line under the header");
             assert!(((line - bottom) - top).abs() * ppp <= 1.0, "{ppp}: {top} {bottom} {line}");
-            // level with the bar over the preview where the icon is as tall
-            // as its room
-            if ppp == 1.0 || ppp == 2.0 {
+            // level with the bar over the preview where the icon fits in its
+            // room
+            if ppp >= 1.0 {
                 let name = fl!("show-input");
                 let input = harness.get_by_label(&name);
                 let input = input.accesskit_node().bounding_box().unwrap().y0 as f32 / ppp;
