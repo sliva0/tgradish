@@ -553,9 +553,9 @@ struct Printer {
     /// For `.tgs`: the art is kept exactly as it is, so a sticker too
     /// large isn't fitted.
     exact: bool,
-    /// For `.tgs`: the size unchanged, to show how much fitting has taken
-    /// off.
-    unchanged: Option<u64>,
+    /// For `.tgs`: how much of making it is done, from 0 to 1, which
+    /// each stage's bar starts from.
+    done: f64,
 }
 
 impl Printer {
@@ -566,16 +566,19 @@ impl Printer {
             bar: Bar::default(),
             limit: tgradish_core::telegram::MAX_STICKER_BYTES,
             exact,
-            unchanged: None,
+            done: 0.0,
         }
     }
 
-    fn spinner(&mut self, verb: &str, message: String) {
+    /// A bar of how much of making a `.tgs` is done, saying the stage it
+    /// is at.
+    fn tgs_bar(&mut self, verb: &str, message: &str) {
         if self.quiet {
             return;
         }
-        let bar = progress_bar(verb, None);
-        bar.set_message(message);
+        let bar = progress_bar(verb, Some(1000));
+        bar.set_message(message.to_owned());
+        bar.set_position((self.done * 1000.0) as u64);
         self.bar.show(bar);
     }
 
@@ -630,13 +633,11 @@ impl Printer {
                 ));
             }
             Event::TooLarge { bytes } if !self.quiet => {
-                self.unchanged = Some(bytes);
                 self.bar.line(ui::status(
                     "Fitting",
                     format!("about {} as it is, too large", ui::size_within(bytes, self.limit)),
                 ));
-                term::progress(Some(0.3));
-                self.spinner("Fitting", "into 64 KiB".into());
+                self.tgs_bar("Fitting", "into 64 KiB");
             }
             Event::Reduced { step } if !self.quiet => {
                 self.bar.line(ui::status(
@@ -647,17 +648,18 @@ impl Printer {
                         ui::kib(step.bytes as u64)
                     ),
                 ));
-                // how much of the excess is gone, on a log scale
-                if let Some(unchanged) = self.unchanged {
-                    let (unchanged, now) = (unchanged as f64, step.bytes as f64);
-                    let target = self.limit as f64;
-                    let gone = ((unchanged / now).ln() / (unchanged / target).ln()).clamp(0.0, 1.0);
-                    term::progress(Some(0.3 + 0.5 * gone));
-                }
             }
-            Event::Packing => {
-                term::progress(Some(0.85));
-                self.spinner("Compressing", "with zopfli".into());
+            Event::Packing => self.tgs_bar("Compressing", "with zopfli"),
+            Event::Advanced { fraction, .. } => {
+                if let Some(bar) = &self.bar.0 {
+                    bar.set_position((fraction * 1000.0) as u64);
+                }
+                // the terminal's progress is in whole percent
+                let percent = |fraction: f64| (fraction * 100.0).round();
+                if percent(fraction) != percent(self.done) {
+                    term::progress(Some(fraction));
+                }
+                self.done = fraction;
             }
             Event::Warning { message } => {
                 self.bar.line(format!("{} {message}", ui::warning_label()));
@@ -717,8 +719,8 @@ impl Printer {
                         likely.scale
                     ));
                 }
-                term::progress(Some(0.1));
-                self.spinner("Converting", "to vector".into());
+                self.done = 0.0;
+                self.tgs_bar("Converting", "to vector");
             }
             _ => {}
         }

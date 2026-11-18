@@ -8,7 +8,7 @@ use crate::frames::Animation;
 use serde::{Deserialize, Serialize};
 
 use crate::check::{self, Issue, Severity};
-use crate::encode::{Effort, Settings, painter};
+use crate::encode::{Effort, Settings, paint};
 use crate::layout::{self, lay_out};
 use crate::limits::{MAX_RAW_JSON, telegram};
 use crate::lottie::Style;
@@ -18,8 +18,10 @@ use crate::scene::Scene;
 use crate::{Result, file, mark};
 
 mod fit;
+mod tracker;
 
 use fit::{Fitting, Quick, RETARGET, ZOPFLI_BEST, ZOPFLI_SHARE, fit, likely_scale, quick};
+use tracker::{Part, Tracker};
 
 /// What to do when the lossless result is too large.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -128,6 +130,21 @@ pub enum Progress {
     },
     /// The result is being packed, the longest step at best effort.
     Packing,
+    /// How far making the sticker got, estimated: each part of the work
+    /// has a share of the whole measured as about the time it takes, and
+    /// moves through it as it goes, by colours drawn, orders tried,
+    /// rounds of reductions, or the time packing takes against how long
+    /// it usually does. Said often, never less than before; 1 once done.
+    Advanced {
+        /// Of all of it, from 0 to 1.
+        fraction: f64,
+        /// Of the stage at work, from 0 to 1: since the art was read
+        /// ([`Progress::Normalised`]), fitting started (after
+        /// [`Progress::TooLarge`], unless the art is kept exactly as it
+        /// is, or the first [`Progress::Reduced`] after the result missed)
+        /// or packing did ([`Progress::Packing`]).
+        stage_fraction: f64,
+    },
 }
 
 /// A finished sticker, and what went into it.
@@ -191,12 +208,13 @@ struct Rendered {
     packed: Vec<u8>,
 }
 
-/// Encodes and lays out `anim`.
+/// Encodes and lays out `anim`, telling `done` how much of it is done.
 fn render(
     anim: &PixelAnim,
     settings: &Settings,
     options: &Options,
     cancelled: Cancelled,
+    done: &dyn Fn(f64),
 ) -> Result<Rendered> {
     let json = |scene: &Scene| {
         let stretch = options.normalise.square == normalise::Square::Stretch;
@@ -226,7 +244,7 @@ fn render(
         }
         size
     };
-    let scene = painter(anim, settings, Some(&score), cancelled)?;
+    let scene = paint(anim, settings, Some(&score), cancelled, done)?;
     match smallest.into_inner() {
         Some(known) if known.scene == scene => Ok(known),
         _ => {
@@ -279,19 +297,9 @@ pub fn make(
     cancelled: Cancelled,
 ) -> Result<Sticker> {
     let check = || if cancelled() { Err(crate::Error::Cancelled) } else { Ok(()) };
-    // the lossless size is said once, by whichever finds it too large first
-    let mut said_too_large = false;
-    let progress = &mut |event: Progress| {
-        if matches!(event, Progress::TooLarge { .. }) {
-            if said_too_large {
-                return;
-            }
-            said_too_large = true;
-        }
-        progress(event);
-    };
+    let tracker = Tracker::new(progress, options.fit == Fit::Auto);
     let (original, report) = normalise(animation, &options.normalise)?;
-    progress(Progress::Normalised { report: Box::new(report.clone()) });
+    tracker.say(Progress::Normalised { report: Box::new(report.clone()) });
     let settings = Settings { effort: options.effort, ..Settings::default() };
 
     // what scales quick estimates to the real encoder's sizes, measured
@@ -317,8 +325,9 @@ pub fn make(
             let fitting = Fitting { target, likely, settings: &settings, options, cancelled };
             let known = current_quick.take();
             (current, reached) =
-                fit(&original, current, known, &mut steps, &mut calibration, &fitting, progress)?;
+                fit(&original, current, known, &mut steps, &mut calibration, &fitting, &tracker)?;
         }
+        tracker.fitted();
         check()?;
         // fitting may end on the art it calibrated on, already made by the
         // real encoder and zopfli
@@ -330,10 +339,12 @@ pub fn make(
         let Rendered { scene, json, packed: quick_packed } = match real {
             Some(real) => &real.rendered,
             None => {
-                rendered = render(&current, &settings, options, cancelled)?;
+                let done = tracker.hook(Part::Rendering, 0.0, 1.0);
+                rendered = render(&current, &settings, options, cancelled, &done)?;
                 &rendered
             }
         };
+        tracker.at(Part::Rendering, 1.0);
         // packing it as small as it goes is worth zopfli's time only when
         // that can fit
         let hopeless = !within_limits(scene, json)
@@ -350,30 +361,35 @@ pub fn make(
             // fitting starts from this, so it is kept for it
             let known = match current_quick {
                 Some(known) => known,
-                None => *current_quick.insert(quick(&current, options, cancelled)?),
+                None => *current_quick.insert(quick(&current, options, cancelled, &|_| {})?),
             };
             Ok(known.is_some())
         };
         if hopeless && retarget()? {
             target = ((target as f64) * RETARGET) as usize;
+            tracker.again(calibration.is_some());
             continue;
         }
         // too large as it is, kept so or with nothing for fitting to do;
         // short of that, only packing tells
         if hopeless && steps.is_empty() {
             let quick = Quick { packed: quick_packed.len(), share: share_of_limits(scene, json) };
-            progress(Progress::TooLarge { bytes: quick.size(ZOPFLI_SHARE, options.max_bytes) });
+            let bytes = quick.size(ZOPFLI_SHARE, options.max_bytes);
+            tracker.say(Progress::TooLarge { bytes });
         }
-        progress(Progress::Packing);
+        tracker.say(Progress::Packing);
         let tgs = match (hopeless, real) {
             (true, _) => quick_packed.clone(),
             (false, Some(real)) => real.tgs.clone(),
-            (false, None) => pack(json, options.effort, cancelled)?,
+            (false, None) => {
+                pack(json, options.effort, cancelled, &tracker.hook(Part::Packing, 0.0, 1.0))?
+            }
         };
         check()?;
         let fits = tgs.len() <= options.max_bytes && within_limits(scene, json);
         if !fits && retarget()? {
             target = ((target as f64) * RETARGET) as usize;
+            tracker.again(calibration.is_some());
             continue;
         }
         check()?;
@@ -386,6 +402,7 @@ pub fn make(
             .flat_map(|layer| &layer.groups)
             .map(|group| group.shapes.len())
             .sum();
+        tracker.finish();
         return Ok(Sticker {
             bytes: tgs.len(),
             json_bytes: json.len(),
@@ -411,17 +428,18 @@ const THREADS: bool = cfg!(all(feature = "threads", not(target_family = "wasm"))
 /// can't be stopped, so with [`THREADS`] it packs in a thread of its own,
 /// left to finish alone; at most [`PACKING`] of them run at once in the
 /// whole process, so stopping and starting again doesn't pile them up.
-fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
+///
+/// zopfli can't say how far it got either: with [`THREADS`], `done` is
+/// told the time it has taken against about how long it takes, by
+/// [`ZOPFLI_PACE`] and [`ZOPFLI_ITERATION`], creeping on once that is
+/// past.
+fn pack(json: &str, effort: Effort, cancelled: Cancelled, done: &dyn Fn(f64)) -> Result<Vec<u8>> {
     let check = || if cancelled() { Err(crate::Error::Cancelled) } else { Ok(()) };
     check()?;
     let iterations = zopfli_iterations(effort);
     let tgs = if THREADS {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::mpsc::{RecvTimeoutError, channel};
-        use std::time::Duration;
-        // a stop is noticed within this, which the GUI can't tell apart
-        // from at once
-        const POLL: Duration = Duration::from_millis(50);
         static RUNNING: AtomicUsize = AtomicUsize::new(0);
         /// Counts a thread as running until it ends, however it ends.
         struct Running;
@@ -443,7 +461,9 @@ fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
         // stopped while waiting: the slot is given back
         check()?;
         let (send, receive) = channel();
+        let expected = iterations as f64 * (ZOPFLI_ITERATION + json.len() as f64 * ZOPFLI_PACE);
         let json = json.as_bytes().to_vec();
+        let started = std::time::Instant::now();
         std::thread::spawn(move || {
             let _running = running;
             send.send(file::pack(&json, iterations))
@@ -452,7 +472,9 @@ fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
             check()?;
             match receive.recv_timeout(POLL) {
                 Ok(tgs) => break tgs,
-                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Timeout) => {
+                    done(packed_by(started.elapsed().as_secs_f64() / expected));
+                }
                 Err(RecvTimeoutError::Disconnected) => panic!("zopfli panicked"),
             }
         }
@@ -467,6 +489,24 @@ fn pack(json: &str, effort: Effort, cancelled: Cancelled) -> Result<Vec<u8>> {
 /// one at work, and one left to finish after a stop.
 const PACKING: usize = 2;
 
+/// About how long zopfli takes over a byte of JSON in one iteration, and
+/// over the rest of an iteration, in seconds: on the reference art on a
+/// desktop of 2025 it took from two thirds to twice this, more over
+/// smaller art.
+const ZOPFLI_PACE: f64 = 0.2e-6;
+const ZOPFLI_ITERATION: f64 = 4e-3;
+
+/// How far packing is taken to have got, from 0 to 1, by `time` it has
+/// taken as a share of how long it is expected to: as much until four
+/// fifths, then creeping on ever more slowly, never all the way, as zopfli
+/// takes several times longer over some art.
+fn packed_by(time: f64) -> f64 {
+    match time {
+        time if time <= 0.8 => time.max(0.0),
+        time => (1.0 - 0.2 * (-(time - 0.8) / 0.6).exp()).min(0.999),
+    }
+}
+
 /// How many threads [`parallel`] works in with `threads` asked for: as
 /// many, or as many as the machine runs at once, which a round's few
 /// candidates seldom reach; one without [`THREADS`].
@@ -478,32 +518,76 @@ fn workers(threads: Option<NonZeroUsize>) -> usize {
 }
 
 /// `f` of each item, in order, in at most `workers` threads at once, each
-/// taking the next item left; in the calling thread with one.
-fn parallel<T: Sync, R: Send>(items: &[T], workers: usize, f: impl Fn(&T) -> R + Sync) -> Vec<R> {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+/// taking the next item left; in the calling thread with one. `f` tells
+/// the hook it is given how much of its item is done, and `done` is told,
+/// in the calling thread, how much of all of them is: as `f` tells it with
+/// one thread, and every [`POLL`] while threads work.
+fn parallel<T: Sync, R: Send>(
+    items: &[T],
+    workers: usize,
+    done: &dyn Fn(f64),
+    f: impl Fn(&T, &dyn Fn(f64)) -> R + Sync,
+) -> Vec<R> {
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    // how much of each item is done, the bits of an f64
+    let shares: Vec<AtomicU64> = items.iter().map(|_| AtomicU64::new(0)).collect();
+    let all = || {
+        let sum: f64 =
+            shares.iter().map(|share| f64::from_bits(share.load(Ordering::Relaxed))).sum();
+        sum / items.len().max(1) as f64
+    };
+    let set = |index: usize, share: f64| shares[index].store(share.to_bits(), Ordering::Relaxed);
     if workers <= 1 || items.len() <= 1 {
-        return items.iter().map(f).collect();
+        let each = items.iter().enumerate().map(|(index, item)| {
+            let result = f(item, &|share| {
+                set(index, share);
+                done(all());
+            });
+            set(index, 1.0);
+            done(all());
+            result
+        });
+        return each.collect();
     }
     let next = AtomicUsize::new(0);
+    // each thread wakes the calling one as it ends, which otherwise wakes
+    // to say how far they got; one that panics is found ended all the same
+    let ended = AtomicUsize::new(0);
+    let caller = std::thread::current();
     let mut results: Vec<(usize, R)> = std::thread::scope(|scope| {
         let workers: Vec<_> = (0..workers.min(items.len()))
             .map(|_| {
                 scope.spawn(|| {
-                    let mut done = Vec::new();
+                    let mut finished = Vec::new();
                     loop {
                         let index = next.fetch_add(1, Ordering::Relaxed);
                         let Some(item) = items.get(index) else { break };
-                        done.push((index, f(item)));
+                        finished.push((index, f(item, &|share| set(index, share))));
+                        set(index, 1.0);
                     }
-                    done
+                    ended.fetch_add(1, Ordering::SeqCst);
+                    caller.unpark();
+                    finished
                 })
             })
             .collect();
+        while ended.load(Ordering::SeqCst) < workers.len()
+            && !workers.iter().all(|worker| worker.is_finished())
+        {
+            std::thread::park_timeout(POLL);
+            done(all());
+        }
         workers.into_iter().flat_map(|worker| worker.join().expect("no panics")).collect()
     });
+    done(1.0);
     results.sort_by_key(|(index, _)| *index);
     results.into_iter().map(|(_, result)| result).collect()
 }
+
+/// How often what waits on other threads says how far they got, and
+/// packing asks whether to stop: the GUI can't tell a stop noticed within
+/// this apart from one at once.
+const POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
 internal! {
 /// How many zopfli iterations stickers are packed with at `effort`.
@@ -528,7 +612,7 @@ mod tests {
 
     /// A quick estimate scaled by `calibration`.
     fn estimate(anim: &PixelAnim, options: &Options, calibration: f64) -> Option<usize> {
-        let quick = quick(anim, options, &|| false).unwrap();
+        let quick = quick(anim, options, &|| false, &|_| {}).unwrap();
         quick.map(|quick| quick.size(calibration, options.max_bytes))
     }
 
@@ -598,10 +682,64 @@ mod tests {
         let items: Vec<usize> = (0..9).collect();
         for workers in [1, 2, 4, 16] {
             assert_eq!(
-                parallel(&items, workers, |&item| item * 2),
+                parallel(&items, workers, &|_| {}, |&item, _| item * 2),
                 [0, 2, 4, 6, 8, 10, 12, 14, 16]
             );
         }
+    }
+
+    #[test]
+    fn says_how_far_it_got_only_ever_further() {
+        let walker = tgradish_corpus::files().into_iter().find(|f| f.name == "walker.gif").unwrap();
+        let input =
+            crate::frames::decode(&walker.bytes, &Default::default(), &Default::default()).unwrap();
+        // kept as it is, and fitted under a limit that takes several
+        // rounds, in one thread and in several
+        let exact = Options { fit: Fit::Exact, effort: Effort::Best, ..Options::default() };
+        let fitted = |threads| Options {
+            fit: Fit::Auto,
+            max_bytes: 600,
+            threads: NonZeroUsize::new(threads),
+            ..exact.clone()
+        };
+        for options in [exact.clone(), fitted(1), fitted(4)] {
+            // (fraction, stage fraction, stages started before it)
+            let mut said: Vec<(f64, f64, usize)> = Vec::new();
+            let mut stages = 0;
+            let mut progress = |event| match event {
+                Progress::Advanced { fraction, stage_fraction } => {
+                    said.push((fraction, stage_fraction, stages))
+                }
+                Progress::Normalised { .. } | Progress::TooLarge { .. } | Progress::Packing => {
+                    stages += 1
+                }
+                // which starts fitting again after the result missed
+                Progress::Reduced { .. } => stages += 1,
+            };
+            let made = make(input.clone(), &options, &mut progress, &|| false).unwrap();
+            let fit = options.fit;
+            assert_eq!(made.steps.is_empty(), fit == Fit::Exact, "{fit:?}");
+            assert!(said.len() > 20, "{fit:?}: {said:?}");
+            assert!(said.windows(2).all(|pair| pair[0].0 <= pair[1].0), "{fit:?}: {said:?}");
+            assert!(said.iter().all(|&(_, stage, _)| (0.0..=1.0).contains(&stage)), "{said:?}");
+            // each stage only ever further too
+            for pair in said.windows(2).filter(|pair| pair[0].2 == pair[1].2) {
+                assert!(pair[0].1 <= pair[1].1, "{fit:?}: {said:?}");
+            }
+            assert_eq!(said.last().map(|&(fraction, ..)| fraction), Some(1.0), "{fit:?}");
+            // and no more than about once in a thousandth
+            assert!(said.len() < 2500, "{fit:?}: {}", said.len());
+        }
+    }
+
+    #[test]
+    fn tells_how_far_packing_is_by_the_time_it_takes() {
+        assert_eq!(packed_by(0.0), 0.0);
+        assert!((packed_by(0.5) - 0.5).abs() < 1e-9);
+        // past four fifths ever more slowly, never all the way
+        let later: Vec<f64> = [0.8, 1.0, 2.0, 3.0].into_iter().map(packed_by).collect();
+        assert!(later.windows(2).all(|pair| pair[0] < pair[1]), "{later:?}");
+        assert!(later[1] - later[0] < 0.2 && packed_by(1000.0) < 1.0, "{later:?}");
     }
 
     #[test]
@@ -668,7 +806,7 @@ mod tests {
         let (anim, _) = normalise(input.clone(), &normalise::Options::default()).unwrap();
         // between colours, whatever the effort
         let best = Settings { effort: Effort::Best, ..Settings::default() };
-        let stopped = painter(&anim, &best, None, &|| true);
+        let stopped = crate::encode::painter(&anim, &best, None, &|| true);
         assert!(matches!(stopped, Err(EncodeError::Cancelled)), "{stopped:?}");
         // and making a sticker ends there too, after a few questions
         let asked = std::sync::atomic::AtomicUsize::new(0);
@@ -759,8 +897,9 @@ mod tests {
                 cancelled: &|| false,
             };
             let mut calibration = Some(Calibration { factor: 1.0, real: None });
-            let (current, progress) = (anim.clone(), &mut |_| {});
-            fit(&anim, current, None, &mut steps, &mut calibration, &fitting, progress).unwrap();
+            let (current, mut progress) = (anim.clone(), |_| {});
+            let tracker = Tracker::new(&mut progress, true);
+            fit(&anim, current, None, &mut steps, &mut calibration, &fitting, &tracker).unwrap();
             assert!(!steps.is_empty());
             steps.iter().map(|step| step.reduction.kind().motion()).collect::<Vec<bool>>()
         };
@@ -801,7 +940,8 @@ mod tests {
         let (anim, _) = normalise(input.clone(), &normalise_options).unwrap();
         let options = Options::default();
         let quick = Settings { effort: Effort::Fast, ..Settings::default() };
-        let Rendered { scene, json, .. } = render(&anim, &quick, &options, &|| false).unwrap();
+        let Rendered { scene, json, .. } =
+            render(&anim, &quick, &options, &|| false, &|_| {}).unwrap();
         assert!(layout::cost(&scene) > telegram::MAX_COST, "{}", layout::cost(&scene));
         assert!(!within_limits(&scene, &json));
         // with no weight on the packed size, what is left is the cost

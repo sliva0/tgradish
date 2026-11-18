@@ -231,12 +231,12 @@ fn widest_stage(stage: jobs::TgsStage) -> String {
     texts.into_iter().max_by_key(String::len).unwrap_or_default()
 }
 
-/// How far the stage at work has got. It moves even while its share stays
-/// put, as fitting's does through a round of trying reductions.
+/// How far the stage at work has got, as converting says: reading the art
+/// says nothing until it is read.
 fn stage_fill(progress: &jobs::Progress, stage: jobs::TgsStage) -> widgets::Fill {
     match stage {
-        jobs::TgsStage::Fitting => widgets::Fill::working(progress.tgs_fitting()),
-        _ => widgets::Fill::Unknown,
+        jobs::TgsStage::Reading => widgets::Fill::Unknown,
+        _ => widgets::Fill::Working(progress.stage_done),
     }
 }
 
@@ -250,10 +250,10 @@ fn rate_text(attempt: &jobs::Attempt) -> String {
     }
 }
 
-/// The step a conversion is at and how far it has got. Only that step: how
-/// many encodes fitting needs isn't known until it has them, and a `.tgs`
-/// conversion's stages take very different times, so a share of all of it
-/// would stall and jump.
+/// The step a conversion is at and how far it has got. Only that step,
+/// as the column of every step beside the preview shows them: how many
+/// encodes fitting a WebM needs isn't known until it has them, and the
+/// list's bar shows how far all of a `.tgs` got.
 fn current_step(progress: &jobs::Progress) -> (widgets::Fill, String) {
     use widgets::Fill;
     if let Some(stage) = progress.tgs {
@@ -715,11 +715,19 @@ mod tests {
         let number = fl!("encode", number = 1, fps = "30", rate = "81 kbit/s");
         assert_eq!(current_step(&progress).1, number);
 
-        // a .tgs says the stage it is at, not the others
-        let compressing = Progress { tgs: Some(TgsStage::Compressing), ..Progress::default() };
+        // a .tgs says the stage it is at, not the others, and how far it
+        // got, but while the art is read
+        let compressing = Progress {
+            tgs: Some(TgsStage::Compressing),
+            tgs_done: 0.9,
+            stage_done: 0.75,
+            ..Progress::default()
+        };
         let (fill, text) = current_step(&compressing);
-        assert!(matches!(fill, Fill::Unknown));
+        assert!(matches!(fill, Fill::Working(share) if share == 0.75), "{text}");
         assert_eq!(text, fl!("stage-compressing"));
+        let reading = Progress { tgs: Some(TgsStage::Reading), ..Progress::default() };
+        assert!(matches!(current_step(&reading).0, Fill::Unknown));
     }
 
     #[test]

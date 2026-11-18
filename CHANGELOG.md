@@ -55,6 +55,12 @@ What changed in each release of tgradish, newest first. The format follows
   file keeps its scroll, and clicking a control moves nothing around it.
 - The GUI's crop shows the ring of the keyboard's focus only once the
   arrows move it, until it is pressed again, not around it on every drag.
+- Making a `.tgs` says how far it got, about as the time it takes: the
+  GUI's bar in the list, the bar of each stage and the one beside Stop
+  fill as the art is drawn, fitted and compressed, the command line shows
+  a bar with its percentage and the terminal's progress follows it, and
+  `--json` prints `advanced` events of all of it and of the stage at
+  work.
 
 ### Fixed
 

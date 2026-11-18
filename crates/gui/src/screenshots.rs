@@ -1394,6 +1394,8 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
             110_000,
             0.01,
         )],
+        tgs_done: 0.45,
+        stage_done: 0.4,
         ..jobs::Progress::default()
     };
     let item = harness.state_mut().items.last_mut().unwrap();

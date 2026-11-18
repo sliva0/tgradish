@@ -6,11 +6,14 @@ mod cover;
 mod mask;
 mod painter;
 
+#[cfg(not(feature = "internals"))]
+pub(crate) use painter::Settings;
+pub(crate) use painter::paint;
+#[cfg(all(test, not(feature = "internals")))]
+pub(crate) use painter::painter;
 pub use painter::{Effort, EncodeError};
 #[cfg(feature = "internals")]
 pub use painter::{Settings, painter};
-#[cfg(not(feature = "internals"))]
-pub(crate) use painter::{Settings, painter};
 
 #[cfg(any(test, feature = "internals"))]
 use crate::normalise::PixelAnim;

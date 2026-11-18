@@ -74,6 +74,7 @@ impl Painter<'_> {
             if (self.cancelled)() {
                 return colours.to_vec();
             }
+            self.at(set as f64 / (1usize << n) as f64);
             best[set] = (0..n)
                 .filter(|&i| set >> i & 1 == 1)
                 .map(|i| {
@@ -109,6 +110,9 @@ impl Painter<'_> {
                 mask.union(&self.own(colour, f));
             }
         }
+        // what each colour costs at the bottom, then each colour placed,
+        // as half of the work each
+        let steps = 2.0 * colours.len() as f64;
         // cells of different colours never overlap, so "every colour but
         // this one" is a subtraction
         let mut at_bottom = Vec::with_capacity(colours.len());
@@ -117,6 +121,7 @@ impl Painter<'_> {
             if (self.cancelled)() {
                 return colours.to_vec();
             }
+            self.at(at_bottom.len() as f64 / steps);
             let later: Vec<Mask> = everything
                 .iter()
                 .enumerate()
@@ -153,6 +158,7 @@ impl Painter<'_> {
         let mut costs: Vec<Option<usize>> = vec![None; colours.len()];
         let mut top_down = Vec::with_capacity(colours.len());
         while !remaining.is_empty() {
+            self.at((colours.len() + top_down.len()) as f64 / steps);
             for &i in &remaining {
                 if costs[i].is_none() {
                     if (self.cancelled)() {
@@ -194,6 +200,8 @@ impl Painter<'_> {
     ) -> Result<Scene, EncodeError> {
         let (order, scene) = result?;
         let Some(score) = score.filter(|_| self.reuse) else { return Ok(scene) };
+        let (from, to) = self.plain.get();
+        self.part(from, to);
         self.reuse = false;
         let plain = self.encode(&order);
         self.reuse = true;
@@ -220,9 +228,41 @@ impl Painter<'_> {
             n if n <= GREEDY_ORDER => self.greedy_order(&guess),
             _ => guess.clone(),
         };
+        // how long each part takes, about, in encodes, as measured on the
+        // reference art: searching the order exactly costs a quarter of
+        // an encode per set of colours, greedily a quarter per colour;
+        // then an encode of each order to start from, the neighbours
+        // swapped in about three passes over the order, and one drawn
+        // again without reuse
+        let searching = match (effort, guess.len()) {
+            (Effort::Fast, _) => 0.0,
+            (_, n) if n <= EXACT_ORDER => (1usize << n) as f64 / 4.0,
+            (_, n) if n <= GREEDY_ORDER => n as f64 / 4.0,
+            _ => 0.0,
+        };
+        let improves = effort == Effort::Best && score.is_some();
+        let (starts, swaps) = match improves {
+            true => (2.0, (3 * guess.len().saturating_sub(1)).min(BEST_TRIES - 2) as f64),
+            false => (1.0, 0.0),
+        };
+        let plain = if score.is_some() && self.reuse { 1.0 } else { 0.0 };
+        let work = searching + starts + swaps + plain;
+        let share = |encodes: f64| encodes / work;
+        let (searched_by, started_by) = (share(searching), share(searching + starts));
+        let swapped_by = share(searching + starts + swaps);
+        self.plain.set((swapped_by, 1.0));
+        self.part(0.0, searched_by);
+        let searched = || {
+            let order = searched();
+            self.part(searched_by, started_by);
+            order
+        };
         let encoded = |order: Vec<u16>| self.encode(&order).map(|scene| (order, scene));
         let score = match (effort, score) {
-            (Effort::Fast, _) => return encoded(guess.clone()),
+            (Effort::Fast, _) => {
+                self.part(searched_by, started_by);
+                return encoded(guess.clone());
+            }
             (Effort::Balanced, _) | (Effort::Best, None) => return encoded(searched()),
             (Effort::Best, Some(score)) => score,
         };
@@ -236,7 +276,10 @@ impl Painter<'_> {
             Err(_) => Ok(None),
         };
         let mut order = searched();
+        let first = share(searching + 1.0);
+        self.part(searched_by, first);
         let mut best = try_order(&order)?;
+        self.part(first, started_by);
         if let Some(guessed) = try_order(&guess)?
             && best.as_ref().is_none_or(|(size, _)| guessed.0 < *size)
         {
@@ -248,6 +291,17 @@ impl Painter<'_> {
         };
         let mut tries = 2;
         let mut improved = true;
+        // how many passes over the order it takes isn't known until one
+        // changes nothing: each pass goes over half of what is left of
+        // swapping, and never behind the share of the most tries it may
+        // take
+        let pairs = order.len().saturating_sub(1).max(1);
+        let swept = |pass: i32, pair: usize, tries: usize| {
+            let passes = 1.0 - 0.5f64.powi(pass) * (1.0 - 0.5 * pair as f64 / pairs as f64);
+            let tried = (tries - 2) as f64 / (BEST_TRIES - 2) as f64;
+            started_by + (swapped_by - started_by) * passes.max(tried)
+        };
+        let mut pass = 0;
         while improved && tries < BEST_TRIES {
             improved = false;
             for i in 0..order.len().saturating_sub(1) {
@@ -257,6 +311,7 @@ impl Painter<'_> {
                 if (self.cancelled)() {
                     return Err(EncodeError::Cancelled);
                 }
+                self.part(swept(pass, i, tries), swept(pass, i + 1, tries + 1));
                 tries += 1;
                 order.swap(i, i + 1);
                 match try_order(&order)? {
@@ -267,6 +322,7 @@ impl Painter<'_> {
                     _ => order.swap(i, i + 1),
                 }
             }
+            pass += 1;
         }
         Ok((order, scene))
     }

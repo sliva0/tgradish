@@ -88,30 +88,17 @@ pub(crate) struct Progress {
     pub(crate) tgs: Option<TgsStage>,
     /// For `.tgs`: the art is never changed to fit.
     pub(crate) tgs_exact: bool,
+    /// For `.tgs`: how much of making it is done, and of the stage it is
+    /// at, from 0 to 1, as converting says; nothing while it is read.
+    pub(crate) tgs_done: f32,
+    pub(crate) stage_done: f32,
 }
 
 impl Progress {
-    /// How far fitting a `.tgs` got: the size taken off so far, against
-    /// what has to go, on a log scale, as reductions save shares.
-    pub(crate) fn tgs_fitting(&self) -> Option<f32> {
-        let unchanged = self.unchanged_bytes? as f64;
-        let now = self.steps.last().map_or(unchanged, |step| step.bytes as f64);
-        let target = tgs::MAX_BYTES as f64;
-        if unchanged <= target {
-            return Some(1.0);
-        }
-        Some(((unchanged / now).ln() / (unchanged / target).ln()).clamp(0.0, 1.0) as f32)
-    }
-
     /// How far the whole conversion got, roughly.
     pub(crate) fn overall(&self) -> Option<f32> {
-        if let Some(stage) = self.tgs {
-            return Some(match stage {
-                TgsStage::Reading => 0.03,
-                TgsStage::Drawing => 0.15,
-                TgsStage::Fitting => 0.3 + 0.5 * self.tgs_fitting().unwrap_or(0.0),
-                TgsStage::Compressing => 0.85,
-            });
+        if self.tgs.is_some() {
+            return Some(self.tgs_done);
         }
         let most = self.webm.as_ref()?.attempts.max(1) as f32;
         let done = self.attempts.iter().filter(|attempt| attempt.bytes.is_some()).count() as f32;
@@ -559,6 +546,15 @@ fn run(
     Ok(Done::of(outcome))
 }
 
+/// Puts a `.tgs` conversion at `stage`, which it says how far it got of
+/// from the start.
+fn at_stage(progress: &mut Progress, stage: TgsStage) {
+    if progress.tgs != Some(stage) {
+        progress.stage_done = 0.0;
+    }
+    progress.tgs = Some(stage);
+}
+
 /// Takes in what a conversion of any format says as it goes.
 fn follow(event: Event, update: Update) {
     match event {
@@ -580,7 +576,7 @@ fn follow(event: Event, update: Update) {
         Event::Started(Started { details: StartDetails::Tgs { report }, .. }) => {
             update(Box::new(move |progress| {
                 progress.report = Some(report);
-                progress.tgs = Some(TgsStage::Drawing);
+                at_stage(progress, TgsStage::Drawing);
             }))
         }
         Event::AttemptStarted { attempt, params } => update(Box::new(move |progress| {
@@ -615,15 +611,16 @@ fn follow(event: Event, update: Update) {
             progress.unchanged_bytes = Some(bytes as usize);
             // kept exactly as it is, it goes on to be compressed as it is
             if !progress.tgs_exact {
-                progress.tgs = Some(TgsStage::Fitting);
+                at_stage(progress, TgsStage::Fitting);
             }
         })),
         Event::Reduced { step } => update(Box::new(move |progress| {
             progress.steps.push(step);
-            progress.tgs = Some(TgsStage::Fitting);
+            at_stage(progress, TgsStage::Fitting);
         })),
-        Event::Packing => update(Box::new(|progress| {
-            progress.tgs = Some(TgsStage::Compressing);
+        Event::Packing => update(Box::new(|progress| at_stage(progress, TgsStage::Compressing))),
+        Event::Advanced { fraction, stage_fraction } => update(Box::new(move |progress| {
+            (progress.tgs_done, progress.stage_done) = (fraction as f32, stage_fraction as f32);
         })),
         Event::Warning { message } => {
             update(Box::new(move |progress| progress.warnings.push(message)))
@@ -639,25 +636,6 @@ mod tests {
     fn step(bytes: usize) -> Step {
         let reduction = tgradish_core::tgradish_tgs::reduce::Reduction::Despeckle;
         Step::new(reduction, bytes, 0.0)
-    }
-
-    #[test]
-    fn measures_fitting_a_tgs_on_a_log_scale() {
-        let limit = tgs::MAX_BYTES as usize;
-        assert_eq!(Progress::default().tgs_fitting(), None);
-        // small enough from the start
-        let fits = Progress { unchanged_bytes: Some(limit), ..Progress::default() };
-        assert_eq!(fits.tgs_fitting(), Some(1.0));
-        // four times too large: halved is half way, as reductions save shares
-        let mut progress = Progress { unchanged_bytes: Some(4 * limit), ..Progress::default() };
-        assert_eq!(progress.tgs_fitting(), Some(0.0));
-        progress.steps.push(step(2 * limit));
-        assert!((progress.tgs_fitting().unwrap() - 0.5).abs() < 1e-6);
-        // and never past the end, nor back before the start
-        progress.steps.push(step(limit / 2));
-        assert_eq!(progress.tgs_fitting(), Some(1.0));
-        progress.steps.push(step(8 * limit));
-        assert_eq!(progress.tgs_fitting(), Some(0.0));
     }
 
     /// `progress` after `event`.
@@ -679,12 +657,28 @@ mod tests {
     }
 
     #[test]
+    fn follows_how_far_a_tgs_got_in_all_and_in_each_stage() {
+        let reading = Progress { tgs: Some(TgsStage::Reading), ..Progress::default() };
+        assert_eq!(reading.overall(), Some(0.0));
+        let advanced = |fraction, stage_fraction| Event::Advanced { fraction, stage_fraction };
+        let drawing = Progress { tgs: Some(TgsStage::Drawing), ..reading };
+        let drawn = followed(drawing, advanced(0.25, 0.5));
+        assert_eq!((drawn.overall(), drawn.stage_done), (Some(0.25), 0.5));
+        // a stage starts from nothing
+        let packing = followed(drawn, Event::Packing);
+        assert_eq!((packing.overall(), packing.stage_done), (Some(0.25), 0.0));
+        let packed = followed(packing, advanced(0.75, 0.4));
+        assert_eq!((packed.overall(), packed.stage_done), (Some(0.75), 0.4));
+        // the result missed, and fitting goes on
+        let fitting = followed(packed, Event::Reduced { step: step(60_000) });
+        assert_eq!((fitting.tgs, fitting.stage_done), (Some(TgsStage::Fitting), 0.0));
+        let done = followed(fitting, advanced(1.0, 1.0));
+        assert_eq!(done.overall(), Some(1.0));
+    }
+
+    #[test]
     fn says_roughly_how_far_a_conversion_got() {
         assert_eq!(Progress::default().overall(), None);
-        let stage = |stage| Progress { tgs: Some(stage), ..Progress::default() }.overall();
-        assert_eq!(stage(TgsStage::Reading), Some(0.03));
-        assert_eq!(stage(TgsStage::Fitting), Some(0.3));
-        assert_eq!(stage(TgsStage::Compressing), Some(0.85));
         // a WebM by encodes done of those it may take, and the one at work
         let plan =
             WebmPlan { width: 512, height: 512, fps: 30.0, length: 1.0, attempts: 4, limit: 1 };

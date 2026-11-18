@@ -130,6 +130,9 @@ pub fn convert(
             Progress::TooLarge { bytes } => on_event(Event::TooLarge { bytes: bytes as u64 }),
             Progress::Reduced { step } => on_event(Event::Reduced { step }),
             Progress::Packing => on_event(Event::Packing),
+            Progress::Advanced { fraction, stage_fraction } => {
+                on_event(Event::Advanced { fraction, stage_fraction })
+            }
             // what core has no event for yet isn't said
             _ => {}
         },
@@ -190,6 +193,32 @@ mod tests {
         // the same file by another path
         let other = dir.path().join(".").join("art.png");
         assert!(convert(&request(other)).is_err());
+    }
+
+    #[test]
+    fn says_how_far_it_got_before_it_finishes() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = tgradish_corpus::files();
+        let walker = files.iter().find(|file| file.name == "walker.gif").unwrap();
+        let input = dir.path().join("walker.gif");
+        std::fs::write(&input, &walker.bytes).unwrap();
+        let request = Request { overwrite: true, ..Request::new(Input::File(input)) };
+        let mut events = Vec::new();
+        convert(None, &request, &CancelToken::new(), &mut |event| events.push(event)).unwrap();
+        let fractions: Vec<f64> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Advanced { fraction, .. } => Some(*fraction),
+                _ => None,
+            })
+            .collect();
+        assert!(fractions.len() > 10, "{fractions:?}");
+        assert!(fractions.windows(2).all(|pair| pair[0] <= pair[1]), "{fractions:?}");
+        // all of it, once started, and before the result is written
+        assert!(matches!(events[0], Event::Started(_)));
+        assert_eq!(fractions.last(), Some(&1.0));
+        let [.., last, finished] = &events[..] else { panic!("{events:?}") };
+        assert!(matches!(last, Event::Advanced { .. }) && matches!(finished, Event::Finished(_)));
     }
 
     #[test]

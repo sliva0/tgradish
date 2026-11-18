@@ -39,6 +39,8 @@
 
 mod order;
 
+use std::cell::Cell;
+
 use super::cover::{Rect, cover};
 use super::mask::Mask;
 use crate::limits::{TLOTTIE, telegram};
@@ -204,7 +206,23 @@ struct Painter<'a> {
     /// Split colours into cores and deltas where that is cheaper.
     split: bool,
     reuse: bool,
+    /// Told how much of the work is done, from 0 to 1, as [`paint`]'s
+    /// `done` is.
+    done: &'a dyn Fn(f64),
+    /// The share of the work the search at hand goes over: all of it, or
+    /// what was left when it started again without lifetimes.
+    whole: Cell<(f64, f64)>,
+    /// The share of the work the part at hand goes over.
+    part: Cell<(f64, f64)>,
+    /// How much of the work was said to be done last.
+    said: Cell<f64>,
+    /// The share of the search that drawing it again without reuse takes,
+    /// as [`Painter::search`] lays it out.
+    plain: Cell<(f64, f64)>,
 }
+
+/// Tells nothing of how far the work got.
+fn unheard(_: f64) {}
 
 impl<'a> Painter<'a> {
     fn new(anim: &'a PixelAnim, settings: &Settings, cancelled: Cancelled<'a>) -> Painter<'a> {
@@ -223,7 +241,29 @@ impl<'a> Painter<'a> {
             lifetimes: settings.lifetimes,
             split: settings.split,
             reuse: settings.reuse,
+            done: &unheard,
+            whole: Cell::new((0.0, 1.0)),
+            part: Cell::new((0.0, 1.0)),
+            said: Cell::new(0.0),
+            plain: Cell::new((1.0, 1.0)),
         }
+    }
+
+    /// Starts the part of the search from `from` to `to`, as shares of
+    /// it.
+    fn part(&self, from: f64, to: f64) {
+        let (start, end) = self.whole.get();
+        let at = |share: f64| start + (end - start) * share;
+        self.part.set((at(from), at(to)));
+    }
+
+    /// Says the part at hand is `share` done, or as much as was said
+    /// before, where a part is done again.
+    fn at(&self, share: f64) {
+        let (from, to) = self.part.get();
+        let done = (from + (to - from) * share.clamp(0.0, 1.0)).max(self.said.get());
+        self.said.set(done);
+        (self.done)(done);
     }
 
     fn opaque(&self, colour: u16) -> bool {
@@ -612,6 +652,8 @@ impl<'a> Painter<'a> {
             if (self.cancelled)() {
                 return Err(EncodeError::Cancelled);
             }
+            // colour by colour, most of the time an encode takes
+            self.at((order.len() - rank - 1) as f64 / order.len() as f64);
             for (place, piece) in self.pieces(colour, &later, true)? {
                 pieces.push((rank * 2 + usize::from(place == Place::Main), colour, piece));
             }
@@ -631,26 +673,47 @@ impl<'a> Painter<'a> {
 /// without one it works like [`Effort::Balanced`]. `cancelled` is asked
 /// between colours; when it says yes, this ends with
 /// [`EncodeError::Cancelled`].
+#[cfg(any(test, feature = "internals"))]
 pub fn painter(
     anim: &PixelAnim,
     settings: &Settings,
     score: Option<&dyn Fn(&Scene) -> usize>,
     cancelled: Cancelled,
 ) -> Result<Scene, EncodeError> {
+    paint(anim, settings, score, cancelled, &unheard)
+}
+
+/// [`painter`], telling `done` how much of the work is done as it goes,
+/// from 0 to 1, never less than it told before: by colours drawn, orders
+/// searched and orders tried, each weighed by about how long it takes.
+pub(crate) fn paint(
+    anim: &PixelAnim,
+    settings: &Settings,
+    score: Option<&dyn Fn(&Scene) -> usize>,
+    cancelled: Cancelled,
+    done: &dyn Fn(f64),
+) -> Result<Scene, EncodeError> {
     let mut painter = Painter::new(anim, settings, cancelled);
-    if settings.lifetimes {
-        match painter.search(settings.effort, score) {
-            // a layer per frame stays within the limit for up to 180
-            // frames, and a colour's rectangles in one frame are fewer
-            // than over a merged lifetime
-            Err(EncodeError::TooManyLayers { .. } | EncodeError::TooManyRects { .. }) => {
-                painter.lifetimes = false
+    painter.done = done;
+    let scene = 'scene: {
+        if settings.lifetimes {
+            match painter.search(settings.effort, score) {
+                // a layer per frame stays within the limit for up to 180
+                // frames, and a colour's rectangles in one frame are fewer
+                // than over a merged lifetime
+                Err(EncodeError::TooManyLayers { .. } | EncodeError::TooManyRects { .. }) => {
+                    painter.lifetimes = false;
+                    // searching again takes what is left
+                    painter.whole.set((painter.said.get(), 1.0));
+                }
+                result => break 'scene painter.without_reuse_if_smaller(result, score),
             }
-            result => return painter.without_reuse_if_smaller(result, score),
         }
-    }
-    let result = painter.search(settings.effort, score);
-    painter.without_reuse_if_smaller(result, score)
+        let result = painter.search(settings.effort, score);
+        painter.without_reuse_if_smaller(result, score)
+    }?;
+    done(1.0);
+    Ok(scene)
 }
 
 /// Rectangles covering `must` within `may` (see [`cover`]), in groups a

@@ -3,6 +3,7 @@
 
 use crate::frames::Animation;
 
+use super::tracker::{Part, RENDER, Stage, Tracker};
 use super::{
     Cancelled, Options, Progress, Rendered, Step, pack, parallel, render, share_of_limits, workers,
 };
@@ -37,6 +38,12 @@ pub(super) const RETARGET: f64 = 0.96;
 /// over it, fitting shrinks the art a lot anyway, and the real encoder's
 /// search of all of it can take minutes.
 const CALIBRATE_WITHIN: f64 = 2.0;
+/// How much of the size, on a log scale, a round of reductions takes off
+/// at first, about, which tells how many rounds fitting seems to take
+/// before one is done.
+const TAKEN_A_ROUND: f64 = 0.2;
+/// How many times weakening the last reduction halves the strength.
+const HALVINGS: usize = 5;
 
 /// What a quick encode of an animation comes to before it is scaled to
 /// the real encoder: its size packed by gzip, and its share of the
@@ -57,14 +64,16 @@ impl Quick {
     }
 }
 
-/// Encodes `anim` quickly: `None` when it can't be made at all.
+/// Encodes `anim` quickly, telling `done` how much of it is done: `None`
+/// when it can't be made at all.
 pub(super) fn quick(
     anim: &PixelAnim,
     options: &Options,
     cancelled: Cancelled,
+    done: &dyn Fn(f64),
 ) -> Result<Option<Quick>> {
     let fast = Settings { effort: Effort::Fast, ..Settings::default() };
-    match render(anim, &fast, options, cancelled) {
+    match render(anim, &fast, options, cancelled, done) {
         Ok(rendered) => Ok(Some(Quick {
             packed: rendered.packed.len(),
             share: share_of_limits(&rendered.scene, &rendered.json),
@@ -99,10 +108,13 @@ fn calibrate(
     settings: &Settings,
     options: &Options,
     cancelled: Cancelled,
+    tracker: &Tracker,
 ) -> Result<Calibration> {
-    match render(anim, settings, options, cancelled) {
+    let rendering = tracker.hook(Part::Calibrating, 0.0, RENDER);
+    match render(anim, settings, options, cancelled, &rendering) {
         Ok(rendered) => {
-            let tgs = pack(&rendered.json, settings.effort, cancelled)?;
+            let packing = tracker.hook(Part::Calibrating, RENDER, 1.0);
+            let tgs = pack(&rendered.json, settings.effort, cancelled, &packing)?;
             Ok(Calibration {
                 factor: tgs.len() as f64 / quick.packed.max(1) as f64,
                 real: Some(Real { anim: anim.clone(), rendered, tgs }),
@@ -136,7 +148,8 @@ pub(super) struct Fitting<'a> {
 /// `calibration`, which is measured on the art as it is once it comes near
 /// the target. `known` is the quick encode of `current`, when the caller
 /// has it. Also says whether the estimate got to the target, rather than
-/// every reduction being used up first.
+/// every reduction being used up first, and tells `tracker` how far it
+/// got.
 pub(super) fn fit(
     original: &PixelAnim,
     mut current: PixelAnim,
@@ -144,7 +157,7 @@ pub(super) fn fit(
     steps: &mut Vec<Step>,
     calibration: &mut Option<Calibration>,
     fitting: &Fitting,
-    progress: &mut dyn FnMut(Progress),
+    tracker: &Tracker,
 ) -> Result<(PixelAnim, bool)> {
     let Fitting { target, likely, settings, options, cancelled } = *fitting;
     let factor = |calibration: &Option<Calibration>| calibration.as_ref().map(|c| c.factor);
@@ -159,15 +172,16 @@ pub(super) fn fit(
     let measure = |anim: &PixelAnim, quick: Option<Quick>| -> Result<Option<Calibration>> {
         match quick {
             Some(quick) if near(Some(quick)) => {
-                calibrate(anim, quick, settings, options, cancelled).map(Some)
+                calibrate(anim, quick, settings, options, cancelled, tracker).map(Some)
             }
             _ => Ok(None),
         }
     };
     let mut quick_now = match known {
         Some(known) => known,
-        None => quick(&current, options, cancelled)?,
+        None => quick(&current, options, cancelled, &tracker.hook(Part::Quick, 0.0, 1.0))?,
     };
+    tracker.at(Part::Quick, 1.0);
     // fits even as gzip packs the quick encode: the real encoder and
     // zopfli usually make it smaller still, and the result is checked
     // after fitting all the same
@@ -182,7 +196,8 @@ pub(super) fn fit(
         return Ok((current, true));
     }
     if steps.is_empty() {
-        progress(Progress::TooLarge { bytes: size });
+        tracker.say(Progress::TooLarge { bytes: size });
+        tracker.start(Stage::Fitting);
     }
     // once snapped, the art is on its grid
     let likely = steps
@@ -206,6 +221,14 @@ pub(super) fn fit(
     // the state before the last step, to weaken it
     let mut before_last: Option<(PixelAnim, usize)> = None;
     let workers = workers(options.threads);
+    // How far the rounds got: by the size taken off against what has to
+    // go, on a log scale, as reductions save shares; and through each
+    // round by its candidates' encodes, as one of the rounds it seems to
+    // take, by how much of the way those before it came, or by how much a
+    // round takes off at first.
+    let (start, rounds_from) = (size as f64, size as f64 / target as f64);
+    let gone = |size: usize| ((start / size as f64).ln() / rounds_from.ln()).clamp(0.0, 1.0);
+    let (mut rounds, mut through) = (0usize, 0.0f64);
 
     while size > target {
         if cancelled() {
@@ -222,19 +245,32 @@ pub(super) fn fit(
             .filter(|&k| options.compromise.first(options.reductions[k]))
             .collect();
         let kinds = if first.is_empty() { open } else { first };
+        // a round takes a rung of at least one ladder, so there are at
+        // most as many left as rungs
+        let rungs: usize = ladders.iter().zip(&next).map(|(ladder, &k)| ladder.len() - k).sum();
+        let from = through.max(gone(size));
+        let left = match rounds {
+            0 => rounds_from.ln() / TAKEN_A_ROUND,
+            _ if from > 0.0 => rounds as f64 * (1.0 - from) / from,
+            _ => rungs as f64,
+        };
+        through = from + (1.0 - from) / left.clamp(1.0, rungs.max(1) as f64);
+        let this_round = tracker.hook(Part::Rounds, from, through);
         // each kind's candidate, its estimate and its error, or `None` when
         // it doesn't help at this strength
         let now = factor(calibration);
-        let tries = parallel(&kinds, workers, |&k| -> Result<Option<Candidate>> {
-            let candidate = ladders[k][next[k]].apply(&current)?;
-            let candidate_quick = quick(&candidate, options, cancelled)?;
-            let candidate_size = size_of(candidate_quick, now);
-            if candidate == current || candidate_size >= size {
-                return Ok(None);
-            }
-            let candidate_distortion = distortion(original, &candidate);
-            Ok(Some((candidate, candidate_quick, candidate_size, candidate_distortion)))
-        });
+        let tries =
+            parallel(&kinds, workers, &this_round, |&k, done| -> Result<Option<Candidate>> {
+                let candidate = ladders[k][next[k]].apply(&current)?;
+                let candidate_quick = quick(&candidate, options, cancelled, done)?;
+                let candidate_size = size_of(candidate_quick, now);
+                if candidate == current || candidate_size >= size {
+                    return Ok(None);
+                }
+                let candidate_distortion = distortion(original, &candidate);
+                Ok(Some((candidate, candidate_quick, candidate_size, candidate_distortion)))
+            });
+        rounds += 1;
         // (value, kind, candidate)
         let mut best: Option<(f64, usize, Candidate)> = None;
         for (&k, tried) in kinds.iter().zip(tries) {
@@ -264,7 +300,7 @@ pub(super) fn fit(
             size = size_of(quick_now, factor(calibration));
         }
         let step = Step { reduction: ladders[k][next[k]], bytes: size, distortion: distortion_now };
-        progress(Progress::Reduced { step: step.clone() });
+        tracker.say(Progress::Reduced { step: step.clone() });
         steps.push(step);
         next[k] += 1;
     }
@@ -283,12 +319,15 @@ pub(super) fn fit(
         let (mut low, mut high) = (0.0, 1.0);
         // five halvings put the strength within a 32nd of the weakest
         // that fits
-        for _ in 0..5 {
+        tracker.at(Part::Rounds, 1.0);
+        for halving in 0..HALVINGS {
             let share = (low + high) / 2.0;
             let Some(reduction) = last.between(weaker.as_ref(), share) else { break };
             let candidate = reduction.apply(&previous)?;
+            let (from, to) = (halving as f64, halving as f64 + 1.0);
+            let done = tracker.hook(Part::Weakening, from / HALVINGS as f64, to / HALVINGS as f64);
             let candidate_size =
-                size_of(quick(&candidate, options, cancelled)?, factor(calibration));
+                size_of(quick(&candidate, options, cancelled, &done)?, factor(calibration));
             if candidate_size <= target {
                 high = share;
                 let candidate_distortion = distortion(original, &candidate);
