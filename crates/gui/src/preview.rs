@@ -470,7 +470,12 @@ fn preview(
                 };
                 let cropping = Cropping { crop: &mut item.choices.crop, ratio, kept, exact };
                 let zoom = &mut item.view.input_zoom;
-                canvas::show(ui, screen, (rect, input_area), &picture, zoom, Some(cropping));
+                // each file's own, so that a drag begun on one file's picture
+                // goes no further once another is shown, as when the file is
+                // removed or one is put back while the button is held
+                ui.push_id(item.id, |ui| {
+                    canvas::show(ui, screen, (rect, input_area), &picture, zoom, Some(cropping));
+                });
                 // after the crop moved
                 let showing = on || inset.leaving();
                 let mut change = None;

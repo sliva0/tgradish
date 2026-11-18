@@ -20,6 +20,8 @@ What changed in each release of tgradish, newest first. The format follows
   picture's edge while it keeps a shape: it stops growing there instead.
 - Ctrl and the arrows make the GUI's crop larger again where an integer
   scale such as ½ holds it to whole blocks, a block at a time.
+- A drag on the GUI's preview no longer goes on to crop another file's
+  picture when Delete or Ctrl+Z shows another file halfway through it.
 
 ## [2.1.0] - 2026-11-18
 

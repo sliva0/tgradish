@@ -1060,6 +1060,53 @@ mod tests {
     }
 
     #[test]
+    fn leaves_a_crop_dragged_to_its_own_file_as_another_is_shown_meanwhile() {
+        // the file shown changed halfway through a drag on its picture: by
+        // Ctrl+Z putting back the file removed before, or by Delete
+        for put_back in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut harness = opened(dir.path(), &["first.png", "second.png", "third.png"]);
+            let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+            harness.state_mut().select(ids[0]);
+            harness.run_steps(2);
+            keys(&mut harness, Modifiers::NONE, egui::Key::Delete);
+            finish(&mut harness);
+            let dragged = harness.state().selected.unwrap();
+            let press = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            };
+            let (from, to) =
+                (on_picture(&harness, vec2(9.0, 5.0)), on_picture(&harness, vec2(27.0, 17.0)));
+            harness.event(egui::Event::PointerMoved(from));
+            harness.event(press(from, true));
+            harness.step();
+            for step in 1..=2 {
+                harness.event(egui::Event::PointerMoved(from + (to - from) * step as f32 / 4.0));
+                harness.step();
+            }
+            let key = if put_back { egui::Key::Z } else { egui::Key::Delete };
+            let modifiers = if put_back { Modifiers::COMMAND } else { Modifiers::NONE };
+            harness.key_press_modifiers(modifiers, key);
+            harness.step();
+            let shown = harness.state().selected.unwrap();
+            assert_ne!(shown, dragged, "put back: {put_back}");
+            for step in 3..=4 {
+                harness.event(egui::Event::PointerMoved(from + (to - from) * step as f32 / 4.0));
+                harness.step();
+            }
+            harness.event(press(to, false));
+            harness.run_steps(3);
+            // the one shown now is as it was
+            let item = harness.state().item(shown).unwrap();
+            assert_eq!(item.choices.crop, None, "put back: {put_back}");
+            assert!(!item.history.can_undo(), "put back: {put_back}");
+        }
+    }
+
+    #[test]
     fn joins_nudges_of_the_crop_made_close_together() {
         let dir = tempfile::tempdir().unwrap();
         let mut harness = opened(dir.path(), &["wide.png"]);
