@@ -21,6 +21,8 @@ What changed in each release of tgradish, newest first. The format follows
 - A corner of the GUI's crop dragged while it keeps a shape no longer
   pushes the opposite corner along at the picture's edge, and a crop drawn
   with a shape starts where the press began.
+- The GUI's crop shows the ring of the keyboard's focus as Tab or
+  Shift+Tab brings the focus to it, not only once the arrows move it.
 - Ctrl and the arrows make the GUI's crop larger again where an integer
   scale such as ½ holds it to whole blocks, a block at a time.
 - A drag on the GUI's preview no longer goes on to crop another file's

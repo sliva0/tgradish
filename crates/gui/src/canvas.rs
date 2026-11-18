@@ -437,12 +437,21 @@ pub(crate) fn show(
         |point: Option<Pos2>| point.and_then(grab).filter(|drag| !matches!(drag, Drag::New(_)));
     let mut focus = (dragging && drag.is_some())
         || (response.clicked() && pressed_on(response.interact_pointer_pos()).is_some());
-    // its ring is shown once the arrows move it, till the canvas is
-    // pressed again or the focus goes elsewhere: a press takes the focus
-    // too, and the crop's own frame is enough to see it by then
+    // its ring is shown once the arrows move it, or the keyboard brings
+    // the focus to it, as Tab does, till the canvas is pressed again or
+    // the focus goes elsewhere: a press takes the focus too, and the
+    // crop's own frame is enough to see it by then
     let keyed_id = crop_id.with(KEYED);
-    if response.is_pointer_button_down_on() || !ui.memory(|memory| memory.has_focus(crop_id)) {
+    let focused = ui.memory(|memory| memory.has_focus(crop_id));
+    if response.is_pointer_button_down_on() || !focused {
         ui.data_mut(|data| data.remove::<bool>(keyed_id));
+    }
+    // come since the last frame ended, by no press of the canvas, which
+    // asks for it as it is drawn
+    let had = crop_id.with(HAD_FOCUS);
+    let came = focused && ui.data(|data| data.get_temp::<bool>(had)) != Some(true);
+    if came && !response.is_pointer_button_down_on() {
+        ui.data_mut(|data| data.insert_temp(keyed_id, true));
     }
     // where it has the focus, the arrows move it a pixel, ten with Shift,
     // and with Ctrl move its bottom right corner
@@ -603,15 +612,28 @@ pub(crate) fn show(
         // asked for again on the next frame, as in the window egui drops a
         // focus asked for in the frame of a click by the end of that frame
         let asked = crop_id.with("asked");
-        if ui.data_mut(|data| data.remove_temp::<bool>(asked)).is_some() {
+        let mut pressed = ui.data_mut(|data| data.remove_temp::<bool>(asked)).is_some();
+        if pressed {
             ui.memory_mut(|memory| memory.request_focus(crop_id));
         }
         if focus && !clicked.inner {
             ui.memory_mut(|memory| memory.request_focus(crop_id));
             ui.data_mut(|data| data.insert_temp(asked, true));
+            pressed = true;
+        }
+        // or Tab brought it here as the crop was drawn
+        let now = ui.memory(|memory| memory.has_focus(crop_id));
+        if now && !focused && !pressed && !response.is_pointer_button_down_on() {
+            ui.data_mut(|data| data.insert_temp(keyed_id, true));
         }
     }
+    let focused = ui.memory(|memory| memory.has_focus(crop_id));
+    ui.data_mut(|data| data.insert_temp(crop_id.with(HAD_FOCUS), focused));
 }
+
+/// The id under the crop's own of whether it had the focus as the last
+/// frame drew it, to tell when the keyboard brings it there.
+const HAD_FOCUS: &str = "had focus";
 
 /// The id under which the crop's own is kept, for [`crop_focused`].
 const CROP: &str = "crop";
@@ -628,8 +650,9 @@ pub(crate) fn crop_focused(ctx: &egui::Context) -> bool {
 const KEYED: &str = "keyed";
 
 /// Whether the crop shows the ring of the keyboard's focus: only once the
-/// arrows moved it, as it takes the focus with each press on it too, and
-/// only till the canvas is pressed again.
+/// arrows moved it or the keyboard brought the focus to it, as it takes
+/// the focus with each press on it too, and only till the canvas is
+/// pressed again.
 pub(crate) fn crop_ringed(ctx: &egui::Context) -> bool {
     let crop = ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new(CROP)));
     let keyed = |crop: egui::Id| ctx.data(|data| data.get_temp::<bool>(crop.with(KEYED)));
@@ -1638,6 +1661,49 @@ mod tests {
         assert_eq!(keyed_to(&mut harness, both, Key::ArrowRight).width, 40);
         // and moved a pixel at a time still
         assert_eq!(keyed_to(&mut harness, Modifiers::NONE, Key::ArrowRight).x, 9);
+    }
+
+    #[test]
+    fn rings_the_crop_as_tab_brings_the_focus_to_it() {
+        let crop = Crop { x: 8, y: 8, width: 30, height: 20 };
+        let (mut harness, scale, corner) = cropped(Some(crop));
+        let focused = |harness: &egui_kittest::Harness<'_, Cropped>| {
+            (crop_focused(&harness.ctx), crop_ringed(&harness.ctx))
+        };
+        // Tab, to the cross back to all of the picture and then to it
+        let tab = |harness: &mut egui_kittest::Harness<'_, Cropped>, modifiers| {
+            harness.key_press_modifiers(modifiers, egui::Key::Tab);
+            harness.step();
+            harness.step();
+        };
+        let mut tabs = 0;
+        while !crop_focused(&harness.ctx) && tabs < 4 {
+            tab(&mut harness, egui::Modifiers::NONE);
+            tabs += 1;
+        }
+        assert_eq!(focused(&harness), (true, true), "after {tabs} tabs");
+        // pressed on: the focus kept, the ring gone
+        let inside = corner + vec2(20.0, 15.0) * scale;
+        harness.event(egui::Event::PointerMoved(inside));
+        harness.event(egui::Event::PointerButton {
+            pos: inside,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.step();
+        let_go(&mut harness, inside);
+        harness.step();
+        assert_eq!(focused(&harness), (true, false));
+        // away and back by Shift+Tab: the ring again
+        tab(&mut harness, egui::Modifiers::SHIFT);
+        assert!(!crop_focused(&harness.ctx));
+        let mut tabs = 0;
+        while !crop_focused(&harness.ctx) && tabs < 4 {
+            tab(&mut harness, egui::Modifiers::SHIFT);
+            tabs += 1;
+        }
+        assert_eq!(focused(&harness), (true, true), "after {tabs} more");
     }
 
     #[test]
