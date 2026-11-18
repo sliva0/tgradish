@@ -138,10 +138,13 @@ fn scale_text(scale: IntegerScale) -> String {
     format!("×{scale}")
 }
 
-/// A scale typed as `3`, `x3`, `×3`, `1/3` or `0.5`.
+/// A scale typed as `3`, `x3`, `×3`, `1/3` or `0.5`: not nothing, which
+/// reads as [`IntegerScale::NONE`], no scale to take.
 fn parse_scale(text: &str) -> Option<IntegerScale> {
     let text = text.trim();
-    text.strip_prefix(['×', 'x', 'X', '*']).unwrap_or(text).trim().parse().ok()
+    let scale: IntegerScale =
+        text.strip_prefix(['×', 'x', 'X', '*']).unwrap_or(text).trim().parse().ok()?;
+    scale.is_valid().then_some(scale)
 }
 
 /// The whole scale that makes the most of a `used` picture for `target`.
@@ -1154,6 +1157,35 @@ mod tests {
             (64, 40),
         );
         assert_eq!(multiples(&stretched, (64, 40)), fl!("scale-each-way", across = 8, down = 12));
+    }
+
+    #[test]
+    fn keeps_the_scale_where_its_field_is_left_empty() {
+        use egui_kittest::kittest::{Queryable, by};
+
+        let dir = tempfile::tempdir().unwrap();
+        let Some(video) = video(dir.path(), "64x48") else { return };
+        let mut config = Config::default();
+        config.ffmpeg.choice = FfmpegChoice::System;
+        let mut harness = harness(config);
+        // with fonts, as a field without has no text to select
+        widgets::test_fonts(&harness);
+        harness.state_mut().add(vec![video]);
+        finish(&mut harness);
+        let scale = Some(IntegerScale { up: 2, down: 1 });
+        let item = &mut harness.state_mut().items[0];
+        item.choices.webm.scaling = Some(Scaling::Integer);
+        item.choices.webm.integer_scale = scale;
+        harness.run_steps(3);
+        // emptied, then done with: nothing typed is no scale to take
+        let field = by().role(egui::accesskit::Role::SpinButton).value("×2");
+        harness.get(field).focus();
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Backspace);
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(3);
+        assert_eq!(harness.state().items[0].choices.webm.integer_scale, scale);
     }
 
     #[test]

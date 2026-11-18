@@ -12,6 +12,8 @@ What changed in each release of tgradish, newest first. The format follows
   show a decimal, as "235.0 px", at a scale below 1.
 - The GUI's bar of an encode that comes out too large keeps its height,
   rather than at times losing a line and moving what is under it.
+- The GUI's integer scale, its field emptied, keeps its scale rather than
+  going to ×1/2.
 
 ## [2.1.0] - 2026-11-18
 
