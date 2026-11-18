@@ -1690,13 +1690,14 @@ impl<'a> Number<'a> {
     }
 }
 
-/// `text` as a number field reads it: without spaces, nor `units` at
+/// `text` as a number field reads it: without spaces, those that set
+/// thousands apart too, as egui's fields read them, nor `units` at
 /// either end, its own as it shows them, a comma for a decimal point, and
 /// the minus sign egui writes as a hyphen. × is read as x too.
 fn lenient(text: &str, units: &[&str]) -> String {
     let mut text: String = text
-        .trim()
         .chars()
+        .filter(|c| !c.is_whitespace())
         .map(|c| match c {
             ',' => '.',
             '−' => '-',
@@ -2193,8 +2194,9 @@ mod number_tests {
         assert_eq!(lenient("600 kbit/s", &["kbit/s"]), "600");
         assert_eq!(lenient("29,97 FPS", &["fps"]), "29.97");
         assert_eq!(lenient("−3", &[]), "-3");
+        assert_eq!(lenient("1 000,5", &[]), "1000.5");
         // only its own
-        assert_eq!(lenient("3 fps", &["px"]), "3 fps");
+        assert_eq!(lenient("3 fps", &["px"]), "3fps");
     }
 
     #[test]
@@ -2284,6 +2286,18 @@ mod number_tests {
         speed.key_press(egui::Key::Enter);
         speed.run_steps(2);
         assert_eq!(speed.state().0, 1.5);
+        // thousands set apart by spaces, as egui's fields read them too
+        fn rate(field: Number<'_>) -> Number<'_> {
+            field.range(1.0..=50_000.0).suffix(" kbit/s")
+        }
+        for typed in ["1 200", "1\u{a0}200 kbit/s", "1\u{202f}200"] {
+            let mut bitrate = field_of(600.0_f64, rate);
+            focus(&mut bitrate);
+            bitrate.event(egui::Event::Text(typed.into()));
+            bitrate.key_press(egui::Key::Enter);
+            bitrate.run_steps(2);
+            assert_eq!(bitrate.state().0, 1200.0, "{typed:?}");
+        }
     }
 
     #[test]
