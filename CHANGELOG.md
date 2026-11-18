@@ -38,6 +38,9 @@ What changed in each release of tgradish, newest first. The format follows
   by one that is gone.
 - Escape in a GUI number field left as it was closes the dialog it is in
   at once; only a field with something to put back keeps the first one.
+- The GUI's settings no longer go blank under the preview while the file
+  list's edge is dragged with them scrolled to their end: they reflow at
+  once, rather than once the button is let go of.
 - The GUI shows its icon and name over the list at a scale below 1 too.
 - The GUI's buttons over the list are level with those over the preview at
   a scale such as 125% or 150% too.

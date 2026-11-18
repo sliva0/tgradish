@@ -2879,7 +2879,10 @@ pub(crate) fn scrolled<R>(
             state.bg_fill = handle;
             state.corner_radius = round;
         }
-        area.show(ui, |ui| {
+        // this area's own, as egui gives what every area scrolls alike the
+        // same id where they are side by side
+        let tallest = ui.unique_id().with("tallest while held");
+        let shown = area.show(ui, |ui| {
             // what scrolls within as it would elsewhere
             ui.set_style(outer);
             ui.set_max_width(width - GUTTER);
@@ -2890,11 +2893,34 @@ pub(crate) fn scrolled<R>(
             // button held to repeat whose step shortens what follows
             // that frame's only, not one it was shown in long before, at
             // another width
-            let tallest = ui.id().with("tallest while held");
             let pass = ui.ctx().cumulative_pass_nr();
             let before = ui.data(|data| data.get_temp::<(u64, f32)>(tallest));
+            // and only for a press that began on it, its bar too, as on a
+            // control in it: one elsewhere, as on a panel's edge dragged,
+            // leaves it to flow anew as it is held
+            let here = tallest.with("pressed here");
+            let (pressed, down, origin) = ui.input(|input| {
+                let pointer = &input.pointer;
+                (pointer.any_pressed(), pointer.any_down(), pointer.press_origin())
+            });
+            let held_here = if pressed {
+                // where it was seen as it was pressed: the frame before
+                let seen = ui.data(|data| data.get_temp::<egui::Rect>(tallest.with("seen")));
+                let layer = ui.layer_id();
+                let on = origin.zip(seen).is_some_and(|(at, seen)| {
+                    seen.contains(at) && ui.ctx().layer_id_at(at) == Some(layer)
+                });
+                ui.data_mut(|data| data.insert_temp(here, on));
+                on
+            } else {
+                ui.data(|data| data.get_temp::<bool>(here)).unwrap_or(false)
+            };
+            if !down {
+                ui.data_mut(|data| data.remove::<bool>(here));
+            }
             if let Some((_, before)) = before.filter(|&(at, _)| at + 1 == pass)
-                && ui.input(|input| input.pointer.any_down())
+                && down
+                && held_here
             {
                 // from its top, where `set_min_height` would add it after
                 // what was added, and it would grow each frame
@@ -2903,7 +2929,14 @@ pub(crate) fn scrolled<R>(
             let height = ui.min_rect().height();
             ui.data_mut(|data| data.insert_temp(tallest, (pass, height)));
             added
-        })
+        });
+        // what is in sight, with the gutter of its bar
+        let seen = egui::Rect::from_min_size(
+            shown.inner_rect.min,
+            vec2(width.max(shown.inner_rect.width()), shown.inner_rect.height()),
+        );
+        ui.data_mut(|data| data.insert_temp(tallest.with("seen"), seen));
+        shown
     })
     .inner
 }
@@ -3125,6 +3158,62 @@ mod tests {
         harness.event(press(false));
         harness.run_steps(3);
         assert!(!harness.state().1.contains(at));
+    }
+
+    #[test]
+    fn keeps_what_scrolls_as_long_only_for_a_press_that_began_on_it() {
+        // two areas side by side, a button in each, lines after the second
+        // one's, and how tall what the second scrolls is
+        type State = (usize, [egui::Rect; 2], f32);
+        let show = |ui: &mut egui::Ui, (lines, at, tall): &mut State| {
+            ui.set_height(200.0);
+            ui.columns(2, |columns| {
+                let area = egui::ScrollArea::vertical().id_salt("one").auto_shrink([false; 2]);
+                scrolled(&mut columns[0], area, |ui| {
+                    at[0] = ui.button("elsewhere").rect;
+                });
+                let area = egui::ScrollArea::vertical().id_salt("two").auto_shrink([false; 2]);
+                *tall = scrolled(&mut columns[1], area, |ui| {
+                    at[1] = ui.button("here").rect;
+                    for line in 0..*lines {
+                        ui.label(format!("line {line}"));
+                    }
+                })
+                .content_size
+                .y;
+            });
+        };
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([400.0, 220.0])
+            .build_ui_state(show, (30, [egui::Rect::NOTHING; 2], 0.0));
+        test_fonts(&harness);
+        harness.run();
+        let tall = harness.state().2;
+        // held on one button or the other, as what the second scrolls
+        // gets shorter: how tall it is then
+        let shortened = |harness: &mut egui_kittest::Harness<'_, State>, on: usize| {
+            let at = harness.state().1[on].center();
+            let press = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            harness.event(egui::Event::PointerMoved(at));
+            harness.event(press(true));
+            harness.step();
+            harness.state_mut().0 = 5;
+            harness.run_steps(3);
+            let held = harness.state().2;
+            harness.event(press(false));
+            harness.state_mut().0 = 30;
+            harness.run_steps(3);
+            held
+        };
+        // pressed on it: as long; on the other: shorter at once
+        assert_eq!(shortened(&mut harness, 1), tall);
+        let held = shortened(&mut harness, 0);
+        assert!(held < tall - 50.0, "{held} of {tall}");
     }
 
     #[test]

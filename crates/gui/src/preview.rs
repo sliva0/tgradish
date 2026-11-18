@@ -1252,6 +1252,68 @@ mod tests {
     }
 
     #[test]
+    fn reflows_the_settings_scrolled_to_their_end_as_the_list_is_dragged_narrower() {
+        let dir = tempfile::tempdir().unwrap();
+        let photo = dir.path().join("photo.png");
+        image::RgbaImage::from_fn(500, 500, |x, y| {
+            image::Rgba([(x / 2) as u8, (y / 2) as u8, ((x + y) / 4) as u8, 255])
+        })
+        .save(&photo)
+        .unwrap();
+        let mut harness = Harness::builder().with_size([1500.0, 900.0]).build_eframe(|cc| {
+            let app = App::with(Config::default(), None, Presets::builtin());
+            app.style(&cc.egui_ctx);
+            app
+        });
+        harness.state_mut().add(vec![photo]);
+        finish(&mut harness);
+        // the settings, in one column, scrolled to their end
+        let divider = harness.get_by_label(&fl!("preview-divider")).rect();
+        let in_settings = egui::pos2(divider.center().x, divider.bottom() + 60.0);
+        harness.event(egui::Event::PointerMoved(in_settings));
+        let (unit, phase) = (egui::MouseWheelUnit::Point, egui::TouchPhase::Move);
+        let (delta, modifiers) = (vec2(0.0, -20_000.0), egui::Modifiers::NONE);
+        harness.event(egui::Event::MouseWheel { unit, delta, phase, modifiers });
+        harness.run_steps(10);
+        let end = |harness: &Harness<App>| harness.get_by_label(&fl!("commands")).rect().bottom();
+        let at_end = end(&harness);
+        let crop = |harness: &Harness<App>| harness.get_by_label(&fl!("crop")).rect().left();
+        let column = crop(&harness);
+        // the list's edge dragged narrower, the button still held: the
+        // settings go in two columns, shorter, and are as they will be once
+        // it is let go of, with no empty room kept under them
+        let from = egui::pos2(divider.left() - 8.0, 300.0);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: from - vec2(150.0, 0.0),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers,
+        };
+        harness.event(egui::Event::PointerMoved(from));
+        harness.run_steps(2);
+        harness.event(egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers,
+        });
+        harness.step();
+        for step in 1..=15 {
+            harness.event(egui::Event::PointerMoved(from - vec2(10.0 * step as f32, 0.0)));
+            harness.step();
+        }
+        harness.run_steps(2);
+        assert!(crop(&harness) < column - 100.0, "one column still");
+        let held = end(&harness);
+        harness.event(press(false));
+        harness.run_steps(3);
+        let released = end(&harness);
+        assert!((held - released).abs() < 2.0, "held {held}, let go of {released}");
+        // no further down than in one column, as they now fit
+        assert!(released <= at_end + 2.0, "{released} under {at_end}");
+    }
+
+    #[test]
     fn puts_the_line_under_the_preview_back_on_a_double_click() {
         let dir = tempfile::tempdir().unwrap();
         let a = dir.path().join("a.png");
