@@ -41,7 +41,10 @@ jobs:
 
       - name: Install ffmpeg (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        run: |
+          # a stalled download fails and is tried again, rather than hanging
+          sudo sh -c "echo 'Acquire::Retries \"3\"; Acquire::http::Timeout \"30\"; Acquire::https::Timeout \"30\";' > /etc/apt/apt.conf.d/80-stalls"
+          sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Install ffmpeg (Windows)
         if: runner.os == 'Windows'
@@ -111,6 +114,8 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install ffmpeg and its development files
         run: |
+          # a stalled download fails and is tried again, rather than hanging
+          sudo sh -c "echo 'Acquire::Retries \"3\"; Acquire::http::Timeout \"30\"; Acquire::https::Timeout \"30\";' > /etc/apt/apt.conf.d/80-stalls"
           sudo apt-get update
           sudo apt-get install -y ffmpeg pkg-config clang libclang-dev \
             libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev \
@@ -131,7 +136,10 @@ jobs:
       - uses: actions/checkout@v7
       - run: rustup target add x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: |
+          # a stalled download fails and is tried again, rather than hanging
+          sudo sh -c "echo 'Acquire::Retries \"3\"; Acquire::http::Timeout \"30\"; Acquire::https::Timeout \"30\";' > /etc/apt/apt.conf.d/80-stalls"
+          sudo apt-get update && sudo apt-get install -y musl-tools
       - run: >
           cargo clippy -p tgradish --target x86_64-unknown-linux-musl --all-targets --locked
           -- -D warnings
@@ -149,7 +157,10 @@ jobs:
         with:
           workspaces: crates/tgs-lab -> target
       - name: Install what Telegram's rlottie builds with
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang libclang-dev
+        run: |
+          # a stalled download fails and is tried again, rather than hanging
+          sudo sh -c "echo 'Acquire::Retries \"3\"; Acquire::http::Timeout \"30\"; Acquire::https::Timeout \"30\";' > /etc/apt/apt.conf.d/80-stalls"
+          sudo apt-get update && sudo apt-get install -y cmake ninja-build clang libclang-dev
       - run: cargo fmt --manifest-path crates/tgs-lab/Cargo.toml --check
       - run: >
           cargo clippy --manifest-path crates/tgs-lab/Cargo.toml --all-targets
