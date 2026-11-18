@@ -334,10 +334,13 @@ impl Command {
     /// and sets the front-end written into its stickers itself.
     pub fn is_gui(&self) -> bool {
         #[cfg(feature = "gui")]
-        if matches!(self, Command::Gui { .. }) {
-            return true;
+        {
+            matches!(self, Command::Gui { .. })
         }
-        false
+        #[cfg(not(feature = "gui"))]
+        {
+            false
+        }
     }
 }
 
