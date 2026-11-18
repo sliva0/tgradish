@@ -654,7 +654,11 @@ mod tests {
         let mut harness = opened(dir.path(), &["first.png", "second.png"]);
         let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
         harness.state_mut().select(ids[0]);
-        harness.run_steps(2);
+        // read again first, as a file picked is, which a few frames may not
+        // be time enough for on a busy machine: the crop's fields show only
+        // then, and counted before they would be six short of one file's
+        finish(&mut harness);
+        assert!(harness.query(width_field("40 px")).is_some());
         let fields = |harness: &Harness<App>| {
             harness.query_all_by_role(egui::accesskit::Role::SpinButton).count()
         };
