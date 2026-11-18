@@ -97,10 +97,26 @@ impl Clip {
         )
     }
 
+    /// The frame `index` as large as it is, or scaled down to at most
+    /// `side` pixels, as large as a texture can be, where it is larger:
+    /// only to be shown, as what is converted is read again.
+    pub(crate) fn image_within(&self, index: usize, side: usize) -> egui::ColorImage {
+        let side = u32::try_from(side).unwrap_or(u32::MAX).max(1);
+        match self.width.max(self.height) <= side {
+            true => self.image(index),
+            false => self.scaled(&self.frames[index], side),
+        }
+    }
+
     /// A frame from a third of the way in, which is rarely a black or
     /// empty first frame, scaled to at most `side` pixels.
     pub(crate) fn thumbnail(&self, side: u32) -> egui::ColorImage {
-        let rgba = &self.frames[self.frames.len() / 3];
+        self.scaled(&self.frames[self.frames.len() / 3], side)
+    }
+
+    /// The frame `rgba` scaled to at most `side` pixels, each the middle
+    /// of the pixels it covers.
+    fn scaled(&self, rgba: &[u8], side: u32) -> egui::ColorImage {
         let scale = (f64::from(side) / f64::from(self.width.max(self.height))).min(1.0);
         let width = ((f64::from(self.width) * scale).round() as u32).max(1);
         let height = ((f64::from(self.height) * scale).round() as u32).max(1);

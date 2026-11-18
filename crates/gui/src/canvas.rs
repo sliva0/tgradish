@@ -27,6 +27,12 @@ impl Screen {
         self.shows.map(|(clip, ..)| clip)
     }
 
+    /// How large the texture shown is.
+    #[cfg(test)]
+    pub(crate) fn texture_size(&self) -> Option<[usize; 2]> {
+        self.texture.as_ref().map(egui::TextureHandle::size)
+    }
+
     /// The frame `index` of `clip`, drawn sharp or smooth.
     fn texture(
         &mut self,
@@ -38,7 +44,9 @@ impl Screen {
         let options =
             if sharp { egui::TextureOptions::NEAREST } else { egui::TextureOptions::LINEAR };
         if self.shows != Some((clip.id, index, sharp)) || self.texture.is_none() {
-            let image = clip.image(index);
+            // no larger than the renderer takes, which would fail on it
+            let side = ctx.input(|input| input.max_texture_side);
+            let image = clip.image_within(index, side);
             match &mut self.texture {
                 Some(texture) => texture.set(image, options),
                 None => self.texture = Some(ctx.load_texture("preview", image, options)),
@@ -1472,6 +1480,20 @@ mod tests {
         harness.step();
         harness.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
         harness.step();
+    }
+
+    #[test]
+    fn shows_a_picture_wider_than_a_texture_can_be() {
+        // a strip of sprites longer than the renderer takes, which is
+        // 2048 in tests, as egui says where nothing tells it
+        let (harness, scale, _) = cropped_of((3000, 16), None);
+        let most = harness.ctx.input(|input| input.max_texture_side);
+        let texture = harness.state().0.texture.as_ref().unwrap().size();
+        assert!(texture[0] <= most && texture[1] <= most, "{texture:?} over {most}");
+        assert_eq!(texture[0], most);
+        // shown as large as the picture, of its pixels
+        let (shown, _) = layout(harness.state().4, (3000, 16), &harness.state().1);
+        assert!((shown.width() - 3000.0 * scale).abs() < 1e-3, "{shown:?}");
     }
 
     #[test]

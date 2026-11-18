@@ -23,6 +23,10 @@ What changed in each release of tgradish, newest first. The format follows
   with a shape starts where the press began.
 - The GUI's crop shows the ring of the keyboard's focus as Tab or
   Shift+Tab brings the focus to it, not only once the arrows move it.
+- The GUI no longer crashes showing a picture wider or taller than the
+  graphics card takes, as a long strip of sprites or a large panorama
+  paused at its full size: the preview shows it scaled down to fit, and
+  converting still reads all of it.
 - Ctrl and the arrows make the GUI's crop larger again where an integer
   scale such as ½ holds it to whole blocks, a block at a time.
 - A drag on the GUI's preview no longer goes on to crop another file's

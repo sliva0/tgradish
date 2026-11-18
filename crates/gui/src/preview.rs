@@ -760,6 +760,42 @@ mod tests {
     use crate::testing::{finish, square};
 
     #[test]
+    fn shows_inputs_larger_than_a_texture_can_be() {
+        // a strip of sprites, read as pixel art, and a picture of many
+        // colours, shown sharp at its full size once paused, each wider
+        // than the renderer takes, which is 2048 in tests
+        let dir = tempfile::tempdir().unwrap();
+        let strip = dir.path().join("strip.png");
+        image::RgbaImage::from_pixel(3000, 16, image::Rgba([200, 40, 90, 255]))
+            .save(&strip)
+            .unwrap();
+        let photo = dir.path().join("photo.png");
+        image::RgbaImage::from_fn(2400, 300, |x, y| {
+            image::Rgba([(x % 251) as u8, (y % 241) as u8, ((x + y) % 239) as u8, 255])
+        })
+        .save(&photo)
+        .unwrap();
+        let mut harness = crate::testing::harness(Config::default());
+        widgets::test_fonts(&harness);
+        harness.state_mut().add(vec![strip, photo]);
+        finish(&mut harness);
+        let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
+        for id in ids {
+            harness.state_mut().select(id);
+            finish(&mut harness);
+            harness.run_steps(4);
+            let item = harness.state().item(id).unwrap();
+            assert!(item.input_size().is_some_and(|size| size.0 > 2048), "{:?}", item.name());
+            // what shows it, the clip read or the still at its full size,
+            // no larger than the renderer takes
+            let most = harness.ctx.input(|input| input.max_texture_side);
+            let texture = harness.state().screen.texture_size().unwrap();
+            assert!(texture[0] <= most && texture[1] <= most, "{:?}: {texture:?}", item.name());
+            assert_eq!(texture[0], most, "{:?}", item.name());
+        }
+    }
+
+    #[test]
     fn the_narrowest_window_holds_the_preview_and_column() {
         let dir = tempfile::tempdir().unwrap();
         let frames = dir.path().join("walk");
