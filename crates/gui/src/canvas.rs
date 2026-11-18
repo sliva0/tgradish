@@ -453,7 +453,11 @@ pub(crate) fn show(
             ..Default::default()
         };
         ui.memory_mut(|memory| memory.set_focus_lock_filter(crop_id, arrows));
-        if let Some(new) = keyed(ui, cropping.crop.unwrap_or(full), cropping.ratio, size) {
+        // resized a whole block at a time, where an integer scale takes
+        // them, as it rounds the crop down to them
+        let block = cropping.exact.map_or(1, |exact| exact.step);
+        let crop = cropping.crop.unwrap_or(full);
+        if let Some(new) = keyed(ui, crop, (cropping.ratio, block), size) {
             let new = match cropping.exact {
                 Some(exact) => exact.fit(new, (Keep::Start, Keep::Start), cropping.ratio, size),
                 None => Some(new),
@@ -671,8 +675,14 @@ fn edges_at(point: Pos2, crop: Rect) -> Option<[bool; 4]> {
 
 /// What the arrows pressed this frame make of `crop` in a `size` picture,
 /// with the `ratio` it keeps: moved a pixel each, ten with Shift, or with
-/// Ctrl its bottom right corner moved; taken from what else they do.
-fn keyed(ui: &egui::Ui, crop: Crop, ratio: Option<f64>, size: (u32, u32)) -> Option<Crop> {
+/// Ctrl its bottom right corner moved, by as many blocks of `block`
+/// pixels; taken from what else they do.
+fn keyed(
+    ui: &egui::Ui,
+    crop: Crop,
+    (ratio, block): (Option<f64>, u32),
+    size: (u32, u32),
+) -> Option<Crop> {
     use egui::Key;
     let mut by = Vec2::ZERO;
     let mut resize = false;
@@ -703,6 +713,7 @@ fn keyed(ui: &egui::Ui, crop: Crop, ratio: Option<f64>, size: (u32, u32)) -> Opt
     if !resize {
         return Some(moved(crop, by, size));
     }
+    let by = by * block as f32;
     let [left, top, mut right, mut bottom] = bounds(crop);
     // no further than the picture, rather than moving it back in
     right = (right + by.x).min(size.0 as f32).max(left + 1.0);
@@ -1574,6 +1585,29 @@ mod tests {
         assert_eq!(keyed_to(&mut harness, Modifiers::COMMAND, Key::ArrowDown), crop);
         let both = Modifiers::COMMAND | Modifiers::SHIFT;
         assert_eq!(keyed_to(&mut harness, both, Key::ArrowDown), crop);
+    }
+
+    #[test]
+    fn resizes_a_crop_held_to_whole_blocks_by_keys_a_block_at_a_time() {
+        use egui::{Key, Modifiers};
+        // halved, in blocks of 2 × 2, 40 across at most
+        let crop = Crop { x: 8, y: 8, width: 20, height: 20 };
+        let exact = Some(Exact { long: 40, step: 2 });
+        let (mut harness, scale, corner) = cropped_with((64, 48), Some(crop), None, exact);
+        focus_crop(&mut harness, corner + vec2(18.0, 18.0) * scale);
+        let wider = Crop { width: 22, ..crop };
+        assert_eq!(keyed_to(&mut harness, Modifiers::COMMAND, Key::ArrowRight), wider);
+        let lower = Crop { height: 22, ..wider };
+        assert_eq!(keyed_to(&mut harness, Modifiers::COMMAND, Key::ArrowDown), lower);
+        assert_eq!(
+            keyed_to(&mut harness, Modifiers::COMMAND, Key::ArrowLeft),
+            Crop { width: 20, ..lower }
+        );
+        // ten blocks with Shift, as far as the scale takes
+        let both = Modifiers::COMMAND | Modifiers::SHIFT;
+        assert_eq!(keyed_to(&mut harness, both, Key::ArrowRight).width, 40);
+        // and moved a pixel at a time still
+        assert_eq!(keyed_to(&mut harness, Modifiers::NONE, Key::ArrowRight).x, 9);
     }
 
     #[test]
