@@ -334,10 +334,12 @@ fn shown_scale(room: Vec2, full: Vec2, ppp: f32, whole_times: bool) -> f32 {
 /// How large a result shows, as `scale` says: as a share of its size, or
 /// as so many times it. The preview's zoom says so too.
 pub(crate) fn scale_text(scale: f32) -> String {
-    if scale >= 2.0 {
+    // from twice as large as it rounds, so that a hair under it is not 200%
+    let percent = (scale * 100.0).round();
+    if percent >= 200.0 {
         fl!("inset-scale", "times", times = scale.round())
     } else {
-        fl!("inset-scale", percent = (scale * 100.0).round())
+        fl!("inset-scale", percent = percent)
     }
 }
 
@@ -693,6 +695,10 @@ mod tests {
         assert_eq!(shown_scale(Vec2::splat(150.0), full, 2.0, true), 3.0);
         assert_eq!(scale_text(0.42), "42%");
         assert_eq!(scale_text(3.0), "3×");
+        // a hair under twice, as zooming in a quarter at a time comes to,
+        // is twice, as twice is
+        assert_eq!((scale_text(1.996), scale_text(2.0)), ("2×".into(), "2×".into()));
+        assert_eq!(scale_text(1.994), "199%");
         // a 100 × 100 emoji in a view 700 high: 100% in the two smallest
         // rooms, twice its size in the next two, three times in the last
         let show = |ui: &mut egui::Ui, (inset, size): &mut (Inset, usize)| {
