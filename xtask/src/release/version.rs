@@ -3,9 +3,12 @@
 //! The application's version, which tgradish, core, the GUI and xtask
 //! share, is `[workspace.package]`'s in `Cargo.toml`, also in the exact
 //! requirements of `[workspace.dependencies]`, both lock files, each AUR
-//! package's `pkgver` and `.SRCINFO`, and the changelog's newest section.
-//! tgradish-tgs has a version of its own, in its manifest, the workspace's
-//! requirement and the lock files. The Nix package reads `Cargo.toml`'s.
+//! package's `pkgver` and `.SRCINFO`, the changelog's newest section, and
+//! the list of the crates' licences that binaries carry, which names the
+//! workspace's own crates with their versions. tgradish-tgs has a version
+//! of its own, in its manifest, the workspace's requirement, the lock files
+//! and that list. The Nix package reads `Cargo.toml`'s, and the binaries
+//! and packages take theirs from cargo as they are built.
 //!
 //! Each file is edited a line at a time, which keeps everything around the
 //! value as it was.
@@ -62,6 +65,10 @@ pub const LOCK: &str = "Cargo.lock";
 pub const LAB_LOCK: &str = "crates/tgs-lab/Cargo.lock";
 pub const CHANGELOG: &str = "CHANGELOG.md";
 pub const WORKFLOW: &str = ".github/workflows/release.yml";
+/// What `cargo xtask licenses` writes, with cargo-about, which `prepare`
+/// can't count on: other versions of it word the list differently, and it
+/// skips what a `.gitignore` around cargo's home hides.
+pub const CRATE_LICENCES: &str = "crates/core/licenses/THIRD-PARTY-CRATES.txt";
 
 /// The packages in `packaging/aur`, each a repository on the AUR.
 pub const AUR_PACKAGES: [&str; 3] = ["tgradish", "tgradish-bin", "tgradish-static-bin"];
@@ -71,6 +78,10 @@ pub const AUR_PACKAGES: [&str; 3] = ["tgradish", "tgradish-bin", "tgradish-stati
 const APP_DEPENDENCIES: [&str; 2] = ["tgradish-core", "tgradish-gui"];
 
 const TGS: &str = "tgradish-tgs";
+
+/// The workspace's crates that the list of crates' licences names, each
+/// as `  name version` on a line of its own under its licence.
+const LICENSED_CRATES: [&str; 4] = ["tgradish", "tgradish-core", "tgradish-gui", TGS];
 
 pub fn pkgbuild(package: &str) -> String {
     format!("packaging/aur/{package}/PKGBUILD")
@@ -84,7 +95,9 @@ pub fn srcinfo(package: &str) -> String {
 /// top.
 pub fn paths() -> Vec<String> {
     let mut paths: Vec<String> =
-        [MANIFEST, TGS_MANIFEST, LOCK, LAB_LOCK, CHANGELOG, WORKFLOW].map(str::to_owned).into();
+        [MANIFEST, TGS_MANIFEST, LOCK, LAB_LOCK, CHANGELOG, WORKFLOW, CRATE_LICENCES]
+            .map(str::to_owned)
+            .into();
     for package in AUR_PACKAGES {
         paths.push(pkgbuild(package));
         paths.push(srcinfo(package));
@@ -240,6 +253,19 @@ fn local_packages(lock: &str) -> Vec<(&str, &str)> {
         .collect()
 }
 
+/// The lines of the list of crates' licences that name a crate of the
+/// workspace: each line's index, the crate and the version it gives.
+fn licensed_crates(text: &str) -> Vec<(usize, &str, &str)> {
+    text.split_inclusive('\n')
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let (name, version) = line.strip_prefix("  ")?.trim_end().split_once(' ')?;
+            let ours = LICENSED_CRATES.contains(&name) && Version::parse(version).is_ok();
+            ours.then_some((index, name, version))
+        })
+        .collect()
+}
+
 /// `tree` with the version `version` everywhere, and tgradish-tgs's `tgs`
 /// where given, dated `date` in the changelog; the lock files are left to
 /// cargo. Fails unless both rise, or where the changelog says nothing new.
@@ -278,6 +304,22 @@ pub fn prepare(tree: &mut Tree, version: Version, tgs: Option<Version>, date: &s
             .collect();
         tree.insert(path, text);
     }
+    // as cargo-about would list them now
+    let tgs = tgs_version(tree)?;
+    let text = file(tree, CRATE_LICENCES)?;
+    let listed = licensed_crates(text);
+    let text: String = text
+        .split_inclusive('\n')
+        .enumerate()
+        .map(|(index, line)| match listed.iter().find(|(at, _, _)| *at == index) {
+            Some((_, name, _)) => {
+                let expected = if *name == TGS { tgs } else { version };
+                format!("  {name} {expected}{}", &line[line.trim_end().len()..])
+            }
+            None => line.to_owned(),
+        })
+        .collect();
+    tree.insert(CRATE_LICENCES.to_owned(), text);
     Ok(())
 }
 
@@ -336,6 +378,22 @@ pub fn problems(tree: &Tree, tag: Option<&str>) -> Result<Vec<String>> {
                     "{path} has {name} {found}, not {expected}: refresh it with cargo update --workspace"
                 ));
             }
+        }
+    }
+    let listed = licensed_crates(file(tree, CRATE_LICENCES)?);
+    for name in LICENSED_CRATES {
+        if !listed.iter().any(|(_, found, _)| *found == name) {
+            problems
+                .push(format!("{CRATE_LICENCES} doesn't list {name}: run cargo xtask licenses"));
+        }
+    }
+    for (_, name, found) in listed {
+        let expected = if name == TGS { tgs } else { version };
+        if found != expected.to_string() {
+            problems.push(format!(
+                "{CRATE_LICENCES} lists {name} {found}, not {expected}, as cargo xtask \
+                 licenses would"
+            ));
         }
     }
     problems.extend(changelog::problems(file(tree, CHANGELOG)?, version));
@@ -412,6 +470,15 @@ mod tests {
         add(
             WORKFLOW,
             "jobs:\n  build:\n    env:\n      RUSTUP_TOOLCHAIN: \"1.99.0\"\n    steps:\n      - run: rustup toolchain install \"$RUSTUP_TOOLCHAIN\"\n",
+        );
+        add(
+            CRATE_LICENCES,
+            "The crates in tgradish, and their licences.\n\n\
+             ----\nApache License 2.0, used by:\n  anyhow 1.0.104\n  tgradish-gui-extra 2.0.0\n\n\
+             Apache License\n  tgradish is not a crate here\n\n\
+             ----\nMIT License, used by:\n  tgradish 2.0.0\n  tgradish-core 2.0.0\n  \
+             tgradish-gui 2.0.0\n  tgradish-tgs 0.1.0\n\nMIT License\n\n\
+             ----\nMIT License, used by:\n  tgradish-gui 2.0.0\n\nMIT License\n",
         );
         for package in AUR_PACKAGES {
             add(
@@ -498,6 +565,15 @@ mod tests {
                 .contains("tgradish-core = { path = \"crates/core\", version = \"=2.1.0\" }")
         );
         assert!(tree[MANIFEST].contains("[workspace.package]\nversion = \"2.1.0\"\n"));
+        // the workspace's crates in the list of licences, each where it is,
+        // and nothing that only looks like one
+        let licences = &tree[CRATE_LICENCES];
+        assert!(licences.contains(
+            "  tgradish 2.1.0\n  tgradish-core 2.1.0\n  tgradish-gui 2.1.0\n  tgradish-tgs 0.1.0\n"
+        ));
+        assert!(licences.contains("used by:\n  tgradish-gui 2.1.0\n\nMIT License\n"));
+        assert!(licences.contains("  tgradish-gui-extra 2.0.0\n"));
+        assert!(licences.contains("  tgradish is not a crate here\n"));
         // tgs keeps its own
         assert!(tree[MANIFEST].contains("version = \"=0.1.0\""));
         assert_eq!(tree[TGS_MANIFEST], before[TGS_MANIFEST]);
@@ -517,6 +593,7 @@ mod tests {
             tree[MANIFEST]
                 .contains("tgradish-tgs = { path = \"crates/tgs\", version = \"=0.2.0\" }")
         );
+        assert!(tree[CRATE_LICENCES].contains("  tgradish-gui 2.0.1\n  tgradish-tgs 0.2.0\n"));
         // flate2's isn't the package's
         assert!(tree[TGS_MANIFEST].contains("flate2 = { version = \"1.1.10\" }"));
         let problems = problems(&tree, None).unwrap();
@@ -564,6 +641,12 @@ mod tests {
             ("packaging/aur/tgradish-bin/.SRCINFO", "/v2.0.0/", "/v1.0.0/"),
             (CHANGELOG, "## [2.0.0] - 2026-11-16", "## [2.0.0]"),
             (WORKFLOW, "\"1.99.0\"", "\"1.90.0\""),
+            (
+                CRATE_LICENCES,
+                "  tgradish-gui 2.0.0\n\nMIT License\n",
+                "  tgradish-gui 1.0.0\n\nMIT License\n",
+            ),
+            (CRATE_LICENCES, "  tgradish-tgs 0.1.0\n", ""),
         ] {
             let mut tree = original.clone();
             let text = tree[path].replacen(from, to, 1);
@@ -596,6 +679,12 @@ mod tests {
         assert_eq!(packages, AUR_PACKAGES);
         for path in paths() {
             assert!(root.join(&path).is_file(), "{path}");
+        }
+        // the list of licences names each crate as this reads it
+        let licences = std::fs::read_to_string(root.join(CRATE_LICENCES)).unwrap();
+        let listed = licensed_crates(&licences);
+        for name in LICENSED_CRATES {
+            assert!(listed.iter().any(|(_, found, _)| *found == name), "{name}: {listed:?}");
         }
     }
 }
