@@ -3,7 +3,9 @@
 //! to put them. This makes both:
 //! `TGRADISH_SCREENSHOTS=/tmp/x cargo test -p tgradish-gui -- --ignored screenshots`
 //! With `TGRADISH_LANG` they are in that language, as `pseudo` for English
-//! made longer, to see where longer words would not fit.
+//! made longer, to see where longer words would not fit; with
+//! `TGRADISH_SCALE`, those drawn at the usual scale are drawn at that many
+//! screen pixels to a point instead, as `0.75`.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -134,6 +136,7 @@ fn tgs_progress(save: &mut impl FnMut(&mut Harness<App>, &str)) {
                 tgs_done: 0.95,
                 stage_done: 0.3,
                 missed: vec![Some(66_100)],
+                first_steps: Some(2),
                 retries: vec![62_914],
                 ..jobs::Progress::default()
             },
@@ -147,6 +150,7 @@ fn tgs_progress(save: &mut impl FnMut(&mut Harness<App>, &str)) {
                 tgs_done: 0.97,
                 stage_done: 0.55,
                 missed: vec![Some(66_100), Some(65_200)],
+                first_steps: Some(2),
                 retries: vec![62_914, 60_398],
                 ..jobs::Progress::default()
             },
@@ -1032,6 +1036,12 @@ fn scroll_bars(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     }
 }
 
+/// Screen pixels to a point of the pictures drawn at the usual scale: 1,
+/// or as `TGRADISH_SCALE` says.
+fn scale() -> f32 {
+    std::env::var("TGRADISH_SCALE").ok().and_then(|scale| scale.parse().ok()).unwrap_or(1.0)
+}
+
 /// The GUI drawn as the screenshots draw it, of `config`, in a window
 /// `size` large.
 fn window(config: Config, size: egui::Vec2) -> Harness<'static, App> {
@@ -1040,13 +1050,12 @@ fn window(config: Config, size: egui::Vec2) -> Harness<'static, App> {
         predictable_texture_filtering: false,
         ..egui_wgpu::RendererOptions::PREDICTABLE
     };
-    Harness::builder().with_size(size).with_render_options(filtering).wgpu().build_eframe(
-        move |cc| {
-            let app = App::with(config.clone(), None, Presets::builtin());
-            app.style(&cc.egui_ctx);
-            app
-        },
-    )
+    let builder = Harness::builder().with_size(size).with_pixels_per_point(scale());
+    builder.with_render_options(filtering).wgpu().build_eframe(move |cc| {
+        let app = App::with(config.clone(), None, Presets::builtin());
+        app.style(&cc.egui_ctx);
+        app
+    })
 }
 
 /// The bar over the preview, at the narrowest window, the usual one and a
@@ -1319,6 +1328,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     };
     let mut harness = Harness::builder()
         .with_size([1280.0, 820.0])
+        .with_pixels_per_point(scale())
         .with_render_options(filtering)
         .wgpu()
         .build_eframe(move |cc| {
@@ -1653,6 +1663,7 @@ fn edges(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     };
     let mut harness = Harness::builder()
         .with_size([1280.0, 820.0])
+        .with_pixels_per_point(scale())
         .with_render_options(filtering)
         .wgpu()
         .build_eframe(move |cc| {
