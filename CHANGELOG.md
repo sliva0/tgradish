@@ -6,6 +6,11 @@ What changed in each release of tgradish, newest first. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The GUI's number fields of whole numbers, as the crop's pixels, no longer
+  show a decimal, as "235.0 px", at a scale below 1.
+
 ## [2.1.0] - 2026-11-18
 
 ### Added

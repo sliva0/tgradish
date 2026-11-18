@@ -1519,7 +1519,8 @@ impl<'a> Number<'a> {
     }
 
     /// How much dragging a point changes it, at the least, which also sets
-    /// how many decimals it shows, as egui's fields have it.
+    /// how many decimals it shows, as egui's fields have it, unless it
+    /// holds whole numbers.
     pub(crate) fn speed(mut self, speed: f64) -> Self {
         self.speed = speed;
         self
@@ -1614,8 +1615,14 @@ impl<'a> Number<'a> {
         }
     }
 
-    /// The decimals it shows, as egui's fields work them out.
+    /// The decimals it shows, as egui's fields work them out: none where
+    /// it holds whole numbers, as egui's have it too, whatever its speed or
+    /// the scale, where below 1 a point is more than a pixel and the speed
+    /// would otherwise ask for a decimal.
     fn decimals(&self, ui: &egui::Ui) -> std::ops::RangeInclusive<usize> {
+        if self.integral {
+            return 0..=0;
+        }
         let aim = f64::from(ui.input(|input| input.aim_radius()));
         let auto = (aim / self.speed.abs()).log10().ceil().clamp(0.0, 15.0) as usize;
         let most = self.max_decimals.unwrap_or(auto + 2);
@@ -2212,7 +2219,16 @@ mod number_tests {
         value: T,
         field: impl Fn(Number<'_>) -> Number<'_> + 'static,
     ) -> Harness<'static, (T, Option<egui::Rect>)> {
-        let mut harness = Harness::new_ui_state(
+        field_at(value, field, 1.0)
+    }
+
+    /// A [`field_of`] at `ppp` pixels a point, as at a scale of the GUI.
+    fn field_at<T: egui::emath::Numeric + Send + Sync>(
+        value: T,
+        field: impl Fn(Number<'_>) -> Number<'_> + 'static,
+        ppp: f32,
+    ) -> Harness<'static, (T, Option<egui::Rect>)> {
+        let mut harness = Harness::builder().with_pixels_per_point(ppp).build_ui_state(
             move |ui, (value, rect): &mut (T, Option<egui::Rect>)| {
                 // as wide as its widest, as the GUI has them
                 let added = steady_numbers(ui, 4, " px", |ui| ui.add(field(Number::new(value))));
@@ -2404,6 +2420,61 @@ mod number_tests {
         let dragged = harness.state().0;
         assert!(dragged >= 950, "{dragged}");
         assert_eq!(harness.state().1, Some(rect));
+    }
+
+    /// What the field of `harness` shows, or holds as it is typed in.
+    fn text_of<T>(harness: &Harness<'_, (T, Option<egui::Rect>)>) -> String {
+        use egui_kittest::kittest::NodeT;
+        let field = harness.get_by_role(egui::accesskit::Role::SpinButton);
+        field.accesskit_node().value().unwrap_or_default().to_owned()
+    }
+
+    #[test]
+    fn shows_whole_numbers_whole_at_any_scale() {
+        for ppp in [0.5, 0.8, 0.9, 0.99, 1.0, 1.25, 2.0] {
+            let mut harness = field_at(235_i64, |field| field.range(0..=500).suffix(" px"), ppp);
+            assert_eq!(text_of(&harness), "235 px", "at {ppp}");
+            let rect = harness.state().1.unwrap();
+            let from = rect.center();
+            // hovered
+            harness.event(egui::Event::PointerMoved(from));
+            harness.run_steps(2);
+            assert_eq!(text_of(&harness), "235 px", "hovered at {ppp}");
+            // dragged, mid-drag and after
+            let press = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            harness.event(press(from, true));
+            harness.run_steps(1);
+            for step in 1..=7 {
+                harness.event(egui::Event::PointerMoved(from + vec2(3.7 * step as f32, 0.0)));
+                harness.run_steps(1);
+                let value = harness.state().0;
+                assert_eq!(text_of(&harness), format!("{value} px"), "dragged at {ppp}");
+            }
+            harness.event(press(from + vec2(25.9, 0.0), false));
+            harness.run_steps(2);
+            let value = harness.state().0;
+            assert!(value > 235, "{value} at {ppp}");
+            assert_eq!(text_of(&harness), format!("{value} px"), "after a drag at {ppp}");
+            // typed in, and stepped there
+            focus(&mut harness);
+            assert_eq!(text_of(&harness), value.to_string(), "typed in at {ppp}");
+            harness.key_press(egui::Key::ArrowUp);
+            harness.run_steps(2);
+            assert_eq!(text_of(&harness), (value + 1).to_string(), "stepped at {ppp}");
+            harness.key_press(egui::Key::Enter);
+            harness.run_steps(2);
+            assert_eq!(text_of(&harness), format!("{} px", value + 1), "done with at {ppp}");
+        }
+        // where they are fractions, the decimals their speed gives them
+        for ppp in [1.0, 2.0] {
+            let harness = field_at(1.5_f64, |field| field.range(0.0..=10.0).speed(0.01), ppp);
+            assert_eq!(text_of(&harness), "1.50", "at {ppp}");
+        }
     }
 
     #[test]

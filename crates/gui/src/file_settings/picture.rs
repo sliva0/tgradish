@@ -1006,6 +1006,115 @@ mod tests {
     }
 
     #[test]
+    fn shows_the_crop_in_whole_pixels_at_a_scale_below_1() {
+        use crate::app::App;
+        use eframe::egui::accesskit::Role;
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::{NodeT, Queryable, by};
+
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("photo.png");
+        let mut photo = image::RgbaImage::new(500, 500);
+        for (x, y, pixel) in photo.enumerate_pixels_mut() {
+            *pixel = image::Rgba([(x / 2) as u8, (y / 2) as u8, ((x + y) / 4) as u8, 255]);
+        }
+        photo.save(&art).unwrap();
+        // a scale below 1, at which a point is more than a pixel
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        config.gui.scale = 0.9;
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![art]);
+        finish(&mut harness);
+        assert!(harness.ctx.pixels_per_point() < 1.0);
+        harness.state_mut().items[0].choices.crop =
+            Some(Crop { x: 0, y: 0, width: 265, height: 265 });
+        harness.run_steps(3);
+        // what the crop's fields show, margins then size, as its value says
+        let fields = |harness: &Harness<App>| {
+            let crop = harness.state().items[0].choices.crop.unwrap();
+            let (right, bottom) = (500 - crop.x - crop.width, 500 - crop.y - crop.height);
+            let expected = [crop.y, crop.x, right, bottom, crop.width, crop.height];
+            let shown: Vec<String> = harness
+                .query_all(by().role(Role::SpinButton))
+                .filter_map(|node| node.accesskit_node().value())
+                .filter(|value| value.ends_with(" px"))
+                .collect();
+            (shown, expected.map(|value| format!("{value} px")).to_vec())
+        };
+        let (shown, expected) = fields(&harness);
+        assert_eq!(&shown[..6], expected, "{shown:?}");
+        // a corner dragged on the canvas, by points that aren't whole pixels
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let view = &harness.state().items[0].view;
+        let (_, fit_in) = view.input_zoom.anchor.unwrap();
+        let (picture, scale) = crate::canvas::layout(fit_in, (500, 500), &view.input_zoom);
+        let corner = picture.min + egui::vec2(265.0, 265.0) * scale;
+        harness.event(egui::Event::PointerMoved(corner));
+        harness.event(press(corner, true));
+        harness.step();
+        for step in 1..=4 {
+            let to = corner + egui::vec2(7.3, 3.1) * step as f32;
+            harness.event(egui::Event::PointerMoved(to));
+            harness.step();
+            let (shown, expected) = fields(&harness);
+            assert_eq!(&shown[..6], expected, "dragging the crop: {shown:?}");
+        }
+        harness.event(press(corner + egui::vec2(29.2, 12.4), false));
+        harness.run_steps(3);
+        let dragged = harness.state().items[0].choices.crop.unwrap();
+        assert_ne!((dragged.width, dragged.height), (265, 265));
+        let (shown, expected) = fields(&harness);
+        assert_eq!(&shown[..6], expected, "the crop dragged: {shown:?}");
+        // a field scrubbed, the width's
+        let width = format!("{} px", dragged.width);
+        let field = harness.query_all(by().role(Role::SpinButton).value(&width)).last().unwrap();
+        let from = field.rect().center();
+        harness.event(egui::Event::PointerMoved(from));
+        harness.event(press(from, true));
+        harness.step();
+        for step in 1..=5 {
+            harness.event(egui::Event::PointerMoved(from + egui::vec2(-3.7, 0.0) * step as f32));
+            harness.step();
+            // the margins, drawn before it, follow it a frame later
+            let (shown, expected) = fields(&harness);
+            assert_eq!(shown[4], expected[4], "scrubbing the width: {shown:?}");
+            assert!(shown.iter().all(|text| !text.contains('.')), "scrubbing: {shown:?}");
+        }
+        harness.event(press(from + egui::vec2(-18.5, 0.0), false));
+        harness.run_steps(3);
+        let scrubbed = harness.state().items[0].choices.crop.unwrap();
+        assert!(scrubbed.width < dragged.width, "{scrubbed:?}");
+        let (shown, expected) = fields(&harness);
+        assert_eq!(&shown[..6], expected, "the width scrubbed: {shown:?}");
+        // typed in, then stepped by the arrows
+        let width = format!("{} px", scrubbed.width);
+        harness.query_all(by().role(Role::SpinButton).value(&width)).last().unwrap().focus();
+        harness.run_steps(2);
+        let typed = |harness: &Harness<App>| {
+            let field = harness.get(by().predicate(|node| node.is_focused()));
+            field.accesskit_node().value().unwrap_or_default().to_owned()
+        };
+        assert_eq!(typed(&harness), scrubbed.width.to_string());
+        harness.key_press(egui::Key::ArrowUp);
+        harness.run_steps(2);
+        harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::ArrowDown);
+        harness.run_steps(2);
+        let stepped = harness.state().items[0].choices.crop.unwrap();
+        assert_eq!(stepped.width, scrubbed.width + 1 - 10, "{stepped:?}");
+        assert_eq!(typed(&harness), stepped.width.to_string());
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        let (shown, expected) = fields(&harness);
+        assert_eq!(&shown[..6], expected, "the width stepped: {shown:?}");
+    }
+
+    #[test]
     fn reshapes_crops_around_their_middle() {
         // about as large, within the picture
         let crop = Crop { x: 100, y: 100, width: 200, height: 100 };
