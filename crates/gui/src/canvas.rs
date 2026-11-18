@@ -719,19 +719,15 @@ fn keyed(
     right = (right + by.x).min(size.0 as f32).max(left + 1.0);
     bottom = (bottom + by.y).min(size.1 as f32).max(top + 1.0);
     // the shape kept from the side that moved, and no further than the
-    // picture the other way either
+    // picture the other way either, from its top left corner
     if let Some(ratio) = ratio.map(|r| r as f32) {
         if by.x != 0.0 {
             bottom = top + (right - left) / ratio;
         } else {
             right = left + (bottom - top) * ratio;
         }
-        let (width, height) = (right - left, bottom - top);
-        let room = ((size.0 as f32 - left) / width).min((size.1 as f32 - top) / height);
-        let shrink = room.min(1.0);
-        (right, bottom) = (left + width * shrink, top + height * shrink);
     }
-    Some(settle([left, top, right, bottom], ratio, size))
+    Some(settle([left, top, right, bottom], ratio, size, [Some(left), Some(top)]))
 }
 
 /// The crop's size over its top left corner, with a cross after it back to
@@ -980,23 +976,44 @@ fn bounds(crop: Crop) -> Bounds {
     [x, y, x + crop.width as f32, y + crop.height as f32]
 }
 
+/// Where a crop's size changes from, across and down: the line that stays
+/// put as it grows or shrinks, as the edge or corner opposite the one
+/// dragged, or its middle; none along an axis it may move along to fit.
+type Anchor = [Option<f32>; 2];
+
 /// `bounds` made whole pixels within a `size` picture, at least one pixel
-/// wide and high, shrunk to fit while keeping its ratio if `ratio` is given.
-fn settle([left, top, right, bottom]: Bounds, ratio: Option<f64>, size: (u32, u32)) -> Crop {
+/// wide and high. Keeping its ratio, if `ratio` is given, it is shrunk to
+/// fit, from the `anchor` along each axis it has one there, which stays
+/// where it is; along the others it is moved in.
+fn settle(bounds: Bounds, ratio: Option<f64>, size: (u32, u32), anchor: Anchor) -> Crop {
+    let [mut left, mut top, mut right, mut bottom] = bounds;
     let (limit_w, limit_h) = (size.0 as f32, size.1 as f32);
-    let (mut width, mut height) = (right - left, bottom - top);
-    if width > limit_w {
-        if ratio.is_some() {
-            height *= limit_w / width;
+    if ratio.is_some() {
+        let mut shrink = 1.0_f32;
+        let axes = [(left, right, limit_w), (top, bottom, limit_h)];
+        for ((low, high, room), anchor) in axes.into_iter().zip(anchor) {
+            match anchor.map(|at| at.clamp(0.0, room)) {
+                // no further than the picture on either side of it
+                Some(at) => {
+                    if at > low {
+                        shrink = shrink.min(at / (at - low));
+                    }
+                    if high > at {
+                        shrink = shrink.min((room - at) / (high - at));
+                    }
+                }
+                None if high - low > room => shrink = shrink.min(room / (high - low)),
+                None => {}
+            }
         }
-        width = limit_w;
+        let scaled = |low: f32, high: f32, anchor: Option<f32>, room: f32| {
+            let at = anchor.map_or(low, |at| at.clamp(0.0, room));
+            (at - (at - low) * shrink, at + (high - at) * shrink)
+        };
+        (left, right) = scaled(left, right, anchor[0], limit_w);
+        (top, bottom) = scaled(top, bottom, anchor[1], limit_h);
     }
-    if height > limit_h {
-        if ratio.is_some() {
-            width *= limit_h / height;
-        }
-        height = limit_h;
-    }
+    let (width, height) = (right - left, bottom - top);
     let width = width.round().clamp(1.0, limit_w);
     let height = height.round().clamp(1.0, limit_h);
     let x = left.round().clamp(0.0, limit_w - width);
@@ -1007,7 +1024,8 @@ fn settle([left, top, right, bottom]: Bounds, ratio: Option<f64>, size: (u32, u3
 fn moved(start: Crop, by: egui::Vec2, size: (u32, u32)) -> Crop {
     let [left, top, right, bottom] = bounds(start);
     let shift = vec2(by.x.round(), by.y.round());
-    settle([left + shift.x, top + shift.y, right + shift.x, bottom + shift.y], None, size)
+    let moved = [left + shift.x, top + shift.y, right + shift.x, bottom + shift.y];
+    settle(moved, None, size, [None, None])
 }
 
 /// `start` with its `edges` dragged to `point`, keeping a `ratio` if one is
@@ -1048,8 +1066,18 @@ fn resized(
             (left, right) = (middle.x - half.x, middle.x + half.x);
             (top, bottom) = (middle.y - half.y, middle.y + half.y);
         }
-        return Some(settle([left, top, right, bottom], ratio, size));
+        let anchor = [Some(middle.x), Some(middle.y)];
+        return Some(settle([left, top, right, bottom], ratio, size, anchor));
     }
+    // the edges opposite those dragged stay where they are; across an
+    // edge dragged alone, it grows about its middle, and moves in to fit
+    let opposite = |low: bool, high: bool, (from, to): (f32, f32)| match (low, high) {
+        (true, _) => Some(to),
+        (_, true) => Some(from),
+        _ => None,
+    };
+    let anchor =
+        [opposite(edges[0], edges[2], (left, right)), opposite(edges[1], edges[3], (top, bottom))];
     if edges[0] {
         left = point.x.min(right - 1.0);
     }
@@ -1091,7 +1119,7 @@ fn resized(
             }
         }
     }
-    Some(settle([left, top, right, bottom], ratio, size))
+    Some(settle([left, top, right, bottom], ratio, size, anchor))
 }
 
 fn drawn(corner: Pos2, point: Pos2, ratio: Option<f64>, size: (u32, u32)) -> Option<Crop> {
@@ -1105,7 +1133,9 @@ fn drawn(corner: Pos2, point: Pos2, ratio: Option<f64>, size: (u32, u32)) -> Opt
     }
     let left = if point.x < corner.x { corner.x - width } else { corner.x };
     let top = if point.y < corner.y { corner.y - height } else { corner.y };
-    Some(settle([left, top, left + width, top + height], ratio, size))
+    // from the corner where it began
+    let anchor = [Some(corner.x), Some(corner.y)];
+    Some(settle([left, top, left + width, top + height], ratio, size, anchor))
 }
 
 #[cfg(test)]
@@ -1821,10 +1851,21 @@ mod tests {
         let wider = resized(crop, [false, false, true, false], pos2(170.0, 0.0), free, SIZE);
         assert_eq!(wider, Some(Crop { width: 120, ..crop }));
         // the top left corner, square: the larger side wins, shrunk to fit
+        // what the picture leaves from the opposite corner, which stays
         let square =
             resized(crop, [true, true, false, false], pos2(40.0, 10.0), (Some(1.0), false), SIZE)
                 .unwrap();
-        assert_eq!(square, Crop { x: 40, y: 0, width: 100, height: 100 });
+        assert_eq!(square, Crop { x: 70, y: 0, width: 80, height: 80 });
+        // the bottom right corner of a square on the picture's bottom edge,
+        // dragged out: it stays as it is rather than pushing its top up
+        let low = Crop { x: 50, y: 40, width: 60, height: 60 };
+        let corner = [false, false, true, true];
+        let out = resized(low, corner, pos2(130.0, 100.0), (Some(1.0), false), SIZE).unwrap();
+        assert_eq!(out, low);
+        // an edge alone grows about its middle across, moving in to fit
+        let right = [false, false, true, false];
+        let wider = resized(low, right, pos2(120.0, 70.0), (Some(1.0), false), SIZE).unwrap();
+        assert_eq!(wider, Crop { x: 50, y: 30, width: 70, height: 70 });
         // an edge keeps the ratio around the middle
         let wide =
             resized(crop, [false, false, true, false], pos2(170.0, 0.0), (Some(2.0), false), SIZE)
@@ -1846,8 +1887,12 @@ mod tests {
     #[test]
     fn draws_new_crops_from_either_corner() {
         assert_eq!(drawn(pos2(50.0, 50.0), pos2(51.0, 50.5), None, SIZE), None);
-        let drawn = drawn(pos2(100.0, 80.0), pos2(60.0, 20.0), Some(1.0), SIZE).unwrap();
-        assert_eq!(drawn, Crop { x: 40, y: 20, width: 60, height: 60 });
+        let square = drawn(pos2(100.0, 80.0), pos2(60.0, 20.0), Some(1.0), SIZE).unwrap();
+        assert_eq!(square, Crop { x: 40, y: 20, width: 60, height: 60 });
+        // near the picture's bottom, from where the press began, no larger
+        // than the picture leaves from there
+        let low = drawn(pos2(20.0, 70.0), pos2(60.0, 80.0), Some(1.0), SIZE).unwrap();
+        assert_eq!(low, Crop { x: 20, y: 70, width: 30, height: 30 });
     }
 
     #[test]
