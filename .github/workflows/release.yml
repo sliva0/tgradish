@@ -94,7 +94,7 @@ jobs:
     # stable, so that building a tag again makes the same binaries; `cargo
     # xtask release prepare` raises it, see CONTRIBUTING.md
     env:
-      RUSTUP_TOOLCHAIN: "1.99.0"
+      RUSTUP_TOOLCHAIN: "1.100.0"
     strategy:
       fail-fast: false
       matrix:

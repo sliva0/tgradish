@@ -2,7 +2,7 @@
 name = "tgradish-tgs"
 description = "Pure-Rust library that turns pixel art from GIF, APNG, WebP, Aseprite or sprite sheets into Telegram animated stickers (.tgs), and checks any .tgs"
 # a library with its own version, not the application's
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

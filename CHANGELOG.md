@@ -6,76 +6,50 @@ What changed in each release of tgradish, newest first. The format follows
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-18
+
 ### Added
 
-- The GUI undoes changes to each file's settings with Ctrl+Z, and makes
-  them again with Ctrl+Shift+Z or Ctrl+Y, or from the menu behind the
-  gear. Each file keeps its own history while it is open. A drag, a button
-  held down, a number typed or a click is one step; the crop nudged by
-  the arrows a moment apart is one too. Ctrl+Z still puts back the files
-  just removed first, while that is offered, with their history.
+- The GUI undoes changes to a file's settings with Ctrl+Z and makes them
+  again with Ctrl+Shift+Z or Ctrl+Y, or from the menu behind the gear.
+  Each file keeps its own history while it is open.
 
 ### Changed
 
+- Making a `.tgs` shows how far it got: the GUI's bars and the command
+  line's fill as the art is drawn, fitted and compressed. Where the result
+  comes out too large and fitting tries again, each try has a bar of its
+  own, as a WebM's encodes do. `--json` prints `advanced` and `missed`
+  events for these.
+- The GUI's number fields take what is typed on Enter, Tab or a click
+  elsewhere, and Escape puts back what was there. They read units and a
+  decimal comma, and Up, Down and the wheel step them. The − and + buttons
+  repeat while held.
+- The GUI's crop snaps to the picture's edges and middle unless Ctrl is
+  held, keeps its shape with Shift and its middle with Alt, goes back on
+  Escape while dragged, and moves by the arrows once clicked.
+- The GUI's timeline shows the time under the pointer, seeks as the button
+  goes down, and slides the part used when an end is dragged with Shift.
+- The GUI's preview zooms in smaller steps and further, shows its scale,
+  and pans across with Shift+wheel. Pixel art is shown at whole screen
+  pixels to each of its own.
+- The GUI's "Smooth scrolling" setting is now "Motion" (`motion` in the
+  config file, which still reads `smooth-scrolling`). Progress, the list,
+  notices and dialogs ease rather than jump, and nothing moves where the
+  system asks for less motion.
+- What scrolls in the GUI shows a scroll bar and fades where there is
+  more, and each file keeps its own scroll position.
+- The GUI without files is one drop zone, and the bar under the preview
+  names the file the result is saved as.
 - Fitting a WebM no longer says why it didn't try a lower frame rate, in
   the GUI, the command line or `--json`'s `decided` events.
-- The GUI shows a bar for fitting a `.tgs` only while it is being fitted,
-  not for one that fits or is kept exactly as it is.
-- The GUI shows its accent plainly where it was faint: the timeline's used
-  part on the light theme, and, with a grey or dark accent on the dark
-  theme, what is chosen, the main button and progress.
-- The GUI without files is one drop zone, until the first file is added.
-  The bar above the preview says what the mouse does on it only where
-  that fits whole, in a wide window, rather than cutting it short. The bar
-  under it
-  names the result's file, its folder said on hover, and stays on one line.
-- The GUI's number fields take a number typed once Enter, Tab or a click
-  elsewhere finishes it, and Escape puts back what was there, so what
-  follows from them, as the crop does from its ratio, no longer follows
-  each digit on the way. They read units and a decimal comma typed with
-  the number, and flash where what is typed isn't one. Up and Down, and
-  the wheel over a field being typed in, step them, further with Shift,
-  and dragging crosses a field's whole range in a few hundred points.
-- Held, the − and + of the integer scale and of Settings' scale step on,
-  faster after a while; the integer scale's are as tall as the controls
-  beside them.
-- The GUI's timeline says the time under the pointer at once, dragging too,
-  takes the nearer end of a short part used, seeks as the button goes down,
-  and slides the part used by an end dragged with Shift.
-- The GUI's crop snaps to the picture's edges and middle but with Ctrl,
-  keeps its shape with Shift and its middle with Alt, goes back on Escape
-  while dragged, moves by the arrows once clicked, and has larger corners.
-- The GUI's preview zooms by a quarter a wheel notch, as far as 32 screen
-  pixels a pixel, says that scale on Zoom out, eases out, and pans across
-  with Shift+wheel; pixel art fits whole screen pixels to each of its own.
-- The GUI's Smooth scrolling is Motion (`motion` in the config file, which
-  still reads `smooth-scrolling`): progress, the list, notices and dialogs
-  ease rather than jump, and nothing moves where the system asks for less.
-- What scrolls in the GUI shows a bar and fades where there is more, each
-  file keeps its scroll, and clicking a control moves nothing around it.
-- The GUI's crop shows the ring of the keyboard's focus only once the
-  arrows move it, until it is pressed again, not around it on every drag.
-- Making a `.tgs` says how far it got, about as the time it takes: the
-  GUI's bar in the list, the bar of each stage and the one beside Stop
-  fill as the art is drawn, fitted and compressed, the command line shows
-  a bar with its percentage and the terminal's progress follows it, and
-  `--json` prints `advanced` events of all of it and of the stage at
-  work. Where the result comes out too large all the same and fitting
-  tries again aiming lower, each try has a bar of its own, as a WebM's
-  encodes do, saying what it aimed at and came to, in the GUI and on the
-  command line, and `--json` prints a `missed` event.
 
 ### Fixed
 
-- On KDE Plasma 6, the GUI's accent as the system has it is the accent
-  chosen in Plasma's settings, the same as choosing that colour in the
-  GUI, not the darker selection colour Plasma makes from it.
-- The GUI's list no longer cuts "outdated" short under a file whose result
-  is out of date where the list is narrow: it says the result's size
-  alone then, as the badge on the file's picture says it is out of date.
-- The GUI's small picture of the crop in the Picture settings draws all
-  four sides of the crop's dashed outline, where the picture is as wide
-  or as tall as it has room for, not cutting the right or bottom one off.
+- On KDE Plasma 6, the GUI's system accent is the accent chosen in
+  Plasma's settings, not the darker selection colour made from it.
+- A grey or dark accent no longer leaves the GUI's chosen items, main
+  button and progress faint on the dark theme.
 
 ## [2.0.0] - 2026-11-16
 
@@ -126,5 +100,6 @@ that makes every kind of Telegram sticker and emoji.
 The last release of the Python tgradish, which converted videos to video
 stickers with ffmpeg and spoofed their duration.
 
-[Unreleased]: https://github.com/sliva0/tgradish/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/sliva0/tgradish/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/sliva0/tgradish/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/sliva0/tgradish/compare/11d7f0d...v2.0.0

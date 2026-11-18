@@ -1,6 +1,6 @@
 pkgbase = tgradish-bin
 	pkgdesc = Telegram stickers and emoji from videos, images or pixel art
-	pkgver = 2.0.0
+	pkgver = 2.1.0
 	pkgrel = 1
 	url = https://github.com/sliva0/tgradish
 	arch = x86_64
@@ -25,9 +25,9 @@ pkgbase = tgradish-bin
 	conflicts = tgradish
 	options = !strip
 	options = !debug
-	source_x86_64 = tgradish-bin-2.0.0-x86_64.tar.gz::https://github.com/sliva0/tgradish/releases/download/v2.0.0/tgradish-linux-x86_64-system-ffmpeg.tar.gz
+	source_x86_64 = tgradish-bin-2.1.0-x86_64.tar.gz::https://github.com/sliva0/tgradish/releases/download/v2.1.0/tgradish-linux-x86_64-system-ffmpeg.tar.gz
 	sha256sums_x86_64 = SKIP
-	source_aarch64 = tgradish-bin-2.0.0-aarch64.tar.gz::https://github.com/sliva0/tgradish/releases/download/v2.0.0/tgradish-linux-aarch64-system-ffmpeg.tar.gz
+	source_aarch64 = tgradish-bin-2.1.0-aarch64.tar.gz::https://github.com/sliva0/tgradish/releases/download/v2.1.0/tgradish-linux-aarch64-system-ffmpeg.tar.gz
 	sha256sums_aarch64 = SKIP
 
 pkgname = tgradish-bin

@@ -3844,7 +3844,7 @@ dependencies = [
 
 [[package]]
 name = "tgradish"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3875,7 +3875,7 @@ dependencies = [
 
 [[package]]
 name = "tgradish-core"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "arboard",
  "directories",
@@ -3898,7 +3898,7 @@ dependencies = [
 
 [[package]]
 name = "tgradish-corpus"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "flate2",
  "gif",
@@ -3908,7 +3908,7 @@ dependencies = [
 
 [[package]]
 name = "tgradish-gui"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "arboard",
  "eframe",
@@ -3945,7 +3945,7 @@ dependencies = [
 
 [[package]]
 name = "tgradish-tgs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "image",
@@ -5079,7 +5079,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "anyhow",
  "png",
