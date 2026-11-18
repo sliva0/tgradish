@@ -101,6 +101,17 @@ pub enum Event {
     },
     /// `.tgs`: the result is being compressed.
     Packing,
+    /// `.tgs`: the result missed the limit all the same, as fitting's
+    /// estimates were off: fitting tries again, aiming lower, then encodes
+    /// and compresses what that comes to, as a stage of its own, until it
+    /// fits or nothing is left to try.
+    Missed {
+        /// How large it came to compressed; none where it was far too
+        /// large, or over Telegram's other limits, to be worth compressing.
+        bytes: Option<u64>,
+        /// The estimated size fitting now aims at, in bytes.
+        aim: u64,
+    },
     /// `.tgs`: how far making the sticker got, estimated, said often as
     /// it goes and never less than before: each part of the work has a
     /// share of the whole of about the time it takes, and moves through it
@@ -110,8 +121,8 @@ pub enum Event {
         fraction: f64,
         /// Of the stage at work, from 0 to 1: since `started`, since
         /// fitting started after `too-large`, unless the art is kept
-        /// exactly as it is, or with the first `reduced` after `packing`,
-        /// or since `packing`.
+        /// exactly as it is, or since `packing`; once the result missed,
+        /// of each try again since its `missed`, all of it.
         stage_fraction: f64,
     },
     /// Something worth saying that doesn't stop the conversion: as options

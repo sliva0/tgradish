@@ -59,13 +59,14 @@ pub(super) enum Part {
 
 /// The stages front-ends show, each from the progress that starts it:
 /// [`Progress::Normalised`], [`Progress::TooLarge`] where fitting starts,
-/// [`Progress::Reduced`] where fitting goes on after the result missed,
-/// and [`Progress::Packing`].
+/// and [`Progress::Packing`]; and each try again once the result missed,
+/// all of it, from its [`Progress::Missed`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Stage {
     Drawing,
     Fitting,
     Packing,
+    Again,
 }
 
 /// Follows the parts of making a sticker, saying how far it got.
@@ -126,10 +127,9 @@ impl<'a> Tracker<'a> {
         match event {
             Progress::TooLarge { .. } if self.said_too_large.replace(true) => return,
             Progress::Normalised { .. } => self.start(Stage::Drawing),
-            Progress::Reduced { .. } if self.stage.get() != Stage::Fitting => {
-                self.start(Stage::Fitting)
-            }
-            Progress::Packing => self.start(Stage::Packing),
+            // a try again is one stage, packing too
+            Progress::Packing if self.stage.get() != Stage::Again => self.start(Stage::Packing),
+            Progress::Missed { .. } => self.start(Stage::Again),
             _ => {}
         }
         (self.progress.borrow_mut())(event);
@@ -168,10 +168,10 @@ impl<'a> Tracker<'a> {
         self.tell();
     }
 
-    /// The result didn't fit, and fitting goes on aiming lower: the work
-    /// left is spread over the rest, calibrating again only unless it was
-    /// done. The stage at work goes on until the next starts.
-    pub(super) fn again(&self, calibrated: bool) {
+    /// The result came to `bytes`, too large, and fitting goes on aiming
+    /// at `aim`, which is said: the work left is spread over the rest,
+    /// calibrating again only unless it was done, as a stage of its own.
+    pub(super) fn missed(&self, bytes: Option<usize>, aim: usize, calibrated: bool) {
         self.base.set(self.whole.get());
         self.quick.set(false);
         self.fitting.set(true);
@@ -180,6 +180,7 @@ impl<'a> Tracker<'a> {
         for part in &self.parts {
             part.set(0.0);
         }
+        self.say(Progress::Missed { bytes, aim });
     }
 
     /// All is done.
@@ -222,7 +223,7 @@ impl<'a> Tracker<'a> {
             Stage::Drawing if fitting => self.layout([1.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
             Stage::Drawing => self.layout([1.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
             Stage::Fitting => self.layout([1.0, 1.0, 1.0, 1.0, 1.0, 0.0]),
-            Stage::Packing => self.layout([1.0; 6]),
+            Stage::Packing | Stage::Again => self.layout([1.0; 6]),
         }
     }
 
@@ -308,16 +309,18 @@ mod tests {
             tracker.say(Progress::Packing);
             tracker.at(Part::Packing, 0.9);
             // the result too large all the same: what is left is spread
-            // over the rest, and fitting starts over as it reduces again
+            // over the rest, a stage of its own
             let before = tracker.whole.get();
-            tracker.again(true);
+            tracker.missed(Some(70_000), 60_000, true);
+            assert_eq!((tracker.stage.get(), tracker.stage_done.get()), (Stage::Again, 0.0));
             tracker.at(Part::Rounds, 0.01);
             assert!(tracker.whole.get() >= before);
             let step = Step::new(Reduction::Despeckle, 1, 0.0);
             tracker.say(Progress::Reduced { step });
-            assert_eq!((tracker.stage.get(), tracker.stage_done.get()), (Stage::Fitting, 0.0));
+            assert_eq!(tracker.stage.get(), Stage::Again);
             tracker.at(Part::Rounds, 1.0);
             tracker.say(Progress::Packing);
+            assert_eq!(tracker.stage.get(), Stage::Again);
             tracker.at(Part::Packing, 0.5);
             tracker.finish();
         });

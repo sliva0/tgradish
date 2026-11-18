@@ -1034,6 +1034,13 @@ stage-fitting-steps = { $count ->
 stage-fitting-from = Fitting into 64 KiB from { $size }
 stage-compressing = Compressing
     .hopeless = Compressing quickly: it can't fit
+    .missed = Compressed → { $size }, too large
+    .missed-far = Compressing: far too large still
+# Another try at fitting a TGS, once the one before came out too large: the
+# estimated size it aims at, then what it came to.
+retry = Try { $number }: aiming at { $aim }
+retry-done = Try { $number }: aiming at { $aim } → { $size }, too large
+    .far = Try { $number }: aiming at { $aim } → far too large still
 # Each encode of a WebM, a bar: its frame rate and rate, then its size as
 # a share of the limit, and whether that fits.
 starting = Starting

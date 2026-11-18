@@ -130,6 +130,9 @@ pub fn convert(
             Progress::TooLarge { bytes } => on_event(Event::TooLarge { bytes: bytes as u64 }),
             Progress::Reduced { step } => on_event(Event::Reduced { step }),
             Progress::Packing => on_event(Event::Packing),
+            Progress::Missed { bytes, aim } => {
+                on_event(Event::Missed { bytes: bytes.map(|bytes| bytes as u64), aim: aim as u64 })
+            }
             Progress::Advanced { fraction, stage_fraction } => {
                 on_event(Event::Advanced { fraction, stage_fraction })
             }

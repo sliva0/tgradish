@@ -74,6 +74,96 @@ fn state_screenshots() {
     });
 }
 
+/// Only the pictures of [`tgs_progress`], to `$TGRADISH_SCREENSHOTS` as
+/// [`screenshots`] makes them.
+#[test]
+#[ignore]
+fn tgs_progress_screenshots() {
+    let out =
+        PathBuf::from(std::env::var_os("TGRADISH_SCREENSHOTS").expect("TGRADISH_SCREENSHOTS"));
+    crate::l10n::choose(None);
+    tgs_progress(&mut |harness: &mut Harness<App>, name: &str| {
+        let image = harness.render().expect("rendering needs a GPU");
+        image.save(out.join(format!("tgradish-{name}.png"))).unwrap();
+    });
+}
+
+/// A `.tgs` at work: fitted, then tried again after the result missed the
+/// limit, once and twice.
+fn tgs_progress(save: &mut impl FnMut(&mut Harness<App>, &str)) {
+    let dir = tempfile::tempdir().unwrap();
+    let frames = dir.path().join("dance");
+    std::fs::create_dir(&frames).unwrap();
+    square(&frames.join("1.png"), [255, 0, 0, 255]);
+    square(&frames.join("2.png"), [0, 0, 255, 255]);
+    let mut config = Config::default();
+    config.gui.output_dir = Some(dir.path().join("out"));
+    // tall enough for the column to show every try
+    let mut harness = window(config, egui::vec2(1280.0, 1000.0));
+    harness.state_mut().add(vec![frames]);
+    finish(&mut harness);
+    let item = harness.state_mut().items.last_mut().unwrap();
+    (item.format, item.format_guessed, item.view.playing) = (Format::Tgs, false, false);
+    let step = |bytes| {
+        tgradish_core::tgradish_tgs::sticker::Step::new(
+            tgradish_core::tgradish_tgs::reduce::Reduction::MergeColours { distance: 0.02 },
+            bytes,
+            0.01,
+        )
+    };
+    let scenes = [
+        (
+            "tgs-fitting",
+            jobs::Progress {
+                tgs: Some(jobs::TgsStage::Fitting),
+                unchanged_bytes: Some(200_000),
+                steps: vec![step(110_000)],
+                tgs_done: 0.45,
+                stage_done: 0.4,
+                ..jobs::Progress::default()
+            },
+        ),
+        // compressed too large, and tried again aiming lower, which
+        // misses too the second time
+        (
+            "tgs-missed",
+            jobs::Progress {
+                tgs: Some(jobs::TgsStage::Compressing),
+                unchanged_bytes: Some(200_000),
+                steps: vec![step(110_000), step(64_000), step(63_000)],
+                tgs_done: 0.95,
+                stage_done: 0.3,
+                missed: vec![Some(66_100)],
+                retries: vec![62_914],
+                ..jobs::Progress::default()
+            },
+        ),
+        (
+            "tgs-missed-twice",
+            jobs::Progress {
+                tgs: Some(jobs::TgsStage::Compressing),
+                unchanged_bytes: Some(200_000),
+                steps: vec![step(110_000), step(64_000), step(63_000), step(60_000)],
+                tgs_done: 0.97,
+                stage_done: 0.55,
+                missed: vec![Some(66_100), Some(65_200)],
+                retries: vec![62_914, 60_398],
+                ..jobs::Progress::default()
+            },
+        ),
+    ];
+    for (name, progress) in scenes {
+        let mut job = Job::waiting(dir.path().join("dance.tgs"));
+        job.status = Status::Running;
+        job.progress = progress;
+        let item = harness.state_mut().items.last_mut().unwrap();
+        item.job = Some(crate::item::Conversion::of(job, Format::Tgs, item.choices.clone()));
+        harness.event(egui::Event::PointerGone);
+        harness.run_steps(4);
+        save(&mut harness, name);
+    }
+}
+
 /// Only the pictures of [`empties`], to `$TGRADISH_SCREENSHOTS` as
 /// [`screenshots`] makes them.
 #[test]

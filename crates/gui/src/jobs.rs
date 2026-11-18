@@ -89,9 +89,17 @@ pub(crate) struct Progress {
     /// For `.tgs`: the art is never changed to fit.
     pub(crate) tgs_exact: bool,
     /// For `.tgs`: how much of making it is done, and of the stage it is
-    /// at, from 0 to 1, as converting says; nothing while it is read.
+    /// at or the try again under way, from 0 to 1, as converting says;
+    /// nothing while it is read.
     pub(crate) tgs_done: f32,
     pub(crate) stage_done: f32,
+    /// For `.tgs`: each try that came out too large all the same, in
+    /// order, the first that of the stages: the size it was compressed to,
+    /// or none where it was too large to be worth compressing.
+    pub(crate) missed: Vec<Option<u64>>,
+    /// For `.tgs`: the estimate each try again after a miss aimed at, in
+    /// bytes, the second try first.
+    pub(crate) retries: Vec<u64>,
 }
 
 impl Progress {
@@ -614,11 +622,24 @@ fn follow(event: Event, update: Update) {
                 at_stage(progress, TgsStage::Fitting);
             }
         })),
+        // a try again is a bar of its own, the stages done
         Event::Reduced { step } => update(Box::new(move |progress| {
             progress.steps.push(step);
-            at_stage(progress, TgsStage::Fitting);
+            if progress.retries.is_empty() {
+                at_stage(progress, TgsStage::Fitting);
+            }
         })),
-        Event::Packing => update(Box::new(|progress| at_stage(progress, TgsStage::Compressing))),
+        Event::Packing => update(Box::new(|progress| {
+            if progress.retries.is_empty() {
+                at_stage(progress, TgsStage::Compressing);
+            }
+        })),
+        Event::Missed { bytes, aim } => update(Box::new(move |progress| {
+            progress.missed.push(bytes);
+            progress.retries.push(aim);
+            at_stage(progress, TgsStage::Compressing);
+            progress.stage_done = 0.0;
+        })),
         Event::Advanced { fraction, stage_fraction } => update(Box::new(move |progress| {
             (progress.tgs_done, progress.stage_done) = (fraction as f32, stage_fraction as f32);
         })),
@@ -669,10 +690,22 @@ mod tests {
         assert_eq!((packing.overall(), packing.stage_done), (Some(0.25), 0.0));
         let packed = followed(packing, advanced(0.75, 0.4));
         assert_eq!((packed.overall(), packed.stage_done), (Some(0.75), 0.4));
-        // the result missed, and fitting goes on
-        let fitting = followed(packed, Event::Reduced { step: step(60_000) });
-        assert_eq!((fitting.tgs, fitting.stage_done), (Some(TgsStage::Fitting), 0.0));
-        let done = followed(fitting, advanced(1.0, 1.0));
+        // the result missed: a try again, its bar from the start, the
+        // stages done however it fits and compresses again
+        let missed = followed(packed, Event::Missed { bytes: Some(70_000), aim: 60_000 });
+        assert_eq!(
+            (missed.missed.clone(), missed.retries.clone()),
+            (vec![Some(70_000)], vec![60_000])
+        );
+        assert_eq!((missed.tgs, missed.stage_done), (Some(TgsStage::Compressing), 0.0));
+        let missed = followed(missed, advanced(0.8, 0.3));
+        let missed = followed(missed, Event::Reduced { step: step(60_000) });
+        let missed = followed(missed, Event::Packing);
+        assert_eq!((missed.tgs, missed.stage_done), (Some(TgsStage::Compressing), 0.3));
+        // and again, too large to be worth compressing
+        let again = followed(missed, Event::Missed { bytes: None, aim: 57_000 });
+        assert_eq!((again.missed.len(), again.retries.len(), again.stage_done), (2, 2, 0.0));
+        let done = followed(again, advanced(1.0, 1.0));
         assert_eq!(done.overall(), Some(1.0));
     }
 

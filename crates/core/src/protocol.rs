@@ -392,6 +392,7 @@ mod tests {
             Event::TooLarge { bytes: 70_000 },
             Event::Reduced { step: step.clone() },
             Event::Packing,
+            Event::Missed { bytes: Some(70_000), aim: 62_914 },
             Event::Advanced { fraction: 0.5, stage_fraction: 0.25 },
             Event::Warning { message: "a warning".into() },
             Event::Finished(Outcome {
@@ -653,6 +654,7 @@ mod tests {
                 r#"{"event":"reduced","step":{"reduction":"despeckle","bytes":60000,"distortion":0.01}}"#,
             ),
             Some(r#"{"event":"packing"}"#),
+            Some(r#"{"event":"missed","bytes":70000,"aim":62914}"#),
             Some(r#"{"event":"advanced","fraction":0.5,"stage-fraction":0.25}"#),
             Some(r#"{"event":"warning","message":"a warning"}"#),
             Some(

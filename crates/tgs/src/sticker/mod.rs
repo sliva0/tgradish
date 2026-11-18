@@ -130,6 +130,16 @@ pub enum Progress {
     },
     /// The result is being packed, the longest step at best effort.
     Packing,
+    /// The result missed the limit all the same, as fitting's estimates
+    /// were off: fitting tries again, aiming lower, and encodes and packs
+    /// what that comes to.
+    Missed {
+        /// How large it came to packed; `None` where it was far too large,
+        /// or over Telegram's other limits, to be worth packing.
+        bytes: Option<usize>,
+        /// The estimate fitting now aims at, in bytes.
+        aim: usize,
+    },
     /// How far making the sticker got, estimated: each part of the work
     /// has a share of the whole measured as about the time it takes, and
     /// moves through it as it goes, by colours drawn, orders tried,
@@ -141,8 +151,9 @@ pub enum Progress {
         /// Of the stage at work, from 0 to 1: since the art was read
         /// ([`Progress::Normalised`]), fitting started (after
         /// [`Progress::TooLarge`], unless the art is kept exactly as it
-        /// is, or the first [`Progress::Reduced`] after the result missed)
-        /// or packing did ([`Progress::Packing`]).
+        /// is) or packing did ([`Progress::Packing`]); and once the result
+        /// missed, of each try again, all of it, from its
+        /// [`Progress::Missed`].
         stage_fraction: f64,
     },
 }
@@ -367,7 +378,7 @@ pub fn make(
         };
         if hopeless && retarget()? {
             target = ((target as f64) * RETARGET) as usize;
-            tracker.again(calibration.is_some());
+            tracker.missed(None, target, calibration.is_some());
             continue;
         }
         // too large as it is, kept so or with nothing for fitting to do;
@@ -389,7 +400,9 @@ pub fn make(
         let fits = tgs.len() <= options.max_bytes && within_limits(scene, json);
         if !fits && retarget()? {
             target = ((target as f64) * RETARGET) as usize;
-            tracker.again(calibration.is_some());
+            // within Telegram's other limits, as it wasn't hopeless: too
+            // large by its size
+            tracker.missed(Some(tgs.len()), target, calibration.is_some());
             continue;
         }
         check()?;
@@ -705,20 +718,22 @@ mod tests {
         for options in [exact.clone(), fitted(1), fitted(4)] {
             // (fraction, stage fraction, stages started before it)
             let mut said: Vec<(f64, f64, usize)> = Vec::new();
-            let mut stages = 0;
+            let (mut stages, mut missed) = (0, 0);
             let mut progress = |event| match event {
                 Progress::Advanced { fraction, stage_fraction } => {
                     said.push((fraction, stage_fraction, stages))
                 }
-                Progress::Normalised { .. } | Progress::TooLarge { .. } | Progress::Packing => {
-                    stages += 1
-                }
-                // which starts fitting again after the result missed
-                Progress::Reduced { .. } => stages += 1,
+                Progress::Normalised { .. } | Progress::TooLarge { .. } => stages += 1,
+                // a try again is a stage of its own, compressing too
+                Progress::Packing if missed == 0 => stages += 1,
+                Progress::Missed { .. } => (stages, missed) = (stages + 1, missed + 1),
+                Progress::Packing | Progress::Reduced { .. } => {}
             };
             let made = make(input.clone(), &options, &mut progress, &|| false).unwrap();
             let fit = options.fit;
             assert_eq!(made.steps.is_empty(), fit == Fit::Exact, "{fit:?}");
+            // the walker under so low a limit misses it once, and tries again
+            assert_eq!(missed, usize::from(fit == Fit::Auto), "{fit:?}");
             assert!(said.len() > 20, "{fit:?}: {said:?}");
             assert!(said.windows(2).all(|pair| pair[0].0 <= pair[1].0), "{fit:?}: {said:?}");
             assert!(said.iter().all(|&(_, stage, _)| (0.0..=1.0).contains(&stage)), "{said:?}");

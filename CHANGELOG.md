@@ -60,7 +60,10 @@ What changed in each release of tgradish, newest first. The format follows
   fill as the art is drawn, fitted and compressed, the command line shows
   a bar with its percentage and the terminal's progress follows it, and
   `--json` prints `advanced` events of all of it and of the stage at
-  work.
+  work. Where the result comes out too large all the same and fitting
+  tries again aiming lower, each try has a bar of its own, as a WebM's
+  encodes do, saying what it aimed at and came to, in the GUI and on the
+  command line, and `--json` prints a `missed` event.
 
 ### Fixed
 

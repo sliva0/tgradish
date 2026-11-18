@@ -93,8 +93,33 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>, cop
     }
 }
 
+/// How one try at fitting went, for its bar: under way, as far as `fill`
+/// says; done and fitting; or done too large, its size said from `from`.
+enum Tried {
+    Working(widgets::Fill),
+    Fits,
+    TooLarge { from: usize },
+}
+
+/// The bar of one try at fitting, a WebM's encode or a `.tgs`'s stages or
+/// try again: `text`, as tall as `widest`, the most it says, needs.
+fn tried_bar(ui: &mut egui::Ui, tried: Tried, text: &str, widest: &str) {
+    match tried {
+        Tried::Working(fill) => widgets::steady_bar(ui, fill, text, widest, running_colour(ui)),
+        Tried::Fits => {
+            let done = theme::POSITIVE.gamma_multiply(0.45);
+            widgets::steady_bar(ui, widgets::Fill::Share(1.0), text, widest, done);
+        }
+        // too large is how fitting goes on, not a failure: a plain bar,
+        // only its size and verdict a warning
+        Tried::TooLarge { from } => widgets::bar_spent(ui, text, from),
+    }
+    ui.add_space(2.0);
+}
+
 /// What a conversion is doing, a bar for each part of it: the stages of a
-/// `.tgs`, or each encode of a WebM.
+/// `.tgs` and each try again where the result missed the limit, or each
+/// encode of a WebM.
 fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     widgets::section(ui, &fl!("converting"));
     if job.is_waiting() {
@@ -113,6 +138,13 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     if let Some(stage) = progress.tgs {
         for (each, text) in stages(progress) {
             use widgets::Fill;
+            // the first try missed: compressed too large, as a try again
+            // that misses says
+            if let (jobs::TgsStage::Compressing, Some(&bytes)) = (each, progress.missed.first()) {
+                let from = missed_from(&text, bytes);
+                tried_bar(ui, Tried::TooLarge { from }, &text, &widest_stage(each));
+                continue;
+            }
             let (fill, colour) = match each.cmp(&stage) {
                 std::cmp::Ordering::Less => (Fill::Share(1.0), done),
                 std::cmp::Ordering::Equal => (stage_fill(progress, stage), running),
@@ -120,6 +152,14 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
             };
             widgets::steady_bar(ui, fill, &text, &widest_stage(each), colour);
             ui.add_space(2.0);
+        }
+        for (index, &aim) in progress.retries.iter().enumerate() {
+            let (text, widest) = retry_texts(index, aim, progress.missed.get(index + 1).copied());
+            let tried = match progress.missed.get(index + 1) {
+                Some(&bytes) => Tried::TooLarge { from: missed_from(&text, bytes) },
+                None => Tried::Working(widgets::Fill::Working(progress.stage_done)),
+            };
+            tried_bar(ui, tried, &text, &widest);
         }
         return;
     }
@@ -148,10 +188,8 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
                 if attempt.fits {
                     let text =
                         fl!("encode-done", number = number, fps = fps, rate = rate, size = size);
-                    widgets::steady_bar(ui, widgets::Fill::Share(1.0), &text, &widest, done);
+                    tried_bar(ui, Tried::Fits, &text, &widest);
                 } else {
-                    // too large is how fitting goes on, not a failure: a
-                    // plain bar, only its size and verdict a warning
                     let text = fl!(
                         "encode-done",
                         "too-large",
@@ -161,15 +199,14 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
                         size = size.as_str()
                     );
                     let from = text.rfind(&size).unwrap_or(text.len());
-                    widgets::bar_spent(ui, &text, from);
+                    tried_bar(ui, Tried::TooLarge { from }, &text, &widest);
                 }
             }
             None => {
                 let fill = widgets::Fill::working(progress.fraction);
-                widgets::steady_bar(ui, fill, &text, &widest, running);
+                tried_bar(ui, Tried::Working(fill), &text, &widest);
             }
         }
-        ui.add_space(2.0);
     }
     if let Some(plan) = &progress.webm
         && plan.attempts > 1
@@ -200,8 +237,11 @@ fn stages(progress: &jobs::Progress) -> Vec<(jobs::TgsStage, String)> {
         (Some(bytes), None) => Some(fl!("stage-fitting-from", size = widgets::kib(bytes as u64))),
         (None, None) => None,
     };
-    let compressing =
-        if hopeless { fl!("stage-compressing", "hopeless") } else { fl!("stage-compressing") };
+    let compressing = match progress.missed.first() {
+        Some(&bytes) => missed_text(bytes),
+        None if hopeless => fl!("stage-compressing", "hopeless"),
+        None => fl!("stage-compressing"),
+    };
     [
         Some((TgsStage::Reading, fl!("stage-reading"))),
         Some((TgsStage::Drawing, fl!("stage-drawing"))),
@@ -224,11 +264,52 @@ fn widest_stage(stage: jobs::TgsStage) -> String {
             fl!("stage-fitting-steps", count = 100, size = size),
             fl!("stage-fitting-from", size = size),
         ],
-        TgsStage::Compressing => {
-            vec![fl!("stage-compressing"), fl!("stage-compressing", "hopeless")]
-        }
+        TgsStage::Compressing => vec![
+            fl!("stage-compressing"),
+            fl!("stage-compressing", "hopeless"),
+            missed_text(Some(999_999)),
+            missed_text(None),
+        ],
     };
     texts.into_iter().max_by_key(String::len).unwrap_or_default()
+}
+
+/// What the compressing of a `.tgs`'s first try says once it missed,
+/// compressed to `bytes` or too large to be worth it.
+fn missed_text(bytes: Option<u64>) -> String {
+    match bytes {
+        Some(bytes) => fl!("stage-compressing", "missed", size = widgets::kib(bytes)),
+        None => fl!("stage-compressing", "missed-far"),
+    }
+}
+
+/// Where what a try that missed came to starts in its bar's `text`, to be
+/// said as a warning: its size, or all of it where it has none.
+fn missed_from(text: &str, bytes: Option<u64>) -> usize {
+    match bytes {
+        Some(bytes) => text.rfind(&widgets::kib(bytes)).unwrap_or(text.len()),
+        None => 0,
+    }
+}
+
+/// What the bar of a `.tgs`'s try again says, the `index`th, aiming at
+/// `aim`: under way, or what it came to once it `missed` too, and the
+/// most it says.
+fn retry_texts(index: usize, aim: u64, missed: Option<Option<u64>>) -> (String, String) {
+    let (number, aim) = (index + 2, widgets::kib(aim));
+    let came_to = |bytes: Option<u64>| match bytes {
+        Some(bytes) => {
+            let size = widgets::kib(bytes);
+            fl!("retry-done", number = number, aim = aim.as_str(), size = size)
+        }
+        None => fl!("retry-done", "far", number = number, aim = aim.as_str()),
+    };
+    let text = match missed {
+        Some(bytes) => came_to(bytes),
+        None => fl!("retry", number = number, aim = aim.as_str()),
+    };
+    let widest = [came_to(Some(999_999)), came_to(None)].into_iter().max_by_key(String::len);
+    (text, widgets::zeros(&widest.unwrap_or_default()))
 }
 
 /// How far the stage at work has got, as converting says: reading the art
@@ -256,6 +337,10 @@ fn rate_text(attempt: &jobs::Attempt) -> String {
 /// list's bar shows how far all of a `.tgs` got.
 fn current_step(progress: &jobs::Progress) -> (widgets::Fill, String) {
     use widgets::Fill;
+    if let Some(&aim) = progress.retries.last() {
+        let (text, _) = retry_texts(progress.retries.len() - 1, aim, None);
+        return (Fill::Working(progress.stage_done), text);
+    }
     if let Some(stage) = progress.tgs {
         let text = stages(progress).into_iter().find(|(each, _)| *each == stage);
         return (stage_fill(progress, stage), text.map(|(_, text)| text).unwrap_or_default());
@@ -585,11 +670,18 @@ mod tests {
             fraction: Some(0.5),
             ..Progress::default()
         };
+        // tried again after it missed, twice: once far too large
+        let retried = Progress {
+            missed: vec![Some(999_999), None],
+            retries: vec![999_999, 999_999],
+            ..tgs(TgsStage::Compressing, false)
+        };
         let progresses = [
             tgs(TgsStage::Fitting, false),
             tgs(TgsStage::Compressing, true),
             webm(false),
             webm(true),
+            retried,
         ];
         for width in [216.0, 288.0] {
             let mut heights = Vec::new();
@@ -728,6 +820,38 @@ mod tests {
         assert_eq!(text, fl!("stage-compressing"));
         let reading = Progress { tgs: Some(TgsStage::Reading), ..Progress::default() };
         assert!(matches!(current_step(&reading).0, Fill::Unknown));
+        // tried again once the result missed: that try, by its own progress
+        let retried = Progress {
+            missed: vec![Some(66_000)],
+            retries: vec![62_000],
+            stage_done: 0.25,
+            ..compressing
+        };
+        let (fill, text) = current_step(&retried);
+        assert!(matches!(fill, Fill::Working(share) if share == 0.25), "{text}");
+        assert_eq!(text, fl!("retry", number = 2, aim = widgets::kib(62_000)));
+    }
+
+    #[test]
+    fn says_what_each_try_at_fitting_a_tgs_came_to() {
+        let progress = Progress {
+            tgs: Some(TgsStage::Compressing),
+            missed: vec![Some(66_000), None],
+            retries: vec![62_000, 59_000],
+            ..Progress::default()
+        };
+        // the first try's compressing, then each try again's bar
+        let compressing = stages(&progress).pop().unwrap().1;
+        assert_eq!(compressing, fl!("stage-compressing", "missed", size = widgets::kib(66_000)));
+        let aim = widgets::kib(62_000);
+        let (second, widest) = retry_texts(0, 62_000, progress.missed.get(1).copied());
+        assert_eq!(second, fl!("retry-done", "far", number = 2, aim = aim.as_str()));
+        assert!(widest.len() >= second.len(), "{widest} {second}");
+        let (third, _) = retry_texts(1, 59_000, progress.missed.get(2).copied());
+        assert_eq!(third, fl!("retry", number = 3, aim = widgets::kib(59_000)));
+        // what it came to said as a warning, from its size
+        let done = fl!("retry-done", number = 2, aim = aim.as_str(), size = widgets::kib(66_000));
+        assert!(done[missed_from(&done, Some(66_000))..].starts_with(&widgets::kib(66_000)));
     }
 
     #[test]

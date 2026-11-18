@@ -556,6 +556,9 @@ struct Printer {
     /// For `.tgs`: how much of making it is done, from 0 to 1, which
     /// each stage's bar starts from.
     done: f64,
+    /// For `.tgs`: the tries again after the result missed the limit so
+    /// far, each with a bar of its own, as a WebM's encodes have.
+    retries: u32,
 }
 
 impl Printer {
@@ -567,6 +570,7 @@ impl Printer {
             limit: tgradish_core::telegram::MAX_STICKER_BYTES,
             exact,
             done: 0.0,
+            retries: 0,
         }
     }
 
@@ -649,10 +653,38 @@ impl Printer {
                     ),
                 ));
             }
-            Event::Packing => self.tgs_bar("Compressing", "with zopfli"),
-            Event::Advanced { fraction, .. } => {
+            // a try again's bar is all of it, compressing too
+            Event::Packing if self.retries == 0 => self.tgs_bar("Compressing", "with zopfli"),
+            Event::Missed { bytes, aim } => {
+                self.retries += 1;
+                if !self.quiet {
+                    self.bar.clear();
+                    // the try that missed, as a WebM's encode says it
+                    let tried = self.retries;
+                    self.bar.line(match bytes {
+                        Some(bytes) => ui::status(
+                            "Compressed",
+                            format!(
+                                "try {tried} → {}, {}",
+                                ui::size_within(bytes, self.limit),
+                                style("too large").red()
+                            ),
+                        ),
+                        None => ui::status(
+                            "Missed",
+                            format!("try {tried}: {}", style("far too large to compress").red()),
+                        ),
+                    });
+                    let bar = progress_bar("Retrying", Some(1000));
+                    bar.set_message(format!("{}: aiming at {}", self.retries + 1, ui::kib(aim)));
+                    self.bar.show(bar);
+                }
+            }
+            Event::Advanced { fraction, stage_fraction } => {
+                // a try again's bar is of that try, as an encode's is
+                let shown = if self.retries > 0 { stage_fraction } else { fraction };
                 if let Some(bar) = &self.bar.0 {
-                    bar.set_position((fraction * 1000.0) as u64);
+                    bar.set_position((shown * 1000.0) as u64);
                 }
                 // the terminal's progress is in whole percent
                 let percent = |fraction: f64| (fraction * 100.0).round();
