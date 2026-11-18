@@ -27,6 +27,8 @@ What changed in each release of tgradish, newest first. The format follows
 - A file put back after it was removed names a preset renamed meanwhile
   by its new name, as do the steps Ctrl+Z goes back through, rather than
   by one that is gone.
+- Escape in a GUI number field left as it was closes the dialog it is in
+  at once; only a field with something to put back keeps the first one.
 
 ## [2.1.0] - 2026-11-18
 

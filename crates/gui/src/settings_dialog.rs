@@ -962,6 +962,51 @@ mod tests {
     }
 
     #[test]
+    fn closes_on_the_first_escape_from_a_field_left_as_it_was() {
+        let mut harness = crate::testing::harness(Config::default());
+        crate::widgets::test_fonts(&harness);
+        harness.run_steps(2);
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(3);
+        harness.get_all_by_label(&fl!("custom")).last().unwrap().click_accesskit();
+        harness.run_steps(3);
+        let threads = |harness: &Harness<crate::app::App>| harness.state().config.threads;
+        let set = threads(&harness);
+        let focus = |harness: &mut Harness<crate::app::App>| {
+            let field = harness.query_all_by_role(egui::accesskit::Role::SpinButton).last();
+            field.unwrap().focus();
+            harness.run_steps(2);
+        };
+        // stepped and back, then typed and back: nothing to put back
+        focus(&mut harness);
+        harness.key_press(egui::Key::ArrowUp);
+        harness.run_steps(2);
+        harness.key_press(egui::Key::ArrowDown);
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("3".into()));
+        harness.run_steps(2);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        harness.run_steps(2);
+        assert!(harness.ctx.text_edit_focused());
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(3);
+        assert!(!harness.state().settings_dialog.is_open());
+        assert!(!harness.ctx.text_edit_focused());
+        assert_eq!(threads(&harness), set);
+        // only stepped: put back, Settings still open
+        harness.state_mut().settings_dialog.open();
+        harness.run_steps(3);
+        focus(&mut harness);
+        harness.key_press(egui::Key::ArrowUp);
+        harness.run_steps(2);
+        assert_ne!(threads(&harness), set);
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(3);
+        assert!(harness.state().settings_dialog.is_open());
+        assert_eq!(threads(&harness), set);
+    }
+
+    #[test]
     fn keeps_each_change_as_it_is_made() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");

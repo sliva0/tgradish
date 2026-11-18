@@ -1688,6 +1688,18 @@ impl<'a> Number<'a> {
         let typed = (typing.text != typing.written).then(|| self.parse(&typing.text)).flatten();
         typed.map_or(value, |typed| self.kept(typed))
     }
+
+    /// Puts back what the field held as typing began, on Escape, and
+    /// takes the Escape where there was something to put back, a number
+    /// typed or stepped to: left as it was, the field lets it through, to
+    /// the dialog around it, as other text fields do.
+    fn put_back(&mut self, ui: &egui::Ui, typing: &Typing, value: f64) -> f64 {
+        if typing.text != typing.written || value != typing.start {
+            escape_taken(ui);
+        }
+        self.set(typing.start);
+        typing.start
+    }
 }
 
 /// `text` as a number field reads it: without spaces, those that set
@@ -1830,9 +1842,7 @@ impl egui::Widget for Number<'_> {
             let lately = ui.ctx().cumulative_pass_nr() <= typing.pass + 2;
             if lately && typing.value == value {
                 if escaped {
-                    value = typing.start;
-                    self.set(value);
-                    escape_taken(ui);
+                    value = self.put_back(ui, typing, value);
                 } else if let Some(taken) = self.take(ui, id, typing) {
                     value = taken;
                 }
@@ -1936,9 +1946,7 @@ impl egui::Widget for Number<'_> {
                 // done with by Enter, or a press elsewhere
                 ui.data_mut(|data| data.remove::<Typing>(id));
                 if escaped {
-                    value = typing.start;
-                    self.set(value);
-                    escape_taken(ui);
+                    value = self.put_back(ui, &typing, value);
                 } else if let Some(taken) = self.take(ui, id, &typing) {
                     value = taken;
                 }
