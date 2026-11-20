@@ -6,6 +6,7 @@ All notable changes to tgradish, newest first. This file follows [Keep a Changel
 
 ### Added
 
+- The GUI in Ukrainian and Russian. It follows the system's language, or the one chosen in Settings.
 - `tgradish config init` writes the example config where tgradish reads it, creating its directory, and never overwrites an existing config.
 - In the `tgradish-core` library, `resolve::resolve` layers a preset's options and any number of layers over them into a conversion's, checks them, and sets aside values that have no effect, saying who set each.
 
