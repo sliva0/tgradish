@@ -1,11 +1,24 @@
 name: CI
 
+# not for Markdown alone, but for the Markdown checked here: the changelog
+# by `release check`, the README's links by xtask's tests, and ffmpeg's
+# notes, which the binaries carry. The last pattern a path matches decides
 on:
   push:
     branches: [main]
-    paths-ignore: ["**.md"]
+    paths:
+      - "**"
+      - "!**.md"
+      - README.md
+      - CHANGELOG.md
+      - crates/core/licenses/**
   pull_request:
-    paths-ignore: ["**.md"]
+    paths:
+      - "**"
+      - "!**.md"
+      - README.md
+      - CHANGELOG.md
+      - crates/core/licenses/**
 
 # a newer push makes an older run of the same branch or pull request moot
 concurrency:
@@ -86,6 +99,18 @@ jobs:
           tool: cargo-about@0.9.2
       - run: cargo xtask licenses --check
         if: runner.os == 'Linux'
+
+  # the code only macOS compiles, which nothing else builds: checked, not
+  # run, as no release is built for it and its tests would want ffmpeg.
+  # Without `linked`, so no ffmpeg libraries are needed
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   # the oldest Rust the manifests say builds tgradish, their `rust-version`
   msrv:

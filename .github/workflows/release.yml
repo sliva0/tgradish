@@ -495,9 +495,12 @@ jobs:
 
   # gathers what the release holds: every build, and ffmpeg's sources. It
   # runs every time, so a tag isn't the first time it does, and so only
-  # reads, as on a pull request it runs the pull request's code
+  # reads, as on a pull request it runs the pull request's code. A tag
+  # whose crates don't package drafts no release; on a pull request crates
+  # is skipped, which mustn't skip this too, as a skipped need would
   assemble:
-    needs: [build, test-linux, test-musl, test-packages, test-aur, test-windows]
+    needs: [crates, build, test-linux, test-musl, test-packages, test-aur, test-windows]
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
