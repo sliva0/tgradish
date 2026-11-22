@@ -6,6 +6,33 @@ What changed in each release of tgradish, newest first. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `tgradish config init` writes the example config where tgradish reads
+  it, making its folder, which a fresh install doesn't have yet, and
+  never over a config already there.
+
+### Fixed
+
+- `tgradish inspect` reads videos with the ffmpeg the config file's
+  `[ffmpeg]` names, as convert does.
+- `tgradish watch` no longer refuses, for as long as it watches, an input
+  whose result another input made before it was deleted, as `cat.mp4`
+  after `cat.png`: that result is replaced with `--overwrite`, as any
+  already there is.
+- A sticker no longer comes out blank, passing every check, from art of
+  thin lines or lone pixels that a pixel scale snaps away, or that a
+  square crop cuts off: converting says the art shows nothing, and fitting
+  to the limit no longer reduces such art to nothing.
+- A file in the GUI's list no longer glows as converted, its result fading
+  in again, when a conversion of it that only waited is cancelled.
+- The GUI's warnings stand over the bar under the preview when it takes
+  two lines, rather than over its first.
+- Inspect and About fit a short window or a large scale, what they hold
+  scrolling, so their Close stays in sight.
+- Screen readers name each of the GUI's number fields, by the setting it
+  is of, and say what its bars show and how far they got.
+
 ## [2.1.1] - 2026-11-18
 
 ### Changed
