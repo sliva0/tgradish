@@ -59,14 +59,21 @@ pub fn strings(args: &[String]) -> Result<()> {
     let sections = fluent(&english);
     let mut sources = Vec::new();
     for (dir, name) in SOURCES {
-        let mut files = Vec::new();
+        let mut code = Vec::new();
         for path in rust_files(&root.join(dir))? {
+            let text = std::fs::read_to_string(&path)?;
+            code.push((path, text));
+        }
+        // modules only the tests build, declared as `mod testfile;`
+        let tests: Vec<_> = code.iter().flat_map(|(path, text)| test_modules(path, text)).collect();
+        let mut files = Vec::new();
+        for (path, text) in &code {
             let relative = path.strip_prefix(root)?.display().to_string();
             // the arguments' words are their help pages
-            if relative.ends_with("cli/src/args.rs") {
+            if relative.ends_with("cli/src/args.rs") || tests.contains(path) {
                 continue;
             }
-            let found = literals(&std::fs::read_to_string(&path)?);
+            let found = literals(text);
             if !found.is_empty() {
                 files.push((relative, found));
             }
@@ -168,8 +175,8 @@ fn rust_files(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
 }
 
 /// The string literals of Rust `code` that read as words, with their
-/// lines, up to its tests: two words or more, of which one is lower case,
-/// and not a flag, path or format alone.
+/// lines, but for those of items only its tests build: two words or more,
+/// of which one is lower case, and not a flag, path or format alone.
 fn literals(code: &str) -> Vec<(usize, String)> {
     let mut found = Vec::new();
     let mut line = 1;
@@ -177,6 +184,9 @@ fn literals(code: &str) -> Vec<(usize, String)> {
     let mut at_line_start = true;
     // the code just before, without spaces, to tell what a literal is for
     let mut recent = String::new();
+    // how deep in brackets of any kind the code is, and how deep an item
+    // only the tests build began, while within one
+    let (mut depth, mut tests_only) = (0usize, None);
     while let Some(c) = chars.next() {
         if !c.is_whitespace() && c != '"' {
             recent.push(c);
@@ -184,13 +194,27 @@ fn literals(code: &str) -> Vec<(usize, String)> {
                 recent.drain(..recent.len() - 32);
             }
         }
-        // the tests at the end of a file
-        if at_line_start && c == '#' && code_rest_starts(&chars, "[cfg(test)]") {
-            break;
+        // an item for the tests, to its `;` or the brace that closes it: a
+        // module of them, or a declaration as `mod testfile;` alone
+        if at_line_start
+            && c == '#'
+            && tests_only.is_none()
+            && code_rest_starts(&chars, "[cfg(test)]")
+        {
+            tests_only = Some(depth);
         }
         at_line_start = c == '\n';
+        let shown = tests_only.is_none();
         match c {
             '\n' => line += 1,
+            '{' | '(' | '[' => depth += 1,
+            '}' | ')' | ']' => {
+                depth = depth.saturating_sub(1);
+                if c == '}' && tests_only == Some(depth) {
+                    tests_only = None;
+                }
+            }
+            ';' if tests_only == Some(depth) => tests_only = None,
             '/' if chars.peek() == Some(&'/') => {
                 for c in chars.by_ref() {
                     if c == '\n' {
@@ -256,7 +280,7 @@ fn literals(code: &str) -> Vec<(usize, String)> {
                     }
                     text.push(c);
                 }
-                if !unseen(&recent) {
+                if shown && !unseen(&recent) {
                     found.push((start, text));
                 }
             }
@@ -295,7 +319,7 @@ fn literals(code: &str) -> Vec<(usize, String)> {
                         other => text.push(other),
                     }
                 }
-                if !unseen(&recent) {
+                if shown && !unseen(&recent) {
                     found.push((start, text));
                 }
             }
@@ -303,6 +327,35 @@ fn literals(code: &str) -> Vec<(usize, String)> {
         }
     }
     found.retain(|(_, text)| reads_as_words(text));
+    found
+}
+
+/// The files of the modules that the file at `path`, holding `code`,
+/// declares for its tests alone, as `#[cfg(test)]` over `mod testfile;`:
+/// where each could be, whether or not it is there.
+fn test_modules(path: &Path, code: &str) -> Vec<std::path::PathBuf> {
+    // a module's own modules are beside it when it is a `mod.rs`, a
+    // crate's root beside it too, and in a folder of its name otherwise
+    let stem = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or_default();
+    let parent = path.parent().unwrap_or(Path::new(""));
+    let dir = match stem {
+        "mod" | "lib" | "main" => parent.to_path_buf(),
+        _ => parent.join(stem),
+    };
+    let lines: Vec<&str> = code.lines().map(str::trim).collect();
+    let mut found = Vec::new();
+    for (index, _) in lines.iter().enumerate().filter(|(_, line)| **line == "#[cfg(test)]") {
+        // past any other attributes
+        let item = lines[index + 1..].iter().find(|line| !line.starts_with("#["));
+        let name = item
+            .and_then(|item| item.strip_suffix(';'))
+            .map(|item| item.trim_start_matches("pub(crate) ").trim_start_matches("pub "))
+            .and_then(|item| item.strip_prefix("mod "));
+        if let Some(name) = name {
+            found.push(dir.join(format!("{name}.rs")));
+            found.push(dir.join(name).join("mod.rs"));
+        }
+    }
     found
 }
 
@@ -615,3 +668,37 @@ document.getElementById('filter').oninput = (event) => {
 };
 </script>
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn leaves_out_only_what_the_tests_build() {
+        let code = "mod read;\n#[cfg(test)]\nmod testfile;\n\nfn a() { error(\"the file ends early\") }\n\
+                    #[cfg(test)]\nuse std::fmt::{Write, Debug};\n\
+                    #[cfg(test)]\nfn helper() -> [u8; 2] { let _ = \"a helper's words\"; '}'; [0; 2] }\n\
+                    fn b() { error(\"a chunk is too long\") }\n\
+                    #[cfg(test)]\nmod tests {\n    fn c() { let _ = \"what a test says\"; }\n}\n";
+        let found: Vec<(usize, String)> = literals(code);
+        assert_eq!(
+            found,
+            [(5, "the file ends early".to_owned()), (10, "a chunk is too long".to_owned())]
+        );
+    }
+
+    #[test]
+    fn leaves_out_the_files_of_modules_for_tests() {
+        let code = "mod read;\n#[cfg(test)]\n#[path = \"x.rs\"]\npub(crate) mod testfile;\n\
+                    #[cfg(test)]\nmod tests {\n}\n";
+        let found = test_modules(Path::new("src/frames/aseprite/mod.rs"), code);
+        let beside = Path::new("src/frames/aseprite");
+        assert_eq!(found, [beside.join("testfile.rs"), beside.join("testfile/mod.rs")]);
+        let found = test_modules(Path::new("src/frames.rs"), "#[cfg(test)]\nmod tests;\n");
+        assert_eq!(found[0], Path::new("src/frames/tests.rs"));
+        // the Aseprite decoder's words follow such a declaration
+        let aseprite = workspace_root().join("crates/tgs/src/frames/aseprite/mod.rs");
+        let found = literals(&std::fs::read_to_string(aseprite).unwrap());
+        assert!(found.iter().any(|(_, text)| text == "not an Aseprite file"), "{found:?}");
+    }
+}
