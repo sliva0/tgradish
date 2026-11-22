@@ -174,6 +174,16 @@ fn rust_files(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
     Ok(files)
 }
 
+/// An item only the tests build, as `literals` passes over it: how deep in
+/// brackets it began, whether a brace back at that depth can end it, and
+/// how deep in `<>` it is at that depth, where a `,` doesn't end it.
+#[derive(Clone, Copy)]
+struct TestsOnly {
+    depth: usize,
+    by_brace: bool,
+    angles: usize,
+}
+
 /// The string literals of Rust `code` that read as words, with their
 /// lines, but for those of items only its tests build: two words or more,
 /// of which one is lower case, and not a flag, path or format alone.
@@ -184,11 +194,11 @@ fn literals(code: &str) -> Vec<(usize, String)> {
     let mut at_line_start = true;
     // the code just before, without spaces, to tell what a literal is for
     let mut recent = String::new();
-    // how deep in brackets of any kind the code is, and how deep an item
-    // only the tests build began while within one, with whether a brace
-    // back at that depth can end it
-    let (mut depth, mut tests_only) = (0usize, None::<(usize, bool)>);
+    // how deep in brackets of any kind the code is, and an item only the
+    // tests build that it is in
+    let (mut depth, mut tests_only) = (0usize, None::<TestsOnly>);
     while let Some(c) = chars.next() {
+        let before = recent.chars().last();
         if !c.is_whitespace() && c != '"' {
             recent.push(c);
             if recent.len() > 64 {
@@ -202,26 +212,54 @@ fn literals(code: &str) -> Vec<(usize, String)> {
             && tests_only.is_none()
             && code_rest_starts(&chars, "[cfg(test)]")
         {
-            tests_only = Some((depth, ends_at_brace(&chars)));
+            tests_only = Some(TestsOnly { depth, by_brace: ends_at_brace(&chars), angles: 0 });
         }
         // the attribute may be indented, as within a function
         at_line_start = c == '\n' || (at_line_start && c.is_whitespace());
         let shown = tests_only.is_none();
+        // a type's or a function's `<>` at the item's own depth, but not
+        // an arrow's `>`
+        if let Some(item) = tests_only.as_mut().filter(|item| item.depth == depth) {
+            match c {
+                '<' => item.angles += 1,
+                '>' if !matches!(before, Some('-' | '=')) => {
+                    item.angles = item.angles.saturating_sub(1);
+                }
+                _ => {}
+            }
+        }
         match c {
             '\n' => line += 1,
             '{' | '(' | '[' => depth += 1,
             '}' | ')' | ']' => {
                 depth = depth.saturating_sub(1);
-                // not where an `else` or a method follows
-                if c == '}' && tests_only == Some((depth, true)) {
-                    let mut ahead = chars.clone().skip_while(|c| c.is_whitespace());
-                    let next: String = ahead.by_ref().take(4).collect();
-                    if !next.starts_with('.') && next != "else" {
+                if let Some(item) = tests_only {
+                    // leaving what holds it ends it, as a tail without a
+                    // `;` ends at the function's brace
+                    if depth < item.depth {
                         tests_only = None;
+                    // its own brace, but not where an `else` or a method
+                    // follows
+                    } else if c == '}' && item.depth == depth && item.by_brace {
+                        let mut ahead = chars.clone().skip_while(|c| c.is_whitespace()).peekable();
+                        let method = ahead.peek() == Some(&'.');
+                        let word: String = std::iter::from_fn(|| {
+                            ahead.next_if(|c| c.is_alphanumeric() || *c == '_')
+                        })
+                        .collect();
+                        if !method && word != "else" {
+                            tests_only = None;
+                        }
                     }
                 }
             }
-            ';' if tests_only.is_some_and(|(at, _)| at == depth) => tests_only = None,
+            ';' if tests_only.is_some_and(|item| item.depth == depth) => tests_only = None,
+            // a field, a variant or an argument, but not a `<>`'s parameter
+            ',' if tests_only
+                .is_some_and(|item| item.depth == depth && item.by_brace && item.angles == 0) =>
+            {
+                tests_only = None
+            }
             '/' if chars.peek() == Some(&'/') => {
                 for c in chars.by_ref() {
                     if c == '\n' {
@@ -352,12 +390,12 @@ fn test_modules(path: &Path, code: &str) -> Vec<std::path::PathBuf> {
     };
     let lines: Vec<&str> = code.lines().map(str::trim).collect();
     let mut found = Vec::new();
+    // an attribute, or a comment among them
+    let over = |line: &&str| !line.starts_with("#[") && !line.starts_with("//");
     for (index, _) in lines.iter().enumerate().filter(|(_, line)| **line == "#[cfg(test)]") {
         // the other attributes, before and after it, and the item after
-        let first =
-            lines[..index].iter().rposition(|line| !line.starts_with("#[")).map_or(0, |at| at + 1);
-        let last =
-            lines[index..].iter().position(|line| !line.starts_with("#[")).map(|at| index + at);
+        let first = lines[..index].iter().rposition(over).map_or(0, |at| at + 1);
+        let last = lines[index..].iter().position(over).map(|at| index + at);
         let Some(last) = last else { continue };
         let name = lines[last]
             .strip_suffix(';')
@@ -370,7 +408,7 @@ fn test_modules(path: &Path, code: &str) -> Vec<std::path::PathBuf> {
             value.trim().strip_suffix(']')?.trim_end().strip_prefix('"')?.strip_suffix('"')
         });
         match given {
-            Some(given) => found.push(parent.join(given)),
+            Some(given) => found.push(lexical(&parent.join(given))),
             None => {
                 found.push(dir.join(format!("{name}.rs")));
                 found.push(dir.join(name).join("mod.rs"));
@@ -378,6 +416,25 @@ fn test_modules(path: &Path, code: &str) -> Vec<std::path::PathBuf> {
         }
     }
     found
+}
+
+/// `path` with its `.` and `..` taken by their names alone, as the files
+/// listed are named, without asking the file system.
+fn lexical(path: &Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for part in path.components() {
+        match (part, out.components().next_back()) {
+            (Component::CurDir, _) => {}
+            (Component::ParentDir, Some(Component::Normal(_))) => {
+                out.pop();
+            }
+            // nothing is above the root
+            (Component::ParentDir, Some(Component::RootDir | Component::Prefix(_))) => {}
+            (part, _) => out.push(part),
+        }
+    }
+    out
 }
 
 /// Whether a literal after `code` is one nobody reads: what a panic says
@@ -409,6 +466,24 @@ fn ends_at_brace(chars: &std::iter::Peekable<std::str::Chars>) -> bool {
                     if depth == 0 && matches!(c, ']' | ')') {
                         break;
                     }
+                }
+            }
+            // past comments, doc comments among them
+            Some('/') => {
+                let mut rest = ahead.clone().skip(1);
+                match rest.next() {
+                    Some('/') => while ahead.next().is_some_and(|c| c != '\n') {},
+                    Some('*') => {
+                        ahead.nth(1);
+                        let mut last = ' ';
+                        for c in ahead.by_ref() {
+                            if last == '*' && c == '/' {
+                                break;
+                            }
+                            last = c;
+                        }
+                    }
+                    _ => break,
                 }
             }
             _ => {
@@ -777,6 +852,30 @@ mod tests {
     }
 
     #[test]
+    fn ends_a_field_variant_or_tail_for_the_tests_where_it_ends() {
+        let code = "struct S {\n    #[cfg(test)]\n    hook: Hook<A, B>,\n    a: u8,\n}\n\
+                    enum E {\n    #[cfg(test)]\n    T(u8),\n    #[error(\"the file ends early\")]\n    A,\n}\n\
+                    fn a() -> u8 {\n    #[cfg(test)]\n    f(\"a test's tail\")\n}\n\
+                    enum F {\n    #[error(\"a chunk is too long\")]\n    A,\n}\n";
+        assert_eq!(
+            literals(code),
+            [(9, "the file ends early".to_owned()), (17, "a chunk is too long".to_owned())]
+        );
+        // not at a `<>`'s `,`, nor after an arrow
+        let code = "#[cfg(test)]\nfn f<A, B>() -> Option<A> where A: X<B, B> { \"a helper's words\" }\n\
+                    fn a() { error(\"shown after them\") }\n";
+        assert_eq!(literals(code), [(3, "shown after them".to_owned())]);
+    }
+
+    #[test]
+    fn reads_the_item_for_the_tests_past_comments_and_elsewhere() {
+        let code = "#[cfg(test)]\n// a note\nconst X: u8 = match c { _ => 1 } + f(\"a test's words\");\n\
+                    #[cfg(test)]\n/* a note */\n/// a doc\nstatic Y: u8 = { 1 } + f(\"a static's words\");\n\
+                    fn a() {\n    #[cfg(test)]\n    if b { c() }\n    elsewhere(\"shown after them\");\n}\n";
+        assert_eq!(literals(code), [(11, "shown after them".to_owned())]);
+    }
+
+    #[test]
     fn leaves_out_the_files_of_modules_for_tests() {
         let code = "mod read;\n#[cfg(test)]\n#[path = \"x.rs\"]\npub(crate) mod testfile;\n\
                     #[cfg(test)]\nmod tests {\n}\n";
@@ -791,7 +890,14 @@ mod tests {
         // from the file's own folder, though it isn't a `mod.rs`, and above
         let code = "#[path = \"../y.rs\"]\n#[cfg(test)]\nmod testfile;\n";
         let found = test_modules(Path::new("src/frames.rs"), code);
-        assert_eq!(found, [Path::new("src/../y.rs")]);
+        assert_eq!(found, [Path::new("y.rs")]);
+        // past comments among its attributes
+        let code = "#[cfg(test)]\n// a note\nmod testfile;\n#[cfg(test)]\n/// a doc\n#[path = \"./x.rs\"]\nmod tests;\n";
+        let found = test_modules(Path::new("src/lib.rs"), code);
+        assert_eq!(
+            found,
+            [Path::new("src/testfile.rs"), Path::new("src/testfile/mod.rs"), Path::new("src/x.rs")]
+        );
         // the Aseprite decoder's words follow such a declaration
         let aseprite = workspace_root().join("crates/tgs/src/frames/aseprite/mod.rs");
         let found = literals(&std::fs::read_to_string(aseprite).unwrap());
