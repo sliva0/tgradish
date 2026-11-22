@@ -80,11 +80,12 @@ impl App {
         };
         let ffmpeg_args = self.backend().as_ref().is_ok_and(Backend::supports_ffmpeg_args);
         let queued = self.queue.iter().position(|&other| other == id);
-        egui::Panel::bottom("actions").show(ui, |ui| {
+        let bar = egui::Panel::bottom("actions").show(ui, |ui| {
             ui.add_space(crate::actions::BAR_ABOVE);
             self.actions(ui, id);
             ui.add_space(crate::actions::below_bar(ui.style()));
         });
+        self.banner.bar = Some(bar.response.rect.top());
         // the rest is the file's own, which a button held there changes
         self.edit_frames.settings_in(ui.available_rect_before_wrap());
         let output = self.item(id).map(|item| self.output_for(item));

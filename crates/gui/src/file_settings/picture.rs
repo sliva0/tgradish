@@ -373,7 +373,8 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
             let field = widgets::Number::new(&mut value)
                 .range(0..=most.max(0))
                 .suffix(" px")
-                .clamp_existing_to_range(fits);
+                .clamp_existing_to_range(fits)
+                .name(hint);
             ui.add(field).on_hover_text(hint).changed().then(|| value.max(0) as u32)
         };
         ui.add_enabled_ui(fits, |ui| {
@@ -417,23 +418,24 @@ fn crop_box(ui: &mut egui::Ui, item: &mut Item, size: Option<(u32, u32)>, exact:
             ui.add_enabled_ui(fits, |ui| {
                 let grid = egui::Grid::new(("crop size", item.id)).spacing([6.0, 4.0]);
                 grid.show(ui, |ui| {
-                    let side = |ui: &mut egui::Ui, value: u32, most: u32| {
+                    let side = |ui: &mut egui::Ui, value: u32, most: u32, name: String| {
                         let mut value = value;
                         let field = widgets::Number::new(&mut value)
                             .range(1..=most)
                             .suffix(" px")
-                            .clamp_existing_to_range(fits);
+                            .clamp_existing_to_range(fits)
+                            .name(name);
                         let changed =
                             widgets::steady_numbers(ui, digits, " px", |ui| ui.add(field));
                         changed.changed().then_some(value)
                     };
                     ui.label(fl!("width"));
-                    if let Some(value) = side(ui, crop.width, width) {
+                    if let Some(value) = side(ui, crop.width, width, fl!("width")) {
                         edited = Some((Side::Width, value));
                     }
                     ui.end_row();
                     ui.label(fl!("height"));
-                    if let Some(value) = side(ui, crop.height, height) {
+                    if let Some(value) = side(ui, crop.height, height, fl!("height")) {
                         edited = Some((Side::Height, value));
                     }
                     ui.end_row();

@@ -251,6 +251,12 @@ fn animation(ui: &mut egui::Ui, stats: &Stats) {
     });
 }
 
+/// The height of what is around what was found in the dialog: its title
+/// and buttons, its margins and the room kept around it in the window; and
+/// the least what was found is given, however short the window.
+const CHROME: f32 = 150.0;
+const LEAST_ROOM: f32 = 120.0;
+
 impl App {
     /// What an inspected sticker holds, in a dialog, while there is one.
     pub(crate) fn inspection_dialog(&mut self, ctx: &egui::Context) {
@@ -271,7 +277,11 @@ impl App {
             ui.set_width(520.0);
             close = widgets::dialog_title(ui, title);
             ui.add_space(4.0);
-            show(ui, inspection);
+            // the dialog fits the window, what was found scrolling within
+            let room = (ctx.content_rect().height() - CHROME).max(LEAST_ROOM);
+            widgets::scrolled(ui, egui::ScrollArea::vertical().max_height(room), |ui| {
+                show(ui, inspection);
+            });
             widgets::dialog_buttons(ui, |ui| {
                 close |= ui.add(widgets::dialog_button(fl!("close"))).clicked();
                 another = ui.add(widgets::dialog_button(fl!("inspect-another"))).clicked();

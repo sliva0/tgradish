@@ -207,11 +207,13 @@ fn used_part(ui: &mut egui::Ui, item: &mut Item, length: f64, in_frames: bool) {
                 ui.label(fl!("part-from"));
                 let field =
                     timeline::boundary_field(&mut first, 0..=after - 1, frames, in_frames, false);
-                let start = ui.add_sized(size, field).on_hover_text(fl!("part-first")).changed();
+                let hint = fl!("part-first");
+                let start = ui.add_sized(size, field.name(&hint)).on_hover_text(hint).changed();
                 ui.label(fl!("part-to"));
                 let range = first + 1..=frames.count();
                 let field = timeline::boundary_field(&mut after, range, frames, in_frames, true);
-                let end = ui.add_sized(size, field).on_hover_text(fl!("part-last")).changed();
+                let hint = fl!("part-last");
+                let end = ui.add_sized(size, field.name(&hint)).on_hover_text(hint).changed();
                 if start || end {
                     frames.set_part((first, after), &mut choices.start, &mut choices.length);
                 }
@@ -253,9 +255,11 @@ fn used_part(ui: &mut egui::Ui, item: &mut Item, length: f64, in_frames: bool) {
             None => {
                 let (mut from, mut to) = cuts::part(length, choices.start, choices.length);
                 ui.label(fl!("part-from"));
-                let start = ui.add_sized(size, timeline::seconds(&mut from, length)).changed();
+                let field = timeline::seconds(&mut from, length).name(fl!("part-start"));
+                let start = ui.add_sized(size, field).changed();
                 ui.label(fl!("part-to"));
-                let end = ui.add_sized(size, timeline::seconds(&mut to, length)).changed();
+                let field = timeline::seconds(&mut to, length).name(fl!("part-end"));
+                let end = ui.add_sized(size, field).changed();
                 if start || end {
                     let from = from.min(to - 0.01).max(0.0);
                     let to = to.max(from + 0.01).min(length);

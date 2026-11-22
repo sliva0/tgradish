@@ -17,10 +17,9 @@ use crate::l10n::fl;
 use crate::testing::{convert, finish, has_ffmpeg, square, video};
 use crate::{inspect, preset_dialogs, settings_dialog};
 
-/// The GUI as it opens, with its fonts and look, in a window `width`
-/// wide.
-fn window(config: Config, width: f32) -> Harness<'static, App> {
-    Harness::builder().with_size([width, 820.0]).build_eframe(move |cc| {
+/// The GUI as it opens, with its fonts and look, in a window of `size`.
+fn window(config: Config, size: egui::Vec2) -> Harness<'static, App> {
+    Harness::builder().with_size(size).build_eframe(move |cc| {
         let app = App::with(config.clone(), None, Presets::builtin());
         app.style(&cc.egui_ctx);
         app
@@ -40,11 +39,16 @@ fn settle(harness: &mut Harness<App>, at: Option<egui::Pos2>) {
 /// handing each to `visit` by name: empty, with files, one converted and
 /// then changed, its folded settings open, a video's frame picked, the
 /// menus, the dialogs, and files removed. The video's need ffmpeg, and are left out without.
-pub(crate) fn walk(width: f32, mut visit: impl FnMut(&mut Harness<App>, &str)) {
+pub(crate) fn walk(width: f32, visit: impl FnMut(&mut Harness<App>, &str)) {
+    walk_in(egui::vec2(width, 820.0), visit);
+}
+
+/// As [`walk`], in a window of `size`.
+fn walk_in(size: egui::Vec2, mut visit: impl FnMut(&mut Harness<App>, &str)) {
     let dir = tempfile::tempdir().unwrap();
     let mut config = Config::default();
     config.gui.output_dir = Some(dir.path().join("out"));
-    let mut harness = window(config, width);
+    let mut harness = window(config, size);
     settle(&mut harness, None);
     visit(&mut harness, "empty");
 
@@ -228,13 +232,20 @@ fn pressable(role: egui::accesskit::Role) -> bool {
     matches!(role, Role::Button | Role::CheckBox | Role::RadioButton | Role::Link)
 }
 
+/// The roles of what screen readers say by its name: what can be pressed
+/// or picked, number fields, and how far something goes.
+fn named(role: egui::accesskit::Role) -> bool {
+    use egui::accesskit::Role;
+    pressable(role) || matches!(role, Role::SpinButton | Role::ProgressIndicator)
+}
+
 #[test]
 fn names_every_button_for_screen_readers() {
     let mut nameless = Vec::new();
     walk(1280.0, |harness, scene| {
         for node in harness.query_all(by()) {
             let node = node.accesskit_node();
-            if !pressable(node.role()) {
+            if !named(node.role()) {
                 continue;
             }
             // a symbol alone, such as ✖, says nothing
@@ -245,6 +256,41 @@ fn names_every_button_for_screen_readers() {
         }
     });
     assert!(nameless.is_empty(), "nameless:\n{}", nameless.join("\n"));
+}
+
+/// Every dialog fits a window as short as the GUI goes, and one shorter
+/// still, as a larger scale makes it: what it holds scrolls, and what
+/// closes it stays in sight.
+#[test]
+fn keeps_what_closes_each_dialog_in_a_short_window() {
+    let dialogs = ["inspect", "settings", "about", "shortcuts", "manage-presets", "save-preset"];
+    let mut seen = Vec::new();
+    let mut hidden = Vec::new();
+    for height in [crate::MIN_HEIGHT, crate::MIN_HEIGHT / 1.5] {
+        walk_in(egui::vec2(crate::MIN_WIDTH, height), |harness, scene| {
+            if !dialogs.contains(&scene) {
+                return;
+            }
+            seen.push(scene.to_owned());
+            let screen = harness.ctx.content_rect();
+            let closes = [fl!("close"), fl!("cancel")];
+            let mut found = false;
+            for button in harness.query_all(by().role(egui::accesskit::Role::Button)) {
+                let button = button.accesskit_node();
+                let Some(label) = button.label().filter(|label| closes.contains(label)) else {
+                    continue;
+                };
+                found = true;
+                let rect = button.bounding_box().expect("drawn");
+                if rect.y1 > f64::from(screen.bottom()) || rect.y0 < f64::from(screen.top()) {
+                    hidden.push(format!("{height}, {scene}: {label} at {rect:?}"));
+                }
+            }
+            assert!(found, "{height}, {scene}: nothing closes it");
+        });
+    }
+    assert_eq!(seen.len(), 2 * dialogs.len(), "{seen:?}");
+    assert!(hidden.is_empty(), "out of sight:\n{}", hidden.join("\n"));
 }
 
 #[test]

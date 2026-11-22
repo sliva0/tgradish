@@ -313,7 +313,7 @@ pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
                 let (mut first, after) = frames.part(length, *start, *used);
                 let field = boundary_field(&mut first, 0..=after - 1, frames, *in_frames, false);
                 let hint = fl!("part-start", "frame");
-                if ui.add_sized(size, field).on_hover_text(hint).changed() {
+                if ui.add_sized(size, field.name(&hint)).on_hover_text(hint).changed() {
                     frames.set_part((first, after), start, used);
                     *time = frames.times[first];
                 }
@@ -322,7 +322,7 @@ pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
                 let (mut from, to) = part(length, *start, *used);
                 let field = seconds(&mut from, length);
                 let hint = fl!("part-start");
-                if ui.add_sized(size, field).on_hover_text(hint).changed() {
+                if ui.add_sized(size, field.name(&hint)).on_hover_text(hint).changed() {
                     from = from.min(to - 0.01).max(0.0);
                     set_part(length, (from, to), start, used);
                     *time = from;
@@ -340,7 +340,7 @@ pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
                 let range = first + 1..=frames.count();
                 let field = boundary_field(&mut after, range, frames, *in_frames, true);
                 let hint = fl!("part-end", "frame");
-                if ui.add_sized(size, field).on_hover_text(hint).changed() {
+                if ui.add_sized(size, field.name(&hint)).on_hover_text(hint).changed() {
                     frames.set_part((first, after), start, used);
                 }
                 if !alone {
@@ -349,8 +349,9 @@ pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
             }
             None => {
                 let (from, mut to) = part(length, *start, *used);
-                let field = seconds(&mut to, length);
-                if ui.add_sized(size, field).on_hover_text(fl!("part-end")).changed() {
+                let hint = fl!("part-end");
+                let field = seconds(&mut to, length).name(&hint);
+                if ui.add_sized(size, field).on_hover_text(hint).changed() {
                     to = to.max(from + 0.01).min(length);
                     set_part(length, (from, to), start, used);
                 }
@@ -782,9 +783,10 @@ pub(crate) fn frame_picker(
         if step(ui, "⏵", index < last, fl!("frame-after"), fl!("frame-after", "last")) {
             picked = Some(index + 1);
         }
-        let field = frame_field(&mut index, frames, *in_frames);
+        let hint = fl!("frame-picked");
+        let field = frame_field(&mut index, frames, *in_frames).name(&hint);
         let size = vec2(PICKED, ui.spacing().interact_size.y);
-        if ui.add_sized(size, field).on_hover_text(fl!("frame-picked")).changed() {
+        if ui.add_sized(size, field).on_hover_text(hint).changed() {
             picked = Some(index);
         }
         let (width, unit_room) = bar_width(ui, 0.0, alone);

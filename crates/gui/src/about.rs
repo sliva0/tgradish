@@ -17,6 +17,13 @@ pub(crate) const FEEDBACK: &str = "https://t.me/s0untitled?direct";
 /// wraps.
 pub(crate) const WIDTH: f32 = 600.0;
 
+/// The height of what is around the notices in About: its title, what
+/// is said over them, its button, its margins and the room kept around it
+/// in the window; and the least and the most the notices are given.
+const CHROME: f32 = 300.0;
+const LEAST_ROOM: f32 = 80.0;
+const MOST_ROOM: f32 = 360.0;
+
 /// tgradish's version and the licences of what it is made of.
 pub(crate) fn about(ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
@@ -34,7 +41,9 @@ pub(crate) fn about(ui: &mut egui::Ui) {
     ui.add_space(6.0);
     widgets::note(ui, fl!("about-notices"));
     ui.add_space(4.0);
-    let area = egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(360.0);
+    // as tall as About fits the window, short of the most
+    let room = (ui.ctx().content_rect().height() - CHROME).clamp(LEAST_ROOM, MOST_ROOM);
+    let area = egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(room);
     widgets::scrolled(ui, area, |ui| {
         let notices = ui.ctx().memory_mut(|memory| {
             memory

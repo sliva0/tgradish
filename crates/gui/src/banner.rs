@@ -223,6 +223,10 @@ pub(crate) struct Banner {
     /// what passes is shown, as the list last drew it; without files, the
     /// part of the drop zone the list would take.
     pub(crate) corner: Option<egui::Rect>,
+    /// The top of the bar of actions under the preview as drawn this
+    /// frame, whose height changes as it goes on two lines; `None` where
+    /// there is none.
+    pub(crate) bar: Option<f32>,
     /// When the messages were last drawn: hovering what passes holds it.
     drawn: Option<f64>,
     /// Whether what passes was held as they were: the time since, until
@@ -245,6 +249,11 @@ const SHORT_DETAIL: usize = 3;
 const WIDEST: f32 = 640.0;
 /// Room left between the banner and the window's sides.
 const SIDE_ROOM: f32 = 24.0;
+/// How far up from the window's bottom the banner stands where there is
+/// no bar of actions, as over one on a single line; and how far down past
+/// a bar's top it comes, into the room over its buttons.
+const OVER_NO_BAR: f32 = 56.0;
+const INTO_BAR: f32 = 6.0;
 /// The icon's side, and the room between it, the text and the button.
 const ICON: f32 = 16.0;
 const GAP: f32 = 10.0;
@@ -346,6 +355,8 @@ impl Banner {
         let gone = |since: &Option<f64>| crate::motion::along(ctx, since.unwrap_or(now), FADE);
         self.leaving.retain(|(_, since)| gone(since) < 1.0);
         let all = self.banner(ctx, now, &mut clicked, &mut dismissed);
+        // the next frame's bar says where it is again, if there is one
+        self.bar = None;
         let held = self.passing(ctx, now, &mut clicked, &mut dismissed);
         // hovering what passes holds it where it is, for as long: the time
         // since it was last drawn by whether it was held then, as it may
@@ -417,10 +428,12 @@ impl Banner {
         let left = self.corner.map_or(screen.left(), |corner| corner.right()).min(screen.right());
         let middle = (left + screen.right()) / 2.0;
         let widest = WIDEST.min(screen.right() - left - 2.0 * SIDE_ROOM).max(200.0);
+        // over the bar, however many lines it takes
+        let above = self.bar.map_or(OVER_NO_BAR, |top| screen.bottom() - top - INTO_BAR);
         let mut all = false;
         egui::Area::new(egui::Id::new("banner"))
             .order(egui::Order::Foreground)
-            .anchor(egui::Align2::CENTER_BOTTOM, vec2(middle - screen.center().x, -56.0))
+            .anchor(egui::Align2::CENTER_BOTTOM, vec2(middle - screen.center().x, -above))
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).inner_margin(egui::Margin::same(12)).show(
                     ui,
@@ -1098,6 +1111,53 @@ mod tests {
         Harness::builder().with_size([1280.0, 820.0]).with_step_dt(1.0 / 60.0).build_eframe(|_| {
             App::with(Config::default(), None, tgradish_core::presets::Presets::builtin())
         })
+    }
+
+    /// The banner stands over the bar of actions, on one line or two, as
+    /// what the bar says wraps it in a narrow window.
+    #[test]
+    fn stands_over_the_bar_of_actions_however_tall() {
+        let dir = tempfile::tempdir().unwrap();
+        let art = dir.path().join("holiday at the seaside with the whole family.png");
+        crate::testing::square(&art, [200, 80, 0, 255]);
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let size = [crate::MIN_WIDTH, crate::MIN_HEIGHT];
+        let mut harness = Harness::builder().with_size(size).build_eframe(move |cc| {
+            let app = App::with(config.clone(), None, tgradish_core::presets::Presets::builtin());
+            app.style(&cc.egui_ctx);
+            app
+        });
+        harness.state_mut().add(vec![art]);
+        crate::testing::finish(&mut harness);
+        harness.state_mut().say(Message::warning("Stays"));
+        let placed = |harness: &mut Harness<App>| {
+            harness.run_steps(4);
+            let banner = harness.ctx.memory(|memory| memory.area_rect(egui::Id::new("banner")));
+            let keys = crate::keys::keys_text(crate::keys::Command::Convert);
+            let convert = harness.get(egui_kittest::kittest::by().label_contains(&keys)).rect();
+            let bar = egui::PanelState::load(&harness.ctx, egui::Id::new("actions"));
+            (banner.expect("drawn"), convert, bar.expect("drawn").outer_rect.top())
+        };
+        let near = |a: f32, b: f32| assert!((a - b).abs() < 0.5, "{a} against {b}");
+        // on one line, where it always stood
+        let (banner, convert, bar) = placed(&mut harness);
+        near(banner.bottom(), crate::MIN_HEIGHT - OVER_NO_BAR);
+        assert!(banner.bottom() < convert.top(), "{banner:?} over {convert:?}");
+        // on two, as what keeps it from being converted is said beside
+        // Convert, the name of the result under them: as far over it
+        harness.state_mut().items[0].choices.crop =
+            Some(tgradish_core::options::Crop { x: 100, y: 100, width: 50, height: 50 });
+        let (taller, higher, top) = placed(&mut harness);
+        assert!(top < bar - 20.0, "{top} under {bar}");
+        near(higher.top(), convert.top() - (bar - top));
+        near(taller.bottom(), banner.bottom() - (bar - top));
+        assert!(taller.bottom() < higher.top(), "{taller:?} over {higher:?}");
+        // and where there is no bar, as over one on one line
+        harness.state_mut().selected = None;
+        harness.run_steps(4);
+        let banner = harness.ctx.memory(|memory| memory.area_rect(egui::Id::new("banner")));
+        near(banner.expect("drawn").bottom(), crate::MIN_HEIGHT - OVER_NO_BAR);
     }
 
     #[test]

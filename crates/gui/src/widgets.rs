@@ -657,6 +657,7 @@ pub(crate) fn row<R>(
                         ui.add(egui::Label::new(text).wrap())
                     })
                     .inner;
+                let labelled = label.id;
                 match allowed {
                     Err(why) => {
                         label.on_disabled_hover_text(why);
@@ -666,13 +667,34 @@ pub(crate) fn row<R>(
                     }
                     Ok(()) => {}
                 }
-                ui.vertical(contents).inner
+                // what is drawn within it is named by its label, where
+                // nothing else names it
+                let labels = |ui: &egui::Ui, change: &dyn Fn(&mut Vec<egui::Id>)| {
+                    ui.data_mut(|data| change(data.get_temp_mut_or_default(row_labels_id())));
+                };
+                labels(ui, &|labels| labels.push(labelled));
+                let inner = ui.vertical(contents).inner;
+                labels(ui, &|labels| {
+                    labels.pop();
+                });
+                inner
             })
             .inner
         })
         .inner;
     ui.add_space(AFTER_ROW);
     inner
+}
+
+/// The labels of the [`row`]s being drawn, innermost last, in egui's
+/// memory.
+fn row_labels_id() -> egui::Id {
+    egui::Id::new("row labels")
+}
+
+/// The label of the innermost [`row`] being drawn, if any.
+fn row_label(ui: &egui::Ui) -> Option<egui::Id> {
+    ui.data(|data| data.get_temp::<Vec<egui::Id>>(row_labels_id())?.last().copied())
 }
 
 /// One choice of a [`segments`] row: its value, label and explanation.
@@ -1362,6 +1384,9 @@ pub(crate) struct Number<'a> {
     max_decimals: Option<usize>,
     formatter: Option<Formatter<'a>>,
     parser: Option<Parser<'a>>,
+    /// What screen readers call it; by the label of the [`row`] it is in
+    /// without.
+    name: Option<String>,
 }
 
 /// What a number field being typed in holds.
@@ -1500,7 +1525,15 @@ impl<'a> Number<'a> {
             max_decimals: None,
             formatter: None,
             parser: None,
+            name: None,
         }
+    }
+
+    /// What screen readers call it, where the label of the [`row`] it is
+    /// in doesn't say, or it is in none.
+    pub(crate) fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
     }
 
     pub(crate) fn range<N: egui::emath::Numeric>(
@@ -2024,6 +2057,7 @@ impl egui::Widget for Number<'_> {
         response.widget_info(|| egui::WidgetInfo::drag_value(enabled, value));
         let shown = format!("{}{}{}", self.prefix, self.format(ui, value), self.suffix);
         let (low, high, step) = (*self.range.start(), *self.range.end(), self.steps.0);
+        let row = row_label(ui);
         ui.ctx().accesskit_node_builder(response.id, |builder| {
             if low.is_finite() {
                 builder.set_min_numeric_value(low);
@@ -2040,6 +2074,12 @@ impl egui::Widget for Number<'_> {
                 builder.add_action(Action::Decrement);
             }
             builder.clear_label();
+            // named as it is asked, else by the label of its row
+            match (&self.name, row) {
+                (Some(name), _) => builder.set_label(name.as_str()),
+                (None, Some(label)) => builder.push_labelled_by(label.accesskit_id()),
+                (None, None) => {}
+            }
             // as it shows, with its units; typed in, the text it holds
             if !editing {
                 builder.set_value(shown);
@@ -2254,6 +2294,59 @@ mod number_tests {
     fn focus<T>(harness: &mut Harness<'_, (T, Option<egui::Rect>)>) {
         harness.get_by_role(egui::accesskit::Role::SpinButton).focus();
         harness.run_steps(2);
+    }
+
+    /// A bar says to screen readers what it shows: its text, and how far
+    /// it got where that is known.
+    #[test]
+    fn tells_screen_readers_what_a_bar_shows() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::NodeT;
+        let mut harness = Harness::new_ui(|ui| {
+            gauge(ui, 300, 256, "300 KiB of 256 KiB".to_owned());
+            bar(ui, Fill::Working(0.25), "Encoding", Color32::WHITE);
+            bar(ui, Fill::Unknown, "Reading", Color32::WHITE);
+            thin_bar(ui, egui::vec2(100.0, 6.0), Fill::Working(0.5), "Converting", Color32::WHITE);
+        });
+        harness.run_steps(2);
+        let bars: Vec<(Option<String>, Option<f64>)> = harness
+            .query_all_by_role(Role::ProgressIndicator)
+            .map(|node| (node.accesskit_node().label(), node.accesskit_node().numeric_value()))
+            .collect();
+        let said = |text: &str, value| (Some(text.to_owned()), value);
+        let expected = [
+            said("300 KiB of 256 KiB", Some(100.0)),
+            said("Encoding", Some(25.0)),
+            said("Reading", None),
+            said("Converting", Some(50.0)),
+        ];
+        assert_eq!(bars, expected);
+    }
+
+    /// Screen readers call a field by the label of the row it is in,
+    /// unless it is given a name of its own; outside any, by that alone.
+    #[test]
+    fn names_a_field_by_its_row_unless_named() {
+        use egui_kittest::kittest::NodeT;
+        let mut harness = Harness::new_ui_state(
+            |ui, values: &mut [u32; 4]| {
+                let [a, b, c, d] = values;
+                row(ui, "Speed", "", Ok(()), |ui| {
+                    ui.add(Number::new(a));
+                    ui.add(Number::new(b).name("Columns"));
+                });
+                ui.add(Number::new(c));
+                ui.add(Number::new(d).name("Rows"));
+            },
+            [1, 2, 3, 4],
+        );
+        harness.run_steps(2);
+        let names: Vec<Option<String>> = harness
+            .query_all_by_role(egui::accesskit::Role::SpinButton)
+            .map(|node| node.accesskit_node().label())
+            .collect();
+        let named = |name: &str| Some(name.to_owned());
+        assert_eq!(names, [named("Speed"), named("Columns"), None, named("Rows")]);
     }
 
     #[test]
@@ -2679,7 +2772,7 @@ const BAR_FONT: f32 = 12.5;
 pub(crate) fn steady_bar(ui: &mut egui::Ui, fill: Fill, text: &str, widest: &str, colour: Color32) {
     let width = ui.available_width().min(380.0);
     let size = egui::vec2(width, bar_height(ui, &[text, widest], width));
-    bar_drawn(ui, size, fill, text, colour, None);
+    bar_drawn(ui, size, fill, (text, text), colour, None);
 }
 
 /// How tall a bar `width` wide is to say the longest of `texts` whole.
@@ -2703,7 +2796,19 @@ pub(crate) fn bar_sized(
     text: &str,
     colour: Color32,
 ) {
-    bar_drawn(ui, size, fill, text, colour, None);
+    bar_drawn(ui, size, fill, (text, text), colour, None);
+}
+
+/// A [`bar`] of `size` too thin for words, which screen readers call
+/// `name`.
+pub(crate) fn thin_bar(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    fill: Fill,
+    name: &str,
+    colour: Color32,
+) {
+    bar_drawn(ui, size, fill, ("", name), colour, None);
 }
 
 /// A full [`bar`] of a step done with, as an encode too large to keep: in
@@ -2715,7 +2820,7 @@ pub(crate) fn bar_spent(ui: &mut egui::Ui, text: &str, widest: &str, from: usize
     let width = ui.available_width().min(380.0);
     let (fill, ending) = (theme::spent(ui.visuals()), theme::warn(ui.visuals()));
     let size = egui::vec2(width, bar_height(ui, &[text, widest], width));
-    bar_drawn(ui, size, Fill::Share(1.0), text, fill, Some((from, ending)));
+    bar_drawn(ui, size, Fill::Share(1.0), (text, text), fill, Some((from, ending)));
 }
 
 /// How long a bar's fill takes to go most of the way to a share it moved
@@ -2744,16 +2849,27 @@ fn sheen_at(time: f64) -> f32 {
 }
 
 /// A [`bar`] of `size`, its text from the byte `ending` gives on in the
-/// colour it gives.
+/// colour it gives, and what screen readers call it.
 fn bar_drawn(
     ui: &mut egui::Ui,
     size: egui::Vec2,
     fill: Fill,
-    text: &str,
+    (text, name): (&str, &str),
     colour: Color32,
     ending: Option<(usize, Color32)>,
 ) {
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+    // to screen readers, what it says, and how far it got where that is
+    // known, in percent, as egui's own bars have it
+    let enabled = ui.is_enabled();
+    response.widget_info(|| {
+        let mut info =
+            egui::WidgetInfo::labeled(egui::WidgetType::ProgressIndicator, enabled, name);
+        if let Fill::Share(share) | Fill::Working(share) = fill {
+            info.value = Some(f64::from(share.clamp(0.0, 1.0) * 100.0).round());
+        }
+        info
+    });
     let rounding = (size.y / 2.0).min(4.0);
     let painter = ui.painter_at(rect);
     let (track, outline) = theme::track(ui.visuals());

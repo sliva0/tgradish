@@ -64,10 +64,26 @@ fn to_linear() -> &'static [f32; 256] {
     })
 }
 
-fn to_srgb(linear: f32) -> u8 {
+/// Linear light as an sRGB channel value, worked out exactly.
+fn to_srgb_exact(linear: f32) -> u8 {
     let c = linear.clamp(0.0, 1.0);
     let c = if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
     (c * 255.0).round() as u8
+}
+
+/// How many steps of linear light [`to_srgb`] tells apart: enough that a
+/// step changes the channel by less than one, where it changes fastest.
+const SRGB_STEPS: usize = 4096;
+
+/// Linear light as an sRGB channel value, from a table rather than a power
+/// for each channel of each pixel: off by one at the most.
+fn to_srgb(linear: f32) -> u8 {
+    static TABLE: std::sync::OnceLock<[u8; SRGB_STEPS]> = std::sync::OnceLock::new();
+    let table = TABLE.get_or_init(|| {
+        std::array::from_fn(|step| to_srgb_exact(step as f32 / (SRGB_STEPS - 1) as f32))
+    });
+    let step = (linear.clamp(0.0, 1.0) * (SRGB_STEPS - 1) as f32).round() as usize;
+    table[step.min(SRGB_STEPS - 1)]
 }
 
 /// Weights of the source pixels an output pixel covers, along one side:
@@ -307,6 +323,22 @@ mod tests {
 
     fn sizes(scaling: Scaling) -> Sizes {
         tgradish_core::picture::sizes(Format::Webm, Target::Emoji, Resize::Pad, scaling, (2, 1))
+    }
+
+    /// The table gives what the power would, off by one at the most over
+    /// the whole range, and each sRGB value back as it was.
+    #[test]
+    fn takes_light_back_to_srgb_as_the_power_does() {
+        const SAMPLES: u32 = 1 << 20;
+        for sample in 0..=SAMPLES {
+            let linear = sample as f32 / SAMPLES as f32;
+            let (table, exact) = (to_srgb(linear), to_srgb_exact(linear));
+            assert!(table.abs_diff(exact) <= 1, "{linear}: {table}, not {exact}");
+        }
+        for (value, linear) in to_linear().iter().enumerate() {
+            assert_eq!(usize::from(to_srgb(*linear)), value);
+        }
+        assert_eq!((to_srgb(-0.5), to_srgb(1.5)), (0, 255));
     }
 
     /// Padded around the middle as core pads it: a static sticker

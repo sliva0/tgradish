@@ -628,7 +628,8 @@ pub(crate) struct Rows {
     /// The files listed last frame, in order; none before the first, when
     /// the rows there are already show as they are.
     listed: Option<Vec<u64>>,
-    /// The files being made last frame.
+    /// The files being made last frame: running, as one let go of while
+    /// it waited leaves the result made before as it was.
     busy: std::collections::HashSet<u64>,
     /// When each row came, while it fades in.
     came: std::collections::HashMap<u64, f64>,
@@ -679,7 +680,8 @@ impl Rows {
                 self.made.insert(item.id, now);
             }
         }
-        self.busy = items.iter().filter(|item| item.job.is_some()).map(|item| item.id).collect();
+        let running = |item: &&Item| item.job.as_ref().is_some_and(|job| job.job.is_running());
+        self.busy = items.iter().filter(running).map(|item| item.id).collect();
         self.listed = Some(ids);
         self.came.retain(|_, since| now - *since < ROW_CHANGE);
         self.made.retain(|_, since| now - *since < PULSE);
@@ -937,7 +939,7 @@ fn status(ui: &mut egui::Ui, item: &Item, queued: Option<usize>, fading: f32) {
             let size = vec2(ui.available_width(), 6.0);
             let colour = theme::mark(ui.visuals());
             let fill = widgets::Fill::working(job.progress.overall());
-            widgets::bar_sized(ui, size, fill, "", colour);
+            widgets::thin_bar(ui, size, fill, &fl!("converting"), colour);
         }
         (Some(_), _) => {
             ui.label(
@@ -1401,6 +1403,56 @@ mod tests {
         assert_eq!(shown(&harness), Shown { row: 1.0, result: 1.0, glow: 0.0 });
         assert!(glow(0.0) == 0.0 && glow(1.0).abs() < 1e-6 && glow(0.5) == PULSE_MOST);
         harness.try_run().expect("still once done");
+    }
+
+    /// A conversion asked for again and let go of as it waited made
+    /// nothing: the result made before stays as it was, without a glow.
+    #[test]
+    fn lets_no_row_glow_for_a_conversion_that_only_waited() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a.png"), dir.path().join("b.png"));
+        square(&a, [255, 0, 0, 255]);
+        square(&b, [0, 0, 255, 255]);
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = stepped(config);
+        harness.state_mut().add(vec![a, b]);
+        finish(&mut harness);
+        let (first, second) = (harness.state().items[0].id, harness.state().items[1].id);
+        harness.state_mut().select(second);
+        harness.state_mut().enqueue(first);
+        finish(&mut harness);
+        harness.run_steps(60);
+        let shown =
+            |harness: &egui_kittest::Harness<App>| harness.state().rows.shown(&harness.ctx, first);
+        assert_eq!(shown(&harness), Shown { row: 1.0, result: 1.0, glow: 0.0 });
+        // the first waits behind the second, and both are stopped
+        let behind = |harness: &mut egui_kittest::Harness<App>| {
+            harness.state_mut().enqueue(second);
+            harness.state_mut().enqueue(first);
+            harness.step();
+        };
+        behind(&mut harness);
+        let waiting = |harness: &egui_kittest::Harness<App>| {
+            let job = harness.state().item(first).unwrap().job.as_ref();
+            job.is_some_and(|conversion| conversion.job.is_waiting())
+        };
+        assert!(waiting(&harness));
+        harness.state_mut().stop_all();
+        for _ in 0..30 {
+            harness.step();
+            assert_eq!(shown(&harness), Shown { row: 1.0, result: 1.0, glow: 0.0 });
+        }
+        assert!(harness.state().item(first).unwrap().made.is_some());
+        // as is one let go of by its own button
+        behind(&mut harness);
+        assert!(waiting(&harness));
+        harness.state_mut().item_mut(first).unwrap().job = None;
+        harness.state_mut().queue.retain(|&id| id != first);
+        for _ in 0..30 {
+            harness.step();
+            assert_eq!(shown(&harness), Shown { row: 1.0, result: 1.0, glow: 0.0 });
+        }
     }
 
     #[test]

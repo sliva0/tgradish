@@ -494,9 +494,11 @@ mod tests {
         let Some(video) = crate::testing::video(dir.path(), "64x48") else { return };
         let mut config = Config::default();
         config.ffmpeg.choice = FfmpegChoice::System;
-        // where a label first shows
+        // where a label first shows, rather than a field it names
         let at = |harness: &egui_kittest::Harness<crate::app::App>, label: &str| {
-            harness.query_all_by_label(label).next().expect(label).rect().left_top()
+            let by = egui_kittest::kittest::by().label(label).include_labels();
+            let mut found = harness.query_all(by.role(egui::accesskit::Role::Label));
+            found.next().expect(label).rect().left_top()
         };
         for wide in [true, false] {
             let size = if wide { [1920.0, 1400.0] } else { [crate::MIN_WIDTH, 1800.0] };
