@@ -719,10 +719,14 @@ fn aspect_ratio(
                     false => field,
                 }
             }
+            // each named as its hover says, the row's name naming all
+            // four alike
             let (across, down) = widgets::steady_width(ui, "000.000", |ui| {
-                let across = ui.add(shown(side(&mut width), unknown)).on_hover_text(fl!("width"));
+                let across = shown(side(&mut width), unknown).name(fl!("width"));
+                let across = ui.add(across).on_hover_text(fl!("width"));
                 ui.label(":");
-                (across, ui.add(shown(side(&mut height), unknown)).on_hover_text(fl!("height")))
+                let down = shown(side(&mut height), unknown).name(fl!("height"));
+                (across, ui.add(down).on_hover_text(fl!("height")))
             });
             typed |= across.on_disabled_hover_text(pick.as_str()).changed();
             typed |= down.on_disabled_hover_text(pick.as_str()).changed();
@@ -743,7 +747,9 @@ fn aspect_ratio(
                 let digits = box_w.max(box_h).to_string().len();
                 // in pixels too, though its unit shows after the other
                 let across = widgets::Number::new(&mut result_w).range(1..=box_w).reads(" px");
+                let across = across.name(fl!("ratio-result", "width"));
                 let down = widgets::Number::new(&mut result_h).range(1..=box_h).suffix(" px");
+                let down = down.name(fl!("ratio-result", "height"));
                 // a dash where the crop, and so the result, isn't known yet
                 let (across, down) = match sizes {
                     Some(_) => (across, down),

@@ -1176,17 +1176,17 @@ impl eframe::App for App {
         self.shortcuts_dialog(&ctx);
         self.preset_dialogs(&ctx);
         if self.about {
-            let modal = widgets::dialog(&ctx, "about").show(&ctx, |ui| {
-                ui.set_width(crate::about::WIDTH);
-                let crossed =
-                    widgets::dialog_title(ui, widgets::title_text(ui, fl!("about-title")));
-                // afresh each time it opens
-                ui.push_id(self.about_visit, about);
-                let closed = widgets::dialog_buttons(ui, |ui| {
-                    ui.add(widgets::dialog_button(fl!("close"))).clicked()
+            let modal =
+                widgets::dialog(&ctx, "about").width(crate::about::WIDTH).show(&ctx, |ui| {
+                    let crossed =
+                        widgets::dialog_title(ui, widgets::title_text(ui, fl!("about-title")));
+                    // afresh each time it opens
+                    ui.push_id(self.about_visit, about);
+                    let closed = widgets::dialog_buttons(ui, |ui| {
+                        ui.add(widgets::dialog_button(fl!("close"))).clicked()
+                    });
+                    crossed || closed
                 });
-                crossed || closed
-            });
             if modal.inner || modal.should_close() {
                 self.about = false;
                 self.about_visit += 1;

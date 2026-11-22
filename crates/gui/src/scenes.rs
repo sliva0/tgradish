@@ -1,7 +1,8 @@
 //! The GUI's main scenes, drawn without a GPU, for tests that look over
 //! all of them at once: that every button has a name screen readers can
-//! say, that no button's words are cut short in English, and that the
-//! list's bars are level with those beside them.
+//! say, and no two fields of one row the same, that no button's words are
+//! cut short in English, and that the list's bars are level with those
+//! beside them.
 
 use std::path::Path;
 
@@ -37,8 +38,9 @@ fn settle(harness: &mut Harness<App>, at: Option<egui::Pos2>) {
 
 /// Takes the GUI, in a window `width` wide, through its main scenes,
 /// handing each to `visit` by name: empty, with files, one converted and
-/// then changed, its folded settings open, a video's frame picked, the
-/// menus, the dialogs, and files removed. The video's need ffmpeg, and are left out without.
+/// then changed, its folded settings open, a picture read as a sprite
+/// sheet, a video's frame picked, the menus, the dialogs, and files
+/// removed. The video's need ffmpeg, and are left out without.
 pub(crate) fn walk(width: f32, visit: impl FnMut(&mut Harness<App>, &str)) {
     walk_in(egui::vec2(width, 820.0), visit);
 }
@@ -101,6 +103,23 @@ fn walk_in(size: egui::Vec2, mut visit: impl FnMut(&mut Harness<App>, &str)) {
     visit(&mut harness, "outdated");
     folds(&mut harness);
     visit(&mut harness, "folds");
+    // the picture as a sticker, read as a sprite sheet, then as it was
+    let (id, selected) = (harness.state().items[0].id, harness.state().selected);
+    harness.state_mut().select(id);
+    let item = &mut harness.state_mut().items[0];
+    let was = (item.format, item.choices.tgs.sheet);
+    item.format = Format::Tgs;
+    item.choices.tgs.sheet = Some(tgradish_core::options::Sheet { columns: 2, rows: 2 });
+    finish(&mut harness);
+    settle(&mut harness, None);
+    visit(&mut harness, "sheet");
+    let item = &mut harness.state_mut().items[0];
+    (item.format, item.choices.tgs.sheet) = was;
+    if let Some(selected) = selected {
+        harness.state_mut().select(selected);
+    }
+    finish(&mut harness);
+    settle(&mut harness, None);
 
     let sticker = dir.path().join("out").join("dance.sticker.tgs");
     harness.state_mut().inspection = Some(inspect::Inspection::of(&sticker));
@@ -242,9 +261,13 @@ fn named(role: egui::accesskit::Role) -> bool {
 #[test]
 fn names_every_button_for_screen_readers() {
     let mut nameless = Vec::new();
+    let mut alike = Vec::new();
     walk(1280.0, |harness, scene| {
-        for node in harness.query_all(by()) {
-            let node = node.accesskit_node();
+        // each number field's name, and the containers it is in, innermost
+        // first
+        let mut fields = Vec::new();
+        for found in harness.query_all(by()) {
+            let node = found.accesskit_node();
             if !named(node.role()) {
                 continue;
             }
@@ -253,21 +276,55 @@ fn names_every_button_for_screen_readers() {
             if !label.chars().any(char::is_alphanumeric) {
                 nameless.push(format!("{scene}: {:?} {label:?}", node.role()));
             }
+            if node.role() == egui::accesskit::Role::SpinButton {
+                let containers: Vec<_> = std::iter::successors(found.parent(), |up| up.parent())
+                    .map(|up| up.accesskit_node().id())
+                    .collect();
+                fields.push((label, containers));
+            }
+        }
+        // a row's fields, named alike, can't be told apart
+        for (at, (label, containers)) in fields.iter().enumerate() {
+            let of_one_row =
+                |(other, theirs): &(String, Vec<_>)| other == label && one_row(containers, theirs);
+            if fields[at + 1..].iter().any(of_one_row) {
+                alike.push(format!("{scene}: {label:?}"));
+            }
         }
     });
     assert!(nameless.is_empty(), "nameless:\n{}", nameless.join("\n"));
+    assert!(alike.is_empty(), "named alike in one row:\n{}", alike.join("\n"));
+}
+
+/// How far up from two fields of one row the container they share is, at
+/// the most: from those of different rows, or sections, it is further.
+const ONE_ROW: usize = 3;
+
+/// Whether what is in the containers `a`, and what is in `b`, innermost
+/// first, are of one row: within [`ONE_ROW`] of the container they share.
+fn one_row<T: PartialEq>(a: &[T], b: &[T]) -> bool {
+    let shared = a.iter().position(|container| b.contains(container));
+    shared.is_some_and(|up| up < ONE_ROW && b.iter().position(|c| *c == a[up]) < Some(ONE_ROW))
 }
 
 /// Every dialog fits a window as short as the GUI goes, and one shorter
 /// still, as a larger scale makes it: what it holds scrolls, and what
-/// closes it stays in sight.
+/// closes it stays in sight. Inspect, About and Save preset fit one as
+/// narrow as the narrowest at three times the scale too, what they hold
+/// wrapping; Settings, Keys and Manage presets have rows that don't wrap.
 #[test]
 fn keeps_what_closes_each_dialog_in_a_short_window() {
-    let dialogs = ["inspect", "settings", "about", "shortcuts", "manage-presets", "save-preset"];
+    let all = ["inspect", "settings", "about", "shortcuts", "manage-presets", "save-preset"];
+    let narrow = ["inspect", "about", "save-preset"];
+    let sizes = [
+        (egui::vec2(crate::MIN_WIDTH, crate::MIN_HEIGHT), &all[..]),
+        (egui::vec2(crate::MIN_WIDTH, crate::MIN_HEIGHT / 1.5), &all[..]),
+        (egui::vec2(crate::MIN_WIDTH / 3.0, crate::MIN_HEIGHT), &narrow[..]),
+    ];
     let mut seen = Vec::new();
     let mut hidden = Vec::new();
-    for height in [crate::MIN_HEIGHT, crate::MIN_HEIGHT / 1.5] {
-        walk_in(egui::vec2(crate::MIN_WIDTH, height), |harness, scene| {
+    for (size, dialogs) in sizes {
+        walk_in(size, |harness, scene| {
             if !dialogs.contains(&scene) {
                 return;
             }
@@ -282,14 +339,19 @@ fn keeps_what_closes_each_dialog_in_a_short_window() {
                 };
                 found = true;
                 let rect = button.bounding_box().expect("drawn");
-                if rect.y1 > f64::from(screen.bottom()) || rect.y0 < f64::from(screen.top()) {
-                    hidden.push(format!("{height}, {scene}: {label} at {rect:?}"));
+                let (x, y) = (screen.x_range(), screen.y_range());
+                let within = |from: f64, to: f64, range: egui::Rangef| {
+                    from >= f64::from(range.min) && to <= f64::from(range.max)
+                };
+                if !within(rect.x0, rect.x1, x) || !within(rect.y0, rect.y1, y) {
+                    hidden.push(format!("{size:?}, {scene}: {label} at {rect:?}"));
                 }
             }
-            assert!(found, "{height}, {scene}: nothing closes it");
+            assert!(found, "{size:?}, {scene}: nothing closes it");
         });
     }
-    assert_eq!(seen.len(), 2 * dialogs.len(), "{seen:?}");
+    let expected: usize = sizes.iter().map(|(_, dialogs)| dialogs.len()).sum();
+    assert_eq!(seen.len(), expected, "{seen:?}");
     assert!(hidden.is_empty(), "out of sight:\n{}", hidden.join("\n"));
 }
 

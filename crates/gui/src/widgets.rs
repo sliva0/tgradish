@@ -524,6 +524,9 @@ pub(crate) fn text_field(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> 
 
 /// Room inside a dialog's frame.
 const DIALOG_MARGIN: i8 = 16;
+/// Room kept between a dialog and the window's sides, where the window is
+/// too narrow for its width, as a larger scale makes it.
+const DIALOG_AROUND: f32 = 8.0;
 
 /// How long a dialog takes to fade in as it opens, in seconds. It is where
 /// it goes, as large as it is, and takes the keyboard from its first
@@ -537,7 +540,7 @@ const BACKDROP: f32 = 100.0;
 /// last.
 pub(crate) fn dialog(_ctx: &egui::Context, id: &str) -> Dialog {
     let id = egui::Id::new(id);
-    Dialog { id, area: egui::Modal::default_area(id) }
+    Dialog { id, area: egui::Modal::default_area(id), width: None }
 }
 
 /// A dialog to show: an [`egui::Modal`] that fades in, with what is
@@ -545,12 +548,20 @@ pub(crate) fn dialog(_ctx: &egui::Context, id: &str) -> Dialog {
 pub(crate) struct Dialog {
     id: egui::Id,
     area: egui::Area,
+    width: Option<f32>,
 }
 
 impl Dialog {
     /// Places it as `area` says, rather than in the window's middle.
     pub(crate) fn area(self, area: egui::Area) -> Dialog {
         Dialog { area, ..self }
+    }
+
+    /// Makes what it holds `width` wide, or as wide as the window has room
+    /// for where that is less: what it holds wraps, and what closes it, at
+    /// its right, stays in the window.
+    pub(crate) fn width(self, width: f32) -> Dialog {
+        Dialog { width: Some(width), ..self }
     }
 
     pub(crate) fn show<R>(
@@ -567,7 +578,16 @@ impl Dialog {
             .backdrop_color(backdrop)
             .show(ctx, |ui| {
                 ui.multiply_opacity(opacity);
-                frame.show(ui, content).inner
+                frame
+                    .show(ui, |ui| {
+                        if let Some(width) = self.width {
+                            let margins = 2.0 * (f32::from(DIALOG_MARGIN) + DIALOG_AROUND);
+                            let room = ctx.content_rect().width() - margins;
+                            ui.set_width(width.min(room).max(0.0));
+                        }
+                        content(ui)
+                    })
+                    .inner
             })
     }
 }

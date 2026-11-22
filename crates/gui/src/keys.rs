@@ -267,8 +267,7 @@ impl App {
         if !self.shortcuts {
             return;
         }
-        let modal = widgets::dialog(ctx, "shortcuts").show(ctx, |ui| {
-            ui.set_width(560.0);
+        let modal = widgets::dialog(ctx, "shortcuts").width(560.0).show(ctx, |ui| {
             let crossed = widgets::dialog_title(ui, widgets::title_text(ui, fl!("shortcuts")));
             // the dialog fits the window, the list scrolling within
             let room = (ctx.content_rect().height() - 160.0).max(200.0);

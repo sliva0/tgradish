@@ -17,10 +17,11 @@ pub(crate) const FEEDBACK: &str = "https://t.me/s0untitled?direct";
 /// wraps.
 pub(crate) const WIDTH: f32 = 600.0;
 
-/// The height of what is around the notices in About: its title, what
-/// is said over them, its button, its margins and the room kept around it
-/// in the window; and the least and the most the notices are given.
-const CHROME: f32 = 300.0;
+/// The height of what is around the notices in About, but for what is
+/// said over them, measured as it wraps taller where About is narrower:
+/// its title, its button, its margins and the room kept around it in the
+/// window; and the least and the most the notices are given.
+const CHROME: f32 = 154.0;
 const LEAST_ROOM: f32 = 80.0;
 const MOST_ROOM: f32 = 360.0;
 
@@ -42,7 +43,8 @@ pub(crate) fn about(ui: &mut egui::Ui) {
     widgets::note(ui, fl!("about-notices"));
     ui.add_space(4.0);
     // as tall as About fits the window, short of the most
-    let room = (ui.ctx().content_rect().height() - CHROME).clamp(LEAST_ROOM, MOST_ROOM);
+    let chrome = CHROME + ui.min_rect().height();
+    let room = (ui.ctx().content_rect().height() - chrome).clamp(LEAST_ROOM, MOST_ROOM);
     let area = egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(room);
     widgets::scrolled(ui, area, |ui| {
         let notices = ui.ctx().memory_mut(|memory| {
@@ -54,52 +56,62 @@ pub(crate) fn about(ui: &mut egui::Ui) {
                 .clone()
         });
         for notice in notices.iter() {
-            egui::CollapsingHeader::new(title(notice.kind)).id_salt(("notice", notice.kind)).show(
-                ui,
-                |ui| {
-                    if matches!(notice.kind, Kind::Sources { of: "ffmpeg" }) {
-                        widgets::link(
+            let heading = wrapped(ui, title(notice.kind));
+            egui::CollapsingHeader::new(heading).id_salt(("notice", notice.kind)).show(ui, |ui| {
+                if matches!(notice.kind, Kind::Sources { of: "ffmpeg" }) {
+                    widgets::link(
+                        ui,
+                        fl!("ffmpeg-sources"),
+                        format!(
+                            "{}/releases/tag/v{}",
+                            tgradish_core::REPOSITORY,
+                            env!("CARGO_PKG_VERSION")
+                        ),
+                    );
+                }
+                // the crates' list is long: a section for each licence
+                let rule = format!("\n{}\n", "-".repeat(80));
+                let blocks: Vec<&str> = notice.text.split(rule.as_str()).collect();
+                if blocks.len() > 1 {
+                    widgets::note(ui, blocks[0].trim());
+                    for block in &blocks[1..] {
+                        let (head, body) = block.split_once("\n\n").unwrap_or((block, ""));
+                        let name = head.lines().next().unwrap_or("").trim_end_matches(", used by:");
+                        let title = wrapped(ui, licence_title(name, head));
+                        egui::CollapsingHeader::new(title).id_salt(("crates", *block)).show(
                             ui,
-                            fl!("ffmpeg-sources"),
-                            format!(
-                                "{}/releases/tag/v{}",
-                                tgradish_core::REPOSITORY,
-                                env!("CARGO_PKG_VERSION")
-                            ),
+                            |ui| {
+                                widgets::note(
+                                    ui,
+                                    head.lines()
+                                        .skip(1)
+                                        .map(str::trim)
+                                        .collect::<Vec<_>>()
+                                        .join(", "),
+                                );
+                                text_with_links(ui, body.trim());
+                            },
                         );
                     }
-                    // the crates' list is long: a section for each licence
-                    let rule = format!("\n{}\n", "-".repeat(80));
-                    let blocks: Vec<&str> = notice.text.split(rule.as_str()).collect();
-                    if blocks.len() > 1 {
-                        widgets::note(ui, blocks[0].trim());
-                        for block in &blocks[1..] {
-                            let (head, body) = block.split_once("\n\n").unwrap_or((block, ""));
-                            let name =
-                                head.lines().next().unwrap_or("").trim_end_matches(", used by:");
-                            let title = licence_title(name, head);
-                            egui::CollapsingHeader::new(title).id_salt(("crates", *block)).show(
-                                ui,
-                                |ui| {
-                                    widgets::note(
-                                        ui,
-                                        head.lines()
-                                            .skip(1)
-                                            .map(str::trim)
-                                            .collect::<Vec<_>>()
-                                            .join(", "),
-                                    );
-                                    text_with_links(ui, body.trim());
-                                },
-                            );
-                        }
-                    } else {
-                        text_with_links(ui, notice.text.trim());
-                    }
-                },
-            );
+                } else {
+                    text_with_links(ui, notice.text.trim());
+                }
+            });
         }
     });
+}
+
+/// A notice's title, wrapped within the room `ui` has beside the fold's
+/// arrow: egui keeps a fold's title on one line, which would widen About
+/// in a narrow window.
+fn wrapped(ui: &egui::Ui, title: String) -> std::sync::Arc<egui::Galley> {
+    let room = ui.available_width() - ui.spacing().indent - ui.spacing().button_padding.x;
+    egui::WidgetText::from(title).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Wrap),
+        room.max(0.0),
+        egui::TextStyle::Button,
+    )
 }
 
 /// The licence notices of this build: tgradish's, its fonts', and those

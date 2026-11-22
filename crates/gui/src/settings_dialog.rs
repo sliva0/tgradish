@@ -405,14 +405,13 @@ pub(crate) fn show(
     if dialog.pinned.is_some() && wheeled(ctx) {
         release(dialog, now);
     }
-    let mut modal = widgets::dialog(ctx, "settings");
+    let mut modal = widgets::dialog(ctx, "settings").width(620.0);
     let Placed { corner, scroll, room } = placed(ctx, dialog);
     if let Some(corner) = corner {
         let area = egui::Modal::default_area(egui::Id::new("settings"));
         modal = modal.area(area.anchor(egui::Align2::LEFT_TOP, corner.to_vec2()));
     }
     let modal = modal.show(ctx, |ui| {
-        ui.set_width(620.0);
         close = widgets::dialog_title(ui, widgets::title_text(ui, fl!("settings")));
         // the dialog fits the window, its settings scrolling within, and
         // shown shorter where it is kept low in it

@@ -602,7 +602,9 @@ fn moments(save: &mut impl FnMut(&mut Harness<App>, &str)) {
         finish(&mut harness);
         settle(&mut harness);
         // the crop's width, a number typed and not yet taken
-        let label = harness.get_by_label(&fl!("width")).rect();
+        // the label, not the fields it shares its word with
+        let label =
+            harness.get_by_role_and_label(egui::accesskit::Role::Label, &fl!("width")).rect();
         let fields =
             harness.query_all(egui_kittest::kittest::by().role(egui::accesskit::Role::SpinButton));
         let field = fields

@@ -273,8 +273,7 @@ impl App {
         );
         let title = drawable_in(&self.fallbacks, &name, format, style.visuals.code_bg_color).0;
         let (mut another, mut close) = (false, false);
-        let modal = widgets::dialog(ctx, "inspect").show(ctx, |ui| {
-            ui.set_width(520.0);
+        let modal = widgets::dialog(ctx, "inspect").width(520.0).show(ctx, |ui| {
             close = widgets::dialog_title(ui, title);
             ui.add_space(4.0);
             // the dialog fits the window, what was found scrolling within

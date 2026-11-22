@@ -500,9 +500,12 @@ shape-preserve = Preserve
 shape-custom = Custom
     .hint = A shape you type: as a ratio, or as the result's size
     .pick = Pick "{ shape-custom }" to type a shape
-# Beside the ratio: the size of the result, which can be typed instead.
+# Beside the ratio: the size of the result, which can be typed instead;
+# and what screen readers call its two fields.
 ratio-result = Result
     .fixed = The result is squared or has margins, so its size doesn't follow the crop
+    .width = Result width
+    .height = Result height
 square = Force into square
     .hint = How the result becomes square
     .tgs = How the pixel art becomes square (as all TGS must be)
@@ -661,8 +664,11 @@ attempts-times = { $count ->
     [one] time
    *[other] times
 }
+# And what screen readers call the fields of its two ends.
 search-within = Search within
     .hint = The range fitting searches, in the fitted value's unit
+    .low = Lowest
+    .high = Highest
 search-auto = Automatic
     .hint = As wide as suits the way of fitting and the input
 # Between the two ends of the range searched.
@@ -730,8 +736,10 @@ read-as-sheet = Read as a sprite sheet
 # session kept it ticked.
 sheet-refused = This file already has { $frames } frames: a sprite sheet is one picture
     .converted = Read as it is, not as a sprite sheet: it already has { $frames } frames
-# The sprite sheet's columns × rows.
+# The sprite sheet's columns × rows; and what screen readers call each.
 sheet-cells = Cells
+    .columns = Columns
+    .rows = Rows
 sheet-frames = Frames
 sheet-all = All
     .hint = Every cell but transparent ones at the end

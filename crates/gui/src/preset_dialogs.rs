@@ -239,8 +239,7 @@ impl App {
         };
         let exists = valid.is_ok() && dir.join(format!("{name}.toml")).exists();
         let (mut close, mut save) = (false, false);
-        let modal = widgets::dialog(ctx, "save preset").show(ctx, |ui| {
-            ui.set_width(400.0);
+        let modal = widgets::dialog(ctx, "save preset").width(400.0).show(ctx, |ui| {
             close = widgets::dialog_title(ui, widgets::title_text(ui, fl!("save-preset-title")));
             widgets::note(ui, fl!("save-preset-note"));
             ui.add_space(8.0);
@@ -327,8 +326,7 @@ impl App {
     ) -> Option<Managing> {
         let mut close = false;
         let mut changes = Vec::new();
-        let modal = widgets::dialog(ctx, "manage presets").show(ctx, |ui| {
-            ui.set_width(560.0);
+        let modal = widgets::dialog(ctx, "manage presets").width(560.0).show(ctx, |ui| {
             close = widgets::dialog_title(ui, widgets::title_text(ui, fl!("your-presets")));
             widgets::note(ui, fl!("your-presets-note"));
             ui.add_space(8.0);

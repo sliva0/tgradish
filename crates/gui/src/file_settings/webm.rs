@@ -140,12 +140,14 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
             // stay put as one is dragged
             let widest = bounds.widest();
             let field = bounds.field(min, known.is_some(), set.is_some());
+            let field = field.name(fl!("search-within", "low"));
             let low = widgets::steady_width(ui, &widest, |ui| {
                 widgets::number_field(ui, set.is_some(), field)
             })
             .on_disabled_hover_text(pick.as_str());
             ui.label(fl!("range-to"));
             let field = bounds.field(max, known.is_some(), set.is_some());
+            let field = field.name(fl!("search-within", "high"));
             let high = widgets::steady_width(ui, &widest, |ui| {
                 widgets::number_field(ui, set.is_some(), field)
             })

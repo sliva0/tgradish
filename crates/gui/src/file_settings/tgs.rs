@@ -134,11 +134,14 @@ pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item) {
         ui.add_enabled_ui(sheet, |ui| {
             ui.horizontal(|ui| {
                 ui.label(fl!("sheet-cells"));
-                // as wide as any count, so what follows stays put
+                // as wide as any count, so what follows stays put; each
+                // named, as the row's name would name all three alike
                 let (a, b) = widgets::steady_numbers(ui, 3, "", |ui| {
-                    let a = ui.add(widgets::Number::new(&mut columns).range(1..=256));
+                    let columns = widgets::Number::new(&mut columns).range(1..=256);
+                    let a = ui.add(columns.name(fl!("sheet-cells", "columns")));
                     ui.label("×");
-                    (a, ui.add(widgets::Number::new(&mut rows).range(1..=256)))
+                    let rows = widgets::Number::new(&mut rows).range(1..=256);
+                    (a, ui.add(rows.name(fl!("sheet-cells", "rows"))))
                 });
                 if sheet && (a.changed() || b.changed()) {
                     options.sheet = Some(Sheet { columns, rows });
@@ -154,7 +157,7 @@ pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item) {
                     automatic,
                     Some(all),
                     all,
-                    |value| value.range(1..=all),
+                    |value| value.range(1..=all).name(fl!("sheet-frames")),
                 );
             });
         });
