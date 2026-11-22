@@ -343,8 +343,9 @@ fn encode_in(
         duration: spoofs.then_some(plan.fake_duration),
         muxing_app: plan.watermark.then(|| crate::TOOL_ID.to_string()),
         signature: plan.watermark.then(crate::signature),
-        // the video track's UID, as crate::mark makes it
-        track_uid: Some(crate::mark::Mark::current().to_u64()),
+        // the video track's UID, as crate::mark makes it; without one the
+        // muxer's own stays
+        track_uid: crate::mark::Mark::written(plan.watermark).map(crate::mark::Mark::to_u64),
         ..Default::default()
     };
     let mut bytes = std::fs::read(&best.path).map_err(Error::io(FileAction::Read, &best.path))?;

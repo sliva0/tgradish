@@ -1,6 +1,7 @@
-//! The 8 bytes tgradish writes into every sticker it makes: its version,
-//! the front-end that ran it, and 24 bits of a hash of the user's name,
-//! with a check byte, XORed with a fixed key.
+//! The 8 bytes tgradish writes into every sticker it makes with its
+//! watermark on: its version, the front-end that ran it, and 24 bits of a
+//! hash of the user's name, with a check byte, XORed with a fixed key.
+//! Stickers made with it off carry none of them.
 //!
 //! In WebM files they are the video track's UID, in `.tgs` files the
 //! order of rectangles that may come in any order, or the first layer's
@@ -70,6 +71,12 @@ impl Mark {
             client: CLIENT.get().copied().unwrap_or(Client::Library),
             user: user_hash(),
         }
+    }
+
+    /// The mark a sticker gets: none when its watermark is off, so that it
+    /// carries nothing of the user's or of tgradish's.
+    pub fn written(watermark: bool) -> Option<Mark> {
+        watermark.then(Mark::current)
     }
 
     pub fn to_bytes(self) -> [u8; 8] {
@@ -355,13 +362,28 @@ mod tests {
         let walker = files.iter().find(|file| file.name == "walker_2x.gif").unwrap();
         let input = dir.path().join("walker.gif");
         std::fs::write(&input, &walker.bytes).unwrap();
-        let request = crate::tgs::Request {
-            output: Some(dir.path().join("walker.tgs")),
-            ..crate::tgs::Request::new(crate::input::Input::File(input))
-        };
         let cancel = crate::CancelToken::new();
-        let made = crate::tgs::convert(None, &request, &cancel, &mut |_| {}).unwrap();
-        assert_eq!(read_file(&made.output), Some(Mark::current()));
+        let make = |name: &str, watermark| {
+            let request = crate::tgs::Request {
+                output: Some(dir.path().join(name)),
+                options: crate::tgs::Options { watermark, ..Default::default() },
+                ..crate::tgs::Request::new(crate::input::Input::File(input.clone()))
+            };
+            crate::tgs::convert(None, &request, &cancel, &mut |_| {}).unwrap().output
+        };
+        assert_eq!(read_file(&make("walker.tgs", None)), Some(Mark::current()));
+        // without the watermark the rectangles keep their own order, and
+        // no layer is named
+        let json = crate::tgs::read_json(&make("unmarked.tgs", Some(false))).unwrap();
+        let bits = tgradish_tgs::mark::order_bits(&json);
+        assert!(bits.len() >= 64 && !bits.contains(&true), "{bits:?}");
+        assert_eq!(tgradish_tgs::mark::layer_name(&json), None);
+    }
+
+    #[test]
+    fn writes_a_mark_only_with_the_watermark() {
+        assert_eq!(Mark::written(true), Some(Mark::current()));
+        assert_eq!(Mark::written(false), None);
     }
 
     #[test]

@@ -1040,6 +1040,12 @@ fn tells_its_own_stickers_from_look_alikes() {
     let ours = webm("ours.webm", marked);
     assert!(made_by_tgradish(&ours));
     assert!(!made_by_tgradish(&webm("unmarked.webm", unmarked.clone())));
+    // the track's UID holds the hidden mark only with the watermark
+    let uid = |name: &str| container::inspect_file(&path(name)).unwrap().video.unwrap().uid;
+    let mark = tgradish_core::mark::Mark::current().to_u64();
+    assert_eq!(uid("ours.webm"), Some(mark));
+    let unmarked_uid = uid("unmarked.webm");
+    assert!(unmarked_uid.is_some_and(|uid| uid != mark), "{unmarked_uid:?}");
     let other = container::Patch {
         signature: Some("tgradish someone else's".into()),
         ..Default::default()

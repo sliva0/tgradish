@@ -203,7 +203,8 @@ impl Options {
 
     /// The settings for the tgs crate.
     pub fn sticker_options(&self) -> Result<sticker::Options> {
-        let name = match (self.watermark.unwrap_or(true), &self.title) {
+        let watermark = self.watermark.unwrap_or(true);
+        let name = match (watermark, &self.title) {
             (true, Some(title)) => Some(format!("{title}{}", crate::TITLED)),
             (true, None) => Some(format!("{}{}", crate::UNTITLED, crate::TOOL_ID)),
             (false, title) => title.clone(),
@@ -245,7 +246,7 @@ impl Options {
             reductions: self.reductions.clone().unwrap_or_else(|| Kind::ALL.to_vec()),
             compromise: self.compromise.unwrap_or_default(),
             name,
-            mark: Some(crate::mark::Mark::current().to_bytes().to_vec()),
+            mark: crate::mark::Mark::written(watermark).map(|mark| mark.to_bytes().to_vec()),
             ..sticker::Options::default()
         })
     }
@@ -282,6 +283,15 @@ mod tests {
         let set = Options { resize: Some(Resize::Crop), exact: Some(false), ..unset };
         assert_eq!(Options { tempo: Some(0.5), ..set.clone() }.tempo_or_default(Some(6.0)), 0.5);
         assert_eq!((set.resize_or_default(), set.exact_or_default()), (Resize::Crop, false));
+    }
+
+    #[test]
+    fn marks_only_a_watermarked_sticker() {
+        let mark = |watermark| Options { watermark, ..Options::default() }.sticker_options();
+        let current = crate::mark::Mark::current().to_bytes().to_vec();
+        assert_eq!(mark(None).unwrap().mark, Some(current.clone()));
+        assert_eq!(mark(Some(true)).unwrap().mark, Some(current));
+        assert_eq!(mark(Some(false)).unwrap().mark, None);
     }
 
     #[test]
