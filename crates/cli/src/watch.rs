@@ -203,7 +203,10 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
         |path: &Path| converter.output_for(&Input::File(path.to_path_buf()), Some(&args.dir));
 
     let mut tracker = Tracker::default();
-    for (path, stamp) in Scan::run(&args.dir, args.recursive).files {
+    let first = Scan::run(&args.dir, args.recursive).files;
+    // inputs at the last scan, to see which are gone
+    let mut seen: HashSet<PathBuf> = first.keys().cloned().collect();
+    for (path, stamp) in first {
         if args.existing && !output_for(&path).exists() {
             tracker.pending.insert(path, stamp);
         } else {
@@ -236,6 +239,14 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
             }
         }
         unreadable = now_unreadable;
+        // a result whose input is gone, as one deleted or renamed, may be
+        // another's of the same name; the input, back, may replace it again
+        for path in seen.iter().filter(|path| !scan.files.contains_key(*path)) {
+            if matches!(path.try_exists(), Ok(false)) {
+                converter.forget(path);
+            }
+        }
+        seen = scan.files.keys().cloned().collect();
 
         for (path, stamp) in tracker.update(scan.files) {
             if let Some(failed) = failures.get(&path) {

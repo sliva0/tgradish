@@ -468,6 +468,34 @@ pub fn config(ctx: &Context, command: ConfigCommand, path: Option<PathBuf>) -> R
             crate::json_line(&json!({ "text": tgradish_core::config::starting_example() }));
         }
         ConfigCommand::Example => out!("{}", tgradish_core::config::starting_example()),
+        ConfigCommand::Init => {
+            let path = path.context("no home directory found")?;
+            if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+                std::fs::create_dir_all(dir).map_err(|err| {
+                    let reason = tgradish_core::io_reason(&err);
+                    anyhow::anyhow!("couldn't create {}: {reason}", dir.display())
+                })?;
+            }
+            let example = tgradish_core::config::starting_example();
+            tgradish_core::fsutil::write_file(&path, example.as_bytes(), false).map_err(|err| {
+                let (shown, reason) = (path.display(), tgradish_core::io_reason(&err));
+                match err.kind() {
+                    std::io::ErrorKind::AlreadyExists => anyhow::anyhow!(
+                        "{shown} already exists: tgradish config example prints the example to \
+                         compare it with"
+                    ),
+                    _ => anyhow::anyhow!("couldn't write {shown}: {reason}"),
+                }
+            })?;
+            // as a file made is said: on stdout, the path alone with -q
+            if ctx.global.json {
+                crate::json_line(&json!({ "path": path.to_string_lossy() }));
+            } else if ctx.global.quiet {
+                outln!("{}", path.display());
+            } else {
+                outln!("{}", ui::status("Wrote", term::link_out(path.display(), &path)));
+            }
+        }
         ConfigCommand::Path => {
             let path = path.context("no home directory found")?;
             if ctx.global.json {

@@ -379,6 +379,13 @@ impl<'a> Converter<'a> {
         }
     }
 
+    /// Forgets what `input` was converted into, as watching does once it
+    /// is gone, so that another input may have the same result.
+    pub fn forget(&self, input: &Path) {
+        let input = std::path::absolute(input).unwrap_or_else(|_| input.to_path_buf());
+        self.written.borrow_mut().retain(|_, from| *from != input);
+    }
+
     /// Reports a failed conversion of one of several inputs.
     pub fn report_failure(&self, input: &Path, err: Failed) {
         let err = match err {

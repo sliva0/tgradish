@@ -568,7 +568,7 @@ fn keep_orphans() {
 
 /// Sends `signal` to the process group of `child`, which leads it, as a
 /// terminal sends Ctrl-C to all that runs in it.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn signal_group(child: &std::process::Child, signal: &str) {
     let group = format!("-{}", child.id());
     let sent = Command::new("kill").args([&format!("-{signal}"), "--", &group]).status();
@@ -784,7 +784,7 @@ fn assert_terminated(mut child: std::process::Child, signal: &str, temp: &Path, 
 }
 
 /// Sends `signal` to `child` alone, as `kill PID` does.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn signal_one(child: &std::process::Child, signal: &str) {
     let sent = Command::new("kill").args([&format!("-{signal}"), &child.id().to_string()]).status();
     assert!(sent.unwrap().success());
@@ -1553,6 +1553,33 @@ fn watch_converts_a_file_again_that_changed_meanwhile() {
     assert_eq!(watching.stop().status.code(), Some(0));
 }
 
+/// A result whose input is gone may come from another input of the same
+/// name; two inputs there at once still can't share one.
+#[cfg(unix)]
+#[test]
+fn watch_gives_a_result_whose_input_is_gone_to_another() {
+    let dir = tempfile::tempdir().unwrap();
+    let watching = Watching::start(dir.path(), &["--format", "tgs", "-y"]);
+    let files = tgradish_corpus::files();
+    let walker = &files.iter().find(|file| file.name == "walker_2x.gif").unwrap().bytes;
+    square_png(&dir.path().join("cat.png"), [255, 0, 0, 255]);
+    watching.until(|e| named(e, "finished", "cat.sticker.tgs"));
+    std::fs::remove_file(dir.path().join("cat.png")).unwrap();
+    // a scan or two that sees it gone
+    watching.during(0.5);
+    std::fs::write(dir.path().join("cat.gif"), walker).unwrap();
+    let events = watching.until(|e| matches!(e["event"].as_str(), Some("finished" | "error")));
+    let last = events.last().unwrap();
+    assert!(named(last, "finished", "cat.sticker.tgs") && named(last, "finished", "cat.gif"));
+    // both there: the second is refused, as converting both at once is
+    std::fs::write(dir.path().join("dog.gif"), walker).unwrap();
+    square_png(&dir.path().join("dog.png"), [0, 0, 255, 255]);
+    let events = watching.until(|e| e["event"] == "error");
+    let error = events.last().unwrap().to_string();
+    assert!(error.contains("already written from"), "{error}");
+    assert_eq!(watching.stop().status.code(), Some(0));
+}
+
 /// Stopping is the only way out of a watch, so it ends as done, waiting
 /// or converting.
 #[cfg(unix)]
@@ -1962,6 +1989,75 @@ fn reads_the_config_only_where_used() {
     assert!(String::from_utf8_lossy(&output.stderr).contains(&expected));
 }
 
+/// `config init` writes the example where the config is read from, its
+/// folder too, and never over a config already there.
+#[test]
+fn starts_a_config_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str], config: Option<&Path>, home: &Path| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_tgradish"));
+        command.args(args).env_remove("TGRADISH_CONFIG").env("XDG_CONFIG_HOME", home);
+        if let Some(config) = config {
+            command.env("TGRADISH_CONFIG", config);
+        }
+        command.output().unwrap()
+    };
+    let config = dir.path().join("new/folder/config.toml");
+    let made = run(&["config", "init"], Some(&config), dir.path());
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    assert!(String::from_utf8_lossy(&made.stdout).contains("config.toml"));
+    let example = run(&["config", "example"], None, dir.path()).stdout;
+    assert_eq!(std::fs::read(&config).unwrap(), example);
+    // and read as one
+    let shown = run(&["--json", "config", "show"], Some(&config), dir.path());
+    assert!(shown.status.success(), "{}", String::from_utf8_lossy(&shown.stderr));
+    // a config already there is kept
+    std::fs::write(&config, "preset = 'fast'\n").unwrap();
+    let again = run(&["config", "init"], Some(&config), dir.path());
+    assert_eq!(again.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&again.stderr).contains("already exists"));
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), "preset = 'fast'\n");
+    // where config path says, which a fresh install has no folder for
+    #[cfg(target_os = "linux")]
+    {
+        let home = dir.path().join("home");
+        let quiet = run(&["-q", "config", "init"], None, &home);
+        assert!(quiet.status.success(), "{}", String::from_utf8_lossy(&quiet.stderr));
+        let path = run(&["config", "path"], None, &home).stdout;
+        assert_eq!(quiet.stdout, path);
+        assert!(home.join("tgradish/config.toml").is_file());
+    }
+}
+
+/// inspect reads what ffmpeg reads with the config's ffmpeg, as convert
+/// does, and a mistake in the config stops it as it stops convert.
+#[test]
+fn inspects_with_the_configs_ffmpeg() {
+    let dir = tempfile::tempdir().unwrap();
+    let ffmpeg = dir.path().join("no-ffmpeg");
+    let config = dir.path().join("config.toml");
+    std::fs::write(&config, format!("[ffmpeg]\npath = {:?}\n", ffmpeg.to_str().unwrap())).unwrap();
+    let video = dir.path().join("clip.mp4");
+    std::fs::write(&video, b"not a video, but ffmpeg would have to say so").unwrap();
+    let run = |config: &Path| {
+        Command::new(env!("CARGO_BIN_EXE_tgradish"))
+            .args(["inspect", video.to_str().unwrap()])
+            .env("TGRADISH_CONFIG", config)
+            .env_remove("TGRADISH_FFMPEG")
+            .output()
+            .unwrap()
+    };
+    let output = run(&config);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let from = format!("{}, from {} [ffmpeg] path,", ffmpeg.display(), config.display());
+    assert!(stderr.contains(&from), "{stderr}");
+    std::fs::write(&config, "presett = 'fast'\n").unwrap();
+    let output = run(&config);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("presett"));
+}
+
 #[test]
 fn shows_presets_and_the_config() {
     // a preset as a file would hold it
@@ -2024,7 +2120,7 @@ fn shows_presets_and_the_config() {
     assert!(shown.status.success(), "{}", String::from_utf8_lossy(&shown.stderr));
     assert!(json_lines(&shown)[0]["ffmpeg"]["path"].is_null());
     let help = String::from_utf8(tgradish(&["config", "--help"]).stdout).unwrap();
-    assert!(help.contains("tgradish config example > "), "{help}");
+    assert!(help.contains("tgradish config init "), "{help}");
     let path = json_lines(&tgradish(&["--json", "--config", config, "config", "path"]));
     assert_eq!((path[0]["path"].as_str(), path[0]["exists"].as_bool()), (Some(config), Some(true)));
 }

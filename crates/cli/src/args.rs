@@ -76,7 +76,7 @@ fn convert_help() -> String {
 fn config_help() -> String {
     sections(&[(
         "Examples",
-        "  tgradish config example > \"$(tgradish config path)\"   start a config file",
+        "  tgradish config init   start a config file, where tgradish reads it",
     )])
 }
 
@@ -315,12 +315,12 @@ impl Command {
         match self {
             Command::Convert(_)
             | Command::Watch(_)
+            | Command::Inspect(_)
             | Command::Describe
             | Command::Preset(PresetCommand::List)
             | Command::Config(ConfigCommand::Show)
             | Command::Ffmpeg { .. } => true,
             Command::Spoof(_)
-            | Command::Inspect(_)
             | Command::Preset(_)
             | Command::Config(_)
             | Command::Licenses
@@ -851,10 +851,11 @@ impl SpoofArgs {
 pub struct InspectArgs {
     /// Stickers to inspect, WebM, WebP or TGS; or what stickers are made
     /// of, which convert reads: pictures, animations, Aseprite files and
-    /// videos, these read by ffmpeg, as --ffmpeg, --ffmpeg-from or
-    /// TGRADISH_FFMPEG name it. Those are no stickers yet, which Telegram
-    /// refuses, so they are said to be refused, with what a sticker that
-    /// kept their size, length and frame rate would be refused for.
+    /// videos, these read by ffmpeg, as --ffmpeg, --ffmpeg-from,
+    /// TGRADISH_FFMPEG or the config file name it. Those are no stickers
+    /// yet, which Telegram refuses, so they are said to be refused, with
+    /// what a sticker that kept their size, length and frame rate would be
+    /// refused for.
     #[arg(required = true)]
     pub files: Vec<PathBuf>,
     /// What to check WebM and WebP files as, and what stickers are made
@@ -885,9 +886,10 @@ pub enum ConfigCommand {
     /// out.
     Show,
     /// Print an example config, each setting explained, to start one from.
-    ///
-    /// As `tgradish config example > "$(tgradish config path)"`.
     Example,
+    /// Write the example config where tgradish reads it, unless there is
+    /// a config file there already.
+    Init,
 }
 
 #[derive(Debug, Subcommand)]
