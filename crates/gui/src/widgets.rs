@@ -523,7 +523,7 @@ pub(crate) fn text_field(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> 
 }
 
 /// Room inside a dialog's frame.
-const DIALOG_MARGIN: i8 = 16;
+pub(crate) const DIALOG_MARGIN: i8 = 16;
 /// Room kept between a dialog and the window's sides, where the window is
 /// too narrow for its width, as a larger scale makes it.
 const DIALOG_AROUND: f32 = 8.0;
@@ -2748,11 +2748,14 @@ pub(crate) fn from_preset() -> (String, String) {
     (fl!("from-preset"), fl!("from-preset", "hint"))
 }
 
-/// How much of a limit something uses: a bar, red when over.
+/// How much of a limit something uses: a bar, red when over, its words
+/// wrapped onto as many lines as they take where it is narrow.
 pub(crate) fn gauge(ui: &mut egui::Ui, used: u64, limit: u64, text: String) {
     let share = used as f32 / limit.max(1) as f32;
     let colour = if share > 1.0 { theme::NEGATIVE } else { theme::POSITIVE };
-    bar(ui, Fill::Share(share), &text, colour.gamma_multiply(0.55));
+    let width = ui.available_width().min(380.0);
+    let size = egui::vec2(width, bar_height(ui, &[&text], width));
+    bar_sized(ui, size, Fill::Share(share), &text, colour.gamma_multiply(0.55));
 }
 
 /// How far a [`bar`] got.

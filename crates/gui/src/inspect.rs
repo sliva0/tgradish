@@ -48,18 +48,50 @@ impl Inspection {
     }
 }
 
+/// The least width of a grid's column of names, and the room between it
+/// and what each row says.
+const NAMES: f32 = 150.0;
+const BETWEEN: f32 = 12.0;
+/// The width of a [`budget`]'s bar, where there is room for it.
+const BUDGET: f32 = 300.0;
+
 fn grid(ui: &mut egui::Ui, id: &str, rows: impl FnOnce(&mut egui::Ui)) {
-    egui::Grid::new(id).num_columns(2).min_col_width(150.0).spacing([12.0, 7.0]).show(ui, rows);
+    // a grid's cells are as narrow as its least column as it is first laid
+    // out, which its rows' heights would keep: what they say is given the
+    // room the dialog has instead, and neither column is kept wider
+    let room = (ui.available_width() - NAMES - BETWEEN).max(0.0);
+    ui.data_mut(|data| data.insert_temp(room_id(), room));
+    let least = NAMES.min(room);
+    egui::Grid::new(id).num_columns(2).min_col_width(least).spacing([BETWEEN, 7.0]).show(ui, rows);
 }
 
-/// A row of how much of a limit something uses.
+/// Where [`grid`] keeps the room its rows have for what they say.
+fn room_id() -> egui::Id {
+    egui::Id::new("inspect room")
+}
+
+/// The room [`grid`] gives what a row says.
+fn room(ui: &egui::Ui) -> f32 {
+    ui.data(|data| data.get_temp(room_id())).unwrap_or(BUDGET)
+}
+
+/// A row of how much of a limit something uses: its bar narrower, its
+/// words wrapping, where the dialog is too narrow for it.
 fn budget(ui: &mut egui::Ui, name: &str, hint: &str, used: u64, limit: u64, text: String) {
     label(ui, name, hint);
     ui.scope(|ui| {
-        ui.set_width(300.0);
+        ui.set_width(room(ui).min(BUDGET));
         gauge(ui, used, limit, text);
     });
     ui.end_row();
+}
+
+/// What a row says, wrapping where the dialog is too narrow for it.
+fn value(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) {
+    ui.scope(|ui| {
+        ui.set_max_width(room(ui));
+        ui.add(egui::Label::new(text).wrap());
+    });
 }
 
 fn of(used: impl std::fmt::Display, limit: impl std::fmt::Display) -> String {
@@ -107,14 +139,14 @@ fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target) {
                 budget(ui, &name, &hint, used, most, text);
                 if let Some(content) = content.filter(|_| info.spoofed()) {
                     label(ui, &fl!("inspect-plays"), &fl!("inspect-plays", "hint"));
-                    ui.label(widgets::seconds(content));
+                    value(ui, widgets::seconds(content));
                     ui.end_row();
                 }
             }
             (None, Some(content)) => {
                 label(ui, &fl!("inspect-duration"), "");
                 let seconds = widgets::seconds(content);
-                ui.label(fl!("inspect-duration", "no-header", seconds = seconds));
+                value(ui, fl!("inspect-duration", "no-header", seconds = seconds));
                 ui.end_row();
             }
             (None, None) => {}
@@ -136,20 +168,23 @@ fn webm(ui: &mut egui::Ui, info: &WebmInfo, target: Target) {
             Some(video) => {
                 let codec = if video.codec_id == "V_VP9" { "VP9" } else { video.codec_id.as_str() };
                 let (width, height) = (video.width, video.height);
-                ui.label(if video.alpha {
-                    fl!("inspect-video", "alpha", width = width, height = height, codec = codec)
-                } else {
-                    fl!("inspect-video", width = width, height = height, codec = codec)
-                });
+                value(
+                    ui,
+                    if video.alpha {
+                        fl!("inspect-video", "alpha", width = width, height = height, codec = codec)
+                    } else {
+                        fl!("inspect-video", width = width, height = height, codec = codec)
+                    },
+                );
             }
             None => {
-                ui.label(fl!("inspect-picture", "none"));
+                value(ui, fl!("inspect-picture", "none"));
             }
         }
         ui.end_row();
         if info.audio_tracks > 0 {
             label(ui, &fl!("inspect-audio"), "");
-            ui.label(fl!("count-tracks", count = info.audio_tracks));
+            value(ui, fl!("count-tracks", count = info.audio_tracks));
             ui.end_row();
         }
         if let Some(title) = &info.title {
@@ -189,12 +224,15 @@ fn image(ui: &mut egui::Ui, info: &webp::Info, target: Target) {
         budget(ui, &name, &hint, info.bytes, limit, size);
         label(ui, &fl!("inspect-picture"), "");
         let (width, height) = (info.width, info.height);
-        ui.label(match (info.lossy, info.alpha) {
-            (false, false) => fl!("inspect-webp", width = width, height = height),
-            (false, true) => fl!("inspect-webp", "alpha", width = width, height = height),
-            (true, false) => fl!("inspect-webp", "lossy", width = width, height = height),
-            (true, true) => fl!("inspect-webp", "lossy-alpha", width = width, height = height),
-        });
+        value(
+            ui,
+            match (info.lossy, info.alpha) {
+                (false, false) => fl!("inspect-webp", width = width, height = height),
+                (false, true) => fl!("inspect-webp", "alpha", width = width, height = height),
+                (true, false) => fl!("inspect-webp", "lossy", width = width, height = height),
+                (true, true) => fl!("inspect-webp", "lossy-alpha", width = width, height = height),
+            },
+        );
         ui.end_row();
         label(ui, &fl!("inspect-made-with"), &fl!("inspect-made-with", "image"));
         let made = info.made_with.clone().unwrap_or_else(|| fl!("inspect-made-with", "unknown"));
@@ -245,7 +283,7 @@ fn animation(ui: &mut egui::Ui, stats: &Stats) {
         budget(ui, &name, &hint, json, desktop, text);
         if !stats.features.is_empty() {
             label(ui, &fl!("inspect-features"), &fl!("inspect-features", "hint"));
-            ui.label(stats.features.iter().copied().collect::<Vec<_>>().join(", "));
+            value(ui, stats.features.iter().copied().collect::<Vec<_>>().join(", "));
             ui.end_row();
         }
     });

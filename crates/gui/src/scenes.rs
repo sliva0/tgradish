@@ -15,7 +15,7 @@ use crate::app::App;
 use crate::config::Config;
 use crate::item::Show;
 use crate::l10n::fl;
-use crate::testing::{convert, finish, has_ffmpeg, square, video};
+use crate::testing::{finish, has_ffmpeg, square, video};
 use crate::{inspect, preset_dialogs, settings_dialog};
 
 /// The GUI as it opens, with its fonts and look, in a window of `size`.
@@ -78,8 +78,10 @@ fn walk_in(size: egui::Vec2, mut visit: impl FnMut(&mut Harness<App>, &str)) {
     harness.key_press(egui::Key::Escape);
     settle(&mut harness, None);
 
-    // made, with its result's small picture over the input
-    convert(&harness);
+    // made, with its result's small picture over the input; pressed as a
+    // screen reader would, as in a narrow window it is past the edge
+    let keys = crate::keys::keys_text(crate::keys::Command::Convert);
+    harness.get(by().label_contains(&keys)).click_accesskit();
     harness.run_steps(2);
     finish(&mut harness);
     let item = harness.state_mut().items.last_mut().unwrap();
@@ -308,46 +310,94 @@ fn one_row<T: PartialEq>(a: &[T], b: &[T]) -> bool {
 }
 
 /// Every dialog fits a window as short as the GUI goes, and one shorter
-/// still, as a larger scale makes it: what it holds scrolls, and what
-/// closes it stays in sight. Inspect, About and Save preset fit one as
-/// narrow as the narrowest at three times the scale too, what they hold
-/// wrapping; Settings, Keys and Manage presets have rows that don't wrap.
+/// still, as a larger scale makes it: what closes it in sight, its frame
+/// within the window side to side, what it holds within the frame's
+/// margins, and no bar's words cut short. Inspect, About and Save preset
+/// fit so a window as narrow as the narrowest at twice the scale, and at
+/// three times; Settings, Keys and Manage presets have rows that don't
+/// wrap, and are left out at those widths.
 #[test]
 fn keeps_what_closes_each_dialog_in_a_short_window() {
-    let all = ["inspect", "settings", "about", "shortcuts", "manage-presets", "save-preset"];
-    let narrow = ["inspect", "about", "save-preset"];
+    // each dialog's scene, and the id of its area
+    let all = [
+        ("inspect", "inspect"),
+        ("settings", "settings"),
+        ("about", "about"),
+        ("shortcuts", "shortcuts"),
+        ("manage-presets", "manage presets"),
+        ("save-preset", "save preset"),
+    ];
+    let narrow = [all[0], all[2], all[5]];
     let sizes = [
         (egui::vec2(crate::MIN_WIDTH, crate::MIN_HEIGHT), &all[..]),
         (egui::vec2(crate::MIN_WIDTH, crate::MIN_HEIGHT / 1.5), &all[..]),
+        (egui::vec2(crate::MIN_WIDTH / 2.0, crate::MIN_HEIGHT), &narrow[..]),
         (egui::vec2(crate::MIN_WIDTH / 3.0, crate::MIN_HEIGHT), &narrow[..]),
     ];
     let mut seen = Vec::new();
     let mut hidden = Vec::new();
     for (size, dialogs) in sizes {
         walk_in(size, |harness, scene| {
-            if !dialogs.contains(&scene) {
-                return;
-            }
+            let Some(&(_, id)) = dialogs.iter().find(|(name, _)| *name == scene) else { return };
             seen.push(scene.to_owned());
             let screen = harness.ctx.content_rect();
+            let within = |from: f64, to: f64, range: egui::Rangef| {
+                from >= f64::from(range.min) - 0.5 && to <= f64::from(range.max) + 0.5
+            };
             let closes = [fl!("close"), fl!("cancel")];
-            let mut found = false;
+            let mut closer = None;
             for button in harness.query_all(by().role(egui::accesskit::Role::Button)) {
-                let button = button.accesskit_node();
-                let Some(label) = button.label().filter(|label| closes.contains(label)) else {
+                let node = button.accesskit_node();
+                let Some(label) = node.label().filter(|label| closes.contains(label)) else {
                     continue;
                 };
-                found = true;
-                let rect = button.bounding_box().expect("drawn");
-                let (x, y) = (screen.x_range(), screen.y_range());
-                let within = |from: f64, to: f64, range: egui::Rangef| {
-                    from >= f64::from(range.min) && to <= f64::from(range.max)
-                };
-                if !within(rect.x0, rect.x1, x) || !within(rect.y0, rect.y1, y) {
+                let rect = node.bounding_box().expect("drawn");
+                if !within(rect.x0, rect.x1, screen.x_range())
+                    || !within(rect.y0, rect.y1, screen.y_range())
+                {
                     hidden.push(format!("{size:?}, {scene}: {label} at {rect:?}"));
                 }
+                closer = Some(button);
             }
-            assert!(found, "{size:?}, {scene}: nothing closes it");
+            let closer = closer.unwrap_or_else(|| panic!("{size:?}, {scene}: nothing closes it"));
+            // the frame in the window, side to side
+            let frame = harness.ctx.memory(|memory| memory.area_rect(egui::Id::new(id)));
+            let frame = frame.expect("shown");
+            if !within(frame.min.x.into(), frame.max.x.into(), screen.x_range()) {
+                hidden.push(format!("{size:?}, {scene}: its frame at {frame:?}"));
+            }
+            // what it holds, the area's own under the window's, within the
+            // frame's margins, and no bar's words cut short
+            let up: Vec<_> = std::iter::successors(Some(closer), |node| node.parent()).collect();
+            let area = up[up.len() - 2].accesskit_node().id();
+            let inside = frame.shrink(f32::from(crate::widgets::DIALOG_MARGIN)).x_range();
+            let texts = texts(harness);
+            for node in harness.query_all(by()) {
+                if !std::iter::successors(node.parent(), |up| up.parent())
+                    .any(|up| up.accesskit_node().id() == area)
+                {
+                    continue;
+                }
+                let node = node.accesskit_node();
+                let Some(rect) = node.bounding_box() else { continue };
+                let label = node.label().unwrap_or_default();
+                if !within(rect.x0, rect.x1, inside) {
+                    hidden.push(format!(
+                        "{size:?}, {scene}: {:?} {label:?} at {rect:?}",
+                        node.role()
+                    ));
+                }
+                if node.role() == egui::accesskit::Role::ProgressIndicator {
+                    let rect = Rect::from_min_max(
+                        egui::pos2(rect.x0 as f32, rect.y0 as f32),
+                        egui::pos2(rect.x1 as f32, rect.y1 as f32),
+                    );
+                    let on = |(_, text, _): &&(String, Rect, bool)| rect.contains(text.center());
+                    if texts.iter().filter(on).any(|(_, _, elided)| *elided) {
+                        hidden.push(format!("{size:?}, {scene}: {label:?} cut short"));
+                    }
+                }
+            }
         });
     }
     let expected: usize = sizes.iter().map(|(_, dialogs)| dialogs.len()).sum();
