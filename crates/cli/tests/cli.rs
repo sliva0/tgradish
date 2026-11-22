@@ -1575,8 +1575,40 @@ fn watch_gives_a_result_whose_input_is_gone_to_another() {
     std::fs::write(dir.path().join("dog.gif"), walker).unwrap();
     square_png(&dir.path().join("dog.png"), [0, 0, 255, 255]);
     let events = watching.until(|e| e["event"] == "error");
-    let error = events.last().unwrap().to_string();
-    assert!(error.contains("already written from"), "{error}");
+    let error = events.last().unwrap();
+    assert!(error.to_string().contains("already written from"), "{error}");
+    // the refused one, unchanged, has it once the other is gone
+    let refused = error["input"].as_str().unwrap();
+    let (made, refused) =
+        if refused.ends_with("dog.png") { ("dog.gif", "dog.png") } else { ("dog.png", "dog.gif") };
+    std::fs::remove_file(dir.path().join(made)).unwrap();
+    let events = watching.until(|e| matches!(e["event"].as_str(), Some("finished" | "error")));
+    let last = events.last().unwrap();
+    assert!(named(last, "finished", refused), "{last}");
+    assert_eq!(watching.stop().status.code(), Some(0));
+}
+
+/// An input that becomes a folder is gone as one, though its path is
+/// there: a link swapped at once, so no scan sees nothing there.
+#[cfg(unix)]
+#[test]
+fn watch_takes_an_input_turned_folder_as_gone() {
+    let dir = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let watching = Watching::start(dir.path(), &["--format", "tgs", "-y"]);
+    square_png(&elsewhere.path().join("cat.png"), [255, 0, 0, 255]);
+    std::os::unix::fs::symlink(elsewhere.path().join("cat.png"), dir.path().join("cat.png"))
+        .unwrap();
+    watching.until(|e| named(e, "finished", "cat.sticker.tgs"));
+    std::os::unix::fs::symlink(elsewhere.path(), dir.path().join(".swap")).unwrap();
+    std::fs::rename(dir.path().join(".swap"), dir.path().join("cat.png")).unwrap();
+    watching.during(0.5);
+    let files = tgradish_corpus::files();
+    let walker = &files.iter().find(|file| file.name == "walker_2x.gif").unwrap().bytes;
+    std::fs::write(dir.path().join("cat.gif"), walker).unwrap();
+    let events = watching.until(|e| matches!(e["event"].as_str(), Some("finished" | "error")));
+    let last = events.last().unwrap();
+    assert!(named(last, "finished", "cat.gif"), "{last}");
     assert_eq!(watching.stop().status.code(), Some(0));
 }
 

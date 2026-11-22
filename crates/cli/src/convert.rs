@@ -380,10 +380,19 @@ impl<'a> Converter<'a> {
     }
 
     /// Forgets what `input` was converted into, as watching does once it
-    /// is gone, so that another input may have the same result.
-    pub fn forget(&self, input: &Path) {
+    /// is gone, so that another input may have the same result. Returns
+    /// the results it held, as absolute paths.
+    pub fn forget(&self, input: &Path) -> Vec<PathBuf> {
         let input = std::path::absolute(input).unwrap_or_else(|_| input.to_path_buf());
-        self.written.borrow_mut().retain(|_, from| *from != input);
+        let mut freed = Vec::new();
+        self.written.borrow_mut().retain(|output, from| {
+            let held = *from == input;
+            if held {
+                freed.push(output.clone());
+            }
+            !held
+        });
+        freed
     }
 
     /// Reports a failed conversion of one of several inputs.

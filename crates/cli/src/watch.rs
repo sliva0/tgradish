@@ -111,6 +111,14 @@ impl Tracker {
         self.handled.insert(path, stamp);
     }
 
+    /// Makes a handled file ready again at the next update, if it stays
+    /// the same till then.
+    fn redo(&mut self, path: &Path) {
+        if let Some(stamp) = self.handled.remove(path) {
+            self.pending.insert(path.to_path_buf(), stamp);
+        }
+    }
+
     /// Returns files that are ready, sorted by path.
     fn update(&mut self, current: HashMap<PathBuf, Stamp>) -> Vec<(PathBuf, Stamp)> {
         self.handled.retain(|path, _| current.contains_key(path));
@@ -155,6 +163,17 @@ fn worth_retrying(err: &Failed) -> bool {
         }
         Failed::Folder { .. } => true,
         Failed::SameOutput { .. } => false,
+    }
+}
+
+/// Whether `path`, an input at the last scan but not at this one, is no
+/// longer one: deleted, renamed or replaced by a folder. One that can't
+/// be looked at, as in a folder that can't be read, isn't gone yet.
+fn gone(path: &Path) -> bool {
+    use std::io::ErrorKind;
+    match std::fs::metadata(path) {
+        Ok(metadata) => !metadata.is_file(),
+        Err(err) => matches!(err.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory),
     }
 }
 
@@ -217,6 +236,9 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
     // input changes again
     let mut ours: HashSet<PathBuf> = HashSet::new();
     let mut failures: HashMap<PathBuf, Failures> = HashMap::new();
+    // inputs refused as another's result is theirs, with that result, to be
+    // tried again once it is free
+    let mut refused: HashMap<PathBuf, PathBuf> = HashMap::new();
     let mut unreadable: HashSet<PathBuf> = HashSet::new();
 
     if !ctx.global.json && !ctx.global.quiet {
@@ -240,13 +262,25 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
         }
         unreadable = now_unreadable;
         // a result whose input is gone, as one deleted or renamed, may be
-        // another's of the same name; the input, back, may replace it again
+        // another's of the same name; the input, back, may replace it again.
+        // One that can't be looked at stays watched till it can be
+        let mut freed = Vec::new();
+        let mut unsure = Vec::new();
         for path in seen.iter().filter(|path| !scan.files.contains_key(*path)) {
-            if matches!(path.try_exists(), Ok(false)) {
-                converter.forget(path);
+            if gone(path) {
+                freed.extend(converter.forget(path));
+            } else {
+                unsure.push(path.clone());
             }
         }
-        seen = scan.files.keys().cloned().collect();
+        seen = scan.files.keys().cloned().chain(unsure).collect();
+        refused.retain(|path, output| {
+            let free = freed.contains(output);
+            if free {
+                tracker.redo(path);
+            }
+            !free && scan.files.contains_key(path)
+        });
 
         for (path, stamp) in tracker.update(scan.files) {
             if let Some(failed) = failures.get(&path) {
@@ -264,6 +298,7 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
 
             let overwrite = converter.overwrite() || ours.contains(&path);
             let input = Input::File(path.clone());
+            refused.remove(&path);
             let result = converter.run(&input, Some(output_for(&path)), overwrite);
             let changed_meanwhile = current_stamp(&path) != Some(stamp);
             match result {
@@ -289,7 +324,13 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
                     }
                     warn(ctx, format!("giving up on {} until it changes", path.display()));
                 }
-                Err(err) => converter.report_failure(&path, err),
+                Err(err) => {
+                    if let Failed::SameOutput { output, .. } = &err {
+                        let output = std::path::absolute(output).unwrap_or_else(|_| output.clone());
+                        refused.insert(path.clone(), output);
+                    }
+                    converter.report_failure(&path, err);
+                }
             }
             // a file that changed while converting is converted again once
             // it settles
