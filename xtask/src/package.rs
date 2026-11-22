@@ -134,6 +134,14 @@ pub fn package_release(args: &[String]) -> Result<()> {
     package(target, system_ffmpeg, max_glibc)
 }
 
+/// Where the GUI's fonts are, with their licences: those of
+/// [`FONT_LICENCES`], which the binary carries too (`notices` in
+/// crates/gui/src/about.rs) and the archives' `licenses/` has, as the
+/// `tgradish` AUR package installs them.
+const FONTS: &str = "crates/gui/assets/fonts";
+const FONT_LICENCES: [&str; 3] =
+    ["Ubuntu-LICENCE.txt", "JetBrainsMono-OFL.txt", "emoji-icon-font-LICENSE.txt"];
+
 /// Packs a release archive: the tgradish binary built with
 /// `--features linked-static --target <triple>`, and the licences of the
 /// ffmpeg build linked into it. With `system_ffmpeg`, the binary is one
@@ -184,6 +192,10 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
         let to = stage.join("licenses").join(format!("libwebp-{file}"));
         std::fs::copy(root.join(NOTICES).join("libwebp").join(file), to)?;
     }
+    // the GUI's fonts, which every build has too
+    for file in FONT_LICENCES {
+        std::fs::copy(root.join(FONTS).join(file), stage.join("licenses").join(file))?;
+    }
     let third_party = if system_ffmpeg {
         "tgradish is MIT licensed, see LICENSE.txt.\n\n\
          This build has no ffmpeg in it: it runs the system's ffmpeg and ffprobe\n\
@@ -206,10 +218,16 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
     };
     let libwebp = "\nIt includes libwebp (BSD 3-Clause), for static stickers: its licence and\n\
                    patent grant are licenses/libwebp-COPYING and licenses/libwebp-PATENTS.\n";
+    let fonts = "\nIts GUI includes subsets of fonts: Ubuntu Light and Medium, as Ubuntu Light\n\
+                 and Medium derivative tgradish (Ubuntu Font Licence 1.0), JetBrains Mono\n\
+                 NL (SIL Open Font License 1.1) and emoji-icon-font (MIT). Their licences\n\
+                 are licenses/Ubuntu-LICENCE.txt, licenses/JetBrainsMono-OFL.txt and\n\
+                 licenses/emoji-icon-font-LICENSE.txt.\n";
     std::fs::write(
         stage.join("THIRD-PARTY.txt"),
         third_party
             + libwebp
+            + fonts
             + "\nThe Rust crates in it and their licences are in THIRD-PARTY-CRATES.txt.\n",
     )?;
     // the crates of every build, as the binary carries them
@@ -473,7 +491,8 @@ fn linux_packages(
            video or picture, and animated (TGS) stickers from pixel art, fitted to\n  \
            Telegram's limits. It has ffmpeg built in.\n\
          homepage: {homepage:?}\n\
-         license: \"MIT AND LGPL-2.1-or-later AND BSD-3-Clause AND BSD-2-Clause AND Zlib\"\n\
+         license: \"MIT AND LGPL-2.1-or-later AND BSD-3-Clause AND BSD-2-Clause AND Zlib \
+           AND Ubuntu-font-1.0 AND OFL-1.1\"\n\
          contents:\n{contents}\n\
          overrides:\n  \
            deb:\n    depends:{debs}\n    recommends:\n      - xdg-desktop-portal\n    \
@@ -665,6 +684,18 @@ mod tests {
                     has(&path, name);
                 }
             }
+        }
+    }
+
+    /// The fonts' licences that `package` copies are those the GUI carries.
+    #[test]
+    fn font_licences_are_the_guis() {
+        let root = workspace_root();
+        let about = std::fs::read_to_string(root.join("crates/gui/src/about.rs")).unwrap();
+        for file in FONT_LICENCES {
+            assert!(root.join(FONTS).join(file).is_file(), "{FONTS}/{file} is missing");
+            let included = format!("include_str!(\"../assets/fonts/{file}\")");
+            assert!(about.contains(&included), "about.rs doesn't carry {file}");
         }
     }
 

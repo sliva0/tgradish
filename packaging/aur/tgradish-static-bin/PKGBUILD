@@ -7,8 +7,10 @@ pkgrel=1
 pkgdesc='Telegram stickers and emoji from videos, images or pixel art (ffmpeg built-in)'
 arch=(x86_64 aarch64)
 url='https://github.com/sliva0/tgradish'
-# tgradish is MIT; the ffmpeg built in is LGPL, with libvpx, dav1d and zlib
-license=(MIT LGPL-2.1-or-later BSD-3-Clause BSD-2-Clause Zlib)
+# tgradish is MIT; the ffmpeg built in is LGPL, with libvpx, dav1d and
+# zlib; the GUI's fonts are Ubuntu's, JetBrains Mono's and
+# emoji-icon-font's, which is MIT
+license=(MIT LGPL-2.1-or-later BSD-3-Clause BSD-2-Clause Zlib Ubuntu-font-1.0 OFL-1.1)
 # ffmpeg, libvpx, dav1d and zlib are linked in; the GUI loads the
 # graphics libraries when it opens, and D-Bus for file dialogues
 # the GUI's libraries are those of GUI_LIBRARIES in xtask/src/package.rs,
@@ -55,7 +57,7 @@ package() {
   done
   install -Dm644 README.md THIRD-PARTY.txt THIRD-PARTY-CRATES.txt -t "$pkgdir/usr/share/doc/$_pkgname/"
   install -Dm644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-  # ffmpeg's, its libraries' and libwebp's licences, and where ffmpeg's
-  # sources are
+  # ffmpeg's, its libraries', libwebp's and the GUI's fonts' licences, and
+  # where ffmpeg's sources are
   install -Dm644 licenses/* -t "$pkgdir/usr/share/licenses/$pkgname/"
 }

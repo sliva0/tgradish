@@ -89,10 +89,13 @@ rustPlatform.buildRustPackage {
   meta = {
     description = "Telegram video, static and animated stickers and emoji from videos, images or pixel art";
     homepage = "https://github.com/sliva0/tgradish";
-    # libwebp is in every build
+    # libwebp is in every build, and the GUI's fonts: Ubuntu's, JetBrains
+    # Mono's and emoji-icon-font's, which is MIT
     license = [
       lib.licenses.mit
       lib.licenses.bsd3
+      lib.licenses.ufl
+      lib.licenses.ofl
     ];
     mainProgram = "tgradish";
     platforms = lib.platforms.linux;
