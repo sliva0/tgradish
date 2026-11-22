@@ -234,17 +234,20 @@ impl Reduction {
     }
 
     /// `anim` reduced, or an error when the strength is outside the range
-    /// its kind gives.
+    /// its kind gives. One that would leave nothing to see, as snapping
+    /// or downscaling a few lone pixels can, leaves `anim` as it is: a
+    /// blank sticker is the smallest of all, and no use.
     pub fn apply(&self, anim: &PixelAnim) -> Result<PixelAnim> {
         self.check()?;
-        match *self {
-            Reduction::SnapToGrid { scale } => snap_to_grid(anim, scale),
-            Reduction::MergeColours { distance } => Ok(merge_colours(anim, distance)),
-            Reduction::MergeFrames { changed } => Ok(merge_frames(anim, changed)),
-            Reduction::DropFrames { share } => Ok(drop_frames(anim, share)),
-            Reduction::Despeckle => Ok(despeckle(anim)),
-            Reduction::Downscale { factor } => downscale(anim, factor),
-        }
+        let reduced = match *self {
+            Reduction::SnapToGrid { scale } => snap_to_grid(anim, scale)?,
+            Reduction::MergeColours { distance } => merge_colours(anim, distance),
+            Reduction::MergeFrames { changed } => merge_frames(anim, changed),
+            Reduction::DropFrames { share } => drop_frames(anim, share),
+            Reduction::Despeckle => despeckle(anim),
+            Reduction::Downscale { factor } => downscale(anim, factor)?,
+        };
+        Ok(if reduced.shows() || !anim.shows() { reduced } else { anim.clone() })
     }
 }
 
@@ -816,6 +819,24 @@ mod tests {
             let wrong = Reduction::Downscale { factor }.apply(&board);
             assert!(matches!(wrong, Err(Error::DownscaleFactor(_))), "{factor}");
         }
+    }
+
+    #[test]
+    fn leaves_art_it_would_blank_as_it_is() {
+        // a line of single pixels: as one 4x4 cell, it is three-quarters
+        // transparent
+        let pixels: Vec<[u8; 4]> =
+            (0..16).map(|i| if i % 4 == i / 4 { RED } else { CLEAR }).collect();
+        let line = anim(4, 4, &[(&pixels, 100)]);
+        assert!(!snap_to_grid(&line, 4).unwrap().shows());
+        assert!(!downscale(&line, 0.25).unwrap().shows());
+        for reduction in [Reduction::SnapToGrid { scale: 4 }, Reduction::Downscale { factor: 0.25 }]
+        {
+            assert_eq!(reduction.apply(&line).unwrap(), line, "{reduction:?}");
+        }
+        // what still shows is reduced as ever
+        let half = Reduction::SnapToGrid { scale: 2 }.apply(&line).unwrap();
+        assert!(half != line && half.shows());
     }
 
     #[test]

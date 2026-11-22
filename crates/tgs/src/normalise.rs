@@ -143,6 +143,11 @@ impl PixelAnim {
         starts
     }
 
+    /// Whether any cell of any frame shows: only colour 0 is transparent.
+    pub(crate) fn shows(&self) -> bool {
+        self.frames.iter().any(|frame| frame.pixels.iter().any(|&colour| colour != 0))
+    }
+
     /// A frame as RGBA at the input's resolution, cropped.
     pub fn rgba(&self, frame: usize) -> Vec<u8> {
         let (columns, rows) = (&self.grid.columns, &self.grid.rows);
@@ -527,6 +532,11 @@ pub fn normalise(animation: Animation, options: &Options) -> Result<(PixelAnim, 
         pixels = pixels.into_iter().map(|frame| cut(&frame, crop.width, square)).collect();
         crop = Rect { x: crop.x + square.x, y: crop.y + square.y, ..square };
         edges = Edges::count(&pixels, crop.width, crop.height);
+    }
+    // snapping and the square can each leave nothing to see of what did
+    // show: as blank as an empty input, and no sticker either
+    if pixels.iter().flatten().all(|&pixel| pixel == 0) {
+        return Err(Error::Invisible);
     }
     let anim = assemble(&pixels, &ticks, crop.width, &edges)?;
     let (width, height, grid) = (anim.width, anim.height, anim.grid.clone());
@@ -1096,6 +1106,19 @@ mod tests {
             assert_eq!(normalise(corner.clone(), &empty), Err(Error::Invisible), "{keep_canvas}");
         }
         assert_eq!(normalise(corner.clone(), &canvas).unwrap().1.crop.width, 4);
+
+        // a line of single pixels, which a forced scale of 4 snaps to cells
+        // of three-quarters transparent
+        let diagonal = animation(16, 16, &[ms(100)], |_, x, y| if x == y { RED } else { CLEAR });
+        let forced = Options { pixel_scale: Some(4), ..Options::default() };
+        assert_eq!(normalise(diagonal.clone(), &forced), Err(Error::Invisible));
+        assert_eq!(normalise(diagonal.clone(), &Options::default()).unwrap().1.colours, 1);
+        // dots at the far ends of a strip, which the square in its middle
+        // leaves out
+        let ends = animation(10, 2, &[ms(100)], |_, x, _| if x % 9 == 0 { RED } else { CLEAR });
+        let square = Options { square: Square::Crop, ..Options::default() };
+        assert_eq!(normalise(ends.clone(), &square), Err(Error::Invisible));
+        assert_eq!(normalise(ends.clone(), &Options::default()).unwrap().1.width, 3);
     }
 
     #[test]

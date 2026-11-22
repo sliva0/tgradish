@@ -262,9 +262,14 @@ pub(super) fn fit(
         let tries =
             parallel(&kinds, workers, &this_round, |&k, done| -> Result<Option<Candidate>> {
                 let candidate = ladders[k][next[k]].apply(&current)?;
+                // one that changes nothing, as one that would leave nothing
+                // to see, needn't be encoded to know it doesn't help
+                if candidate == current {
+                    return Ok(None);
+                }
                 let candidate_quick = quick(&candidate, options, cancelled, done)?;
                 let candidate_size = size_of(candidate_quick, now);
-                if candidate == current || candidate_size >= size {
+                if candidate_size >= size {
                     return Ok(None);
                 }
                 let candidate_distortion = distortion(original, &candidate);
@@ -324,6 +329,12 @@ pub(super) fn fit(
             let share = (low + high) / 2.0;
             let Some(reduction) = last.between(weaker.as_ref(), share) else { break };
             let candidate = reduction.apply(&previous)?;
+            // one that would leave nothing to see leaves the art as it
+            // was: no weaker step, so a stronger one is tried
+            if candidate == previous {
+                low = share;
+                continue;
+            }
             let (from, to) = (halving as f64, halving as f64 + 1.0);
             let done = tracker.hook(Part::Weakening, from / HALVINGS as f64, to / HALVINGS as f64);
             let candidate_size =

@@ -929,6 +929,49 @@ mod tests {
     }
 
     #[test]
+    fn never_fits_art_by_blanking_it() {
+        // lone pixels, one in each 4x4 block, moving a pixel a frame:
+        // snapping or downscaling them to blocks leaves nothing, the
+        // smallest sticker of all
+        const SIDE: u32 = 32;
+        let frames = (0..4)
+            .map(|frame| {
+                let rgba = (0..SIDE * SIDE)
+                    .flat_map(|index| {
+                        let (x, y) = (index % SIDE, index / SIDE);
+                        match x % 4 == frame && y % 4 == frame {
+                            true => [230, 40, 40, 255],
+                            false => [0; 4],
+                        }
+                    })
+                    .collect();
+                Frame { rgba, duration: Duration::from_millis(100) }
+            })
+            .collect();
+        let input = Animation::new(SIDE, SIDE, frames).unwrap();
+        let normalise_options = normalise::Options { keep_canvas: true, ..Default::default() };
+        let (anim, _) = normalise(input.clone(), &normalise_options).unwrap();
+        let options = Options { effort: Effort::Fast, ..Options::default() };
+        let settings = Settings { effort: Effort::Fast, ..Settings::default() };
+        let fitting = Fitting {
+            target: 1,
+            likely: Some(4),
+            settings: &settings,
+            options: &options,
+            cancelled: &|| false,
+        };
+        let (mut steps, mut calibration) =
+            (Vec::new(), Some(Calibration { factor: 1.0, real: None }));
+        let (current, mut progress) = (anim.clone(), |_| {});
+        let tracker = Tracker::new(&mut progress, true);
+        let (fitted, reached) =
+            fit(&anim, current, None, &mut steps, &mut calibration, &fitting, &tracker).unwrap();
+        // every reduction used up, as far as it gets without blanking it
+        assert!(!reached && !steps.is_empty());
+        assert!(fitted.shows(), "{steps:?}");
+    }
+
+    #[test]
     fn estimates_shapes_over_the_servers_limit_as_too_large() {
         // isolated pixels on one of the four cells of every 2x2 block, a
         // different one in each frame, red and blue by turns: 8100
