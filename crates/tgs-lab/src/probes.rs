@@ -218,9 +218,32 @@ fn half_rate(sprite: &str, same_frames: bool) -> String {
                 // frames are 18 ticks, so halves are whole
                 layer[key] = json!(layer[key].as_u64().unwrap() / 2);
             }
+            // and so are the opacity keyframes that hide what shows only
+            // at times, on the layer and on its groups
+            halve_keyframes(layer);
         }
     }
     lottie.to_string()
+}
+
+/// Halves the time of every keyframe of the animated properties in
+/// `value`, however deep.
+fn halve_keyframes(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if object.get("a") == Some(&json!(1))
+                && let Some(Value::Array(keys)) = object.get_mut("k")
+            {
+                for key in keys {
+                    let time = key["t"].as_u64().expect("keyframes are at whole frames");
+                    key["t"] = json!(time / 2);
+                }
+            }
+            object.values_mut().for_each(halve_keyframes);
+        }
+        Value::Array(items) => items.iter_mut().for_each(halve_keyframes),
+        _ => {}
+    }
 }
 
 /// The sprite twice in a row at 60 fps: 360 frames, 6 seconds.
@@ -850,7 +873,7 @@ fn probes(art: Option<(String, String)>) -> Result<Vec<Probe>> {
             file: "08-30fps.tgs".into(),
             pack: "sticker",
             tests: "30 fps instead of 60, still 3 s (90 frames)".into(),
-            expect: "rejected (stickers must be 60 fps); if accepted, it plays like 01",
+            expect: "accepted, though against the rules, as it was before; plays like 01",
             json: half_rate(&sprite, false),
         },
         Probe {
@@ -1020,6 +1043,22 @@ mod tests {
         }
         let near = probes.iter().find(|probe| probe.file == "03-near-2mib.tgs").unwrap();
         assert!((NEAR_2_MIB - 100_000..=NEAR_2_MIB).contains(&near.json.len()));
+    }
+
+    #[test]
+    fn half_rate_plays_like_the_sprite() {
+        // the blinking pixel is hidden by opacity keyframes, which must
+        // come at half the time with everything else
+        let sprite = sprite_json(Style::default()).unwrap();
+        assert!(sprite.contains("\"t\":"), "the sprite has no keyframes to halve");
+        let (mut full, mut half) = (
+            Renderer::new(sprite.as_bytes()).unwrap(),
+            Renderer::new(half_rate(&sprite, false).as_bytes()).unwrap(),
+        );
+        for tick in 0..90 {
+            let (expected, got) = (full.render(tick * 2, 64), half.render(tick, 64));
+            assert!(expected.unwrap() == got.unwrap(), "frame {tick}");
+        }
     }
 
     #[test]
