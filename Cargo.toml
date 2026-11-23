@@ -96,16 +96,12 @@ unsafe_code = "deny"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 
+[profile.dev.package]
 # The TGS encoder searches a lot: unoptimised, the test corpus takes minutes.
-[profile.dev.package.tgradish-tgs]
-opt-level = 2
-
+tgradish-tgs.opt-level = 2
 # zopfli packs both the final .tgs and size-fitting estimates.
-[profile.dev.package.zopfli]
-opt-level = 2
-
-[profile.dev.package.miniz_oxide]
-opt-level = 2
+zopfli.opt-level = 2
+miniz_oxide.opt-level = 2
 
 [profile.release]
 lto = "thin"
@@ -114,38 +110,16 @@ codegen-units = 1
 
 # Optimise most dependencies (GUI, CLI parsing) for size, and hot
 # decoding/encoding/compression crates for speed.
-[profile.release.package."*"]
-opt-level = "s"
-
-[profile.release.package.zopfli]
-opt-level = 3
-
-[profile.release.package.miniz_oxide]
-opt-level = 3
-
-[profile.release.package.crc32fast]
-opt-level = 3
-
-[profile.release.package.flate2]
-opt-level = 3
-
-[profile.release.package.fdeflate]
-opt-level = 3
-
-[profile.release.package.png]
-opt-level = 3
-
-[profile.release.package.gif]
-opt-level = 3
-
-[profile.release.package.weezl]
-opt-level = 3
-
-[profile.release.package.image-webp]
-opt-level = 3
-
-[profile.release.package.image]
-opt-level = 3
-
-[profile.release.package.serde_json]
-opt-level = 3
+[profile.release.package]
+"*".opt-level = "s"
+zopfli.opt-level = 3
+miniz_oxide.opt-level = 3
+crc32fast.opt-level = 3
+flate2.opt-level = 3
+fdeflate.opt-level = 3
+png.opt-level = 3
+gif.opt-level = 3
+weezl.opt-level = 3
+image-webp.opt-level = 3
+image.opt-level = 3
+serde_json.opt-level = 3
