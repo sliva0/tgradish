@@ -37,6 +37,7 @@ All notable changes to tgradish, newest first. This file follows [Keep a Changel
 - Cancelling a queued (unstarted) conversion in the GUI no longer highlights the file as converted or replays its result fade-in.
 - GUI warnings now sit above the bar under the preview when it wraps to two lines, instead of over its first line.
 - The Inspect and About dialogs now scroll inside short windows or at high UI scales, keeping the Close button visible.
+- Every GUI dialog now stays inside the window at UI scales of 2× and above in the smallest window, where Settings, Keyboard shortcuts and Your presets ran off its edges. What doesn't fit scrolls between the title and the buttons, Settings puts each label over its controls where they don't fit beside it, the shortcuts' descriptions wrap, and buttons that don't fit side by side go on in a second row.
 - Screen readers now announce labels for GUI number fields and report what progress bars represent and their current progress.
 - Holding an arrow key on the GUI crop now keeps moving it, instead of moving it a pixel or two and then taking the keyboard focus elsewhere.
 - Pressing Escape in a GUI number field after stepping it with the arrow keys or the wheel now also puts back what the step changed elsewhere, such as the crop an integer scale holds, and leaves nothing to undo.

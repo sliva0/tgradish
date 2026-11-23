@@ -175,6 +175,24 @@ fn name_problem(name: &str) -> Option<String> {
     presets::check_name(name).err().map(|err| problem(&err))
 }
 
+/// Widths of the name and description fields in Manage Presets, where the
+/// dialog is as wide as it goes; narrower, both narrow alike.
+const NAME: f32 = 170.0;
+const DESCRIPTION: f32 = 300.0;
+
+/// Adds what `add` adds in `width`, whatever it takes.
+fn within(
+    ui: &mut egui::Ui,
+    width: f32,
+    add: impl FnOnce(&mut egui::Ui) -> egui::Response,
+) -> egui::Response {
+    ui.scope(|ui| {
+        ui.set_width(width);
+        add(ui)
+    })
+    .inner
+}
+
 impl App {
     /// Opens any requested preset dialog and draws the currently open one.
     pub(crate) fn preset_dialogs(&mut self, ctx: &egui::Context) {
@@ -245,11 +263,11 @@ impl App {
         let (mut close, mut save) = (false, false);
         let modal = widgets::dialog(ctx, "save preset").width(400.0).show(ctx, |ui| {
             close = widgets::dialog_title(ui, widgets::title_text(ui, fl!("save-preset-title")));
-            widgets::note(ui, fl!("save-preset-note"));
-            ui.add_space(8.0);
-            egui::Grid::new("save preset fields").num_columns(2).spacing([10.0, 8.0]).show(
-                ui,
-                |ui| {
+            widgets::dialog_body(ui, egui::ScrollArea::vertical(), |ui| {
+                widgets::note(ui, fl!("save-preset-note"));
+                ui.add_space(8.0);
+                let grid = egui::Grid::new("save preset fields").num_columns(2);
+                grid.spacing([10.0, 8.0]).show(ui, |ui| {
                     ui.label(fl!("preset-name"));
                     let field = widgets::text_field(&mut saving.name)
                         .hint_text(fl!("preset-name", "placeholder"))
@@ -270,14 +288,14 @@ impl App {
                         .desired_width(270.0);
                     ui.add(field);
                     ui.end_row();
-                },
-            );
-            if exists {
-                widgets::note(ui, fl!("preset-exists"));
-            }
-            if let Some(problem) = &saving.problem {
-                ui.colored_label(theme::bad(ui.visuals()), problem);
-            }
+                });
+                if exists {
+                    widgets::note(ui, fl!("preset-exists"));
+                }
+                if let Some(problem) = &saving.problem {
+                    ui.colored_label(theme::bad(ui.visuals()), problem);
+                }
+            });
             widgets::dialog_buttons(ui, |ui| {
                 close |= ui.add(widgets::dialog_button(fl!("cancel"))).clicked();
                 let text = if exists { fl!("replace") } else { fl!("save") };
@@ -336,29 +354,35 @@ impl App {
         let mut changes = Vec::new();
         let modal = widgets::dialog(ctx, "manage presets").width(560.0).show(ctx, |ui| {
             close = widgets::dialog_title(ui, widgets::title_text(ui, fl!("your-presets")));
-            widgets::note(ui, fl!("your-presets-note"));
-            ui.add_space(8.0);
-            if managing.rows.is_empty() && managing.deleted.is_empty() {
-                widgets::note(ui, fl!("no-presets"));
-            }
-            // Scroll the preset list so the header and Close button stay visible.
-            let room = (ctx.content_rect().height() - 240.0).max(120.0);
-            widgets::scrolled(ui, egui::ScrollArea::vertical().max_height(room), |ui| {
-                egui::Grid::new("presets").num_columns(3).spacing([8.0, 6.0]).show(ui, |ui| {
-                    if !managing.rows.is_empty() {
-                        ui.label(RichText::new(fl!("preset-name")).weak());
-                        ui.label(RichText::new(fl!("preset-description")).weak());
-                        ui.end_row();
-                    }
-                    // Pressing Escape in a field reverts its text and consumes the
-                    // key so the dialog stays open until a second Escape.
-                    let escaped = ui.input(|input| input.key_pressed(egui::Key::Escape));
-                    for row in &mut managing.rows {
-                        // Explicit size prevents the grid from shrinking
-                        // columns to their header width.
-                        let line = ui.spacing().interact_size.y;
+            // Scroll what is under the title so the Close button stays visible.
+            widgets::dialog_body(ui, egui::ScrollArea::vertical(), |ui| {
+                widgets::note(ui, fl!("your-presets-note"));
+                ui.add_space(8.0);
+                if managing.rows.is_empty() && managing.deleted.is_empty() {
+                    widgets::note(ui, fl!("no-presets"));
+                }
+                // the fields as wide as they go up to, or narrower alike
+                let gap = 8.0;
+                let (spacing, line) = (ui.spacing().item_spacing, ui.spacing().interact_size.y);
+                let room = ui.available_width() - line - 2.0 * gap;
+                let share = (room / (NAME + DESCRIPTION)).min(1.0);
+                let (name_width, description_width) = (NAME * share, DESCRIPTION * share);
+                ui.spacing_mut().item_spacing = vec2(gap, 6.0);
+                if !managing.rows.is_empty() {
+                    ui.horizontal(|ui| {
+                        let name = RichText::new(fl!("preset-name")).weak();
+                        within(ui, name_width, |ui| ui.add(egui::Label::new(name).truncate()));
+                        let description = fl!("preset-description");
+                        ui.add(egui::Label::new(RichText::new(description).weak()).truncate());
+                    });
+                }
+                // Pressing Escape in a field reverts its text and consumes the
+                // key so the dialog stays open until a second Escape.
+                let escaped = ui.input(|input| input.key_pressed(egui::Key::Escape));
+                for row in &mut managing.rows {
+                    ui.horizontal(|ui| {
                         let name = widgets::text_field(&mut row.typed_name);
-                        if ui.add_sized(vec2(170.0, line), name).lost_focus() {
+                        if ui.add_sized(vec2(name_width, line), name).lost_focus() {
                             if escaped {
                                 row.typed_name.clone_from(&row.name);
                                 widgets::consume_escape(ui);
@@ -368,13 +392,16 @@ impl App {
                         }
                         match &row.broken {
                             Some(why) => {
-                                ui.colored_label(theme::bad(ui.visuals()), fl!("preset-broken"))
+                                let broken = RichText::new(fl!("preset-broken"))
+                                    .color(theme::bad(ui.visuals()));
+                                let broken = egui::Label::new(broken).truncate();
+                                within(ui, description_width, |ui| ui.add(broken))
                                     .on_hover_text(why);
                             }
                             None => {
                                 let field = widgets::text_field(&mut row.typed_description)
                                     .hint_text(fl!("preset-description", "none"));
-                                if ui.add_sized(vec2(300.0, line), field).lost_focus() {
+                                if ui.add_sized(vec2(description_width, line), field).lost_focus() {
                                     if escaped {
                                         row.typed_description.clone_from(&row.description);
                                         widgets::consume_escape(ui);
@@ -391,15 +418,14 @@ impl App {
                         if delete.on_hover_text(fl!("delete-it")).clicked() {
                             changes.push(Change::Delete(row.id));
                         }
-                        ui.end_row();
-                        if let Some(problem) = &row.problem {
-                            ui.colored_label(theme::bad(ui.visuals()), problem);
-                            ui.end_row();
-                        }
+                    });
+                    if let Some(problem) = &row.problem {
+                        ui.colored_label(theme::bad(ui.visuals()), problem);
                     }
-                });
+                }
+                ui.spacing_mut().item_spacing = spacing;
                 for deleted in &managing.deleted {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         widgets::note(ui, fl!("deleted", name = deleted.name.as_str()));
                         if ui.button(fl!("undo")).on_hover_text(fl!("undo", "hint")).clicked() {
                             changes.push(Change::Undo(deleted.id));

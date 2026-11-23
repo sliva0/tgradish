@@ -1,5 +1,12 @@
 //! Modal dialogs: the fading frame, the title row with its close button,
-//! and the bottom button row.
+//! the body between them that scrolls where the window is too short for
+//! it, and the bottom button row.
+//!
+//! A dialog fits its window at any UI scale: its width is held to the
+//! window's, its body is made short enough for the rest of it to fit, the
+//! [`super::row`]s in it put their label over their controls where they
+//! are narrow, and its buttons go on in another row where they can't all
+//! go side by side.
 
 use eframe::egui::{self, Color32, RichText, vec2};
 
@@ -10,8 +17,14 @@ use crate::theme;
 /// Inner margin inside a dialog frame.
 pub(crate) const DIALOG_MARGIN: i8 = 16;
 /// Minimum margin kept between a dialog and the window edges when the window or
-/// UI scale makes the viewport narrower than the dialog's target width.
+/// UI scale makes the viewport narrower or shorter than the dialog.
 const DIALOG_AROUND: f32 = 8.0;
+/// Least height a dialog's body is given, however short the window: a
+/// line of it, to scroll through.
+const LEAST_BODY: f32 = theme::CONTROL;
+/// Tag on the [`egui::UiStack`] of a dialog's contents, by which what is
+/// drawn in a dialog knows it is.
+const IN_DIALOG: &str = "tgradish dialog";
 
 /// Dialog fade-in duration in seconds. The dialog is placed at full size and
 /// accepts keyboard input from its first frame.
@@ -60,18 +73,77 @@ impl Dialog {
             .backdrop_color(backdrop)
             .show(ctx, |ui| {
                 ui.multiply_opacity(opacity);
-                frame
-                    .show(ui, |ui| {
-                        if let Some(width) = self.width {
-                            let margins = 2.0 * (f32::from(DIALOG_MARGIN) + DIALOG_AROUND);
-                            let room = ctx.content_rect().width() - margins;
-                            ui.set_width(width.min(room).max(0.0));
-                        }
-                        content(ui)
-                    })
-                    .inner
+                let shown = frame.show(ui, |ui| {
+                    if let Some(width) = self.width {
+                        let margins = 2.0 * (f32::from(DIALOG_MARGIN) + DIALOG_AROUND);
+                        let room = ctx.content_rect().width() - margins;
+                        ui.set_width(width.min(room).max(0.0));
+                    }
+                    let tagged = egui::UiStackInfo::default().with_tag(IN_DIALOG);
+                    ui.scope_builder(egui::UiBuilder::new().ui_stack_info(tagged), content).inner
+                });
+                let drawn = shown.response.rect.height();
+                ui.data_mut(|data| data.insert_temp(self.id.with(DRAWN), drawn));
+                shown.inner
             })
     }
+}
+
+/// Whether `ui` is in a dialog.
+pub(crate) fn in_dialog(ui: &egui::Ui) -> bool {
+    ui.stack().iter().any(|frame| frame.tags().contains(IN_DIALOG))
+}
+
+/// Keys under the dialog's own id of how tall it was last drawn, and its
+/// body. Its area's own size is no use, as egui holds it to the window's.
+const DRAWN: &str = "drawn";
+const BODY: &str = "body";
+
+/// The most height the body of the dialog `id` may take for all of the
+/// dialog to fit the window, [`DIALOG_AROUND`] from its edges: the
+/// window's height less what the dialog drew around its body when last
+/// shown (its title, what it says over and under its body, and its
+/// buttons), and at least [`LEAST_BODY`].
+pub(crate) fn dialog_room(ctx: &egui::Context, id: egui::Id) -> f32 {
+    let window = ctx.content_rect().height() - 2.0 * DIALOG_AROUND;
+    let (drawn, body): (Option<f32>, Option<f32>) =
+        ctx.data(|data| (data.get_temp(id.with(DRAWN)), data.get_temp(id.with(BODY))));
+    // not yet drawn, the dialog is sized unseen first
+    let around = drawn.zip(body).map_or(0.0, |(drawn, body)| (drawn - body).max(0.0));
+    (window - around).max(LEAST_BODY)
+}
+
+/// Draws the body of a dialog, between its title and its buttons, in
+/// `area`, no taller than [`dialog_room`] so the dialog fits the window
+/// and what scrolls is the body.
+pub(crate) fn dialog_body<R>(
+    ui: &mut egui::Ui,
+    area: egui::ScrollArea,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::scroll_area::ScrollAreaOutput<R> {
+    dialog_body_within(ui, area, f32::INFINITY, add)
+}
+
+/// [`dialog_body`] no taller than `most` either.
+pub(crate) fn dialog_body_within<R>(
+    ui: &mut egui::Ui,
+    area: egui::ScrollArea,
+    most: f32,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::scroll_area::ScrollAreaOutput<R> {
+    // the dialog's area is the layer it is drawn on
+    let id = ui.layer_id().id;
+    let room = dialog_room(ui.ctx(), id).min(most);
+    // egui's own least height of what scrolls, 64, would be taller than
+    // the room in a short window
+    let area = area.max_height(room).min_scrolled_height(room);
+    let top = ui.cursor().top();
+    let shown = super::scrolled(ui, area, add);
+    // as tall as it was laid out, which is less than its `inner_rect`
+    // where it is shorter than the room it had
+    let body = ui.min_rect().bottom() - top;
+    ui.data_mut(|data| data.insert_temp(id.with(BODY), body));
+    shown
 }
 
 /// Returns the fade-in progress (`0.0..=1.0`) for dialog `id`, restarting from
@@ -113,23 +185,43 @@ pub(crate) fn title_text(ui: &egui::Ui, text: impl Into<String>) -> RichText {
 }
 
 /// Draws a dialog's bottom button row below a separator line. `add` places
-/// buttons right-to-left (dismiss button first, then primary, then others; any
-/// left-to-right sub-layout inside `add` sits at the left end of the row).
+/// buttons right-to-left (dismiss button first, then primary, then others,
+/// and [`dialog_button_apart`] at the left end of the row). Those that
+/// don't fit beside the ones before, as in a narrow window, go on in
+/// another row under them.
 pub(crate) fn dialog_buttons<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     ui.add_space(4.0);
     ui.separator();
     ui.add_space(4.0);
-    // Fix the row height to one control height; otherwise a right-to-left
-    // layout consumes all remaining vertical space and prevents the dialog
-    // from shrinking when the window or scale changes.
+    // Start at one control height, as wrapping rows do; otherwise a
+    // right-to-left layout consumes all remaining vertical space and
+    // prevents the dialog from shrinking when the window or scale changes.
     let row = vec2(ui.available_width(), theme::CONTROL);
-    let layout = egui::Layout::right_to_left(egui::Align::Center);
+    let layout = egui::Layout::right_to_left(egui::Align::Center).with_main_wrap(true);
     ui.allocate_ui_with_layout(row, layout, add).inner
 }
 
 /// Creates a dialog action button with a uniform minimum width.
 pub(crate) fn dialog_button<'a>(text: impl Into<egui::WidgetText>) -> egui::Button<'a> {
-    egui::Button::new(text).min_size(vec2(90.0, theme::CONTROL))
+    egui::Button::new(text).min_size(vec2(DIALOG_BUTTON, theme::CONTROL))
+}
+
+/// Least width of a [`dialog_button`].
+const DIALOG_BUTTON: f32 = 90.0;
+
+/// Adds a [`dialog_button`] of `text` last in [`dialog_buttons`], apart
+/// from the rest at the left end of the row, or of a row of its own under
+/// them where it doesn't fit beside them: one that doesn't close the
+/// dialog.
+pub(crate) fn dialog_button_apart(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    let padding = 2.0 * ui.spacing().button_padding.x;
+    let wide = super::text_width(ui, text, padding).max(DIALOG_BUTTON);
+    if ui.available_size_before_wrap().x < wide {
+        ui.end_row();
+    }
+    // a point short of the end, lest rounding take it past
+    ui.add_space((ui.available_size_before_wrap().x - wide - 1.0).max(0.0));
+    ui.add(dialog_button(text))
 }
 
 #[cfg(test)]

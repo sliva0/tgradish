@@ -19,14 +19,17 @@ pub(crate) use choice::{
 pub(crate) use colour::{colour_picker, swatch};
 #[cfg(test)]
 pub(crate) use dialog::DIALOG_MARGIN;
-pub(crate) use dialog::{dialog, dialog_button, dialog_buttons, dialog_title, title_text};
+pub(crate) use dialog::{
+    dialog, dialog_body, dialog_body_within, dialog_button, dialog_button_apart, dialog_buttons,
+    dialog_room, dialog_title, title_text,
+};
 pub(crate) use format::{
     FPS_DECIMALS, SPEED_DECIMALS, fixed, fps, kib, parse_seconds, seconds, speed, trimmed,
     trimmed_to, widest_seconds, zeros,
 };
 pub(crate) use layout::{
     HEADING, LABELS, TITLE, attention, attention_explained, folding_section, hint, hint_in_room,
-    hint_room, label, link, medium, named, note, primary, problems, row, section, section_rule,
+    hint_room, link, medium, named, note, primary, problems, row, section, section_rule,
     section_with, settings_spacing, steady_hint, text_field,
 };
 pub(crate) use number::{

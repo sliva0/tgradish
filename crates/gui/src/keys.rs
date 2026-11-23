@@ -270,8 +270,7 @@ impl crate::app::Dialogs {
         let modal = widgets::dialog(ctx, "shortcuts").width(560.0).show(ctx, |ui| {
             let crossed = widgets::dialog_title(ui, widgets::title_text(ui, fl!("shortcuts")));
             // the dialog fits the window, the list scrolling within
-            let room = (ctx.content_rect().height() - 160.0).max(200.0);
-            widgets::scrolled(ui, egui::ScrollArea::vertical().max_height(room), |ui| {
+            widgets::dialog_body(ui, egui::ScrollArea::vertical(), |ui| {
                 widgets::settings_spacing(ui);
                 let groups = [
                     (Group::Files, fl!("shortcuts-files")),
@@ -312,16 +311,50 @@ impl crate::app::Dialogs {
     }
 }
 
-/// A group of shortcuts under `title`: each one's keys, and what they do.
+/// Gap between a shortcut's keys and what they do.
+const BETWEEN: f32 = 16.0;
+/// Least width left beside the keys for what they do: where there is
+/// less, as at a large scale, the keys go over it.
+const LEAST_DOES: f32 = 200.0;
+
+/// A group of shortcuts under `title`: each one's keys, and what they do,
+/// in a column as wide as the widest keys, or over it where it would be
+/// too narrow, what they do wrapping beside or under them.
 fn shortcut_rows(ui: &mut egui::Ui, title: &str, rows: Vec<(String, String)>) {
     widgets::section(ui, title);
-    // lines of text, closer than rows of controls
-    let grid = egui::Grid::new(("shortcuts", title)).num_columns(2).min_row_height(0.0);
-    grid.spacing(vec2(16.0, 6.0)).min_col_width(widgets::LABELS).show(ui, |ui| {
-        for (keys, does) in rows {
-            ui.label(egui::RichText::new(keys).strong());
-            ui.label(does);
-            ui.end_row();
+    let room = ui.available_width();
+    let keys = |text: &str| egui::RichText::new(text).strong();
+    let widest = rows.iter().fold(widgets::LABELS, |widest, (text, _)| {
+        let galley = egui::WidgetText::from(keys(text)).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Body,
+        );
+        widest.max(galley.size().x.ceil())
+    });
+    let over = room - widest - BETWEEN < LEAST_DOES;
+    ui.scope(|ui| {
+        // lines of text, closer than rows of controls
+        ui.spacing_mut().item_spacing.y = 6.0;
+        for (text, does) in rows {
+            if over {
+                ui.add(egui::Label::new(keys(&text)).wrap());
+                ui.indent(("does", &text), |ui| ui.add(egui::Label::new(does).wrap()));
+                continue;
+            }
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    vec2(widest, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_width(widest);
+                        ui.add(egui::Label::new(keys(&text)).wrap());
+                    },
+                );
+                ui.add_space(BETWEEN - ui.spacing().item_spacing.x);
+                ui.add(egui::Label::new(does).wrap());
+            });
         }
     });
 }

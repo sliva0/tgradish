@@ -17,91 +17,84 @@ pub(crate) const FEEDBACK: &str = "https://t.me/s0untitled?direct";
 /// wraps.
 pub(crate) const WIDTH: f32 = 600.0;
 
-/// Fixed vertical chrome around the notice list (title, button, margins and
-/// the room kept around the dialog; excluding the dynamic header height, which
-/// wraps taller in narrow windows), plus minimum and maximum scroll-area
-/// heights for the notices.
-const CHROME: f32 = 154.0;
-const LEAST_ROOM: f32 = 80.0;
-const MOST_ROOM: f32 = 360.0;
+/// Most height of the About dialog's body, which scrolls: as tall as the
+/// window lets it be up to this, whichever notices are open.
+const MOST_BODY: f32 = 480.0;
 
 /// Renders the About dialog body (version, links, and collapsible licence
-/// notices).
+/// notices), which scrolls as one.
 pub(crate) fn about(ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        icon::show(ui, 96.0);
-        ui.vertical(|ui| {
-            ui.label(RichText::new(format!("tgradish {}", env!("CARGO_PKG_VERSION"))).heading());
-            // Wrap so a long translated summary does not widen the dialog.
-            ui.horizontal_wrapped(|ui| {
-                ui.label(fl!("about-summary"));
-                widgets::link(ui, fl!("source-code"), tgradish_core::REPOSITORY);
+    let area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+    widgets::dialog_body_within(ui, area, MOST_BODY, |ui| {
+        ui.horizontal(|ui| {
+            icon::show(ui, 96.0);
+            ui.vertical(|ui| {
+                let version = format!("tgradish {}", env!("CARGO_PKG_VERSION"));
+                ui.label(RichText::new(version).heading());
+                // Wrap so a long translated summary does not widen the dialog.
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(fl!("about-summary"));
+                    widgets::link(ui, fl!("source-code"), tgradish_core::REPOSITORY);
+                });
+                widgets::link(ui, fl!("send-feedback"), FEEDBACK);
             });
-            widgets::link(ui, fl!("send-feedback"), FEEDBACK);
         });
+        ui.add_space(6.0);
+        widgets::note(ui, fl!("about-notices"));
+        ui.add_space(4.0);
+        licences(ui);
     });
-    ui.add_space(6.0);
-    widgets::note(ui, fl!("about-notices"));
-    ui.add_space(4.0);
-    // Size the notice scroll area to fit the window, clamped to LEAST_ROOM..=MOST_ROOM.
-    let chrome = CHROME + ui.min_rect().height();
-    let room = (ui.ctx().content_rect().height() - chrome).clamp(LEAST_ROOM, MOST_ROOM);
-    let area = egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(room);
-    widgets::scrolled(ui, area, |ui| {
-        // read once, and kept in egui's memory as long as the GUI runs,
-        // under a key of About's alone
-        let notices = ui.ctx().memory_mut(|memory| {
-            memory
-                .data
-                .get_temp_mut_or_insert_with(egui::Id::new("notices"), || {
-                    std::sync::Arc::new(notices())
-                })
-                .clone()
-        });
-        for notice in notices.iter() {
-            let heading = wrapped(ui, title(notice.kind));
-            egui::CollapsingHeader::new(heading).id_salt(("notice", notice.kind)).show(ui, |ui| {
-                if matches!(notice.kind, Kind::Sources { of: "ffmpeg" }) {
-                    widgets::link(
-                        ui,
-                        fl!("ffmpeg-sources"),
-                        format!(
-                            "{}/releases/tag/v{}",
-                            tgradish_core::REPOSITORY,
-                            env!("CARGO_PKG_VERSION")
-                        ),
-                    );
-                }
-                // Split the third-party crate list into one sub-header per licence.
-                let rule = format!("\n{}\n", "-".repeat(80));
-                let blocks: Vec<&str> = notice.text.split(rule.as_str()).collect();
-                if blocks.len() > 1 {
-                    widgets::note(ui, blocks[0].trim());
-                    for block in &blocks[1..] {
-                        let (head, body) = block.split_once("\n\n").unwrap_or((block, ""));
-                        let name = head.lines().next().unwrap_or("").trim_end_matches(", used by:");
-                        let title = wrapped(ui, licence_title(name, head));
-                        egui::CollapsingHeader::new(title).id_salt(("crates", *block)).show(
+}
+
+/// The collapsible licence notices.
+fn licences(ui: &mut egui::Ui) {
+    // read once, and kept in egui's memory as long as the GUI runs,
+    // under a key of About's alone
+    let notices = ui.ctx().memory_mut(|memory| {
+        memory
+            .data
+            .get_temp_mut_or_insert_with(
+                egui::Id::new("notices"),
+                || std::sync::Arc::new(notices()),
+            )
+            .clone()
+    });
+    for notice in notices.iter() {
+        let heading = wrapped(ui, title(notice.kind));
+        egui::CollapsingHeader::new(heading).id_salt(("notice", notice.kind)).show(ui, |ui| {
+            if matches!(notice.kind, Kind::Sources { of: "ffmpeg" }) {
+                widgets::link(
+                    ui,
+                    fl!("ffmpeg-sources"),
+                    format!(
+                        "{}/releases/tag/v{}",
+                        tgradish_core::REPOSITORY,
+                        env!("CARGO_PKG_VERSION")
+                    ),
+                );
+            }
+            // Split the third-party crate list into one sub-header per licence.
+            let rule = format!("\n{}\n", "-".repeat(80));
+            let blocks: Vec<&str> = notice.text.split(rule.as_str()).collect();
+            if blocks.len() > 1 {
+                widgets::note(ui, blocks[0].trim());
+                for block in &blocks[1..] {
+                    let (head, body) = block.split_once("\n\n").unwrap_or((block, ""));
+                    let name = head.lines().next().unwrap_or("").trim_end_matches(", used by:");
+                    let title = wrapped(ui, licence_title(name, head));
+                    egui::CollapsingHeader::new(title).id_salt(("crates", *block)).show(ui, |ui| {
+                        widgets::note(
                             ui,
-                            |ui| {
-                                widgets::note(
-                                    ui,
-                                    head.lines()
-                                        .skip(1)
-                                        .map(str::trim)
-                                        .collect::<Vec<_>>()
-                                        .join(", "),
-                                );
-                                text_with_links(ui, body.trim());
-                            },
+                            head.lines().skip(1).map(str::trim).collect::<Vec<_>>().join(", "),
                         );
-                    }
-                } else {
-                    text_with_links(ui, notice.text.trim());
+                        text_with_links(ui, body.trim());
+                    });
                 }
-            });
-        }
-    });
+            } else {
+                text_with_links(ui, notice.text.trim());
+            }
+        });
+    }
 }
 
 /// Wraps a [`egui::CollapsingHeader`] title to the available width beside the

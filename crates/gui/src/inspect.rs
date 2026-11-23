@@ -16,7 +16,7 @@ use crate::fonts::drawable_in;
 use crate::jobs::{self, Problem};
 use crate::l10n::fl;
 use crate::theme;
-use crate::widgets::{self, gauge, label, note, problems};
+use crate::widgets::{self, gauge, note, problems};
 
 pub(crate) enum Found {
     Webm { info: Box<WebmInfo>, target: Target },
@@ -76,6 +76,19 @@ fn room_id() -> egui::Id {
 /// The room [`grid`] gives what a row says.
 fn room(ui: &egui::Ui) -> f32 {
     ui.data(|data| data.get_temp(room_id())).unwrap_or(BUDGET)
+}
+
+/// A row's name, with `hint` on hover where there is one, wrapping where it
+/// is wider than the column of names, which would leave less room than
+/// [`grid`] gave what the row says.
+fn label(ui: &mut egui::Ui, text: &str, hint: &str) {
+    ui.scope(|ui| {
+        ui.set_max_width(NAMES);
+        let label = ui.add(egui::Label::new(text).wrap());
+        if !hint.is_empty() {
+            label.on_hover_text(hint);
+        }
+    });
 }
 
 /// A row of how much of a limit something uses: its bar narrower, its
@@ -292,12 +305,6 @@ fn animation(ui: &mut egui::Ui, stats: &Stats) {
     });
 }
 
-/// The height of what is around what was found in the dialog: its title
-/// and buttons, its margins and the room kept around it in the window; and
-/// the least what was found is given, however short the window.
-const CHROME: f32 = 150.0;
-const LEAST_ROOM: f32 = 120.0;
-
 impl App {
     /// What an inspected sticker holds, in a dialog, while there is one.
     pub(crate) fn inspection_dialog(&mut self, ctx: &egui::Context) {
@@ -319,8 +326,7 @@ impl App {
             close = widgets::dialog_title(ui, title);
             ui.add_space(4.0);
             // the dialog fits the window, what was found scrolling within
-            let room = (ctx.content_rect().height() - CHROME).max(LEAST_ROOM);
-            widgets::scrolled(ui, egui::ScrollArea::vertical().max_height(room), |ui| {
+            widgets::dialog_body(ui, egui::ScrollArea::vertical(), |ui| {
                 show(ui, inspection);
             });
             widgets::dialog_buttons(ui, |ui| {

@@ -146,9 +146,10 @@ struct Typed {
     of: Option<Option<PathBuf>>,
 }
 
-/// Draws a path text field bound to `setting`. Updates `setting` whenever
-/// `problem` returns `None` (an empty field clears `setting` to `None`), and
-/// returns `(validation_error, setting_changed)`.
+/// Draws a path text field bound to `setting`, leaving room beside it for
+/// [`choose`]. Updates `setting` whenever `problem` returns `None` (an empty
+/// field clears `setting` to `None`), and returns `(validation_error,
+/// setting_changed)`.
 fn path_field(
     ui: &mut egui::Ui,
     typed: &mut Typed,
@@ -160,7 +161,10 @@ fn path_field(
         typed.text = setting.as_ref().map(|path| path.display().to_string()).unwrap_or_default();
         typed.of = Some(setting.clone());
     }
-    let edit = widgets::text_field(&mut typed.text).hint_text(placeholder).desired_width(280.0);
+    let padding = 2.0 * ui.spacing().button_padding.x;
+    let beside = widgets::text_width(ui, &fl!("choose"), padding) + ui.spacing().item_spacing.x;
+    let width = (ui.available_width() - beside).min(280.0);
+    let edit = widgets::text_field(&mut typed.text).hint_text(placeholder).desired_width(width);
     let field = ui.add(edit);
     let trimmed = typed.text.trim();
     let path = (!trimmed.is_empty()).then(|| PathBuf::from(trimmed));
@@ -172,6 +176,12 @@ fn path_field(
         changed = true;
     }
     (wrong, changed)
+}
+
+/// Draws the button beside a [`path_field`] that picks the path from the
+/// system's file dialog, returning `true` when clicked.
+fn choose(ui: &mut egui::Ui) -> bool {
+    ui.button(fl!("choose")).clicked()
 }
 
 /// Validates an `ffmpeg` path: must exist on disk unless it is a bare command
@@ -295,9 +305,12 @@ const HELD: f64 = 1.5;
 /// Duration in seconds of the ease-back animation to the window centre.
 const RETURNING: f64 = 0.15;
 
-/// Maximum height of the scrollable settings area inside the dialog.
+/// Maximum height of the scrollable settings area inside the dialog: room
+/// to spare around it in a tall window, and as much as the dialog fits in
+/// a short one.
 fn settings_room(ctx: &egui::Context) -> f32 {
-    (ctx.content_rect().height() - 210.0).max(200.0)
+    let spared = (ctx.content_rect().height() - 210.0).max(200.0);
+    spared.min(widgets::dialog_room(ctx, egui::Id::new("settings")))
 }
 
 /// Minimum margin from the top and bottom edges of the scroll viewport to keep
@@ -411,13 +424,19 @@ pub(crate) fn show(
     let modal = modal.show(ctx, |ui| {
         close = widgets::dialog_title(ui, widgets::title_text(ui, fl!("settings")));
         // Shown shorter while the dialog is pinned low.
-        let mut area = egui::ScrollArea::vertical().max_height(room);
+        let mut area = egui::ScrollArea::vertical();
         if let Some(scroll) = scroll {
             area = area.vertical_scroll_offset(scroll);
         }
-        let scrolled = widgets::scrolled(ui, area, |ui| {
+        // In a short window, the save status scrolls at the end of the
+        // settings, where it leaves them more room.
+        let short = ctx.content_rect().height() < SHORT;
+        let scrolled = widgets::dialog_body_within(ui, area, room, |ui| {
             widgets::settings_spacing(ui);
             sections(ui, dialog, config, ffmpeg_given, presets);
+            if short {
+                footer(ui, &dialog.saved);
+            }
         });
         dialog.scrolled = Scrolled {
             offset: scrolled.state.offset.y,
@@ -426,25 +445,17 @@ pub(crate) fn show(
             // Adjusted to be relative to `modal.response.rect.top()` below.
             top: scrolled.inner_rect.top(),
         };
-        // Show the save status footer across the full width of the dialog.
-        ui.add_space(4.0);
-        match &dialog.saved {
-            Some(Ok(saved)) => widgets::note(ui, saved),
-            Some(Err(error)) => {
-                ui.colored_label(theme::bad(ui.visuals()), error);
-            }
-            None => widgets::note(ui, fl!("settings-note")),
+        if !short {
+            footer(ui, &dialog.saved);
         }
         widgets::dialog_buttons(ui, |ui| {
             close |= ui.add(widgets::dialog_button(fl!("close"))).clicked();
             // Put Reset to defaults at the left, apart from the buttons that
             // close.
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                let reset = ui.add(widgets::dialog_button(fl!("reset-settings")));
-                if reset.on_hover_text(fl!("reset-settings", "hint")).clicked() {
-                    dialog.reset = true;
-                }
-            });
+            let reset = widgets::dialog_button_apart(ui, &fl!("reset-settings"));
+            if reset.on_hover_text(fl!("reset-settings", "hint")).clicked() {
+                dialog.reset = true;
+            }
         });
     });
     dialog.drawn = Drawn(modal.response.rect);
@@ -492,6 +503,23 @@ pub(crate) fn show(
     }
 }
 
+/// Window height under which [`footer`] scrolls with the settings, as the
+/// least window height is from 1.4 times the scale.
+const SHORT: f32 = 400.0;
+
+/// Draws the save status across the full width of the dialog, from the
+/// last write of `config.toml` (`saved`), or what saving is like.
+fn footer(ui: &mut egui::Ui, saved: &Option<Result<String, String>>) {
+    ui.add_space(4.0);
+    match saved {
+        Some(Ok(saved)) => widgets::note(ui, saved),
+        Some(Err(error)) => {
+            ui.colored_label(theme::bad(ui.visuals()), error);
+        }
+        None => widgets::note(ui, fl!("settings-note")),
+    }
+}
+
 fn sections(
     ui: &mut egui::Ui,
     dialog: &mut SettingsDialog,
@@ -519,7 +547,7 @@ fn sections(
                 let typed = &mut dialog.ffmpeg_typed;
                 let (wrong, _) =
                     path_field(ui, typed, &mut ffmpeg.path, placeholder, ffmpeg_problem);
-                if ui.button(fl!("choose")).clicked() {
+                if choose(ui) {
                     dialog.pick = Some(crate::files::Pick::Ffmpeg);
                 }
                 wrong
@@ -586,7 +614,7 @@ fn sections(
                     if changed {
                         dialog.folder_unchosen = output_dir.is_none();
                     }
-                    if ui.button(fl!("choose")).clicked() {
+                    if choose(ui) {
                         dialog.pick = Some(crate::files::Pick::OutputDir);
                     }
                     wrong

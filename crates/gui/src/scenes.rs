@@ -308,15 +308,20 @@ fn one_row<T: PartialEq>(a: &[T], b: &[T]) -> bool {
     shared.is_some_and(|up| up < ONE_ROW && b.iter().position(|c| *c == a[up]) < Some(ONE_ROW))
 }
 
-/// Every dialog fits a window as short as the GUI goes, and one shorter
-/// still, as a larger scale makes it: what closes it in sight, its frame
-/// within the window side to side, what it holds within the frame's
-/// margins, and no bar's words cut short. Inspect, About and Save preset
-/// fit so a window as narrow as the narrowest at twice the scale, and at
-/// three times; Settings, Keys and Manage presets have rows that don't
-/// wrap, and are left out at those widths.
+/// Every dialog fits a window as small as the GUI goes at each scale up to
+/// three times, which makes the window that much smaller: its frame
+/// within the window, what it holds within the frame's margins side to
+/// side, its buttons and the cross that closes it in sight, what doesn't
+/// fit scrolling, and no bar's words cut short. Run with
+/// `TGRADISH_LANG=pseudo` to hold them to longer words too, or another
+/// language's tag to its words.
 #[test]
-fn keeps_what_closes_each_dialog_in_a_short_window() {
+fn holds_every_dialog_within_the_window_at_every_scale() {
+    // in British English unless asked otherwise, as the GUI's language is
+    // every test's
+    if std::env::var_os("TGRADISH_LANG").is_some() {
+        crate::l10n::choose(None);
+    }
     // each dialog's scene, and the id of its area
     let all = [
         ("inspect", "inspect"),
@@ -326,28 +331,24 @@ fn keeps_what_closes_each_dialog_in_a_short_window() {
         ("manage-presets", "manage presets"),
         ("save-preset", "save preset"),
     ];
-    let narrow = [all[0], all[2], all[5]];
-    let sizes = [
-        (egui::vec2(crate::MIN_WIDTH, crate::MIN_HEIGHT), &all[..]),
-        (egui::vec2(crate::MIN_WIDTH, crate::MIN_HEIGHT / 1.5), &all[..]),
-        (egui::vec2(crate::MIN_WIDTH / 2.0, crate::MIN_HEIGHT), &narrow[..]),
-        (egui::vec2(crate::MIN_WIDTH / 3.0, crate::MIN_HEIGHT), &narrow[..]),
-    ];
+    let scales = [1.0, 1.5, 2.0, 2.5, 3.0];
+    let buttons =
+        [fl!("close"), fl!("cancel"), fl!("save"), fl!("reset-settings"), fl!("inspect-another")];
     let mut seen = Vec::new();
     let mut hidden = Vec::new();
-    for (size, dialogs) in sizes {
+    for scale in scales {
+        let size = egui::vec2(crate::MIN_WIDTH, crate::MIN_HEIGHT) / scale;
         walk_in(size, |harness, scene| {
-            let Some(&(_, id)) = dialogs.iter().find(|(name, _)| *name == scene) else { return };
+            let Some(&(_, id)) = all.iter().find(|(name, _)| *name == scene) else { return };
             seen.push(scene.to_owned());
             let screen = harness.ctx.content_rect();
             let within = |from: f64, to: f64, range: egui::Rangef| {
                 from >= f64::from(range.min) - 0.5 && to <= f64::from(range.max) + 0.5
             };
-            let closes = [fl!("close"), fl!("cancel")];
             let mut closer = None;
             for button in harness.query_all(by().role(egui::accesskit::Role::Button)) {
                 let node = button.accesskit_node();
-                let Some(label) = node.label().filter(|label| closes.contains(label)) else {
+                let Some(label) = node.label().filter(|label| buttons.contains(label)) else {
                     continue;
                 };
                 let rect = node.bounding_box().expect("drawn");
@@ -356,13 +357,17 @@ fn keeps_what_closes_each_dialog_in_a_short_window() {
                 {
                     hidden.push(format!("{size:?}, {scene}: {label} at {rect:?}"));
                 }
-                closer = Some(button);
+                if [&buttons[0], &buttons[1]].contains(&&label) {
+                    closer = Some(button);
+                }
             }
             let closer = closer.unwrap_or_else(|| panic!("{size:?}, {scene}: nothing closes it"));
-            // the frame in the window, side to side
+            // the frame in the window
             let frame = harness.ctx.memory(|memory| memory.area_rect(egui::Id::new(id)));
             let frame = frame.expect("shown");
-            if !within(frame.min.x.into(), frame.max.x.into(), screen.x_range()) {
+            if !within(frame.min.x.into(), frame.max.x.into(), screen.x_range())
+                || !within(frame.min.y.into(), frame.max.y.into(), screen.y_range())
+            {
                 hidden.push(format!("{size:?}, {scene}: its frame at {frame:?}"));
             }
             // what it holds, the area's own under the window's, within the
@@ -399,8 +404,7 @@ fn keeps_what_closes_each_dialog_in_a_short_window() {
             }
         });
     }
-    let expected: usize = sizes.iter().map(|(_, dialogs)| dialogs.len()).sum();
-    assert_eq!(seen.len(), expected, "{seen:?}");
+    assert_eq!(seen.len(), all.len() * scales.len(), "{seen:?}");
     assert!(hidden.is_empty(), "out of sight:\n{}", hidden.join("\n"));
 }
 

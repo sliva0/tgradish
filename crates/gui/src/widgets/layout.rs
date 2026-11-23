@@ -235,14 +235,6 @@ pub(crate) fn named(response: egui::Response, name: &str) -> egui::Response {
     response
 }
 
-/// Draws a grid label with an optional hover tooltip.
-pub(crate) fn label(ui: &mut egui::Ui, text: &str, hint: &str) {
-    let label = ui.label(text);
-    if !hint.is_empty() {
-        label.on_hover_text(hint);
-    }
-}
-
 /// Styles and adds `button` as the primary action button: accent-filled with
 /// contrasting medium-weight text (via [`medium`]) when `enabled`, or weak
 /// disabled styling otherwise.
@@ -273,9 +265,14 @@ pub(crate) fn text_field(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> 
 /// Width of the left-hand label column in settings rows.
 pub(crate) const LABELS: f32 = 150.0;
 
+/// Least width a [`row`] in a dialog leaves its controls beside its label:
+/// where there is less, as at a large scale, the label goes over them.
+const LEAST_BESIDE: f32 = 220.0;
+
 /// Draws a top-aligned settings row with a left label (and hover `hint`) and
 /// right-hand `contents`. When `allowed` is `Err(why)`, the row is disabled and
-/// hovering the label shows `why`.
+/// hovering the label shows `why`. In a dialog too narrow for the controls
+/// beside the label, the label goes over them.
 pub(crate) fn row<R>(
     ui: &mut egui::Ui,
     text: &str,
@@ -283,20 +280,11 @@ pub(crate) fn row<R>(
     allowed: Result<(), &str>,
     contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
+    let beside = LABELS + ui.spacing().item_spacing.x + LEAST_BESIDE;
+    let over = super::dialog::in_dialog(ui) && ui.available_width() < beside;
     let inner = ui
         .add_enabled_ui(allowed.is_ok(), |ui| {
-            ui.horizontal_top(|ui| {
-                // Vertically centre the label against the first line of controls.
-                let line = ui.spacing().interact_size.y;
-                let layout = egui::Layout::top_down(egui::Align::Min);
-                let label = ui
-                    .allocate_ui_with_layout(vec2(LABELS, line), layout, |ui| {
-                        ui.set_width(LABELS);
-                        let text_height = ui.text_style_height(&egui::TextStyle::Body);
-                        ui.add_space(((line - text_height) / 2.0).floor().max(0.0));
-                        ui.add(egui::Label::new(text).wrap())
-                    })
-                    .inner;
+            let labelled = |ui: &mut egui::Ui, label: egui::Response| {
                 let labelled = label.id;
                 match allowed {
                     Err(why) => {
@@ -318,6 +306,28 @@ pub(crate) fn row<R>(
                     labels.pop();
                 });
                 inner
+            };
+            if over {
+                return ui
+                    .vertical(|ui| {
+                        let label = ui.add(egui::Label::new(text).wrap());
+                        labelled(ui, label)
+                    })
+                    .inner;
+            }
+            ui.horizontal_top(|ui| {
+                // Vertically centre the label against the first line of controls.
+                let line = ui.spacing().interact_size.y;
+                let layout = egui::Layout::top_down(egui::Align::Min);
+                let label = ui
+                    .allocate_ui_with_layout(vec2(LABELS, line), layout, |ui| {
+                        ui.set_width(LABELS);
+                        let text_height = ui.text_style_height(&egui::TextStyle::Body);
+                        ui.add_space(((line - text_height) / 2.0).floor().max(0.0));
+                        ui.add(egui::Label::new(text).wrap())
+                    })
+                    .inner;
+                labelled(ui, label)
             })
             .inner
         })
