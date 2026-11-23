@@ -398,8 +398,8 @@ impl App {
         let mut convert = take(Command::Convert);
         // a number being typed is only taken as it is done with: taken this
         // frame, as its field is drawn, and converted with it the next
-        if (convert || convert_all) && widgets::typing_number(ctx) {
-            widgets::take_typed_number(ctx);
+        if (convert || convert_all) && widgets::number_focused(ctx) {
+            widgets::commit_draft_keeping_focus(ctx);
             self.keyed.waiting = Some((convert, convert_all));
             (convert, convert_all) = (false, false);
         }

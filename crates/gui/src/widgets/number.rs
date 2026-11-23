@@ -10,7 +10,7 @@ use crate::theme;
 
 /// Scopes `add` under an ID derived from `(part, file)` and records `file` as
 /// the active file being drawn so per-widget state (such as in-progress number
-/// edits tracked by [`typed_number`]) stays bound to that file when switching
+/// edits tracked by [`draft_file`]) stays bound to that file when switching
 /// selection.
 pub(crate) fn of_file<R>(
     ui: &mut egui::Ui,
@@ -175,8 +175,8 @@ struct Typing {
 }
 
 /// egui temp-data keys: the number field being typed in (with its file), the
-/// pass in which [`take_typed_number`] asks it to commit, and the file being
-/// drawn (set by [`of_file`]).
+/// pass in which [`commit_draft_keeping_focus`] asks it to commit, and the
+/// file being drawn (set by [`of_file`]).
 const TYPED: &str = "number typed";
 const TAKE_TYPED: &str = "take number typed";
 const DRAWING: &str = "file drawn";
@@ -192,16 +192,17 @@ pub(crate) struct Typed {
     pub(crate) file: Option<u64>,
 }
 
-/// Returns `true` if a [`Number`] field currently has keyboard focus for typing.
-pub(crate) fn typing_number(ctx: &egui::Context) -> bool {
+/// Returns `true` if a [`Number`] field holds keyboard focus for typing, with
+/// a draft in it or not.
+pub(crate) fn number_focused(ctx: &egui::Context) -> bool {
     let typed = ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)));
     typed.is_some_and(|typed| ctx.memory(|memory| memory.has_focus(typed.field)))
 }
 
-/// Returns the file ID owning an uncommitted [`Number`] text edit, or `None` if
-/// no edit is pending (or the field has been off-screen for more than two
-/// passes).
-pub(crate) fn typed_number(ctx: &egui::Context) -> Option<u64> {
+/// Returns the file whose settings a [`Number`] field's uncommitted draft (text
+/// typed but not yet committed) belongs to, or `None` if there is no draft (or
+/// its field has been off-screen for more than two passes).
+pub(crate) fn draft_file(ctx: &egui::Context) -> Option<u64> {
     draft(ctx).and_then(|typed| typed.file)
 }
 
@@ -217,9 +218,9 @@ fn draft(ctx: &egui::Context) -> Option<Typed> {
     (typing.text != typing.written).then_some(typed)
 }
 
-/// Returns `true` if a number field committed or rejected typed input during
-/// the current pass.
-fn number_taken_now(ctx: &egui::Context) -> bool {
+/// Returns `true` if a number field's draft was committed during the current
+/// pass, or rejected as not a number.
+fn draft_committed_now(ctx: &egui::Context) -> bool {
     let taken = ctx.data(|data| data.get_temp::<u64>(egui::Id::new(TAKEN)));
     taken == Some(ctx.cumulative_pass_nr())
 }
@@ -228,7 +229,7 @@ fn number_taken_now(ctx: &egui::Context) -> bool {
 /// this pass, allowing another control clicked at the same time to let the
 /// typed edit commit as its own undo step first.
 fn number_typed_now(ctx: &egui::Context) -> bool {
-    draft(ctx).is_some() || number_taken_now(ctx)
+    draft(ctx).is_some() || draft_committed_now(ctx)
 }
 
 /// Tells history `said` of the edit of the file being drawn (set by
@@ -240,18 +241,18 @@ pub(crate) fn tell_history(ctx: &egui::Context, said: fn(&egui::Context, u64)) {
     }
 }
 
-/// Surrenders focus from any active number field so its typed value is committed
-/// when drawn this frame.
-pub(crate) fn finish_typed_number(ctx: &egui::Context) {
+/// Commits the draft of the number field typed in, as Enter or Tab would: the
+/// field loses focus and commits its draft as it is drawn this frame.
+pub(crate) fn commit_draft(ctx: &egui::Context) {
     let typed = ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)));
     if let Some(typed) = typed {
         ctx.memory_mut(|memory| memory.surrender_focus(typed.field));
     }
 }
 
-/// Discards any uncommitted text in the active number field without applying it
-/// (used when its file is removed).
-pub(crate) fn forget_typed_number(ctx: &egui::Context) {
+/// Discards the draft of the number field typed in without committing it, and
+/// takes the focus from the field (used when its file is gone).
+pub(crate) fn discard_draft(ctx: &egui::Context) {
     let typed = ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)));
     if let Some(typed) = typed {
         ctx.memory_mut(|memory| memory.surrender_focus(typed.field));
@@ -259,10 +260,10 @@ pub(crate) fn forget_typed_number(ctx: &egui::Context) {
     }
 }
 
-/// Requests that the currently focused number field commit its typed text this
-/// frame (like Enter) while keeping keyboard focus, for shortcuts that
-/// immediately use the updated value.
-pub(crate) fn take_typed_number(ctx: &egui::Context) {
+/// Commits the draft of the focused number field as it is drawn this frame,
+/// as Enter would, while the field keeps keyboard focus: for shortcuts that
+/// use the value at once.
+pub(crate) fn commit_draft_keeping_focus(ctx: &egui::Context) {
     let pass = ctx.cumulative_pass_nr();
     ctx.data_mut(|data| data.insert_temp(egui::Id::new(TAKE_TYPED), pass));
 }
@@ -489,7 +490,7 @@ impl<'a> Number<'a> {
     /// if nothing changed so an enclosing dialog can close).
     fn put_back(&mut self, ui: &egui::Ui, typing: &Typing, value: f64) -> f64 {
         if typing.text != typing.written || value != typing.start {
-            escape_taken(ui);
+            consume_escape(ui);
         }
         self.set(typing.start);
         typing.start
@@ -564,9 +565,9 @@ fn notches(ui: &egui::Ui) -> (f32, f32) {
     })
 }
 
-/// Consumes the Escape key press for this frame so an enclosing dialog or view
-/// does not also react to it after a field reverted its edit.
-pub(crate) fn escape_taken(ui: &egui::Ui) {
+/// Consumes this frame's Escape key press, once a field has used it to discard
+/// its edit, so that an enclosing dialog or view does not react to it too.
+pub(crate) fn consume_escape(ui: &egui::Ui) {
     ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
 }
 
@@ -977,7 +978,7 @@ pub(crate) fn stepper(
             // deferred step fired.
             let clicked = since.is_none_or(|(_, taken)| taken == 0) && response.clicked();
             if clicked && typed {
-                finish_typed_number(ui.ctx());
+                commit_draft(ui.ctx());
                 ui.data_mut(|data| data.insert_temp(pending, pass));
                 ui.ctx().request_repaint();
             }

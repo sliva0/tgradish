@@ -59,16 +59,16 @@ impl App {
         // being deselected or removed, draw it for one more frame after
         // surrendering focus so its field commits the typed value to the right
         // item before switching.
-        let typed = widgets::typed_number(&ctx);
+        let typed = widgets::draft_file(&ctx);
         if typed.is_some_and(|file| self.item(file).is_none()) {
-            widgets::forget_typed_number(&ctx);
+            widgets::discard_draft(&ctx);
         }
         let held = typed.filter(|&file| {
             let leaving = Some(file) != selected || self.removing.contains(&file);
             leaving && Some(file) == self.drawn && self.item(file).is_some()
         });
         if held.is_some() {
-            widgets::finish_typed_number(&ctx);
+            widgets::commit_draft(&ctx);
         }
         self.drawn = held.or(selected);
         let Some(id) = self.drawn else {

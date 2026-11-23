@@ -355,7 +355,7 @@ impl App {
                         if ui.add_sized(vec2(170.0, line), name).lost_focus() {
                             if escaped {
                                 row.typed_name.clone_from(&row.name);
-                                widgets::escape_taken(ui);
+                                widgets::consume_escape(ui);
                             } else if row.typed_name.trim_end() != row.name {
                                 changes.push(Change::Rename(row.id));
                             }
@@ -371,7 +371,7 @@ impl App {
                                 if ui.add_sized(vec2(300.0, line), field).lost_focus() {
                                     if escaped {
                                         row.typed_description.clone_from(&row.description);
-                                        widgets::escape_taken(ui);
+                                        widgets::consume_escape(ui);
                                     } else if row.typed_description.trim() != row.description {
                                         changes.push(Change::Describe(row.id));
                                     }

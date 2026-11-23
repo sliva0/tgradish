@@ -1105,9 +1105,9 @@ impl eframe::App for App {
         // a number being typed is taken as the window closes, as its field
         // is drawn this last frame, so that it is saved with the rest
         if ctx.input(|input| input.viewport().close_requested()) {
-            widgets::finish_typed_number(&ctx);
+            widgets::commit_draft(&ctx);
         }
-        self.typed = widgets::typed_number(&ctx);
+        self.typed = widgets::draft_file(&ctx);
         if !self.removing.is_empty() && self.typed.is_none_or(|file| !self.removing.contains(&file))
         {
             let removing = std::mem::take(&mut self.removing);
