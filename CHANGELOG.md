@@ -25,6 +25,7 @@ All notable changes to tgradish, newest first. This file follows [Keep a Changel
 ### Fixed
 
 - Converting to WebP no longer fails when the preset sets an out-of-range value that only WebM uses, such as `tempo = 50.0`. Only the options WebP uses are checked.
+- The command line in the GUI's Commands section no longer includes `--sheet-frames` while the file isn't read as a sprite sheet, which the CLI refused.
 - `tgradish inspect` now uses the `[ffmpeg]` setting from `config.toml` when inspecting videos, matching `convert`.
 - `tgradish watch` no longer permanently skips an input when an earlier input wrote the same output path before being deleted (for example, `cat.mp4` after `cat.png`). With `--overwrite`, the existing output is now replaced as expected.
 - Stickers no longer come out blank and pass checks when snapping to the pixel scale or a square crop removes thin lines or lone pixels. Conversion now reports that the art is empty, and size fitting no longer reduces art to nothing.

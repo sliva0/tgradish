@@ -133,35 +133,6 @@ impl Choices {
         presets.tgs(self.preset_name(Format::Tgs, config)).map_err(|err| err.to_string())
     }
 
-    /// The choices every format shares, as WebM options: what is made,
-    /// and what of the input is read and used.
-    pub(crate) fn shared_webm(&self) -> Options {
-        Options {
-            target: Some(self.target),
-            tag: self.tag.clone(),
-            show_layers: self.show_layers.clone(),
-            hide_layers: self.hide_layers.clone(),
-            crop: self.crop,
-            start: self.start,
-            length: self.length,
-            ..Options::default()
-        }
-    }
-
-    /// The same, as `.tgs` options.
-    pub(crate) fn shared_tgs(&self) -> tgs::Options {
-        tgs::Options {
-            target: Some(self.target),
-            tag: self.tag.clone(),
-            show_layers: self.show_layers.clone(),
-            hide_layers: self.hide_layers.clone(),
-            crop: self.crop,
-            start: self.start,
-            length: self.length,
-            ..tgs::Options::default()
-        }
-    }
-
     /// The item's values for `format`, as a layer over its preset's: its
     /// drafts, what every format shares, and the GUI's own rules for an
     /// integer scale, as values. Its target is always set, so recipes
@@ -338,23 +309,6 @@ impl From<FormatOptions> for Recipe {
             FormatOptions::Webp(options) => Recipe::Webp(options),
         }
     }
-}
-
-/// `options` without the values of settings that are hidden or greyed
-/// out, as `effective`, everything a conversion gets, shows them: they are
-/// kept for when they show again, but have no say until then. What has no
-/// say by how fitting uses it core says; the GUI adds its own rows'.
-pub(crate) fn shown(options: Options, effective: &Options) -> Options {
-    let mut options = tgradish_core::webm::in_effect(options, effective);
-    // a scale of whole multiples, which keeps the whole picture
-    if effective.scaling != Some(Scaling::Integer) {
-        options.integer_scale = None;
-    } else if effective.integer_scale.is_some()
-        && matches!(effective.resize, Some(Resize::Crop | Resize::Stretch))
-    {
-        options.resize = None;
-    }
-    options
 }
 
 /// An Aseprite file's tags, layers and frame durations.

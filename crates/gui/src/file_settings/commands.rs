@@ -5,10 +5,10 @@
 use crate::config::Config;
 use eframe::egui;
 use tgradish_core::ffmpeg::FfmpegChoice;
-use tgradish_core::options::{IntegerScale, Scaling};
+use tgradish_core::options::Scaling;
 use tgradish_core::picture;
 use tgradish_core::presets::Format;
-use tgradish_core::webm::Options;
+use tgradish_core::resolve::Origin;
 
 use super::Context;
 use crate::item::{Item, Kind};
@@ -124,27 +124,6 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
     }
     let choices = &item.choices;
     let (presets, config) = (context.presets, context.config);
-    // what is set over the preset, as far as it has a say
-    let base = choices.webm_base(presets, config).unwrap_or_default();
-    let merged = base.clone().merged(&choices.webm);
-    let effective = crate::item::shown(merged.clone(), &merged);
-    let mut webm = crate::item::shown(choices.webm.clone(), &merged);
-    // the preset's values the GUI sets aside, as their settings are
-    // greyed out, which the command line would otherwise take up again
-    if base.lossless == Some(true) && effective.lossless != Some(true) {
-        webm.lossless = Some(false);
-    }
-    if base.resize.is_some() && effective.resize.is_none() {
-        webm.resize = Some(picture::default_resize(choices.target));
-    }
-    // and an integer scale, which no value sets aside but nothing does
-    let no_scale = base.integer_scale.is_some() && effective.integer_scale.is_none();
-    let flags = |mut options: Options| {
-        if no_scale {
-            options.integer_scale = Some(IntegerScale::NONE);
-        }
-        tgradish_core::options::flags(&options)
-    };
     // static stickers take their picture settings from the preset too;
     // named unless it is the format's own, as the GUI's settings may
     // choose another than the config file
@@ -152,18 +131,20 @@ fn command_line(item: &Item, context: &Context) -> Vec<String> {
     if choices.preset.is_some() || preset != item.format.default_preset() {
         args.extend(["--preset".into(), preset.to_owned()]);
     }
-    args.extend(match item.format {
-        Format::Webm => flags(webm.merged(&choices.shared_webm())),
-        Format::Webp => {
-            // a picture is one frame, where its start is
-            let picture = Options::from(tgradish_core::webp::Options::from(&webm));
-            let shared = Options { start: choices.frame, length: None, ..choices.shared_webm() };
-            flags(picture.merged(&shared))
-        }
-        Format::Tgs => {
-            tgradish_core::options::flags(&choices.tgs.clone().merged(&choices.shared_tgs()))
-        }
-    });
+    // the item's own values, as the GUI layers them over the preset's, but
+    // for those set aside, whose settings are greyed out; the preset's it
+    // sets aside the command line sets aside too
+    let layer = choices.layer(item.format, presets, config);
+    let resolved = choices.resolved(item.format, presets, config);
+    let aside = resolved.iter().flat_map(|resolved| &resolved.set_aside);
+    let mut options = match serde_json::to_value(&layer) {
+        Ok(serde_json::Value::Object(options)) => options,
+        _ => serde_json::Map::new(),
+    };
+    for aside in aside.filter(|aside| aside.set_by == Origin::Layer(0)) {
+        options.remove(aside.option);
+    }
+    args.extend(tgradish_core::options::flags(&options));
     args
 }
 
@@ -329,10 +310,14 @@ mod tests {
         item.choices.preset = Some("still".into());
         item.choices.webm.scaling = Some(Scaling::Integer);
         // fitting a bitrate greys out lossless, which the command line
-        // would take up from the preset and refuse
+        // sets aside from the preset too
         item.choices.webm.fit = Some(Fit::Auto);
         let line = command_line(&item, &context).join(" ");
-        assert!(line.contains("--preset still") && line.contains("--no-lossless"), "{line}");
+        assert!(line.contains("--preset still") && !line.contains("lossless"), "{line}");
+        // as it does the item's own
+        item.choices.webm.crf = Some(20);
+        let line = command_line(&item, &context).join(" ");
+        assert!(line.contains("--fit=auto") && !line.contains("--crf"), "{line}");
         // without integer scaling the preset's scale has no say, which the
         // command line is told by a scale of nothing
         item.choices.webm.scaling = Some(Scaling::Smooth);
@@ -355,6 +340,14 @@ mod tests {
         let line = command_line(&item, &context);
         assert!(line.contains(&"--encoder-options=".to_owned()), "{line:?}");
         assert!(line.join(" ").contains("--preset tuned"), "{line:?}");
+
+        // nor a sheet's frames while it isn't read as one, which the
+        // command line would refuse
+        let mut art = Item::new(3, vec!["sheet.png".into()], false, Target::Sticker);
+        art.format = Format::Tgs;
+        art.choices.tgs.sheet_frames = Some(3);
+        let line = command_line(&art, &context).join(" ");
+        assert!(line.contains("--format tgs") && !line.contains("--sheet-frames"), "{line}");
     }
 
     #[test]
