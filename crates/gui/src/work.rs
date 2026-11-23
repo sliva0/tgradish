@@ -201,24 +201,19 @@ impl App {
         let Some(id) = self.selected else { return };
         let Ok(backend) = backend else { return };
         let Some(item) = self.item_mut(id) else { return };
-        if item.format == Format::Tgs {
-            return;
-        }
-        let range = item.range().map(|(start, end)| (start, end - start));
-        // Rendered pixel-art clips already contain every frame at full resolution.
-        let Some(video) = item.video.ready().filter(|video| !video.complete) else { return };
-        let still = video.probe.still_image;
-        if !item.view.playing || still {
-            let time = if still { 0.0 } else { item.view.time };
-            let loaded = item.still.as_ref().is_some_and(|(at, _)| *at == time);
-            if !loaded && settled(ctx, ("still", id), (time, 0.0), 0.25) {
+        let Some(Detail { still, part }) = detail(item) else { return };
+        let Some(video) = item.video.ready() else { return };
+        if let Some(time) = still {
+            if !item.still.as_ref().is_some_and(|(at, _)| *at == time)
+                && settled(ctx, ("still", id), (time, 0.0), 0.25)
+            {
                 let task = video.load_still(ctx, backend.clone(), time);
                 item.still = Some((time, Load::Loading(task)));
             }
         } else {
             item.still = None;
         }
-        let Some(range) = range else { return };
+        let Some(range) = part else { return };
         if !item.part.as_ref().is_some_and(|(loaded, _)| *loaded == range)
             && settled(ctx, ("range", id), range, 0.4)
         {
@@ -331,6 +326,40 @@ impl App {
             }
         }
     }
+}
+
+/// The detail [`App::load_detail`] reads of the selected item's video once
+/// its playback and trim settle.
+pub(crate) struct Detail {
+    /// The time of the frame read at full resolution, while paused or for
+    /// a still picture.
+    pub(crate) still: Option<f64>,
+    /// The trimmed part, as `(start, length)`, read at full frame rate.
+    pub(crate) part: Option<(f64, f64)>,
+}
+
+/// What [`Detail`] `item` wants while selected, or `None` when it has
+/// none to read: a `.tgs`, a video not read yet, or a rendered pixel-art
+/// clip, which already has every frame at full resolution.
+pub(crate) fn detail(item: &Item) -> Option<Detail> {
+    if item.format == Format::Tgs {
+        return None;
+    }
+    let video = item.video.ready().filter(|video| !video.complete)?;
+    let picture = video.probe.still_image;
+    let still =
+        (!item.view.playing || picture).then_some(if picture { 0.0 } else { item.view.time });
+    let part = item.range().map(|(start, end)| (start, end - start));
+    Some(Detail { still, part })
+}
+
+/// Whether [`App::load_detail`] has read, or is reading, the detail `item`
+/// wants while selected.
+#[cfg(test)]
+pub(crate) fn detail_asked(item: &Item) -> bool {
+    let Some(Detail { still, part }) = detail(item) else { return true };
+    still.is_none_or(|time| item.still.as_ref().is_some_and(|(at, _)| *at == time))
+        && part.is_none_or(|range| item.part.as_ref().is_some_and(|(at, _)| *at == range))
 }
 
 /// Returns true if `value` (tracked under `key`) has remained unchanged for
@@ -667,17 +696,7 @@ mod tests {
         finish(&mut harness);
         assert_eq!(harness.state().items[0].input_clip().unwrap().width, 640);
         harness.state_mut().items[0].view.playing = false;
-        for _ in 0..500 {
-            harness.step();
-            if harness.state().items[0]
-                .still
-                .as_ref()
-                .is_some_and(|(_, still)| still.ready().is_some())
-            {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        finish(&mut harness);
         let (_, still) = harness.state().items[0].still.as_ref().expect("asked for");
         assert_eq!(still.ready().map(|clip| (clip.width, clip.height)), Some((1280, 720)));
     }
@@ -942,20 +961,10 @@ mod tests {
         finish(&mut harness);
         let item = &mut harness.state_mut().items[0];
         (item.view.playing, item.view.time) = (false, 0.45);
-        for _ in 0..500 {
-            harness.step();
-            let ready = |item: &Item| {
-                item.still.as_ref().and_then(|(_, still)| still.ready().map(|clip| clip.id))
-            };
-            if let Some(id) = ready(&harness.state().items[0]) {
-                harness.run_steps(2);
-                assert_eq!(harness.state().preview.screen.showing(), Some(id));
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        finish(&mut harness);
         let (_, still) = harness.state().items[0].still.as_ref().expect("asked for");
         let clip = still.ready().expect("read");
+        assert_eq!(harness.state().preview.screen.showing(), Some(clip.id));
         assert_eq!(clip.width, 1280);
         let pixel = &clip.frames[0][..4];
         assert!(pixel[0] > 200 && pixel[2] < 60, "the frame at 0.45 s is red, not {pixel:?}");
@@ -978,18 +987,6 @@ mod tests {
         let mut harness = harness(config);
         harness.state_mut().add(vec![photo]);
         finish(&mut harness);
-        for _ in 0..500 {
-            harness.step();
-            if harness.state().items[0]
-                .still
-                .as_ref()
-                .is_some_and(|(_, still)| still.ready().is_some())
-            {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        harness.run_steps(2);
         let (_, still) = harness.state().items[0].still.as_ref().expect("asked for");
         let clip = still.ready().expect("read");
         assert_eq!((clip.width, harness.state().preview.screen.showing()), (1280, Some(clip.id)));

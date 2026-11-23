@@ -173,18 +173,28 @@ pub(crate) const ANY: &str = "\u{1}";
 
 /// Steps the harness until all background loads, conversions, and file dialogs
 /// have been idle for two consecutive frames (work triggered by a click on one
-/// frame is only spawned at the start of the next frame).
+/// frame is only spawned at the start of the next frame). That takes in the
+/// selected video's full-resolution frame and part, which are only asked for
+/// once its playback has settled for a while.
 pub(crate) fn finish(harness: &mut Harness<App>) {
     let mut settled = false;
     for _ in 0..6000 {
         harness.step();
         let state = harness.state();
+        // read with no ffmpeg, the detail is never asked for
+        let reads = matches!(state.work.read_with, Some(Ok(_)));
+        fn detail<T, U>(load: &Option<(T, crate::media::Load<U>)>) -> bool {
+            load.as_ref().is_some_and(|(_, load)| load.is_loading())
+        }
         let reading = state.items.iter().any(|item| {
             item.sniffed.is_loading()
                 || item.video.is_loading()
                 || item.art.is_loading()
                 || item.result_clip.is_loading()
                 || item.earlier.is_some()
+                || detail(&item.still)
+                || detail(&item.part)
+                || (reads && state.selected == Some(item.id) && !crate::work::detail_asked(item))
         });
         let idle = state.work.queue.is_empty() && state.picker.picking.is_none();
         if !reading && idle && state.items.iter().all(|item| item.job.is_none()) {
