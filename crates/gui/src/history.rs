@@ -1102,7 +1102,204 @@ mod tests {
             let item = harness.state().item(shown).unwrap();
             assert_eq!(item.choices.crop, None, "put back: {put_back}");
             assert!(!item.history.can_undo(), "put back: {put_back}");
+            // and the one dragged keeps what the drag made of it so far,
+            // as a step, once it is back where Delete took it
+            if !put_back {
+                undo(&mut harness);
+            }
+            let item = harness.state().item(dragged).unwrap();
+            assert!(item.choices.crop.is_some(), "put back: {put_back}");
+            assert_eq!(item.history.undo.len(), 1, "put back: {put_back}");
         }
+    }
+
+    /// The pointer pressed at `at`, or let go of there.
+    fn press(harness: &mut Harness<App>, at: Pos2, pressed: bool) {
+        let (button, modifiers) = (PointerButton::Primary, Modifiers::NONE);
+        harness.event(egui::Event::PointerButton { pos: at, button, pressed, modifiers });
+    }
+
+    /// The pointer moved `by` from `from` over `frames` frames, a frame each.
+    fn move_by(harness: &mut Harness<App>, from: Pos2, by: egui::Vec2, frames: usize) {
+        for frame in 1..=frames {
+            harness.event(egui::Event::PointerMoved(from + by * frame as f32 / frames as f32));
+            harness.step();
+        }
+    }
+
+    #[test]
+    fn leaves_undo_and_redo_alone_halfway_through_a_drag() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["wide.png"]);
+        let (from, to) =
+            (on_picture(&harness, vec2(9.0, 5.0)), on_picture(&harness, vec2(27.0, 17.0)));
+        drag(&mut harness, from, to);
+        let drawn = selected(&harness).choices.crop;
+        undo(&mut harness);
+        assert_eq!(selected(&harness).choices.crop, None);
+        assert!(selected(&harness).history.can_redo());
+        // another drawn, Ctrl+Y and Ctrl+Z pressed as it is
+        let (from, by) = (on_picture(&harness, vec2(4.0, 4.0)), vec2(60.0, 40.0));
+        harness.event(egui::Event::PointerMoved(from));
+        press(&mut harness, from, true);
+        harness.step();
+        move_by(&mut harness, from, by / 2.0, 2);
+        harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::Y);
+        harness.step();
+        harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
+        harness.step();
+        move_by(&mut harness, from + by / 2.0, by / 2.0, 2);
+        press(&mut harness, from + by, false);
+        harness.run_steps(3);
+        let again = selected(&harness).choices.crop;
+        assert!(again.is_some() && again != drawn, "{again:?}");
+        assert_eq!(steps(&harness), 1);
+        assert!(!selected(&harness).history.can_redo());
+        undo(&mut harness);
+        assert_eq!(selected(&harness).choices.crop, None);
+    }
+
+    #[test]
+    fn makes_one_step_of_a_drag_or_a_number_typed_as_the_window_loses_focus() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["wide.png"]);
+        type_width(&mut harness, "40 px", "20");
+        harness.event(egui::Event::WindowFocused(false));
+        harness.run_steps(3);
+        assert_eq!((selected(&harness).choices.crop, steps(&harness)), (None, 0));
+        harness.event(egui::Event::WindowFocused(true));
+        harness.run_steps(2);
+        keys(&mut harness, Modifiers::NONE, egui::Key::Enter);
+        assert_eq!(width_of(&harness, 0), Some(20));
+        assert_eq!(steps(&harness), 1);
+        // another drawn beside it, the window left and come back to
+        // halfway through
+        let (from, by) = (on_picture(&harness, vec2(24.0, 4.0)), vec2(60.0, 40.0));
+        harness.event(egui::Event::PointerMoved(from));
+        press(&mut harness, from, true);
+        harness.step();
+        move_by(&mut harness, from, by / 2.0, 2);
+        harness.event(egui::Event::WindowFocused(false));
+        harness.run_steps(3);
+        harness.event(egui::Event::WindowFocused(true));
+        harness.step();
+        move_by(&mut harness, from + by / 2.0, by / 2.0, 2);
+        press(&mut harness, from + by, false);
+        harness.run_steps(3);
+        assert_ne!(width_of(&harness, 0), Some(20));
+        assert_eq!(steps(&harness), 2);
+        undo(&mut harness);
+        assert_eq!(width_of(&harness, 0), Some(20));
+    }
+
+    #[test]
+    fn makes_one_step_of_a_number_dragged() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["wide.png"]);
+        let at = harness.get(width_field("40 px")).rect().center();
+        harness.event(egui::Event::PointerMoved(at));
+        harness.step();
+        press(&mut harness, at, true);
+        harness.step();
+        move_by(&mut harness, at, vec2(-80.0, 0.0), 8);
+        press(&mut harness, at + vec2(-80.0, 0.0), false);
+        harness.run_steps(3);
+        let width = width_of(&harness, 0);
+        assert!(width.is_some_and(|width| width < 30), "{width:?}");
+        assert_eq!(steps(&harness), 1);
+        undo(&mut harness);
+        assert_eq!(width_of(&harness, 0), None);
+    }
+
+    #[test]
+    fn puts_back_a_number_typed_and_given_up_on_without_a_step() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["wide.png"]);
+        type_width(&mut harness, "40 px", "20");
+        keys(&mut harness, Modifiers::NONE, egui::Key::Escape);
+        harness.run_steps(2);
+        assert_eq!((selected(&harness).choices.crop, steps(&harness)), (None, 0));
+        assert!(!selected(&harness).history.can_undo());
+    }
+
+    #[test]
+    fn makes_one_step_of_an_end_of_the_used_part_dragged() {
+        let dir = tempfile::tempdir().unwrap();
+        let frames = dir.path().join("dance");
+        std::fs::create_dir(&frames).unwrap();
+        for at in 1..=8 {
+            crate::testing::square(&frames.join(format!("{at}.png")), [255, 0, 0, 255]);
+        }
+        let mut config = Config::default();
+        config.gui.output_dir = Some(dir.path().join("out"));
+        let mut harness = Harness::builder()
+            .with_size(vec2(1280.0, 1400.0))
+            .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin()));
+        widgets::test_fonts(&harness);
+        harness.state_mut().add(vec![frames]);
+        finish(&mut harness);
+        assert!(!selected(&harness).history.can_undo());
+        // the bar, between the fields of where the used part starts and
+        // ends, its start at the left of its track
+        let start = harness.get_by_label(&fl!("part-start", "frame")).rect();
+        let end = harness.get_by_label(&fl!("part-end", "frame")).rect();
+        let at = Pos2::new(start.right() + 8.0 + 8.0, start.center().y);
+        let width = end.left() - at.x - 16.0;
+        harness.event(egui::Event::PointerMoved(at));
+        harness.step();
+        press(&mut harness, at, true);
+        harness.step();
+        move_by(&mut harness, at, vec2(width / 2.0, 0.0), 6);
+        press(&mut harness, at + vec2(width / 2.0, 0.0), false);
+        harness.run_steps(3);
+        let start = selected(&harness).choices.start;
+        assert!(start.is_some_and(|start| start > 0.0), "{start:?}");
+        assert_eq!(steps(&harness), 1);
+        undo(&mut harness);
+        assert_eq!(selected(&harness).choices.start, None);
+    }
+
+    #[test]
+    fn joins_what_an_integer_scale_makes_of_the_crop_to_the_scale_typed() {
+        if !has_ffmpeg() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["wide.png"]);
+        for label in [fl!("format-image"), fl!("scaling-integer"), fl!("scale-fixed")] {
+            harness.get_by_label(&label).click_accesskit();
+            harness.run_steps(2);
+            finish(&mut harness);
+        }
+        let set = selected(&harness).choices.webm.integer_scale;
+        assert_eq!((selected(&harness).choices.crop, steps(&harness)), (None, 3));
+        // ×20, which takes 25 pixels at most: the crop is kept to them
+        scale_field(&harness).focus();
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("20".into()));
+        harness.run_steps(2);
+        keys(&mut harness, Modifiers::NONE, egui::Key::Enter);
+        harness.run_steps(2);
+        let (scale, crop) = (selected(&harness).choices.webm.integer_scale, width_of(&harness, 0));
+        assert_eq!(scale.map(|scale| scale.up), Some(20));
+        assert_eq!(crop, Some(25));
+        // one step, which puts back both
+        assert_eq!(steps(&harness), 4);
+        undo(&mut harness);
+        assert_eq!(selected(&harness).choices.webm.integer_scale, set);
+        assert_eq!((width_of(&harness, 0), steps(&harness)), (None, 3));
+        redo(&mut harness);
+        assert_eq!(selected(&harness).choices.webm.integer_scale, scale);
+        assert_eq!(width_of(&harness, 0), crop);
+    }
+
+    /// The field of the integer scale, which holds `×` and a number.
+    fn scale_field<'a>(harness: &'a Harness<'_, App>) -> egui_kittest::Node<'a> {
+        let scale = egui_kittest::kittest::by().role(egui::accesskit::Role::SpinButton);
+        harness
+            .get_all(scale)
+            .rfind(|node| node.value().is_some_and(|value| value.starts_with('×')))
+            .unwrap()
     }
 
     #[test]
