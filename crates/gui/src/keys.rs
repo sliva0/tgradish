@@ -329,7 +329,7 @@ fn shortcut_rows(ui: &mut egui::Ui, title: &str, rows: Vec<(String, String)>) {
 impl App {
     /// Files dropped on the window, pasted, and keys.
     pub(crate) fn take_input(&mut self, ctx: &egui::Context) {
-        let paste = ctx.input(|input| self.paste_key.read(&input.events));
+        let paste = ctx.input(|input| self.input.paste_key.read(&input.events));
         let (dropped, hovered) = ctx.input(|input| {
             let dropped: Vec<PathBuf> = input
                 .raw
@@ -362,17 +362,17 @@ impl App {
         // text picked in a label is what Ctrl+C copies then
         use egui::text_selection::LabelSelectionState;
         let selecting = ctx.with_plugin::<LabelSelectionState, _>(|labels| labels.has_selection());
-        let waiting = self.keyed.waiting;
-        self.keyed = Keyed::default();
-        self.hovering = hovered || self.hovering;
+        let waiting = self.input.keyed.waiting;
+        self.input.keyed = Keyed::default();
+        self.input.hovering = hovered || self.input.hovering;
         if !dropped.is_empty() {
             self.add(dropped);
         }
         #[cfg(all(unix, not(target_os = "macos")))]
-        if let Some(drops) = &self.drops {
+        if let Some(drops) = &self.input.drops {
             for dropped in drops.poll() {
                 match dropped {
-                    dnd::Dropped::Hovering(over) => self.hovering = over,
+                    dnd::Dropped::Hovering(over) => self.input.hovering = over,
                     dnd::Dropped::Files(files) => self.add(files),
                 }
             }
@@ -400,13 +400,13 @@ impl App {
         // frame, as its field is drawn, and converted with it the next
         if (convert || convert_all) && widgets::number_focused(ctx) {
             widgets::commit_draft_keeping_focus(ctx);
-            self.keyed.waiting = Some((convert, convert_all));
+            self.input.keyed.waiting = Some((convert, convert_all));
             (convert, convert_all) = (false, false);
         }
         if let Some((one, all)) = waiting {
             (convert, convert_all) = (convert || one, convert_all || all);
         }
-        self.keyed.convert = convert;
+        self.input.keyed.convert = convert;
         if convert_all {
             self.convert_all();
         }
@@ -431,8 +431,8 @@ impl App {
             return;
         }
         // for the bar under the preview, which has the buttons they press
-        self.keyed.copy = copy && selecting != Some(true);
-        self.keyed.keep_best = keep_best;
+        self.input.keyed.copy = copy && selecting != Some(true);
+        self.input.keyed.keep_best = keep_best;
         // a field typed in undoes its own text, as it has the keys above;
         // a button with the focus has no undoing of its own, as after a row
         // with the focus was removed by its key
@@ -515,6 +515,38 @@ pub(crate) struct Keyed {
     /// Convert and Convert all asked for as a number was typed, for the
     /// next frame, once its field has taken it.
     waiting: Option<(bool, bool)>,
+}
+
+/// What [`App::take_input`] keeps of what comes from outside the
+/// widgets, from one frame to the next: keys, a paste, and files dropped
+/// or dragged over the window.
+#[derive(Default)]
+pub(crate) struct Input {
+    /// What Ctrl+V has done so far.
+    pub(crate) paste_key: PasteKey,
+    /// What keys asked of the bar under the preview this frame.
+    pub(crate) keyed: Keyed,
+    /// Files are being dragged over the window, as egui or, on Wayland,
+    /// tgradish's own listener reports it.
+    pub(crate) hovering: bool,
+    #[cfg(all(unix, not(target_os = "macos")))]
+    pub(crate) drops: Option<dnd::Drops>,
+}
+
+impl Input {
+    /// Forgets files hovering as the frame ends, where egui says each
+    /// frame whether they do; Wayland's listener says when they leave.
+    pub(crate) fn end_hovering(&mut self) {
+        if self.hovering {
+            #[cfg(all(unix, not(target_os = "macos")))]
+            let reported = self.drops.is_some();
+            #[cfg(not(all(unix, not(target_os = "macos"))))]
+            let reported = false;
+            if !reported {
+                self.hovering = false;
+            }
+        }
+    }
 }
 
 impl App {

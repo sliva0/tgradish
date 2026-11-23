@@ -211,11 +211,11 @@ pub fn run(launch: Launch) -> Result<Started, Error> {
                 }
             }
             #[cfg(all(unix, not(target_os = "macos")))]
-            let app = App {
-                drops: dnd::Drops::start(cc, &cc.egui_ctx),
-                _toplevel_icon: cc.winit_window().and_then(|window| toplevel_icon::set(window)),
-                ..app
-            };
+            {
+                app.input.drops = dnd::Drops::start(cc, &cc.egui_ctx);
+                app._toplevel_icon =
+                    cc.winit_window().and_then(|window| toplevel_icon::set(window));
+            }
             // the icon applies with the next frame
             cc.egui_ctx.request_repaint();
             // asked to close as it opened: after, so either sees the other

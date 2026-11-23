@@ -1336,7 +1336,7 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         // files dragged over the window, which the list takes, as egui says
         // each frame
         for _ in 0..2 {
-            harness.state_mut().hovering = true;
+            harness.state_mut().input.hovering = true;
             harness.step();
         }
         save(&mut harness, "dropping");

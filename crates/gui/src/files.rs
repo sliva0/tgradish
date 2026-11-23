@@ -362,7 +362,7 @@ impl App {
     /// words that say so in its middle, fading in and out.
     fn drop_target(&self, ui: &egui::Ui, list: egui::Rect) {
         let time = if crate::motion::motion(ui.ctx()) { DROP_FADE } else { 0.0 };
-        let shown = ui.ctx().animate_bool_with_time(drop_id(), self.hovering, time);
+        let shown = ui.ctx().animate_bool_with_time(drop_id(), self.input.hovering, time);
         if shown == 0.0 {
             return;
         }
@@ -428,7 +428,7 @@ impl App {
     /// Where files are dropped, framed in `zone`, with the buttons that add
     /// them otherwise in its middle.
     pub(crate) fn drop_zone(&mut self, ui: &mut egui::Ui, zone: egui::Rect) {
-        let colour = if self.hovering {
+        let colour = if self.input.hovering {
             theme::mark(ui.visuals())
         } else {
             ui.visuals().widgets.noninteractive.bg_stroke.color
@@ -1656,7 +1656,7 @@ mod tests {
         // files over the window, as egui says each frame
         let over = |harness: &mut egui_kittest::Harness<App>, frames: usize| {
             for _ in 0..frames {
-                harness.state_mut().hovering = true;
+                harness.state_mut().input.hovering = true;
                 harness.step();
             }
         };

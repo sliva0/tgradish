@@ -26,9 +26,9 @@ use crate::jobs::{Job, failure};
 use crate::keys::direct_scrolling;
 use crate::l10n::fl;
 use crate::outputs::Outputs;
-use crate::work::{Work, release};
 #[cfg(all(unix, not(target_os = "macos")))]
-use crate::{dnd, toplevel_icon};
+use crate::toplevel_icon;
+use crate::work::{Work, release};
 use crate::{inspect, instance, preset_dialogs, session, settings_dialog, system, theme, widgets};
 
 /// How many items keep their big frames: the selected one and the last few.
@@ -87,20 +87,13 @@ pub(crate) struct App {
     pub(crate) settings_reset: Option<Config>,
     /// The clipboard results are copied to, as files.
     pub(crate) clipboard: system::Clipboard,
-    /// What Ctrl+V has done so far.
-    pub(crate) paste_key: crate::keys::PasteKey,
-    /// What keys asked of the bar under the preview this frame.
-    pub(crate) keyed: crate::keys::Keyed,
+    /// Keys, a paste and files dropped, as they come.
+    pub(crate) input: crate::keys::Input,
     /// The file picked by its key, which the list scrolls to.
     pub(crate) reveal_selected: bool,
-    #[cfg(all(unix, not(target_os = "macos")))]
-    pub(crate) drops: Option<dnd::Drops>,
     /// The window's icon on Wayland, kept while the window shows it.
     #[cfg(all(unix, not(target_os = "macos")))]
     pub(crate) _toplevel_icon: Option<toplevel_icon::ToplevelIcon>,
-    /// Files are being dragged over the window, as egui or, on Wayland,
-    /// tgradish's own listener reports it.
-    pub(crate) hovering: bool,
     /// Share of the main panel's height the preview takes.
     pub(crate) preview_share: f32,
     /// How the list's rows change, as they fade in and close up.
@@ -288,14 +281,10 @@ impl App {
             edits: crate::history::Edits::default(),
             settings_reset: None,
             clipboard: system::Clipboard::default(),
-            paste_key: crate::keys::PasteKey::default(),
-            keyed: crate::keys::Keyed::default(),
+            input: crate::keys::Input::default(),
             reveal_selected: false,
             #[cfg(all(unix, not(target_os = "macos")))]
-            drops: None,
-            #[cfg(all(unix, not(target_os = "macos")))]
             _toplevel_icon: None,
-            hovering: false,
             preview_share: PREVIEW_SHARE,
             rows: crate::files::Rows::default(),
         }
@@ -957,7 +946,7 @@ impl eframe::App for App {
         self.stop_converting();
         // the listener shares winit's Wayland connection, which closes next
         #[cfg(all(unix, not(target_os = "macos")))]
-        if let Some(drops) = &mut self.drops {
+        if let Some(drops) = &mut self.input.drops {
             drops.stop();
         }
     }
@@ -1082,16 +1071,7 @@ impl eframe::App for App {
         theme::focus_ring(&ctx);
         // files dropped are shown where they go: on the list, or the drop
         // zone without one, never over the preview
-        if self.hovering {
-            // egui says each frame whether files hover; Wayland says when they leave
-            #[cfg(all(unix, not(target_os = "macos")))]
-            let reported = self.drops.is_some();
-            #[cfg(not(all(unix, not(target_os = "macos"))))]
-            let reported = false;
-            if !reported {
-                self.hovering = false;
-            }
-        }
+        self.input.end_hovering();
         // links clicked, opened as files are shown in their folder: eframe
         // opens them only with a dependency much larger than this
         let mut links = Vec::new();

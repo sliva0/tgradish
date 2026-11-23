@@ -71,7 +71,7 @@ impl App {
         });
         let queued = self.work.queue.iter().position(|&other| other == id);
         let presets_kept = self.presets_dir.is_some();
-        let keyed = self.keyed;
+        let keyed = self.input.keyed;
         // the result to copy, and whether it is where the next goes, made
         // as it would be made now
         let made = self.copyable(id, output.as_deref());
