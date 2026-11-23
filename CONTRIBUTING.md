@@ -36,11 +36,19 @@ Use comments to explain *why*, not *what* the code already shows. Write commit m
 
 ### Translations
 
-GUI strings live in `crates/gui/i18n/en-GB/tgradish.ftl` in [Fluent](https://projectfluent.org/fluent/guide/) format, with comments noting where each string appears. CLI output stays in English because scripts parse it.
+GUI strings live in `crates/gui/i18n/<tag>/tgradish.ftl` in [Fluent](https://projectfluent.org/fluent/guide/) format, one directory per language tag (such as `uk` or `pt-BR`). British English, `en-GB/tgradish.ftl`, is the source every other language is checked against and falls back on; its comments note where each string appears and what it means. CLI output stays in English because scripts parse it.
 
-To add a translation, copy that file into a directory named after the language tag (for example, `crates/gui/i18n/de/tgradish.ftl`). Missing messages fall back to English. Set `TGRADISH_LANG=de` to test a language, or `TGRADISH_LANG=pseudo` to test longer accented English strings for layout overflow. Scripts not covered by the bundled fonts (such as Chinese or Arabic) need a matching font added first.
+To add a language, copy `en-GB/tgradish.ftl` into a directory named after its tag (for example, `crates/gui/i18n/de/tgradish.ftl`) and translate every message and attribute, starting with `language-name`, the language's name for itself as Settings lists it. Every file under `i18n/` is built into the executable; nothing else needs registering. Each file must:
 
-Run `cargo xtask strings` to generate `target/strings/index.html`, which shows every GUI message alongside screenshots and all CLI help pages.
+- Have every message and attribute `en-GB` has. Only a regional variant of English, such as `en-US`, leaves out what it says the same, and falls back on `en-GB` for it.
+- Have nothing `en-GB` lacks, and use only the arguments (`{ $name }`) the same message in `en-GB` uses.
+- Have whatever its messages put in: `{ other-message }` puts in a message of the same file, and `{ -term }` a term it defines itself.
+- Give counts (`{ $count -> … }`) a variant for each plural form of the language, such as `[one]`, `[few]`, `[many]` and `*[other]` in Ukrainian; use `[1]` for "exactly one" where the number itself isn't shown.
+- Use only characters the bundled fonts draw. To draw more, add them to `crates/gui/assets/fonts/subset.py` and run it with `uv run crates/gui/assets/fonts/subset.py`.
+
+Check every file with `cargo test -p tgradish-gui every_language_file_is_sound`, which `cargo test --workspace` runs too: it lists every problem of every file, with the English of each message missing. Keep the names of programs, formats and units as they are (tgradish, Telegram, ffmpeg, WebM, WebP, TGS, VP9, CRF, SSIM, Aseprite, `s`, `px`, `fps`, `KiB`); key names such as Ctrl may follow the language's keyboards.
+
+To see a language, run the GUI with `TGRADISH_LANG=de`, which comes before the system's language and the one chosen in Settings, or `TGRADISH_LANG=pseudo` for longer, accented English to find text that doesn't fit. `TGRADISH_LANG=de cargo xtask strings` generates `target/strings/index.html`, which shows every GUI message, its translation under it, and screenshots of where it appears in that language, alongside all CLI help pages; without `TGRADISH_LANG` it shows English only.
 
 ## Licences
 
