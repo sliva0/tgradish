@@ -63,8 +63,8 @@
 //!   `crates/gui/assets/icon.png`; `--check` fails if they are out of date.
 //! - `strings [--no-pictures]`: builds `target/strings/index.html` for string
 //!   review and GUI translation, pairing each GUI message with screenshots and
-//!   listing CLI help pages and source strings. Capturing screenshots requires
-//!   a wgpu-capable GPU and ffmpeg; `--no-pictures` reuses previous screenshots.
+//!   listing CLI help pages. Capturing screenshots requires a wgpu-capable GPU
+//!   and ffmpeg; `--no-pictures` reuses previous screenshots.
 
 mod build;
 mod ffmpeg;

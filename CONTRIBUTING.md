@@ -40,7 +40,7 @@ GUI strings live in `crates/gui/i18n/en-GB/tgradish.ftl` in [Fluent](https://pro
 
 To add a translation, copy that file into a directory named after the language tag (for example, `crates/gui/i18n/de/tgradish.ftl`). Missing messages fall back to English. Set `TGRADISH_LANG=de` to test a language, or `TGRADISH_LANG=pseudo` to test longer accented English strings for layout overflow. Scripts not covered by the bundled fonts (such as Chinese or Arabic) need a matching font added first.
 
-Run `cargo xtask strings` to generate `target/strings/index.html`, which shows every GUI message alongside screenshots and all CLI help and messages.
+Run `cargo xtask strings` to generate `target/strings/index.html`, which shows every GUI message alongside screenshots and all CLI help pages.
 
 ## Licences
 

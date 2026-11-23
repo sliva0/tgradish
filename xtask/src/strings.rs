@@ -1,6 +1,6 @@
 //! Generates an HTML review/translation page (`target/strings/index.html`)
 //! showing all GUI Fluent strings (with translator notes and screenshots),
-//! plus CLI help pages and user-facing source strings with reference IDs.
+//! plus CLI help pages with reference IDs.
 //!
 //! Screenshots are captured by `strings::strings` in `crates/gui/src/strings.rs`
 //! (requires a wgpu-capable GPU and ffmpeg, and takes a few minutes). Pass
@@ -14,14 +14,6 @@ use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
 use crate::{cargo, run, workspace_root};
-
-/// The sources whose messages the command line prints, as their crates are
-/// called on the page. The arguments' own words are in the help pages.
-const SOURCES: [(&str, &str); 3] = [
-    ("crates/cli/src", "Command line"),
-    ("crates/core/src", "tgradish-core (errors and warnings printed by the CLI)"),
-    ("crates/tgs/src", "tgradish-tgs (decoding errors and .tgs check messages)"),
-];
 
 /// Widest a picture shows on the page, in its pixels.
 const SHOWN: f32 = 460.0;
@@ -57,31 +49,8 @@ pub fn strings(args: &[String]) -> Result<()> {
     let help = read("cli.json")?;
     let english = std::fs::read_to_string(root.join("crates/gui/i18n/en-GB/tgradish.ftl"))?;
     let sections = fluent(&english);
-    let mut sources = Vec::new();
-    for (dir, name) in SOURCES {
-        let mut code = Vec::new();
-        for path in rust_files(&root.join(dir))? {
-            let text = std::fs::read_to_string(&path)?;
-            code.push((path, text));
-        }
-        // modules only the tests build, declared as `mod testfile;`
-        let tests: Vec<_> = code.iter().flat_map(|(path, text)| test_modules(path, text)).collect();
-        let mut files = Vec::new();
-        for (path, text) in &code {
-            let relative = path.strip_prefix(root)?.display().to_string();
-            // the arguments' words are their help pages
-            if relative.ends_with("cli/src/args.rs") || tests.contains(path) {
-                continue;
-            }
-            let found = literals(text);
-            if !found.is_empty() {
-                files.push((relative, found));
-            }
-        }
-        sources.push((name, files));
-    }
     let page = Page { pictures: &out.join("pictures"), sizes: BTreeMap::new() };
-    let html = page.html(&sections, &shown, &help, &sources)?;
+    let html = page.html(&sections, &shown, &help)?;
     let index = out.join("index.html");
     std::fs::write(&index, html)?;
     println!("{}", index.display());
@@ -156,382 +125,6 @@ fn fluent(text: &str) -> Vec<Section> {
     sections
 }
 
-/// The `.rs` files under `dir`, in order.
-fn rust_files(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
-    let mut files = Vec::new();
-    let mut dirs = vec![dir.to_path_buf()];
-    while let Some(dir) = dirs.pop() {
-        for entry in std::fs::read_dir(&dir)? {
-            let path = entry?.path();
-            if path.is_dir() {
-                dirs.push(path);
-            } else if path.extension().is_some_and(|ext| ext == "rs") {
-                files.push(path);
-            }
-        }
-    }
-    files.sort();
-    Ok(files)
-}
-
-/// An item only the tests build, as `literals` passes over it: how deep in
-/// brackets it began, whether a brace back at that depth can end it, and
-/// how deep in `<>` it is at that depth, where a `,` doesn't end it.
-#[derive(Clone, Copy)]
-struct TestsOnly {
-    depth: usize,
-    by_brace: bool,
-    angles: usize,
-}
-
-/// The string literals of Rust `code` that read as words, with their
-/// lines, but for those of items only its tests build: two words or more,
-/// of which one is lower case, and not a flag, path or format alone.
-fn literals(code: &str) -> Vec<(usize, String)> {
-    let mut found = Vec::new();
-    let mut line = 1;
-    let mut chars = code.chars().peekable();
-    let mut at_line_start = true;
-    // the code just before, without spaces, to tell what a literal is for
-    let mut recent = String::new();
-    // how deep in brackets of any kind the code is, and an item only the
-    // tests build that it is in
-    let (mut depth, mut tests_only) = (0usize, None::<TestsOnly>);
-    while let Some(c) = chars.next() {
-        let before = recent.chars().last();
-        if !c.is_whitespace() && c != '"' {
-            recent.push(c);
-            if recent.len() > 64 {
-                recent.drain(..recent.len() - 32);
-            }
-        }
-        // an item for the tests, to its `;` or the brace that closes it: a
-        // module of them, or a declaration as `mod testfile;` alone
-        if at_line_start
-            && c == '#'
-            && tests_only.is_none()
-            && code_rest_starts(&chars, "[cfg(test)]")
-        {
-            tests_only = Some(TestsOnly { depth, by_brace: ends_at_brace(&chars), angles: 0 });
-        }
-        // the attribute may be indented, as within a function
-        at_line_start = c == '\n' || (at_line_start && c.is_whitespace());
-        let shown = tests_only.is_none();
-        // a type's or a function's `<>` at the item's own depth, but not
-        // an arrow's `>`
-        if let Some(item) = tests_only.as_mut().filter(|item| item.depth == depth) {
-            match c {
-                '<' => item.angles += 1,
-                '>' if !matches!(before, Some('-' | '=')) => {
-                    item.angles = item.angles.saturating_sub(1);
-                }
-                _ => {}
-            }
-        }
-        match c {
-            '\n' => line += 1,
-            '{' | '(' | '[' => depth += 1,
-            '}' | ')' | ']' => {
-                depth = depth.saturating_sub(1);
-                if let Some(item) = tests_only {
-                    // leaving what holds it ends it, as a tail without a
-                    // `;` ends at the function's brace
-                    if depth < item.depth {
-                        tests_only = None;
-                    // its own brace, but not where an `else` or a method
-                    // follows
-                    } else if c == '}' && item.depth == depth && item.by_brace {
-                        let mut ahead = chars.clone().skip_while(|c| c.is_whitespace()).peekable();
-                        let method = ahead.peek() == Some(&'.');
-                        let word: String = std::iter::from_fn(|| {
-                            ahead.next_if(|c| c.is_alphanumeric() || *c == '_')
-                        })
-                        .collect();
-                        if !method && word != "else" {
-                            tests_only = None;
-                        }
-                    }
-                }
-            }
-            ';' if tests_only.is_some_and(|item| item.depth == depth) => tests_only = None,
-            // a field, a variant or an argument, but not a `<>`'s parameter
-            ',' if tests_only
-                .is_some_and(|item| item.depth == depth && item.by_brace && item.angles == 0) =>
-            {
-                tests_only = None
-            }
-            '/' if chars.peek() == Some(&'/') => {
-                for c in chars.by_ref() {
-                    if c == '\n' {
-                        line += 1;
-                        at_line_start = true;
-                        break;
-                    }
-                }
-            }
-            '/' if chars.peek() == Some(&'*') => {
-                let mut last = ' ';
-                for c in chars.by_ref() {
-                    if c == '\n' {
-                        line += 1;
-                    }
-                    if last == '*' && c == '/' {
-                        break;
-                    }
-                    last = c;
-                }
-            }
-            '\'' => {
-                // a character, not a lifetime
-                let mut ahead = chars.clone();
-                let first = ahead.next();
-                if first == Some('\\') || ahead.next() == Some('\'') {
-                    let mut escaped = false;
-                    for c in chars.by_ref() {
-                        if c == '\'' && !escaped {
-                            break;
-                        }
-                        escaped = c == '\\' && !escaped;
-                    }
-                }
-            }
-            'r' if matches!(chars.peek(), Some('"' | '#')) => {
-                let mut hashes = 0;
-                while chars.peek() == Some(&'#') {
-                    chars.next();
-                    hashes += 1;
-                }
-                if chars.next() != Some('"') {
-                    continue;
-                }
-                let start = line;
-                let mut text = String::new();
-                while let Some(c) = chars.next() {
-                    if c == '"' {
-                        let mut closing = 0;
-                        while closing < hashes && chars.peek() == Some(&'#') {
-                            chars.next();
-                            closing += 1;
-                        }
-                        if closing == hashes {
-                            break;
-                        }
-                        text.push('"');
-                        text.extend(std::iter::repeat_n('#', closing));
-                        continue;
-                    }
-                    if c == '\n' {
-                        line += 1;
-                    }
-                    text.push(c);
-                }
-                if shown && !unseen(&recent) {
-                    found.push((start, text));
-                }
-            }
-            '"' => {
-                let start = line;
-                let mut text = String::new();
-                while let Some(c) = chars.next() {
-                    match c {
-                        '"' => break,
-                        '\n' => {
-                            line += 1;
-                            text.push('\n');
-                        }
-                        '\\' => match chars.next() {
-                            Some('n') => text.push('\n'),
-                            Some('t') => text.push('\t'),
-                            // a line continued: its next line's indentation goes
-                            Some('\n') => {
-                                line += 1;
-                                while chars.peek().is_some_and(|c| c.is_whitespace()) {
-                                    if chars.next() == Some('\n') {
-                                        line += 1;
-                                    }
-                                }
-                            }
-                            Some('u') => {
-                                let code: String =
-                                    chars.by_ref().skip(1).take_while(|&c| c != '}').collect();
-                                text.extend(
-                                    u32::from_str_radix(&code, 16).ok().and_then(char::from_u32),
-                                );
-                            }
-                            Some(other) => text.push(other),
-                            None => {}
-                        },
-                        other => text.push(other),
-                    }
-                }
-                if shown && !unseen(&recent) {
-                    found.push((start, text));
-                }
-            }
-            _ => {}
-        }
-    }
-    found.retain(|(_, text)| reads_as_words(text));
-    found
-}
-
-/// The files of the modules that the file at `path`, holding `code`,
-/// declares for its tests alone, as `#[cfg(test)]` over `mod testfile;`:
-/// where each could be, whether or not it is there, or where its `#[path]`
-/// puts it.
-fn test_modules(path: &Path, code: &str) -> Vec<std::path::PathBuf> {
-    // a module's own modules are beside it when it is a `mod.rs`, a
-    // crate's root beside it too, and in a folder of its name otherwise
-    let stem = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or_default();
-    let parent = path.parent().unwrap_or(Path::new(""));
-    let dir = match stem {
-        "mod" | "lib" | "main" => parent.to_path_buf(),
-        _ => parent.join(stem),
-    };
-    let lines: Vec<&str> = code.lines().map(str::trim).collect();
-    let mut found = Vec::new();
-    // an attribute, or a comment among them
-    let over = |line: &&str| !line.starts_with("#[") && !line.starts_with("//");
-    for (index, _) in lines.iter().enumerate().filter(|(_, line)| **line == "#[cfg(test)]") {
-        // the other attributes, before and after it, and the item after
-        let first = lines[..index].iter().rposition(over).map_or(0, |at| at + 1);
-        let last = lines[index..].iter().position(over).map(|at| index + at);
-        let Some(last) = last else { continue };
-        let name = lines[last]
-            .strip_suffix(';')
-            .map(|item| item.trim_start_matches("pub(crate) ").trim_start_matches("pub "))
-            .and_then(|item| item.strip_prefix("mod "));
-        let Some(name) = name else { continue };
-        // a `#[path]` is from the declaring file's folder, whatever it is
-        let given = lines[first..last].iter().find_map(|line| {
-            let value = line.strip_prefix("#[path")?.trim_start().strip_prefix('=')?;
-            value.trim().strip_suffix(']')?.trim_end().strip_prefix('"')?.strip_suffix('"')
-        });
-        match given {
-            Some(given) => found.push(lexical(&parent.join(given))),
-            None => {
-                found.push(dir.join(format!("{name}.rs")));
-                found.push(dir.join(name).join("mod.rs"));
-            }
-        }
-    }
-    found
-}
-
-/// `path` with its `.` and `..` taken by their names alone, as the files
-/// listed are named, without asking the file system.
-fn lexical(path: &Path) -> std::path::PathBuf {
-    use std::path::Component;
-    let mut out = std::path::PathBuf::new();
-    for part in path.components() {
-        match (part, out.components().next_back()) {
-            (Component::CurDir, _) => {}
-            (Component::ParentDir, Some(Component::Normal(_))) => {
-                out.pop();
-            }
-            // nothing is above the root
-            (Component::ParentDir, Some(Component::RootDir | Component::Prefix(_))) => {}
-            (part, _) => out.push(part),
-        }
-    }
-    out
-}
-
-/// Whether a literal after `code` is one nobody reads: what a panic says
-/// of a broken assumption, or a test's.
-fn unseen(code: &str) -> bool {
-    ["expect(", "panic!(", "unreachable!(", "assert!(", "assert_eq!(", "debug_assert!("]
-        .iter()
-        .any(|call| code.ends_with(call))
-}
-
-/// Whether the item after `#[cfg(test)]` at `chars` can end at its brace,
-/// as a function or module does, rather than only at its `;`, as a
-/// `const`, `static`, `let`, `type` or `use` does whatever braces it holds.
-fn ends_at_brace(chars: &std::iter::Peekable<std::str::Chars>) -> bool {
-    let mut ahead = chars.clone().skip("[cfg(test)]".len()).peekable();
-    let mut words = Vec::new();
-    while words.len() < 2 {
-        while ahead.next_if(|c| c.is_whitespace()).is_some() {}
-        match ahead.peek() {
-            // past other attributes, and a visibility's `(crate)`
-            Some('#' | '(') => {
-                let mut depth = 0;
-                for c in ahead.by_ref() {
-                    match c {
-                        '[' | '(' => depth += 1,
-                        ']' | ')' => depth -= 1,
-                        _ => {}
-                    }
-                    if depth == 0 && matches!(c, ']' | ')') {
-                        break;
-                    }
-                }
-            }
-            // past comments, doc comments among them
-            Some('/') => {
-                let mut rest = ahead.clone().skip(1);
-                match rest.next() {
-                    Some('/') => while ahead.next().is_some_and(|c| c != '\n') {},
-                    Some('*') => {
-                        ahead.nth(1);
-                        let mut last = ' ';
-                        for c in ahead.by_ref() {
-                            if last == '*' && c == '/' {
-                                break;
-                            }
-                            last = c;
-                        }
-                    }
-                    _ => break,
-                }
-            }
-            _ => {
-                let word: String =
-                    std::iter::from_fn(|| ahead.next_if(|c| c.is_alphanumeric() || *c == '_'))
-                        .collect();
-                if word.is_empty() {
-                    break;
-                }
-                if word != "pub" {
-                    words.push(word);
-                }
-            }
-        }
-    }
-    match words.first().map(String::as_str) {
-        // a `const fn` is a function
-        Some("const") => words
-            .get(1)
-            .is_some_and(|next| ["fn", "unsafe", "async", "extern"].contains(&next.as_str())),
-        Some("static" | "let" | "type" | "use") => false,
-        _ => true,
-    }
-}
-
-/// Whether what follows in `chars` starts with `text`.
-fn code_rest_starts(chars: &std::iter::Peekable<std::str::Chars>, text: &str) -> bool {
-    chars.clone().take(text.len()).eq(text.chars())
-}
-
-/// Whether a literal is words people read, rather than a name, path, flag
-/// or format alone.
-fn reads_as_words(text: &str) -> bool {
-    let trimmed = text.trim();
-    let words = trimmed
-        .split_whitespace()
-        .filter(|word| word.chars().filter(|c| c.is_alphabetic()).count() >= 2)
-        .count();
-    words >= 2
-        && trimmed.chars().any(|c| c.is_lowercase())
-        && !trimmed.starts_with(['-', '/', '.'])
-        && !trimmed.contains("::")
-        && !trimmed.contains("=")
-}
-
-/// A source file, and the messages in it with their lines.
-type Source = (String, Vec<(usize, String)>);
-
 /// What writing the page needs: the pictures' folder, and their sizes as
 /// read.
 struct Page<'a> {
@@ -540,13 +133,7 @@ struct Page<'a> {
 }
 
 impl Page<'_> {
-    fn html(
-        mut self,
-        sections: &[Section],
-        shown: &Value,
-        help: &Value,
-        sources: &[(&str, Vec<Source>)],
-    ) -> Result<String> {
+    fn html(mut self, sections: &[Section], shown: &Value, help: &Value) -> Result<String> {
         let mut html = String::from(HEAD);
         // each value and attribute, by the name the pictures know it by
         let texts: Vec<String> = sections
@@ -593,9 +180,8 @@ impl Page<'_> {
         html.push_str("</section>\n<section id=cli hidden>\n");
         html.push_str(
             "<p class=about>The CLI is English-only. Each line has a reference ID made of its \
-             section prefix and line number, such as <code>convert:23</code> for a help line or \
-             <code>core/src/error.rs:34</code> for a source string. Hover over a line number to \
-             see the full ID.</p>\n<h2>Help pages</h2>\n",
+             section prefix and line number, such as <code>convert:23</code>. Hover over a line \
+             number to see the full ID.</p>\n<h2>Help pages</h2>\n",
         );
         for page in help.as_array().map(Vec::as_slice).unwrap_or_default() {
             let command = page["command"].as_str().unwrap_or_default();
@@ -621,26 +207,6 @@ impl Page<'_> {
                 )?;
             }
             html.push_str("</div>\n");
-        }
-        html.push_str("<h2>Source strings</h2>\n");
-        for (name, files) in sources {
-            writeln!(html, "<h3>{}</h3>", escape(name))?;
-            for (file, found) in files {
-                let short = file.trim_start_matches("crates/");
-                writeln!(html, "<h4>{}:</h4><div class=help>", escape(short))?;
-                for (line, text) in found {
-                    let name = format!("{short}:{line}");
-                    writeln!(
-                        html,
-                        "<div class=line id=\"src-{0}\"><span class=ln title=\"{0}\">{1}</span>\
-                         <span class=text>{2}</span></div>",
-                        escape(&name),
-                        line,
-                        escape(text)
-                    )?;
-                }
-                html.push_str("</div>\n");
-            }
         }
         html.push_str("</section>\n");
         html.push_str(TAIL);
@@ -755,7 +321,6 @@ header button.on { background: Highlight; color: HighlightText; }
 header input { margin-left: auto; font: inherit; padding: 4px 8px; width: 260px; }
 h2 { margin: 36px 0 8px; font-size: 18px; }
 h3 { margin: 24px 0 6px; font-size: 15px; }
-h4 { margin: 16px 0 4px; font: 13px ui-monospace, monospace; color: var(--weak); }
 .about { color: var(--weak); }
 .message { border-top: 1px solid var(--line); padding: 10px 0; }
 .name code { font-size: 13px; font-weight: 600; }
@@ -809,97 +374,3 @@ document.getElementById('filter').oninput = (event) => {
 };
 </script>
 "#;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn leaves_out_only_what_the_tests_build() {
-        let code = "mod read;\n#[cfg(test)]\nmod testfile;\n\nfn a() { error(\"the file ends early\") }\n\
-                    #[cfg(test)]\nuse std::fmt::{Write, Debug};\n\
-                    #[cfg(test)]\nfn helper() -> [u8; 2] { let _ = \"a helper's words\"; '}'; [0; 2] }\n\
-                    fn b() { error(\"a chunk is too long\") }\n\
-                    #[cfg(test)]\nmod tests {\n    fn c() { let _ = \"what a test says\"; }\n}\n";
-        let found: Vec<(usize, String)> = literals(code);
-        assert_eq!(
-            found,
-            [(5, "the file ends early".to_owned()), (10, "a chunk is too long".to_owned())]
-        );
-    }
-
-    #[test]
-    fn leaves_out_a_declaration_whole_whatever_its_braces() {
-        let code = "#[cfg(test)]\nconst X: &str = if c { \"one of them\" } else { \"the other one\" };\n\
-                    #[cfg(test)]\nstatic Y: [&str; 1] = [{ \"a static's words\" }];\n\
-                    #[cfg(test)]\npub(crate) const fn z() -> u8 { 0 }\n\
-                    fn a() { error(\"shown after them\") }\n";
-        assert_eq!(literals(code), [(7, "shown after them".to_owned())]);
-    }
-
-    #[test]
-    fn leaves_out_an_indented_item_for_the_tests() {
-        let code = "fn a() {\n    #[cfg(test)]\n    COUNT.set(\"counted words here\");\n\
-                    \t#[cfg(test)]\n    if b { \"a test's branch\" } else { \"its other branch\" };\n\
-                    error(\"shown after them\")\n}\n\
-                    mod inner {\n    #[cfg(test)]\n    mod tests {\n        fn c() { \"what a test says\" }\n    }\n\
-                    fn d() { error(\"shown after the tests\") }\n}\n";
-        assert_eq!(
-            literals(code),
-            [(6, "shown after them".to_owned()), (13, "shown after the tests".to_owned())]
-        );
-    }
-
-    #[test]
-    fn ends_a_field_variant_or_tail_for_the_tests_where_it_ends() {
-        let code = "struct S {\n    #[cfg(test)]\n    hook: Hook<A, B>,\n    a: u8,\n}\n\
-                    enum E {\n    #[cfg(test)]\n    T(u8),\n    #[error(\"the file ends early\")]\n    A,\n}\n\
-                    fn a() -> u8 {\n    #[cfg(test)]\n    f(\"a test's tail\")\n}\n\
-                    enum F {\n    #[error(\"a chunk is too long\")]\n    A,\n}\n";
-        assert_eq!(
-            literals(code),
-            [(9, "the file ends early".to_owned()), (17, "a chunk is too long".to_owned())]
-        );
-        // not at a `<>`'s `,`, nor after an arrow
-        let code = "#[cfg(test)]\nfn f<A, B>() -> Option<A> where A: X<B, B> { \"a helper's words\" }\n\
-                    fn a() { error(\"shown after them\") }\n";
-        assert_eq!(literals(code), [(3, "shown after them".to_owned())]);
-    }
-
-    #[test]
-    fn reads_the_item_for_the_tests_past_comments_and_elsewhere() {
-        let code = "#[cfg(test)]\n// a note\nconst X: u8 = match c { _ => 1 } + f(\"a test's words\");\n\
-                    #[cfg(test)]\n/* a note */\n/// a doc\nstatic Y: u8 = { 1 } + f(\"a static's words\");\n\
-                    fn a() {\n    #[cfg(test)]\n    if b { c() }\n    elsewhere(\"shown after them\");\n}\n";
-        assert_eq!(literals(code), [(11, "shown after them".to_owned())]);
-    }
-
-    #[test]
-    fn leaves_out_the_files_of_modules_for_tests() {
-        let code = "mod read;\n#[cfg(test)]\n#[path = \"x.rs\"]\npub(crate) mod testfile;\n\
-                    #[cfg(test)]\nmod tests {\n}\n";
-        let found = test_modules(Path::new("src/frames/aseprite/mod.rs"), code);
-        assert_eq!(found, [Path::new("src/frames/aseprite/x.rs")]);
-        let code = "mod read;\n#[cfg(test)]\npub(crate) mod testfile;\n";
-        let found = test_modules(Path::new("src/frames/aseprite/mod.rs"), code);
-        let beside = Path::new("src/frames/aseprite");
-        assert_eq!(found, [beside.join("testfile.rs"), beside.join("testfile/mod.rs")]);
-        let found = test_modules(Path::new("src/frames.rs"), "#[cfg(test)]\nmod tests;\n");
-        assert_eq!(found[0], Path::new("src/frames/tests.rs"));
-        // from the file's own folder, though it isn't a `mod.rs`, and above
-        let code = "#[path = \"../y.rs\"]\n#[cfg(test)]\nmod testfile;\n";
-        let found = test_modules(Path::new("src/frames.rs"), code);
-        assert_eq!(found, [Path::new("y.rs")]);
-        // past comments among its attributes
-        let code = "#[cfg(test)]\n// a note\nmod testfile;\n#[cfg(test)]\n/// a doc\n#[path = \"./x.rs\"]\nmod tests;\n";
-        let found = test_modules(Path::new("src/lib.rs"), code);
-        assert_eq!(
-            found,
-            [Path::new("src/testfile.rs"), Path::new("src/testfile/mod.rs"), Path::new("src/x.rs")]
-        );
-        // the Aseprite decoder's words follow such a declaration
-        let aseprite = workspace_root().join("crates/tgs/src/frames/aseprite/mod.rs");
-        let found = literals(&std::fs::read_to_string(aseprite).unwrap());
-        assert!(found.iter().any(|(_, text)| text == "not an Aseprite file"), "{found:?}");
-    }
-}
