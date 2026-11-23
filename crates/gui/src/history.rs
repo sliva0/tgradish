@@ -152,6 +152,72 @@ impl Frames {
     }
 }
 
+/// What a control says of an edit it makes of a file's settings, which
+/// history groups into steps by it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Said {
+    /// Under way this frame: begun in it, or going on from before.
+    Underway,
+    /// Done with: what it changed is a step.
+    Commit,
+    /// Given up: the settings go back to what they were as it began.
+    Cancel,
+    /// A key pressed to move something a little, a step of its own.
+    Nudge,
+}
+
+/// What controls said this frame of the edits they make, file by file in
+/// the order they said it. Kept in egui's memory, as the file drawn is,
+/// so that a control can say it wherever it is drawn.
+#[derive(Debug, Clone, Default)]
+struct Saying(Vec<(u64, Said)>);
+
+/// The id [`Saying`] is kept under.
+const SAYING: &str = "edits said";
+
+#[expect(dead_code, reason = "controls say it once they are made to")]
+fn say(ctx: &egui::Context, file: u64, said: Said) {
+    let id = egui::Id::new(SAYING);
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<Saying>(id).0.push((file, said)));
+}
+
+/// Says that an edit of the file `file`'s settings is under way this
+/// frame: begun now, or going on. Said each frame it goes on, it makes
+/// what changes until it is committed one step; an edit no longer said
+/// to be under way, as its control is no longer drawn, is committed.
+#[expect(dead_code, reason = "controls say it once they are made to")]
+pub(crate) fn underway(ctx: &egui::Context, file: u64) {
+    say(ctx, file, Said::Underway);
+}
+
+/// Says that the edit of `file` under way is done with, and makes what
+/// it changed a step as this frame ends; said of none, what this frame
+/// changed of `file` is a step of the user's of its own.
+#[expect(dead_code, reason = "controls say it once they are made to")]
+pub(crate) fn commit(ctx: &egui::Context, file: u64) {
+    say(ctx, file, Said::Commit);
+}
+
+/// Says that the edit of `file` under way is given up: its settings go
+/// back to what they were as it began, which makes no step.
+#[expect(dead_code, reason = "controls say it once they are made to")]
+pub(crate) fn cancel(ctx: &egui::Context, file: u64) {
+    say(ctx, file, Said::Cancel);
+}
+
+/// Says that a key moved something of `file` a little this frame: a step
+/// of its own, which joins a step of such keys made just before, so that
+/// a crop nudged pixel by pixel, or a key held, is put back at once.
+#[expect(dead_code, reason = "controls say it once they are made to")]
+pub(crate) fn nudge(ctx: &egui::Context, file: u64) {
+    say(ctx, file, Said::Nudge);
+}
+
+/// What was said this frame, which is then forgotten.
+fn said(ctx: &egui::Context) -> Saying {
+    ctx.data_mut(|data| data.remove_temp::<Saying>(egui::Id::new(SAYING))).unwrap_or_default()
+}
+
 /// A change since the last step, not at rest yet.
 #[derive(Debug, Clone, Copy)]
 struct Pending {
@@ -179,6 +245,9 @@ pub(crate) struct History {
     /// A step was just undone or made again: what follows from it over the
     /// next frames, as a crop kept to an integer scale, is part of it.
     restoring: bool,
+    /// An edit is under way, which a control said is: what changes until
+    /// it is committed is one step.
+    editing: bool,
 }
 
 impl History {
@@ -191,9 +260,16 @@ impl History {
         !self.redo.is_empty()
     }
 
-    /// Takes in `item` as `frame` left it; true where its settings
-    /// changed in it, so that another frame follows to see them at rest.
-    fn follow(&mut self, item: &Item, frame: &Frame) -> bool {
+    /// Whether an edit is under way, which a step undone or made again
+    /// would cut short.
+    pub(crate) fn editing(&self) -> bool {
+        self.editing
+    }
+
+    /// Takes in `item` as `frame` left it, with what its controls `said`
+    /// of their edits; true where its settings changed in it, so that
+    /// another frame follows to see them at rest.
+    fn follow(&mut self, item: &mut Item, frame: &Frame, said: &[Said]) -> bool {
         self.now = frame.now;
         let Some(seen) = &self.seen else {
             self.settled = Some(Settings::of(item));
@@ -201,23 +277,67 @@ impl History {
             return false;
         };
         let changed = !seen.matches(item);
+        // what was changed before an edit is a step of its own
+        if !said.is_empty() && !self.editing {
+            self.settle();
+        }
+        // which edit is under way as the frame ends, and how the one under
+        // way before ended, if it did
+        let (mut open, mut ended, mut nudge) = (false, None, false);
+        for &said in said {
+            match said {
+                Said::Underway => open = true,
+                Said::Commit | Said::Cancel => (open, ended) = (false, Some(said)),
+                Said::Nudge => (open, ended, nudge) = (false, Some(Said::Commit), true),
+            }
+        }
+        // one no control said goes on is over, as its control is no
+        // longer drawn
+        if self.editing && said.is_empty() {
+            ended = Some(Said::Commit);
+        }
+        let user = frame.input || self.editing || !said.is_empty();
         if changed {
             self.seen = Some(Settings::of(item));
-            let pending = self.pending.get_or_insert(Pending { user: false, nudge: frame.arrows });
-            pending.user |= frame.input;
+            let nudge = frame.arrows || nudge;
+            let pending = self.pending.get_or_insert(Pending { user: false, nudge });
+            pending.user |= user;
         }
-        if self.restoring {
+        self.editing = open;
+        if self.restoring && said.is_empty() {
             match changed {
                 true => self.take_in(),
                 false => self.restoring = false,
             }
             return changed;
         }
-        let user = self.pending.is_some_and(|pending| pending.user);
-        if (frame.committed && user) || !(changed || frame.busy) {
-            self.settle();
+        self.restoring = false;
+        match ended {
+            Some(Said::Cancel) => {
+                self.put_back(item);
+                return true;
+            }
+            Some(_) => self.settle(),
+            None if open => {}
+            None => {
+                let user = self.pending.is_some_and(|pending| pending.user);
+                if (frame.committed && user) || !(changed || frame.busy) {
+                    self.settle();
+                }
+            }
         }
         changed
+    }
+
+    /// Puts `item`'s settings back as they were as of the last step, as an
+    /// edit given up leaves them.
+    fn put_back(&mut self, item: &mut Item) {
+        self.pending = None;
+        let Some(settled) = self.settled.clone() else { return };
+        if !settled.matches(item) {
+            settled.clone().apply(item);
+        }
+        self.seen = Some(settled);
     }
 
     /// Makes what changed since the last step a step, if the user changed
@@ -264,6 +384,7 @@ impl History {
         }
         self.settle();
         self.nudged = None;
+        self.editing = false;
     }
 
     /// Goes a step back, `back`, or on again, putting `item`'s settings
@@ -284,13 +405,20 @@ impl History {
     }
 }
 
-/// Takes in each of `items` as `frame` left them; true where any changed,
-/// so another frame follows to see them at rest.
-pub(crate) fn follow<'a>(items: impl Iterator<Item = (&'a mut Item, Frame)>) -> bool {
+/// Takes in each of `items` as `frame` left them, with what their
+/// controls said of their edits in `ctx` this frame; true where any
+/// changed, so another frame follows to see them at rest.
+pub(crate) fn follow<'a>(
+    ctx: &egui::Context,
+    items: impl Iterator<Item = (&'a mut Item, Frame)>,
+) -> bool {
+    let saying = said(ctx);
     let mut changed = false;
     for (item, frame) in items {
+        let of: Vec<Said> =
+            saying.0.iter().filter(|(file, _)| *file == item.id).map(|&(_, said)| said).collect();
         let mut history = std::mem::take(&mut item.history);
-        changed |= history.follow(item, &frame);
+        changed |= history.follow(item, &frame, &of);
         item.history = history;
     }
     changed
@@ -1371,29 +1499,128 @@ mod tests {
 
     /// `history` taking in `item` as a frame a moment after the last
     /// leaves it, the user doing something in it where `input`.
-    fn frame(history: &mut History, item: &Item, input: bool) -> bool {
+    fn frame(history: &mut History, item: &mut Item, input: bool) -> bool {
+        saying(history, item, input, &[])
+    }
+
+    /// [`frame`], in which a control said `said` of its edits, and the
+    /// user did nothing else.
+    fn saying(history: &mut History, item: &mut Item, input: bool, said: &[Said]) -> bool {
         let now = history.now + 0.25;
-        history.follow(item, &Frame { now, input, ..Frame::default() })
+        history.follow(item, &Frame { now, input, ..Frame::default() }, said)
+    }
+
+    #[test]
+    fn makes_a_step_of_what_an_edit_changes_from_begun_to_committed() {
+        let mut item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
+        let mut history = History::default();
+        frame(&mut history, &mut item, false);
+        // a change of the user's, not at rest yet as an edit begins
+        item.choices.target = Target::Emoji;
+        frame(&mut history, &mut item, true);
+        // the edit, over frames, some of which change nothing: no step yet
+        for start in [1.0, 2.0, 2.0, 3.0] {
+            item.choices.start = Some(start);
+            saying(&mut history, &mut item, false, &[Said::Underway]);
+            assert_eq!(history.undo.len(), 1);
+            assert!(history.editing() && history.can_undo());
+        }
+        // committed, as what it changed last is: one step
+        item.choices.start = Some(4.0);
+        saying(&mut history, &mut item, false, &[Said::Commit]);
+        assert!(!history.editing());
+        frame(&mut history, &mut item, false);
+        assert_eq!(history.undo.len(), 2);
+        assert_eq!(history.undo[1].choices.start, None);
+        assert_eq!(history.undo[1].choices.target, Target::Emoji);
+        assert_eq!(history.undo[0].choices.target, Target::Sticker);
+        // a change committed alone is a step of its own at once, even
+        // with no input, as a step put off a frame is
+        item.choices.start = Some(5.0);
+        saying(&mut history, &mut item, false, &[Said::Commit]);
+        assert_eq!(history.undo.len(), 3);
+        // and one committed as another begins in the same frame is too
+        saying(&mut history, &mut item, false, &[Said::Underway]);
+        item.choices.start = Some(6.0);
+        saying(&mut history, &mut item, false, &[Said::Commit, Said::Underway]);
+        assert_eq!(history.undo.len(), 4);
+        assert!(history.editing());
+        item.choices.start = Some(7.0);
+        saying(&mut history, &mut item, false, &[Said::Commit]);
+        assert_eq!(history.undo.len(), 5);
+        assert_eq!(history.undo[4].choices.start, Some(6.0));
+    }
+
+    #[test]
+    fn commits_an_edit_no_longer_said_to_be_under_way() {
+        let mut item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
+        let mut history = History::default();
+        frame(&mut history, &mut item, false);
+        item.choices.start = Some(1.0);
+        saying(&mut history, &mut item, false, &[Said::Underway]);
+        // its control gone from sight, as another file is shown
+        frame(&mut history, &mut item, false);
+        assert!(!history.editing());
+        assert_eq!(history.undo.len(), 1);
+    }
+
+    #[test]
+    fn puts_back_what_an_edit_given_up_on_changed_without_a_step() {
+        let mut item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
+        let mut history = History::default();
+        frame(&mut history, &mut item, false);
+        saying(&mut history, &mut item, false, &[Said::Underway]);
+        item.choices.start = Some(1.0);
+        saying(&mut history, &mut item, false, &[Said::Underway]);
+        // and what follows from it
+        item.choices.crop = Some(Crop { x: 0, y: 0, width: 4, height: 4 });
+        saying(&mut history, &mut item, false, &[Said::Underway]);
+        // given up on, as its control puts back only its own
+        item.choices.start = None;
+        assert!(saying(&mut history, &mut item, true, &[Said::Cancel]));
+        assert_eq!((item.choices.start, item.choices.crop), (None, None));
+        frame(&mut history, &mut item, false);
+        assert!(!history.can_undo() && !history.editing());
+    }
+
+    #[test]
+    fn joins_nudges_made_close_together() {
+        let mut item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
+        let mut history = History::default();
+        frame(&mut history, &mut item, false);
+        // a key held, each step a frame apart, and one after a while
+        for start in 1..=5 {
+            item.choices.start = Some(f64::from(start));
+            saying(&mut history, &mut item, true, &[Said::Nudge]);
+        }
+        assert_eq!(history.undo.len(), 1);
+        for _ in 0..5 {
+            frame(&mut history, &mut item, false);
+        }
+        item.choices.start = Some(9.0);
+        saying(&mut history, &mut item, true, &[Said::Nudge]);
+        assert_eq!(history.undo.len(), 2);
+        assert_eq!(history.undo[1].choices.start, Some(5.0));
     }
 
     #[test]
     fn takes_in_what_follows_from_a_change_and_what_the_gui_changes_itself() {
         let mut item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
         let mut history = History::default();
-        frame(&mut history, &item, false);
+        frame(&mut history, &mut item, false);
         // a change, then what follows from it in the next frame, which
         // has no input: one step, once at rest
         item.choices.target = Target::Emoji;
-        assert!(frame(&mut history, &item, true));
+        assert!(frame(&mut history, &mut item, true));
         item.choices.crop = Some(Crop { x: 0, y: 0, width: 4, height: 4 });
-        assert!(frame(&mut history, &item, false));
-        assert!(!frame(&mut history, &item, false));
+        assert!(frame(&mut history, &mut item, false));
+        assert!(!frame(&mut history, &mut item, false));
         assert_eq!(history.undo.len(), 1);
         assert_eq!(history.undo[0].choices.target, Target::Sticker);
         // a change without input, as the GUI makes: no step
         item.choices.crop = None;
-        frame(&mut history, &item, false);
-        frame(&mut history, &item, false);
+        frame(&mut history, &mut item, false);
+        frame(&mut history, &mut item, false);
         assert_eq!(history.undo.len(), 1);
         // the preset of a step renamed with the one in use
         history.undo[0].choices.preset = Some("mine".into());
@@ -1410,11 +1637,11 @@ mod tests {
     fn keeps_so_many_steps_back() {
         let mut item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
         let mut history = History::default();
-        frame(&mut history, &item, false);
+        frame(&mut history, &mut item, false);
         for step in 0..STEPS + 10 {
             item.choices.start = Some(step as f64);
-            frame(&mut history, &item, true);
-            frame(&mut history, &item, false);
+            frame(&mut history, &mut item, true);
+            frame(&mut history, &mut item, false);
         }
         assert_eq!(history.undo.len(), STEPS);
         assert_eq!(history.undo[0].choices.start, Some(9.0));

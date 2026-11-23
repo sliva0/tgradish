@@ -717,6 +717,10 @@ impl App {
             return;
         }
         let Some(item) = self.selected.and_then(|id| self.item_mut(id)) else { return };
+        // nor through any edit, which is a step once it is over
+        if item.history.editing() {
+            return;
+        }
         if crate::history::step(item, back) {
             ctx.request_repaint();
         }
@@ -745,7 +749,7 @@ impl App {
             true => (item, frame),
             false => (item, other),
         });
-        if crate::history::follow(items) {
+        if crate::history::follow(ctx, items) {
             ctx.request_repaint();
         }
     }
