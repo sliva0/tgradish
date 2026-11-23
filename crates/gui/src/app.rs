@@ -713,8 +713,12 @@ impl App {
 
     fn step_history(&mut self, ctx: &egui::Context, back: bool) {
         let Some(item) = self.selected.and_then(|id| self.item_mut(id)) else { return };
-        // not halfway through an edit, as a drag, whose step isn't over
-        if item.history.editing() {
+        // not halfway through an edit held by the pointer, as a drag, whose
+        // next frame would make again what was undone; one under way only
+        // as a number field has the focus is committed first, as a screen
+        // reader's Undo leaves it focused
+        let held = ctx.input(|input| input.pointer.any_down());
+        if item.history.editing() && held {
             return;
         }
         if crate::history::step(item, back) {

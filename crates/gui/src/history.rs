@@ -1524,6 +1524,21 @@ mod tests {
         assert_eq!((width_of(&harness, 0), steps(&harness)), (None, 3));
     }
 
+    #[test]
+    fn undoes_from_the_menu_as_a_screen_reader_does_while_a_number_has_the_focus() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["wide.png"]);
+        click(&mut harness, &fl!("target-emoji"));
+        harness.get(width_field("40 px")).focus();
+        harness.run_steps(2);
+        assert!(selected(&harness).history.editing());
+        harness.get_by_label(&fl!("main-menu")).click_accesskit();
+        harness.run_steps(2);
+        harness.get_by_label_contains(&fl!("menu-undo")).click_accesskit();
+        harness.run_steps(2);
+        assert_eq!(selected(&harness).choices.target, Target::Sticker);
+    }
+
     /// The field of the integer scale, which holds `×` and a number.
     fn scale_field<'a>(harness: &'a Harness<'_, App>) -> egui_kittest::Node<'a> {
         let scale = egui_kittest::kittest::by().role(egui::accesskit::Role::SpinButton);
