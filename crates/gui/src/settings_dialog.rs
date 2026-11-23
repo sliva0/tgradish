@@ -724,7 +724,7 @@ fn language(ui: &mut egui::Ui, chosen: &mut Option<String>, variable: Option<&st
     let name = |language: &LanguageIdentifier| {
         l10n::name_of(language).map_or_else(|| language.to_string(), str::to_owned)
     };
-    let system = l10n::system().unwrap_or_else(|| l10n::fallback().clone());
+    let system = l10n::system();
     let system = fl!("as-the-system-language", language = name(&system));
     let picked: Option<LanguageIdentifier> = chosen.as_deref().and_then(|tag| tag.parse().ok());
     let label = format!("{GLOBE} {}", fl!("language"));
@@ -1126,7 +1126,7 @@ mod tests {
         });
         harness.state_mut().dialogs.settings.open();
         harness.run_steps(3);
-        let system = crate::l10n::system().unwrap_or_else(|| crate::l10n::fallback().clone());
+        let system = crate::l10n::system();
         let system = crate::l10n::name_of(&system).unwrap();
         let system = fl!("as-the-system-language", language = system);
         let language = fl!("language");

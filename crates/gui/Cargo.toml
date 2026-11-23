@@ -27,7 +27,6 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 skrifa.workspace = true
-sys-locale.workspace = true
 rfd.workspace = true
 rust-embed.workspace = true
 shlex.workspace = true
@@ -50,6 +49,11 @@ winit = { workspace = true, features = ["wayland"] }
 # Load libdbus at runtime to query the system accent colour from the
 # desktop portal.
 libloading.workspace = true
+
+# The system's languages, where they aren't the environment's locales,
+# which the GUI reads itself.
+[target.'cfg(any(not(unix), target_vendor = "apple", target_os = "android"))'.dependencies]
+sys-locale.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Query the system accent colour from AppKit.
