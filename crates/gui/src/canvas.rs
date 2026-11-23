@@ -10,7 +10,7 @@ use tgradish_core::telegram::Target;
 
 use crate::item::Zoom;
 use crate::media::Clip;
-use crate::{theme, widgets};
+use crate::{history, theme, widgets};
 
 /// The one texture the preview draws, and which frame it holds.
 #[derive(Default)]
@@ -69,6 +69,8 @@ pub(crate) struct Picture<'a> {
 
 /// The crop being edited, with the width to height ratio it keeps.
 pub(crate) struct Cropping<'a> {
+    /// The file it is of, whose history is told of its edits.
+    pub(crate) file: u64,
     pub(crate) crop: &'a mut Option<Crop>,
     pub(crate) ratio: Option<f64>,
     /// What of the crop the result keeps, cutting off the rest.
@@ -280,6 +282,7 @@ pub(crate) fn show(
     painter.image(texture, shown, uv, Color32::WHITE);
 
     let Some(cropping) = cropping else { return };
+    let (ctx, file) = (ui.ctx().clone(), cropping.file);
     let size = picture.size;
     let to_pixels = |point: Pos2| {
         let x = ((point.x - shown.min.x) / scale).clamp(0.0, size.0 as f32);
@@ -338,6 +341,7 @@ pub(crate) fn show(
     {
         *cropping.crop = before;
         ui.data_mut(|data| data.remove::<(Drag, Option<Crop>)>(id));
+        history::cancel(&ctx, file);
     }
     let drag = ui.data(|data| data.get_temp::<(Drag, Option<Crop>)>(id)).map(|(drag, _)| drag);
     if let Some(point) = response.hover_pos() {
@@ -421,9 +425,14 @@ pub(crate) fn show(
         let crop = cropping.crop.unwrap_or(full);
         guides.retain(|&(across, line)| on_line(crop, across, line));
     }
-    // nor kept once the button is up, wherever it was let go
-    if response.drag_stopped() || !held {
+    // nor kept once the button is up, wherever it was let go: a step then,
+    // and under way till then
+    let kept = ui.data(|data| data.get_temp::<(Drag, Option<Crop>)>(id)).is_some();
+    if kept && (response.drag_stopped() || !held) {
         ui.data_mut(|data| data.remove::<(Drag, Option<Crop>)>(id));
+        history::commit(&ctx, file);
+    } else if kept {
+        history::underway(&ctx, file);
     }
     // all of the picture, or as much of it as the integer scale takes
     let whole_picture = |crop: &mut Option<Crop>| {
@@ -437,13 +446,14 @@ pub(crate) fn show(
     };
     if response.double_clicked() && cropping.crop.is_some() {
         whole_picture(cropping.crop);
+        history::commit(&ctx, file);
     }
     // the crop takes the keyboard's focus as it is pressed on, or drawn
     let crop_id = response.id.with("crop");
     ui.data_mut(|data| data.insert_temp(egui::Id::new(CROP), crop_id));
     let pressed_on =
         |point: Option<Pos2>| point.and_then(grab).filter(|drag| !matches!(drag, Drag::New(_)));
-    let mut focus = (dragging && drag.is_some())
+    let focus = (dragging && drag.is_some())
         || (response.clicked() && pressed_on(response.interact_pointer_pos()).is_some());
     // its ring is shown once the arrows move it, or the keyboard brings
     // the focus to it, as Tab does, till the canvas is pressed again or
@@ -482,7 +492,9 @@ pub(crate) fn show(
             if let Some(new) = new {
                 *cropping.crop = (new != full).then_some(new);
             }
-            focus = true;
+            history::nudge(&ctx, file);
+            // not asked for again, as it has it: asking would drop what
+            // keeps the arrows for it, and the next would take it away
             ui.data_mut(|data| data.insert_temp(keyed_id, true));
         }
     }
@@ -611,6 +623,7 @@ pub(crate) fn show(
         });
         if clicked.inner {
             whole_picture(cropping.crop);
+            history::commit(&ctx, file);
         }
         // last, as egui takes the focus from it on a press elsewhere, which
         // a press on its edges outside it is
@@ -1308,7 +1321,7 @@ mod tests {
             |ui, (screen, zoom, clip, crop, stage): &mut State| {
                 *stage = ui.max_rect();
                 let picture = Picture { clip, frame: 0, size: (64, 48), square: false };
-                let cropping = Cropping { crop, ratio: None, kept: None, exact: None };
+                let cropping = Cropping { file: 1, crop, ratio: None, kept: None, exact: None };
                 show(ui, screen, (*stage, *stage), &picture, zoom, Some(cropping));
             },
             state,
@@ -1408,7 +1421,7 @@ mod tests {
                 move |ui, (screen, zoom, clip, crop, stage): &mut Cropped| {
                     *stage = ui.max_rect();
                     let picture = Picture { clip, frame: 0, size, square: false };
-                    let cropping = Cropping { crop, ratio, kept: None, exact };
+                    let cropping = Cropping { file: 1, crop, ratio, kept: None, exact };
                     show(ui, screen, (*stage, *stage), &picture, zoom, Some(cropping));
                 },
                 state,

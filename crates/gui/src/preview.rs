@@ -472,7 +472,8 @@ fn preview(
                     }
                     _ => filling.map(Kept::Ratio),
                 };
-                let cropping = Cropping { crop: &mut item.choices.crop, ratio, kept, exact };
+                let crop = &mut item.choices.crop;
+                let cropping = Cropping { file: item.id, crop, ratio, kept, exact };
                 let zoom = &mut item.view.input_zoom;
                 // Scope by item ID so a drag started on one item's canvas stops
                 // if another item replaces it mid-drag (e.g. via Remove/Undo).

@@ -33,6 +33,7 @@ All notable changes to tgradish, newest first. This file follows [Keep a Changel
 - GUI warnings now sit above the bar under the preview when it wraps to two lines, instead of over its first line.
 - The Inspect and About dialogs now scroll inside short windows or at high UI scales, keeping the Close button visible.
 - Screen readers now announce labels for GUI number fields and report what progress bars represent and their current progress.
+- Holding an arrow key on the GUI crop now keeps moving it, instead of moving it a pixel or two and then taking the keyboard focus elsewhere.
 
 ## [2.1.1] - 2026-11-18
 

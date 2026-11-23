@@ -175,7 +175,6 @@ struct Saying(Vec<(u64, Said)>);
 /// The id [`Saying`] is kept under.
 const SAYING: &str = "edits said";
 
-#[expect(dead_code, reason = "controls say it once they are made to")]
 fn say(ctx: &egui::Context, file: u64, said: Said) {
     let id = egui::Id::new(SAYING);
     ctx.data_mut(|data| data.get_temp_mut_or_default::<Saying>(id).0.push((file, said)));
@@ -185,7 +184,6 @@ fn say(ctx: &egui::Context, file: u64, said: Said) {
 /// frame: begun now, or going on. Said each frame it goes on, it makes
 /// what changes until it is committed one step; an edit no longer said
 /// to be under way, as its control is no longer drawn, is committed.
-#[expect(dead_code, reason = "controls say it once they are made to")]
 pub(crate) fn underway(ctx: &egui::Context, file: u64) {
     say(ctx, file, Said::Underway);
 }
@@ -193,14 +191,12 @@ pub(crate) fn underway(ctx: &egui::Context, file: u64) {
 /// Says that the edit of `file` under way is done with, and makes what
 /// it changed a step as this frame ends; said of none, what this frame
 /// changed of `file` is a step of the user's of its own.
-#[expect(dead_code, reason = "controls say it once they are made to")]
 pub(crate) fn commit(ctx: &egui::Context, file: u64) {
     say(ctx, file, Said::Commit);
 }
 
 /// Says that the edit of `file` under way is given up: its settings go
 /// back to what they were as it began, which makes no step.
-#[expect(dead_code, reason = "controls say it once they are made to")]
 pub(crate) fn cancel(ctx: &egui::Context, file: u64) {
     say(ctx, file, Said::Cancel);
 }
@@ -208,7 +204,6 @@ pub(crate) fn cancel(ctx: &egui::Context, file: u64) {
 /// Says that a key moved something of `file` a little this frame: a step
 /// of its own, which joins a step of such keys made just before, so that
 /// a crop nudged pixel by pixel, or a key held, is put back at once.
-#[expect(dead_code, reason = "controls say it once they are made to")]
 pub(crate) fn nudge(ctx: &egui::Context, file: u64) {
     say(ctx, file, Said::Nudge);
 }
@@ -1318,6 +1313,63 @@ mod tests {
         assert_eq!(steps(&harness), 2);
         undo(&mut harness);
         assert_eq!(width_of(&harness, 0), Some(20));
+    }
+
+    #[test]
+    fn makes_one_step_of_an_arrow_held_down_on_the_crop() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["wide.png"]);
+        let (from, to) =
+            (on_picture(&harness, vec2(9.0, 5.0)), on_picture(&harness, vec2(27.0, 17.0)));
+        drag(&mut harness, from, to);
+        let drawn = selected(&harness).choices.crop.unwrap();
+        // clicked inside, so the arrows move it
+        let inside = on_picture(&harness, vec2(17.0, 11.0));
+        pointer_click(&mut harness, inside);
+        assert_eq!(steps(&harness), 1);
+        // held down for a few seconds, repeating every other frame, as
+        // the keyboard repeats slower than frames are drawn
+        let key = |pressed, repeat| egui::Event::Key {
+            key: egui::Key::ArrowLeft,
+            physical_key: None,
+            pressed,
+            repeat,
+            modifiers: Modifiers::NONE,
+        };
+        harness.event(key(true, false));
+        harness.step();
+        for _ in 0..8 {
+            harness.step();
+            harness.event(key(true, true));
+            harness.step();
+            // the crop keeps the keyboard's focus all the while
+            assert!(crate::canvas::crop_focused(&harness.ctx));
+        }
+        harness.event(key(false, false));
+        harness.run_steps(3);
+        assert_eq!(selected(&harness).choices.crop.unwrap().x, drawn.x - 9);
+        assert_eq!(steps(&harness), 2);
+        undo(&mut harness);
+        assert_eq!(selected(&harness).choices.crop, Some(drawn));
+    }
+
+    #[test]
+    fn makes_no_step_of_a_drag_taken_back_by_escape() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["wide.png"]);
+        let (from, by) = (on_picture(&harness, vec2(9.0, 5.0)), vec2(60.0, 40.0));
+        harness.event(egui::Event::PointerMoved(from));
+        press(&mut harness, from, true);
+        harness.step();
+        move_by(&mut harness, from, by, 3);
+        assert!(selected(&harness).choices.crop.is_some());
+        harness.key_press(egui::Key::Escape);
+        harness.step();
+        move_by(&mut harness, from + by, by, 2);
+        press(&mut harness, from + by * 2.0, false);
+        harness.run_steps(3);
+        assert_eq!(selected(&harness).choices.crop, None);
+        assert!(!selected(&harness).history.can_undo());
     }
 
     #[test]
