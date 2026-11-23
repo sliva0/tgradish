@@ -506,7 +506,7 @@ impl Presets {
 
     /// Options of `name` for `format`, with everything it extends applied
     /// first. WebP's are those of its `[webm]` table a picture has.
-    pub fn resolve(&self, name: &str, format: Format) -> Result<FormatOptions> {
+    pub fn options(&self, name: &str, format: Format) -> Result<FormatOptions> {
         Ok(match format {
             Format::Webm => FormatOptions::Webm(self.webm(name)?),
             Format::Tgs => FormatOptions::Tgs(self.tgs(name)?),
@@ -873,7 +873,7 @@ mod tests {
         let presets = Presets::load(Some(dir.path())).unwrap();
         let scaling = Some(crate::options::Scaling::Sharp);
         let sharp = webp::Options { scaling, ..Default::default() };
-        assert_eq!(presets.resolve("picture", Format::Webp).unwrap(), FormatOptions::Webp(sharp));
+        assert_eq!(presets.options("picture", Format::Webp).unwrap(), FormatOptions::Webp(sharp));
     }
 
     /// One file's options are refused in either table, as such, even one
@@ -890,7 +890,7 @@ mod tests {
             [("crop", "webm.crop"), ("webm-sheet", "webm.sheet"), ("tgs-sheet", "tgs.sheet")]
         {
             for format in [Format::Webm, Format::Webp, Format::Tgs] {
-                let err = presets.resolve(name, format).unwrap_err();
+                let err = presets.options(name, format).unwrap_err();
                 let Error::Preset(PresetError::PerFile { key: named, place }) = &err else {
                     panic!("{name}: {err}")
                 };
@@ -919,7 +919,7 @@ mod tests {
             (Some(Fit::Bitrate), Some(Effort::Fast), None)
         );
         assert_eq!(presets.tgs("fast").unwrap().effort, Some(Effort::Fast));
-        assert!(matches!(presets.resolve("best", Format::Tgs), Ok(FormatOptions::Tgs(_))));
+        assert!(matches!(presets.options("best", Format::Tgs), Ok(FormatOptions::Tgs(_))));
         assert!(presets.webm("nope").is_err());
         for format in [Format::Webm, Format::Tgs] {
             assert!(presets.get(format.default_preset()).is_ok());
