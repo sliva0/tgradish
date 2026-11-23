@@ -7,7 +7,7 @@ use crate::config::Config;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use tgradish_core::input::{self, FileKind, Input};
-use tgradish_core::options::{Crop, IntegerScale, Resize, Scaling, Sheet};
+use tgradish_core::options::{Crop, IntegerScale, Resize, Scaling, Selection, Sheet};
 use tgradish_core::picture;
 use tgradish_core::presets::{Format, FormatOptions, Presets};
 use tgradish_core::resolve::{Resolved, resolve};
@@ -75,10 +75,11 @@ impl From<FileKind> for Kind {
 }
 
 /// What the user chose for an item: a preset, then their own values over
-/// it. Target, crop, times and what of an Aseprite file is read apply to
-/// every format. Kept with the session as they are.
+/// it. Target, crop, times, title and what of an Aseprite file or a sprite
+/// sheet is read are the file's own, and go to every format that takes
+/// them. Kept with the session as [`SavedChoices`] has them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(from = "SavedChoices", into = "SavedChoices")]
 pub(crate) struct Choices {
     /// `None` for the default preset of the format.
     pub(crate) preset: Option<String>,
@@ -93,10 +94,108 @@ pub(crate) struct Choices {
     pub(crate) length: Option<f64>,
     /// Seconds into the input of the frame a static sticker is made of.
     pub(crate) frame: Option<f64>,
+    pub(crate) title: Option<String>,
+    /// The sprite sheet a `.tgs` reads its frames from, and how many of
+    /// them; kept while the sheet is off, for when it is on again.
+    pub(crate) sheet: Option<Sheet>,
+    pub(crate) sheet_frames: Option<u32>,
     /// Values set over the preset's, for WebM and `.tgs` results; images
     /// take WebM's.
     pub(crate) webm: Options,
     pub(crate) tgs: tgs::Options,
+}
+
+/// [`Choices`] as the session file holds them, as version 1 wrote them:
+/// the title, the sheet and its frames within the options of a format.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct SavedChoices {
+    preset: Option<String>,
+    target: Target,
+    tag: Option<String>,
+    show_layers: Option<Vec<String>>,
+    hide_layers: Option<Vec<String>>,
+    crop: Option<Crop>,
+    start: Option<f64>,
+    length: Option<f64>,
+    frame: Option<f64>,
+    webm: Options,
+    tgs: tgs::Options,
+}
+
+impl From<SavedChoices> for Choices {
+    fn from(saved: SavedChoices) -> Choices {
+        let SavedChoices { webm, tgs, .. } = saved;
+        // one title, which version 1 kept for each format, though it set
+        // neither
+        let title = webm.title.clone().or(tgs.title.clone());
+        // the file's own the GUI never wrote there are read and left out:
+        // its own are the item's
+        let webm = Options {
+            target: None,
+            tag: None,
+            show_layers: None,
+            hide_layers: None,
+            crop: None,
+            start: None,
+            length: None,
+            title: None,
+            ..webm
+        };
+        Choices {
+            preset: saved.preset,
+            target: saved.target,
+            tag: saved.tag,
+            show_layers: saved.show_layers,
+            hide_layers: saved.hide_layers,
+            crop: saved.crop,
+            start: saved.start,
+            length: saved.length,
+            frame: saved.frame,
+            title,
+            sheet: tgs.sheet,
+            sheet_frames: tgs.sheet_frames,
+            webm,
+            tgs: tgs::Options {
+                target: None,
+                start: None,
+                length: None,
+                crop: None,
+                tag: None,
+                show_layers: None,
+                hide_layers: None,
+                sheet: None,
+                sheet_frames: None,
+                title: None,
+                ..tgs
+            },
+        }
+    }
+}
+
+impl From<Choices> for SavedChoices {
+    fn from(choices: Choices) -> SavedChoices {
+        let title = choices.title;
+        SavedChoices {
+            preset: choices.preset,
+            target: choices.target,
+            tag: choices.tag,
+            show_layers: choices.show_layers,
+            hide_layers: choices.hide_layers,
+            crop: choices.crop,
+            start: choices.start,
+            length: choices.length,
+            frame: choices.frame,
+            // to both, as either format reads it
+            webm: Options { title: title.clone(), ..choices.webm },
+            tgs: tgs::Options {
+                title,
+                sheet: choices.sheet,
+                sheet_frames: choices.sheet_frames,
+                ..choices.tgs
+            },
+        }
+    }
 }
 
 impl Choices {
@@ -111,6 +210,9 @@ impl Choices {
             start: None,
             length: None,
             frame: None,
+            title: None,
+            sheet: None,
+            sheet_frames: None,
             webm: Options::default(),
             tgs: tgs::Options::default(),
         }
@@ -133,41 +235,47 @@ impl Choices {
         presets.tgs(self.preset_name(Format::Tgs, config)).map_err(|err| err.to_string())
     }
 
+    /// What the item chose of its file for `format`. Its target is always
+    /// set, so recipes saved with one stay equal.
+    pub(crate) fn selection(&self, format: Format) -> Selection {
+        Selection {
+            target: Some(self.target),
+            tag: self.tag.clone(),
+            show_layers: self.show_layers.clone(),
+            hide_layers: self.hide_layers.clone(),
+            crop: self.crop,
+            // a picture is of its frame
+            start: if format == Format::Webp { self.frame } else { self.start },
+            length: self.length,
+            title: self.title.clone(),
+            sheet: self.sheet,
+            // kept for when the sheet is on again, and of none till then
+            sheet_frames: self.sheet_frames.filter(|_| self.sheet.is_some()),
+        }
+        .for_format(format)
+    }
+
     /// The item's values for `format`, as a layer over its preset's: its
-    /// drafts, what every format shares, and the GUI's own rules for an
-    /// integer scale, as values. Its target is always set, so recipes
-    /// saved with one stay equal.
+    /// drafts, what it chose of its file, and the GUI's own rules for an
+    /// integer scale, as values.
     pub(crate) fn layer(
         &self,
         format: Format,
         presets: &Presets,
         config: &Config,
     ) -> FormatOptions {
-        match format {
+        let options = match format {
             Format::Webm => FormatOptions::Webm(self.webm_layer(presets, config)),
-            // a picture starts at its frame
-            Format::Webp => {
-                let layer = self.webm_layer(presets, config);
-                FormatOptions::Webp(webp::Options { start: self.frame, ..(&layer).into() })
-            }
-            Format::Tgs => FormatOptions::Tgs(self.tgs_layer()),
-        }
+            Format::Webp => FormatOptions::Webp((&self.webm_layer(presets, config)).into()),
+            Format::Tgs => FormatOptions::Tgs(self.tgs.clone()),
+        };
+        self.selection(format).into_options(options)
     }
 
-    /// The item's layer for WebM, as [`Choices::layer`] says, which a
-    /// picture's is made of.
+    /// The item's options for WebM, as [`Choices::layer`] says, which a
+    /// picture's are made of.
     pub(crate) fn webm_layer(&self, presets: &Presets, config: &Config) -> Options {
-        let webm = &self.webm;
-        let mut layer = Options {
-            target: Some(self.target),
-            tag: self.tag.clone().or_else(|| webm.tag.clone()),
-            show_layers: self.show_layers.clone().or_else(|| webm.show_layers.clone()),
-            hide_layers: self.hide_layers.clone().or_else(|| webm.hide_layers.clone()),
-            crop: self.crop.or(webm.crop),
-            start: self.start.or(webm.start),
-            length: self.length.or(webm.length),
-            ..webm.clone()
-        };
+        let mut layer = self.webm.clone();
         // the GUI scales by an integer scale only under integer scaling,
         // which then keeps the whole picture, where core would scale by it
         // whatever the scaling, and refuse it with a crop or a stretch: the
@@ -180,27 +288,6 @@ impl Choices {
             && matches!(effective.resize, Some(Resize::Crop | Resize::Stretch))
         {
             layer.resize = base.resize.map(|_| picture::default_resize(self.target));
-        }
-        layer
-    }
-
-    /// The item's layer for `.tgs`, as [`Choices::layer`] says.
-    pub(crate) fn tgs_layer(&self) -> tgs::Options {
-        let tgs = &self.tgs;
-        let mut layer = tgs::Options {
-            target: Some(self.target),
-            tag: self.tag.clone().or_else(|| tgs.tag.clone()),
-            show_layers: self.show_layers.clone().or_else(|| tgs.show_layers.clone()),
-            hide_layers: self.hide_layers.clone().or_else(|| tgs.hide_layers.clone()),
-            crop: self.crop.or(tgs.crop),
-            start: self.start.or(tgs.start),
-            length: self.length.or(tgs.length),
-            ..tgs.clone()
-        };
-        // a sheet's frames, kept while it is unticked for when it is
-        // ticked again, are no conversion's
-        if layer.sheet.is_none() {
-            layer.sheet_frames = None;
         }
         layer
     }
@@ -238,8 +325,8 @@ impl Choices {
             tag: self.tag.clone(),
             show_layers: self.show_layers.clone(),
             hide_layers: self.hide_layers.clone(),
-            sheet: self.tgs.sheet,
-            sheet_frames: self.tgs.sheet_frames,
+            sheet: self.sheet,
+            sheet_frames: self.sheet_frames,
             fps,
             ..tgs::Options::default()
         }
@@ -441,6 +528,7 @@ pub(crate) struct Framing {
     start: Option<f64>,
     length: Option<f64>,
     frame: Option<f64>,
+    sheet: (Option<Sheet>, Option<u32>),
     webm: Options,
     tgs: tgs::Options,
 }
@@ -457,6 +545,7 @@ impl Framing {
             start: item.choices.start,
             length: item.choices.length,
             frame: item.choices.frame,
+            sheet: (item.choices.sheet, item.choices.sheet_frames),
             webm: Options {
                 resize: webm.resize,
                 scaling: webm.scaling,
@@ -472,8 +561,6 @@ impl Framing {
                 keep_canvas: tgs.keep_canvas,
                 pixel_scale: tgs.pixel_scale,
                 resize: tgs.resize,
-                sheet: tgs.sheet,
-                sheet_frames: tgs.sheet_frames,
                 fps: tgs.fps,
                 tempo: tgs.tempo,
                 ..tgs::Options::default()
@@ -904,7 +991,7 @@ impl Item {
             crop: choices.crop,
             tag: choices.tag.clone(),
             layers: (choices.show_layers.clone(), choices.hide_layers.clone()),
-            sheet: choices.tgs.sheet.filter(|_| art),
+            sheet: choices.sheet.filter(|_| art),
             facts,
             ffmpeg,
         };
@@ -1001,10 +1088,29 @@ mod tests {
             start: _,
             length: _,
             frame: _,
+            title: _,
+            sheet: _,
+            sheet_frames: _,
             webm: _,
             tgs: _,
         } = Choices::new(Target::Sticker);
-        let shared = ["target", "tag", "show-layers", "hide-layers", "crop", "start", "length"];
+        // of those the file's own, all but its title
+        let shared = [
+            "target",
+            "tag",
+            "show-layers",
+            "hide-layers",
+            "crop",
+            "start",
+            "length",
+            "sheet",
+            "sheet-frames",
+        ];
+        let mut file: Vec<String> = Selection::keys().collect();
+        file.sort();
+        let mut decided_file: Vec<&str> = shared.iter().copied().chain(["title"]).collect();
+        decided_file.sort();
+        assert_eq!(file, decided_file, "one file's options");
         // of the rest, those that change what of the input is used or how
         // it fits, with a value other than their default, and those that
         // don't: an option core adds goes in one or the other
@@ -1024,7 +1130,6 @@ mod tests {
             "lossless",
             "spoof",
             "fake-duration",
-            "title",
             "watermark",
             "encoder-options",
             "ffmpeg-args",
@@ -1036,24 +1141,23 @@ mod tests {
             "keep-canvas": true,
             "pixel-scale": 2,
             "resize": "pad",
-            "sheet": "2x2",
-            "sheet-frames": 3,
             "fps": 5.0,
             "tempo": 2.0,
         });
-        let tgs_other = ["effort", "exact", "reductions", "compromise", "title", "watermark"];
+        let tgs_other = ["effort", "exact", "reductions", "compromise", "watermark"];
         let keys = |format: &str| -> Vec<String> {
             let mut keys: Vec<String> = match format {
                 "webm" => tgradish_core::webm::Options::keys().collect(),
                 _ => tgradish_core::tgs::Options::keys().collect(),
             };
+            keys.retain(|key| !Selection::keys().any(|file| file == *key));
             keys.sort();
             keys
         };
         let decided = |framing: &Value, other: &[&str]| -> Vec<String> {
             let framing = framing.as_object().unwrap().keys().map(String::as_str);
             let mut keys: Vec<String> =
-                shared.iter().chain(other).copied().chain(framing).map(str::to_owned).collect();
+                other.iter().copied().chain(framing).map(str::to_owned).collect();
             keys.sort();
             keys
         };
@@ -1073,6 +1177,13 @@ mod tests {
             changed.choices.tgs = serde_json::from_value(json!({ key: value })).unwrap();
             assert_ne!(Framing::of(&changed), unchanged, ".tgs's {key}");
         }
+        let mut sheet = item();
+        sheet.choices.sheet = "2x2".parse().ok();
+        let mut frames = item();
+        frames.choices.sheet_frames = Some(3);
+        for changed in [sheet, frames] {
+            assert_ne!(Framing::of(&changed), unchanged, "{:?}", changed.choices);
+        }
         let sequence = || {
             let mut item = Item::new(1, vec!["walk".into()], true, Target::Sticker);
             item.format = Format::Webm;
@@ -1086,6 +1197,47 @@ mod tests {
             changed.choices.webm = video.choices.webm.clone();
             assert_ne!(Framing::of(&changed), Framing::of(&sequence()), "a sequence's WebM {key}");
         }
+    }
+
+    /// As a session holds them: one title, read from either format's
+    /// options, WebM's first, and written to both; the sheet in `.tgs`'s;
+    /// and the rest of the file's own there, which the GUI never wrote,
+    /// read and left out.
+    #[test]
+    fn keeps_choices_as_a_session_holds_them() {
+        use serde_json::json;
+        let saved = |webm: serde_json::Value, tgs: serde_json::Value| {
+            let choices = json!({
+                "preset": null,
+                "target": "sticker",
+                "tag": null,
+                "show-layers": null,
+                "hide-layers": null,
+                "crop": null,
+                "start": null,
+                "length": null,
+                "frame": null,
+                "webm": webm,
+                "tgs": tgs,
+            });
+            serde_json::from_value::<Choices>(choices).unwrap()
+        };
+        let crop = json!({ "x": 0, "y": 0, "width": 8, "height": 8 });
+        let tgs = json!({ "title": "pig", "sheet": "4x1", "sheet-frames": 3, "tag": "idle" });
+        let choices = saved(json!({ "crf": 20, "crop": crop, "start": 1.0 }), tgs);
+        let sheet = (choices.sheet, choices.sheet_frames);
+        assert_eq!((choices.title.as_deref(), sheet), (Some("pig"), ("4x1".parse().ok(), Some(3))));
+        assert_eq!((choices.crop, choices.start, &choices.tag), (None, None, &None));
+        assert_eq!(choices.webm, Options { crf: Some(20), ..default() });
+        assert_eq!(choices.tgs, tgs::Options::default());
+        let written = serde_json::to_value(&choices).unwrap();
+        assert_eq!(written["webm"], json!({ "crf": 20, "title": "pig" }));
+        assert_eq!(written["tgs"], json!({ "title": "pig", "sheet": "4x1", "sheet-frames": 3 }));
+        let both = saved(json!({ "title": "webm" }), json!({ "title": "tgs" }));
+        assert_eq!(both.title.as_deref(), Some("webm"));
+        // and nothing else
+        let newer = json!({ "preset": null, "target": "sticker", "made-up": 1 });
+        assert!(serde_json::from_value::<Choices>(newer).is_err());
     }
 
     #[test]
@@ -1125,7 +1277,7 @@ mod tests {
         let presets = Presets::load(Some(dir.path())).unwrap();
         let mut choices = Choices::new(Target::Sticker);
         choices.preset = Some("slow".into());
-        choices.tgs.sheet = "4x1".parse().ok();
+        choices.sheet = "4x1".parse().ok();
         let reading = choices.reading(&presets, &Config::default());
         assert_eq!((reading.sheet, reading.fps), ("4x1".parse().ok(), Some(2.0)));
     }
@@ -1407,7 +1559,7 @@ mod tests {
     #[test]
     fn sheet_frames_without_a_sheet() {
         let mut choices = Choices::new(Target::Sticker);
-        choices.tgs.sheet_frames = Some(3);
+        choices.sheet_frames = Some(3);
         let recipe = choices.recipe(Format::Tgs, &Presets::builtin(), &Config::default());
         // left out, as it is kept only for when the sheet is ticked again,
         // where the command line refuses it (divergence 6)

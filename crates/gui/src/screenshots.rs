@@ -1221,7 +1221,7 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().add(vec![art]);
     let item = harness.state_mut().items.last_mut().unwrap();
     (item.format, item.format_guessed) = (Format::Tgs, false);
-    item.choices.tgs.sheet = "3x1".parse().ok();
+    item.choices.sheet = "3x1".parse().ok();
     finish(&mut harness);
     shot(&mut harness, save, "state-blocked-sheet");
     // a tag and a layer an Aseprite file no longer has

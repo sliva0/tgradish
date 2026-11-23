@@ -865,7 +865,7 @@ mod tests {
         harness.state_mut().add(vec![art]);
         let item = &mut harness.state_mut().items[0];
         (item.format, item.format_guessed) = (Format::Tgs, false);
-        item.choices.tgs.sheet = "3x1".parse().ok();
+        item.choices.sheet = "3x1".parse().ok();
         finish(&mut harness);
         let uneven = Blocker::SheetUneven { width: 4, height: 4, columns: 3, rows: 1 };
         assert_eq!(harness.state().items[0].blockers, [uneven]);
@@ -873,7 +873,7 @@ mod tests {
         harness.get_by_label(&nearest).click_accesskit();
         finish(&mut harness);
         let item = &harness.state().items[0];
-        assert_eq!((item.choices.tgs.sheet, item.blocked()), ("4x1".parse().ok(), false));
+        assert_eq!((item.choices.sheet, item.blocked()), ("4x1".parse().ok(), false));
         assert_eq!(item.input_size(), Some((1, 4)));
     }
 

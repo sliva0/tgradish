@@ -9,7 +9,10 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::presets::{Format, FormatOptions};
+use crate::telegram::Target;
 use crate::webm::CRFS;
+use crate::{tgs, webm, webp};
 
 /// How the input is fitted into the target dimensions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -396,7 +399,7 @@ impl From<IntegerScale> for String {
     }
 }
 
-/// Generates `overlaid(&self, overlay)` and `keys()` for an options struct
+/// Generates `overlaid(&self, overlay)`, `keys()` and `sets()` for a struct
 /// whose fields are all `Option<T>`. Destructuring `overlay` guarantees every
 /// new field must be added here; list them in field order, which `keys()`
 /// keeps.
@@ -412,7 +415,7 @@ macro_rules! layered {
 
             /// Whether the option `key`, as [`Self::keys`] names it, is
             /// set.
-            pub(crate) fn sets(&self, key: &str) -> bool {
+            pub fn sets(&self, key: &str) -> bool {
                 let field = key.replace('-', "_");
                 $(if field == stringify!($field) {
                     return self.$field.is_some();
@@ -432,6 +435,150 @@ macro_rules! layered {
     };
 }
 pub(crate) use layered;
+
+/// What a conversion takes of one input and what it makes of it: the
+/// target, the part of the input, what of an Aseprite file or a sprite sheet
+/// is read, and the title. Each file has its own, so presets set none of
+/// these. `None` uses the default.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Selection {
+    /// Target type: sticker or emoji. Default: sticker.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<Target>,
+    /// Aseprite tag to read. Default: all frames.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// Aseprite layers to show by name (including hidden layers). Default:
+    /// layers visible in the file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_layers: Option<Vec<String>>,
+    /// Aseprite layers to hide by name; hiding a group hides its children.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hide_layers: Option<Vec<String>>,
+    /// Region of the input to keep, in source pixels. Default: full frame.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crop: Option<Crop>,
+    /// Start offset in seconds; for WebP, the time of the frame to make the
+    /// picture of. Default: 0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<f64>,
+    /// Maximum duration in seconds to read from `start` (not for WebP).
+    /// Default: full remaining duration (for WebM, or 3 seconds of output
+    /// when spoofing is off).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub length: Option<f64>,
+    /// Title stored in the output: WebM and WebP metadata, or a `.tgs`'s
+    /// Lottie name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Treat the input as a sprite sheet of `COLUMNSxROWS` equal cells, read
+    /// row by row, for example `4x2` (`.tgs` only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sheet: Option<Sheet>,
+    /// Number of frames to read from a sprite sheet (`.tgs` only). Default:
+    /// all cells except trailing empty ones.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sheet_frames: Option<u32>,
+}
+
+layered!(Selection {
+    target,
+    tag,
+    show_layers,
+    hide_layers,
+    crop,
+    start,
+    length,
+    title,
+    sheet,
+    sheet_frames,
+});
+
+impl Selection {
+    /// Overlays all set fields from `overlay` onto `self`.
+    pub fn merged(self, overlay: &Selection) -> Selection {
+        self.overlaid(overlay)
+    }
+
+    /// `self` without what `format` doesn't take: a sprite sheet is read
+    /// only for `.tgs`, and a picture has no length.
+    pub fn for_format(mut self, format: Format) -> Selection {
+        if format != Format::Tgs {
+            (self.sheet, self.sheet_frames) = (None, None);
+        }
+        if format == Format::Webp {
+            self.length = None;
+        }
+        self
+    }
+
+    /// The keys of those [`Selection::for_format`] keeps for `format`, in
+    /// field order.
+    pub fn keys_for(format: Format) -> impl Iterator<Item = String> {
+        Selection::keys().filter(move |key| match key.as_str() {
+            "sheet" | "sheet-frames" => format == Format::Tgs,
+            "length" => format != Format::Webp,
+            _ => true,
+        })
+    }
+
+    /// `options` with this selection's values written over the fields of
+    /// the same names they still have.
+    // until the options lose those fields, which then are this alone's
+    #[doc(hidden)]
+    pub fn into_options(self, options: FormatOptions) -> FormatOptions {
+        let Selection {
+            target,
+            tag,
+            show_layers,
+            hide_layers,
+            crop,
+            start,
+            length,
+            title,
+            sheet,
+            sheet_frames,
+        } = self;
+        // as overlaid, which merging isn't: that clears a scale of none
+        match options {
+            FormatOptions::Webm(options) => FormatOptions::Webm(webm::Options {
+                target: target.or(options.target),
+                tag: tag.or(options.tag),
+                show_layers: show_layers.or(options.show_layers),
+                hide_layers: hide_layers.or(options.hide_layers),
+                crop: crop.or(options.crop),
+                start: start.or(options.start),
+                length: length.or(options.length),
+                title: title.or(options.title),
+                ..options
+            }),
+            FormatOptions::Webp(options) => FormatOptions::Webp(webp::Options {
+                target: target.or(options.target),
+                tag: tag.or(options.tag),
+                show_layers: show_layers.or(options.show_layers),
+                hide_layers: hide_layers.or(options.hide_layers),
+                crop: crop.or(options.crop),
+                start: start.or(options.start),
+                title: title.or(options.title),
+                ..options
+            }),
+            FormatOptions::Tgs(options) => FormatOptions::Tgs(tgs::Options {
+                target: target.or(options.target),
+                tag: tag.or(options.tag),
+                show_layers: show_layers.or(options.show_layers),
+                hide_layers: hide_layers.or(options.hide_layers),
+                crop: crop.or(options.crop),
+                start: start.or(options.start),
+                length: length.or(options.length),
+                title: title.or(options.title),
+                sheet: sheet.or(options.sheet),
+                sheet_frames: sheet_frames.or(options.sheet_frames),
+                ..options
+            }),
+        }
+    }
+}
 
 /// Legacy option keys kept as aliases in configs, JSON and CLI flags:
 /// `(old, current)`.
@@ -1050,6 +1197,38 @@ height = 8
 ";
         assert_eq!(toml::to_string(&tgs).unwrap(), toml);
         assert_eq!(toml::from_str::<crate::tgs::Options>(toml).unwrap(), tgs);
+    }
+
+    /// One file's options, every one set.
+    fn every_selection() -> Selection {
+        Selection {
+            target: Some(Target::Emoji),
+            tag: Some("idle".into()),
+            show_layers: Some(vec!["Hat".into()]),
+            hide_layers: Some(vec!["Sketch".into(), "Guides".into()]),
+            crop: Some(Crop { x: 1, y: 2, width: 30, height: 40 }),
+            start: Some(1.25),
+            length: Some(2.0),
+            title: Some("pig".into()),
+            sheet: Some(Sheet { columns: 4, rows: 2 }),
+            sheet_frames: Some(7),
+        }
+    }
+
+    #[test]
+    fn takes_of_one_files_options_what_each_format_reads() {
+        let every = every_selection();
+        for format in [Format::Webm, Format::Webp, Format::Tgs] {
+            let kept = set_keys(&every.clone().for_format(format));
+            assert_eq!(kept, Selection::keys_for(format).collect::<Vec<_>>(), "{format:?}");
+        }
+        let picture: Vec<String> = Selection::keys_for(Format::Webp).collect();
+        let read = ["target", "tag", "show-layers", "hide-layers", "crop", "start", "title"];
+        assert_eq!(picture, read);
+        // each over the last, as options merge
+        let later = Selection { start: Some(3.0), ..Selection::default() };
+        assert_eq!(every.clone().merged(&later), Selection { start: Some(3.0), ..every.clone() });
+        assert!(every.sets("sheet-frames") && !Selection::default().sets("crop"));
     }
 
     #[test]

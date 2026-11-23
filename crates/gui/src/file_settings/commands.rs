@@ -345,7 +345,7 @@ mod tests {
         // command line would refuse
         let mut art = Item::new(3, vec!["sheet.png".into()], false, Target::Sticker);
         art.format = Format::Tgs;
-        art.choices.tgs.sheet_frames = Some(3);
+        art.choices.sheet_frames = Some(3);
         let line = command_line(&art, &context).join(" ");
         assert!(line.contains("--format tgs") && !line.contains("--sheet-frames"), "{line}");
     }

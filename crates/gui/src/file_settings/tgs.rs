@@ -118,7 +118,7 @@ pub(super) fn reading(ui: &mut egui::Ui, item: &mut Item) {
         }
         _ => None,
     });
-    let options = &mut item.choices.tgs;
+    let options = &mut item.choices;
     row(ui, &fl!("sprite-sheet"), &fl!("sprite-sheet", "hint"), allowed, |ui| {
         // greyed out unticked, though a session may keep it ticked, which
         // reading and converting leave aside for this file
@@ -232,8 +232,8 @@ mod tests {
         // each keeps its own
         select(&mut harness, 0);
         assert_eq!(ticked(&harness), (false, true));
-        assert!(harness.state().items[0].choices.tgs.sheet.is_some());
-        assert!(harness.state().items[1].choices.tgs.sheet.is_none());
+        assert!(harness.state().items[0].choices.sheet.is_some());
+        assert!(harness.state().items[1].choices.sheet.is_none());
     }
 
     #[test]
@@ -246,7 +246,7 @@ mod tests {
         harness.state_mut().add(vec![walker(dir.path())]);
         let item = &mut harness.state_mut().items[0];
         (item.format, item.format_guessed) = (Format::Tgs, false);
-        item.choices.tgs.sheet = Some(FIRST_SHEET);
+        item.choices.sheet = Some(FIRST_SHEET);
         finish(&mut harness);
         harness.run_steps(3);
         // read as it is, rather than not at all, and said so

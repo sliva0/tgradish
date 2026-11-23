@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use tgradish_core::config::Threads;
 use tgradish_core::ffmpeg::FfmpegChoice;
-use tgradish_core::options::{self, Crop, IntegerScale, Range};
+use tgradish_core::options::{self, Crop, IntegerScale, Range, Selection};
 use tgradish_core::presets::Format;
 use tgradish_core::telegram::Target;
 use tgradish_core::tgradish_tgs::reduce;
@@ -620,7 +620,8 @@ impl OptionArgs {
         format: Format,
         json: Option<&serde_json::Map<String, serde_json::Value>>,
     ) -> Vec<String> {
-        let mut flags = options::set_keys(&self.to_options());
+        let mut flags = options::set_keys(&self.to_selection());
+        flags.extend(options::set_keys(&self.to_options()));
         flags.extend(options::set_keys(&self.to_tgs_options()));
         let json: Vec<&str> =
             json.map_or(Vec::new(), |json| json.keys().map(String::as_str).collect());
@@ -633,47 +634,48 @@ impl OptionArgs {
         named
     }
 
-    pub fn to_tgs_options(&self) -> tgs::Options {
-        tgs::Options {
+    /// What the flags choose of one input: [`OptionArgs::to_options`] and
+    /// [`OptionArgs::to_tgs_options`] hold none of this.
+    pub fn to_selection(&self) -> Selection {
+        Selection {
             target: self.target.map(Into::into),
+            tag: self.tag.clone(),
+            show_layers: names(&self.show_layers),
+            hide_layers: names(&self.hide_layers),
+            crop: self.crop,
             start: self.start,
             length: self.length,
+            title: self.title.clone(),
+            sheet: self.sheet,
+            sheet_frames: self.sheet_frames,
+        }
+    }
+
+    pub fn to_tgs_options(&self) -> tgs::Options {
+        tgs::Options {
             tempo: self.tempo,
             effort: self.effort.map(Into::into),
             exact: switch(self.exact, self.no_exact),
             reductions: (!self.reductions.is_empty())
                 .then(|| self.reductions.iter().map(|&kind| kind.into()).collect()),
             compromise: self.compromise.map(Into::into),
-            crop: self.crop,
             resize: self.resize.map(Into::into),
             keep_canvas: switch(self.keep_canvas, self.no_keep_canvas),
             pixel_scale: self.pixel_scale,
-            tag: self.tag.clone(),
-            show_layers: names(&self.show_layers),
-            hide_layers: names(&self.hide_layers),
-            sheet: self.sheet,
-            sheet_frames: self.sheet_frames,
             fps: self.fps,
-            title: self.title.clone(),
             watermark: switch(self.watermark, self.no_watermark),
+            ..tgs::Options::default()
         }
     }
 
     pub fn to_options(&self) -> Options {
         Options {
-            target: self.target.map(Into::into),
-            tag: self.tag.clone(),
-            show_layers: names(&self.show_layers),
-            hide_layers: names(&self.hide_layers),
-            crop: self.crop,
             resize: self.resize.map(Into::into),
             scaling: self.scaling.map(Into::into),
             integer_scale: self.integer_scale,
             fit: self.fit.map(Into::into),
             attempts: self.attempts,
             fit_range: self.fit_range,
-            start: self.start,
-            length: self.length,
             tempo: self.tempo,
             fps: self.fps,
             bitrate: self.bitrate,
@@ -682,11 +684,11 @@ impl OptionArgs {
             lossless: switch(self.lossless, self.no_lossless),
             spoof: self.spoof.map(Into::into),
             fake_duration: self.fake_duration,
-            title: self.title.clone(),
             watermark: switch(self.watermark, self.no_watermark),
             encoder_options: (!self.encoder_options.is_empty())
                 .then(|| self.encoder_options.iter().flatten().cloned().collect()),
             ffmpeg_args: self.ffmpeg_args.clone().map(|words| words.0),
+            ..Options::default()
         }
     }
 }
@@ -984,7 +986,7 @@ mod tests {
         for command in ["convert", "watch"] {
             let command = cli.find_subcommand(command).unwrap();
             let flags: Vec<_> = command.get_arguments().filter_map(|a| a.get_long()).collect();
-            for key in Options::keys().chain(tgs::Options::keys()) {
+            for key in Selection::keys().chain(Options::keys()).chain(tgs::Options::keys()) {
                 assert!(flags.contains(&key.as_str()), "no --{key} flag");
             }
         }
@@ -1197,7 +1199,7 @@ mod tests {
 
     #[test]
     fn writes_flags_that_read_back() {
-        let webm = Options {
+        let selection = Selection {
             target: Some(Target::Emoji),
             tag: Some("idle".into()),
             // names with commas and spaces, one flag each, and ones that
@@ -1205,14 +1207,19 @@ mod tests {
             show_layers: Some(vec!["Shadow, soft".into(), "Hat".into()]),
             hide_layers: Some(vec!["Back ground".into(), "--old".into()]),
             crop: Some(Crop { x: 1, y: 2, width: 30, height: 40 }),
+            start: Some(1.25),
+            length: Some(2.0),
+            title: Some("-_- a pig's \"sticker\"".into()),
+            sheet: "4x2".parse().ok(),
+            sheet_frames: Some(7),
+        };
+        let webm = Options {
             resize: Some(options::Resize::Pad),
             scaling: Some(options::Scaling::Integer),
             integer_scale: Some("1/2".parse().unwrap()),
             fit: Some(options::Fit::Crf),
             attempts: Some(5),
             fit_range: Some(Range { min: 4.0, max: 40.5 }),
-            start: Some(1.25),
-            length: Some(2.0),
             tempo: Some(1.5),
             fps: Some(24.0),
             bitrate: Some(600.0),
@@ -1221,35 +1228,34 @@ mod tests {
             lossless: Some(false),
             spoof: Some(options::Spoof::Never),
             fake_duration: Some(0.5),
-            title: Some("-_- a pig's \"sticker\"".into()),
             watermark: Some(false),
             encoder_options: Some([("tune-content".into(), "screen".into())].into()),
             ffmpeg_args: Some(vec!["-x".into(), "a b".into()]),
+            ..Options::default()
         };
-        assert_eq!(parsed(options::flags(&webm)).to_options(), webm);
+        let read = parsed([options::flags(&selection), options::flags(&webm)].concat());
+        assert_eq!((read.to_selection(), read.to_options()), (selection, webm));
+        let selection = Selection {
+            tag: Some("-run".into()),
+            hide_layers: Some(vec!["Sketch".into(), "Guides, old".into()]),
+            title: Some("-_-".into()),
+            ..Selection::default()
+        };
         let tgs = tgs::Options {
-            target: Some(Target::Emoji),
-            start: Some(0.5),
-            length: Some(1.5),
             tempo: Some(0.5),
             effort: Some(options::Effort::Fast),
             exact: Some(true),
             reductions: Some(vec![reduce::Kind::MergeColours, reduce::Kind::DropFrames]),
             compromise: Some(reduce::Compromise::Detail),
-            crop: Some(Crop { x: 0, y: 0, width: 8, height: 8 }),
             resize: Some(options::Resize::Stretch),
             keep_canvas: Some(true),
             pixel_scale: Some(2),
-            tag: Some("-run".into()),
-            show_layers: Some(vec!["Outline".into()]),
-            hide_layers: Some(vec!["Sketch".into(), "Guides, old".into()]),
-            sheet: "4x2".parse().ok(),
-            sheet_frames: Some(7),
             fps: Some(12.5),
-            title: Some("-_-".into()),
             watermark: Some(true),
+            ..tgs::Options::default()
         };
-        assert_eq!(parsed(options::flags(&tgs)).to_tgs_options(), tgs);
+        let read = parsed([options::flags(&selection), options::flags(&tgs)].concat());
+        assert_eq!((read.to_selection(), read.to_tgs_options()), (selection, tgs));
     }
 
     /// Flags renamed since keep their old names, hidden.

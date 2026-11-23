@@ -912,7 +912,9 @@ mod tests {
         assert_eq!(current, [true, true, true, false, false, false]);
         let written = restored.written.into_iter().collect();
         let again = Session::of(&items, restored.selected, &written).with_window(window);
-        assert_eq!(again.to_json().unwrap(), text);
+        // the one title written for either format, as both read it
+        let titled = text.replacen(r#""tgs":{}}"#, r#""tgs":{"title":"pig"}}"#, 1);
+        assert_eq!(again.to_json().unwrap(), titled);
     }
 
     #[test]

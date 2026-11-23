@@ -148,11 +148,12 @@ fn layer_options(
         layers.push(json_options(json, format)?);
     }
     let flags = layers.len();
-    layers.push(match format {
+    let flagged = match format {
         Format::Webm => FormatOptions::Webm(args.options.to_options()),
         Format::Webp => FormatOptions::Webp(webp::Options::from(&args.options.to_options())),
         Format::Tgs => FormatOptions::Tgs(args.options.to_tgs_options()),
-    });
+    };
+    layers.push(args.options.to_selection().for_format(format).into_options(flagged));
     let name = args.preset.as_deref().unwrap_or_else(|| config.preset_for(format));
     let refused = |err| match err {
         ResolveError::UnknownPreset { known, named, .. } => {

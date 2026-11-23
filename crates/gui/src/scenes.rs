@@ -108,14 +108,14 @@ fn walk_in(size: egui::Vec2, mut visit: impl FnMut(&mut Harness<App>, &str)) {
     let (id, selected) = (harness.state().items[0].id, harness.state().selected);
     harness.state_mut().select(id);
     let item = &mut harness.state_mut().items[0];
-    let was = (item.format, item.choices.tgs.sheet);
+    let was = (item.format, item.choices.sheet);
     item.format = Format::Tgs;
-    item.choices.tgs.sheet = Some(tgradish_core::options::Sheet { columns: 2, rows: 2 });
+    item.choices.sheet = Some(tgradish_core::options::Sheet { columns: 2, rows: 2 });
     finish(&mut harness);
     settle(&mut harness, None);
     visit(&mut harness, "sheet");
     let item = &mut harness.state_mut().items[0];
-    (item.format, item.choices.tgs.sheet) = was;
+    (item.format, item.choices.sheet) = was;
     if let Some(selected) = selected {
         harness.state_mut().select(selected);
     }

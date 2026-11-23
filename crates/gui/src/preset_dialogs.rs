@@ -296,8 +296,7 @@ impl App {
         // the preset makes what the item made, from the command line too
         let webm = choices.webm_layer(presets, config);
         let webm = choices.webm_base(presets, config).unwrap_or_default().merged(&webm);
-        let tgs =
-            choices.tgs_base(presets, config).unwrap_or_default().merged(&choices.tgs_layer());
+        let tgs = choices.tgs_base(presets, config).unwrap_or_default().merged(&choices.tgs);
         let description = saving.description.trim().to_owned();
         match presets::save(dir, &name, &description, (&webm, &tgs), exists) {
             Ok(_) => {
@@ -597,19 +596,12 @@ impl App {
 }
 
 /// Switches `item` to preset `name` and clears per-item format overrides that
-/// are now stored in the preset, keeping only file-specific fields (title and
-/// sprite-sheet layout).
+/// are now stored in the preset, keeping what is the file's own.
 fn take_up(item: &mut Item, name: &str) {
     let choices = &mut item.choices;
     choices.preset = Some(name.to_owned());
-    choices.webm = Options { title: choices.webm.title.take(), ..Options::default() };
-    let tgs = &mut choices.tgs;
-    *tgs = tgs::Options {
-        title: tgs.title.take(),
-        sheet: tgs.sheet.take(),
-        sheet_frames: tgs.sheet_frames.take(),
-        ..tgs::Options::default()
-    };
+    choices.webm = Options::default();
+    choices.tgs = tgs::Options::default();
 }
 
 #[cfg(test)]
@@ -638,7 +630,7 @@ mod tests {
         item.format = Format::Webm;
         item.choices.webm.fit = Some(Fit::Crf);
         item.choices.webm.resize = Some(Resize::Crop);
-        item.choices.webm.title = Some("only this one".into());
+        item.choices.title = Some("only this one".into());
         harness.run_steps(2);
         harness.get_by_label(&fl!("save-preset")).click();
         harness.run_steps(2);
@@ -656,10 +648,7 @@ mod tests {
         assert!(state.preset_dialog.is_none());
         let choices = &state.items[0].choices;
         assert_eq!(choices.preset.as_deref(), Some("by quality"));
-        assert_eq!(
-            (choices.webm.fit, choices.webm.title.as_deref()),
-            (None, Some("only this one"))
-        );
+        assert_eq!((choices.webm.fit, choices.title.as_deref()), (None, Some("only this one")));
         // what it makes, and shows, comes from the preset now
         let effective =
             choices.recipe(Format::Webm, &state.presets, &state.config).unwrap().into_webm();
