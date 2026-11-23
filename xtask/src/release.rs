@@ -248,15 +248,25 @@ pub fn local_release(args: &[String]) -> Result<()> {
         let glibc = !target.is_windows() && !target.is_musl();
         // musl and Windows builds have no glibc to check
         let max_glibc = max_glibc.filter(|_| glibc);
+        // only builds for this machine run here
+        let runs = target == Target::host();
         ensure_ffmpeg(target, asm)?;
         build(target, false)?;
-        package(target, false, max_glibc)?;
+        let linked = package(target, false, max_glibc)?;
+        if runs {
+            smoke_test(&linked)?;
+        }
         // the build without ffmpeg goes where the linked one was, so after
         // that one is packed; only for glibc, as the AUR package tgradish-bin
         // uses it
         if glibc {
             build(target, true)?;
-            package(target, true, max_glibc)?;
+            let system = package(target, true, max_glibc)?;
+            // it runs the system's ffmpeg, which the release workflow's
+            // build containers lack
+            if runs && Command::new("ffmpeg").arg("-version").output().is_ok() {
+                smoke_test(&system)?;
+            }
         }
     }
     let out = root.join("target/release-artifacts");
@@ -275,4 +285,13 @@ pub fn local_release(args: &[String]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Runs `.github/smoke.sh`, which every release test job runs too, on a
+/// packed binary, in `target/smoke`, where it leaves the files it made.
+fn smoke_test(binary: &Path) -> Result<()> {
+    let root = workspace_root();
+    let dir = root.join("target/smoke");
+    std::fs::create_dir_all(&dir)?;
+    run(Command::new("sh").current_dir(&dir).arg(root.join(".github/smoke.sh")).arg(binary))
 }
