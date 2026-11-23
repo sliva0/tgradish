@@ -640,9 +640,14 @@ impl Printer {
                     ),
                 ));
             }
-            Event::Scored { ssim, .. } if self.verbose > 0 => {
-                self.bar
-                    .line(ui::status("Compared", ui::dim(format!("similarity (SSIM) {ssim:.4}"))));
+            // in the words the decisions after it use, with the measure
+            // named so it can be looked up
+            Event::Scored { attempt, ssim } if self.verbose > 0 => {
+                let looks = format!(
+                    "attempt {attempt} looks {:.1}% like the input (SSIM {ssim:.4})",
+                    ssim * 100.0
+                );
+                self.bar.line(ui::status("Compared", ui::dim(looks)));
             }
             // why fitting stops, or tries a lower frame rate
             Event::Decided { message, .. } if !self.quiet => {

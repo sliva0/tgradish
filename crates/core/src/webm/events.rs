@@ -175,14 +175,14 @@ impl std::fmt::Display for Decision {
             ),
             Decision::AlikeEnough { attempt, ssim } => write!(
                 f,
-                "stopped: attempt {attempt} already matches the input at {} SSIM; more bits would \
-                 only enlarge it",
+                "stopped: attempt {attempt} already looks {} like the input, so more bits would \
+                 only make it larger",
                 percent(ssim)
             ),
             Decision::AlikeUnchanged { attempt, than, ssim } => write!(
                 f,
-                "stopped: attempt {attempt} reaches {} SSIM, barely improving on attempt {than} \
-                 with fewer bits",
+                "stopped: attempt {attempt} looks {} like the input, hardly more than attempt \
+                 {than} with fewer bits",
                 percent(ssim)
             ),
             Decision::LittleToGain { attempt, share, predicted } => write!(
@@ -207,19 +207,19 @@ impl std::fmt::Display for Decision {
             }
             Decision::LowersFrameRateForLooks { from, fps: rate, attempt, ssim } => write!(
                 f,
-                "trying {} fps: attempt {attempt} at {} fps only reached {} SSIM",
+                "trying {} fps: attempt {attempt} at {} fps looks only {} like the input",
                 fps(rate),
                 fps(from),
                 percent(ssim)
             ),
             Decision::LowerLooksNoBetter { fps: rate, ssim, kept, kept_fps, kept_ssim } => write!(
                 f,
-                "stopped: {} fps reached {} SSIM, no better than attempt {kept} at {} fps ({} \
-                 SSIM)",
+                "stopped: {} fps looks {} like the input, no more than the {} of attempt {kept} \
+                 at {} fps",
                 fps(rate),
                 percent(ssim),
-                fps(kept_fps),
-                percent(kept_ssim)
+                percent(kept_ssim),
+                fps(kept_fps)
             ),
             Decision::Settled { attempt } => {
                 write!(f, "stopped early as requested: kept attempt {attempt}, the best that fits")

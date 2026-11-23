@@ -1094,7 +1094,7 @@ column-rate = Bitrate, or the quality it was encoded at
 column-size = size
     .hint = Share of the file size limit, green where it fits
 column-alike = alike
-    .hint = How like the input it looks (SSIM)
+    .hint = How much it looks like the input, measured by SSIM (structural similarity)
 # A quality, short, in the table's rate column.
 rate-quality-short = q { $crf }
 # Under the table: why fitting stopped where it did, or tried a lower
@@ -1113,7 +1113,7 @@ decided-out-of-attempts = { $count ->
 decided-lowers-to-fit = Trying { $fps } fps: nothing fit at { $from } fps
 decided-lowers-for-looks = Trying { $fps } fps: encode { $number } at { $from } fps looks only { $alike } like the input
 decided-settled = Stopped early: kept encode { $number }
-decided-lower-no-better =Stopped: { $fps } fps looks { $alike } like the input, no more than encode { $kept } at { $kept_fps } fps with { $kept_alike }
+decided-lower-no-better = Stopped: { $fps } fps looks { $alike } like the input, no more than the { $kept_alike } of encode { $kept } at { $kept_fps } fps
 # Telegram's problems with a WebM or static result.
 issue-not-webm = Its container is { $container }, not WebM
 issue-no-video = It has no video track

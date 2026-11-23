@@ -63,8 +63,8 @@ pub enum Event {
         /// early.
         can_settle: bool,
     },
-    /// WebM: SSIM quality score (0.0 to 1.0) comparing an attempt to the
-    /// source.
+    /// WebM: how much an attempt looks like the input, by its SSIM score
+    /// (0.0 to 1.0) against the source.
     Scored {
         /// 1-based attempt number.
         attempt: u32,

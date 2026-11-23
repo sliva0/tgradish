@@ -13,6 +13,7 @@ All notable changes to tgradish, newest first. This file follows [Keep a Changel
 
 ### Changed
 
+- The CLI now says how good a WebM encode is in the GUI's words, as how much it looks like the input (for example, "attempt 3 already looks 99.6% like the input"), instead of as "99.6% SSIM". `-v` names the measure, SSIM, beside each score, and the help for `--fit` says what `auto` keeps by it. In `--json` output only the wording of `decided` events' `message` changes.
 - `--lossless` (or `"lossless"` in `--options-json`) with a fit that doesn't keep a constant quality (`auto`, `bitrate` or `crf`) now fails with exit status 2 before any input is read, instead of failing each input with 1. A preset's `lossless` there is ignored with a warning instead.
 - Warnings about options that have no effect, such as `crf` with `--fit bitrate`, now come right after each input's `started` event, before any other warning.
 - The GUI now checks a preset's values before converting, as the CLI does. An out-of-range value, even one the other settings leave without effect (such as `fake-duration = 5.0` with `spoof = "never"`), now fails the conversion with a message naming the preset, instead of failing later or being ignored.

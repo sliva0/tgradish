@@ -495,7 +495,10 @@ pub struct OptionArgs {
     pub fps: Option<f64>,
 
     /// Parameter to adjust to get close to the WebM size limit (256 KiB for
-    /// stickers, 64 KiB for emoji). [default: auto]
+    /// stickers, 64 KiB for emoji): auto fits the bitrate, tries lower frame
+    /// rates where they could look better, and keeps the encode that looks
+    /// most like the input (by SSIM, which -v shows); bitrate, crf, fps or
+    /// length fits that alone; off encodes once. [default: auto]
     #[arg(long, value_enum, help_heading = "Size fitting")]
     pub fit: Option<FitArg>,
     /// Maximum encoding attempts during size fitting (1 to 50). [default:
