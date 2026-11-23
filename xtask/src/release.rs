@@ -15,7 +15,7 @@ use anyhow::{Context, Result, bail, ensure};
 use self::version::{Tree, Version};
 use crate::build::build;
 use crate::ffmpeg::ensure_ffmpeg;
-use crate::package::package;
+use crate::package::{glibc_version, package};
 use crate::{Target, cargo, output, run, rustc, workspace_root};
 
 const USAGE: &str = "\
@@ -216,10 +216,13 @@ fn fetch(url: &str) -> Result<Option<String>> {
 
 /// Builds every release variant of `targets` and packs them into
 /// `target/release-artifacts`, building ffmpeg first where its libraries
-/// are missing or from another recipe.
+/// are missing or from another recipe. The release workflow builds each
+/// target with this too, so a local run makes the files a release has.
+/// With `--max-glibc`, fails if a glibc build needs a newer glibc.
 pub fn local_release(args: &[String]) -> Result<()> {
     let mut targets = vec![Target::host(), Target::WindowsX64];
     let mut asm = true;
+    let mut max_glibc = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -233,20 +236,27 @@ pub fn local_release(args: &[String]) -> Result<()> {
                     .collect::<Result<_>>()?;
             }
             "--no-asm" => asm = false,
+            "--max-glibc" => {
+                let max = iter.next().context("--max-glibc needs a version, like 2.28")?;
+                max_glibc = Some(glibc_version(max)?);
+            }
             other => bail!("unknown argument {other:?}"),
         }
     }
     let root = workspace_root();
     for target in targets {
+        let glibc = !target.is_windows() && !target.is_musl();
+        // musl and Windows builds have no glibc to check
+        let max_glibc = max_glibc.filter(|_| glibc);
         ensure_ffmpeg(target, asm)?;
         build(target, false)?;
-        package(target, false, None)?;
+        package(target, false, max_glibc)?;
         // the build without ffmpeg goes where the linked one was, so after
         // that one is packed; only for glibc, as the AUR package tgradish-bin
         // uses it
-        if !target.is_windows() && !target.is_musl() {
+        if glibc {
             build(target, true)?;
-            package(target, true, None)?;
+            package(target, true, max_glibc)?;
         }
     }
     let out = root.join("target/release-artifacts");

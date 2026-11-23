@@ -111,29 +111,6 @@ fn check_dll_imports(exe: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The `package` task: [`package`] as its arguments ask.
-pub fn package_release(args: &[String]) -> Result<()> {
-    let mut target = None;
-    let mut system_ffmpeg = false;
-    let mut max_glibc = None;
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--target" => target = Some(Target::parse(iter.next())?),
-            "--system-ffmpeg" => system_ffmpeg = true,
-            "--max-glibc" => {
-                max_glibc =
-                    Some(glibc_version(iter.next().context("--max-glibc needs a version")?)?)
-            }
-            other => bail!("unknown argument {other:?}"),
-        }
-    }
-    let target = target.context(
-        "usage: cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc 2.28]",
-    )?;
-    package(target, system_ffmpeg, max_glibc)
-}
-
 /// Where the GUI's fonts are, with their licences: those of
 /// [`FONT_LICENCES`], which the binary carries too (`notices` in
 /// crates/gui/src/about.rs) and the archives' `licenses/` has, as the
@@ -563,7 +540,7 @@ fn check_musl_links(exe: &Path, target: Target) -> Result<()> {
 }
 
 /// `2.28` as `(2, 28)`; `2.2.5` is `(2, 2)`.
-fn glibc_version(text: &str) -> Result<(u32, u32)> {
+pub fn glibc_version(text: &str) -> Result<(u32, u32)> {
     let mut parts = text.split('.').map(str::parse);
     match (parts.next(), parts.next()) {
         (Some(Ok(major)), Some(Ok(minor))) => Ok((major, minor)),
