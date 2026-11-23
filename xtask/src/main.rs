@@ -17,19 +17,21 @@
 //! - `build --target TARGET [--system-ffmpeg]`: builds a release binary into
 //!   `target/<triple>/release`, statically linking the built ffmpeg unless
 //!   `--system-ffmpeg` is passed (Windows uses mingw-w64, musl uses
-//!   `musl-gcc`). Used by both the release workflow and `local-release`.
-//! - `package --target TARGET [--system-ffmpeg] [--max-glibc 2.28]`: packages a
-//!   built binary into a release archive (`--system-ffmpeg` packages a build
-//!   that uses the system ffmpeg). For glibc builds with built-in ffmpeg, also
-//!   builds `.deb` and `.rpm` packages via `nfpm` (downloaded automatically).
+//!   `musl-gcc`). `local-release` builds with it too; on its own, it relinks
+//!   tgradish against a modified ffmpeg, as the ffmpeg sources' README says.
 //! - `ffmpeg-sources`: packs the exact source tarballs of the static ffmpeg
 //!   build into `target/ffmpeg/ffmpeg-<version>-sources.tar`, which the release
 //!   workflow publishes with each release for LGPL compliance.
-//! - `local-release [--targets linux-x86_64,windows-x86_64] [--no-asm]`: builds
-//!   and packages all release variants locally for manual testing (with
-//!   built-in ffmpeg, plus `--system-ffmpeg` for glibc targets, building ffmpeg
-//!   first if missing or outdated; Windows requires mingw-w64, musl requires
-//!   `musl-gcc`). Outputs go to `target/release-artifacts`.
+//! - `local-release [--targets linux-x86_64,windows-x86_64] [--no-asm]
+//!   [--max-glibc 2.28]`: builds and packages all release variants, as the
+//!   release workflow does for each target (with built-in ffmpeg, plus one
+//!   without it for glibc targets, building ffmpeg first if missing or
+//!   outdated; Windows requires mingw-w64, musl requires `musl-gcc`).
+//!   Archives get the binary, licence notices and, on Linux, the desktop
+//!   entry, icons, man pages and completions; glibc builds with built-in
+//!   ffmpeg also get `.deb` and `.rpm` packages via `nfpm` (downloaded
+//!   automatically). `--max-glibc` fails if a glibc build needs a newer
+//!   glibc. Outputs go to `target/release-artifacts`.
 //! - `release`: automates the release steps in `CONTRIBUTING.md`:
 //!   - `prepare X.Y.Z [--tgs X.Y.Z]`: bumps versions everywhere (including
 //!     `tgradish-tgs` when `--tgs` is given), dates `CHANGELOG.md`
@@ -81,7 +83,6 @@ fn main() -> Result<()> {
         Some("ffmpeg") => ffmpeg::build_ffmpeg(&args[1..]),
         Some("ffmpeg-sources") => ffmpeg::package_sources(),
         Some("build") => build::build_release(&args[1..]),
-        Some("package") => package::package_release(&args[1..]),
         Some("licenses") => licenses::crate_licenses(&args[1..]),
         Some("icons") => icons::icons(&args[1..]),
         Some("local-release") => release::local_release(&args[1..]),
@@ -91,10 +92,9 @@ fn main() -> Result<()> {
             "usage: cargo xtask ffmpeg [--target TARGET] [--no-asm] [--force]\n       \
              cargo xtask ffmpeg-sources\n       \
              cargo xtask build --target TARGET [--system-ffmpeg]\n       \
-             cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc 2.28]\n       \
              cargo xtask licenses [--check]\n       \
              cargo xtask icons [--check]\n       \
-             cargo xtask local-release [--targets TARGET,...] [--no-asm]\n       \
+             cargo xtask local-release [--targets TARGET,...] [--no-asm] [--max-glibc 2.28]\n       \
              cargo xtask release prepare|check|notes|aur|crates ...\n       \
              cargo xtask strings [--no-pictures]\n\
              targets: {}",

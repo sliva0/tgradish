@@ -1,5 +1,5 @@
-//! Release build runner shared by the release workflow and `local-release` so
-//! both use identical flags.
+//! Release build runner behind `local-release`, which the release workflow
+//! runs too, and `build`, which relinks tgradish against a modified ffmpeg.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -69,7 +69,7 @@ pub fn build(target: Target, system_ffmpeg: bool) -> Result<()> {
                 format!("-I/usr/x86_64-w64-mingw32/include -I{}", stubs.display()),
             );
         // links winpthread and libgcc into the executable instead of
-        // depending on their DLLs; `xtask package` checks the result
+        // depending on their DLLs; packaging checks the result
         rustflags.extend(["-C".into(), "link-arg=-static".into()]);
     }
     if target.is_musl() {

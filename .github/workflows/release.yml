@@ -178,25 +178,14 @@ jobs:
             target/ffmpeg/licenses-${{ matrix.triple }}
           key: ffmpeg-${{ matrix.triple }}-${{ matrix.container || matrix.runner }}-${{ hashFiles('xtask/src/ffmpeg.rs') }}
 
-      - run: cargo xtask ffmpeg --target ${{ matrix.target }}
-
-      # Uses shared build settings from xtask/src/build.rs (also used by
-      # local-release).
-      - name: Build tgradish with ffmpeg linked in
-        run: cargo xtask build --target ${{ matrix.target }}
-
-      - name: Package
-        if: ${{ !matrix.container }}
-        run: cargo xtask package --target ${{ matrix.target }}
-
-      # Package the static-ffmpeg build (tarball, .deb, .rpm) before overwriting
-      # the binary with the system-ffmpeg build.
-      - name: Package, then build and package without ffmpeg
-        if: matrix.container
-        run: |
-          cargo xtask package --target ${{ matrix.target }} --max-glibc 2.28
-          cargo xtask build --target ${{ matrix.target }} --system-ffmpeg
-          cargo xtask package --target ${{ matrix.target }} --system-ffmpeg --max-glibc 2.28
+      # The command that builds releases locally too, so both make the same
+      # files: ffmpeg unless cached, the build with it linked in, packed, and
+      # for glibc the build without it, both checked against the container's
+      # glibc.
+      - name: Build and package every variant
+        run: >
+          cargo xtask local-release --targets ${{ matrix.target }}
+          ${{ matrix.container && '--max-glibc 2.28' || '' }}
 
       - uses: actions/upload-artifact@v7
         with:
