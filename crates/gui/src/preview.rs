@@ -16,7 +16,7 @@ use tgradish_core::webm::Options;
 use crate::app::App;
 use crate::canvas::{self, Cropping, Kept, Picture, Screen};
 use crate::inset::{self, Inset, InsetChange};
-use crate::item::{Framing, Item, Show};
+use crate::item::{Framing, Item, Recipe, Show};
 use crate::l10n::fl;
 use crate::media::{Clip, Load};
 use crate::result::{details, summary};
@@ -224,9 +224,9 @@ fn under_settings(ui: &mut egui::Ui, item: &mut Item, context: &file_settings::C
 /// options.
 fn made_with(item: &Item, context: &file_settings::Context) -> (f64, Options, tgs::Options) {
     let (presets, config) = (context.presets, context.config);
-    let tgs = item.choices.tgs_options(presets, config).unwrap_or_default();
-    let webm = item.choices.webm_options(presets, config);
-    let webm = webm.unwrap_or_else(|_| item.choices.webm.clone());
+    let recipe = |format| item.choices.recipe(format, presets, config);
+    let tgs = recipe(Format::Tgs).map(Recipe::into_tgs).unwrap_or_default();
+    let webm = recipe(Format::Webm).map_or_else(|_| item.choices.webm.clone(), Recipe::into_webm);
     (item.tempo(presets, config), webm, tgs)
 }
 

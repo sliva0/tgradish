@@ -23,7 +23,7 @@ use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 
 use crate::app::{App, set_theme};
-use crate::item::{self, Show, Zoom};
+use crate::item::{self, Recipe, Show, Zoom};
 use crate::jobs::{self, Job, Status};
 use crate::testing::{convert, finish, square, video};
 use crate::timeline::PastLimit;
@@ -422,8 +422,9 @@ fn limit_screenshots() {
             let app = harness.state();
             let (item, presets, config) = (&app.items[0], &app.presets, &app.config);
             let at = (0.5 + 3.0 * item.tempo(presets, config)) / item.input_length().unwrap();
-            let webm = item.choices.webm_options(presets, config).unwrap_or_default();
-            let tgs = item.choices.tgs_options(presets, config).unwrap_or_default();
+            let recipe = |format| item.choices.recipe(format, presets, config).ok();
+            let webm = recipe(Format::Webm).map(Recipe::into_webm).unwrap_or_default();
+            let tgs = recipe(Format::Tgs).map(Recipe::into_tgs).unwrap_or_default();
             let said = Some(PastLimit::of(item.format, &webm, &tgs).text());
             let bar = harness.query_all(egui_kittest::kittest::by()).find(|node| {
                 use egui_kittest::kittest::NodeT;

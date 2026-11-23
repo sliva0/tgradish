@@ -13,7 +13,7 @@ use tgradish_core::webm::Options;
 use tgradish_core::tgradish_tgs::frames::aseprite::Direction;
 
 use super::Context;
-use crate::item::{Blocker, Item, Kind};
+use crate::item::{Blocker, Item, Kind, Recipe};
 use crate::l10n::fl;
 use crate::{cuts, theme, widgets};
 
@@ -93,11 +93,8 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
     let mut steps = Vec::new();
     match item.format {
         Format::Webm | Format::Webp => {
-            let options = match item.format {
-                Format::Webp => item.choices.image_options(presets, config).map(Options::from),
-                _ => item.choices.webm_options(presets, config),
-            };
-            let Ok(options) = options else { return steps };
+            let recipe = item.choices.recipe(item.format, presets, config);
+            let Ok(options) = recipe.map(Recipe::into_webm) else { return steps };
             let used = Used {
                 tag: options.tag.as_deref(),
                 crop: options.crop,
@@ -115,7 +112,8 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
             }
         }
         Format::Tgs => {
-            let Ok(options) = item.choices.tgs_options(presets, config) else { return steps };
+            let recipe = item.choices.recipe(Format::Tgs, presets, config);
+            let Ok(options) = recipe.map(Recipe::into_tgs) else { return steps };
             let used = Used {
                 tag: options.tag.as_deref(),
                 crop: options.crop,

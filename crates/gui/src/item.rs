@@ -7,8 +7,10 @@ use crate::config::Config;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use tgradish_core::input::{self, FileKind, Input};
-use tgradish_core::options::{Crop, Resize, Scaling, Sheet};
-use tgradish_core::presets::{Format, Presets};
+use tgradish_core::options::{Crop, IntegerScale, Resize, Scaling, Sheet};
+use tgradish_core::picture;
+use tgradish_core::presets::{Format, FormatOptions, Presets};
+use tgradish_core::resolve::{Resolved, resolve};
 use tgradish_core::telegram::Target;
 use tgradish_core::tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 use tgradish_core::webm::Options;
@@ -160,44 +162,79 @@ impl Choices {
         }
     }
 
-    /// The preset's WebM options with the item's over them, those of
-    /// hidden settings too.
-    pub(crate) fn webm_merged(
+    /// The item's values for `format`, as a layer over its preset's: its
+    /// drafts, what every format shares, and the GUI's own rules for an
+    /// integer scale, as values. Its target is always set, so recipes
+    /// saved with one stay equal.
+    pub(crate) fn layer(
         &self,
+        format: Format,
         presets: &Presets,
         config: &Config,
-    ) -> Result<Options, String> {
-        Ok(self.webm_base(presets, config)?.merged(&self.webm).merged(&self.shared_webm()))
+    ) -> FormatOptions {
+        if format == Format::Tgs {
+            let tgs = &self.tgs;
+            let mut layer = tgs::Options {
+                target: Some(self.target),
+                tag: self.tag.clone().or_else(|| tgs.tag.clone()),
+                show_layers: self.show_layers.clone().or_else(|| tgs.show_layers.clone()),
+                hide_layers: self.hide_layers.clone().or_else(|| tgs.hide_layers.clone()),
+                crop: self.crop.or(tgs.crop),
+                start: self.start.or(tgs.start),
+                length: self.length.or(tgs.length),
+                ..tgs.clone()
+            };
+            // a sheet's frames, kept while it is unticked for when it is
+            // ticked again, are no conversion's
+            if layer.sheet.is_none() {
+                layer.sheet_frames = None;
+            }
+            return FormatOptions::Tgs(layer);
+        }
+        let webm = &self.webm;
+        let mut layer = Options {
+            target: Some(self.target),
+            tag: self.tag.clone().or_else(|| webm.tag.clone()),
+            show_layers: self.show_layers.clone().or_else(|| webm.show_layers.clone()),
+            hide_layers: self.hide_layers.clone().or_else(|| webm.hide_layers.clone()),
+            crop: self.crop.or(webm.crop),
+            start: self.start.or(webm.start),
+            length: self.length.or(webm.length),
+            ..webm.clone()
+        };
+        // the GUI scales by an integer scale only under integer scaling,
+        // which then keeps the whole picture, where core would scale by it
+        // whatever the scaling, and refuse it with a crop or a stretch: the
+        // preset's values that would are cleared, and the item's left out
+        let base = self.webm_base(presets, config).unwrap_or_default();
+        let effective = base.clone().merged(&layer);
+        if effective.scaling != Some(Scaling::Integer) {
+            layer.integer_scale = base.integer_scale().map(|_| IntegerScale::NONE);
+        } else if effective.integer_scale.is_some()
+            && matches!(effective.resize, Some(Resize::Crop | Resize::Stretch))
+        {
+            layer.resize = base.resize.map(|_| picture::default_resize(self.target));
+        }
+        match format {
+            // a picture starts at its frame
+            Format::Webp => {
+                FormatOptions::Webp(webp::Options { start: self.frame, ..(&layer).into() })
+            }
+            _ => FormatOptions::Webm(layer),
+        }
     }
 
-    /// Everything a WebM conversion gets.
-    pub(crate) fn webm_options(
+    /// What a conversion to `format` gets: the item's layer over its
+    /// preset, checked, with what has no say set aside.
+    pub(crate) fn resolved(
         &self,
+        format: Format,
         presets: &Presets,
         config: &Config,
-    ) -> Result<Options, String> {
-        let merged = self.webm_merged(presets, config)?;
-        Ok(shown(merged.clone(), &merged))
-    }
-
-    /// Everything an image conversion gets: WebM's options a still picture
-    /// has, and the frame for its start.
-    pub(crate) fn image_options(
-        &self,
-        presets: &Presets,
-        config: &Config,
-    ) -> Result<webp::Options, String> {
-        let options = self.webm_options(presets, config)?;
-        Ok(webp::Options { start: self.frame, ..webp::Options::from(&options) })
-    }
-
-    /// Everything a `.tgs` conversion gets.
-    pub(crate) fn tgs_options(
-        &self,
-        presets: &Presets,
-        config: &Config,
-    ) -> Result<tgs::Options, String> {
-        Ok(self.tgs_base(presets, config)?.merged(&self.tgs).merged(&self.shared_tgs()))
+    ) -> Result<Resolved, String> {
+        let layer = [self.layer(format, presets, config)];
+        resolve(presets, config, format, self.preset.as_deref(), &layer)
+            .map_err(|err| err.to_string())
     }
 
     /// Everything a conversion to `format` gets.
@@ -207,11 +244,7 @@ impl Choices {
         presets: &Presets,
         config: &Config,
     ) -> Result<Recipe, String> {
-        Ok(match format {
-            Format::Webm => Recipe::Webm(self.webm_options(presets, config)?),
-            Format::Tgs => Recipe::Tgs(self.tgs_options(presets, config)?),
-            Format::Webp => Recipe::Webp(self.image_options(presets, config)?),
-        })
+        Ok(self.resolved(format, presets, config)?.options.into())
     }
 
     /// The options that change what pixel art is read as: the item's
@@ -219,7 +252,7 @@ impl Choices {
     /// its frames play at, the preset's included.
     pub(crate) fn reading(&self, presets: &Presets, config: &Config) -> tgs::Options {
         // a broken preset still leaves the item's own
-        let fps = self.tgs_options(presets, config).map_or(self.tgs.fps, |options| options.fps);
+        let fps = self.tgs.fps.or_else(|| self.tgs_base(presets, config).ok()?.fps);
         tgs::Options {
             tag: self.tag.clone(),
             show_layers: self.show_layers.clone(),
@@ -237,7 +270,7 @@ impl Choices {
     /// pictures leave at the default, as making one does.
     pub(crate) fn drawing(&self, format: Format, presets: &Presets, config: &Config) -> Options {
         // a broken preset still leaves the item's own
-        let fps = self.webm_merged(presets, config).map_or(self.webm.fps, |options| options.fps);
+        let fps = self.webm.fps.or_else(|| self.webm_base(presets, config).ok()?.fps);
         Options {
             tag: self.tag.clone(),
             show_layers: self.show_layers.clone(),
@@ -276,6 +309,34 @@ impl Recipe {
             Recipe::Webp(options) => options.target,
         }
         .unwrap_or_default()
+    }
+
+    /// Its options as WebM's, which a picture's are some of; none of a
+    /// `.tgs`'s.
+    pub(crate) fn into_webm(self) -> Options {
+        match self {
+            Recipe::Webm(options) => options,
+            Recipe::Webp(options) => options.into(),
+            Recipe::Tgs(_) => Options::default(),
+        }
+    }
+
+    /// Its options as `.tgs`'s; none of another format's.
+    pub(crate) fn into_tgs(self) -> tgs::Options {
+        match self {
+            Recipe::Tgs(options) => options,
+            _ => tgs::Options::default(),
+        }
+    }
+}
+
+impl From<FormatOptions> for Recipe {
+    fn from(options: FormatOptions) -> Recipe {
+        match options {
+            FormatOptions::Webm(options) => Recipe::Webm(options),
+            FormatOptions::Tgs(options) => Recipe::Tgs(options),
+            FormatOptions::Webp(options) => Recipe::Webp(options),
+        }
     }
 }
 
@@ -820,13 +881,14 @@ impl Item {
     /// used part into 3 seconds.
     pub(crate) fn tempo(&self, presets: &Presets, config: &Config) -> f64 {
         // a broken preset still leaves the defaults
+        let recipe = |format| self.choices.recipe(format, presets, config).ok();
         match self.format {
             Format::Webm => {
-                self.choices.webm_options(presets, config).unwrap_or_default().tempo_or_default()
+                recipe(Format::Webm).map(Recipe::into_webm).unwrap_or_default().tempo_or_default()
             }
             Format::Tgs => {
                 let used = self.range().map(|(start, end)| end - start);
-                self.choices.tgs_options(presets, config).unwrap_or_default().tempo_or_default(used)
+                recipe(Format::Tgs).map(Recipe::into_tgs).unwrap_or_default().tempo_or_default(used)
             }
             Format::Webp => 1.0,
         }
@@ -1083,7 +1145,9 @@ mod tests {
         let mut choices = Choices::new(Target::Sticker);
         choices.preset = Some("quality".into());
         let config = Config::default();
-        let range = |choices: &Choices| choices.webm_options(&presets, &config).unwrap().fit_range;
+        let range = |choices: &Choices| {
+            choices.recipe(Format::Webm, &presets, &config).unwrap().into_webm().fit_range
+        };
         assert!(range(&choices).is_some());
         // a range of qualities is none of bitrates
         choices.webm.fit = Some(Fit::Bitrate);
@@ -1135,22 +1199,22 @@ mod tests {
         choices.preset = Some("fast".into());
         choices.webm.crf = Some(20);
         choices.start = Some(1.0);
-        let options = choices.webm_options(&presets, &config).unwrap();
+        let options = choices.recipe(Format::Webm, &presets, &config).unwrap().into_webm();
         assert_eq!(options.target, Some(Target::Emoji));
         assert_eq!(options.effort, presets.webm("fast").unwrap().effort);
         // fast fits the bitrate, which hides the quality: it has no say
         assert_eq!((options.crf, options.start), (None, Some(1.0)));
         choices.webm.fit = Some(Fit::Length);
-        let options = choices.webm_options(&presets, &config).unwrap();
+        let options = choices.recipe(Format::Webm, &presets, &config).unwrap().into_webm();
         assert_eq!(options.crf, Some(20));
         choices.webm.lossless = Some(true);
-        let options = choices.webm_options(&presets, &config).unwrap();
+        let options = choices.recipe(Format::Webm, &presets, &config).unwrap().into_webm();
         assert_eq!((options.crf, options.lossless), (None, Some(true)));
         // and lossless has no say once fitting hides it again
         choices.webm.fit = None;
-        let options = choices.webm_options(&presets, &config).unwrap();
+        let options = choices.recipe(Format::Webm, &presets, &config).unwrap().into_webm();
         assert_eq!((options.fit, options.lossless), (Some(Fit::Bitrate), None));
-        let tgs = choices.tgs_options(&presets, &config).unwrap();
+        let tgs = choices.recipe(Format::Tgs, &presets, &config).unwrap().into_tgs();
         assert_eq!((tgs.target, tgs.start), (Some(Target::Emoji), Some(1.0)));
     }
 
@@ -1267,12 +1331,14 @@ mod tests {
         ]);
         let config = Config::default();
         let never = sticker(Options { spoof: Some(Spoof::Never), ..default() });
-        // set aside, without a word (divergence 7), and so never checked
-        // (divergence 4)
-        for preset in ["never", "too long"] {
-            let recipe = with_preset(preset).recipe(Format::Webm, &presets, &config);
-            assert_eq!(recipe.unwrap(), Recipe::Webm(never.clone()), "{preset}");
-        }
+        // set aside, without a word (divergence 7)
+        let recipe = with_preset("never").recipe(Format::Webm, &presets, &config);
+        assert_eq!(recipe.unwrap(), Recipe::Webm(never));
+        // though checked first, as the command line checks it
+        let too_long = with_preset("too long").recipe(Format::Webm, &presets, &config);
+        let said = "preset \"too long\" sets fake-duration, which must be greater than 0 and at \
+                    most 3 seconds";
+        assert_eq!(too_long.unwrap_err(), said);
     }
 
     #[test]
@@ -1286,9 +1352,11 @@ mod tests {
         let scaled = |format| with_preset("scaled").recipe(format, &presets, &config).unwrap();
         assert_eq!(scaled(Format::Webm), Recipe::Webm(sticker(default())));
         assert_eq!(scaled(Format::Webp), Recipe::Webp(picture_sticker(default())));
-        // and the crop it can't go with set aside instead (divergence 3)
+        // and the crop it can't go with set aside instead, for the default
+        // (divergence 3)
         let cropped = with_preset("cropped").recipe(Format::Webm, &presets, &config);
         let scaled = Options {
+            resize: Some(Resize::Contain),
             scaling: Some(Scaling::Integer),
             integer_scale: "2".parse::<IntegerScale>().ok(),
             ..default()
@@ -1349,27 +1417,27 @@ mod tests {
         let picture =
             webp::Options { scaling: Some(Scaling::Sharp), start: Some(1.5), ..default() };
         assert_eq!(recipe.unwrap(), Recipe::Webp(picture_sticker(picture)));
-        // so a value a picture doesn't use isn't checked (divergence 5),
-        // nor is it for WebM (divergence 4)
+        // so a value a picture doesn't use isn't checked, though it is for
+        // WebM, as the command line checks it
         let fast = with_preset("fast tempo");
         let picture = fast.recipe(Format::Webp, &presets, &config);
         assert_eq!(picture.unwrap(), Recipe::Webp(picture_sticker(default())));
         let webm = fast.recipe(Format::Webm, &presets, &config);
-        let tempo = Options { tempo: Some(50.0), ..default() };
-        assert_eq!(webm.unwrap(), Recipe::Webm(sticker(tempo)));
+        let said = "preset \"fast tempo\" sets tempo, which must be from 0.1 to 10";
+        assert_eq!(webm.unwrap_err(), said);
     }
 
     #[test]
     fn bad_values_and_where_they_came_from() {
         let presets = presets(&[("slow", "[webm]\ntempo = 50.0\n[tgs]\ntempo = 50.0\n")]);
         let config = Config::default();
-        let recipe = |format| with_preset("slow").recipe(format, &presets, &config).unwrap();
-        // not checked, so the conversion fails as planned, naming no
-        // preset (divergence 4)
-        let webm = Options { tempo: Some(50.0), ..default() };
-        assert_eq!(recipe(Format::Webm), Recipe::Webm(sticker(webm)));
-        let tgs = tgs::Options { tempo: Some(50.0), ..default() };
-        assert_eq!(recipe(Format::Tgs), Recipe::Tgs(tgs_sticker(tgs)));
+        // checked, naming the preset, as the command line says it; which
+        // fails the conversion when it starts
+        let said = "preset \"slow\" sets tempo, which must be from 0.1 to 10";
+        for format in [Format::Webm, Format::Tgs] {
+            let recipe = with_preset("slow").recipe(format, &presets, &config);
+            assert_eq!(recipe.unwrap_err(), said, "{format:?}");
+        }
     }
 
     #[test]
@@ -1377,8 +1445,9 @@ mod tests {
         let mut choices = Choices::new(Target::Sticker);
         choices.tgs.sheet_frames = Some(3);
         let recipe = choices.recipe(Format::Tgs, &Presets::builtin(), &Config::default());
-        // kept, for core to ignore (divergence 6)
-        let best = tgs::Options { effort: Some(Effort::Best), sheet_frames: Some(3), ..default() };
+        // left out, as it is kept only for when the sheet is ticked again,
+        // where the command line refuses it (divergence 6)
+        let best = tgs::Options { effort: Some(Effort::Best), ..default() };
         assert_eq!(recipe.unwrap(), Recipe::Tgs(tgs_sticker(best)));
     }
 

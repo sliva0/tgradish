@@ -172,10 +172,8 @@ impl Basis {
     fn of(item: &Item, context: &Context) -> Basis {
         let (presets, config) = (context.presets, context.config);
         let base = item.choices.webm_base(presets, config).unwrap_or_default();
-        let effective = item
-            .choices
-            .webm_options(presets, config)
-            .unwrap_or_else(|_| item.choices.webm.clone());
+        let recipe = item.choices.recipe(Format::Webm, presets, config);
+        let effective = recipe.map_or_else(|_| item.choices.webm.clone(), Recipe::into_webm);
         let exact = exact_of(&effective).filter(|_| item.format != Format::Tgs);
         Basis { size: item.input_size(), base, effective, exact }
     }

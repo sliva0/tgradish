@@ -693,6 +693,33 @@ mod tests {
         assert!(item.made.is_some() && !item.result_is_current());
     }
 
+    /// A preset's value wrong whatever the input fails the conversion,
+    /// saying whose it is, as the command line says it.
+    #[test]
+    fn fails_a_conversion_whose_preset_sets_a_wrong_value() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("slow.toml"), "[tgs]\ntempo = 50.0\n").unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        let mut harness = harness(Config::default());
+        harness.state_mut().presets =
+            tgradish_core::presets::Presets::load(Some(dir.path())).unwrap();
+        harness.state_mut().add(vec![art]);
+        finish(&mut harness);
+        let item = &mut harness.state_mut().items[0];
+        item.format = Format::Tgs;
+        item.choices.preset = Some("slow".into());
+        harness.run_steps(2);
+        convert(&harness);
+        harness.run_steps(2);
+        finish(&mut harness);
+        let item = &harness.state().items[0];
+        let said = "preset \"slow\" sets tempo, which must be from 0.1 to 10";
+        let status = &item.failed.as_ref().unwrap().job.status;
+        assert!(matches!(status, Status::Failed(message) if message == said), "{status:?}");
+        assert!(item.made.is_none());
+    }
+
     #[test]
     fn reads_inputs_again_once_ffmpeg_is_found() {
         let dir = tempfile::tempdir().unwrap();

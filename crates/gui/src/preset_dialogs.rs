@@ -657,7 +657,8 @@ mod tests {
             (None, Some("only this one"))
         );
         // what it makes, and shows, comes from the preset now
-        let effective = choices.webm_options(&state.presets, &state.config).unwrap();
+        let effective =
+            choices.recipe(Format::Webm, &state.presets, &state.config).unwrap().into_webm();
         assert_eq!(crate::file_settings::resize_of(&effective), Resize::Crop);
         let saved = state.presets.webm("by quality").unwrap();
         assert_eq!((saved.fit, saved.title), (Some(Fit::Crf), None));
