@@ -85,6 +85,38 @@ pub(crate) struct Frame {
     pub(crate) input: bool,
 }
 
+/// What `App` knows across frames of the edits made to files' settings:
+/// the frames before, which file's settings were drawn, and a number
+/// typed but not yet taken, which removing its file waits for. What each
+/// control says of its edits comes through egui's memory instead.
+#[derive(Debug, Default)]
+pub(crate) struct Edits {
+    /// What the last frames were, for which changes to files' settings
+    /// are steps to undo.
+    pub(crate) frames: Frames,
+    /// The file whose settings were drawn last, which is the one picked
+    /// but for the frame a number typed in another's is taken.
+    pub(crate) drawn: Option<u64>,
+    /// The file with a number typed in its settings, not yet taken, as the
+    /// frame began.
+    pub(crate) typed: Option<u64>,
+    /// Files to remove once the number typed in one of them is taken.
+    pub(crate) removing: Vec<u64>,
+}
+
+impl Edits {
+    /// The files whose removal waited for the number typed in one of
+    /// them, once it is taken, as [`Edits::typed`] says as the frame
+    /// begins.
+    pub(crate) fn no_longer_waiting(&mut self) -> Option<Vec<u64>> {
+        let waiting = |file| self.removing.contains(&file);
+        if self.removing.is_empty() || self.typed.is_some_and(waiting) {
+            return None;
+        }
+        Some(std::mem::take(&mut self.removing))
+    }
+}
+
 /// What the frames before were, for what the next one is.
 #[derive(Debug, Default)]
 pub(crate) struct Frames {

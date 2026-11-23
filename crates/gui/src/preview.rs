@@ -65,14 +65,14 @@ impl App {
             widgets::discard_draft(&ctx);
         }
         let held = typed.filter(|&file| {
-            let leaving = Some(file) != selected || self.removing.contains(&file);
-            leaving && Some(file) == self.drawn && self.item(file).is_some()
+            let leaving = Some(file) != selected || self.edits.removing.contains(&file);
+            leaving && Some(file) == self.edits.drawn && self.item(file).is_some()
         });
         if held.is_some() {
             widgets::commit_draft(&ctx);
         }
-        self.drawn = held.or(selected);
-        let Some(id) = self.drawn else {
+        self.edits.drawn = held.or(selected);
+        let Some(id) = self.edits.drawn else {
             self.drop_zone(ui, ui.max_rect().shrink(28.0));
             return;
         };

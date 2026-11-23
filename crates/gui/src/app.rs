@@ -80,17 +80,8 @@ pub(crate) struct App {
     pub(crate) banner: Banner,
     /// Files removed a moment ago, which may be put back.
     pub(crate) removed: Option<Removed>,
-    /// What the last frames were, for which changes to files' settings
-    /// are steps to undo.
-    pub(crate) edit_frames: crate::history::Frames,
-    /// The file whose settings were drawn last, which is the one picked
-    /// but for the frame a number typed in another's is taken.
-    pub(crate) drawn: Option<u64>,
-    /// The file with a number typed in its settings, not yet taken, as the
-    /// frame began.
-    pub(crate) typed: Option<u64>,
-    /// Files to remove once the number typed in one of them is taken.
-    pub(crate) removing: Vec<u64>,
+    /// What is known across frames of edits to files' settings.
+    pub(crate) edits: crate::history::Edits,
     /// The settings as they were before Settings put them back to their
     /// defaults a moment ago, which may be put back.
     pub(crate) settings_reset: Option<Config>,
@@ -294,10 +285,7 @@ impl App {
             fonts: crate::fonts::Fonts::default(),
             banner: Banner::default(),
             removed: None,
-            edit_frames: Default::default(),
-            drawn: None,
-            typed: None,
-            removing: Vec::new(),
+            edits: crate::history::Edits::default(),
             settings_reset: None,
             clipboard: system::Clipboard::default(),
             paste_key: crate::keys::PasteKey::default(),
@@ -495,8 +483,8 @@ impl App {
     pub(crate) fn remove_all(&mut self, ids: &[u64]) {
         // a number typed in one of them taken first, in the next frame,
         // which shows that file a frame more for it
-        if self.typed.is_some_and(|file| ids.contains(&file)) {
-            self.removing.extend_from_slice(ids);
+        if self.edits.typed.is_some_and(|file| ids.contains(&file)) {
+            self.edits.removing.extend_from_slice(ids);
             return;
         }
         let selected = self.selected.filter(|id| ids.contains(id));
@@ -605,8 +593,8 @@ impl App {
     /// their controls said of their edits; another frame is drawn after
     /// one, for what the GUI makes of it.
     fn follow_edits(&mut self, ctx: &egui::Context) {
-        let frame = self.edit_frames.end(ctx, self.drawn);
-        let selected = self.drawn;
+        let frame = self.edits.frames.end(ctx, self.edits.drawn);
+        let selected = self.edits.drawn;
         // what the settings drawn make of the crop, as an integer scale
         // holds it, as part of the change that brought it about in this
         // frame, wherever that was drawn
@@ -1006,10 +994,8 @@ impl eframe::App for App {
         if ctx.input(|input| input.viewport().close_requested()) {
             widgets::commit_draft(&ctx);
         }
-        self.typed = widgets::draft_file(&ctx);
-        if !self.removing.is_empty() && self.typed.is_none_or(|file| !self.removing.contains(&file))
-        {
-            let removing = std::mem::take(&mut self.removing);
+        self.edits.typed = widgets::draft_file(&ctx);
+        if let Some(removing) = self.edits.no_longer_waiting() {
             self.remove_all(&removing);
         }
         self.take_input(&ctx);
