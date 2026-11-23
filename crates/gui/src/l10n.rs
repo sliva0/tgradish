@@ -255,14 +255,19 @@ mod tests {
         patterns
     }
 
-    /// What `pattern` holds: its text, the arguments it takes, and the
-    /// messages and terms it puts in, as `id` or `id.attribute`.
+    /// What `pattern` holds: its text, the arguments it takes, the
+    /// messages and terms it puts in, as `id` or `id.attribute`, and the
+    /// plural forms each choice by a count has, as `one` and `other`.
     #[derive(Default)]
     struct Parts {
         text: String,
         arguments: BTreeSet<String>,
         references: BTreeSet<String>,
+        plurals: Vec<BTreeSet<String>>,
     }
+
+    /// The names of plural forms, as Unicode's rules for counting name them.
+    const PLURAL_FORMS: [&str; 6] = ["zero", "one", "two", "few", "many", "other"];
 
     fn parts(pattern: &ast::Pattern<String>, into: &mut Parts) {
         for element in &pattern.elements {
@@ -295,6 +300,19 @@ mod tests {
             ast::Expression::Inline(expression) => inline(expression, into),
             ast::Expression::Select { selector, variants } => {
                 inline(selector, into);
+                // a choice by a count, its variants named for plural forms
+                let names: BTreeSet<String> = variants
+                    .iter()
+                    .filter_map(|variant| match &variant.key {
+                        ast::VariantKey::Identifier { name } => Some(name.clone()),
+                        ast::VariantKey::NumberLiteral { .. } => None,
+                    })
+                    .collect();
+                // [other] alone is what is said otherwise, not a form
+                let forms = PLURAL_FORMS.iter().filter(|form| **form != "other");
+                if forms.into_iter().any(|form| names.contains(*form)) {
+                    into.plurals.push(names);
+                }
                 for variant in variants {
                     parts(&variant.value, into);
                 }
@@ -306,17 +324,265 @@ mod tests {
         parse("en-GB", &files()["en-GB"])
     }
 
-    #[test]
-    fn every_language_reads_as_fluent_without_clashes() {
-        for (tag, text) in files() {
-            let resource = fluent_bundle::FluentResource::try_new(text)
-                .unwrap_or_else(|(_, errors)| panic!("{tag} doesn't read as Fluent: {errors:?}"));
-            // a term and a message of one name hide each other
-            let mut bundle = fluent_bundle::FluentBundle::new(vec![tag.parse().unwrap()]);
-            if let Err(errors) = bundle.add_resource(resource) {
-                panic!("{tag} names something twice: {errors:?}");
+    type Bundle = fluent_bundle::FluentBundle<fluent_bundle::FluentResource>;
+
+    /// `id`, as `message` or `message.attribute`, split in two.
+    fn split(id: &str) -> (&str, Option<&str>) {
+        id.split_once('.').map_or((id, None), |(message, attribute)| (message, Some(attribute)))
+    }
+
+    /// What `bundle` has for `id`, as `message` or `message.attribute`.
+    fn pattern_of<'a>(
+        bundle: &'a Bundle,
+        id: &str,
+    ) -> Option<&'a fluent_syntax::ast::Pattern<&'a str>> {
+        let (message, attribute) = split(id);
+        let message = bundle.get_message(message)?;
+        match attribute {
+            Some(attribute) => message.get_attribute(attribute).map(|found| found.value()),
+            None => message.value(),
+        }
+    }
+
+    /// What British English says, which every other language is checked
+    /// against: each message and attribute, by `id` or `id.attribute`,
+    /// with the arguments it takes and what it is written as; and the
+    /// messages ready to show, for saying what a translation lacks.
+    struct English {
+        said: BTreeMap<String, (BTreeSet<String>, ast::Pattern<String>)>,
+        bundle: Bundle,
+    }
+
+    impl English {
+        fn new() -> English {
+            let said = patterns(&english())
+                .into_iter()
+                .filter(|(id, _)| !id.starts_with('-'))
+                .map(|(id, pattern)| {
+                    let mut found = Parts::default();
+                    parts(pattern, &mut found);
+                    (id, (found.arguments, pattern.clone()))
+                })
+                .collect();
+            let mut bundle = Bundle::new(vec![LOADER.fallback_language().clone()]);
+            bundle.set_use_isolating(false);
+            let text = files()["en-GB"].clone();
+            bundle.add_resource(fluent_bundle::FluentResource::try_new(text).unwrap()).unwrap();
+            English { said, bundle }
+        }
+
+        /// What English says for `id`, arguments shown as `{$count}`.
+        fn words(&self, id: &str) -> String {
+            let pattern = pattern_of(&self.bundle, id).expect("English has it");
+            self.bundle.format_pattern(pattern, None, &mut Vec::new()).into_owned()
+        }
+    }
+
+    /// The plural forms `language` counts with, as Fluent picks them:
+    /// `one` and `other` for English, `one`, `few`, `many` and `other`
+    /// for Ukrainian.
+    fn plural_forms(language: &LanguageIdentifier) -> BTreeSet<String> {
+        let variants: Vec<String> = PLURAL_FORMS
+            .iter()
+            .map(|form| format!("    {}[{form}] {form}\n", if *form == "other" { "*" } else { "" }))
+            .collect();
+        let forms = format!("forms = {{ $n ->\n{}}}\n", variants.concat());
+        let mut bundle = Bundle::new(vec![language.clone()]);
+        bundle.add_resource(fluent_bundle::FluentResource::try_new(forms).unwrap()).unwrap();
+        let pattern = pattern_of(&bundle, "forms").unwrap();
+        let whole = (0..=200).map(fluent_bundle::FluentValue::from);
+        let numbers = whole.chain([0.5, 1.5, 2.5].map(fluent_bundle::FluentValue::from));
+        numbers
+            .map(|number| {
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("n", number);
+                bundle.format_pattern(pattern, Some(&args), &mut Vec::new()).into_owned()
+            })
+            .collect()
+    }
+
+    /// What is wrong with the file of the language `tag`, `text`, each as
+    /// a line for its translator; nothing for a sound one. A translation
+    /// has every message and attribute English has, else English shows
+    /// for them, which only a regional variant of English, as `en-US`,
+    /// may leave to it; and nothing English hasn't, nor any argument
+    /// English's message doesn't take.
+    fn problems(tag: &str, text: &str, english: &English) -> Vec<String> {
+        let mut problems = Vec::new();
+        let fallback = LOADER.fallback_language();
+        let language: LanguageIdentifier = tag.parse().unwrap_or_else(|_| {
+            problems.push(format!("{tag:?} isn't a language tag, as de or pt-BR"));
+            fallback.clone()
+        });
+        let line = |at: usize| text[..at.min(text.len())].matches('\n').count() + 1;
+        let resource =
+            fluent_syntax::parser::parse(text.to_owned()).unwrap_or_else(|(resource, errors)| {
+                for error in errors {
+                    problems.push(format!("line {}: {error}", line(error.pos.start)));
+                }
+                resource
+            });
+        let patterns = patterns(&resource);
+        let had: BTreeSet<&str> = patterns.iter().map(|(id, _)| id.as_str()).collect();
+        // English stands in for what a variant of it lacks
+        let variant = language.language == fallback.language && language != *fallback;
+        let forms = plural_forms(&language);
+        let mut given = BTreeSet::new();
+        for (id, pattern) in &patterns {
+            if !given.insert(id) {
+                problems.push(format!("{id} is given twice"));
+            }
+            let mut found = Parts::default();
+            parts(pattern, &mut found);
+            let arguments = |names: &mut dyn Iterator<Item = &String>| -> String {
+                let names: Vec<String> = names.map(|name| format!("{{ ${name} }}")).collect();
+                if names.is_empty() { "none".to_owned() } else { names.join(", ") }
+            };
+            match english.said.get(id) {
+                _ if id.starts_with('-') => {}
+                None => problems.push(format!("{id} isn't a message English has: leave it out")),
+                Some((known, _)) if !found.arguments.is_subset(known) => problems.push(format!(
+                    "{id} takes {}, which English's doesn't: it takes {}",
+                    arguments(&mut found.arguments.difference(known)),
+                    arguments(&mut known.iter()),
+                )),
+                Some((_, english)) if variant && english == *pattern => problems.push(format!(
+                    "{id} says just what en-GB does: leave it out, as en-GB stands in for it"
+                )),
+                Some(_) => {}
+            }
+            for reference in &found.references {
+                let term = reference.starts_with('-');
+                if term && !had.contains(split(reference).0) {
+                    problems.push(format!("{id} puts in {{ {reference} }}, a term not given here"));
+                } else if !term && !english.said.contains_key(reference) {
+                    problems.push(format!("{id} puts in {{ {reference} }}, which English hasn't"));
+                } else if !term && !had.contains(reference.as_str()) {
+                    // English stands in for whole messages, not for parts
+                    problems
+                        .push(format!("{id} puts in {{ {reference} }}, which isn't given here"));
+                }
+            }
+            for named in &found.plurals {
+                let lacking: Vec<String> =
+                    forms.difference(named).map(|form| format!("[{form}]")).collect();
+                if !lacking.is_empty() {
+                    let named: Vec<String> = named.iter().map(|form| format!("[{form}]")).collect();
+                    problems.push(format!(
+                        "{id} counts with {} but not {}, a plural form of {tag}",
+                        named.join(" "),
+                        lacking.join(" ")
+                    ));
+                }
             }
         }
+        if !had.contains("language-name") {
+            problems.push("language-name, the language's name for itself, is missing".into());
+        }
+        if !variant {
+            for id in english.said.keys().filter(|id| !had.contains(id.as_str())) {
+                problems.push(format!("{id} is missing; English says {:?}", english.words(id)));
+            }
+        }
+        // what it says, as the GUI would show it, with counts and words in
+        // for its arguments
+        let mut bundle = Bundle::new(vec![language]);
+        bundle.set_use_isolating(false);
+        let resource = fluent_bundle::FluentResource::try_new(text.to_owned())
+            .unwrap_or_else(|(resource, _)| resource);
+        if let Err(errors) = bundle.add_resource(resource) {
+            // as a term and a message of one name, which hide each other
+            problems.extend(errors.iter().map(|error| format!("{error}")));
+        }
+        for (id, pattern) in patterns.iter().filter(|(id, _)| !id.starts_with('-')) {
+            let mut found = Parts::default();
+            parts(pattern, &mut found);
+            let Some(pattern) = pattern_of(&bundle, id) else { continue };
+            let mut said = BTreeSet::new();
+            for count in [1, 2, 5] {
+                let mut args = fluent_bundle::FluentArgs::new();
+                for argument in &found.arguments {
+                    args.set(argument.as_str(), count);
+                }
+                let mut errors = Vec::new();
+                let text = bundle.format_pattern(pattern, Some(&args), &mut errors);
+                if text.trim().is_empty() {
+                    said.insert(format!("{id} says nothing"));
+                }
+                // what it puts in that isn't there is told above
+                let reference = |error: &fluent_bundle::FluentError| {
+                    use fluent_bundle::resolver::ResolverError;
+                    matches!(
+                        error,
+                        fluent_bundle::FluentError::ResolverError(ResolverError::Reference(_))
+                    )
+                };
+                said.extend(errors.iter().filter(|e| !reference(e)).map(|e| format!("{id}: {e}")));
+            }
+            problems.extend(said);
+        }
+        problems
+    }
+
+    /// Every language's file is sound, as [`problems`] tells: it reads as
+    /// Fluent, and says what English does, all of it but in a regional
+    /// variant of English, with the arguments English's messages take and
+    /// the plural forms of its language. A translator sees what is wrong
+    /// with every file at once with
+    /// `cargo test -p tgradish-gui every_language_file_is_sound`.
+    #[test]
+    fn every_language_file_is_sound() {
+        let english = English::new();
+        let mut wrong = Vec::new();
+        for path in Files::iter() {
+            let Some((tag, "tgradish.ftl")) = path.split_once('/') else {
+                wrong.push(format!("i18n/{path}: each language's file is i18n/<tag>/tgradish.ftl"));
+                continue;
+            };
+            let text = String::from_utf8(Files::get(&path).unwrap().data.into_owned());
+            let problems = match text {
+                Ok(text) => problems(tag, &text, &english),
+                Err(_) => vec!["isn't UTF-8".to_owned()],
+            };
+            if !problems.is_empty() {
+                let count = problems.len();
+                wrong.push(format!("crates/gui/i18n/{path}, {count} problems:"));
+                wrong.extend(problems.into_iter().map(|problem| format!("    {problem}")));
+            }
+        }
+        assert!(wrong.is_empty(), "\n{}\n", wrong.join("\n"));
+    }
+
+    #[test]
+    fn tells_what_is_wrong_with_a_translation() {
+        let english = English::new();
+        let text = "language-name = Test\n\
+            close = { $who } { -app } { never } { save }\n\
+            count-frames = { $count ->\n    [one] a\n   *[other] b\n}\n\
+            unknown = x\n\
+            broken = { $ }\n\
+            close = again\n";
+        let said = problems("uk", text, &english);
+        let has = |part: &str| said.iter().any(|problem| problem.contains(part));
+        for part in [
+            "line 8:",
+            "close takes { $who }, which English's doesn't: it takes none",
+            "close puts in { -app }, a term not given here",
+            "close puts in { never }, which English hasn't",
+            "close puts in { save }, which isn't given here",
+            "count-frames counts with [one] [other] but not [few] [many], a plural form of uk",
+            "unknown isn't a message English has",
+            "close is given twice",
+            "save is missing; English says \"Save\"",
+        ] {
+            assert!(has(part), "no {part:?} in {said:#?}");
+        }
+        // a variant of English may leave messages to it, but not repeat them
+        let variant = problems("en-US", "language-name = Test\nclose = Close\n", &english);
+        assert_eq!(variant.len(), 1, "{variant:#?}");
+        assert!(variant[0].starts_with("close says just what en-GB does"), "{variant:#?}");
+        let unnamed = problems("de", "", &english);
+        assert!(unnamed.iter().any(|problem| problem.starts_with("language-name")));
     }
 
     #[test]
@@ -341,39 +607,6 @@ mod tests {
         }
         choosing.join().unwrap();
         assert_eq!(marked, None);
-    }
-
-    #[test]
-    fn english_says_everything_without_errors() {
-        let text = files()["en-GB"].clone();
-        let resource = english();
-        let mut bundle = fluent_bundle::FluentBundle::new(vec!["en-GB".parse().unwrap()]);
-        bundle.set_use_isolating(false);
-        bundle.add_resource(fluent_bundle::FluentResource::try_new(text).unwrap()).unwrap();
-        for (id, pattern) in patterns(&resource) {
-            if id.starts_with('-') {
-                continue;
-            }
-            let mut found = Parts::default();
-            parts(pattern, &mut found);
-            // a count, which also fills in for words
-            let mut args = fluent_bundle::FluentArgs::new();
-            for argument in &found.arguments {
-                args.set(argument.as_str(), 2);
-            }
-            let (message, attribute) = id
-                .split_once('.')
-                .map_or((id.as_str(), None), |(message, attribute)| (message, Some(attribute)));
-            let message = bundle.get_message(message).unwrap_or_else(|| panic!("{id} is hidden"));
-            let pattern = match attribute {
-                Some(attribute) => message.get_attribute(attribute).map(|a| a.value()),
-                None => message.value(),
-            };
-            let mut errors = Vec::new();
-            let said = bundle.format_pattern(pattern.unwrap(), Some(&args), &mut errors);
-            assert!(errors.is_empty(), "{id}: {errors:?}");
-            assert!(!said.trim().is_empty(), "{id} says nothing");
-        }
     }
 
     /// Where a comment, string or character starting at `at` in `code`
@@ -557,60 +790,6 @@ mod tests {
             .filter(|id| !used.contains(id) && id != "language-name")
             .collect();
         assert!(unused.is_empty(), "never shown: {unused:?}");
-    }
-
-    /// Other languages say only what English does, with its arguments.
-    #[test]
-    fn translations_say_what_english_does() {
-        let arguments = |resource: &ast::Resource<String>| -> BTreeMap<String, BTreeSet<String>> {
-            patterns(resource)
-                .into_iter()
-                .map(|(id, pattern)| {
-                    let mut found = Parts::default();
-                    parts(pattern, &mut found);
-                    (id, found.arguments)
-                })
-                .collect()
-        };
-        let english = arguments(&english());
-        for (tag, text) in files().into_iter().filter(|(tag, _)| tag != "en-GB") {
-            let translated = arguments(&parse(&tag, &text));
-            for (id, taken) in translated {
-                // terms are a language's own
-                if id.starts_with('-') {
-                    continue;
-                }
-                let Some(known) = english.get(&id) else {
-                    panic!("{tag} has {id}, which English doesn't");
-                };
-                let unknown: Vec<_> = taken.difference(known).collect();
-                assert!(
-                    unknown.is_empty(),
-                    "{tag}'s {id} takes {unknown:?}, which English doesn't"
-                );
-            }
-        }
-    }
-
-    /// What a translation puts in from another message, it has itself:
-    /// English stands in for whole messages a translation lacks, not for
-    /// those another puts in, which would show as `{save}`.
-    #[test]
-    fn translations_put_in_only_what_they_have() {
-        for (tag, text) in files() {
-            let resource = parse(&tag, &text);
-            let had: BTreeSet<String> = patterns(&resource)
-                .into_iter()
-                .map(|(id, _)| id.split('.').next().unwrap_or_default().to_owned())
-                .collect();
-            for (id, pattern) in patterns(&resource) {
-                let mut found = Parts::default();
-                parts(pattern, &mut found);
-                let messages = found.references.iter().map(|id| id.split('.').next().unwrap());
-                let lacking: Vec<_> = messages.filter(|id| !had.contains(*id)).collect();
-                assert!(lacking.is_empty(), "{tag}'s {id} puts in {lacking:?}, which it lacks");
-            }
-        }
     }
 
     /// The built-in fonts draw every language the GUI has: the system's
