@@ -18,6 +18,7 @@ use crate::about::about;
 use crate::banner::{Action, Banner, Message, Subject};
 use crate::canvas::Screen;
 use crate::ffmpeg::Ffmpeg;
+use crate::files::Picker;
 use crate::fonts::fonts;
 use crate::inset::Inset;
 use crate::item::{Conversion, Item};
@@ -67,10 +68,8 @@ pub(crate) struct App {
     pub(crate) screen: Screen,
     pub(crate) inset: Inset,
     pub(crate) settings_dialog: settings_dialog::SettingsDialog,
-    /// The file dialog open, if one is, on a thread of its own.
-    pub(crate) picking: Option<crate::media::Task<Option<crate::files::Picked>>>,
-    /// A file dialog parented to the window, to ask with.
-    pub(crate) file_dialog: rfd::FileDialog,
+    /// The system's file dialogs, one open at a time.
+    pub(crate) picker: Picker,
     /// A dialog of the user's presets, open over the rest.
     pub(crate) preset_dialog: Option<preset_dialogs::Dialog>,
     pub(crate) inspection: Option<inspect::Inspection>,
@@ -129,9 +128,6 @@ pub(crate) struct App {
     pub(crate) keyed: crate::keys::Keyed,
     /// The file picked by its key, which the list scrolls to.
     pub(crate) reveal_selected: bool,
-    /// What file dialogs were asked for, which tests don't open.
-    #[cfg(test)]
-    pub(crate) asked_to_pick: Vec<crate::files::Pick>,
     #[cfg(all(unix, not(target_os = "macos")))]
     pub(crate) drops: Option<dnd::Drops>,
     /// The window's icon on Wayland, kept while the window shows it.
@@ -350,8 +346,7 @@ impl App {
             screen: Screen::default(),
             inset: Inset::default(),
             settings_dialog: settings_dialog::SettingsDialog::default(),
-            picking: None,
-            file_dialog: rfd::FileDialog::new(),
+            picker: Picker::default(),
             preset_dialog: None,
             inspection: None,
             about: false,
@@ -377,8 +372,6 @@ impl App {
             paste_key: crate::keys::PasteKey::default(),
             keyed: crate::keys::Keyed::default(),
             reveal_selected: false,
-            #[cfg(test)]
-            asked_to_pick: Vec::new(),
             #[cfg(all(unix, not(target_os = "macos")))]
             drops: None,
             #[cfg(all(unix, not(target_os = "macos")))]
@@ -829,7 +822,7 @@ impl App {
 
     /// Whether a dialog is open over the rest.
     pub(crate) fn dialog_open(&self) -> bool {
-        self.picking.is_some()
+        self.picker.is_open()
             || self.settings_dialog.is_open()
             || self.about
             || self.shortcuts
@@ -1037,7 +1030,7 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         self.scaling.begun();
         // file dialogs stay over the window, which they are modal for
-        self.file_dialog = rfd::FileDialog::new().set_parent(frame);
+        self.picker.file_dialog = rfd::FileDialog::new().set_parent(frame);
         self.take_picked();
         self.outputs.this_frame.borrow_mut().clear();
         // converting, or done this frame
@@ -1108,7 +1101,7 @@ impl eframe::App for App {
             &self.presets,
         );
         if let Some(pick) = self.settings_dialog.pick.take() {
-            self.pick(&ctx, pick);
+            self.picker.pick(&ctx, pick);
         }
         if std::mem::take(&mut self.settings_dialog.reset) {
             self.reset_settings();

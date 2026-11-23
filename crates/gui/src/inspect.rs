@@ -329,7 +329,7 @@ impl App {
             self.inspection = None;
         }
         if another {
-            self.pick(ctx, crate::files::Pick::Inspected);
+            self.picker.pick(ctx, crate::files::Pick::Inspected);
         }
     }
 }

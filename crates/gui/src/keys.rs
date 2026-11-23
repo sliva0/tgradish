@@ -423,11 +423,11 @@ impl App {
             return;
         }
         if inspect {
-            self.pick(ctx, Pick::Inspected);
+            self.picker.pick(ctx, Pick::Inspected);
             return;
         }
         if add {
-            self.pick(ctx, Pick::Files);
+            self.picker.pick(ctx, Pick::Files);
             return;
         }
         // for the bar under the preview, which has the buttons they press
@@ -801,12 +801,12 @@ mod tests {
         // none of the others while it is open, whose keys they are
         command(&mut harness, egui::Key::I);
         command(&mut harness, egui::Key::O);
-        assert!(harness.state().asked_to_pick.is_empty());
+        assert!(harness.state().picker.asked.is_empty());
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
         command(&mut harness, egui::Key::I);
         command(&mut harness, egui::Key::O);
-        assert_eq!(harness.state().asked_to_pick, [Pick::Inspected, Pick::Files]);
+        assert_eq!(harness.state().picker.asked, [Pick::Inspected, Pick::Files]);
         // the menu's rows say their keys, as Convert does
         harness.get_by_label(&fl!("main-menu")).click();
         harness.run_steps(2);

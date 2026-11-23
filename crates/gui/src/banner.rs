@@ -642,7 +642,7 @@ impl crate::app::App {
                     }
                 }
             }
-            Action::ChooseFfmpeg => self.pick(ctx, crate::files::Pick::Ffmpeg),
+            Action::ChooseFfmpeg => self.picker.pick(ctx, crate::files::Pick::Ffmpeg),
             Action::Undo => self.undo_removing(),
             Action::UndoReset => self.undo_reset(),
             Action::ReadPresetsAgain => {

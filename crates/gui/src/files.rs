@@ -42,11 +42,11 @@ impl App {
 
     fn add_menu(&mut self, ui: &mut egui::Ui) {
         if ui.button(fl!("add-folder")).on_hover_text(fl!("add-folder", "hint")).clicked() {
-            self.pick(ui.ctx(), Pick::Folder);
+            self.picker.pick(ui.ctx(), Pick::Folder);
             ui.close();
         }
         if ui.button(fl!("add-images")).on_hover_text(fl!("add-images", "hint")).clicked() {
-            self.pick(ui.ctx(), Pick::Frames);
+            self.picker.pick(ui.ctx(), Pick::Frames);
             ui.close();
         }
         let pasted = egui::Button::new(fl!("add-pasted")).shortcut_text(keys_text(Command::Paste));
@@ -84,7 +84,7 @@ impl App {
         }
         let inspect = ui.add(item(fl!("inspect"), Command::Inspect));
         if inspect.on_hover_text(fl!("inspect", "hint")).clicked() {
-            self.pick(ui.ctx(), Pick::Inspected);
+            self.picker.pick(ui.ctx(), Pick::Inspected);
             ui.close();
         }
         if ui.add(item(fl!("shortcuts"), Command::Shortcuts)).clicked() {
@@ -102,40 +102,9 @@ impl App {
         }
     }
 
-    /// Asks for something with one of the system's file dialogs, parented
-    /// to the window. It runs on a thread of its own, so the GUI keeps
-    /// drawing and converting meanwhile, and what is picked is taken in as
-    /// it draws. One at a time: while one is open, others aren't asked for.
-    pub(crate) fn pick(&mut self, ctx: &egui::Context, pick: Pick) {
-        if self.picking.is_some() {
-            return;
-        }
-        // tests open none of the system's dialogs, only say one was asked for
-        if cfg!(test) {
-            #[cfg(test)]
-            self.asked_to_pick.push(pick);
-            return;
-        }
-        let dialog = pick.dialog(self.file_dialog.clone());
-        self.picking = Some(Task::spawn(ctx, move |_| {
-            Ok(match pick {
-                Pick::Files => dialog.pick_files().map(Picked::Files),
-                Pick::Folder => dialog.pick_folder().map(Picked::Folder),
-                Pick::Frames => dialog.pick_files().map(Picked::Frames),
-                // read here too, as large files take a moment
-                Pick::Inspected => dialog
-                    .pick_file()
-                    .map(|file| Picked::Inspected(Box::new(Inspection::of(&file)))),
-                Pick::Ffmpeg => dialog.pick_file().map(Picked::Ffmpeg),
-                Pick::OutputDir => dialog.pick_folder().map(Picked::OutputDir),
-            })
-        }));
-    }
-
     /// Takes in what a file dialog picked, once it closes.
     pub(crate) fn take_picked(&mut self) {
-        let Some(result) = self.picking.as_ref().and_then(Task::poll) else { return };
-        self.picking = None;
+        let Some(result) = self.picker.picked() else { return };
         match result {
             Ok(Some(Picked::Files(files))) => self.add(files),
             Ok(Some(Picked::Folder(dir))) => self.add(vec![dir]),
@@ -216,7 +185,7 @@ impl App {
     fn add_button(&mut self, ui: &mut egui::Ui, add: egui::Button<'_>, more: egui::Button<'_>) {
         let files = |app: &mut App, ui: &mut egui::Ui| {
             if ui.add(add).on_hover_text(keys_text(Command::AddFiles)).clicked() {
-                app.pick(ui.ctx(), Pick::Files);
+                app.picker.pick(ui.ctx(), Pick::Files);
             }
         };
         let menu = |app: &mut App, ui: &mut egui::Ui| {
@@ -504,7 +473,7 @@ impl App {
                     .on_hover_text(fl!("add-folder", "hint"))
                     .clicked()
                 {
-                    self.pick(ui.ctx(), Pick::Folder);
+                    self.picker.pick(ui.ctx(), Pick::Folder);
                 }
                 if ui
                     .add(egui::Button::new(fl!("paste")).min_size(vec2(90.0, ZONE_BUTTON)))
@@ -596,6 +565,73 @@ pub(crate) enum Picked {
     Inspected(Box<Inspection>),
     Ffmpeg(PathBuf),
     OutputDir(PathBuf),
+}
+
+/// The system's file dialogs the GUI asks with, one at a time: what is
+/// picked is taken in by [`App::take_picked`], as it is for all sorts.
+pub(crate) struct Picker {
+    /// The file dialog open, if one is, on a thread of its own.
+    pub(crate) picking: Option<Task<Option<Picked>>>,
+    /// A file dialog parented to the window, to ask with.
+    pub(crate) file_dialog: rfd::FileDialog,
+    /// What file dialogs were asked for, which tests don't open.
+    #[cfg(test)]
+    pub(crate) asked: Vec<Pick>,
+}
+
+impl Default for Picker {
+    fn default() -> Picker {
+        Picker {
+            picking: None,
+            file_dialog: rfd::FileDialog::new(),
+            #[cfg(test)]
+            asked: Vec::new(),
+        }
+    }
+}
+
+impl Picker {
+    /// Asks for something with one of the system's file dialogs, parented
+    /// to the window. It runs on a thread of its own, so the GUI keeps
+    /// drawing and converting meanwhile, and what is picked is taken in as
+    /// it draws. One at a time: while one is open, others aren't asked for.
+    pub(crate) fn pick(&mut self, ctx: &egui::Context, pick: Pick) {
+        if self.picking.is_some() {
+            return;
+        }
+        // tests open none of the system's dialogs, only say one was asked for
+        if cfg!(test) {
+            #[cfg(test)]
+            self.asked.push(pick);
+            return;
+        }
+        let dialog = pick.dialog(self.file_dialog.clone());
+        self.picking = Some(Task::spawn(ctx, move |_| {
+            Ok(match pick {
+                Pick::Files => dialog.pick_files().map(Picked::Files),
+                Pick::Folder => dialog.pick_folder().map(Picked::Folder),
+                Pick::Frames => dialog.pick_files().map(Picked::Frames),
+                // read here too, as large files take a moment
+                Pick::Inspected => dialog
+                    .pick_file()
+                    .map(|file| Picked::Inspected(Box::new(Inspection::of(&file)))),
+                Pick::Ffmpeg => dialog.pick_file().map(Picked::Ffmpeg),
+                Pick::OutputDir => dialog.pick_folder().map(Picked::OutputDir),
+            })
+        }));
+    }
+
+    /// What the file dialog picked, once it closes, or why nothing was.
+    fn picked(&mut self) -> Option<Result<Option<Picked>, String>> {
+        let result = self.picking.as_ref().and_then(Task::poll)?;
+        self.picking = None;
+        Some(result)
+    }
+
+    /// Whether a file dialog is open.
+    pub(crate) fn is_open(&self) -> bool {
+        self.picking.is_some()
+    }
 }
 
 /// Height of a row of the list.
@@ -1026,21 +1062,21 @@ mod tests {
         // as a dialog answers, a moment later, while the GUI draws on
         let (answer, picked) = std::sync::mpsc::channel();
         let ctx = harness.ctx.clone();
-        harness.state_mut().picking =
+        harness.state_mut().picker.picking =
             Some(Task::spawn(&ctx, move |_| picked.recv().map_err(|err| err.to_string())));
         harness.run_steps(3);
         // another isn't asked for meanwhile
-        harness.state_mut().pick(&ctx, Pick::Files);
+        harness.state_mut().picker.pick(&ctx, Pick::Files);
         assert!(harness.state().items.is_empty());
         answer.send(Some(Picked::Frames(vec![a, b]))).unwrap();
         finish(&mut harness);
         let app = harness.state();
-        assert!(app.picking.is_none());
+        assert!(app.picker.picking.is_none());
         assert_eq!((app.items.len(), app.items[0].inputs.len()), (1, 2));
         // what Settings asks for goes there
         let ctx = harness.ctx.clone();
         let folder = dir.path().join("out");
-        harness.state_mut().picking =
+        harness.state_mut().picker.picking =
             Some(Task::spawn(&ctx, move |_| Ok(Some(Picked::OutputDir(folder)))));
         finish(&mut harness);
         assert_eq!(harness.state().config.gui.output_dir, Some(dir.path().join("out")));
@@ -1177,7 +1213,7 @@ mod tests {
         harness.run_steps(2);
         harness.get_by_label(&fl!("add-images")).click();
         harness.run_steps(2);
-        assert_eq!(harness.state().asked_to_pick, [Pick::Frames]);
+        assert_eq!(harness.state().picker.asked, [Pick::Frames]);
         assert!(harness.query_by_label(&fl!("remove-all")).is_none());
         // what passes, in the corner the list would have, and what stays
         // clear of it, right of where the list would be
