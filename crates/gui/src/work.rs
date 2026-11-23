@@ -5,6 +5,8 @@
 //! work, and evict decoded full-resolution frames (as they take much memory)
 //! for items that are not currently viewed.
 
+use std::collections::VecDeque;
+
 use eframe::egui;
 use tgradish_core::backend::Backend;
 use tgradish_core::options::Settings;
@@ -21,6 +23,20 @@ use crate::outputs::Written;
 
 /// Maximum concurrent background input loads besides the selected item.
 const READING: usize = 2;
+
+/// What [`App::pump`] works through: the conversions waiting, how many
+/// were asked for, and the ffmpeg inputs were read with. The loads and
+/// conversions themselves are each item's own.
+#[derive(Default)]
+pub(crate) struct Work {
+    /// Items waiting to be converted, in order.
+    pub(crate) queue: VecDeque<u64>,
+    /// How many were asked to be converted since nothing was.
+    pub(crate) batch: usize,
+    /// The ffmpeg inputs were last read with, or why there was none: when
+    /// it changes, reads that failed are tried again.
+    pub(crate) read_with: Option<Result<Backend, String>>,
+}
 
 impl App {
     /// Builds a conversion [`Setup`] for `recipe` using `backend` (which
@@ -48,9 +64,9 @@ impl App {
         let backend = self.backend();
         // Retry failed or in-progress loads whenever the ffmpeg backend
         // changes.
-        if self.read_with.as_ref() != Some(&backend) {
+        if self.work.read_with.as_ref() != Some(&backend) {
             self.items.iter_mut().for_each(read_again);
-            self.read_with = Some(backend.clone());
+            self.work.read_with = Some(backend.clone());
         }
         let selected = self.selected;
         let mut reading = self
@@ -248,7 +264,7 @@ impl App {
         {
             return;
         }
-        while let Some(id) = self.queue.pop_front() {
+        while let Some(id) = self.work.queue.pop_front() {
             let Some(item) = self.item(id) else { continue };
             // Fail queued jobs that developed a blocker after being enqueued.
             if let Some(blocker) = item.blockers.first() {
@@ -281,7 +297,7 @@ impl App {
                         }
                     }
                     None if !matches!(item.art, crate::media::Load::Failed(_)) => {
-                        self.queue.push_front(id);
+                        self.work.queue.push_front(id);
                         return;
                     }
                     None => {}
@@ -812,7 +828,7 @@ mod tests {
             convert(&harness);
             harness.run_steps(2);
             let item = &harness.state().items[0];
-            assert!(item.job.is_none() && harness.state().queue.is_empty(), "{input:?}");
+            assert!(item.job.is_none() && harness.state().work.queue.is_empty(), "{input:?}");
             // the way out, under the crop
             harness.get_by_label(&fl!("use-whole")).click_accesskit();
             harness.run_steps(2);
@@ -1109,7 +1125,7 @@ mod tests {
             let _ = failing.recv();
             Err("the old ffmpeg failed".into())
         }));
-        app.read_with = Some(Err("the old ffmpeg".into()));
+        app.work.read_with = Some(Err("the old ffmpeg".into()));
         harness.step();
         fail.send(()).unwrap();
         finish(&mut harness);

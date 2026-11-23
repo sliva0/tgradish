@@ -69,7 +69,7 @@ impl App {
             true => fl!("replaces-earlier"),
             false => fl!("replaces-earlier", "any"),
         });
-        let queued = self.queue.iter().position(|&other| other == id);
+        let queued = self.work.queue.iter().position(|&other| other == id);
         let presets_kept = self.presets_dir.is_some();
         let keyed = self.keyed;
         // the result to copy, and whether it is where the next goes, made
@@ -131,7 +131,7 @@ impl App {
                     {
                         job.cancel();
                         item.job = None;
-                        self.queue.retain(|&other| other != id);
+                        self.work.queue.retain(|&other| other != id);
                     } else {
                         if let Some(made) = &made {
                             copy = copy_button(ui, made, keyed.copy);
@@ -665,7 +665,7 @@ mod tests {
         // takes, so the rest wait
         let ids: Vec<u64> = harness.state().items.iter().map(|item| item.id).collect();
         ids.iter().for_each(|&id| harness.state_mut().enqueue(id));
-        harness.state_mut().queue.pop_front();
+        harness.state_mut().work.queue.pop_front();
         harness.state_mut().items[0].job.as_mut().unwrap().job.status = Status::Running;
         assert_eq!(harness.state().batch_progress(), Some((1, 4)));
         harness.run_steps(2);
@@ -677,7 +677,7 @@ mod tests {
         harness.get_by_label(&fl!("stop-all")).click_accesskit();
         harness.run_steps(2);
         let app = harness.state();
-        assert!(app.queue.is_empty());
+        assert!(app.work.queue.is_empty());
         // the one at work asked to stop, the rest never begun
         assert!(app.items[0].job.as_ref().is_some_and(|conversion| conversion.job.is_stopping()));
         for item in &app.items[1..] {
@@ -697,14 +697,14 @@ mod tests {
         ids.iter().for_each(|&id| harness.state_mut().enqueue(id));
         // the first as if converting, for as long as it takes, so the
         // second waits
-        harness.state_mut().queue.pop_front();
+        harness.state_mut().work.queue.pop_front();
         harness.state_mut().items[0].job.as_mut().unwrap().job.status = Status::Running;
         select(&mut harness, 1);
         assert!(harness.query_all_by_label(&fl!("next-to-convert")).count() > 0);
         harness.get_by_label(&fl!("cancel-waiting")).click();
         harness.run_steps(2);
         let app = harness.state();
-        assert!(app.queue.is_empty() && app.items[1].job.is_none());
+        assert!(app.work.queue.is_empty() && app.items[1].job.is_none());
         assert!(app.items[1].made.is_none() && app.items[1].failed.is_none());
         assert_eq!(harness.query_all_by_label(&fl!("next-to-convert")).count(), 0);
     }

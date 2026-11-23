@@ -325,7 +325,7 @@ impl App {
             for (index, item) in self.items.iter().enumerate() {
                 gap(ui, &self.rows, Some(item.id));
                 let selected = self.selected == Some(item.id);
-                let queued = self.queue.iter().position(|&id| id == item.id);
+                let queued = self.work.queue.iter().position(|&id| id == item.id);
                 let shown = self.rows.shown(ui.ctx(), item.id);
                 let opacity = ui.opacity();
                 ui.multiply_opacity(shown.row);
@@ -434,7 +434,7 @@ impl App {
         if busy == 0 {
             return None;
         }
-        let total = self.batch.max(busy);
+        let total = self.work.batch.max(busy);
         Some(((total - waiting).clamp(1, total), total))
     }
 
@@ -1448,7 +1448,7 @@ mod tests {
         behind(&mut harness);
         assert!(waiting(&harness));
         harness.state_mut().item_mut(first).unwrap().job = None;
-        harness.state_mut().queue.retain(|&id| id != first);
+        harness.state_mut().work.queue.retain(|&id| id != first);
         for _ in 0..30 {
             harness.step();
             assert_eq!(shown(&harness), Shown { row: 1.0, result: 1.0, glow: 0.0 });

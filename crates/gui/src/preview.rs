@@ -77,7 +77,7 @@ impl App {
             return;
         };
         let ffmpeg_args = self.backend().as_ref().is_ok_and(Backend::supports_ffmpeg_args);
-        let queued = self.queue.iter().position(|&other| other == id);
+        let queued = self.work.queue.iter().position(|&other| other == id);
         let bar = egui::Panel::bottom("actions").show(ui, |ui| {
             ui.add_space(crate::actions::BAR_ABOVE);
             self.actions(ui, id);

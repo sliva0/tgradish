@@ -146,7 +146,7 @@ fn walk_in(size: egui::Vec2, mut visit: impl FnMut(&mut Harness<App>, &str)) {
         // as it converts, Keep best so far beside Stop, as long as it gets
         let id = harness.state().items.last().unwrap().id;
         harness.state_mut().enqueue(id);
-        harness.state_mut().queue.retain(|&other| other != id);
+        harness.state_mut().work.queue.retain(|&other| other != id);
         let item = harness.state_mut().items.last_mut().unwrap();
         let job = &mut item.job.as_mut().expect("queued").job;
         (job.status, job.settles) = (crate::jobs::Status::Running, true);

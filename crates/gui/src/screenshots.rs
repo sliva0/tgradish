@@ -1285,11 +1285,11 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
         if index == 0 {
             job.status = Status::Running;
         } else {
-            state.queue.push_back(item.id);
+            state.work.queue.push_back(item.id);
         }
         item.job = Some(crate::item::Conversion::of(job, Format::Tgs, item.choices.clone()));
     }
-    state.batch = 12;
+    state.work.batch = 12;
     shot(&mut harness, save, "state-queue");
     harness.set_size(egui::vec2(crate::MIN_WIDTH, 640.0));
     harness.ctx.memory_mut(|memory| memory.reset_areas());

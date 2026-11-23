@@ -205,12 +205,12 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     let waiting = Job::waiting(dir.path().join("waiting.webm"));
     item.job = Some(Conversion::of(waiting, Format::Webm, item.choices.clone()));
     let waiting = id(&harness, 0);
-    harness.state_mut().queue.push_back(waiting);
+    harness.state_mut().work.queue.push_back(waiting);
     let item = &mut harness.state_mut().items[1];
     let later = Job::waiting(dir.path().join("later.png"));
     item.job = Some(Conversion::of(later, Format::Webp, item.choices.clone()));
     let later = id(&harness, 1);
-    harness.state_mut().queue.push_back(later);
+    harness.state_mut().work.queue.push_back(later);
     select(&mut harness, 2);
     save(&mut harness, "queue");
     select(&mut harness, 0);
@@ -218,7 +218,7 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     for item in &mut harness.state_mut().items {
         item.job = None;
     }
-    harness.state_mut().queue.clear();
+    harness.state_mut().work.queue.clear();
 
     // conversions that failed, met a file in the way, or were stopped
     let ended = |status: Status| {

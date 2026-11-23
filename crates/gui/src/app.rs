@@ -25,7 +25,7 @@ use crate::jobs::{Job, failure};
 use crate::keys::direct_scrolling;
 use crate::l10n::fl;
 use crate::outputs::Outputs;
-use crate::work::release;
+use crate::work::{Work, release};
 use crate::{
     accent, fallback, inspect, instance, preset_dialogs, session, settings_dialog, system, theme,
     widgets,
@@ -58,17 +58,12 @@ pub(crate) struct App {
     pub(crate) selected: Option<u64>,
     /// Items selected lately, the latest first, which keep their frames.
     pub(crate) recent: VecDeque<u64>,
-    /// Items waiting to be converted, in order.
-    pub(crate) queue: VecDeque<u64>,
-    /// How many were asked to be converted since nothing was.
-    pub(crate) batch: usize,
+    /// The conversions waiting, and what reading inputs went by.
+    pub(crate) work: Work,
     /// What is known of where results go.
     pub(crate) outputs: Outputs,
     /// The ffmpeg the command line gave, and the one found.
     pub(crate) ffmpeg: Ffmpeg,
-    /// The ffmpeg inputs were last read with, or why there was none: when
-    /// it changes, reads that failed are tried again.
-    pub(crate) read_with: Option<Result<Backend, String>>,
     pub(crate) screen: Screen,
     pub(crate) inset: Inset,
     pub(crate) settings_dialog: settings_dialog::SettingsDialog,
@@ -349,11 +344,9 @@ impl App {
             next_id: 0,
             selected: None,
             recent: VecDeque::new(),
-            queue: VecDeque::new(),
-            batch: 0,
+            work: Work::default(),
             outputs: Outputs::default(),
             ffmpeg: Ffmpeg::default(),
-            read_with: None,
             screen: Screen::default(),
             inset: Inset::default(),
             settings_dialog: settings_dialog::SettingsDialog::default(),
@@ -615,7 +608,7 @@ impl App {
         if taken.is_empty() {
             return;
         }
-        self.queue.retain(|id| !ids.contains(id));
+        self.work.queue.retain(|id| !ids.contains(id));
         self.recent.retain(|id| !ids.contains(id));
         if selected.is_some() {
             self.selected = self.recent.front().copied().or(self.items.last().map(|item| item.id));
@@ -783,16 +776,16 @@ impl App {
         let output = self.work_out_output(item);
         // counted from the first while nothing else converts
         if self.items.iter().all(|item| item.job.is_none()) {
-            self.batch = 0;
+            self.work.batch = 0;
         }
         let item = self.item_mut(id).expect("found above");
         let again = item.job.as_ref().inspect(|conversion| conversion.job.cancel()).is_some();
         item.job = Some(Conversion::of(Job::waiting(output), item.format, item.choices.clone()));
         if !again {
-            self.batch += 1;
+            self.work.batch += 1;
         }
-        self.queue.retain(|&other| other != id);
-        self.queue.push_back(id);
+        self.work.queue.retain(|&other| other != id);
+        self.work.queue.push_back(id);
     }
 
     /// Stops every conversion, and takes what waits out of the queue.
@@ -806,7 +799,7 @@ impl App {
                 item.job = None;
             }
         }
-        self.queue.clear();
+        self.work.queue.clear();
     }
 
     /// Changes a setting of the GUI, and keeps that change in the config

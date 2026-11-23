@@ -186,7 +186,7 @@ pub(crate) fn finish(harness: &mut Harness<App>) {
                 || item.result_clip.is_loading()
                 || item.earlier.is_some()
         });
-        let idle = state.queue.is_empty() && state.picking.is_none();
+        let idle = state.work.queue.is_empty() && state.picking.is_none();
         if !reading && idle && state.items.iter().all(|item| item.job.is_none()) {
             if settled {
                 harness.run_steps(2);
