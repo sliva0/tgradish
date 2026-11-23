@@ -192,13 +192,13 @@ To configure defaults, run `tgradish config init` to create the config directory
 
 Exit statuses:
 
-- `0` — Success (or `watch` stopped by cancellation).
-- `1` — Error (takes precedence over `3` when processing multiple files).
+- `0` — Success. `watch` also exits with `0` when cancelled.
+- `1` — Something failed. With several inputs, this wins over `3`.
 - `2` — Invalid command-line arguments.
-- `3` — All files were converted or read, but Telegram would reject a result or an inspected file.
+- `3` — Everything was converted or read, but Telegram would reject a result or an inspected file.
 - `130` — `convert` was cancelled (Ctrl-C or `--cancel-on-stdin`).
-- `141` — Standard output pipe closed early on Unix (`1` on other platforms), for example when piped into `head`.
-- `128 + N` — Stopped by `SIGTERM` or `SIGHUP` on Unix (re-raised so the shell sees the signal, such as `143` for `SIGTERM`).
+- `141` — Standard output was closed early on Unix (`1` on other platforms), for example when piped into `head`.
+- `128 + N` — Stopped by signal `N` (`SIGTERM` or `SIGHUP`) on Unix, for example `143` for `SIGTERM`.
 
 ## Contributing
 

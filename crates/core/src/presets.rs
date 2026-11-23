@@ -311,8 +311,8 @@ fn builtin() -> Vec<Preset> {
         ),
         preset(
             "best",
-            "WebM as balanced with the slowest encoder: minutes for long videos. TGS takes a few \
-             seconds for the smallest file.",
+            "WebM as in balanced, with the slowest encoder: minutes for long videos. TGS takes a \
+             few seconds for the smallest file.",
             Options { fit: Some(Fit::Auto), effort: Some(Effort::Best), ..Default::default() },
             effort(Effort::Best),
         ),

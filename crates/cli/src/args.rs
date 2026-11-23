@@ -32,20 +32,22 @@ const CONVERT_EXAMPLES: &str =
 const ENVIRONMENT: &str = "  TGRADISH_CONFIG  Config file path (overridden by --config).
   TGRADISH_FFMPEG  Path to ffmpeg or its directory (overrides the config;
                    overridden by --ffmpeg or --ffmpeg-from).
-  TGRADISH_LANG    GUI language, as de, over the config's and the system's.
+  TGRADISH_LANG    GUI language, such as de (overrides the config and the
+                   system's language).
   NO_COLOR         Disable colours when --colour is auto.
   CLICOLOR_FORCE   Force colours when --colour is auto, even off a terminal.
   FORCE_HYPERLINK  Set to 1 to force file hyperlinks, or 0 to disable them.";
 
-const EXIT_STATUS: &str = "  0      Success (also when watch is cancelled).
-  1      Runtime or conversion error. With multiple inputs, beats 3.
+const EXIT_STATUS: &str = "  0      Success. watch also exits with 0 when cancelled.
+  1      Something failed. With several inputs, this wins over 3.
   2      Invalid command-line arguments.
-  3      Files were read or created, but Telegram would reject a result or
-         inspected file (e.g. a .tgs kept oversized by --exact, a WebM over
-         the limit with --fit off, or an image of the wrong size).
-  128+N  ended by SIGTERM or SIGHUP on Unix, which tgradish re-raises.
-  130    convert was cancelled via Ctrl-C or --cancel-on-stdin.
-  141    stdout closed early on Unix (1 on other platforms).";
+  3      Everything was converted or read, but Telegram would reject a
+         result or an inspected file: for example a .tgs that --exact keeps
+         too large, a WebM over the limit with --fit off, or an image of
+         the wrong size.
+  128+N  Stopped by signal N (SIGTERM or SIGHUP) on Unix.
+  130    convert was cancelled by Ctrl-C or --cancel-on-stdin.
+  141    stdout was closed early on Unix (1 on other platforms).";
 
 /// `sections` under their headings, styled as clap styles its own.
 fn sections(sections: &[(&str, &str)]) -> String {
@@ -62,9 +64,10 @@ fn top_help() -> String {
 }
 
 const CONVERT_STOPPING: &str =
-    "  Ctrl-C while a WebM is being fitted, once an encode fits, stops fitting,
-  keeps the best encode so far and moves on to the next input. Ctrl-C again
-  within 2 seconds, before anything fits, or for any other format, cancels.";
+    "  Ctrl-C while a WebM is being fitted stops fitting if an encode already
+  fits: tgradish keeps the best encode so far and moves on to the next
+  input. Otherwise Ctrl-C cancels: before anything fits, when pressed again
+  within 2 seconds, and for every other format.";
 
 fn convert_help() -> String {
     sections(&[
