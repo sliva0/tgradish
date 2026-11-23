@@ -154,8 +154,11 @@ fn prepare(args: &[String]) -> Result<()> {
     println!(
         "\nReview git diff, then run:\n\n  \
          git commit -am \"Release {version}\"\n  \
+         git push origin main\n  \
+         gh workflow run release.yml --ref main\n\n\
+         Once that run passes, tag the commit:\n\n  \
          git tag -a v{version} -m \"tgradish {version}\"\n  \
-         git push origin main v{version}\n\n\
+         git push origin v{version}\n\n\
          The release workflow creates a draft release. Publish it on GitHub, then run:\n\n  \
          cargo xtask release aur --push\n  \
          cargo xtask release crates"
