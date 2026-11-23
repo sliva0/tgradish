@@ -562,7 +562,7 @@ impl App {
         };
         if let Some(id) = next.and_then(|next| self.items.get(next)).map(|item| item.id) {
             self.select(id);
-            self.reveal_selected = true;
+            self.list.reveal_selected = true;
         }
     }
 }

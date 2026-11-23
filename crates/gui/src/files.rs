@@ -273,7 +273,7 @@ impl App {
         // over the footer's
         let under = corner.top() - (ui.painter().round_to_pixel_center(rule) + 0.5);
         let now = ui.input(|input| input.time);
-        self.rows.follow(&self.items, now);
+        self.list.rows.follow(&self.items, now);
         let list = egui::ScrollArea::vertical().auto_shrink([false, false]);
         widgets::scrolled(ui, list, |ui| {
             let mut clicked = None;
@@ -283,7 +283,7 @@ impl App {
             // which a text field with the focus would take instead
             let delete = ui.input(|input| pressed(input, Command::Remove).is_some());
             let mut focus_next = None;
-            let reveal = std::mem::take(&mut self.reveal_selected);
+            let reveal = std::mem::take(&mut self.list.reveal_selected);
             let gap = |ui: &mut egui::Ui, rows: &Rows, before: Option<u64>| {
                 let closing = rows.closing(ui.ctx(), before);
                 if closing > 0.0 {
@@ -292,10 +292,10 @@ impl App {
                 }
             };
             for (index, item) in self.items.iter().enumerate() {
-                gap(ui, &self.rows, Some(item.id));
+                gap(ui, &self.list.rows, Some(item.id));
                 let selected = self.selected == Some(item.id);
                 let queued = self.work.queue.iter().position(|&id| id == item.id);
-                let shown = self.rows.shown(ui.ctx(), item.id);
+                let shown = self.list.rows.shown(ui.ctx(), item.id);
                 let opacity = ui.opacity();
                 ui.multiply_opacity(shown.row);
                 let (response, action) =
@@ -337,7 +337,7 @@ impl App {
                     }
                 });
             }
-            gap(ui, &self.rows, None);
+            gap(ui, &self.list.rows, None);
             // after the spacing that follows the last row
             ui.add_space((under - ui.spacing().item_spacing.y).max(0.0));
             if let Some(id) = clicked {
@@ -657,6 +657,16 @@ fn drop_id() -> egui::Id {
 /// How long a row's tint takes to follow it being chosen or let go of;
 /// its outline follows at once.
 const SELECTING: f32 = 0.09;
+
+/// How the list of files is shown, apart from the files themselves: how
+/// its rows change, and whether it scrolls to the file picked.
+#[derive(Default)]
+pub(crate) struct List {
+    /// How the list's rows change, as they fade in and close up.
+    pub(crate) rows: Rows,
+    /// The file picked by its key, which the list scrolls to.
+    pub(crate) reveal_selected: bool,
+}
 
 /// How the rows change as files come and go and are made, for each to
 /// move as it does.
@@ -1371,8 +1381,9 @@ mod tests {
         harness.state_mut().add(vec![paths[2].clone()]);
         harness.step();
         let id = harness.state().items[2].id;
-        let row =
-            |harness: &egui_kittest::Harness<App>| harness.state().rows.shown(&harness.ctx, id).row;
+        let row = |harness: &egui_kittest::Harness<App>| {
+            harness.state().list.rows.shown(&harness.ctx, id).row
+        };
         assert!(row(&harness) < 0.15, "{}", row(&harness));
         harness.run_steps(4);
         assert!((0.3..0.7).contains(&row(&harness)), "{}", row(&harness));
@@ -1423,8 +1434,9 @@ mod tests {
             assert!(waited < 2000, "never made");
         }
         assert!(harness.state().item(first).unwrap().made.is_some());
-        let shown =
-            |harness: &egui_kittest::Harness<App>| harness.state().rows.shown(&harness.ctx, first);
+        let shown = |harness: &egui_kittest::Harness<App>| {
+            harness.state().list.rows.shown(&harness.ctx, first)
+        };
         // from nothing, its size and picture over 180 ms, its glow up to a
         // quarter of the accent halfway through 700 ms, and none at its end
         let start = shown(&harness);
@@ -1460,8 +1472,9 @@ mod tests {
         harness.state_mut().enqueue(first);
         finish(&mut harness);
         harness.run_steps(60);
-        let shown =
-            |harness: &egui_kittest::Harness<App>| harness.state().rows.shown(&harness.ctx, first);
+        let shown = |harness: &egui_kittest::Harness<App>| {
+            harness.state().list.rows.shown(&harness.ctx, first)
+        };
         assert_eq!(shown(&harness), Shown { row: 1.0, result: 1.0, glow: 0.0 });
         // the first waits behind the second, and both are stopped
         let behind = |harness: &mut egui_kittest::Harness<App>| {

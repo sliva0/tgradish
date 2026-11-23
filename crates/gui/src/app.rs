@@ -88,13 +88,11 @@ pub(crate) struct App {
     pub(crate) clipboard: system::Clipboard,
     /// Keys, a paste and files dropped, as they come.
     pub(crate) input: crate::keys::Input,
-    /// The file picked by its key, which the list scrolls to.
-    pub(crate) reveal_selected: bool,
+    /// How the list of files is shown.
+    pub(crate) list: crate::files::List,
     /// The window's icon on Wayland, kept while the window shows it.
     #[cfg(all(unix, not(target_os = "macos")))]
     pub(crate) _toplevel_icon: Option<toplevel_icon::ToplevelIcon>,
-    /// How the list's rows change, as they fade in and close up.
-    pub(crate) rows: crate::files::Rows,
 }
 
 impl App {
@@ -278,10 +276,9 @@ impl App {
             settings_reset: None,
             clipboard: system::Clipboard::default(),
             input: crate::keys::Input::default(),
-            reveal_selected: false,
+            list: crate::files::List::default(),
             #[cfg(all(unix, not(target_os = "macos")))]
             _toplevel_icon: None,
-            rows: crate::files::Rows::default(),
         }
     }
 
