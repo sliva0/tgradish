@@ -21,8 +21,7 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>, cop
             Status::Failed(message) => {
                 let said = ui.colored_label(theme::bad(ui.visuals()), message);
                 // Scroll to the full error message when clicked in the bottom bar.
-                let id = egui::Id::new(crate::actions::POINT_AT_FAILURE);
-                if ui.data_mut(|data| data.remove_temp::<bool>(id)).unwrap_or(false) {
+                if crate::actions::pointed_at_failure(ui.ctx()) {
                     said.scroll_to_me(Some(egui::Align::Center));
                 }
             }

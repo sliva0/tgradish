@@ -89,8 +89,8 @@ pub(crate) struct App {
     /// The settings as they were before Settings put them back to their
     /// defaults a moment ago, which may be put back.
     pub(crate) settings_reset: Option<Config>,
-    /// The clipboard results are copied to, as files.
-    pub(crate) clipboard: system::Clipboard,
+    /// What the bar under the preview keeps between frames.
+    pub(crate) bar: crate::actions::Bar,
     /// Keys, a paste and files dropped, as they come.
     pub(crate) input: crate::keys::Input,
     /// How the list of files is shown.
@@ -279,7 +279,7 @@ impl App {
             removed: None,
             edits: crate::history::Edits::default(),
             settings_reset: None,
-            clipboard: system::Clipboard::default(),
+            bar: crate::actions::Bar::default(),
             input: crate::keys::Input::default(),
             list: crate::files::List::default(),
             #[cfg(all(unix, not(target_os = "macos")))]

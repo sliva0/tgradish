@@ -38,12 +38,38 @@ pub(crate) fn below_bar(style: &egui::Style) -> f32 {
 }
 pub(crate) const BAR_ROW: f32 = 32.0;
 
-/// egui temp-data key recording whether the bar needed two lines on the last
-/// frame.
-const LINES: &str = "action bar lines";
-/// egui temp-data key asking the column beside the preview to scroll to the
-/// full failure message.
-pub(crate) const POINT_AT_FAILURE: &str = "point at failure";
+/// What the bar keeps from one frame to the next, whichever file it is
+/// for: the clipboard results are copied to, what copying did last, and
+/// how many lines the bar took.
+#[derive(Default)]
+pub(crate) struct Bar {
+    /// The clipboard results are copied to, as files.
+    pub(crate) clipboard: system::Clipboard,
+    /// What copying a result last did, and when, which its button says
+    /// for [`COPIED_SHOWN`] seconds.
+    copied: Option<(f64, Result<(), String>)>,
+    /// Where the result goes is on a line of its own, under the rest, as
+    /// they didn't fit on one when the bar was last drawn.
+    two_lines: bool,
+}
+
+/// Where a click on what the bar says of a failure asks the column beside
+/// the preview to scroll to the failure in full: written by the bar, taken
+/// by the column as it is drawn later in the same frame, which is all the
+/// key lives for.
+fn failure_pointed_id() -> egui::Id {
+    egui::Id::new("point at failure")
+}
+
+/// Asks the column beside the preview to scroll to the failure in full.
+fn point_at_failure(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.insert_temp(failure_pointed_id(), true));
+}
+
+/// Whether [`point_at_failure`] asked for it since this was last asked.
+pub(crate) fn pointed_at_failure(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|data| data.remove_temp::<bool>(failure_pointed_id())).unwrap_or(false)
+}
 
 impl App {
     /// Returns the output file written by item `id` if it is still unchanged on
@@ -94,8 +120,8 @@ impl App {
         let bar = ui.available_width();
         // where the result goes on a line of its own, under the rest, while
         // they don't fit on one: as found last time it was drawn
-        let lines = egui::Id::new(LINES);
-        let two = right.is_some() && ui.data(|data| data.get_temp(lines)).unwrap_or(false);
+        let two = right.is_some() && self.bar.two_lines;
+        let copied = &self.bar.copied;
         // the right's least, kept beside the left on one line
         let keep = match &right {
             Some(right) if !two => right.least + gap,
@@ -134,7 +160,7 @@ impl App {
                         self.work.queue.retain(|&other| other != id);
                     } else {
                         if let Some(made) = &made {
-                            copy = copy_button(ui, made, keyed.copy);
+                            copy = copy_button(ui, made, keyed.copy, copied);
                         }
                         let ahead = queued.unwrap_or(0);
                         let text = if ahead == 0 {
@@ -198,7 +224,7 @@ impl App {
                         }
                     }
                     if let Some(made) = &made {
-                        copy = copy_button(ui, made, keyed.copy);
+                        copy = copy_button(ui, made, keyed.copy, copied);
                     }
                     left = ui.cursor().min.x - start + said;
                     let room = ui.available_width() - keep;
@@ -224,13 +250,13 @@ impl App {
         // on two lines from the next frame, or back on one, as they fit
         let needs_two = right.as_ref().is_some_and(|right| left + gap + right.least > bar + 0.5);
         if needs_two != two {
-            ui.data_mut(|data| data.insert_temp(lines, needs_two));
+            self.bar.two_lines = needs_two;
             ui.ctx().request_repaint();
         }
         if let Some(path) = copy {
             let now = ui.input(|input| input.time);
-            let copied = self.clipboard.copy_file(&path);
-            ui.data_mut(|data| data.insert_temp(egui::Id::new(COPIED), (now, copied)));
+            let copied = self.bar.clipboard.copy_file(&path);
+            self.bar.copied = Some((now, copied));
         }
         let shortcut = keyed.convert;
         // the user lets this item replace the file that is there now
@@ -332,7 +358,7 @@ impl Said {
                 let response = within(ui, room, |ui| ui.add(button))
                     .on_hover_text(fl!("failed", error = message.as_str()));
                 if response.clicked() {
-                    ui.data_mut(|data| data.insert_temp(egui::Id::new(POINT_AT_FAILURE), true));
+                    point_at_failure(ui.ctx());
                 }
             }
             Said::InTheWay(path) => {
@@ -351,8 +377,6 @@ impl Said {
 /// cut shortest; with less room, the bar goes on two lines instead.
 const NAME_LEAST: usize = 8;
 
-/// What copying the result last did, and when, kept under this name.
-const COPIED: &str = "result copied";
 /// How long what copying did is said on its button.
 const COPIED_SHOWN: f64 = 2.0;
 
@@ -477,17 +501,21 @@ impl<'a> Right<'a> {
 /// Copy button shown next to Convert once a result exists: copies `made` as a
 /// file for pasting into Telegram and briefly shows the outcome. Fixed to the
 /// widest of its labels so adjacent controls do not shift. Returns the path to
-/// copy when clicked or triggered via shortcut (`keyed`).
-fn copy_button(ui: &mut egui::Ui, made: &Path, keyed: bool) -> Option<PathBuf> {
+/// copy when clicked or triggered via shortcut (`keyed`); what copying last
+/// did is `copied`, [`Bar`]'s.
+fn copy_button(
+    ui: &mut egui::Ui,
+    made: &Path,
+    keyed: bool,
+    copied: &Option<(f64, Result<(), String>)>,
+) -> Option<PathBuf> {
     let now = ui.input(|input| input.time);
-    let copied: Option<(f64, Result<(), String>)> =
-        ui.data(|data| data.get_temp(egui::Id::new(COPIED)));
-    let (text, hint) = match copied.filter(|(when, _)| now - when < COPIED_SHOWN) {
+    let (text, hint) = match copied.as_ref().filter(|(when, _)| now - when < COPIED_SHOWN) {
         Some((when, copied)) => {
             ui.ctx().request_repaint_after_secs((COPIED_SHOWN - (now - when)) as f32);
             match copied {
                 Ok(()) => (copied_text(), copy_hint()),
-                Err(why) => (fl!("copy-result", "failed"), why),
+                Err(why) => (fl!("copy-result", "failed"), why.clone()),
             }
         }
         None => (fl!("copy-result"), copy_hint()),
