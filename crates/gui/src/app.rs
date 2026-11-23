@@ -17,6 +17,7 @@ use crate::Launch;
 use crate::about::about;
 use crate::banner::{Action, Banner, Message, Subject};
 use crate::canvas::Screen;
+use crate::ffmpeg::Ffmpeg;
 use crate::fonts::fonts;
 use crate::inset::Inset;
 use crate::item::{Conversion, Item};
@@ -63,15 +64,8 @@ pub(crate) struct App {
     pub(crate) batch: usize,
     /// What is known of where results go.
     pub(crate) outputs: Outputs,
-    /// The ffmpeg found for the settings, and when: looking for it
-    /// searches the PATH, so it is looked for again only every few
-    /// seconds, to notice one installed meanwhile, or when the settings
-    /// change.
-    pub(crate) found_backend: std::cell::RefCell<Option<FoundBackend>>,
-    /// The ffmpeg given as the GUI was started, by the command line or
-    /// `TGRADISH_FFMPEG`, over the config's for this run alone, so
-    /// Settings doesn't save it.
-    pub(crate) ffmpeg_override: (Option<FfmpegChoice>, Option<PathBuf>),
+    /// The ffmpeg the command line gave, and the one found.
+    pub(crate) ffmpeg: Ffmpeg,
     /// The ffmpeg inputs were last read with, or why there was none: when
     /// it changes, reads that failed are tried again.
     pub(crate) read_with: Option<Result<Backend, String>>,
@@ -184,7 +178,7 @@ impl App {
         // before anything is said
         crate::l10n::choose(config.gui.language.as_deref());
         let mut app = App::with(config, config_path, Presets::builtin());
-        app.ffmpeg_override = (launch.ffmpeg_choice, launch.ffmpeg_path);
+        app.ffmpeg.given = (launch.ffmpeg_choice, launch.ffmpeg_path);
         app.start(unreadable, tgradish_core::presets::user_dir());
         if let Some(store) = session {
             app.resume(store);
@@ -358,8 +352,7 @@ impl App {
             queue: VecDeque::new(),
             batch: 0,
             outputs: Outputs::default(),
-            found_backend: Default::default(),
-            ffmpeg_override: (None, None),
+            ffmpeg: Ffmpeg::default(),
             read_with: None,
             screen: Screen::default(),
             inset: Inset::default(),
@@ -505,29 +498,11 @@ impl App {
     /// Which ffmpeg to use and where, as the settings and the command line
     /// say: as on the command line, a path beats a choice.
     pub(crate) fn ffmpeg_settings(&self) -> (FfmpegChoice, Option<PathBuf>) {
-        let ffmpeg = &self.config.ffmpeg;
-        match &self.ffmpeg_override {
-            (choice, Some(path)) => (choice.unwrap_or(ffmpeg.choice), Some(path.clone())),
-            (Some(choice), None) => (*choice, None),
-            (None, None) => (ffmpeg.choice, ffmpeg.path.clone()),
-        }
+        self.ffmpeg.settings(&self.config.ffmpeg)
     }
 
     pub(crate) fn backend(&self) -> Result<Backend, String> {
-        let settings = self.ffmpeg_settings();
-        let mut found = self.found_backend.borrow_mut();
-        match &*found {
-            Some(seen) if seen.settings == settings && seen.when.elapsed() < LOOK_AGAIN => {
-                seen.backend.clone()
-            }
-            _ => {
-                let backend = Backend::select(settings.0, settings.1.as_deref())
-                    .map_err(|err| crate::jobs::failure(&err));
-                let when = std::time::Instant::now();
-                *found = Some(FoundBackend { settings, when, backend: backend.clone() });
-                backend
-            }
-        }
+        self.ffmpeg.backend(&self.config.ffmpeg)
     }
 
     pub(crate) fn item(&self, id: u64) -> Option<&Item> {
@@ -1039,16 +1014,6 @@ pub(crate) fn set_theme(ctx: &egui::Context, theme: crate::config::Theme) {
     });
 }
 
-/// How long an ffmpeg found, or not found, is taken as it is.
-const LOOK_AGAIN: std::time::Duration = std::time::Duration::from_secs(3);
-
-/// The ffmpeg found for the settings `settings`, at `when`.
-pub(crate) struct FoundBackend {
-    settings: (FfmpegChoice, Option<PathBuf>),
-    when: std::time::Instant,
-    backend: Result<Backend, String>,
-}
-
 impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         // the window is let go of next
@@ -1140,7 +1105,7 @@ impl eframe::App for App {
             self.follow_window(&ctx, (!small).then(|| list.response.rect.width()));
             egui::CentralPanel::default().show(ui, |ui| self.main_panel(ui));
         }
-        let ffmpeg_given = self.ffmpeg_override != (None, None);
+        let ffmpeg_given = self.ffmpeg.given != (None, None);
         settings_dialog::show(
             &ctx,
             &mut self.settings_dialog,
@@ -1575,7 +1540,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         let mut app = App::with(Config::default(), Some(path.clone()), Presets::builtin());
-        app.ffmpeg_override = (None, Some(dir.path().join("no-ffmpeg-here")));
+        app.ffmpeg.given = (None, Some(dir.path().join("no-ffmpeg-here")));
         // used, though nothing is found there
         assert!(app.backend().is_err());
         app.save_setting(|gui| gui.overwrite = true);

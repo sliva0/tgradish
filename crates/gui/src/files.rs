@@ -148,7 +148,7 @@ impl App {
                 self.config.ffmpeg.path = Some(file)
             }
             Ok(Some(Picked::Ffmpeg(file))) => {
-                self.ffmpeg_override = (None, None);
+                self.ffmpeg.given = (None, None);
                 self.save_config_setting(|config| config.ffmpeg.path = Some(file.clone()));
             }
             Ok(Some(Picked::OutputDir(dir))) => self.config.gui.output_dir = Some(dir),

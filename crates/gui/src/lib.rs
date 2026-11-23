@@ -22,6 +22,7 @@ mod dbus;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod dnd;
 mod fallback;
+mod ffmpeg;
 mod file_settings;
 mod files;
 mod fonts;

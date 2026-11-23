@@ -1749,7 +1749,7 @@ mod tests {
         let mut harness = crate::testing::harness(config);
         // the command line's choice is used, and said to be, but the
         // setting is what is checked
-        harness.state_mut().ffmpeg_override = (Some(FfmpegChoice::System), None);
+        harness.state_mut().ffmpeg.given = (Some(FfmpegChoice::System), None);
         harness.state_mut().settings_dialog.open();
         harness.run_steps(2);
         harness.get_by_label(&fl!("ffmpeg-given"));
