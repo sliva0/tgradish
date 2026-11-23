@@ -26,8 +26,8 @@ pub(crate) fn medium_in(ctx: &egui::Context) -> egui::FontFamily {
 }
 
 /// The GUI's fonts: Ubuntu Light for text, Ubuntu Medium for headings,
-/// JetBrains Mono NL for commands, and a few symbols; small subsets, see
-/// `assets/fonts`. Ubuntu's are named "Ubuntu Light derivative tgradish"
+/// JetBrains Mono NL for commands, and a few symbols; small subsets, made
+/// by `assets/fonts/subset.py`. Ubuntu's are named "Ubuntu Light derivative tgradish"
 /// and "Ubuntu Medium derivative tgradish" within, as its licence asks of
 /// a version changed but not substantially.
 pub(crate) fn fonts() -> egui::FontDefinitions {
@@ -197,9 +197,49 @@ pub(crate) fn missing_note(missing: &[char]) -> Option<String> {
     Some(fl!("no-font", count = codes.len(), codes = codes.join(", ")))
 }
 
+/// Every character some built-in font draws.
+#[cfg(test)]
+pub(crate) fn drawn() -> std::collections::BTreeSet<char> {
+    let fonts = fonts();
+    fonts.font_data.values().flat_map(|data| fallback::characters(&data.font, data.index)).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The letters and marks of the languages written in Latin and
+    /// Cyrillic letters the GUI is or may be translated into, beyond
+    /// English's: Ukrainian, Russian, Portuguese, Spanish, Indonesian,
+    /// Uzbek, Turkish, German and French, and the quotes, dashes and
+    /// spaces they write with.
+    const LETTERS: [&str; 10] = [
+        "ґєіїҐЄІЇёЁъЪыЫэЭ",
+        "ãõáéíóúâêôàçÃÕÁÉÍÓÚÂÊÔÀÇ",
+        "ñ¿¡üÑÜ",
+        "ʻʼ",
+        "ğşıİçöüĞŞÇÖÜ",
+        "äöüßÄÖÜ",
+        "éèêëàâçîïôûùüÿœæÉÈÊËÀÂÇÎÏÔÛÙÜŸŒÆ",
+        "«»„“”‚‘’‹›",
+        "–—…",
+        "\u{a0}",
+    ];
+
+    /// The text's, the headings' and the commands' fonts draw [`LETTERS`]
+    /// themselves, not by falling back on another.
+    #[test]
+    fn each_font_draws_the_letters_of_translations() {
+        let fonts = fonts();
+        for name in ["ubuntu", "medium", "mono"] {
+            let data = &fonts.font_data[name];
+            let drawn = fallback::characters(&data.font, data.index);
+            let lacking: String = LETTERS.concat().chars().filter(|c| !drawn.contains(c)).collect();
+            assert!(lacking.is_empty(), "{name} lacks {lacking:?}");
+        }
+        // Ubuntu lacks the capital ß, which JetBrains Mono draws for it
+        assert!(drawn().contains(&'ẞ'));
+    }
 
     #[test]
     fn explains_characters_no_font_has() {

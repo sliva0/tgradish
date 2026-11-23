@@ -792,25 +792,30 @@ mod tests {
         assert!(unused.is_empty(), "never shown: {unused:?}");
     }
 
-    /// The built-in fonts draw every language the GUI has: the system's
-    /// are only for names of files.
+    /// The built-in fonts draw every character of every language the GUI
+    /// has: the system's are only for names of files. A line's end, and
+    /// the thin and narrow no-break spaces, as French puts before its
+    /// colons, egui spaces out itself; any other character no font has
+    /// would show as a box. To draw more, see `assets/fonts/subset.py`.
     #[test]
     fn the_fonts_draw_every_language() {
-        let fonts = crate::fonts::fonts();
-        let drawn: BTreeSet<char> = fonts
-            .font_data
-            .values()
-            .flat_map(|data| crate::fallback::characters(&data.font, data.index))
-            .collect();
+        let drawn = crate::fonts::drawn();
+        let mut lacking = Vec::new();
         for (tag, text) in files() {
             let mut found = Parts::default();
             for (_, pattern) in patterns(&parse(&tag, &text)) {
                 parts(pattern, &mut found);
             }
-            let lacking: BTreeSet<char> =
-                found.text.chars().filter(|c| !c.is_whitespace() && !drawn.contains(c)).collect();
-            assert!(lacking.is_empty(), "{tag} has characters no font draws: {lacking:?}");
+            let spaced = ['\n', '\u{2009}', '\u{202F}'];
+            let missing: BTreeSet<char> =
+                found.text.chars().filter(|c| !spaced.contains(c) && !drawn.contains(c)).collect();
+            if !missing.is_empty() {
+                let missing: Vec<String> =
+                    missing.iter().map(|c| format!("{c:?} U+{:04X}", u32::from(*c))).collect();
+                lacking.push(format!("{tag}: {}", missing.join(", ")));
+            }
         }
+        assert!(lacking.is_empty(), "characters no font draws:\n{}", lacking.join("\n"));
     }
 
     #[test]
@@ -826,11 +831,7 @@ mod tests {
         assert_eq!(pseudo_text("Crop: 4 px"), "Çřøøþ: 4 þx");
         assert!(pseudo_text("Settings").chars().count() > "Settings".chars().count());
         // the built-in fonts have every letter it makes
-        let drawn: BTreeSet<char> = crate::fonts::fonts()
-            .font_data
-            .values()
-            .flat_map(|data| crate::fallback::characters(&data.font, data.index))
-            .collect();
+        let drawn = crate::fonts::drawn();
         let accented = pseudo_text("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
         assert!(accented.chars().all(|c| drawn.contains(&c)), "{accented}");
     }

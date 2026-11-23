@@ -10,8 +10,8 @@ repository.workspace = true
 readme = "README.md"
 keywords = ["telegram", "sticker", "emoji", "egui", "pixel-art"]
 categories = ["multimedia::video", "multimedia::images"]
-# Art used only by the README screenshot test.
-exclude = ["/readme-art"]
+# Art used only by the README screenshot test, and how the fonts are made.
+exclude = ["/readme-art", "/assets/fonts/subset.py"]
 
 [dependencies]
 tgradish-core = { workspace = true, features = ["clipboard"] }
