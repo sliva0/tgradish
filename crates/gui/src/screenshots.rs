@@ -685,7 +685,7 @@ fn moments(save: &mut impl FnMut(&mut Harness<App>, &str)) {
         harness.state_mut().select(last);
         settle(&mut harness);
         // Settings fading in, then scrolled to its end
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(4);
         save(&mut harness, &name("settings-fading"));
         harness.run_steps(30);
@@ -706,7 +706,7 @@ fn moments(save: &mut impl FnMut(&mut Harness<App>, &str)) {
         press(&mut harness, plus, false);
         harness.run_steps(3);
         harness.state_mut().config.gui.scale = 1.0;
-        harness.state_mut().settings_dialog = settings_dialog::SettingsDialog::default();
+        harness.state_mut().dialogs.settings = settings_dialog::SettingsDialog::default();
         settle(&mut harness);
     }
 }
@@ -867,7 +867,7 @@ fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().items[0].view.input_zoom = Zoom::default();
     settle(&mut harness);
     // the shortcuts, scrolled to what the mouse does
-    harness.state_mut().shortcuts = true;
+    harness.state_mut().dialogs.shortcuts = true;
     settle(&mut harness);
     let middle = harness.ctx.content_rect().center();
     harness.event(egui::Event::PointerMoved(middle));
@@ -879,7 +879,7 @@ fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     });
     harness.run_steps(8);
     save(&mut harness, "shortcuts-mouse");
-    harness.state_mut().shortcuts = false;
+    harness.state_mut().dialogs.shortcuts = false;
     settle(&mut harness);
 }
 
@@ -1013,7 +1013,7 @@ fn scroll_bars(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     }
     // Settings, scrolled part of the way, in the narrowest window
     harness.set_size(egui::vec2(crate::MIN_WIDTH, 820.0));
-    harness.state_mut().settings_dialog.open();
+    harness.state_mut().dialogs.settings.open();
     harness.run_steps(6);
     let screen = harness.ctx.content_rect();
     wheel(&mut harness, screen.center(), 200.0);
@@ -1132,7 +1132,7 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     };
     let mut harness = window(config.clone(), egui::vec2(1280.0, 820.0));
     // Settings, at the usual size and the smallest
-    harness.state_mut().settings_dialog.open();
+    harness.state_mut().dialogs.settings.open();
     shot(&mut harness, save, "state-settings");
     // made larger by its buttons, the pointer gone from them since: back
     // in the middle
@@ -1174,7 +1174,7 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().banner = Default::default();
     harness.set_size(egui::vec2(crate::MIN_WIDTH, 640.0));
     shot(&mut harness, save, "state-settings-small");
-    harness.state_mut().settings_dialog = settings_dialog::SettingsDialog::default();
+    harness.state_mut().dialogs.settings = settings_dialog::SettingsDialog::default();
     harness.set_size(egui::vec2(1280.0, 820.0));
     let Some(clip) = video(dir.path(), "640x360") else { return };
     harness.state_mut().add(vec![clip]);
@@ -1429,12 +1429,12 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
         preset_dialogs::ask(&harness.ctx, preset_dialogs::Ask::Manage);
         harness.run_steps(3);
         save(&mut harness, "manage-presets");
-        harness.state_mut().preset_dialog = None;
+        harness.state_mut().dialogs.presets = None;
         let id = harness.state().items[0].id;
         preset_dialogs::ask(&harness.ctx, preset_dialogs::Ask::Save(id));
         harness.run_steps(3);
         save(&mut harness, "save-preset");
-        harness.state_mut().preset_dialog = None;
+        harness.state_mut().dialogs.presets = None;
         harness.state_mut().items[0].choices.preset = None;
         harness.run_steps(3);
     }
@@ -1460,15 +1460,15 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().items.last_mut().unwrap().view.show = Show::Input;
     harness.run_steps(3);
     save(&mut harness, "tgs-input");
-    harness.state_mut().settings_dialog.open();
+    harness.state_mut().dialogs.settings.open();
     harness.run_steps(3);
     save(&mut harness, "settings");
-    harness.state_mut().settings_dialog = settings_dialog::SettingsDialog::default();
+    harness.state_mut().dialogs.settings = settings_dialog::SettingsDialog::default();
     let sticker = dir.path().join("out").join("dance.sticker.tgs");
-    harness.state_mut().inspection = Some(inspect::Inspection::of(&sticker));
+    harness.state_mut().dialogs.inspection = Some(inspect::Inspection::of(&sticker));
     harness.run_steps(3);
     save(&mut harness, "inspect");
-    harness.state_mut().inspection = None;
+    harness.state_mut().dialogs.inspection = None;
     // a .tgs halfway through fitting
     let mut job = Job::waiting(dir.path().join("progress.tgs"));
     job.status = Status::Running;
@@ -1488,14 +1488,14 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     item.job = Some(crate::item::Conversion::of(job, Format::Tgs, item.choices.clone()));
     harness.run_steps(3);
     save(&mut harness, "progress");
-    harness.state_mut().about = true;
+    harness.state_mut().dialogs.about = true;
     harness.run_steps(3);
     save(&mut harness, "about");
-    harness.state_mut().about = false;
-    harness.state_mut().shortcuts = true;
+    harness.state_mut().dialogs.about = false;
+    harness.state_mut().dialogs.shortcuts = true;
     harness.run_steps(3);
     save(&mut harness, "shortcuts");
-    harness.state_mut().shortcuts = false;
+    harness.state_mut().dialogs.shortcuts = false;
     set_theme(&harness.ctx, crate::config::Theme::Light);
     let item = harness.state_mut().items.last_mut().unwrap();
     item.job = None;
@@ -1759,7 +1759,7 @@ fn edges(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     shot(&mut harness, save, "edge-presets");
     preset_dialogs::ask(&harness.ctx, preset_dialogs::Ask::Manage);
     shot(&mut harness, save, "edge-manage-presets");
-    harness.state_mut().preset_dialog = None;
+    harness.state_mut().dialogs.presets = None;
     harness.set_size(egui::vec2(crate::MIN_WIDTH, 820.0));
     harness.ctx.memory_mut(|memory| memory.reset_areas());
     shot(&mut harness, save, "edge-narrow-presets");
@@ -2046,7 +2046,7 @@ fn accents(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     }
     harness.event(egui::Event::PointerGone);
     harness.state_mut().config.gui.accent = Accent::Named("teal");
-    harness.state_mut().settings_dialog.open();
+    harness.state_mut().dialogs.settings.open();
     for width in [1280.0, crate::MIN_WIDTH] {
         harness.set_size(egui::vec2(width, 820.0));
         for theme in [Theme::Dark, Theme::Light] {

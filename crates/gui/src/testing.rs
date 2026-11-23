@@ -67,7 +67,7 @@ impl Screen {
             .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin()));
         let mut screen = Screen { harness, size: size.into(), said: None };
         if settings {
-            screen.harness.state_mut().settings_dialog.open();
+            screen.harness.state_mut().dialogs.settings.open();
         }
         screen.frames(16);
         screen

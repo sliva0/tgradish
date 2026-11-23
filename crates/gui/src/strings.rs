@@ -126,9 +126,9 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
         }
     };
     if let Some(output) = made(&harness, 0) {
-        harness.state_mut().inspection = Some(crate::inspect::Inspection::of(&output));
+        harness.state_mut().dialogs.inspection = Some(crate::inspect::Inspection::of(&output));
         save(&mut harness, "inspect-webm");
-        harness.state_mut().inspection = None;
+        harness.state_mut().dialogs.inspection = None;
     }
     select(&mut harness, 1);
     harness.state_mut().items[1].format = Format::Webp;
@@ -137,9 +137,9 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     harness.run_steps(2);
     finish(&mut harness);
     if let Some(output) = made(&harness, 1) {
-        harness.state_mut().inspection = Some(crate::inspect::Inspection::of(&output));
+        harness.state_mut().dialogs.inspection = Some(crate::inspect::Inspection::of(&output));
         save(&mut harness, "inspect-image");
-        harness.state_mut().inspection = None;
+        harness.state_mut().dialogs.inspection = None;
     }
 
     // emoji, as a WebM and as a picture
@@ -245,14 +245,14 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     save(&mut harness, "unreadable");
 
     // the settings, ffmpeg checked and a change kept, with no home folder
-    harness.state_mut().settings_dialog.open();
+    harness.state_mut().dialogs.settings.open();
     harness.run_steps(10);
     harness.get_by_label(&fl!("check")).click_accesskit();
     harness.run_steps(2);
     harness.get_by_label(&fl!("replace-in-the-way")).click_accesskit();
     harness.run_steps(2);
     save(&mut harness, "settings-checked");
-    harness.state_mut().settings_dialog = crate::settings_dialog::SettingsDialog::default();
+    harness.state_mut().dialogs.settings = crate::settings_dialog::SettingsDialog::default();
 
     // naming a preset: as a built-in one, as one that is there, wrongly
     let mine = (&tgradish_core::webm::Options::default(), &Default::default());
@@ -268,7 +268,7 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
         harness.event(egui::Event::Text(typed.into()));
         harness.run_steps(2);
         save(&mut harness, name);
-        harness.state_mut().preset_dialog = None;
+        harness.state_mut().dialogs.presets = None;
         harness.run_steps(2);
     }
 }

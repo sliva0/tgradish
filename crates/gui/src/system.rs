@@ -433,7 +433,7 @@ mod tests {
     #[test]
     fn opens_links() {
         let mut harness = harness(Config::default());
-        harness.state_mut().about = true;
+        harness.state_mut().dialogs.about = true;
         harness.run_steps(2);
         // a link, a label whose text is its name rather than its value
         let source = fl!("source-code");
@@ -454,7 +454,7 @@ mod tests {
         drop(browsed);
         // and from the menu over the list, beside the way to About
         let before = BROWSED.lock().unwrap().len();
-        harness.state_mut().about = false;
+        harness.state_mut().dialogs.about = false;
         harness.run_steps(2);
         harness.get_by_label(&fl!("main-menu")).click();
         harness.run_steps(2);

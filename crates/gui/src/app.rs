@@ -67,19 +67,10 @@ pub(crate) struct App {
     pub(crate) ffmpeg: Ffmpeg,
     pub(crate) screen: Screen,
     pub(crate) inset: Inset,
-    pub(crate) settings_dialog: settings_dialog::SettingsDialog,
     /// The system's file dialogs, one open at a time.
     pub(crate) picker: Picker,
-    /// A dialog of the user's presets, open over the rest.
-    pub(crate) preset_dialog: Option<preset_dialogs::Dialog>,
-    pub(crate) inspection: Option<inspect::Inspection>,
-    /// Whether the dialog of tgradish's version and licences is open.
-    pub(crate) about: bool,
-    /// How many times About was closed, which it starts afresh by: how
-    /// far it is scrolled and which licences are open are forgotten.
-    pub(crate) about_visit: u64,
-    /// Whether the dialog that lists the keyboard's shortcuts is open.
-    pub(crate) shortcuts: bool,
+    /// The GUI's own dialogs, and what is typed in them.
+    pub(crate) dialogs: Dialogs,
     /// The theme Settings showed last, to apply a change made there.
     pub(crate) theme_shown: Option<crate::config::Theme>,
     /// The scale shown last, to apply a change made in Settings
@@ -345,13 +336,8 @@ impl App {
             ffmpeg: Ffmpeg::default(),
             screen: Screen::default(),
             inset: Inset::default(),
-            settings_dialog: settings_dialog::SettingsDialog::default(),
             picker: Picker::default(),
-            preset_dialog: None,
-            inspection: None,
-            about: false,
-            about_visit: 0,
-            shortcuts: false,
+            dialogs: Dialogs::default(),
             theme_shown: None,
             scale_shown: None,
             scaling: Default::default(),
@@ -714,7 +700,7 @@ impl App {
     pub(crate) fn reset_settings(&mut self) {
         let before = self.config.clone();
         self.take_dialog_settings(&Config::default());
-        self.settings_dialog.forget_typed();
+        self.dialogs.settings.forget_typed();
         self.settings_reset = Some(before);
         let message = Message::info(fl!("settings-reset"));
         self.say(message.actions(&[Action::UndoReset]).about(Subject::SettingsReset));
@@ -726,8 +712,8 @@ impl App {
         let Some(before) = self.settings_reset.take() else { return };
         self.banner.forget(Subject::SettingsReset);
         self.take_dialog_settings(&before);
-        self.settings_dialog.forget_typed();
-        if !self.settings_dialog.is_open() {
+        self.dialogs.settings.forget_typed();
+        if !self.dialogs.settings.is_open() {
             self.save_config_setting(|config| dialog_settings(&before, config));
         }
     }
@@ -822,12 +808,55 @@ impl App {
 
     /// Whether a dialog is open over the rest.
     pub(crate) fn dialog_open(&self) -> bool {
-        self.picker.is_open()
-            || self.settings_dialog.is_open()
+        self.picker.is_open() || self.dialogs.is_open()
+    }
+}
+
+/// The GUI's own dialogs over the rest, each open or not, with what is
+/// typed in them: the system's file dialogs are the [`Picker`]'s.
+#[derive(Default)]
+pub(crate) struct Dialogs {
+    pub(crate) settings: settings_dialog::SettingsDialog,
+    /// A dialog of the user's presets, open over the rest.
+    pub(crate) presets: Option<preset_dialogs::Dialog>,
+    pub(crate) inspection: Option<inspect::Inspection>,
+    /// Whether the dialog of tgradish's version and licences is open.
+    pub(crate) about: bool,
+    /// How many times About was closed, which it starts afresh by: how
+    /// far it is scrolled and which licences are open are forgotten.
+    pub(crate) about_visit: u64,
+    /// Whether the dialog that lists the keyboard's shortcuts is open.
+    pub(crate) shortcuts: bool,
+}
+
+impl Dialogs {
+    /// Whether one of them is open.
+    pub(crate) fn is_open(&self) -> bool {
+        self.settings.is_open()
             || self.about
             || self.shortcuts
             || self.inspection.is_some()
-            || self.preset_dialog.is_some()
+            || self.presets.is_some()
+    }
+
+    /// The dialog of tgradish's version and licences, while it is open.
+    fn about_dialog(&mut self, ctx: &egui::Context) {
+        if !self.about {
+            return;
+        }
+        let modal = widgets::dialog(ctx, "about").width(crate::about::WIDTH).show(ctx, |ui| {
+            let crossed = widgets::dialog_title(ui, widgets::title_text(ui, fl!("about-title")));
+            // afresh each time it opens
+            ui.push_id(self.about_visit, about);
+            let closed = widgets::dialog_buttons(ui, |ui| {
+                ui.add(widgets::dialog_button(fl!("close"))).clicked()
+            });
+            crossed || closed
+        });
+        if modal.inner || modal.should_close() {
+            self.about = false;
+            self.about_visit += 1;
+        }
     }
 }
 
@@ -1094,22 +1123,22 @@ impl eframe::App for App {
         let ffmpeg_given = self.ffmpeg.given != (None, None);
         settings_dialog::show(
             &ctx,
-            &mut self.settings_dialog,
+            &mut self.dialogs.settings,
             &mut self.config,
             ffmpeg_given,
             self.config_path.as_deref(),
             &self.presets,
         );
-        if let Some(pick) = self.settings_dialog.pick.take() {
+        if let Some(pick) = self.dialogs.settings.pick.take() {
             self.picker.pick(&ctx, pick);
         }
-        if std::mem::take(&mut self.settings_dialog.reset) {
+        if std::mem::take(&mut self.dialogs.settings.reset) {
             self.reset_settings();
         }
-        if std::mem::take(&mut self.settings_dialog.wrote) {
+        if std::mem::take(&mut self.dialogs.settings.wrote) {
             self.banner.forget(Subject::SettingsFile);
         }
-        if let Some((format, name)) = self.settings_dialog.default_preset.take() {
+        if let Some((format, name)) = self.dialogs.settings.default_preset.take() {
             self.set_default_preset(format, name);
         }
         // as Settings changes them, without saving
@@ -1121,25 +1150,9 @@ impl eframe::App for App {
         }
         self.follow_scale(&ctx);
         self.inspection_dialog(&ctx);
-        self.shortcuts_dialog(&ctx);
+        self.dialogs.shortcuts_dialog(&ctx);
         self.preset_dialogs(&ctx);
-        if self.about {
-            let modal =
-                widgets::dialog(&ctx, "about").width(crate::about::WIDTH).show(&ctx, |ui| {
-                    let crossed =
-                        widgets::dialog_title(ui, widgets::title_text(ui, fl!("about-title")));
-                    // afresh each time it opens
-                    ui.push_id(self.about_visit, about);
-                    let closed = widgets::dialog_buttons(ui, |ui| {
-                        ui.add(widgets::dialog_button(fl!("close"))).clicked()
-                    });
-                    crossed || closed
-                });
-            if modal.inner || modal.should_close() {
-                self.about = false;
-                self.about_visit += 1;
-            }
-        }
+        self.dialogs.about_dialog(&ctx);
         for (message, action) in self.banner.show(&ctx) {
             self.act(&ctx, &message, action);
         }
@@ -1331,7 +1344,7 @@ mod tests {
         first.state_mut().resume(store);
         first.state_mut().instance = Some(listener);
         // behind a dialog, as a drop is
-        first.state_mut().about = true;
+        first.state_mut().dialogs.about = true;
         first.run_steps(2);
 
         let art = dir.path().join("art.png");
@@ -1352,7 +1365,7 @@ mod tests {
             app.items.iter().map(|item| (item.inputs.clone(), item.sequence)).collect();
         assert_eq!(added, [(vec![art], false), (vec![frames], true)]);
         assert_eq!(app.selected, Some(app.items[1].id));
-        assert!(app.about);
+        assert!(app.dialogs.about);
     }
 
     #[test]

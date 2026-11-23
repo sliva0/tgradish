@@ -919,7 +919,7 @@ mod tests {
     fn leaves_the_first_escape_to_a_field_typed_in() {
         let mut harness = crate::testing::harness(Config::default());
         harness.run_steps(2);
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(3);
         // the threads, of one's own number, typed in
         harness.get_all_by_label(&fl!("custom")).last().unwrap().click_accesskit();
@@ -935,13 +935,13 @@ mod tests {
         // put back as it was, Settings still open
         harness.key_press(egui::Key::Escape);
         harness.run_steps(3);
-        assert!(harness.state().settings_dialog.is_open());
+        assert!(harness.state().dialogs.settings.is_open());
         assert!(!harness.ctx.text_edit_focused());
         assert_eq!(threads(&harness), set);
         // and closed by the next
         harness.key_press(egui::Key::Escape);
         harness.run_steps(3);
-        assert!(!harness.state().settings_dialog.is_open());
+        assert!(!harness.state().dialogs.settings.is_open());
         assert_eq!(threads(&harness), set);
     }
 
@@ -950,7 +950,7 @@ mod tests {
         let mut harness = crate::testing::harness(Config::default());
         crate::widgets::test_fonts(&harness);
         harness.run_steps(2);
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(3);
         harness.get_all_by_label(&fl!("custom")).last().unwrap().click_accesskit();
         harness.run_steps(3);
@@ -974,11 +974,11 @@ mod tests {
         assert!(harness.ctx.text_edit_focused());
         harness.key_press(egui::Key::Escape);
         harness.run_steps(3);
-        assert!(!harness.state().settings_dialog.is_open());
+        assert!(!harness.state().dialogs.settings.is_open());
         assert!(!harness.ctx.text_edit_focused());
         assert_eq!(threads(&harness), set);
         // only stepped: put back, Settings still open
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(3);
         focus(&mut harness);
         harness.key_press(egui::Key::ArrowUp);
@@ -986,7 +986,7 @@ mod tests {
         assert_ne!(threads(&harness), set);
         harness.key_press(egui::Key::Escape);
         harness.run_steps(3);
-        assert!(harness.state().settings_dialog.is_open());
+        assert!(harness.state().dialogs.settings.is_open());
         assert_eq!(threads(&harness), set);
     }
 
@@ -995,7 +995,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         let mut harness = kept_in(&path);
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(2);
         // opening it writes nothing
         assert!(!path.exists());
@@ -1010,10 +1010,10 @@ mod tests {
         harness.state_mut().config.gui.reopen_files = false;
         harness.get_all_by_label(&fl!("close")).last().unwrap().click_accesskit();
         harness.run_steps(2);
-        assert!(!harness.state().settings_dialog.is_open());
+        assert!(!harness.state().dialogs.settings.is_open());
         assert!(!Config::load(&path).unwrap().gui.reopen_files);
         // there is no Save to forget
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(2);
         assert!(harness.query_by_label(&fl!("save")).is_none());
     }
@@ -1023,7 +1023,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         let mut harness = kept_in(&path);
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(2);
         harness.get_by_label(&fl!("in-a-folder")).click_accesskit();
         harness.run_steps(2);
@@ -1085,7 +1085,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         let mut harness = kept_in(&path);
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(2);
         // automatic, beside how many this computer runs at once, which a
         // number of one's own starts from; the ffmpeg's Automatic, where
@@ -1131,7 +1131,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         let mut harness = kept_in(&path);
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(2);
         harness.get_by_label(&fl!("replace-in-the-way")).click_accesskit();
         harness.get_by_label(&fl!("theme-dark")).click_accesskit();
@@ -1156,7 +1156,7 @@ mod tests {
         harness.run_steps(2);
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
-        assert!(!harness.state().settings_dialog.is_open() && !kept().overwrite);
+        assert!(!harness.state().dialogs.settings.is_open() && !kept().overwrite);
         harness.get_by_label(&fl!("undo-reset")).click();
         harness.run_steps(2);
         assert!(kept().overwrite && kept().theme == crate::config::Theme::Dark);
@@ -1183,7 +1183,7 @@ mod tests {
                 harness.step();
             }
         };
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         settle(&mut harness);
         harness.get_by_label(&fl!("scale-percent", percent = 100));
         // its keys said as other shortcuts are, Ctrl++ rather than Ctrl+=
@@ -1237,7 +1237,7 @@ mod tests {
     #[test]
     fn offers_a_choice_of_ffmpeg_only_where_one_is_built_in() {
         let mut harness = crate::testing::harness(Config::default());
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(2);
         let builtin = Backend::select(FfmpegChoice::Builtin, None).is_ok();
         let offered = |harness: &Harness<App>| harness.query_by_label(&fl!("ffmpeg-use")).is_some();
@@ -1265,10 +1265,10 @@ mod tests {
             }
         };
         let centred = |harness: &Harness<App>| {
-            let drawn = harness.state().settings_dialog.drawn.0;
+            let drawn = harness.state().dialogs.settings.drawn.0;
             (drawn.center() - harness.ctx.content_rect().center()).length() < 1.0
         };
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         // which takes a few frames as its parts find their sizes
         settle(&mut harness, 16);
         assert!(centred(&harness));
@@ -1288,13 +1288,13 @@ mod tests {
             settle(&mut harness, 4);
         }
         assert_eq!(harness.state().config.gui.scale, 1.2);
-        assert!(harness.state().settings_dialog.pinned.is_some() && !centred(&harness));
+        assert!(harness.state().dialogs.settings.pinned.is_some() && !centred(&harness));
         // the pointer away: back in the middle, a moment later
         harness.event(Event::PointerMoved(egui::pos2(5.0, 5.0)));
         settle(&mut harness, 2);
-        assert!(harness.state().settings_dialog.pinned.is_none());
+        assert!(harness.state().dialogs.settings.pinned.is_none());
         settle(&mut harness, 30);
-        assert!(centred(&harness) && harness.state().settings_dialog.returning.is_none());
+        assert!(centred(&harness) && harness.state().dialogs.settings.returning.is_none());
     }
 
     #[test]
@@ -1305,19 +1305,19 @@ mod tests {
             .with_size([1280.0, 900.0])
             .with_step_dt(1.0 / 60.0)
             .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin()));
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(16);
-        let centre = |harness: &Harness<App>| harness.state().settings_dialog.drawn.0.center();
+        let centre = |harness: &Harness<App>| harness.state().dialogs.settings.drawn.0.center();
         let middle = centre(&harness);
         // let go of in the corner, as the scale's buttons leave it
         let leave = |harness: &mut Harness<App>| {
             let now = harness.ctx.input(|input| input.time);
-            harness.state_mut().settings_dialog.returning = Some((egui::Pos2::ZERO, now));
+            harness.state_mut().dialogs.settings.returning = Some((egui::Pos2::ZERO, now));
             harness.step();
         };
         leave(&mut harness);
         assert!((centre(&harness) - middle).length() < 1.0);
-        assert!(harness.state().settings_dialog.returning.is_none());
+        assert!(harness.state().dialogs.settings.returning.is_none());
         // with motion: on its way a frame later, there once its time is up
         harness.state_mut().config.gui.motion = true;
         harness.step();
@@ -1329,7 +1329,7 @@ mod tests {
         assert!(nearer > 1.0 && nearer < away, "{nearer}");
         harness.run_steps(8);
         assert!((centre(&harness) - middle).length() < 1.0);
-        assert!(harness.state().settings_dialog.returning.is_none());
+        assert!(harness.state().dialogs.settings.returning.is_none());
     }
 
     /// How far `label`'s button is out of what shows of the settings, in
@@ -1337,7 +1337,7 @@ mod tests {
     /// where it shows, to a pixel. Scrolled out of sight, a click there
     /// goes to whatever is drawn there instead.
     fn out_of_sight(screen: &crate::testing::Screen, label: &str) -> f32 {
-        let dialog = &screen.harness.state().settings_dialog;
+        let dialog = &screen.harness.state().dialogs.settings;
         let top = dialog.drawn.0.top() + dialog.scrolled.top;
         let button = screen.harness.get_by_label(label).rect();
         let below = button.bottom() - (top + dialog.scrolled.shown);
@@ -1367,7 +1367,7 @@ mod tests {
                 break;
             }
             // the wheel turned over the middle of the settings
-            let dialog = &screen.harness.state().settings_dialog;
+            let dialog = &screen.harness.state().dialogs.settings;
             let middle = dialog.drawn.0.center_top()
                 + egui::vec2(0.0, dialog.scrolled.top + dialog.scrolled.shown / 2.0);
             screen.move_to(middle * screen.harness.ctx.zoom_factor());
@@ -1401,7 +1401,7 @@ mod tests {
                 screen.frames(4);
                 let app = screen.harness.state();
                 assert_eq!(app.config.gui.scale, scale, "{label}");
-                assert!(app.settings_dialog.pinned.is_some(), "{label} at {scale}");
+                assert!(app.dialogs.settings.pinned.is_some(), "{label} at {scale}");
                 // to a pixel or two, as egui rounds what it lays out to them
                 let now = screen.pixels(&label);
                 assert!((now - under).length() < 2.0, "{label} at {scale}: {now:?}, not {under:?}");
@@ -1425,14 +1425,14 @@ mod tests {
                 screen.frames(4);
                 let app = screen.harness.state();
                 assert_eq!(app.config.gui.scale, scale, "{label}");
-                assert!(app.settings_dialog.pinned.is_some(), "{label} at {scale}");
+                assert!(app.dialogs.settings.pinned.is_some(), "{label} at {scale}");
                 let now = screen.pixels(label);
                 assert!((now - under).length() < 2.0, "{label} at {scale}: {now:?}, not {under:?}");
                 assert!(screen.on(label), "{label} at {scale}");
             }
         };
         let dialog = |screen: &Screen| {
-            let dialog = &screen.harness.state().settings_dialog;
+            let dialog = &screen.harness.state().dialogs.settings;
             (dialog.drawn.0, dialog.scrolled)
         };
         // a usual window, which the dialog is nearly as tall as, to where
@@ -1460,7 +1460,7 @@ mod tests {
         let modifiers = egui::Modifiers::NONE;
         let delta = egui::vec2(0.0, -40.0);
         screen.frame(vec![egui::Event::MouseWheel { unit, delta, phase, modifiers }]);
-        assert!(screen.harness.state().settings_dialog.pinned.is_none());
+        assert!(screen.harness.state().dialogs.settings.pinned.is_none());
     }
 
     #[test]
@@ -1505,7 +1505,7 @@ mod tests {
         // a while later, the pointer kept still, the dialog is back in the
         // middle, and + is no longer under the pointer
         screen.frames(120);
-        let dialog = &screen.harness.state().settings_dialog;
+        let dialog = &screen.harness.state().dialogs.settings;
         assert!(dialog.pinned.is_none() && dialog.returning.is_none());
         let middle = screen.harness.ctx.content_rect().center();
         assert!((dialog.drawn.0.center() - middle).length() < 1.0);
@@ -1601,7 +1601,7 @@ mod tests {
                 item.choices.webm.fit_range = bitrates;
                 app.items.push(item);
             }
-            app.settings_dialog.open();
+            app.dialogs.settings.open();
         }
         harness.run_steps(2);
         // the WebM row's, the first
@@ -1619,7 +1619,7 @@ mod tests {
     fn takes_up_an_accent_as_it_is_chosen() {
         let mut harness = crate::testing::harness(Config::default());
         harness.state().style(&harness.ctx);
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(2);
         let shown = |harness: &Harness<App>| theme::accent(&harness.ctx.global_style().visuals);
         assert_eq!(shown(&harness), theme::BREEZE_ACCENT);
@@ -1697,13 +1697,13 @@ mod tests {
                 app.style(&cc.egui_ctx);
                 app
             });
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(16);
         let under = |harness: &Harness<App>| harness.get_by_label(&fl!("threads")).rect();
         let before = under(&harness);
         let version = "8.0.1-full_build-www.gyan.dev Copyright (c) 2000-2025";
         let status = fl!("ffmpeg-no-vp9", version = version);
-        harness.state_mut().settings_dialog.ffmpeg_status = Some((false, status.clone()));
+        harness.state_mut().dialogs.settings.ffmpeg_status = Some((false, status.clone()));
         harness.run_steps(2);
         harness.get_by_label(&status);
         assert_eq!(under(&harness), before);
@@ -1722,7 +1722,7 @@ mod tests {
         let mut harness = Harness::builder().with_size([1280.0, 820.0]).build_eframe(move |_| {
             App::with(Config::default(), Some(at.clone()), Presets::builtin())
         });
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         // which takes a few frames as its parts find their sizes
         harness.run_steps(16);
         let under =
@@ -1750,21 +1750,21 @@ mod tests {
         // the command line's choice is used, and said to be, but the
         // setting is what is checked
         harness.state_mut().ffmpeg.given = (Some(FfmpegChoice::System), None);
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(2);
         harness.get_by_label(&fl!("ffmpeg-given"));
         harness.get_by_label(&fl!("check")).click_accesskit();
         harness.run_steps(2);
         // what it finds is taken in as frames are drawn
         for _ in 0..500 {
-            if harness.state().settings_dialog.ffmpeg_status.is_some() {
+            if harness.state().dialogs.settings.ffmpeg_status.is_some() {
                 break;
             }
             harness.step();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         // in tgradish's own words, as reading a file without it would say
-        let status = harness.state().settings_dialog.ffmpeg_status.clone();
+        let status = harness.state().dialogs.settings.ffmpeg_status.clone();
         assert!(
             matches!(&status, Some((false, said)) if said.starts_with("ffmpeg wasn't found")),
             "{status:?}"

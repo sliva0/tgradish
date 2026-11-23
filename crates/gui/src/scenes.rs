@@ -123,10 +123,10 @@ fn walk_in(size: egui::Vec2, mut visit: impl FnMut(&mut Harness<App>, &str)) {
     settle(&mut harness, None);
 
     let sticker = dir.path().join("out").join("dance.sticker.tgs");
-    harness.state_mut().inspection = Some(inspect::Inspection::of(&sticker));
+    harness.state_mut().dialogs.inspection = Some(inspect::Inspection::of(&sticker));
     settle(&mut harness, None);
     visit(&mut harness, "inspect");
-    harness.state_mut().inspection = None;
+    harness.state_mut().dialogs.inspection = None;
     dialogs(&mut harness, dir.path(), &mut visit);
 
     if has_ffmpeg()
@@ -194,18 +194,18 @@ fn dialogs(
     dir: &Path,
     visit: &mut impl FnMut(&mut Harness<App>, &str),
 ) {
-    harness.state_mut().settings_dialog.open();
+    harness.state_mut().dialogs.settings.open();
     settle(harness, None);
     visit(harness, "settings");
-    harness.state_mut().settings_dialog = settings_dialog::SettingsDialog::default();
-    harness.state_mut().about = true;
+    harness.state_mut().dialogs.settings = settings_dialog::SettingsDialog::default();
+    harness.state_mut().dialogs.about = true;
     settle(harness, None);
     visit(harness, "about");
-    harness.state_mut().about = false;
-    harness.state_mut().shortcuts = true;
+    harness.state_mut().dialogs.about = false;
+    harness.state_mut().dialogs.shortcuts = true;
     settle(harness, None);
     visit(harness, "shortcuts");
-    harness.state_mut().shortcuts = false;
+    harness.state_mut().dialogs.shortcuts = false;
     let presets_dir = dir.join("presets");
     let options = (&Default::default(), &Default::default());
     tgradish_core::presets::save(&presets_dir, "my stickers", "Mine", options, false).unwrap();
@@ -217,12 +217,12 @@ fn dialogs(
     preset_dialogs::ask(&harness.ctx, preset_dialogs::Ask::Manage);
     settle(harness, None);
     visit(harness, "manage-presets");
-    harness.state_mut().preset_dialog = None;
+    harness.state_mut().dialogs.presets = None;
     let id = harness.state().items[0].id;
     preset_dialogs::ask(&harness.ctx, preset_dialogs::Ask::Save(id));
     settle(harness, None);
     visit(harness, "save-preset");
-    harness.state_mut().preset_dialog = None;
+    harness.state_mut().dialogs.presets = None;
     settle(harness, None);
 }
 

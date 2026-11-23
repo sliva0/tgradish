@@ -299,7 +299,7 @@ const LEAST_ROOM: f32 = 120.0;
 impl App {
     /// What an inspected sticker holds, in a dialog, while there is one.
     pub(crate) fn inspection_dialog(&mut self, ctx: &egui::Context) {
-        let Some(inspection) = &self.inspection else { return };
+        let Some(inspection) = &self.dialogs.inspection else { return };
         let name = inspection
             .path
             .file_name()
@@ -326,7 +326,7 @@ impl App {
             });
         });
         if close || modal.should_close() {
-            self.inspection = None;
+            self.dialogs.inspection = None;
         }
         if another {
             self.picker.pick(ctx, crate::files::Pick::Inspected);

@@ -66,7 +66,7 @@ impl App {
         let selected = self.selected.and_then(|id| self.item(id));
         selected.map(|item| self.output_for(item)).hash(&mut hasher);
         self.banner.rows.iter().for_each(|said| said.id.hash(&mut hasher));
-        self.inspection.as_ref().map(|inspection| &inspection.path).hash(&mut hasher);
+        self.dialogs.inspection.as_ref().map(|inspection| &inspection.path).hash(&mut hasher);
         self.config.gui.output_dir.hash(&mut hasher);
         let shown = hasher.finish();
         if self.fonts_checked == Some(shown) && !self.fallbacks.looking() {
@@ -86,7 +86,10 @@ impl App {
         }
         texts.extend(self.banner.rows.iter().flat_map(|said| said.message.texts()));
         texts.extend(
-            self.inspection.as_ref().map(|inspection| inspection.path.display().to_string()),
+            self.dialogs
+                .inspection
+                .as_ref()
+                .map(|inspection| inspection.path.display().to_string()),
         );
         texts.extend(self.config.gui.output_dir.as_ref().map(|dir| dir.display().to_string()));
         self.fallbacks.check(ctx, texts.iter().map(String::as_str));

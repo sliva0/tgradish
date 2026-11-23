@@ -256,7 +256,7 @@ mod tests {
                 app.style(&cc.egui_ctx);
                 app
             });
-        harness.state_mut().about = true;
+        harness.state_mut().dialogs.about = true;
         harness.run_steps(3);
         let rect = |label: String| {
             let nodes: Vec<_> =

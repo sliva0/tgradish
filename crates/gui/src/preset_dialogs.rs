@@ -172,7 +172,7 @@ impl App {
             asked
         });
         if let Some(asked) = asked {
-            self.preset_dialog = Some(match asked {
+            self.dialogs.presets = Some(match asked {
                 Ask::Save(item) => Dialog::Save(Saving {
                     item,
                     name: String::new(),
@@ -184,10 +184,10 @@ impl App {
             });
         }
         let Some(dir) = self.presets_dir.clone() else {
-            self.preset_dialog = None;
+            self.dialogs.presets = None;
             return;
         };
-        self.preset_dialog = match self.preset_dialog.take() {
+        self.dialogs.presets = match self.dialogs.presets.take() {
             Some(Dialog::Save(saving)) => self.save_dialog(ctx, &dir, saving).map(Dialog::Save),
             Some(Dialog::Manage(managing)) => {
                 self.manage_dialog(ctx, &dir, managing).map(Dialog::Manage)
@@ -645,7 +645,7 @@ mod tests {
         harness.run_steps(3);
         // the item takes it up, its title its own still
         let state = harness.state();
-        assert!(state.preset_dialog.is_none());
+        assert!(state.dialogs.presets.is_none());
         let choices = &state.items[0].choices;
         assert_eq!(choices.preset.as_deref(), Some("by quality"));
         assert_eq!((choices.webm.fit, choices.title.as_deref()), (None, Some("only this one")));
@@ -737,7 +737,7 @@ mod tests {
         harness.event(eframe::egui::Event::Text("s".into()));
         harness.run_steps(2);
         let managing = |harness: &egui_kittest::Harness<crate::app::App>| {
-            matches!(harness.state().preset_dialog, Some(Dialog::Manage(_)))
+            matches!(harness.state().dialogs.presets, Some(Dialog::Manage(_)))
         };
         // the name put back, not taken, the presets still open
         harness.key_press(eframe::egui::Key::Escape);
@@ -781,7 +781,7 @@ mod tests {
         harness.run_steps(2);
         harness.get_by_label(&fl!("your-presets"));
         let state = harness.state_mut();
-        let Some(Dialog::Manage(mut managing)) = state.preset_dialog.take() else { panic!() };
+        let Some(Dialog::Manage(mut managing)) = state.dialogs.presets.take() else { panic!() };
         assert_eq!(managing.rows.len(), 1);
 
         // renamed: what named it follows
@@ -852,7 +852,7 @@ mod tests {
         harness.get_by_label(&fl!("manage-presets")).click();
         harness.run_steps(2);
         let state = harness.state_mut();
-        let Some(Dialog::Manage(mut managing)) = state.preset_dialog.take() else { panic!() };
+        let Some(Dialog::Manage(mut managing)) = state.dialogs.presets.take() else { panic!() };
         managing.rows[0].typed_name = "yours".into();
         state.change_preset(&presets_dir, &mut managing, Change::Rename(0));
         assert_eq!(state.items[0].choices.preset.as_deref(), Some("yours"));

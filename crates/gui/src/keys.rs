@@ -261,7 +261,7 @@ fn what(command: Command) -> String {
     }
 }
 
-impl App {
+impl crate::app::Dialogs {
     /// The dialog that lists every shortcut, while it is open.
     pub(crate) fn shortcuts_dialog(&mut self, ctx: &egui::Context) {
         if !self.shortcuts {
@@ -415,11 +415,11 @@ impl App {
             return;
         }
         if shortcuts {
-            self.shortcuts = true;
+            self.dialogs.shortcuts = true;
             return;
         }
         if settings {
-            self.settings_dialog.open();
+            self.dialogs.settings.open();
             return;
         }
         if inspect {
@@ -761,7 +761,7 @@ mod tests {
         ] {
             harness.key_press_modifiers(modifiers, key);
             harness.run_steps(2);
-            assert!(harness.state().shortcuts, "{key:?}");
+            assert!(harness.state().dialogs.shortcuts, "{key:?}");
             for shortcut in SHORTCUTS {
                 harness.get_by_label(&keys_text(shortcut.command));
                 harness.get_by_label(&what(shortcut.command));
@@ -769,22 +769,22 @@ mod tests {
             harness.get_by_label(&fl!("mouse-wheel", "does"));
             harness.key_press(egui::Key::Escape);
             harness.run_steps(2);
-            assert!(!harness.state().shortcuts);
+            assert!(!harness.state().dialogs.shortcuts);
         }
         // from the menu too
         harness.get_by_label(&fl!("main-menu")).click();
         harness.run_steps(2);
         harness.get_by_label_contains(&fl!("shortcuts")).click();
         harness.run_steps(2);
-        assert!(harness.state().shortcuts);
+        assert!(harness.state().dialogs.shortcuts);
         // and not while another dialog is open, whose keys they are
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(2);
         harness.key_press(egui::Key::F1);
         harness.run_steps(2);
-        assert!(!harness.state().shortcuts);
+        assert!(!harness.state().dialogs.shortcuts);
     }
 
     #[test]
@@ -797,7 +797,7 @@ mod tests {
             harness.run_steps(2);
         };
         command(&mut harness, egui::Key::Comma);
-        assert!(harness.state().settings_dialog.is_open());
+        assert!(harness.state().dialogs.settings.is_open());
         // none of the others while it is open, whose keys they are
         command(&mut harness, egui::Key::I);
         command(&mut harness, egui::Key::O);
@@ -963,7 +963,7 @@ mod tests {
         let mut harness = harness(Config::default());
         harness.state_mut().add(vec![art]);
         finish(&mut harness);
-        harness.state_mut().settings_dialog.open();
+        harness.state_mut().dialogs.settings.open();
         harness.run_steps(2);
         harness.key_press(egui::Key::Delete);
         harness.run_steps(2);
@@ -971,7 +971,7 @@ mod tests {
         // Escape closes the dialog, and the keys are shortcuts again
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
-        assert!(!harness.state().settings_dialog.is_open());
+        assert!(!harness.state().dialogs.settings.is_open());
         harness.key_press(egui::Key::Delete);
         harness.run_steps(2);
         assert!(harness.state().items.is_empty());

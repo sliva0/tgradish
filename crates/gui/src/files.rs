@@ -79,7 +79,7 @@ impl App {
         }
         ui.separator();
         if ui.add(item(fl!("menu-settings"), Command::Settings)).clicked() {
-            self.settings_dialog.open();
+            self.dialogs.settings.open();
             ui.close();
         }
         let inspect = ui.add(item(fl!("inspect"), Command::Inspect));
@@ -88,7 +88,7 @@ impl App {
             ui.close();
         }
         if ui.add(item(fl!("shortcuts"), Command::Shortcuts)).clicked() {
-            self.shortcuts = true;
+            self.dialogs.shortcuts = true;
             ui.close();
         }
         ui.separator();
@@ -97,7 +97,7 @@ impl App {
             ui.close();
         }
         if ui.button(fl!("about-and-licences")).clicked() {
-            self.about = true;
+            self.dialogs.about = true;
             ui.close();
         }
     }
@@ -109,11 +109,11 @@ impl App {
             Ok(Some(Picked::Files(files))) => self.add(files),
             Ok(Some(Picked::Folder(dir))) => self.add(vec![dir]),
             Ok(Some(Picked::Frames(files))) => self.add_frames(files),
-            Ok(Some(Picked::Inspected(inspection))) => self.inspection = Some(*inspection),
+            Ok(Some(Picked::Inspected(inspection))) => self.dialogs.inspection = Some(*inspection),
             // for Settings, which keeps it as it keeps any change; else, as
             // a message or a file's settings asked, kept at once, and used
             // over one given as the GUI was started
-            Ok(Some(Picked::Ffmpeg(file))) if self.settings_dialog.is_open() => {
+            Ok(Some(Picked::Ffmpeg(file))) if self.dialogs.settings.is_open() => {
                 self.config.ffmpeg.path = Some(file)
             }
             Ok(Some(Picked::Ffmpeg(file))) => {
@@ -1162,24 +1162,24 @@ mod tests {
             harness.run_steps(2);
         };
         menu(&mut harness, &fl!("menu-settings"));
-        assert!(harness.state().settings_dialog.is_open());
+        assert!(harness.state().dialogs.settings.is_open());
         // Settings has no way to About of its own any more
         assert!(harness.query_by_label(&fl!("about-and-licences")).is_none());
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
-        assert!(!harness.state().settings_dialog.is_open());
+        assert!(!harness.state().dialogs.settings.is_open());
         // About, a licence opened in it, and About again: as it first was
         let notice = crate::about::notices().swap_remove(1);
         let title = crate::about::title(notice.kind);
         let text = notice.text.trim().lines().next().unwrap().to_owned();
         menu(&mut harness, &fl!("about-and-licences"));
-        assert!(harness.state().about);
+        assert!(harness.state().dialogs.about);
         harness.get_by_label(&title).click_accesskit();
         harness.run_steps(2);
         harness.get_by_label_contains(&text);
         harness.get_all_by_label(&fl!("close")).last().unwrap().click_accesskit();
         harness.run_steps(2);
-        assert!(!harness.state().about);
+        assert!(!harness.state().dialogs.about);
         menu(&mut harness, &fl!("about-and-licences"));
         assert!(harness.query_by_label_contains(&text).is_none());
     }
