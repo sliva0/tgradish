@@ -64,7 +64,9 @@
 //! - `strings [--no-pictures]`: builds `target/strings/index.html` for string
 //!   review and GUI translation, pairing each GUI message with screenshots and
 //!   listing CLI help pages. Capturing screenshots requires a wgpu-capable GPU
-//!   and ffmpeg; `--no-pictures` reuses previous screenshots.
+//!   and ffmpeg; `--no-pictures` reuses previous screenshots. With
+//!   `TGRADISH_LANG` set to a language's tag, the screenshots show it, and
+//!   each message its translation under the English.
 
 mod build;
 mod ffmpeg;

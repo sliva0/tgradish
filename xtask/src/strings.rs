@@ -4,7 +4,10 @@
 //!
 //! Screenshots are captured by `strings::strings` in `crates/gui/src/strings.rs`
 //! (requires a wgpu-capable GPU and ffmpeg, and takes a few minutes). Pass
-//! `--no-pictures` to reuse existing screenshots.
+//! `--no-pictures` to reuse existing screenshots. With `TGRADISH_LANG` set
+//! to a language's tag, as `uk`, the screenshots show the GUI in it, and
+//! each message shows its translation under the English, or that it has
+//! none.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -49,7 +52,17 @@ pub fn strings(args: &[String]) -> Result<()> {
     let help = read("cli.json")?;
     let english = std::fs::read_to_string(root.join("crates/gui/i18n/en-GB/tgradish.ftl"))?;
     let sections = fluent(&english);
-    let page = Page { pictures: &out.join("pictures"), sizes: BTreeMap::new() };
+    // the translation the pictures show, beside English
+    let tag = std::env::var("TGRADISH_LANG").ok().filter(|tag| !tag.is_empty() && tag != "en-GB");
+    let translated = match &tag {
+        Some(tag) => {
+            let path = root.join(format!("crates/gui/i18n/{tag}/tgradish.ftl"));
+            let text = std::fs::read_to_string(&path).ok();
+            text.map(|text| (tag.clone(), translations(&fluent(&text))))
+        }
+        None => None,
+    };
+    let page = Page { pictures: &out.join("pictures"), sizes: BTreeMap::new(), translated };
     let html = page.html(&sections, &shown, &help)?;
     let index = out.join("index.html");
     std::fs::write(&index, html)?;
@@ -125,11 +138,26 @@ fn fluent(text: &str) -> Vec<Section> {
     sections
 }
 
-/// What writing the page needs: the pictures' folder, and their sizes as
-/// read.
+/// Each value and attribute of `sections`, by `id` or `id.attribute`.
+fn translations(sections: &[Section]) -> BTreeMap<String, String> {
+    let mut texts = BTreeMap::new();
+    for message in sections.iter().flat_map(|section| &section.messages) {
+        if !message.value.is_empty() {
+            texts.insert(message.id.clone(), message.value.clone());
+        }
+        for (name, value) in &message.attributes {
+            texts.insert(format!("{}.{name}", message.id), value.clone());
+        }
+    }
+    texts
+}
+
+/// What writing the page needs: the pictures' folder, their sizes as
+/// read, and the translation `TGRADISH_LANG` names, by its tag.
 struct Page<'a> {
     pictures: &'a Path,
     sizes: BTreeMap<String, (f32, f32)>,
+    translated: Option<(String, BTreeMap<String, String>)>,
 }
 
 impl Page<'_> {
@@ -159,6 +187,16 @@ impl Page<'_> {
              the full image.</p>",
             texts.len()
         )?;
+        if let Some((tag, translated)) = &self.translated {
+            let missing = texts.iter().filter(|id| !translated.contains_key(*id)).count();
+            writeln!(
+                html,
+                "<p class=about>Under each, its translation in \
+                 <code>crates/gui/i18n/{tag}/tgradish.ftl</code>, which the screenshots show; \
+                 {missing} strings have none, and show in English.</p>",
+                tag = escape(tag),
+            )?;
+        }
         for section in sections {
             writeln!(html, "<h2>{}</h2>", escape(&section.title))?;
             for message in &section.messages {
@@ -168,11 +206,12 @@ impl Page<'_> {
                     writeln!(html, "<p class=note>{}</p>", escape(&message.comment))?;
                 }
                 if !message.value.is_empty() {
-                    self.pattern(&mut html, None, &message.value, shown.get(&message.id))?;
+                    let id = &message.id;
+                    self.pattern(&mut html, None, id, &message.value, shown.get(id))?;
                 }
                 for (name, value) in &message.attributes {
                     let key = format!("{}.{name}", message.id);
-                    self.pattern(&mut html, Some(name), value, shown.get(&key))?;
+                    self.pattern(&mut html, Some(name), &key, value, shown.get(&key))?;
                 }
                 html.push_str("</div>\n");
             }
@@ -213,12 +252,14 @@ impl Page<'_> {
         Ok(html)
     }
 
-    /// A message's value, or its `attribute`, with pictures of where it
-    /// shows from `places`.
+    /// A message's value, or its `attribute`, known as `id`, with its
+    /// translation, if one is shown, and pictures of where it shows from
+    /// `places`.
     fn pattern(
         &mut self,
         html: &mut String,
         attribute: Option<&str>,
+        id: &str,
         text: &str,
         places: Option<&Value>,
     ) -> Result<()> {
@@ -226,7 +267,20 @@ impl Page<'_> {
         if let Some(name) = attribute {
             write!(html, "<code class=attribute>.{}</code>", escape(name))?;
         }
-        write!(html, "<pre>{}</pre>", escape(text))?;
+        match self.translated.as_ref().map(|(_, translated)| translated.get(id)) {
+            None => write!(html, "<pre>{}</pre>", escape(text))?,
+            Some(Some(translated)) => write!(
+                html,
+                "<div><pre class=english>{}</pre><pre>{}</pre></div>",
+                escape(text),
+                escape(translated)
+            )?,
+            Some(None) => write!(
+                html,
+                "<div><pre>{}</pre><p class=untranslated>Not translated: shown in English</p></div>",
+                escape(text)
+            )?,
+        }
         let places = places.and_then(|shown| shown["places"].as_array());
         match places {
             Some(places) if !places.is_empty() => {
@@ -332,6 +386,8 @@ pre { margin: 0; white-space: pre-wrap; font: 14.5px/1.45 system-ui, sans-serif;
 .shot { position: relative; display: block; border-radius: 4px; outline: 1px solid var(--line); background-repeat: no-repeat; }
 .mark { position: absolute; border: 2px solid var(--mark); border-radius: 4px; box-shadow: 0 0 0 2px #fff8; }
 .unseen { margin: 0; color: var(--weak); font-size: 13px; text-align: right; }
+pre.english { color: var(--weak); font-size: 13px; margin-bottom: 4px; }
+.untranslated { margin: 4px 0 0; color: var(--mark); font-size: 13px; }
 .help { font: 13px/1.5 ui-monospace, monospace; border: 1px solid var(--line); border-radius: 6px; padding: 6px 0; }
 .line { display: grid; grid-template-columns: 4.5em 1fr; }
 .prefix { font-weight: normal; color: var(--weak); margin-left: 6px; }
