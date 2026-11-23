@@ -53,7 +53,7 @@ impl App {
         let item = self.item(id)?;
         match &item.made.as_ref()?.job.status {
             Status::Done(done) if Some(done.output.as_path()) == output => {
-                Some(done.output.clone()).filter(|made| self.wrote(id, made))
+                Some(done.output.clone()).filter(|made| self.outputs.wrote(id, made))
             }
             _ => None,
         }
@@ -63,9 +63,9 @@ impl App {
         let output = self.item(id).map(|item| self.output_for(item));
         // a file there that this item didn't write, which tgradish made or
         // the settings let any result replace
-        let there = output.as_ref().is_some_and(|output| self.probes.exists(output));
-        let replaces = output.as_ref().filter(|output| there && !self.wrote(id, output));
-        let replaces = replaces.map(|output| match self.made_by_tgradish(output) {
+        let there = output.as_ref().is_some_and(|output| self.outputs.probes.exists(output));
+        let replaces = output.as_ref().filter(|output| there && !self.outputs.wrote(id, output));
+        let replaces = replaces.map(|output| match self.outputs.made_by_tgradish(output) {
             true => fl!("replaces-earlier"),
             false => fl!("replaces-earlier", "any"),
         });
@@ -236,7 +236,7 @@ impl App {
         // the user lets this item replace the file that is there now
         if let Some(path) = replace {
             if let Some(written) = Written::of(id, &path) {
-                self.written.insert(path, written);
+                self.outputs.written.insert(path, written);
             }
             convert = true;
         }
@@ -890,7 +890,7 @@ mod tests {
         let file = std::fs::File::options().write(true).open(&output).unwrap();
         file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1 << 30)).unwrap();
         drop(file);
-        harness.state().probes.forget();
+        harness.state().outputs.probes.forget();
         harness.run_steps(2);
         // not this item's result, to copy or say it is saved: one it replaces
         assert!(harness.query_by_label(&saved).is_none());

@@ -2,7 +2,8 @@
 //! tgradish are never overwritten automatically; the GUI tracks files it wrote
 //! itself and checks existing files for tgradish metadata markers.
 
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -112,14 +113,59 @@ impl Written {
     }
 }
 
+/// What the GUI knows of where results go: what it wrote, what is on
+/// disk there, and where each item's result goes this frame. Working out
+/// where results go fills it in, though it only borrows `App`, hence the
+/// cells.
+#[derive(Default)]
+pub(crate) struct Outputs {
+    /// Results the GUI wrote, which it replaces when making them again.
+    pub(crate) written: HashMap<PathBuf, Written>,
+    /// Files found in the way, by their size and time: whether tgradish
+    /// made them, so they may be replaced.
+    pub(crate) made_by_tgradish: RefCell<HashMap<PathBuf, (FileVersion, bool)>>,
+    /// What was seen of files where results go, looked at again only now
+    /// and then rather than on every frame.
+    pub(crate) probes: Probes,
+    /// Where each item's result goes, worked out once a frame: it looks
+    /// at the other items and at files on disk, and is asked for several
+    /// times a frame. Cleared as each frame starts.
+    pub(crate) this_frame: RefCell<HashMap<u64, PathBuf>>,
+}
+
+impl Outputs {
+    /// Whether the item wrote the file at `path`, and nobody changed it
+    /// since.
+    pub(crate) fn wrote(&self, item: u64, path: &Path) -> bool {
+        self.written.get(path).is_some_and(|written| {
+            written.item == item && self.probes.version(path) == Some(written.version)
+        })
+    }
+
+    /// Whether tgradish made the file at `path`, by the marks it shows:
+    /// read once for each version of the file.
+    pub(crate) fn made_by_tgradish(&self, path: &Path) -> bool {
+        let Some(version) = self.probes.version(path) else { return false };
+        let mut known = self.made_by_tgradish.borrow_mut();
+        match known.get(path) {
+            Some(&(seen, made)) if seen == version => made,
+            _ => {
+                let made = tgradish_core::mark::made_by_tgradish(path);
+                known.insert(path.to_path_buf(), (version, made));
+                made
+            }
+        }
+    }
+}
+
 impl App {
     /// Where an item's result goes, as worked out this frame.
     pub(crate) fn output_for(&self, item: &Item) -> PathBuf {
-        if let Some(output) = self.outputs.borrow().get(&item.id) {
+        if let Some(output) = self.outputs.this_frame.borrow().get(&item.id) {
             return output.clone();
         }
         let output = self.work_out_output(item);
-        self.outputs.borrow_mut().insert(item.id, output.clone());
+        self.outputs.this_frame.borrow_mut().insert(item.id, output.clone());
         output
     }
 
@@ -151,10 +197,10 @@ impl App {
         // doesn't make it theirs to replace: only the item's own result is
         let blocked = |path: &Path| {
             let may_replace = match item.paste_dir {
-                Some(_) => self.wrote(item.id, path),
+                Some(_) => self.outputs.wrote(item.id, path),
                 None => self.may_replace(item.id, path),
             };
-            self.probes.exists(path) && !may_replace
+            self.outputs.probes.exists(path) && !may_replace
         };
         free_name(&first, &suffix, &claimed, own, &blocked)
     }
@@ -163,30 +209,8 @@ impl App {
     /// nobody changed since, one tgradish made, or any with the setting
     /// that allows it.
     pub(crate) fn may_replace(&self, item: u64, path: &Path) -> bool {
-        self.config.gui.overwrite || self.wrote(item, path) || self.made_by_tgradish(path)
-    }
-
-    /// Whether the item wrote the file at `path`, and nobody changed it
-    /// since.
-    pub(crate) fn wrote(&self, item: u64, path: &Path) -> bool {
-        self.written.get(path).is_some_and(|written| {
-            written.item == item && self.probes.version(path) == Some(written.version)
-        })
-    }
-
-    /// Whether tgradish made the file at `path`, by the marks it shows:
-    /// read once for each version of the file.
-    pub(crate) fn made_by_tgradish(&self, path: &Path) -> bool {
-        let Some(version) = self.probes.version(path) else { return false };
-        let mut known = self.made_by_tgradish.borrow_mut();
-        match known.get(path) {
-            Some(&(seen, made)) if seen == version => made,
-            _ => {
-                let made = tgradish_core::mark::made_by_tgradish(path);
-                known.insert(path.to_path_buf(), (version, made));
-                made
-            }
-        }
+        let outputs = &self.outputs;
+        self.config.gui.overwrite || outputs.wrote(item, path) || outputs.made_by_tgradish(path)
     }
 }
 
@@ -239,7 +263,7 @@ mod tests {
         convert(&harness);
         harness.run_steps(2);
         finish(&mut harness);
-        let looked = |harness: &Harness<App>| harness.state().probes.looked.get();
+        let looked = |harness: &Harness<App>| harness.state().outputs.probes.looked.get();
         let copy = fl!("copy-result");
         harness.get_by_label(&copy);
         // frames that change nothing look at nothing, for a while, and

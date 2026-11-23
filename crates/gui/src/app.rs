@@ -2,7 +2,7 @@
 //! dialogs, and theme. Other modules extend `App`; this module holds shared
 //! state and drives the frame loop.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use crate::config::Config;
@@ -23,7 +23,7 @@ use crate::item::{Conversion, Item};
 use crate::jobs::{Job, failure};
 use crate::keys::direct_scrolling;
 use crate::l10n::fl;
-use crate::outputs::{FileVersion, Written};
+use crate::outputs::Outputs;
 use crate::work::release;
 use crate::{
     accent, fallback, inspect, instance, preset_dialogs, session, settings_dialog, system, theme,
@@ -61,19 +61,8 @@ pub(crate) struct App {
     pub(crate) queue: VecDeque<u64>,
     /// How many were asked to be converted since nothing was.
     pub(crate) batch: usize,
-    /// Results the GUI wrote, which it replaces when making them again.
-    pub(crate) written: HashMap<PathBuf, Written>,
-    /// Files found in the way, by their size and time: whether tgradish
-    /// made them, so they may be replaced. Working out where results go
-    /// fills it in, though it only borrows `App`, hence the cell.
-    pub(crate) made_by_tgradish: std::cell::RefCell<HashMap<PathBuf, (FileVersion, bool)>>,
-    /// What was seen of files where results go, looked at again only now
-    /// and then rather than on every frame.
-    pub(crate) probes: crate::outputs::Probes,
-    /// Where each item's result goes, worked out once a frame: it looks
-    /// at the other items and at files on disk, and is asked for several
-    /// times a frame. Cleared as each frame starts.
-    pub(crate) outputs: std::cell::RefCell<HashMap<u64, PathBuf>>,
+    /// What is known of where results go.
+    pub(crate) outputs: Outputs,
     /// The ffmpeg found for the settings, and when: looking for it
     /// searches the PATH, so it is looked for again only every few
     /// seconds, to notice one installed meanwhile, or when the settings
@@ -252,7 +241,7 @@ impl App {
             let restored = loaded.session.restore(store.path(), self.next_id);
             self.next_id += restored.items.len() as u64;
             self.items = restored.items;
-            self.written.extend(restored.written);
+            self.outputs.written.extend(restored.written);
             if let Some(id) = restored.selected.or(self.items.last().map(|item| item.id)) {
                 self.select(id);
             }
@@ -346,7 +335,7 @@ impl App {
             self.items.iter_mut().chain(removed).for_each(|item| item.pasted_copy = None);
             (&[], Vec::new())
         };
-        let session = session::Session::of(items, self.selected, &self.written);
+        let session = session::Session::of(items, self.selected, &self.outputs.written);
         let session = session.with_window(self.window);
         if let Err(err) = store.save(&session, held) {
             let message = session_unsaved(store.path(), &err);
@@ -368,10 +357,7 @@ impl App {
             recent: VecDeque::new(),
             queue: VecDeque::new(),
             batch: 0,
-            written: HashMap::new(),
-            made_by_tgradish: Default::default(),
-            probes: Default::default(),
-            outputs: Default::default(),
+            outputs: Outputs::default(),
             found_backend: Default::default(),
             ffmpeg_override: (None, None),
             read_with: None,
@@ -818,7 +804,7 @@ impl App {
         let Some(item) = self.item(id).filter(|item| !item.blocked()) else { return };
         // as things are now, not as they were when the frame started, nor
         // as files were seen a moment ago
-        self.probes.forget();
+        self.outputs.probes.forget();
         let output = self.work_out_output(item);
         // counted from the first while nothing else converts
         if self.items.iter().all(|item| item.job.is_none()) {
@@ -1095,10 +1081,10 @@ impl eframe::App for App {
         // file dialogs stay over the window, which they are modal for
         self.file_dialog = rfd::FileDialog::new().set_parent(frame);
         self.take_picked();
-        self.outputs.borrow_mut().clear();
+        self.outputs.this_frame.borrow_mut().clear();
         // converting, or done this frame
         let working = self.items.iter().any(|item| item.job.is_some());
-        self.probes.follow(&ctx, working);
+        self.outputs.probes.follow(&ctx, working);
         self.follow_accent(&ctx);
         let less = self.system_motion.as_ref().is_some_and(crate::motion::System::reduced);
         let motion = self.config.gui.motion && !less;

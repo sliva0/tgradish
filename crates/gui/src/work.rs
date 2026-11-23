@@ -238,7 +238,7 @@ impl App {
             item.failed = None;
             load_result_clip(ctx, item, backend);
             if let Some(written) = Written::of(id, &output) {
-                self.written.insert(output, written);
+                self.outputs.written.insert(output, written);
             }
         }
         if self
@@ -295,7 +295,7 @@ impl App {
             let setup = recipe.clone().and_then(|recipe| self.setup(recipe, backend));
             let overwrite = self.may_replace(id, &job.output);
             // Warn when overwriting an existing file not written for this item.
-            let replaces = job.output.exists() && !self.wrote(id, &job.output);
+            let replaces = job.output.exists() && !self.outputs.wrote(id, &job.output);
             let input = item.input();
             let item = self.item_mut(id).expect("found above");
             let conversion = item.job.as_mut().expect("found above");
