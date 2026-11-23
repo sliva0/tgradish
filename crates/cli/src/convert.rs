@@ -7,6 +7,7 @@ use anyhow::{Result, bail};
 use console::style;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use tgradish_core::backend::Backend;
+use tgradish_core::config::Config;
 use tgradish_core::convert::{self, needs_backend};
 use tgradish_core::events::{Details, StartDetails};
 use tgradish_core::input::Input;
@@ -15,9 +16,8 @@ use tgradish_core::webm::Options;
 use tgradish_core::webp;
 use tgradish_core::{Event, Outcome, Started};
 
-use crate::Context;
 use crate::args::{ConversionArgs, ConvertArgs, FormatArg};
-use crate::{term, ui};
+use crate::{ConfigFile, Context, term, ui};
 
 /// Why converting one input failed.
 #[derive(Debug, thiserror::Error)]
@@ -148,6 +148,62 @@ fn check_output(output: &Path, format: Format) -> Result<()> {
     }
 }
 
+/// Layers the options for `format`: the preset's (named by `--preset`, or
+/// else by the config), then `--options-json`'s, then the flags', each over
+/// the last, and checks them before any input is read.
+fn layer_options(
+    presets: &Presets,
+    config: &Config,
+    config_file: Option<&ConfigFile>,
+    args: &ConversionArgs,
+    json: Option<&serde_json::Map<String, serde_json::Value>>,
+    format: Format,
+) -> Result<FormatOptions> {
+    // preset, then --options-json, then flags
+    let name = args.preset.as_deref().unwrap_or_else(|| config.preset_for(format));
+    let webm = |mut options: Options| -> Result<Options> {
+        if let Some(json) = json {
+            options = options.merged(&overlay(json, format)?);
+        }
+        let options = options.merged(&args.options.to_options());
+        check_options(&options, args, json, name)?;
+        Ok(options)
+    };
+    let resolved = presets.resolve(name, format).map_err(|err| match err {
+        tgradish_core::Error::Preset(PresetError::Unknown { known, .. }) => {
+            let known = known.join(", ");
+            if args.preset.is_some() {
+                return crate::usage(format!("unknown --preset {name:?}; available: {known}"));
+            }
+            // the only other place a preset is named
+            let key = if format == Format::Tgs { "tgs-preset" } else { "preset" };
+            let file = config_file.map(|file| file.path.display());
+            let place = file.map_or(String::new(), |file| format!(" ({file}: {key})"));
+            anyhow::anyhow!("unknown {key} {name:?} in config{place}; available: {known}")
+        }
+        err => err.into(),
+    })?;
+    Ok(match resolved {
+        FormatOptions::Webm(options) => FormatOptions::Webm(webm(options)?),
+        FormatOptions::Webp(options) => FormatOptions::Webp(webm(options)?),
+        FormatOptions::Tgs(mut options) => {
+            if let Some(json) = json {
+                options = options.merged(&overlay(json, format)?);
+            }
+            let options = options.merged(&args.options.to_tgs_options());
+            check_options(&options, args, json, name)?;
+            // how a sheet is read, of a sheet that isn't one
+            if options.sheet_frames.is_some() && options.sheet.is_none() {
+                return Err(crate::usage(match args.options.sheet_frames {
+                    Some(_) => "--sheet-frames requires --sheet",
+                    None => "\"sheet-frames\" in --options-json requires \"sheet\"",
+                }));
+            }
+            FormatOptions::Tgs(options)
+        }
+    })
+}
+
 impl<'a> Converter<'a> {
     /// Creates a converter for `format` (or the format inferred from `output`).
     pub fn new(
@@ -182,49 +238,9 @@ impl<'a> Converter<'a> {
             ));
         }
         let presets = Presets::load_user()?;
-        // preset, then --options-json, then flags
-        let name = args.preset.as_deref().unwrap_or_else(|| ctx.config.preset_for(format));
-        let webm = |mut options: Options| -> Result<Options> {
-            if let Some(json) = &json {
-                options = options.merged(&overlay(json, format)?);
-            }
-            let options = options.merged(&args.options.to_options());
-            check_options(&options, args, json.as_ref(), name)?;
-            Ok(options)
-        };
-        let resolved = presets.resolve(name, format).map_err(|err| match err {
-            tgradish_core::Error::Preset(PresetError::Unknown { known, .. }) => {
-                let known = known.join(", ");
-                if args.preset.is_some() {
-                    return crate::usage(format!("unknown --preset {name:?}; available: {known}"));
-                }
-                // the only other place a preset is named
-                let key = if format == Format::Tgs { "tgs-preset" } else { "preset" };
-                let file = ctx.config_file.as_ref().map(|file| file.path.display());
-                let place = file.map_or(String::new(), |file| format!(" ({file}: {key})"));
-                anyhow::anyhow!("unknown {key} {name:?} in config{place}; available: {known}")
-            }
-            err => err.into(),
-        })?;
-        let options = match resolved {
-            FormatOptions::Webm(options) => FormatOptions::Webm(webm(options)?),
-            FormatOptions::Webp(options) => FormatOptions::Webp(webm(options)?),
-            FormatOptions::Tgs(mut options) => {
-                if let Some(json) = &json {
-                    options = options.merged(&overlay(json, format)?);
-                }
-                let options = options.merged(&args.options.to_tgs_options());
-                check_options(&options, args, json.as_ref(), name)?;
-                // how a sheet is read, of a sheet that isn't one
-                if options.sheet_frames.is_some() && options.sheet.is_none() {
-                    return Err(crate::usage(match args.options.sheet_frames {
-                        Some(_) => "--sheet-frames requires --sheet",
-                        None => "\"sheet-frames\" in --options-json requires \"sheet\"",
-                    }));
-                }
-                FormatOptions::Tgs(options)
-            }
-        };
+        let config_file = ctx.config_file.as_ref();
+        let options =
+            layer_options(&presets, &ctx.config, config_file, args, json.as_ref(), format)?;
         let backend = match format {
             Format::Webm | Format::Webp => Some(ctx.backend().map_err(|err| ctx.explain(err))?),
             Format::Tgs => None,
