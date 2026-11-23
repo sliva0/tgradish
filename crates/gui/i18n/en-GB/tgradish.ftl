@@ -954,9 +954,14 @@ existing-files = Existing files
     .hint = Results tgradish made are always replaced when made again
 replace-in-the-way = Replace any file that is in the way
 interface = Interface
+# The choice of language, a globe beside it; .variable under it where the
+# TGRADISH_LANG environment variable chooses instead, which it then shows.
 language = Language
     .hint = The language shown here; the command line stays in English
+    .variable = Chosen by the { $variable } environment variable
 as-the-system = As the system
+# The first choice of language, then which the system's is, by its own name.
+as-the-system-language = As the system: { $language }
 theme = Theme
     .hint = The button beside ⚙ switches between light and dark too
 theme-light = Light

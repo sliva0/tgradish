@@ -103,18 +103,10 @@ struct Scrolled {
 
 impl SettingsDialog {
     pub(crate) fn open(&mut self) {
-        let ffmpeg = match tgradish_core::ffmpeg::Ffmpeg::on_path() {
-            Ok(found) => fl!("ffmpeg-found", path = found.ffmpeg.display().to_string()),
-            Err(_) if cfg!(windows) => fl!("for-example", example = r"C:\ffmpeg\bin"),
-            Err(_) => fl!("for-example", example = "/usr/local/bin/ffmpeg"),
-        };
-        let folder = tgradish_core::paths::pictures_dir()
-            .map(|dir| fl!("for-example", example = dir.join("Stickers").display().to_string()))
-            .unwrap_or_default();
         // Reset `pinned` so the dialog opens centred in the window.
         *self = SettingsDialog {
             open: true,
-            placeholders: (ffmpeg, folder),
+            placeholders: placeholders(),
             ..SettingsDialog::default()
         };
     }
@@ -129,6 +121,20 @@ impl SettingsDialog {
         (self.ffmpeg_typed, self.folder_typed) = Default::default();
         self.folder_unchosen = false;
     }
+}
+
+/// What the empty fields of the ffmpeg program and of the folder for
+/// results show: the `ffmpeg` found on `PATH`, and an example folder.
+fn placeholders() -> (String, String) {
+    let ffmpeg = match tgradish_core::ffmpeg::Ffmpeg::on_path() {
+        Ok(found) => fl!("ffmpeg-found", path = found.ffmpeg.display().to_string()),
+        Err(_) if cfg!(windows) => fl!("for-example", example = r"C:\ffmpeg\bin"),
+        Err(_) => fl!("for-example", example = "/usr/local/bin/ffmpeg"),
+    };
+    let folder = tgradish_core::paths::pictures_dir()
+        .map(|dir| fl!("for-example", example = dir.join("Stickers").display().to_string()))
+        .unwrap_or_default();
+    (ffmpeg, folder)
 }
 
 /// Buffers text typed into a path field alongside the last `setting` value it
@@ -604,24 +610,9 @@ fn sections(
     });
 
     widgets::section(ui, &fl!("interface"));
-    // Show the language selector only when translations other than English exist.
-    let languages = l10n::languages();
-    if languages.len() > 1 {
-        row(ui, &fl!("language"), &fl!("language", "hint"), Ok(()), |ui| {
-            // The system's, then each by its own name.
-            let tags: Vec<Option<String>> = std::iter::once(None)
-                .chain(languages.iter().map(|(language, _)| Some(language.to_string())))
-                .collect();
-            let names = std::iter::once(fl!("as-the-system"))
-                .chain(languages.iter().map(|(_, name)| name.clone()));
-            let choices: Vec<widgets::Choice<usize>> =
-                names.enumerate().map(|(index, name)| (index, name, String::new())).collect();
-            let mut index = tags.iter().position(|tag| *tag == gui.language).unwrap_or(0);
-            if segments(ui, &mut index, &choices, |_| Ok(())) {
-                gui.language = tags[index].clone();
-                l10n::choose(gui.language.as_deref());
-            }
-        });
+    if language(ui, &mut gui.language, l10n::variable().as_deref()) {
+        // said in the language before
+        dialog.placeholders = placeholders();
     }
     row(ui, &fl!("theme"), &fl!("theme", "hint"), Ok(()), |ui| {
         use crate::config::Theme;
@@ -685,6 +676,74 @@ fn sections(
             dialog.default_preset = Some((format, picked));
         }
     }
+}
+
+/// The globe that marks the choice of language beside its name, for it to
+/// be found in a language one can't read.
+const GLOBE: &str = "🌐";
+
+/// Draws the choice of language, if there are translations: the system's
+/// first, saying which that is, then each by its own name. A change shows
+/// at once, as it is kept; returns whether there was one. While
+/// `variable`, what `TGRADISH_LANG` asks for, chooses the language, the
+/// choice shows that, and can't be changed.
+fn language(ui: &mut egui::Ui, chosen: &mut Option<String>, variable: Option<&str>) -> bool {
+    use i18n_embed::unic_langid::LanguageIdentifier;
+    let languages = l10n::languages();
+    if languages.len() < 2 {
+        return false;
+    }
+    let name = |language: &LanguageIdentifier| {
+        l10n::name_of(language).map_or_else(|| language.to_string(), str::to_owned)
+    };
+    let system = l10n::system().unwrap_or_else(|| l10n::fallback().clone());
+    let system = fl!("as-the-system-language", language = name(&system));
+    let picked: Option<LanguageIdentifier> = chosen.as_deref().and_then(|tag| tag.parse().ok());
+    let label = format!("{GLOBE} {}", fl!("language"));
+    let mut changed = false;
+    row(ui, &label, &fl!("language", "hint"), Ok(()), |ui| {
+        let shown = match (variable, &picked) {
+            // English made longer, as it is asked for
+            (Some(tag @ "pseudo"), _) => tag.to_owned(),
+            (Some(_), _) => name(&l10n::current()),
+            (None, Some(language)) => name(language),
+            (None, None) => system.clone(),
+        };
+        // Within the window at any scale; it scrolls for the rest.
+        let height = (ui.ctx().content_rect().height() * 0.4).clamp(80.0, 320.0);
+        let mut asked = None;
+        let combo = ui.add_enabled_ui(variable.is_none(), |ui| {
+            let combo = egui::ComboBox::from_id_salt("language").selected_text(shown.clone());
+            combo.height(height).show_ui(ui, |ui| {
+                if ui.selectable_label(picked.is_none(), &system).clicked() {
+                    asked = Some(None);
+                }
+                ui.separator();
+                for (language, own) in languages {
+                    if ui.selectable_label(picked.as_ref() == Some(language), own).clicked() {
+                        asked = Some(Some(language.to_string()));
+                    }
+                }
+            })
+        });
+        let combo = combo.inner.response;
+        let enabled = combo.enabled();
+        combo.widget_info(|| {
+            let language = fl!("language");
+            let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, enabled, language);
+            info.current_text_value = Some(shown.clone());
+            info
+        });
+        if variable.is_some() {
+            widgets::hint(ui, fl!("language", "variable", variable = l10n::VARIABLE));
+        }
+        if let Some(asked) = asked.filter(|asked| asked != chosen) {
+            *chosen = asked;
+            l10n::choose(chosen.as_deref());
+            changed = true;
+        }
+    });
+    changed
 }
 
 /// Draws the ffmpeg backend selector (`Auto`, `Builtin`, `System`).
@@ -1016,6 +1075,82 @@ mod tests {
         harness.state_mut().dialogs.settings.open();
         harness.run_steps(2);
         assert!(harness.query_by_label(&fl!("save")).is_none());
+    }
+
+    /// The choice of language lists the system's first, saying which that
+    /// is, then each language by its own name, within a short window; and
+    /// keeps the one picked.
+    #[test]
+    fn picks_a_language_from_each_by_its_own_name() {
+        // `TGRADISH_LANG` chooses instead, as the next test has it
+        if crate::l10n::variable().is_some() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let at = path.clone();
+        // as short as a larger scale makes the window
+        let builder = Harness::builder().with_size([crate::MIN_WIDTH, crate::MIN_HEIGHT / 1.5]);
+        let mut harness = builder.build_eframe(move |cc| {
+            let app = App::with(Config::default(), Some(at.clone()), Presets::builtin());
+            app.style(&cc.egui_ctx);
+            app
+        });
+        harness.state_mut().dialogs.settings.open();
+        harness.run_steps(3);
+        let system = crate::l10n::system().unwrap_or_else(|| crate::l10n::fallback().clone());
+        let system = crate::l10n::name_of(&system).unwrap();
+        let system = fl!("as-the-system-language", language = system);
+        let language = fl!("language");
+        let combo = harness.get_by_label(&language);
+        assert_eq!(combo.accesskit_node().value().as_deref(), Some(system.as_str()));
+        combo.scroll_to_me();
+        harness.run_steps(3);
+        harness.get_by_label(&language).click();
+        harness.run_steps(3);
+        // each named, and the list within the window
+        harness.get_by_label(&system);
+        for (_, name) in crate::l10n::languages() {
+            harness.get_by_label(name);
+        }
+        let screen = harness.ctx.content_rect();
+        let areas: Vec<egui::Rect> = harness.ctx.memory(|memory| {
+            let layers = memory.areas().visible_layer_ids();
+            layers.iter().filter_map(|layer| memory.area_rect(layer.id)).collect()
+        });
+        assert!(areas.len() > 1, "{areas:?}");
+        for area in areas {
+            assert!(screen.expand(0.5).contains_rect(area), "{area:?} out of {screen:?}");
+        }
+        // picked, shown and kept
+        harness.get_by_label("English (UK)").click_accesskit();
+        harness.run_steps(3);
+        assert_eq!(harness.state().config.gui.language.as_deref(), Some("en-GB"));
+        assert_eq!(Config::load(&path).unwrap().gui.language.as_deref(), Some("en-GB"));
+        let combo = harness.get_by_label(&language);
+        assert_eq!(combo.accesskit_node().value().as_deref(), Some("English (UK)"));
+    }
+
+    /// While `TGRADISH_LANG` chooses the language, the choice shows that
+    /// and says why it can't be changed.
+    #[test]
+    fn shows_the_language_tgradish_lang_chooses() {
+        let mut harness = Harness::new_ui_state(
+            |ui, chosen: &mut Option<String>| {
+                language(ui, chosen, Some("pseudo"));
+            },
+            Some("ru".to_owned()),
+        );
+        harness.run();
+        let language = fl!("language");
+        let combo = harness.get_by_label(&language);
+        assert_eq!(combo.accesskit_node().value().as_deref(), Some("pseudo"));
+        assert!(combo.accesskit_node().is_disabled());
+        let why = fl!("language", "variable", variable = "TGRADISH_LANG");
+        harness.get_by_label(&why);
+        assert_eq!(harness.state().as_deref(), Some("ru"));
+        // the globe beside it is drawn by the GUI's own fonts
+        assert!(GLOBE.chars().all(|c| crate::fonts::drawn().contains(&c)));
     }
 
     #[test]

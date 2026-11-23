@@ -79,9 +79,10 @@ TEXT = [
 ]
 
 # Characters each font is to have beyond those its file here has: Uzbek's
-# ʻ (U+02BB) for the text.
+# ʻ (U+02BB) for the text, and the globe that marks the choice of language.
 ADDED = {
     **{file: {0x02BB} for file in TEXT},
+    "emoji-icon-font-tgradish.ttf": {0x1F310},
 }
 
 # Characters the originals lack, drawn with the glyph of another that looks

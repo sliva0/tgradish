@@ -55,7 +55,7 @@ pub(crate) use fl;
 /// the system's: a tag such as `de`, or `pseudo` for English with its
 /// letters accented and its vowels doubled, to see where longer words
 /// would not fit.
-const VARIABLE: &str = "TGRADISH_LANG";
+pub(crate) const VARIABLE: &str = "TGRADISH_LANG";
 
 /// The languages there are translations for, each with what it calls
 /// itself, in the order of those names.
@@ -83,6 +83,11 @@ pub(crate) fn languages() -> &'static [(LanguageIdentifier, String)] {
     &LANGUAGES
 }
 
+/// What `language` calls itself, if there is a translation into it.
+pub(crate) fn name_of(language: &LanguageIdentifier) -> Option<&'static str> {
+    languages().iter().find(|(had, _)| had == language).map(|(_, name)| name.as_str())
+}
+
 /// What `TGRADISH_LANG` asks for, if it is set.
 pub(crate) fn variable() -> Option<String> {
     std::env::var(VARIABLE).ok().filter(|tag| !tag.is_empty())
@@ -95,6 +100,17 @@ pub(crate) fn system() -> Option<LanguageIdentifier> {
         sys_locale::get_locales().filter_map(|tag| tag.parse().ok()).collect();
     let available: Vec<_> = languages().iter().map(|(language, _)| language.clone()).collect();
     pick(&asked, &available, LOADER.fallback_language())
+}
+
+/// The language the GUI is shown in.
+pub(crate) fn current() -> LanguageIdentifier {
+    LOADER.current_language()
+}
+
+/// British English, which the GUI is shown in where no other is picked,
+/// and which stands in for what a translation lacks.
+pub(crate) fn fallback() -> &'static LanguageIdentifier {
+    LOADER.fallback_language()
 }
 
 /// Regions where English is spelt as in the United States: the country
@@ -958,6 +974,7 @@ mod tests {
         sorted.sort_by_key(|name| name.to_lowercase());
         sorted.dedup();
         assert_eq!(names, sorted);
+        assert_eq!(name_of(&"en-US".parse().unwrap()), Some("English (US)"));
     }
 
     #[test]

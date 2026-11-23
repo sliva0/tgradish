@@ -1174,6 +1174,12 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     harness.state_mut().banner = Default::default();
     harness.set_size(egui::vec2(crate::MIN_WIDTH, 640.0));
     shot(&mut harness, save, "state-settings-small");
+    // its choice of language, open, unless `TGRADISH_LANG` chooses
+    let language = crate::l10n::fl!("language");
+    harness.get_by_label(&language).scroll_to_me();
+    harness.run_steps(3);
+    harness.get_by_label(&language).click();
+    shot(&mut harness, save, "state-settings-language");
     harness.state_mut().dialogs.settings = settings_dialog::SettingsDialog::default();
     harness.set_size(egui::vec2(1280.0, 820.0));
     let Some(clip) = video(dir.path(), "640x360") else { return };
