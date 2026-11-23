@@ -362,7 +362,12 @@ impl Recipe {
 
     /// What it makes: a sticker or an emoji.
     pub(crate) fn target(&self) -> Target {
-        Settings::<FormatOptions>::from(self.clone()).target()
+        let selection = match self {
+            Recipe::Webm(settings) => &settings.selection,
+            Recipe::Tgs(settings) => &settings.selection,
+            Recipe::Webp(settings) => &settings.selection,
+        };
+        selection.target.unwrap_or_default()
     }
 
     /// Its settings as WebM's, which a picture's are some of; none of a
@@ -1150,7 +1155,6 @@ mod tests {
                 "webm" => tgradish_core::webm::Options::keys().collect(),
                 _ => tgradish_core::tgs::Options::keys().collect(),
             };
-            keys.retain(|key| !Selection::keys().any(|file| file == *key));
             keys.sort();
             keys
         };

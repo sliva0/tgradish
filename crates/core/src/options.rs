@@ -1,7 +1,7 @@
 //! Shared option value types, option layering, validation, and CLI flag
-//! formatting used by [`webm::Options`](crate::webm::Options),
-//! [`webp::Options`](crate::webp::Options) and
-//! [`tgs::Options`](crate::tgs::Options).
+//! formatting used by [`webm::Options`], [`webp::Options`] and
+//! [`tgs::Options`], which presets hold, and by [`Selection`], what is one
+//! file's own; [`Settings`] pairs the two.
 //!
 //! Every option field is `Option<T>` so options can be layered in order:
 //! built-in defaults, then a preset, then command-line flags. Unset fields
@@ -439,7 +439,8 @@ pub(crate) use layered;
 /// What a conversion takes of one input and what it makes of it: the
 /// target, the part of the input, what of an Aseprite file or a sprite sheet
 /// is read, and the title. Each file has its own, so presets set none of
-/// these. `None` uses the default.
+/// these; `pixel-scale` and `fps` are options, as files from one source
+/// often share them. `None` uses the default.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Selection {

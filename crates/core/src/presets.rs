@@ -17,7 +17,8 @@
 //! ```
 //!
 //! Either table may be omitted. A user preset with the same name as a built-in
-//! preset overrides it. Per-file options ([`PER_FILE`]) are rejected when
+//! preset overrides it. What is one file's own ([`Selection::keys`]) is
+//! refused in either table, as no preset holds it.
 //! loading presets and stripped when saving them.
 
 use std::collections::BTreeMap;
@@ -162,22 +163,6 @@ impl FormatOptions {
     }
 }
 
-/// Per-file options that are disallowed in presets (rejected on load and
-/// stripped on save). `pixel-scale` is excluded because files from the same
-/// source often share a pixel scale.
-pub const PER_FILE: [&str; 10] = [
-    "target",
-    "tag",
-    "show-layers",
-    "hide-layers",
-    "crop",
-    "start",
-    "length",
-    "title",
-    "sheet",
-    "sheet-frames",
-];
-
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 struct PresetFile {
@@ -216,7 +201,8 @@ impl Preset {
         for (table, format, options) in
             [("webm", Format::Webm, &file.webm), ("tgs", Format::Tgs, &file.tgs)]
         {
-            if let Some(key) = options.keys().find(|key| PER_FILE.contains(&key.as_str())) {
+            if let Some(key) = options.keys().find(|key| Selection::keys().any(|own| own == **key))
+            {
                 return Err(PresetError::PerFile { place, key: format!("{table}.{key}") });
             }
             // said here, as serde would list the options of one file among
@@ -251,13 +237,12 @@ impl Preset {
 }
 
 /// The options a preset's table for `format` can set, in the order of
-/// their fields: all that `format` takes but [`PER_FILE`].
+/// their fields.
 fn preset_keys(format: Format) -> Vec<String> {
-    let keys: Vec<String> = match format {
+    match format {
         Format::Tgs => tgs::Options::keys().collect(),
         Format::Webm | Format::Webp => Options::keys().collect(),
-    };
-    keys.into_iter().filter(|key| !PER_FILE.contains(&key.as_str())).collect()
+    }
 }
 
 fn table(options: &impl Serialize) -> toml::Table {
@@ -332,7 +317,7 @@ pub enum PresetError {
     /// extends it.
     #[error("preset {0:?} extends this preset; change {0:?} first")]
     Extended(String),
-    /// A preset's file sets an option of one file, one of [`PER_FILE`],
+    /// A preset's file sets an option of one file, one of [`Selection::keys`],
     /// as `key` names it in its table, `webm.crop`; `place` is the file.
     #[error("invalid preset {place}: {key} is a per-file option and cannot be set in a preset")]
     PerFile {
@@ -564,16 +549,8 @@ pub fn check_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Returns a copy of `options` with all [`PER_FILE`] keys removed.
-pub fn shareable<T: Serialize + serde::de::DeserializeOwned>(options: &T) -> T {
-    let mut table = table(options);
-    table.retain(|key, _| !PER_FILE.contains(&key));
-    table.try_into().expect("options read back with fewer set")
-}
-
-/// Saves a preset named `name` into `dir` with `description` and the shareable
-/// options from `webm` and `tgs` (excluding [`PER_FILE`]). Replaces an existing
-/// file only when `replace` is true.
+/// Saves a preset named `name` into `dir` with `description` and the options
+/// `webm` and `tgs`. Replaces an existing file only when `replace` is true.
 pub fn save(
     dir: &Path,
     name: &str,
@@ -586,8 +563,8 @@ pub fn save(
     if !description.is_empty() {
         file.insert("description".into(), description.into());
     }
-    file.insert("webm".into(), table(&shareable(webm)).into());
-    file.insert("tgs".into(), table(&shareable(tgs)).into());
+    file.insert("webm".into(), table(webm).into());
+    file.insert("tgs".into(), table(tgs).into());
     let text = toml::to_string(&file).map_err(|err| PresetError::Broken(err.to_string()))?;
     let path = file_in(dir, name)?;
     std::fs::create_dir_all(dir).map_err(Error::io(FileAction::Create, dir))?;

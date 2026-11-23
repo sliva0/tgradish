@@ -441,7 +441,8 @@ pub struct ConversionArgs {
     pub options: OptionArgs,
 }
 
-/// One flag per [`Options`] and [`tgs::Options`] field, with the same name.
+/// One flag per [`Selection`], [`Options`] and [`tgs::Options`] field, with the
+/// same name.
 #[derive(Debug, Args)]
 pub struct OptionArgs {
     /// Sticker or custom emoji. Sets dimensions and size limits: stickers

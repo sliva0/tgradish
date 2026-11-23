@@ -16,6 +16,8 @@ All notable changes to tgradish, newest first. This file follows [Keep a Changel
 - The GUI now checks a preset's values before converting, as the CLI does. An out-of-range value, even one the other settings leave without effect (such as `fake-duration = 5.0` with `spoof = "never"`), now fails the conversion with a message naming the preset, instead of failing later or being ignored.
 - After updating, a result from an earlier session shows as out of date once if it was made with integer scaling over a preset's `crop` or `stretch` resize, or with sprite sheet frames set while the file wasn't read as a sheet.
 - In the `tgradish-core` library, `webp::Options` is now its own type holding only the options static WebP uses, instead of WebM's `webm::Options`. `webp::Request` and `FormatOptions::Webp` take it; `webp::PICTURE_OPTIONS` and `webp::picture_options` are removed (use `webp::Options::from(&webm_options)`).
+- In the `tgradish-core` library, `Presets::resolve` is renamed `Presets::options`.
+- In the `tgradish-core` library, what is one file's own (`target`, `tag`, `show-layers`, `hide-layers`, `crop`, `start`, `length`, `title`, `sheet` and `sheet-frames`) moves out of `webm::Options`, `webp::Options` and `tgs::Options`, which now hold just what a preset can set, into the new `options::Selection`. Each format's `Request` takes it as `selection`, and `options::Settings` pairs it with a format's options, read and written as one flat object as `--options-json` has it. `convert::Request` takes `settings` instead of `options`, `resolve::resolve` layers `Settings`, and `presets::PER_FILE`, `presets::shareable` and `FormatOptions::target` are removed (use `Selection::keys` and `Settings::target`).
 
 ### Removed
 
