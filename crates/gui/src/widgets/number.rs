@@ -30,7 +30,7 @@ pub(crate) fn of_file_in<R>(
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
     let id = egui::Id::new((part, file));
-    let drawing = egui::Id::new(DRAWING);
+    let drawing = file_drawn_id();
     ui.data_mut(|data| data.insert_temp(drawing, file));
     let added = ui.scope_builder(place.id(id), add).inner;
     ui.data_mut(|data| data.remove::<u64>(drawing));
@@ -174,14 +174,50 @@ struct Typing {
     pass: u64,
 }
 
-/// egui temp-data keys: the number field being typed in (with its file), the
-/// pass in which [`commit_draft_keeping_focus`] asks it to commit, and the
-/// file being drawn (set by [`of_file`]).
-const TYPED: &str = "number typed";
-const TAKE_TYPED: &str = "take number typed";
-const DRAWING: &str = "file drawn";
-/// Pass number in which a number field last committed or rejected typed input.
-const TAKEN: &str = "number taken";
+// The number fields' egui temp-data keys that aren't under one field's
+// own id, each made here alone; all are this module's, and are kept as
+// long as the GUI runs, written over as they change.
+
+/// The number field last typed in, with its file, as a [`Typed`]: written
+/// while a field has the focus, read by the GUI as it commits, discards or
+/// waits for a draft.
+fn typed_id() -> egui::Id {
+    egui::Id::new("number typed")
+}
+
+/// The pass in which [`commit_draft_keeping_focus`] asks the focused field
+/// to commit, as a `u64`, which the field reads as it is drawn.
+fn take_typed_id() -> egui::Id {
+    egui::Id::new("take number typed")
+}
+
+/// The file whose settings are being drawn, as a `u64`: set by [`of_file`]
+/// for the controls drawn in it, and gone after them.
+fn file_drawn_id() -> egui::Id {
+    egui::Id::new("file drawn")
+}
+
+/// The pass in which a number field last committed or rejected typed
+/// input, as a `u64`.
+fn taken_id() -> egui::Id {
+    egui::Id::new("number taken")
+}
+
+/// When the field `field` last refused what was typed, as an `f64` of
+/// egui's time, for its outline to flash: kept under the field's own id.
+fn refused_id(field: egui::Id) -> egui::Id {
+    field.with("refused")
+}
+
+/// The number field last typed in, with its file.
+fn typed(ctx: &egui::Context) -> Option<Typed> {
+    ctx.data(|data| data.get_temp::<Typed>(typed_id()))
+}
+
+/// The file whose settings are being drawn, as [`of_file`] says.
+fn file_drawn(ctx: &egui::Context) -> Option<u64> {
+    ctx.data(|data| data.get_temp::<u64>(file_drawn_id()))
+}
 
 /// Identifies the most recently edited number field and the file whose settings
 /// it belongs to, so pending text can be committed before switching away from
@@ -195,7 +231,7 @@ pub(crate) struct Typed {
 /// Returns `true` if a [`Number`] field holds keyboard focus for typing, with
 /// a draft in it or not.
 pub(crate) fn number_focused(ctx: &egui::Context) -> bool {
-    let typed = ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)));
+    let typed = typed(ctx);
     typed.is_some_and(|typed| ctx.memory(|memory| memory.has_focus(typed.field)))
 }
 
@@ -208,7 +244,7 @@ pub(crate) fn draft_file(ctx: &egui::Context) -> Option<u64> {
 
 /// Returns the [`Typed`] record for a field with uncommitted text modifications.
 fn draft(ctx: &egui::Context) -> Option<Typed> {
-    let typed = ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)))?;
+    let typed = typed(ctx)?;
     let typing = ctx.data(|data| data.get_temp::<Typing>(typed.field))?;
     // Discard stale state if the field has not been drawn recently.
     if ctx.cumulative_pass_nr() > typing.pass + 2 {
@@ -221,7 +257,7 @@ fn draft(ctx: &egui::Context) -> Option<Typed> {
 /// Returns `true` if a number field's draft was committed during the current
 /// pass, or rejected as not a number.
 fn draft_committed_now(ctx: &egui::Context) -> bool {
-    let taken = ctx.data(|data| data.get_temp::<u64>(egui::Id::new(TAKEN)));
+    let taken = ctx.data(|data| data.get_temp::<u64>(taken_id()));
     taken == Some(ctx.cumulative_pass_nr())
 }
 
@@ -236,7 +272,7 @@ fn number_typed_now(ctx: &egui::Context) -> bool {
 /// [`of_file`]), if one is: controls elsewhere, as in dialogs, edit no
 /// file's settings.
 pub(crate) fn tell_history(ctx: &egui::Context, said: fn(&egui::Context, u64)) {
-    if let Some(file) = ctx.data(|data| data.get_temp::<u64>(egui::Id::new(DRAWING))) {
+    if let Some(file) = file_drawn(ctx) {
         said(ctx, file);
     }
 }
@@ -244,7 +280,7 @@ pub(crate) fn tell_history(ctx: &egui::Context, said: fn(&egui::Context, u64)) {
 /// Commits the draft of the number field typed in, as Enter or Tab would: the
 /// field loses focus and commits its draft as it is drawn this frame.
 pub(crate) fn commit_draft(ctx: &egui::Context) {
-    let typed = ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)));
+    let typed = typed(ctx);
     if let Some(typed) = typed {
         ctx.memory_mut(|memory| memory.surrender_focus(typed.field));
     }
@@ -253,7 +289,7 @@ pub(crate) fn commit_draft(ctx: &egui::Context) {
 /// Discards the draft of the number field typed in without committing it, and
 /// takes the focus from the field (used when its file is gone).
 pub(crate) fn discard_draft(ctx: &egui::Context) {
-    let typed = ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)));
+    let typed = typed(ctx);
     if let Some(typed) = typed {
         ctx.memory_mut(|memory| memory.surrender_focus(typed.field));
         ctx.data_mut(|data| data.remove::<Typing>(typed.field));
@@ -265,7 +301,7 @@ pub(crate) fn discard_draft(ctx: &egui::Context) {
 /// use the value at once.
 pub(crate) fn commit_draft_keeping_focus(ctx: &egui::Context) {
     let pass = ctx.cumulative_pass_nr();
-    ctx.data_mut(|data| data.insert_temp(egui::Id::new(TAKE_TYPED), pass));
+    ctx.data_mut(|data| data.insert_temp(take_typed_id(), pass));
 }
 
 impl<'a> Number<'a> {
@@ -456,7 +492,7 @@ impl<'a> Number<'a> {
         // Record that a user edit was processed this pass (e.g. when focus left
         // the field on the previous frame due to clicking a later control).
         let pass = ui.ctx().cumulative_pass_nr();
-        ui.data_mut(|data| data.insert_temp(egui::Id::new(TAKEN), pass));
+        ui.data_mut(|data| data.insert_temp(taken_id(), pass));
         match self.parse(&typing.text) {
             Some(value) => {
                 let value = self.kept(value);
@@ -465,7 +501,7 @@ impl<'a> Number<'a> {
             }
             None => {
                 let now = ui.input(|input| input.time);
-                ui.data_mut(|data| data.insert_temp(id.with("refused"), now));
+                ui.data_mut(|data| data.insert_temp(refused_id(id), now));
                 None
             }
         }
@@ -662,7 +698,7 @@ impl egui::Widget for Number<'_> {
             };
             // When a shortcut (such as Convert) requests the current typed
             // value, commit it immediately while keeping focus.
-            let take_asked = ui.data(|data| data.get_temp::<u64>(egui::Id::new(TAKE_TYPED)))
+            let take_asked = ui.data(|data| data.get_temp::<u64>(take_typed_id()))
                 == Some(ui.ctx().cumulative_pass_nr());
             if take_asked && typing.text != typing.written {
                 if let Some(taken) = self.take(ui, id, &typing) {
@@ -742,10 +778,10 @@ impl egui::Widget for Number<'_> {
             }
             if ui.memory(|memory| memory.has_focus(id)) {
                 (typing.value, typing.pass) = (value, ui.ctx().cumulative_pass_nr());
-                let file = ui.data(|data| data.get_temp::<u64>(egui::Id::new(DRAWING)));
+                let file = file_drawn(ui.ctx());
                 ui.data_mut(|data| {
                     data.insert_temp(id, typing);
-                    data.insert_temp(egui::Id::new(TYPED), Typed { field: id, file });
+                    data.insert_temp(typed_id(), Typed { field: id, file });
                 });
                 // what its keys and the wheel step, and what is typed, is
                 // one step once it is done with
@@ -814,7 +850,7 @@ impl egui::Widget for Number<'_> {
         };
         // Flash an inside error outline over the field when invalid input was
         // rejected so layout does not shift.
-        let refused = id.with("refused");
+        let refused = refused_id(id);
         if let Some(at) = ui.data(|data| data.get_temp::<f64>(refused)) {
             let age = ui.input(|input| input.time) - at;
             if (0.0..REFUSED_FOR).contains(&age) {
@@ -1257,8 +1293,7 @@ mod tests {
         harness.run_steps(1);
         assert_eq!(harness.state().0, 8);
         let refused = |harness: &Harness<'_, (u32, Option<egui::Rect>)>| {
-            let typed = harness.ctx.data(|data| data.get_temp::<Typed>(egui::Id::new(TYPED)));
-            let id = typed.unwrap().field.with("refused");
+            let id = refused_id(typed(&harness.ctx).unwrap().field);
             harness.ctx.data(|data| data.get_temp::<f64>(id)).is_some()
         };
         assert!(refused(&harness));
