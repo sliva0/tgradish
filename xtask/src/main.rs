@@ -55,10 +55,6 @@
 //!   is out of date. Because `cargo-about` skips files matched by any parent
 //!   `.gitignore` (such as a dotfile repo in `$HOME`), set `CARGO_HOME` outside
 //!   it if needed.
-//! - `man [DIR]`: generates `tgradish.1` and subcommand man pages into
-//!   `target/man` or `DIR` using `clap_mangen` via the hidden
-//!   `tgradish __man DIR` command (`tgradish completions SHELL` prints shell
-//!   completions; Linux release archives and packages include both).
 //! - `icons [--check]`: generates menu PNG icons and `tgradish.ico` from
 //!   `crates/gui/assets/icon.png`; `--check` fails if they are out of date.
 //! - `strings [--no-pictures]`: builds `target/strings/index.html` for string
@@ -91,7 +87,6 @@ fn main() -> Result<()> {
         Some("local-release") => release::local_release(&args[1..]),
         Some("release") => release::release(&args[1..]),
         Some("strings") => strings::strings(&args[1..]),
-        Some("man") => man(&args[1..]),
         _ => bail!(
             "usage: cargo xtask ffmpeg [--target TARGET] [--no-asm] [--force]\n       \
              cargo xtask ffmpeg-sources\n       \
@@ -101,29 +96,11 @@ fn main() -> Result<()> {
              cargo xtask icons [--check]\n       \
              cargo xtask local-release [--targets TARGET,...] [--no-asm]\n       \
              cargo xtask release prepare|check|notes|aur|crates ...\n       \
-             cargo xtask strings [--no-pictures]\n       \
-             cargo xtask man [DIR]\n\
+             cargo xtask strings [--no-pictures]\n\
              targets: {}",
             Target::names()
         ),
     }
-}
-
-/// The `man` task: the man pages, as `tgradish __man` writes them, into
-/// `target/man` or the directory given.
-fn man(args: &[String]) -> Result<()> {
-    let root = workspace_root();
-    let dir = match args {
-        [] => root.join("target/man"),
-        [dir] => PathBuf::from(dir),
-        _ => bail!("usage: cargo xtask man [DIR]"),
-    };
-    run(cargo()
-        .current_dir(root)
-        .args(["run", "--quiet", "--locked", "-p", "tgradish", "--", "__man"])
-        .arg(&dir))?;
-    println!("{}", dir.display());
-    Ok(())
 }
 
 /// Where the notices binaries carry are kept, from the repository's top:
