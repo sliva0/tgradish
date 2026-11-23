@@ -29,9 +29,7 @@ use crate::outputs::Outputs;
 use crate::work::{Work, release};
 #[cfg(all(unix, not(target_os = "macos")))]
 use crate::{dnd, toplevel_icon};
-use crate::{
-    fallback, inspect, instance, preset_dialogs, session, settings_dialog, system, theme, widgets,
-};
+use crate::{inspect, instance, preset_dialogs, session, settings_dialog, system, theme, widgets};
 
 /// How many items keep their big frames: the selected one and the last few.
 const FRAMES_HELD: usize = 3;
@@ -77,9 +75,7 @@ pub(crate) struct App {
     /// What GUIs started while this one runs hand it.
     pub(crate) handover: instance::Handover,
     /// The system's fonts for what tgradish's own lack.
-    pub(crate) fallbacks: fallback::Fallbacks,
-    /// What the texts were when fonts were last looked for them.
-    pub(crate) fonts_checked: Option<u64>,
+    pub(crate) fonts: crate::fonts::Fonts,
     /// What is said along the bottom.
     pub(crate) banner: Banner,
     /// Files removed a moment ago, which may be put back.
@@ -295,8 +291,7 @@ impl App {
             look: theme::Look::default(),
             keeping: session::Keeping::default(),
             handover: instance::Handover::default(),
-            fallbacks: fallback::Fallbacks::new(fonts()),
-            fonts_checked: None,
+            fonts: crate::fonts::Fonts::default(),
             banner: Banner::default(),
             removed: None,
             edit_frames: Default::default(),

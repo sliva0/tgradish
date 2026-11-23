@@ -310,7 +310,8 @@ impl App {
             egui::TextStyle::Heading.resolve(&style),
             style.visuals.text_color(),
         );
-        let title = drawable_in(&self.fallbacks, &name, format, style.visuals.code_bg_color).0;
+        let title =
+            drawable_in(&self.fonts.fallbacks, &name, format, style.visuals.code_bg_color).0;
         let (mut another, mut close) = (false, false);
         let modal = widgets::dialog(ctx, "inspect").width(520.0).show(ctx, |ui| {
             close = widgets::dialog_title(ui, title);

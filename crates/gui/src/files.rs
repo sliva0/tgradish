@@ -298,7 +298,8 @@ impl App {
                 let shown = self.rows.shown(ui.ctx(), item.id);
                 let opacity = ui.opacity();
                 ui.multiply_opacity(shown.row);
-                let (response, action) = row(ui, item, selected, queued, &self.fallbacks, shown);
+                let (response, action) =
+                    row(ui, item, selected, queued, &self.fonts.fallbacks, shown);
                 ui.set_opacity(opacity);
                 if selected && reveal {
                     response.scroll_to_me(None);

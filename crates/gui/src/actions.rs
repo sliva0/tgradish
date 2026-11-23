@@ -83,7 +83,7 @@ impl App {
         // the room goes to the progress, and the column beside the preview
         // already names the file
         let converting = item.job.as_ref().is_some_and(|conversion| conversion.job.is_running());
-        let fallbacks = &self.fallbacks;
+        let fallbacks = &self.fonts.fallbacks;
         let right = output
             .as_ref()
             .filter(|_| !converting)

@@ -53,6 +53,33 @@ pub(crate) fn fonts() -> egui::FontDefinitions {
     fonts
 }
 
+/// The system's fonts for what the GUI's own lack, and what was shown
+/// when they were last looked for.
+pub(crate) struct Fonts {
+    /// The system's fonts for what tgradish's own lack.
+    pub(crate) fallbacks: fallback::Fallbacks,
+    /// What the texts were when fonts were last looked for them.
+    checked: Option<u64>,
+}
+
+impl Default for Fonts {
+    fn default() -> Fonts {
+        Fonts { fallbacks: fallback::Fallbacks::new(fonts()), checked: None }
+    }
+}
+
+impl Fonts {
+    /// Whether fonts are to be looked for what is shown, known by
+    /// `shown`: only as it changes, or while fonts are looked for.
+    fn look_again(&mut self, shown: u64) -> bool {
+        if self.checked == Some(shown) && !self.fallbacks.looking() {
+            return false;
+        }
+        self.checked = Some(shown);
+        true
+    }
+}
+
 impl App {
     /// Looks for the system's fonts for characters in names the GUI's
     /// own fonts lack.
@@ -69,10 +96,9 @@ impl App {
         self.dialogs.inspection.as_ref().map(|inspection| &inspection.path).hash(&mut hasher);
         self.config.gui.output_dir.hash(&mut hasher);
         let shown = hasher.finish();
-        if self.fonts_checked == Some(shown) && !self.fallbacks.looking() {
+        if !self.fonts.look_again(shown) {
             return;
         }
-        self.fonts_checked = Some(shown);
         let mut texts: Vec<String> = Vec::new();
         for item in &self.items {
             texts.push(item.name());
@@ -92,7 +118,7 @@ impl App {
                 .map(|inspection| inspection.path.display().to_string()),
         );
         texts.extend(self.config.gui.output_dir.as_ref().map(|dir| dir.display().to_string()));
-        self.fallbacks.check(ctx, texts.iter().map(String::as_str));
+        self.fonts.fallbacks.check(ctx, texts.iter().map(String::as_str));
     }
 }
 
