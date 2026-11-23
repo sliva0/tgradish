@@ -664,6 +664,59 @@ mod tests {
         assert!(dir.path().join("presets/by quality.toml").is_file());
     }
 
+    /// The GUI's twin of the command line's test of the same name in
+    /// crates/cli/src/convert.rs, which takes up the preset saved here.
+    #[test]
+    fn integer_scale_of_a_preset_the_gui_saved() {
+        use tgradish_core::options::Scaling;
+        use tgradish_core::telegram::Target;
+        let dir = tempfile::tempdir().unwrap();
+        let presets_dir = dir.path().join("presets");
+        std::fs::create_dir(&presets_dir).unwrap();
+        std::fs::write(presets_dir.join("scaled.toml"), "[webm]\ninteger-scale = '2'\n").unwrap();
+        let art = dir.path().join("art.png");
+        square(&art, [255, 0, 0, 255]);
+        let mut harness = harness(Config::default());
+        let state = harness.state_mut();
+        state.presets_dir = Some(presets_dir.clone());
+        state.presets = Presets::load(Some(&presets_dir)).unwrap();
+        state.add(vec![art]);
+        finish(&mut harness);
+        let item = &mut harness.state_mut().items[0];
+        item.format = Format::Webm;
+        item.choices.preset = Some("scaled".into());
+        item.choices.webm.scaling = Some(Scaling::Smooth);
+        // the scale set aside, as only integer scaling scales by it
+        // (divergence 2)
+        let smooth = Options {
+            target: Some(Target::Sticker),
+            scaling: Some(Scaling::Smooth),
+            ..Options::default()
+        };
+        let recipe = |harness: &egui_kittest::Harness<crate::app::App>| {
+            let state = harness.state();
+            state.items[0].choices.recipe(Format::Webm, &state.presets, &state.config).unwrap()
+        };
+        assert_eq!(recipe(&harness), crate::item::Recipe::Webm(smooth.clone()));
+        harness.run_steps(2);
+        harness.get_by_label(&fl!("save-preset")).click();
+        harness.run_steps(2);
+        harness
+            .query_all_by_role(eframe::egui::accesskit::Role::TextInput)
+            .next()
+            .unwrap()
+            .type_text("mine");
+        harness.run_steps(2);
+        harness.get_by_label(&fl!("save")).click();
+        harness.run_steps(3);
+        // yet saved with the scale and the scaling both, which the
+        // command line scales by (divergence 8)
+        let saved = std::fs::read_to_string(presets_dir.join("mine.toml")).unwrap();
+        assert_eq!(saved, "[tgs]\n\n[webm]\ninteger-scale = \"2\"\nscaling = \"smooth\"\n");
+        assert_eq!(harness.state().items[0].choices.preset.as_deref(), Some("mine"));
+        assert_eq!(recipe(&harness), crate::item::Recipe::Webm(smooth));
+    }
+
     #[test]
     fn leaves_the_first_escape_to_a_name_typed_in() {
         let dir = tempfile::tempdir().unwrap();

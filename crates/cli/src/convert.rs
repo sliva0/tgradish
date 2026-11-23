@@ -865,4 +865,363 @@ mod tests {
         bar.set_message("to vector");
         assert!(bar.is_hidden());
     }
+
+    // What the command line layers, scenario by scenario. Each test has a
+    // twin of the same name among the GUI's tests (in item.rs, the last in
+    // preset_dialogs.rs), which pins what the GUI makes of the same. Where
+    // the two differ, both name the divergence by its number in the plan to
+    // unify how options are layered, so that unifying them changes these
+    // on purpose.
+
+    use clap::Parser;
+    use tgradish_core::options::{Effort, Fit, IntegerScale, Resize, Scaling, Spoof};
+    use tgradish_core::tgs;
+
+    /// The conversion arguments clap reads from `flags`.
+    fn args(flags: &[&str]) -> ConversionArgs {
+        let mut all = vec!["tgradish", "convert", "a.png"];
+        all.extend(flags);
+        let crate::args::Command::Convert(convert) = crate::args::Cli::parse_from(all).command
+        else {
+            panic!("not a conversion")
+        };
+        convert.conversion
+    }
+
+    /// The built-in presets and `files`, each `(name, text)`.
+    fn presets(files: &[(&str, &str)]) -> Presets {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, text) in files {
+            std::fs::write(dir.path().join(format!("{name}.toml")), text).unwrap();
+        }
+        Presets::load(Some(dir.path())).unwrap()
+    }
+
+    /// What the command line makes of `flags` and `json` for `format`.
+    fn layered(
+        presets: &Presets,
+        config: &Config,
+        format: Format,
+        flags: &[&str],
+        json: Option<serde_json::Value>,
+    ) -> Result<FormatOptions> {
+        let json = json.map(|json| json.as_object().expect("an object").clone());
+        layer_options(presets, config, None, &args(flags), json.as_ref(), format)
+    }
+
+    /// Why layering failed, and whether it is the command line's fault
+    /// (exit 2) or else the preset's or config's (exit 1).
+    fn refused(layered: Result<FormatOptions>) -> (bool, String) {
+        let err = layered.expect_err("refused");
+        (err.downcast_ref::<crate::Usage>().is_some(), err.to_string())
+    }
+
+    fn webm(options: Options) -> FormatOptions {
+        FormatOptions::Webm(options)
+    }
+
+    fn webp(options: Options) -> FormatOptions {
+        FormatOptions::Webp(options)
+    }
+
+    #[test]
+    fn layers_an_inherited_preset() {
+        let child = "extends = 'fast'\n[webm]\nfit = 'crf'\ncrf = 20\n[tgs]\nexact = false\n";
+        let presets = presets(&[("child", child)]);
+        let config = Config::default();
+        let layered = |format| layered(&presets, &config, format, &["-p", "child"], None).unwrap();
+        // the crf fitting has no say over is kept, and planning warns of it
+        // (divergence 7); the target is left to its default
+        let fitted =
+            Options { fit: Some(Fit::Crf), crf: Some(20), effort: Some(Effort::Fast), ..default() };
+        assert_eq!(layered(Format::Webm), webm(fitted.clone()));
+        let tgs = tgs::Options { effort: Some(Effort::Fast), exact: Some(false), ..default() };
+        assert_eq!(layered(Format::Tgs), FormatOptions::Tgs(tgs));
+        // a picture is handed all of WebM's, of which core keeps a
+        // picture's (divergence 5)
+        assert_eq!(layered(Format::Webp), webp(fitted));
+    }
+
+    #[test]
+    fn keeps_an_explicit_false_over_a_presets_true() {
+        let on = "[webm]\nfit = 'off'\nlossless = true\nwatermark = true\n\
+                  [tgs]\nkeep-canvas = true\nwatermark = true\n";
+        let presets = presets(&[("on", on)]);
+        let config = Config::default();
+        let off = ["-p", "on", "--no-watermark", "--no-lossless", "--no-keep-canvas"];
+        let layered = |format| layered(&presets, &config, format, &off, None).unwrap();
+        let webm_off = Options {
+            fit: Some(Fit::Off),
+            lossless: Some(false),
+            watermark: Some(false),
+            ..default()
+        };
+        assert_eq!(layered(Format::Webm), webm(webm_off.clone()));
+        assert_eq!(layered(Format::Webp), webp(webm_off));
+        let tgs = tgs::Options { keep_canvas: Some(false), watermark: Some(false), ..default() };
+        assert_eq!(layered(Format::Tgs), FormatOptions::Tgs(tgs));
+    }
+
+    #[test]
+    fn crf_under_a_presets_bitrate_fit() {
+        let presets = presets(&[("by bitrate", "[webm]\nfit = 'bitrate'\ncrf = 20\n")]);
+        let layered =
+            layered(&presets, &Config::default(), Format::Webm, &["-p", "by bitrate"], None);
+        // kept, for planning to warn of (divergence 7)
+        let kept = Options { fit: Some(Fit::Bitrate), crf: Some(20), ..default() };
+        assert_eq!(layered.unwrap(), webm(kept));
+    }
+
+    #[test]
+    fn lossless_under_fit_auto() {
+        let presets = presets(&[("lossless", "[webm]\nlossless = true\n")]);
+        let flags = ["-p", "lossless", "--fit", "auto"];
+        let layered = layered(&presets, &Config::default(), Format::Webm, &flags, None);
+        // kept, for planning to refuse for each input (divergence 1)
+        let kept = Options { fit: Some(Fit::Auto), lossless: Some(true), ..default() };
+        assert_eq!(layered.unwrap(), webm(kept));
+    }
+
+    #[test]
+    fn drops_a_fit_range_of_another_unit() {
+        let quality = "[webm]\nfit = 'crf'\nfit-range = { min = 20, max = 40 }\n";
+        let presets = presets(&[("quality", quality)]);
+        let config = Config::default();
+        let by_bitrate = Options { fit: Some(Fit::Bitrate), ..default() };
+        let flags = ["-p", "quality", "--fit", "bitrate"];
+        let layered_flags = layered(&presets, &config, Format::Webm, &flags, None);
+        assert_eq!(layered_flags.unwrap(), webm(by_bitrate.clone()));
+        let json = serde_json::json!({ "fit": "bitrate" });
+        let layered_json = layered(&presets, &config, Format::Webm, &["-p", "quality"], Some(json));
+        assert_eq!(layered_json.unwrap(), webm(by_bitrate));
+    }
+
+    #[test]
+    fn fake_duration_under_spoof_never() {
+        let presets = presets(&[
+            ("never", "[webm]\nspoof = 'never'\nfake-duration = 1.0\n"),
+            ("too long", "[webm]\nspoof = 'never'\nfake-duration = 5.0\n"),
+        ]);
+        let config = Config::default();
+        // kept, for planning to warn of (divergence 7)
+        let never = layered(&presets, &config, Format::Webm, &["-p", "never"], None);
+        let kept = Options { spoof: Some(Spoof::Never), fake_duration: Some(1.0), ..default() };
+        assert_eq!(never.unwrap(), webm(kept));
+        // and checked though it has no say (divergence 4)
+        let too_long = layered(&presets, &config, Format::Webm, &["-p", "too long"], None);
+        assert_eq!(
+            refused(too_long),
+            (
+                false,
+                "preset \"too long\" sets fake-duration, which must be greater than 0 and at most \
+                 3 seconds"
+                    .into()
+            )
+        );
+    }
+
+    #[test]
+    fn integer_scale_without_integer_scaling() {
+        let presets = presets(&[
+            ("scaled", "[webm]\ninteger-scale = '2'\n"),
+            ("cropped", "[webm]\nscaling = 'integer'\ninteger-scale = '2'\nresize = 'crop'\n"),
+        ]);
+        let config = Config::default();
+        let two = "2".parse::<IntegerScale>().ok();
+        // kept, as core scales by it whatever the scaling (divergence 2)
+        for format in [Format::Webm, Format::Webp] {
+            let scaled = layered(&presets, &config, format, &["-p", "scaled"], None).unwrap();
+            let kept = Options { integer_scale: two, ..default() };
+            assert_eq!(scaled, if format == Format::Webm { webm(kept) } else { webp(kept) });
+        }
+        // and the crop it can't go with, for planning to refuse
+        // (divergence 3)
+        let cropped = layered(&presets, &config, Format::Webm, &["-p", "cropped"], None);
+        let kept = Options {
+            resize: Some(Resize::Crop),
+            scaling: Some(Scaling::Integer),
+            integer_scale: two,
+            ..default()
+        };
+        assert_eq!(cropped.unwrap(), webm(kept));
+    }
+
+    #[test]
+    fn refuses_a_preset_setting_one_files_options() {
+        let presets = presets(&[
+            ("crop", "[webm]\ncrop = { x = 0, y = 0, width = 8, height = 8 }\n"),
+            ("webm sheet", "[webm]\nsheet = '4x1'\n"),
+            ("tgs sheet", "[tgs]\nsheet = '4x1'\n"),
+        ]);
+        let config = Config::default();
+        for (name, key) in
+            [("crop", "webm.crop"), ("webm sheet", "webm.sheet"), ("tgs sheet", "tgs.sheet")]
+        {
+            // the whole preset, for every format
+            for format in [Format::Webm, Format::Webp, Format::Tgs] {
+                let (usage, said) =
+                    refused(layered(&presets, &config, format, &["-p", name], None));
+                assert!(!usage, "{name} {format:?}");
+                assert!(said.starts_with("invalid preset "), "{said}");
+                let per_file =
+                    format!(": {key} is a per-file option and cannot be set in a preset");
+                assert!(said.ends_with(&per_file), "{said}");
+            }
+        }
+    }
+
+    #[test]
+    fn reads_options_by_their_old_names() {
+        let renamed = "[webm]\nspeed = 'best'\nscaling = 'pixel-perfect'\nexact-scale = '3'\n\
+                       [tgs]\nspeed = 'fast'\n";
+        let presets = presets(&[("renamed", renamed)]);
+        let config = Config::default();
+        let scaled = |effort, scale: &str| Options {
+            scaling: Some(Scaling::Integer),
+            integer_scale: scale.parse().ok(),
+            effort: Some(effort),
+            ..default()
+        };
+        let preset = ["-p", "renamed"];
+        let layered =
+            |format, flags: &[&str], json| layered(&presets, &config, format, flags, json);
+        assert_eq!(layered(Format::Webm, &preset, None).unwrap(), webm(scaled(Effort::Best, "3")));
+        let tgs = tgs::Options { effort: Some(Effort::Fast), ..default() };
+        assert_eq!(layered(Format::Tgs, &preset, None).unwrap(), FormatOptions::Tgs(tgs));
+        let json = serde_json::json!({
+            "speed": "fast",
+            "scaling": "pixel-perfect",
+            "exact-scale": "2",
+        });
+        let from_json = layered(Format::Webm, &preset, Some(json));
+        assert_eq!(from_json.unwrap(), webm(scaled(Effort::Fast, "2")));
+        let flags =
+            ["-p", "renamed", "--speed=balanced", "--scaling=pixel-perfect", "--exact-scale=1/2"];
+        let from_flags = layered(Format::Webm, &flags, None);
+        assert_eq!(from_flags.unwrap(), webm(scaled(Effort::Balanced, "1/2")));
+        // a picture's is read by its old name too, the preset's effort with
+        // it (divergence 5)
+        let json = serde_json::json!({ "exact-scale": "2" });
+        let picture = layered(Format::Webp, &preset, Some(json));
+        assert_eq!(picture.unwrap(), webp(scaled(Effort::Best, "2")));
+    }
+
+    #[test]
+    fn makes_a_picture_of_a_presets_webm_options() {
+        let presets = presets(&[
+            ("picture", "[webm]\nfit = 'off'\ncrf = 20\nscaling = 'sharp'\n"),
+            ("fast tempo", "[webm]\ntempo = 50.0\n"),
+        ]);
+        let config = Config::default();
+        // all of WebM's, of which core keeps a picture's (divergence 5)
+        let flags = ["-p", "picture", "--start", "1.5"];
+        let picture = layered(&presets, &config, Format::Webp, &flags, None);
+        let all = Options {
+            scaling: Some(Scaling::Sharp),
+            fit: Some(Fit::Off),
+            start: Some(1.5),
+            crf: Some(20),
+            ..default()
+        };
+        assert_eq!(picture.unwrap(), webp(all));
+        // so a value a picture doesn't use is checked too (divergence 5)
+        let tempo = layered(&presets, &config, Format::Webp, &["-p", "fast tempo"], None);
+        let said = "preset \"fast tempo\" sets tempo, which must be from 0.1 to 10";
+        assert_eq!(refused(tempo), (false, said.into()));
+    }
+
+    #[test]
+    fn bad_values_and_where_they_came_from() {
+        let presets = presets(&[("slow", "[webm]\ntempo = 50.0\n[tgs]\ntempo = 50.0\n")]);
+        let config = Config::default();
+        let layered =
+            |format, flags: &[&str], json| layered(&presets, &config, format, flags, json);
+        let preset = "preset \"slow\" sets tempo, which must be from 0.1 to 10";
+        for format in [Format::Webm, Format::Tgs] {
+            let from_preset = layered(format, &["-p", "slow"], None);
+            assert_eq!(refused(from_preset), (false, preset.into()), "{format:?}");
+            let json = Some(serde_json::json!({ "tempo": 50 }));
+            let from_json = layered(format, &[], json);
+            let said = "\"tempo\" in --options-json must be from 0.1 to 10";
+            assert_eq!(refused(from_json), (true, said.into()), "{format:?}");
+            // what is set over the preset's is what is checked
+            let json = Some(serde_json::json!({ "tempo": 2 }));
+            assert!(layered(format, &["-p", "slow"], json).is_ok(), "{format:?}");
+        }
+        // a flag's value clap checks as it reads it, so layering never
+        // finds one wrong
+        let flag = crate::args::Cli::try_parse_from(["tgradish", "convert", "a", "--tempo", "50"]);
+        let err = flag.expect_err("refused");
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+        assert!(err.to_string().contains("must be from 0.1 to 10"), "{err}");
+    }
+
+    #[test]
+    fn sheet_frames_without_a_sheet() {
+        let presets = Presets::builtin();
+        let config = Config::default();
+        let layered = |flags: &[&str], json| layered(&presets, &config, Format::Tgs, flags, json);
+        let flag = layered(&["--sheet-frames", "3"], None);
+        assert_eq!(refused(flag), (true, "--sheet-frames requires --sheet".into()));
+        let json = Some(serde_json::json!({ "sheet-frames": 3 }));
+        let said = "\"sheet-frames\" in --options-json requires \"sheet\"";
+        assert_eq!(refused(layered(&[], json)), (true, said.into()));
+        // with one, from either
+        let json = Some(serde_json::json!({ "sheet-frames": 3 }));
+        let Ok(FormatOptions::Tgs(sheet)) = layered(&["--sheet", "4x1"], json) else { panic!() };
+        assert_eq!((sheet.sheet, sheet.sheet_frames), ("4x1".parse().ok(), Some(3)));
+    }
+
+    #[test]
+    fn picks_the_configs_preset_for_each_format() {
+        let presets = Presets::builtin();
+        let config = Config {
+            preset: Some("fast".into()),
+            tgs_preset: Some("balanced".into()),
+            ..Config::default()
+        };
+        let layered = |format, flags: &[&str]| layered(&presets, &config, format, flags, None);
+        let fast = Options { fit: Some(Fit::Bitrate), effort: Some(Effort::Fast), ..default() };
+        assert_eq!(layered(Format::Webm, &[]).unwrap(), webm(fast.clone()));
+        assert_eq!(layered(Format::Webp, &[]).unwrap(), webp(fast));
+        let balanced = tgs::Options { effort: Some(Effort::Balanced), ..default() };
+        assert_eq!(layered(Format::Tgs, &[]).unwrap(), FormatOptions::Tgs(balanced));
+        // unless one is named
+        let best = tgs::Options { effort: Some(Effort::Best), ..default() };
+        assert_eq!(layered(Format::Tgs, &["-p", "best"]).unwrap(), FormatOptions::Tgs(best));
+        // and one there isn't, said as where it was named
+        let none = Config { preset: Some("nope".into()), ..Config::default() };
+        let available = "available: balanced, best, fast";
+        let said = format!("unknown preset \"nope\" in config; {available}");
+        let from_config = layer_options(&presets, &none, None, &args(&[]), None, Format::Webm);
+        assert_eq!(refused(from_config), (false, said));
+        let file = ConfigFile { path: "config.toml".into(), from: crate::ConfigFrom::Flag };
+        let named = layer_options(&presets, &none, Some(&file), &args(&[]), None, Format::Webp);
+        let said = format!("unknown preset \"nope\" in config (config.toml: preset); {available}");
+        assert_eq!(refused(named), (false, said));
+        // which leaves .tgs to its own
+        assert!(layer_options(&presets, &none, None, &args(&[]), None, Format::Tgs).is_ok());
+        let flag = layered(Format::Webm, &["-p", "nope"]);
+        assert_eq!(refused(flag), (true, format!("unknown --preset \"nope\"; {available}")));
+    }
+
+    #[test]
+    fn integer_scale_of_a_preset_the_gui_saved() {
+        // as the GUI saves one where the item chose smooth scaling over a
+        // preset's integer scale (divergence 8)
+        let saved = "[tgs]\n\n[webm]\ninteger-scale = \"2\"\nscaling = \"smooth\"\n";
+        let presets = presets(&[("mine", saved)]);
+        let layered = layered(&presets, &Config::default(), Format::Webm, &["-p", "mine"], None);
+        // which core scales by, whatever the scaling (divergence 2)
+        let kept = Options {
+            scaling: Some(Scaling::Smooth),
+            integer_scale: "2".parse().ok(),
+            ..default()
+        };
+        assert_eq!(layered.unwrap(), webm(kept));
+    }
+
+    fn default<T: Default>() -> T {
+        T::default()
+    }
 }

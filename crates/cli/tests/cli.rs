@@ -1837,6 +1837,120 @@ fn clears_a_presets_integer_scale() {
     assert!(preset("cleared").get("integer-scale").is_none(), "{}", preset("cleared"));
 }
 
+// How a conversion ends for options the GUI sets aside or never checks.
+// The scenarios are pinned value by value in crates/cli/src/convert.rs and
+// crates/gui/src/item.rs, which number each divergence as these do.
+
+/// Values the GUI sets aside are refused, or kept and warned of, as each
+/// input is planned.
+#[test]
+fn plans_with_values_the_gui_sets_aside() {
+    if !tgradish_corpus::ffmpeg_on_path() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("a.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let convert = |format: &str, more: &[&str]| {
+        let mut args = vec!["--json", "--ffmpeg-from", "system", "convert", png.to_str().unwrap()];
+        args.extend(["-f", format, "-y"]);
+        args.extend(more);
+        tgradish(&args)
+    };
+    let refused = |output: Output, said: &str| {
+        assert_eq!(output.status.code(), Some(1), "{said}");
+        let events = json_lines(&output);
+        assert_eq!(events.last().unwrap()["message"], said, "{events:?}");
+    };
+    // lossless where fitting has no say: refused as each input is
+    // planned (divergence 1)
+    let lossless = convert("webm", &["--lossless", "--fit", "auto"]);
+    refused(lossless, "lossless only works with fit fps, length or off");
+    // an integer scale with a crop it can't go with (divergence 3)
+    let cropped = ["--integer-scale", "2", "--scaling", "integer", "--resize", "crop"];
+    let said = "resize crop cannot be used with integer-scale; use contain or pad";
+    refused(convert("webp", &cropped), said);
+    // an integer scale without integer scaling, scaled by (divergence 2)
+    let scaled = convert("webp", &["--integer-scale", "2", "--scaling", "smooth"]);
+    assert!(scaled.status.success(), "{}", String::from_utf8_lossy(&scaled.stderr));
+    let finished = json_lines(&scaled).pop().unwrap();
+    assert_eq!((finished["width"].as_u64(), finished["height"].as_u64()), (Some(512), Some(8)));
+    // and values fitting ignores, warned of (divergence 7)
+    let ignored = ["--fit", "bitrate", "--crf", "20", "--spoof", "never", "--fake-duration", "1"];
+    let output = convert("webm", &[&ignored[..], &["--length", "0.5"]].concat());
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let events = json_lines(&output);
+    let warned: Vec<&Value> = events
+        .iter()
+        .skip_while(|event| event["event"] != "started")
+        .skip(1)
+        .take_while(|event| event["event"] == "warning")
+        .map(|event| &event["message"])
+        .collect();
+    assert_eq!(
+        warned,
+        [
+            "crf is ignored because fit is bitrate",
+            "fake-duration is ignored because spoof is never"
+        ]
+    );
+}
+
+/// A preset's bad values fail with 1, naming it, before any input is read;
+/// the command line's with 2.
+#[cfg(target_os = "linux")]
+#[test]
+fn refuses_a_presets_bad_values_before_reading_inputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let presets = dir.path().join("tgradish").join("presets");
+    std::fs::create_dir_all(&presets).unwrap();
+    for (name, text) in [
+        ("slow", "[webm]\ntempo = 50.0\n[tgs]\ntempo = 50.0\n"),
+        ("late", "[webm]\nspoof = 'never'\nfake-duration = 5.0\n"),
+        ("cropped", "[webm]\ncrop = { x = 0, y = 0, width = 8, height = 8 }\n"),
+        ("lossless", "[webm]\nlossless = true\n"),
+    ] {
+        std::fs::write(presets.join(format!("{name}.toml")), text).unwrap();
+    }
+    let png = dir.path().join("a.png");
+    square_png(&png, [255, 0, 0, 255]);
+    let convert = |format: &str, more: &[&str]| {
+        let mut args = vec!["--ffmpeg-from", "system", "convert", png.to_str().unwrap()];
+        args.extend(["-f", format, "-y"]);
+        args.extend(more);
+        with_presets(dir.path(), &args)
+    };
+    let slow = "preset \"slow\" sets tempo, which must be from 0.1 to 10";
+    let late = "preset \"late\" sets fake-duration, which must be greater than 0 and at most 3 \
+                seconds";
+    let cropped = "webm.crop is a per-file option and cannot be set in a preset";
+    let sheet = "\"sheet-frames\" in --options-json requires \"sheet\"";
+    for (format, more, code, said) in [
+        ("webm", &["-p", "slow"][..], 1, slow),
+        ("tgs", &["-p", "slow"], 1, slow),
+        // though a picture has no tempo (divergence 5)
+        ("webp", &["-p", "slow"], 1, slow),
+        // though spoofing never uses it (divergence 4)
+        ("webm", &["-p", "late"], 1, late),
+        ("tgs", &["-p", "cropped"], 1, cropped),
+        ("tgs", &["--options-json", r#"{"sheet-frames":3}"#], 2, sheet),
+    ] {
+        let output = convert(format, more);
+        assert_eq!(output.status.code(), Some(code), "{format} {more:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.starts_with("error: ") && stderr.trim_end().ends_with(said), "{stderr}");
+        assert!(!stderr.contains("Converting"), "{stderr}");
+    }
+    // a preset's lossless where fitting has no say, refused as each input
+    // is planned, as the command line's is (divergence 1)
+    if tgradish_corpus::ffmpeg_on_path() {
+        let output = convert("webm", &["-p", "lossless", "--fit", "auto"]);
+        assert_eq!(output.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("lossless only works with fit fps, length or off"), "{stderr}");
+    }
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn shows_a_preset_as_a_file_could_hold_it() {

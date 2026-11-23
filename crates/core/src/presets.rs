@@ -870,6 +870,30 @@ mod tests {
         assert_eq!(crate::options::set_keys(&crate::webp::picture_options(&all)), ["crop"]);
     }
 
+    /// One file's options are refused in either table, as such, even one
+    /// that table's format doesn't use, and for every format: the GUI and
+    /// the command line both say so as this does.
+    #[test]
+    fn refuses_one_files_options_in_either_table() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "crop", "[webm]\ncrop = { x = 0, y = 0, width = 8, height = 8 }\n");
+        write(dir.path(), "webm-sheet", "[webm]\nsheet = '4x1'\n");
+        write(dir.path(), "tgs-sheet", "[tgs]\nsheet = '4x1'\n");
+        let presets = Presets::load(Some(dir.path())).unwrap();
+        for (name, key) in
+            [("crop", "webm.crop"), ("webm-sheet", "webm.sheet"), ("tgs-sheet", "tgs.sheet")]
+        {
+            for format in [Format::Webm, Format::Webp, Format::Tgs] {
+                let err = presets.resolve(name, format).unwrap_err();
+                let Error::Preset(PresetError::PerFile { key: named, place }) = &err else {
+                    panic!("{name}: {err}")
+                };
+                assert_eq!(named, key);
+                assert!(place.ends_with(&format!("{name}.toml")), "{place}");
+            }
+        }
+    }
+
     #[test]
     fn names_the_static_format_webp() {
         assert_eq!(serde_json::to_value(Format::Webp).unwrap(), "webp");
