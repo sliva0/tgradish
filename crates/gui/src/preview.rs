@@ -83,9 +83,6 @@ impl App {
             ui.add_space(crate::actions::below_bar(ui.style()));
         });
         self.banner.bar = Some(bar.response.rect.top());
-        // Record the per-item settings rectangle so pointer-held edits inside
-        // it are grouped for undo.
-        self.edit_frames.settings_in(ui.available_rect_before_wrap());
         let output = self.item(id).map(|item| self.output_for(item));
         let copyable = self.copyable(id, output.as_deref()).is_some();
         let (choice, path) = self.ffmpeg_settings();

@@ -30,9 +30,9 @@ pub(crate) use layout::{
     section_with, settings_spacing, steady_hint, text_field,
 };
 pub(crate) use number::{
-    Number, acted_now, auto_number, escape_taken, finish_typed_number, forget_typed_number,
-    from_preset, number_field, number_taken_now, of_file, of_file_in, preset_number, stepper,
-    take_typed_number, tell_history, typed_number, typing_number,
+    Number, auto_number, escape_taken, finish_typed_number, forget_typed_number, from_preset,
+    number_field, of_file, of_file_in, preset_number, stepper, take_typed_number, tell_history,
+    typed_number, typing_number,
 };
 pub(crate) use paint::{cased_outline, checkerboard, checkerboard_from, hatch, tick};
 pub(crate) use progress::{Fill, bar, bar_sized, bar_spent, gauge, steady_bar, thin_bar};

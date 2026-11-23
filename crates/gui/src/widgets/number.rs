@@ -217,19 +217,9 @@ fn draft(ctx: &egui::Context) -> Option<Typed> {
     (typing.text != typing.written).then_some(typed)
 }
 
-/// egui temp-data key recording the pass on which a deferred user action (such
-/// as committing a typed number or applying a deferred stepper click) ran.
-const ACTED: &str = "acted for the user";
-
-/// Returns `true` if a deferred user action completed during the current pass.
-pub(crate) fn acted_now(ctx: &egui::Context) -> bool {
-    let acted = ctx.data(|data| data.get_temp::<u64>(egui::Id::new(ACTED)));
-    acted == Some(ctx.cumulative_pass_nr())
-}
-
 /// Returns `true` if a number field committed or rejected typed input during
 /// the current pass.
-pub(crate) fn number_taken_now(ctx: &egui::Context) -> bool {
+fn number_taken_now(ctx: &egui::Context) -> bool {
     let taken = ctx.data(|data| data.get_temp::<u64>(egui::Id::new(TAKEN)));
     taken == Some(ctx.cumulative_pass_nr())
 }
@@ -465,10 +455,7 @@ impl<'a> Number<'a> {
         // Record that a user edit was processed this pass (e.g. when focus left
         // the field on the previous frame due to clicking a later control).
         let pass = ui.ctx().cumulative_pass_nr();
-        ui.data_mut(|data| {
-            data.insert_temp(egui::Id::new(TAKEN), pass);
-            data.insert_temp(egui::Id::new(ACTED), pass);
-        });
+        ui.data_mut(|data| data.insert_temp(egui::Id::new(TAKEN), pass));
         match self.parse(&typing.text) {
             Some(value) => {
                 let value = self.kept(value);
@@ -998,10 +985,6 @@ pub(crate) fn stepper(
         }
     };
     let stepped = stepped || put_off;
-    if put_off {
-        // Record that a deferred user action fired on this pass.
-        ui.data_mut(|data| data.insert_temp(egui::Id::new(ACTED), pass));
-    }
     // Held, its steps are one edit, done with as it is let go of; a click
     // by the keyboard or a screen reader, or one put off, is a step alone.
     if held {

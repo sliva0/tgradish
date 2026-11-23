@@ -712,12 +712,8 @@ impl App {
     }
 
     fn step_history(&mut self, ctx: &egui::Context, back: bool) {
-        // not halfway through a drag, whose step isn't over
-        if ctx.input(|input| input.pointer.any_down()) {
-            return;
-        }
         let Some(item) = self.selected.and_then(|id| self.item_mut(id)) else { return };
-        // nor through any edit, which is a step once it is over
+        // not halfway through an edit, as a drag, whose step isn't over
         if item.history.editing() {
             return;
         }
@@ -738,8 +734,9 @@ impl App {
         self.items.iter_mut().for_each(crate::history::take_in);
     }
 
-    /// Takes in the changes to files' settings this frame made, which are
-    /// steps once at rest; another frame is drawn while they aren't.
+    /// Takes in the changes to files' settings this frame made, with what
+    /// their controls said of their edits; another frame is drawn after
+    /// one, for what the GUI makes of it.
     fn follow_edits(&mut self, ctx: &egui::Context) {
         let frame = self.edit_frames.end(ctx, self.drawn);
         let selected = self.drawn;

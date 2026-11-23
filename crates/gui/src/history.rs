@@ -1,23 +1,35 @@
 //! Per-file undo/redo history (`Ctrl+Z` / `Ctrl+Shift+Z`).
 //!
-//! Because many controls mutate item settings in place, we snapshot settings at
-//! the end of each frame rather than instrumenting every control. A change is
-//! committed as an undo step once interaction settles (no pointer button held
-//! on the preview/settings and no text field being edited, followed by one
-//! unchanged frame). This groups continuous drags, held stepper buttons, typed
-//! numbers, and follow-on adjustments (such as clamping a crop to an integer
-//! scale on the next frame; undoing it on its own would only re-apply it) into
-//! a single undo step.
+//! Controls change item settings in place, so the settings are snapshotted
+//! as each frame ends rather than by each control. Where a step begins and
+//! ends is said by the controls that edit over several frames: the crop on
+//! the preview, number fields and their steppers, and the timeline's bars
+//! tell history, file by file, that an edit is [`underway`] (said each
+//! frame it goes on), that it is committed ([`commit`]), or that it is
+//! given up ([`cancel`]), which puts the settings back as they were as it
+//! began and makes no step. What changes while an edit is under way is
+//! one step once it is committed, or once no control says it goes on, as
+//! when its file is no longer shown. Keys that move something a little say
+//! [`nudge`]: nudges close together, as of a key held, join one step.
 //!
-//! Only user-initiated changes create undo steps; automatic adjustments (such
-//! as initial format detection once a file is read) update the baseline in
-//! place.
+//! Outside such edits, what a frame changed is a step as the frame ends if
+//! the user did something in it (pressed, typed, turned the wheel) while
+//! the file's settings were drawn, and otherwise is the GUI's own change,
+//! which updates the baseline in place, as the format guessed once a file
+//! is read does. This much is still told by the frame's input: the choices,
+//! check boxes, buttons and shortcuts that change settings do so in the
+//! frame they are used, and there are too many of them for each to say so
+//! without one left out losing its undo. In the frame a file is first
+//! shown, what it settles to is not the user's either.
+//!
+//! What follows from a change, as a crop kept to an integer scale, is made
+//! in the frame of the change ([`crate::file_settings::keep_crop`]), so it
+//! is part of that step: undone on its own, it would only be made again.
 
 use eframe::egui;
 use tgradish_core::presets::Format;
 
 use crate::item::{Aspect, Choices, Item};
-use crate::widgets;
 
 /// How many steps back each file keeps.
 const STEPS: usize = 200;
@@ -68,49 +80,25 @@ impl Settings {
 pub(crate) struct Frame {
     /// Seconds since the GUI started.
     pub(crate) now: f64,
-    /// Something is still being done: the pointer held down on a control
-    /// of the picked file's preview or settings, or a field typed in. What
-    /// it changes is a step once it is over.
-    pub(crate) busy: bool,
-    /// The user did something: pressed, typed, turned the wheel, or let go
-    /// of what they did in the frame before.
+    /// The user did something: pressed, typed or turned the wheel, which
+    /// makes what the frame changed outside an edit theirs.
     pub(crate) input: bool,
-    /// An arrow key was pressed.
-    pub(crate) arrows: bool,
-    /// A field typed in was done with, by Enter, Tab or the pointer
-    /// pressed elsewhere: what it took is a step then, apart from what the
-    /// press goes on to do.
-    pub(crate) committed: bool,
 }
 
 /// What the frames before were, for what the next one is.
 #[derive(Debug, Default)]
 pub(crate) struct Frames {
-    /// The field typed in as the last frame ended.
-    typing: Option<egui::Id>,
-    busy: bool,
     selected: Option<u64>,
-    /// Where the picked file's preview and settings are this frame.
-    settings: Option<egui::Rect>,
 }
 
 impl Frames {
-    /// Has the frame know where the picked file's preview and settings
-    /// are, which a button held changes.
-    pub(crate) fn settings_in(&mut self, rect: egui::Rect) {
-        self.settings = Some(rect);
-    }
-
     /// What the frame ending in `ctx` was, for the file `selected`, whose
     /// settings were drawn: the one the user changes, but in the frame it
     /// is first shown, as it settles to be shown then.
     pub(crate) fn end(&mut self, ctx: &egui::Context, selected: Option<u64>) -> Frame {
-        let typing = ctx.text_edit_focused() || widgets::typing_number(ctx);
-        let typing = typing.then(|| ctx.memory(|memory| memory.focused())).flatten();
-        let (now, down, did, arrows) = ctx.input(|input| {
-            use egui::{Event, Key};
-            let events = &input.raw.events;
-            let did = events.iter().any(|event| {
+        let (now, did) = ctx.input(|input| {
+            use egui::Event;
+            let did = input.raw.events.iter().any(|event| {
                 matches!(
                     event,
                     Event::PointerButton { .. }
@@ -122,33 +110,11 @@ impl Frames {
                         | Event::AccessKitActionRequest(_)
                 )
             });
-            let arrows = events.iter().any(|event| {
-                let arrow = [Key::ArrowLeft, Key::ArrowRight, Key::ArrowUp, Key::ArrowDown];
-                matches!(event, Event::Key { key, pressed: true, .. } if arrow.contains(key))
-            });
-            (input.time, input.pointer.any_down(), did, arrows)
+            (input.time, did)
         });
-        // a button held is what the user does only where it was pressed on
-        // a control in the picked file's preview or settings, not as it is
-        // held on the list, a notice or anywhere else, while the GUI
-        // changes the settings by itself
-        let settings = self.settings.take();
-        let origin = ctx.input(|input| input.pointer.press_origin());
-        let on_settings = origin.is_some_and(|at| {
-            let layer = ctx.layer_id_at(at).map(|layer| layer.order);
-            settings.is_some_and(|rect| rect.contains(at)) && layer == Some(egui::Order::Background)
-        });
-        let held = down && ctx.egui_is_using_pointer() && on_settings;
-        let busy = held || typing.is_some();
-        let did = did || widgets::acted_now(ctx);
-        // or taken a frame after it was left, as its field was drawn before
-        // what took the focus from it
-        let committed =
-            (self.typing.is_some() && self.typing != typing) || widgets::number_taken_now(ctx);
-        let input = did || busy || self.busy;
         let picked = self.selected != selected;
-        (self.typing, self.busy, self.selected) = (typing, busy, selected);
-        Frame { now, busy, input: input && !picked, arrows, committed }
+        self.selected = selected;
+        Frame { now, input: did && !picked }
     }
 }
 
@@ -213,12 +179,13 @@ fn said(ctx: &egui::Context) -> Saying {
     ctx.data_mut(|data| data.remove_temp::<Saying>(egui::Id::new(SAYING))).unwrap_or_default()
 }
 
-/// A change since the last step, not at rest yet.
+/// A change since the last step, which an edit under way goes on making.
 #[derive(Debug, Clone, Copy)]
 struct Pending {
     /// Made by the user, rather than by the GUI itself.
     user: bool,
-    /// Made by the arrow keys, which join a step of them just before.
+    /// Made by a key that moves something a little, which joins a step of
+    /// such keys just before.
     nudge: bool,
 }
 
@@ -246,7 +213,7 @@ pub(crate) struct History {
 }
 
 impl History {
-    /// Whether there is anything to undo, a change not yet at rest too.
+    /// Whether there is anything to undo, an edit under way too.
     pub(crate) fn can_undo(&self) -> bool {
         !self.undo.is_empty() || self.pending.is_some_and(|pending| pending.user)
     }
@@ -263,7 +230,7 @@ impl History {
 
     /// Takes in `item` as `frame` left it, with what its controls `said`
     /// of their edits; true where its settings changed in it, so that
-    /// another frame follows to see them at rest.
+    /// another frame follows to see what the GUI makes of them.
     fn follow(&mut self, item: &mut Item, frame: &Frame, said: &[Said]) -> bool {
         self.now = frame.now;
         let Some(seen) = &self.seen else {
@@ -272,10 +239,6 @@ impl History {
             return false;
         };
         let changed = !seen.matches(item);
-        // what was changed before an edit is a step of its own
-        if !said.is_empty() && !self.editing {
-            self.settle();
-        }
         // which edit is under way as the frame ends, and how the one under
         // way before ended, if it did
         let (mut open, mut ended, mut nudge) = (false, None, false);
@@ -291,12 +254,10 @@ impl History {
         if self.editing && said.is_empty() {
             ended = Some(Said::Commit);
         }
-        let user = frame.input || self.editing || !said.is_empty();
         if changed {
             self.seen = Some(Settings::of(item));
-            let nudge = frame.arrows || nudge;
             let pending = self.pending.get_or_insert(Pending { user: false, nudge });
-            pending.user |= user;
+            pending.user |= frame.input || self.editing || !said.is_empty();
         }
         self.editing = open;
         if self.restoring && said.is_empty() {
@@ -312,14 +273,11 @@ impl History {
                 self.put_back(item);
                 return true;
             }
-            Some(_) => self.settle(),
+            // a step once it ends
             None if open => {}
-            None => {
-                let user = self.pending.is_some_and(|pending| pending.user);
-                if (frame.committed && user) || !(changed || frame.busy) {
-                    self.settle();
-                }
-            }
+            // ended, or made in this frame alone, with what follows from
+            // it, which is made in the same frame
+            _ => self.settle(),
         }
         changed
     }
@@ -402,7 +360,7 @@ impl History {
 
 /// Takes in each of `items` as `frame` left them, with what their
 /// controls said of their edits in `ctx` this frame; true where any
-/// changed, so another frame follows to see them at rest.
+/// changed, so another frame follows to see what the GUI makes of them.
 pub(crate) fn follow<'a>(
     ctx: &egui::Context,
     items: impl Iterator<Item = (&'a mut Item, Frame)>,
@@ -485,6 +443,7 @@ mod tests {
     use crate::config::Config;
     use crate::l10n::fl;
     use crate::testing::{convert, finish, has_ffmpeg};
+    use crate::widgets;
     use tgradish_core::presets::Presets;
 
     /// The GUI with a 40 × 24 picture of `name` open and read, which is
@@ -1651,7 +1610,7 @@ mod tests {
     /// user did nothing else.
     fn saying(history: &mut History, item: &mut Item, input: bool, said: &[Said]) -> bool {
         let now = history.now + 0.25;
-        history.follow(item, &Frame { now, input, ..Frame::default() }, said)
+        history.follow(item, &Frame { now, input }, said)
     }
 
     #[test]
@@ -1659,7 +1618,7 @@ mod tests {
         let mut item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
         let mut history = History::default();
         frame(&mut history, &mut item, false);
-        // a change of the user's, not at rest yet as an edit begins
+        // a change of the user's, a step of its own as an edit begins
         item.choices.target = Target::Emoji;
         frame(&mut history, &mut item, true);
         // the edit, over frames, some of which change nothing: no step yet
@@ -1753,7 +1712,7 @@ mod tests {
         let mut history = History::default();
         frame(&mut history, &mut item, false);
         // a change, then what follows from it in the next frame, which
-        // has no input: one step, once at rest
+        // has no input: one step, which that joins
         item.choices.target = Target::Emoji;
         assert!(frame(&mut history, &mut item, true));
         item.choices.crop = Some(Crop { x: 0, y: 0, width: 4, height: 4 });
