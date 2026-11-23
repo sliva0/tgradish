@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use crate::config::Config;
-use eframe::egui::{self, Color32};
+use eframe::egui;
 use tgradish_core::backend::Backend;
 use tgradish_core::clipboard::Pasted;
 use tgradish_core::ffmpeg::FfmpegChoice;
@@ -27,12 +27,11 @@ use crate::keys::direct_scrolling;
 use crate::l10n::fl;
 use crate::outputs::Outputs;
 use crate::work::{Work, release};
-use crate::{
-    accent, fallback, inspect, instance, preset_dialogs, session, settings_dialog, system, theme,
-    widgets,
-};
 #[cfg(all(unix, not(target_os = "macos")))]
 use crate::{dnd, toplevel_icon};
+use crate::{
+    fallback, inspect, instance, preset_dialogs, session, settings_dialog, system, theme, widgets,
+};
 
 /// How many items keep their big frames: the selected one and the last few.
 const FRAMES_HELD: usize = 3;
@@ -71,14 +70,8 @@ pub(crate) struct App {
     pub(crate) picker: Picker,
     /// The GUI's own dialogs, and what is typed in them.
     pub(crate) dialogs: Dialogs,
-    /// The theme Settings showed last, to apply a change made there.
-    pub(crate) theme_shown: Option<crate::config::Theme>,
-    /// The scale shown last, to apply a change made in Settings
-    /// and save one made by egui's keys.
-    pub(crate) scale_shown: Option<f32>,
-    /// The scale asked of egui, and the pointer kept where it is on the
-    /// screen as it changes.
-    pub(crate) scaling: crate::scaling::Scaling,
+    /// The theme, scale, accent and motion applied, as they change.
+    pub(crate) look: theme::Look,
     /// Where and when the session is kept, and the window's layout in it.
     pub(crate) keeping: session::Keeping,
     /// What GUIs started while this one runs hand it.
@@ -123,13 +116,6 @@ pub(crate) struct App {
     pub(crate) hovering: bool,
     /// Share of the main panel's height the preview takes.
     pub(crate) preview_share: f32,
-    /// The system's accent colour, as it changes.
-    pub(crate) accent: Option<accent::Accent>,
-    /// The accent the look was made with last: the one chosen, or
-    /// else the system's.
-    pub(crate) applied_accent: Option<Color32>,
-    /// Whether the system asks for less motion, as it changes.
-    pub(crate) system_motion: Option<crate::motion::System>,
     /// How the list's rows change, as they fade in and close up.
     pub(crate) rows: crate::files::Rows,
 }
@@ -306,9 +292,7 @@ impl App {
             inset: Inset::default(),
             picker: Picker::default(),
             dialogs: Dialogs::default(),
-            theme_shown: None,
-            scale_shown: None,
-            scaling: Default::default(),
+            look: theme::Look::default(),
             keeping: session::Keeping::default(),
             handover: instance::Handover::default(),
             fallbacks: fallback::Fallbacks::new(fonts()),
@@ -330,9 +314,6 @@ impl App {
             _toplevel_icon: None,
             hovering: false,
             preview_share: PREVIEW_SHARE,
-            accent: None,
-            applied_accent: None,
-            system_motion: None,
             rows: crate::files::Rows::default(),
         }
     }
@@ -347,10 +328,10 @@ impl App {
         let zoom = ctx.zoom_factor();
         let set = self.config.gui.scale as f32;
         let alike = |a: f32, b: f32| (a - b).abs() < 0.005;
-        match self.scale_shown {
+        match self.look.scale_shown {
             // the setting changed, by Settings, or as the GUI starts
-            Some(shown) if !alike(set, shown) => self.scaling.set(ctx, set),
-            None => self.scaling.set(ctx, set),
+            Some(shown) if !alike(set, shown) => self.look.scaling.set(ctx, set),
+            None => self.look.scaling.set(ctx, set),
             // what was asked, now applied
             Some(shown) if alike(zoom, shown) => return,
             // by the keys, Settings open or not; or by egui, were it to
@@ -359,19 +340,19 @@ impl App {
                 let scale = crate::config::within_scales(f64::from(zoom));
                 self.save_setting(|gui| gui.scale = scale);
                 if !alike(zoom, scale as f32) {
-                    self.scaling.set(ctx, scale as f32);
+                    self.look.scaling.set(ctx, scale as f32);
                 }
-                self.scale_shown = Some(scale as f32);
+                self.look.scale_shown = Some(scale as f32);
                 return;
             }
         }
-        self.scale_shown = Some(set);
+        self.look.scale_shown = Some(set);
     }
 
     pub(crate) fn style(&self, ctx: &egui::Context) {
         ctx.set_fonts(fonts());
         set_theme(ctx, self.config.gui.theme);
-        theme::apply(ctx, self.applied_accent);
+        theme::apply(ctx, self.look.applied_accent);
         ctx.all_styles_mut(|style| {
             use egui::{FontFamily, FontId, TextStyle};
             // headings stand out by their weight more than their size
@@ -419,17 +400,6 @@ impl App {
             window.list = list.round();
         }
         window.preview = self.preview_share;
-    }
-
-    /// Makes the look again when the accent chosen, or the
-    /// system's, changed.
-    fn follow_accent(&mut self, ctx: &egui::Context) {
-        let system = || self.accent.as_ref().and_then(accent::Accent::get);
-        let accent = self.config.gui.accent.colour().or_else(system);
-        if accent != self.applied_accent {
-            self.applied_accent = accent;
-            theme::apply(ctx, accent);
-        }
     }
 
     /// Which ffmpeg to use and where, as the settings and the command line
@@ -1017,12 +987,12 @@ impl eframe::App for App {
     /// Says the frame's input at the scale egui applies to it, with the
     /// pointer where it is on the screen as the scale changes.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        self.scaling.follow(ctx, raw_input);
+        self.look.scaling.follow(ctx, raw_input);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        self.scaling.begun();
+        self.look.scaling.begun();
         // file dialogs stay over the window, which they are modal for
         self.picker.file_dialog = rfd::FileDialog::new().set_parent(frame);
         self.take_picked();
@@ -1030,9 +1000,8 @@ impl eframe::App for App {
         // converting, or done this frame
         let working = self.items.iter().any(|item| item.job.is_some());
         self.outputs.probes.follow(&ctx, working);
-        self.follow_accent(&ctx);
-        let less = self.system_motion.as_ref().is_some_and(crate::motion::System::reduced);
-        let motion = self.config.gui.motion && !less;
+        self.look.follow_accent(&ctx, self.config.gui.accent.colour());
+        let motion = self.config.gui.motion && !self.look.less_motion();
         crate::motion::set(&ctx, motion);
         if !motion {
             direct_scrolling(&ctx);
@@ -1109,9 +1078,9 @@ impl eframe::App for App {
         // as Settings changes them, without saving
         self.config.forget_overridden();
         // as Settings or the theme button changes it
-        if self.theme_shown != Some(self.config.gui.theme) {
+        if self.look.theme_shown != Some(self.config.gui.theme) {
             set_theme(&ctx, self.config.gui.theme);
-            self.theme_shown = Some(self.config.gui.theme);
+            self.look.theme_shown = Some(self.config.gui.theme);
         }
         self.follow_scale(&ctx);
         self.inspection_dialog(&ctx);
@@ -1157,7 +1126,7 @@ impl eframe::App for App {
         links.iter().for_each(|url| system::browse(url));
         self.follow_edits(&ctx);
         // last, as egui would take them
-        self.scaling.keys(&ctx);
+        self.look.scaling.keys(&ctx);
         // every few seconds, so a crash loses little; what changed is kept
         // even if nothing is drawn again before then
         let now = ctx.input(|input| input.time);

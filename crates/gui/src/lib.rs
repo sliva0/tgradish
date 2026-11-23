@@ -196,11 +196,12 @@ pub fn run(launch: Launch) -> Result<Started, Error> {
         "tgradish",
         options,
         Box::new(|cc| {
-            let app = App {
-                accent: Some(accent::Accent::watch(&cc.egui_ctx)),
-                system_motion: Some(motion::System::watch(&cc.egui_ctx)),
-                ..App::new(launch, store, listener)
-            };
+            // watched first, before the GUI reads its settings and session
+            let accent = Some(accent::Accent::watch(&cc.egui_ctx));
+            let system_motion = Some(motion::System::watch(&cc.egui_ctx));
+            let mut app = App::new(launch, store, listener);
+            app.look.accent = accent;
+            app.look.system_motion = system_motion;
             app.style(&cc.egui_ctx);
             if let Some(listener) = &app.handover.listener {
                 listener.attach(&cc.egui_ctx);

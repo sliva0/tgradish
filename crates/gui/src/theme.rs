@@ -26,6 +26,46 @@ pub(crate) const ACCENTS: [(&str, Color32); 10] = [
     ("grey", Color32::from_rgb(104, 107, 111)),
 ];
 
+/// How the GUI looks as the settings and the system change it: the theme,
+/// scale and accent last applied, and the system's accent and motion as
+/// they change. What is chosen is the config's, which `App` holds.
+#[derive(Default)]
+pub(crate) struct Look {
+    /// The theme Settings showed last, to apply a change made there.
+    pub(crate) theme_shown: Option<crate::config::Theme>,
+    /// The scale shown last, to apply a change made in Settings
+    /// and save one made by egui's keys.
+    pub(crate) scale_shown: Option<f32>,
+    /// The scale asked of egui, and the pointer kept where it is on the
+    /// screen as it changes.
+    pub(crate) scaling: crate::scaling::Scaling,
+    /// The system's accent colour, as it changes.
+    pub(crate) accent: Option<crate::accent::Accent>,
+    /// The accent the look was made with last: the one chosen, or
+    /// else the system's.
+    pub(crate) applied_accent: Option<Color32>,
+    /// Whether the system asks for less motion, as it changes.
+    pub(crate) system_motion: Option<crate::motion::System>,
+}
+
+impl Look {
+    /// Makes the look again when the accent `chosen`, or else the
+    /// system's, changed.
+    pub(crate) fn follow_accent(&mut self, ctx: &egui::Context, chosen: Option<Color32>) {
+        let system = || self.accent.as_ref().and_then(crate::accent::Accent::get);
+        let accent = chosen.or_else(system);
+        if accent != self.applied_accent {
+            self.applied_accent = accent;
+            apply(ctx, accent);
+        }
+    }
+
+    /// Whether the system asks for less motion.
+    pub(crate) fn less_motion(&self) -> bool {
+        self.system_motion.as_ref().is_some_and(crate::motion::System::reduced)
+    }
+}
+
 /// Base colour palette using Breeze role names.
 struct Scheme {
     /// Window background for panels and dialogs.
