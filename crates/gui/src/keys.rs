@@ -486,6 +486,12 @@ impl App {
             && let Some(item) = self.item_mut(id)
         {
             keys.apply(item);
+            // the arrows move it a frame at a time, which is put back at
+            // once when pressed close together or held
+            match keys.by != 0 || keys.move_start != 0 || keys.move_end != 0 {
+                true => crate::history::nudge(ctx, id),
+                false => crate::history::commit(ctx, id),
+            }
         }
         if delete && let Some(id) = self.selected {
             self.remove(id);

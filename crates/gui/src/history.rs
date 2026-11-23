@@ -1402,16 +1402,16 @@ mod tests {
         assert!(!selected(&harness).history.can_undo());
     }
 
-    #[test]
-    fn makes_one_step_of_an_end_of_the_used_part_dragged() {
-        let dir = tempfile::tempdir().unwrap();
-        let frames = dir.path().join("dance");
+    /// The GUI with an animation of eight frames open and read, of which
+    /// a `.tgs` is made.
+    fn animated(dir: &Path) -> Harness<'static, App> {
+        let frames = dir.join("dance");
         std::fs::create_dir(&frames).unwrap();
         for at in 1..=8 {
             crate::testing::square(&frames.join(format!("{at}.png")), [255, 0, 0, 255]);
         }
         let mut config = Config::default();
-        config.gui.output_dir = Some(dir.path().join("out"));
+        config.gui.output_dir = Some(dir.join("out"));
         let mut harness = Harness::builder()
             .with_size(vec2(1280.0, 1400.0))
             .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin()));
@@ -1419,6 +1419,41 @@ mod tests {
         harness.state_mut().add(vec![frames]);
         finish(&mut harness);
         assert!(!selected(&harness).history.can_undo());
+        harness
+    }
+
+    #[test]
+    fn joins_moves_of_the_used_parts_ends_by_keys_pressed_close_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = animated(dir.path());
+        let frames = selected(&harness).input_frames().unwrap();
+        let length = selected(&harness).input_length().unwrap();
+        let part = |harness: &Harness<App>| {
+            let choices = &selected(harness).choices;
+            frames.part(length, choices.start, choices.length)
+        };
+        assert_eq!(part(&harness), (0, 8));
+        // the start moved on three frames, a key at a time: one step
+        for _ in 0..3 {
+            harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::ArrowRight);
+            harness.step();
+        }
+        harness.run_steps(2);
+        assert_eq!((part(&harness), steps(&harness)), ((3, 8), 1));
+        // and after a while, the end back one: another
+        harness.run_steps(6);
+        keys(&mut harness, Modifiers::ALT, egui::Key::ArrowLeft);
+        assert_eq!((part(&harness), steps(&harness)), ((3, 7), 2));
+        undo(&mut harness);
+        assert_eq!(part(&harness), (3, 8));
+        undo(&mut harness);
+        assert_eq!(part(&harness), (0, 8));
+    }
+
+    #[test]
+    fn makes_one_step_of_an_end_of_the_used_part_dragged() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = animated(dir.path());
         // the bar, between the fields of where the used part starts and
         // ends, its start at the left of its track
         let start = harness.get_by_label(&fl!("part-start", "frame")).rect();

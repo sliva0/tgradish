@@ -508,6 +508,8 @@ fn bar(
     if response.drag_stopped() {
         ui.data_mut(|data| data.remove::<Grab>(id));
     }
+    // what is dragged till the button is let go is one step
+    held_edit(ui, response);
 
     let (from, to) = ends(*start, *used);
     let painter = ui.painter_at(rect);
@@ -793,6 +795,7 @@ pub(crate) fn frame_picker(
             index = picked;
             *frame = frames.start_of(picked);
         }
+        held_edit(ui, &response);
         if !alone {
             unit(ui, in_frames, true, unit_room);
         }
@@ -834,6 +837,16 @@ pub(crate) fn frame_picker(
     });
     if alone {
         unit_below(ui, in_frames, true);
+    }
+}
+
+/// Tells history of the edit `response`, a bar, makes as it is held: under
+/// way while the button is down on it, and done with once it is let go.
+fn held_edit(ui: &egui::Ui, response: &egui::Response) {
+    if response.is_pointer_button_down_on() {
+        widgets::tell_history(ui.ctx(), crate::history::underway);
+    } else if response.drag_stopped() || response.clicked() {
+        widgets::tell_history(ui.ctx(), crate::history::commit);
     }
 }
 
