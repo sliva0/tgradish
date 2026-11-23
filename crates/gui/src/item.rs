@@ -143,25 +143,20 @@ impl Choices {
         presets: &Presets,
         config: &Config,
     ) -> FormatOptions {
-        if format == Format::Tgs {
-            let tgs = &self.tgs;
-            let mut layer = tgs::Options {
-                target: Some(self.target),
-                tag: self.tag.clone().or_else(|| tgs.tag.clone()),
-                show_layers: self.show_layers.clone().or_else(|| tgs.show_layers.clone()),
-                hide_layers: self.hide_layers.clone().or_else(|| tgs.hide_layers.clone()),
-                crop: self.crop.or(tgs.crop),
-                start: self.start.or(tgs.start),
-                length: self.length.or(tgs.length),
-                ..tgs.clone()
-            };
-            // a sheet's frames, kept while it is unticked for when it is
-            // ticked again, are no conversion's
-            if layer.sheet.is_none() {
-                layer.sheet_frames = None;
+        match format {
+            Format::Webm => FormatOptions::Webm(self.webm_layer(presets, config)),
+            // a picture starts at its frame
+            Format::Webp => {
+                let layer = self.webm_layer(presets, config);
+                FormatOptions::Webp(webp::Options { start: self.frame, ..(&layer).into() })
             }
-            return FormatOptions::Tgs(layer);
+            Format::Tgs => FormatOptions::Tgs(self.tgs_layer()),
         }
+    }
+
+    /// The item's layer for WebM, as [`Choices::layer`] says, which a
+    /// picture's is made of.
+    pub(crate) fn webm_layer(&self, presets: &Presets, config: &Config) -> Options {
         let webm = &self.webm;
         let mut layer = Options {
             target: Some(self.target),
@@ -186,13 +181,28 @@ impl Choices {
         {
             layer.resize = base.resize.map(|_| picture::default_resize(self.target));
         }
-        match format {
-            // a picture starts at its frame
-            Format::Webp => {
-                FormatOptions::Webp(webp::Options { start: self.frame, ..(&layer).into() })
-            }
-            _ => FormatOptions::Webm(layer),
+        layer
+    }
+
+    /// The item's layer for `.tgs`, as [`Choices::layer`] says.
+    pub(crate) fn tgs_layer(&self) -> tgs::Options {
+        let tgs = &self.tgs;
+        let mut layer = tgs::Options {
+            target: Some(self.target),
+            tag: self.tag.clone().or_else(|| tgs.tag.clone()),
+            show_layers: self.show_layers.clone().or_else(|| tgs.show_layers.clone()),
+            hide_layers: self.hide_layers.clone().or_else(|| tgs.hide_layers.clone()),
+            crop: self.crop.or(tgs.crop),
+            start: self.start.or(tgs.start),
+            length: self.length.or(tgs.length),
+            ..tgs.clone()
+        };
+        // a sheet's frames, kept while it is unticked for when it is
+        // ticked again, are no conversion's
+        if layer.sheet.is_none() {
+            layer.sheet_frames = None;
         }
+        layer
     }
 
     /// What a conversion to `format` gets: the item's layer over its

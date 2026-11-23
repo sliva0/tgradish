@@ -15,7 +15,6 @@ All notable changes to tgradish, newest first. This file follows [Keep a Changel
 - Warnings about options that have no effect, such as `crf` with `--fit bitrate`, now come right after each input's `started` event, before any other warning.
 - The GUI now checks a preset's values before converting, as the CLI does. An out-of-range value, even one the other settings leave without effect (such as `fake-duration = 5.0` with `spoof = "never"`), now fails the conversion with a message naming the preset, instead of failing later or being ignored.
 - After updating, a result from an earlier session shows as out of date once if it was made with integer scaling over a preset's `crop` or `stretch` resize, or with sprite sheet frames set while the file wasn't read as a sheet.
-
 - In the `tgradish-core` library, `webp::Options` is now its own type holding only the options static WebP uses, instead of WebM's `webm::Options`. `webp::Request` and `FormatOptions::Webp` take it; `webp::PICTURE_OPTIONS` and `webp::picture_options` are removed (use `webp::Options::from(&webm_options)`).
 
 ### Removed
@@ -25,6 +24,7 @@ All notable changes to tgradish, newest first. This file follows [Keep a Changel
 ### Fixed
 
 - Converting to WebP no longer fails when the preset sets an out-of-range value that only WebM uses, such as `tempo = 50.0`. Only the options WebP uses are checked.
+- A preset saved from the GUI now converts in the CLI as the file it was saved from did in the GUI. Previously it could keep an integer scale the GUI wasn't using, without integer scaling, which the CLI then scaled by.
 - The command line in the GUI's Commands section no longer includes `--sheet-frames` while the file isn't read as a sprite sheet, which the CLI refused.
 - `tgradish inspect` now uses the `[ffmpeg]` setting from `config.toml` when inspecting videos, matching `convert`.
 - `tgradish watch` no longer permanently skips an input when an earlier input wrote the same output path before being deleted (for example, `cat.mp4` after `cat.png`). With `--overwrite`, the existing output is now replaced as expected.

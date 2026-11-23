@@ -292,8 +292,12 @@ impl App {
         let item = self.item(saving.item)?;
         let (presets, config) = (&self.presets, &self.config);
         let choices = &item.choices;
-        let webm = choices.webm_base(presets, config).unwrap_or_default().merged(&choices.webm);
-        let tgs = choices.tgs_base(presets, config).unwrap_or_default().merged(&choices.tgs);
+        // the item's layer over its preset, as converting takes them, so
+        // the preset makes what the item made, from the command line too
+        let webm = choices.webm_layer(presets, config);
+        let webm = choices.webm_base(presets, config).unwrap_or_default().merged(&webm);
+        let tgs =
+            choices.tgs_base(presets, config).unwrap_or_default().merged(&choices.tgs_layer());
         let description = saving.description.trim().to_owned();
         match presets::save(dir, &name, &description, (&webm, &tgs), exists) {
             Ok(_) => {
@@ -710,10 +714,10 @@ mod tests {
         harness.run_steps(2);
         harness.get_by_label(&fl!("save")).click();
         harness.run_steps(3);
-        // yet saved with the scale and the scaling both, which the
-        // command line scales by (divergence 8)
+        // and saved so, the scale cleared, as the command line takes it
+        // up too
         let saved = std::fs::read_to_string(presets_dir.join("mine.toml")).unwrap();
-        assert_eq!(saved, "[tgs]\n\n[webm]\ninteger-scale = \"2\"\nscaling = \"smooth\"\n");
+        assert_eq!(saved, "[tgs]\n\n[webm]\nscaling = \"smooth\"\n");
         assert_eq!(harness.state().items[0].choices.preset.as_deref(), Some("mine"));
         assert_eq!(recipe(&harness), crate::item::Recipe::Webm(smooth));
     }

@@ -1256,17 +1256,14 @@ mod tests {
     #[test]
     fn integer_scale_of_a_preset_the_gui_saved() {
         // as the GUI saves one where the item chose smooth scaling over a
-        // preset's integer scale (divergence 8)
-        let saved = "[tgs]\n\n[webm]\ninteger-scale = \"2\"\nscaling = \"smooth\"\n";
+        // preset's integer scale: without the scale, which the GUI set
+        // aside
+        let saved = "[tgs]\n\n[webm]\nscaling = \"smooth\"\n";
         let presets = presets(&[("mine", saved)]);
         let layered = layered(&presets, &Config::default(), Format::Webm, &["-p", "mine"], None);
-        // which core scales by, whatever the scaling (divergence 2)
-        let kept = Options {
-            scaling: Some(Scaling::Smooth),
-            integer_scale: "2".parse().ok(),
-            ..default()
-        };
-        assert_eq!(layered.unwrap(), webm(kept));
+        // so made as the GUI made it
+        let smooth = Options { scaling: Some(Scaling::Smooth), ..default() };
+        assert_eq!(layered.unwrap(), webm(smooth));
     }
 
     /// `--options-json` takes every key its format uses, by its old name
