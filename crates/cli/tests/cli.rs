@@ -1862,10 +1862,13 @@ fn plans_with_values_the_gui_sets_aside() {
         let events = json_lines(&output);
         assert_eq!(events.last().unwrap()["message"], said, "{events:?}");
     };
-    // lossless where fitting has no say: refused as each input is
-    // planned (divergence 1)
+    // lossless asked for where fitting has no say: refused before any
+    // input is read, where the GUI sets it aside
     let lossless = convert("webm", &["--lossless", "--fit", "auto"]);
-    refused(lossless, "lossless only works with fit fps, length or off");
+    assert_eq!(lossless.status.code(), Some(2));
+    let said = "--lossless only works with fit fps, length or off";
+    assert_eq!(json_lines(&lossless).last().unwrap()["message"], said);
+    assert!(!json_lines(&lossless).iter().any(|event| event["event"] == "started"));
     // an integer scale with a crop it can't go with (divergence 3)
     let cropped = ["--integer-scale", "2", "--scaling", "integer", "--resize", "crop"];
     let said = "resize crop cannot be used with integer-scale; use contain or pad";
@@ -1875,7 +1878,9 @@ fn plans_with_values_the_gui_sets_aside() {
     assert!(scaled.status.success(), "{}", String::from_utf8_lossy(&scaled.stderr));
     let finished = json_lines(&scaled).pop().unwrap();
     assert_eq!((finished["width"].as_u64(), finished["height"].as_u64()), (Some(512), Some(8)));
-    // and values fitting ignores, warned of (divergence 7)
+    // and values fitting ignores, set aside as the GUI does and warned of
+    // right after each input starts, which the GUI doesn't do
+    // (divergence 7)
     let ignored = ["--fit", "bitrate", "--crf", "20", "--spoof", "never", "--fake-duration", "1"];
     let output = convert("webm", &[&ignored[..], &["--length", "0.5"]].concat());
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -1928,8 +1933,6 @@ fn refuses_a_presets_bad_values_before_reading_inputs() {
     for (format, more, code, said) in [
         ("webm", &["-p", "slow"][..], 1, slow),
         ("tgs", &["-p", "slow"], 1, slow),
-        // though a picture has no tempo (divergence 5)
-        ("webp", &["-p", "slow"], 1, slow),
         // though spoofing never uses it (divergence 4)
         ("webm", &["-p", "late"], 1, late),
         ("tgs", &["-p", "cropped"], 1, cropped),
@@ -1941,13 +1944,18 @@ fn refuses_a_presets_bad_values_before_reading_inputs() {
         assert!(stderr.starts_with("error: ") && stderr.trim_end().ends_with(said), "{stderr}");
         assert!(!stderr.contains("Converting"), "{stderr}");
     }
-    // a preset's lossless where fitting has no say, refused as each input
-    // is planned, as the command line's is (divergence 1)
     if tgradish_corpus::ffmpeg_on_path() {
+        // a preset's lossless where fitting has no say, set aside as the
+        // GUI does, and warned of
         let output = convert("webm", &["-p", "lossless", "--fit", "auto"]);
-        assert_eq!(output.status.code(), Some(1));
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("lossless only works with fit fps, length or off"), "{stderr}");
+        assert_eq!(output.status.code(), Some(0), "{stderr}");
+        assert!(stderr.contains("lossless is ignored because fit is auto"), "{stderr}");
+        // and a picture made though its preset sets a tempo, which a
+        // picture doesn't have, as the GUI makes one
+        let output = convert("webp", &["-p", "slow"]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(0), "{stderr}");
     }
 }
 

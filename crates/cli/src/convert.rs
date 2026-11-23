@@ -11,8 +11,8 @@ use tgradish_core::config::Config;
 use tgradish_core::convert::{self, needs_backend};
 use tgradish_core::events::{Details, StartDetails};
 use tgradish_core::input::Input;
-use tgradish_core::presets::{Format, FormatOptions, PresetError, Presets};
-use tgradish_core::webm::Options;
+use tgradish_core::presets::{Format, FormatOptions, Presets};
+use tgradish_core::resolve::{Origin, ResolveError, SetAside, resolve};
 use tgradish_core::webp;
 use tgradish_core::{Event, Outcome, Started};
 
@@ -60,6 +60,8 @@ pub struct Converter<'a> {
     args: &'a ConversionArgs,
     /// Resolved format options: preset, then `--options-json`, then CLI flags.
     options: FormatOptions,
+    /// Warnings of the values set aside, given with each input as it starts.
+    set_aside: Vec<String>,
     /// Cached ffmpeg backend. Resolved up front for WebM and WebP (which always
     /// need it) so a missing ffmpeg fails before converting any input; resolved
     /// lazily for TGS (which only needs it for videos).
@@ -74,39 +76,20 @@ pub struct Converter<'a> {
     fps_unused_said: std::cell::Cell<bool>,
 }
 
-/// Deserialises `--options-json` into the option type for `format`.
-fn overlay<T: serde::de::DeserializeOwned>(
+/// `--options-json`'s options, as `format` takes them.
+fn json_options(
     json: &serde_json::Map<String, serde_json::Value>,
     format: Format,
-) -> Result<T> {
-    serde_json::from_value(json.clone().into()).map_err(|err| {
+) -> Result<FormatOptions> {
+    let json = serde_json::Value::Object(json.clone());
+    let read = match format {
+        Format::Webm => serde_json::from_value(json).map(FormatOptions::Webm),
+        Format::Webp => serde_json::from_value(json).map(FormatOptions::Webp),
+        Format::Tgs => serde_json::from_value(json).map(FormatOptions::Tgs),
+    };
+    read.map_err(|err| {
         crate::usage(format!("invalid --options-json for {} output: {err}", format.name()))
     })
-}
-
-/// Validates input-independent option values before converting any input.
-/// Bad values from a CLI flag or `--options-json` key fail as usage errors
-/// (exit 2); bad values from `preset` fail as ordinary errors.
-fn check_options(
-    options: &impl tgradish_core::options::Checked,
-    args: &ConversionArgs,
-    json: Option<&serde_json::Map<String, serde_json::Value>>,
-    preset: &str,
-) -> Result<()> {
-    let Err(tgradish_core::Error::InvalidOption { option, reason }) =
-        tgradish_core::options::check(options)
-    else {
-        return Ok(());
-    };
-    let mut flags = tgradish_core::options::set_keys(&args.options.to_options());
-    flags.extend(tgradish_core::options::set_keys(&args.options.to_tgs_options()));
-    if flags.iter().any(|key| key == option) {
-        return Err(crate::usage(format!("--{option} {reason}")));
-    }
-    if json.is_some_and(|json| json.contains_key(option)) {
-        return Err(crate::usage(format!("{option:?} in --options-json {reason}")));
-    }
-    bail!("preset {preset:?} sets {option}, which {reason}")
 }
 
 /// Resolves the output format from `--format`, then `-o`'s extension, then
@@ -148,9 +131,10 @@ fn check_output(output: &Path, format: Format) -> Result<()> {
     }
 }
 
-/// Layers the options for `format`: the preset's (named by `--preset`, or
-/// else by the config), then `--options-json`'s, then the flags', each over
-/// the last, and checks them before any input is read.
+/// What the options for `format` come to: the preset's (named by
+/// `--preset`, or else by the config), then `--options-json`'s, then the
+/// flags', each over the last, checked before any input is read. Also
+/// returns the warnings each input gets of the values set aside.
 fn layer_options(
     presets: &Presets,
     config: &Config,
@@ -158,21 +142,22 @@ fn layer_options(
     args: &ConversionArgs,
     json: Option<&serde_json::Map<String, serde_json::Value>>,
     format: Format,
-) -> Result<FormatOptions> {
-    // preset, then --options-json, then flags
+) -> Result<(FormatOptions, Vec<String>)> {
+    let mut layers = Vec::new();
+    if let Some(json) = json {
+        layers.push(json_options(json, format)?);
+    }
+    let flags = layers.len();
+    layers.push(match format {
+        Format::Webm => FormatOptions::Webm(args.options.to_options()),
+        Format::Webp => FormatOptions::Webp(webp::Options::from(&args.options.to_options())),
+        Format::Tgs => FormatOptions::Tgs(args.options.to_tgs_options()),
+    });
     let name = args.preset.as_deref().unwrap_or_else(|| config.preset_for(format));
-    let webm = |mut options: Options| -> Result<Options> {
-        if let Some(json) = json {
-            options = options.merged(&overlay(json, format)?);
-        }
-        let options = options.merged(&args.options.to_options());
-        check_options(&options, args, json, name)?;
-        Ok(options)
-    };
-    let unknown = |err| match err {
-        tgradish_core::Error::Preset(PresetError::Unknown { known, .. }) => {
+    let refused = |err| match err {
+        ResolveError::UnknownPreset { known, named, .. } => {
             let known = known.join(", ");
-            if args.preset.is_some() {
+            if named {
                 return crate::usage(format!("unknown --preset {name:?}; available: {known}"));
             }
             // the only other place a preset is named
@@ -181,33 +166,42 @@ fn layer_options(
             let place = file.map_or(String::new(), |file| format!(" ({file}: {key})"));
             anyhow::anyhow!("unknown {key} {name:?} in config{place}; available: {known}")
         }
+        ResolveError::Preset(err) => tgradish_core::Error::Preset(err).into(),
+        // clap checks most flags' values as it reads them, so mostly JSON's
+        ResolveError::Invalid { option, reason, set_by: Origin::Layer(layer), .. } => {
+            if layer == flags {
+                crate::usage(format!("--{option} {reason}"))
+            } else {
+                crate::usage(format!("{option:?} in --options-json {reason}"))
+            }
+        }
+        ResolveError::Requires { option, requires, set_by: Origin::Layer(layer) } => {
+            if layer == flags {
+                crate::usage(format!("--{option} requires --{requires}"))
+            } else {
+                crate::usage(format!("{option:?} in --options-json requires {requires:?}"))
+            }
+        }
+        // the preset's, said naming it
         err => err.into(),
     };
-    Ok(match format {
-        Format::Webm => FormatOptions::Webm(webm(presets.webm(name).map_err(unknown)?)?),
-        // checked as all of WebM's are, the preset's too, and only then cut
-        // down to what a picture has
-        Format::Webp => {
-            let options = webm(presets.webm(name).map_err(unknown)?)?;
-            FormatOptions::Webp(webp::Options::from(&options))
-        }
-        Format::Tgs => {
-            let mut options = presets.tgs(name).map_err(unknown)?;
-            if let Some(json) = json {
-                options = options.merged(&overlay(json, format)?);
+    let resolved =
+        resolve(presets, config, format, args.preset.as_deref(), &layers).map_err(refused)?;
+    let mut warnings = Vec::new();
+    for SetAside { option, why, set_by } in resolved.set_aside {
+        // lossless asked for where fitting has no use for it is refused, as
+        // what was asked can't be made; a preset's is only warned of
+        match (option, set_by) {
+            ("lossless", Origin::Layer(layer)) => {
+                let named =
+                    if layer == flags { "--lossless" } else { "\"lossless\" in --options-json" };
+                let said = format!("{named} only works with fit fps, length or off");
+                return Err(crate::usage(said));
             }
-            let options = options.merged(&args.options.to_tgs_options());
-            check_options(&options, args, json, name)?;
-            // how a sheet is read, of a sheet that isn't one
-            if options.sheet_frames.is_some() && options.sheet.is_none() {
-                return Err(crate::usage(match args.options.sheet_frames {
-                    Some(_) => "--sheet-frames requires --sheet",
-                    None => "\"sheet-frames\" in --options-json requires \"sheet\"",
-                }));
-            }
-            FormatOptions::Tgs(options)
+            _ => warnings.push(format!("{option} is ignored because {why}")),
         }
-    })
+    }
+    Ok((resolved.options, warnings))
 }
 
 impl<'a> Converter<'a> {
@@ -245,7 +239,7 @@ impl<'a> Converter<'a> {
         }
         let presets = Presets::load_user()?;
         let config_file = ctx.config_file.as_ref();
-        let options =
+        let (options, set_aside) =
             layer_options(&presets, &ctx.config, config_file, args, json.as_ref(), format)?;
         let backend = match format {
             Format::Webm | Format::Webp => Some(ctx.backend().map_err(|err| ctx.explain(err))?),
@@ -269,6 +263,7 @@ impl<'a> Converter<'a> {
             ctx,
             args,
             options,
+            set_aside,
             backend,
             written: Default::default(),
             fps_given,
@@ -329,10 +324,17 @@ impl<'a> Converter<'a> {
             matches!(&self.options, FormatOptions::Tgs(options) if options.exact_or_default());
         let mut printer = Printer::new(self.ctx, exact);
         let mut on_event = |event: Event| {
-            if json {
-                crate::json_line(&event);
-            } else {
-                printer.event(event);
+            let started = matches!(event, Event::Started(_));
+            let mut say = |event: Event| match json {
+                true => crate::json_line(&event),
+                false => printer.event(event),
+            };
+            say(event);
+            // of each input, where planning it would say them
+            if started {
+                for message in &self.set_aside {
+                    say(Event::Warning { message: message.clone() });
+                }
             }
         };
         let request = convert::Request {
@@ -882,6 +884,7 @@ mod tests {
     use clap::Parser;
     use tgradish_core::options::{Effort, Fit, IntegerScale, Resize, Scaling, Spoof};
     use tgradish_core::tgs;
+    use tgradish_core::webm::Options;
 
     /// The conversion arguments clap reads from `flags`.
     fn args(flags: &[&str]) -> ConversionArgs {
@@ -903,6 +906,19 @@ mod tests {
         Presets::load(Some(dir.path())).unwrap()
     }
 
+    /// What the command line makes of `flags` and `json` for `format`, and
+    /// the warnings each input gets.
+    fn layered_warned(
+        presets: &Presets,
+        config: &Config,
+        format: Format,
+        flags: &[&str],
+        json: Option<serde_json::Value>,
+    ) -> Result<(FormatOptions, Vec<String>)> {
+        let json = json.map(|json| json.as_object().expect("an object").clone());
+        layer_options(presets, config, None, &args(flags), json.as_ref(), format)
+    }
+
     /// What the command line makes of `flags` and `json` for `format`.
     fn layered(
         presets: &Presets,
@@ -911,13 +927,12 @@ mod tests {
         flags: &[&str],
         json: Option<serde_json::Value>,
     ) -> Result<FormatOptions> {
-        let json = json.map(|json| json.as_object().expect("an object").clone());
-        layer_options(presets, config, None, &args(flags), json.as_ref(), format)
+        layered_warned(presets, config, format, flags, json).map(|(options, _)| options)
     }
 
     /// Why layering failed, and whether it is the command line's fault
     /// (exit 2) or else the preset's or config's (exit 1).
-    fn refused(layered: Result<FormatOptions>) -> (bool, String) {
+    fn refused<T: std::fmt::Debug>(layered: Result<T>) -> (bool, String) {
         let err = layered.expect_err("refused");
         (err.downcast_ref::<crate::Usage>().is_some(), err.to_string())
     }
@@ -936,14 +951,18 @@ mod tests {
         let presets = presets(&[("child", child)]);
         let config = Config::default();
         let layered = |format| layered(&presets, &config, format, &["-p", "child"], None).unwrap();
-        // the crf fitting has no say over is kept, and planning warns of it
+        // the crf fitting has no say over is set aside, as the GUI sets it
+        // aside, and warned of with each input, which the GUI doesn't do
         // (divergence 7); the target is left to its default
-        let fitted =
-            Options { fit: Some(Fit::Crf), crf: Some(20), effort: Some(Effort::Fast), ..default() };
-        assert_eq!(layered(Format::Webm), webm(fitted));
+        let warned = layered_warned(&presets, &config, Format::Webm, &["-p", "child"], None);
+        let fitted = Options { fit: Some(Fit::Crf), effort: Some(Effort::Fast), ..default() };
+        assert_eq!(
+            warned.unwrap(),
+            (webm(fitted), vec!["crf is ignored because fit is crf".into()])
+        );
         let tgs = tgs::Options { effort: Some(Effort::Fast), exact: Some(false), ..default() };
         assert_eq!(layered(Format::Tgs), FormatOptions::Tgs(tgs));
-        // a picture's only, all of WebM's checked first (divergence 5)
+        // a picture's only, and only those checked
         assert_eq!(layered(Format::Webp), webp(default()));
     }
 
@@ -972,20 +991,44 @@ mod tests {
     fn crf_under_a_presets_bitrate_fit() {
         let presets = presets(&[("by bitrate", "[webm]\nfit = 'bitrate'\ncrf = 20\n")]);
         let layered =
-            layered(&presets, &Config::default(), Format::Webm, &["-p", "by bitrate"], None);
-        // kept, for planning to warn of (divergence 7)
-        let kept = Options { fit: Some(Fit::Bitrate), crf: Some(20), ..default() };
-        assert_eq!(layered.unwrap(), webm(kept));
+            layered_warned(&presets, &Config::default(), Format::Webm, &["-p", "by bitrate"], None);
+        // set aside, as the GUI does, and warned of with each input, which
+        // the GUI doesn't do (divergence 7)
+        let fitted = Options { fit: Some(Fit::Bitrate), ..default() };
+        let warned = vec!["crf is ignored because fit is bitrate".to_owned()];
+        assert_eq!(layered.unwrap(), (webm(fitted), warned));
     }
 
     #[test]
     fn lossless_under_fit_auto() {
         let presets = presets(&[("lossless", "[webm]\nlossless = true\n")]);
+        let config = Config::default();
         let flags = ["-p", "lossless", "--fit", "auto"];
-        let layered = layered(&presets, &Config::default(), Format::Webm, &flags, None);
-        // kept, for planning to refuse for each input (divergence 1)
-        let kept = Options { fit: Some(Fit::Auto), lossless: Some(true), ..default() };
-        assert_eq!(layered.unwrap(), webm(kept));
+        let presets_lossless = layered_warned(&presets, &config, Format::Webm, &flags, None);
+        // a preset's set aside, as the GUI does, and warned of with each
+        // input
+        let fitted = Options { fit: Some(Fit::Auto), ..default() };
+        let warned = vec!["lossless is ignored because fit is auto".to_owned()];
+        assert_eq!(presets_lossless.unwrap(), (webm(fitted.clone()), warned));
+        // the command line's refused before any input is read, as what it
+        // asks for can't be made
+        let flags = ["--lossless", "--fit", "auto"];
+        let said = "--lossless only works with fit fps, length or off";
+        assert_eq!(
+            refused(layered_warned(&presets, &config, Format::Webm, &flags, None)),
+            (true, said.into())
+        );
+        let json = Some(serde_json::json!({ "lossless": true, "fit": "bitrate" }));
+        let said = "\"lossless\" in --options-json only works with fit fps, length or off";
+        assert_eq!(
+            refused(layered(&presets, &config, Format::Webm, &[], json)),
+            (true, said.into())
+        );
+        // and off where it has no say, which changes nothing, is said by
+        // neither
+        let flags = ["-p", "lossless", "--no-lossless", "--fit", "auto"];
+        let off = layered_warned(&presets, &config, Format::Webm, &flags, None);
+        assert_eq!(off.unwrap(), (webm(fitted), vec![]));
     }
 
     #[test]
@@ -1009,11 +1052,13 @@ mod tests {
             ("too long", "[webm]\nspoof = 'never'\nfake-duration = 5.0\n"),
         ]);
         let config = Config::default();
-        // kept, for planning to warn of (divergence 7)
-        let never = layered(&presets, &config, Format::Webm, &["-p", "never"], None);
-        let kept = Options { spoof: Some(Spoof::Never), fake_duration: Some(1.0), ..default() };
-        assert_eq!(never.unwrap(), webm(kept));
-        // and checked though it has no say (divergence 4)
+        // set aside, as the GUI does, and warned of with each input, which
+        // the GUI doesn't do (divergence 7)
+        let never = layered_warned(&presets, &config, Format::Webm, &["-p", "never"], None);
+        let never_spoofed = Options { spoof: Some(Spoof::Never), ..default() };
+        let warned = vec!["fake-duration is ignored because spoof is never".to_owned()];
+        assert_eq!(never.unwrap(), (webm(never_spoofed), warned));
+        // and checked first, though it has no say (divergence 4)
         let too_long = layered(&presets, &config, Format::Webm, &["-p", "too long"], None);
         assert_eq!(
             refused(too_long),
@@ -1126,11 +1171,10 @@ mod tests {
         let picture = layered(&presets, &config, Format::Webp, &flags, None);
         let sharp = webp::Options { scaling: Some(Scaling::Sharp), start: Some(1.5), ..default() };
         assert_eq!(picture.unwrap(), webp(sharp));
-        // though all of WebM's are checked first, so a value a picture
-        // doesn't use is too (divergence 5)
+        // and only those checked, so a value a picture doesn't use doesn't
+        // stop one being made, as in the GUI
         let tempo = layered(&presets, &config, Format::Webp, &["-p", "fast tempo"], None);
-        let said = "preset \"fast tempo\" sets tempo, which must be from 0.1 to 10";
-        assert_eq!(refused(tempo), (false, said.into()));
+        assert_eq!(tempo.unwrap(), webp(default()));
     }
 
     #[test]
@@ -1306,8 +1350,10 @@ mod tests {
             let args = args(&["-p", "none"]);
             assert_eq!(args.options.unused(format, given.as_object()), [""; 0], "{format:?}");
             let layered = layered(&presets, &config, format, &["-p", "none"], Some(given.clone()));
-            let layered = layered.unwrap_or_else(|err| panic!("{format:?}: {err}"));
-            assert_eq!(&serde_json::to_value(&layered).unwrap(), written, "{format:?}");
+            layered.unwrap_or_else(|err| panic!("{format:?}: {err}"));
+            // as read, before what has no say is set aside
+            let read = json_options(given.as_object().unwrap(), format).unwrap();
+            assert_eq!(&serde_json::to_value(&read).unwrap(), written, "{format:?}");
         }
     }
 

@@ -7,8 +7,12 @@ All notable changes to tgradish, newest first. This file follows [Keep a Changel
 ### Added
 
 - `tgradish config init` writes the example config where tgradish reads it, creating its directory, and never overwrites an existing config.
+- In the `tgradish-core` library, `resolve::resolve` layers a preset's options and any number of layers over them into a conversion's, checks them, and sets aside values that have no effect, saying who set each.
 
 ### Changed
+
+- `--lossless` (or `"lossless"` in `--options-json`) with a fit that doesn't keep a constant quality (`auto`, `bitrate` or `crf`) now fails with exit status 2 before any input is read, instead of failing each input with 1. A preset's `lossless` there is ignored with a warning instead.
+- Warnings about options that have no effect, such as `crf` with `--fit bitrate`, now come right after each input's `started` event, before any other warning.
 
 - In the `tgradish-core` library, `webp::Options` is now its own type holding only the options static WebP uses, instead of WebM's `webm::Options`. `webp::Request` and `FormatOptions::Webp` take it; `webp::PICTURE_OPTIONS` and `webp::picture_options` are removed (use `webp::Options::from(&webm_options)`).
 
@@ -18,6 +22,7 @@ All notable changes to tgradish, newest first. This file follows [Keep a Changel
 
 ### Fixed
 
+- Converting to WebP no longer fails when the preset sets an out-of-range value that only WebM uses, such as `tempo = 50.0`. Only the options WebP uses are checked.
 - `tgradish inspect` now uses the `[ffmpeg]` setting from `config.toml` when inspecting videos, matching `convert`.
 - `tgradish watch` no longer permanently skips an input when an earlier input wrote the same output path before being deleted (for example, `cat.mp4` after `cat.png`). With `--overwrite`, the existing output is now replaced as expected.
 - Stickers no longer come out blank and pass checks when snapping to the pixel scale or a square crop removes thin lines or lone pixels. Conversion now reports that the art is empty, and size fitting no longer reduces art to nothing.
