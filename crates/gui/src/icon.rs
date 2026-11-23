@@ -39,7 +39,8 @@ pub(crate) fn window() -> egui::IconData {
     egui::IconData { rgba, width: side as u32, height: side as u32 }
 }
 
-/// The icon as a texture, made once.
+/// The icon as a texture, made once: kept in egui's memory as long as the
+/// GUI runs, under a key of this function's alone.
 fn texture(ctx: &egui::Context) -> egui::TextureHandle {
     let id = egui::Id::new("tgradish icon");
     if let Some(texture) = ctx.data(|data| data.get_temp(id)) {

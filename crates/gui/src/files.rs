@@ -650,7 +650,9 @@ const PULSE_MOST: f32 = 0.25;
 /// window, and to go back.
 const DROP_FADE: f32 = 0.12;
 
-/// How far the list is lit up as where files go, in egui's memory.
+/// How far the list is lit up as where files go, as egui animates it, and
+/// where it was lit up, a `Rect` in egui's memory, which only tests read:
+/// both the list's own.
 fn drop_id() -> egui::Id {
     egui::Id::new("files dropping")
 }

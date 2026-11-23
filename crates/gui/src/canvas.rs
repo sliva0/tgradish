@@ -899,7 +899,8 @@ const PER_POINT: f32 = 0.002;
 /// How fast scrolling zooms, by each point scrolled, as the wheel's last
 /// turn came: a notch of a mouse wheel, which egui scrolls by so many
 /// points, zooms by [`NOTCH`]; a touchpad's scrolling, by points, as far
-/// as it scrolls, finer.
+/// as it scrolls, finer. How the last turn came is kept in egui's memory,
+/// a `bool` under a key of this function's alone.
 fn wheel_rate(ui: &egui::Ui) -> f32 {
     let id = egui::Id::new("wheel in notches");
     let notched = ui.input(|input| {

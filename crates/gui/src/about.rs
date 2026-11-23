@@ -48,6 +48,8 @@ pub(crate) fn about(ui: &mut egui::Ui) {
     let room = (ui.ctx().content_rect().height() - chrome).clamp(LEAST_ROOM, MOST_ROOM);
     let area = egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(room);
     widgets::scrolled(ui, area, |ui| {
+        // read once, and kept in egui's memory as long as the GUI runs,
+        // under a key of About's alone
         let notices = ui.ctx().memory_mut(|memory| {
             memory
                 .data

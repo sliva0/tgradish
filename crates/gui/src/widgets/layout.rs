@@ -326,7 +326,8 @@ pub(crate) fn row<R>(
     inner
 }
 
-/// egui memory ID for the stack of active [`row`] label IDs (innermost last).
+/// egui memory ID for the stack of active [`row`] label IDs (innermost last):
+/// pushed and popped by [`row`] as it draws, read by [`row_label`].
 fn row_labels_id() -> egui::Id {
     egui::Id::new("row labels")
 }

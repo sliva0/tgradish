@@ -66,7 +66,9 @@ fn grid(ui: &mut egui::Ui, id: &str, rows: impl FnOnce(&mut egui::Ui)) {
     egui::Grid::new(id).num_columns(2).min_col_width(least).spacing([BETWEEN, 7.0]).show(ui, rows);
 }
 
-/// Where [`grid`] keeps the room its rows have for what they say.
+/// Where [`grid`] keeps the room its rows have for what they say, an
+/// `f32`: written by each grid of the dialog as it is drawn, and read by
+/// its rows with [`room`].
 fn room_id() -> egui::Id {
     egui::Id::new("inspect room")
 }

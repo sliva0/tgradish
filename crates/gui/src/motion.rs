@@ -14,6 +14,9 @@ use eframe::egui;
 /// in quick turns.
 const ANIMATION: f32 = 0.15;
 
+/// Whether things move, a `bool` in egui's memory: [`set`] by `App` as
+/// each frame starts, from the settings and the system, and read by
+/// whatever moves with [`motion`], wherever it is drawn.
 fn id() -> egui::Id {
     egui::Id::new("motion")
 }
