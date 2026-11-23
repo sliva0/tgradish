@@ -3,17 +3,16 @@
 
 use std::path::PathBuf;
 
-use schemars::JsonSchema;
 use serde::Serialize;
 use tgradish_tgs::normalise::Report;
 use tgradish_tgs::sticker::Step;
 
 use crate::presets::Format;
 use crate::preview::Preview;
-use crate::protocol::Failure;
 use crate::telegram::{Issue, Target};
 use crate::webm::{Decision, Params, Plan};
 use crate::webp::Encoding;
+use crate::wire::Failure;
 
 /// Progress event emitted during conversion and printed as NDJSON by
 /// `convert --json` and `watch --json`.
@@ -22,7 +21,7 @@ use crate::webp::Encoding;
 /// [`Event::Finished`]. Between them, WebM emits encoding and fitting events,
 /// `.tgs` emits fitting and progress events, and WebP only warnings (any
 /// format can emit [`Event::Warning`]).
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "event", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum Event {
@@ -134,15 +133,15 @@ pub enum Event {
 
 /// Payload for [`Event::Started`]: input, output, format, target, size limit,
 /// and format-specific start details.
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Started {
     /// Input path (or first image/directory of a sequence).
-    #[serde(serialize_with = "crate::protocol::serialize_path")]
+    #[serde(serialize_with = "crate::wire::serialize_path")]
     pub input: PathBuf,
     /// Destination output path.
-    #[serde(serialize_with = "crate::protocol::serialize_path")]
+    #[serde(serialize_with = "crate::wire::serialize_path")]
     pub output: PathBuf,
     /// Output format.
     pub format: Format,
@@ -156,7 +155,7 @@ pub struct Started {
 }
 
 /// Format-specific fields flattened into [`Started`].
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged, rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum StartDetails {
@@ -175,15 +174,15 @@ pub enum StartDetails {
 }
 
 /// Final result of a successful conversion across any format.
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Outcome {
     /// Input path (or first image/directory of a sequence).
-    #[serde(serialize_with = "crate::protocol::serialize_path")]
+    #[serde(serialize_with = "crate::wire::serialize_path")]
     pub input: PathBuf,
     /// Path where the output was written.
-    #[serde(serialize_with = "crate::protocol::serialize_path")]
+    #[serde(serialize_with = "crate::wire::serialize_path")]
     pub output: PathBuf,
     /// Output format.
     pub format: Format,
@@ -206,7 +205,7 @@ pub struct Outcome {
 }
 
 /// Format-specific fields flattened into [`Outcome`].
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged, rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum Details {
@@ -222,7 +221,7 @@ pub enum Details {
         /// [`CancelToken::settle`](crate::CancelToken::settle).
         settled: bool,
         /// Directory holding kept intermediate files, if `keep_temp` was set.
-        #[serde(serialize_with = "crate::protocol::serialize_optional_path")]
+        #[serde(serialize_with = "crate::wire::serialize_optional_path")]
         temp_dir: Option<PathBuf>,
     },
     /// `.tgs` result metadata.

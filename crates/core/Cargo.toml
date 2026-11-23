@@ -27,7 +27,7 @@ clipboard = ["dep:arboard"]
 
 [dependencies]
 flate2.workspace = true
-tgradish-tgs = { workspace = true, features = ["schema", "threads"] }
+tgradish-tgs = { workspace = true, features = ["threads"] }
 
 arboard = { workspace = true, optional = true }
 directories.workspace = true
@@ -35,7 +35,6 @@ image-webp.workspace = true
 libwebp-sys.workspace = true
 ffmpeg-next = { workspace = true, optional = true }
 png.workspace = true
-schemars.workspace = true
 serde.workspace = true
 # Preserve struct field order when serialising options to CLI flags.
 serde_json = { workspace = true, features = ["preserve_order"] }

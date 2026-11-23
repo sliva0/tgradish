@@ -12,7 +12,6 @@ use serde_json::Value;
 use crate::limits::{MAX_RAW_JSON, TLOTTIE, telegram};
 
 /// Summary statistics of a Lottie document relevant to Telegram's limits.
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
@@ -67,7 +66,6 @@ pub struct Stats {
     pub features: BTreeSet<&'static str>,
 }
 
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 /// Severity of a validation [`Issue`].
@@ -80,7 +78,6 @@ pub enum Severity {
     Warning,
 }
 
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 /// A problem found in a sticker by [`check`].
@@ -95,7 +92,6 @@ pub struct Issue {
 }
 
 /// Category of a validation [`Issue`].
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]

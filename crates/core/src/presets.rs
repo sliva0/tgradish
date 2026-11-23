@@ -23,7 +23,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, FileAction, Result};
@@ -41,7 +40,7 @@ pub const DEFAULT_PRESET: &str = "balanced";
 pub const DEFAULT_TGS_PRESET: &str = "best";
 
 /// Output format for conversions.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Format {
     /// Video stickers and custom emoji (VP9 in WebM), from any video or image.
@@ -108,18 +107,9 @@ impl Format {
     /// [`crate::webp::PICTURE_OPTIONS`] for WebP.
     pub fn uses(self, key: &str) -> bool {
         let key = crate::options::current_key(key);
-        static WEBM: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-        static TGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-        let known = |keys: &std::sync::OnceLock<Vec<String>>, schema: fn() -> schemars::Schema| {
-            let keys = keys.get_or_init(|| {
-                let schema = serde_json::to_value(schema()).unwrap_or_default();
-                schema["properties"].as_object().map_or(Vec::new(), |p| p.keys().cloned().collect())
-            });
-            keys.iter().any(|known| known == key)
-        };
         match self {
-            Format::Webm => known(&WEBM, || schemars::schema_for!(Options)),
-            Format::Tgs => known(&TGS, || schemars::schema_for!(tgs::Options)),
+            Format::Webm => Options::keys().any(|known| known == key),
+            Format::Tgs => tgs::Options::keys().any(|known| known == key),
             Format::Webp => crate::webp::PICTURE_OPTIONS.contains(&key),
         }
     }
@@ -148,7 +138,7 @@ impl Format {
 }
 
 /// Format-specific options bundled with their target format.
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum FormatOptions {
     /// Options for WebM output.
@@ -205,7 +195,7 @@ struct PresetFile {
 }
 
 /// Named preset definition (built-in or loaded from a `.toml` file).
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Preset {
     /// Preset name (filename without `.toml` for user presets).
     pub name: String,
@@ -270,13 +260,10 @@ impl Preset {
 /// The options a preset's table for `format` can set, in the order of
 /// their fields: all that `format` takes but [`PER_FILE`].
 fn preset_keys(format: Format) -> Vec<String> {
-    let schema = match format {
-        Format::Tgs => schemars::schema_for!(tgs::Options),
-        Format::Webm | Format::Webp => schemars::schema_for!(Options),
+    let keys: Vec<String> = match format {
+        Format::Tgs => tgs::Options::keys().collect(),
+        Format::Webm | Format::Webp => Options::keys().collect(),
     };
-    let schema = serde_json::to_value(schema).unwrap_or_default();
-    let keys = schema["properties"].as_object().map(|keys| keys.keys().cloned().collect());
-    let keys: Vec<String> = keys.unwrap_or_default();
     keys.into_iter().filter(|key| !PER_FILE.contains(&key.as_str())).collect()
 }
 
@@ -391,6 +378,26 @@ struct Resolved {
     tgs: std::result::Result<tgs::Options, PresetError>,
 }
 
+/// One preset as `preset list --json` prints it ([`Presets::listed`]).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub struct Listed {
+    /// Preset name.
+    pub name: String,
+    /// Preset description (empty if omitted or broken).
+    pub description: String,
+    /// True for built-in presets; false for user preset files.
+    pub builtin: bool,
+    /// Resolved WebM/WebP options (with `extends` applied), or `None` if
+    /// broken.
+    pub webm: Option<Options>,
+    /// Resolved `.tgs` options (with `extends` applied), or `None` if broken.
+    pub tgs: Option<tgs::Options>,
+    /// Error message if the preset is invalid for either format.
+    pub error: Option<String>,
+}
+
 impl Presets {
     /// Built-in presets only.
     pub fn builtin() -> Self {
@@ -445,6 +452,27 @@ impl Presets {
     /// Every preset, with why for the ones that failed to load.
     pub fn iter(&self) -> impl Iterator<Item = (&str, std::result::Result<&Preset, &PresetError>)> {
         self.entries.iter().map(|(name, entry)| (name.as_str(), entry.as_ref()))
+    }
+
+    /// Every preset as `preset list --json` prints it, broken ones too.
+    pub fn listed(&self) -> Vec<Listed> {
+        self.iter()
+            .map(|(name, preset)| {
+                let (webm, tgs) = (self.webm(name), self.tgs(name));
+                let error = match (&webm, &tgs) {
+                    (Err(err), _) | (_, Err(err)) => Some(err.to_string()),
+                    _ => None,
+                };
+                Listed {
+                    name: name.to_string(),
+                    description: preset.map(|p| p.description.clone()).unwrap_or_default(),
+                    builtin: preset.is_ok_and(|p| p.path.is_none()),
+                    webm: webm.ok(),
+                    tgs: tgs.ok(),
+                    error,
+                }
+            })
+            .collect()
     }
 
     /// The preset `name`, as loaded: [`PresetError::Unknown`] when there
@@ -824,6 +852,15 @@ mod tests {
         // every option a picture has is WebM's
         for key in crate::webp::PICTURE_OPTIONS {
             assert!(Format::Webm.uses(key), "{key}");
+        }
+        // the keys named are the ones serde reads, as it refuses others
+        for key in Options::keys() {
+            let read = serde_json::from_value::<Options>(serde_json::json!({ &key: null }));
+            assert!(read.is_ok(), "{key}: {read:?}");
+        }
+        for key in tgs::Options::keys() {
+            let read = serde_json::from_value::<tgs::Options>(serde_json::json!({ &key: null }));
+            assert!(read.is_ok(), "{key}: {read:?}");
         }
         let all = Options {
             crf: Some(30),

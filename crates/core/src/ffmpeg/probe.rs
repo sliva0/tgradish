@@ -7,7 +7,6 @@ use std::process::Command;
 use super::orientation::{Orientation, parse_display_matrix};
 use super::{Output, run};
 use crate::CancelToken;
-use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -15,7 +14,7 @@ use super::Ffmpeg;
 use crate::error::{Error, Result};
 
 /// Properties of an input video, as reported by ffprobe.
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Probe {

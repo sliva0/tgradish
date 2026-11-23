@@ -4,11 +4,9 @@
     "```"
 )]
 
-use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, FileAction, Result};
@@ -31,7 +29,7 @@ pub fn starting_example() -> String {
 }
 
 /// User configuration loaded from `config.toml` ([`Config::default_path`]).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Config {
     /// Default preset for WebM and WebP output.
@@ -45,7 +43,6 @@ pub struct Config {
     /// GUI-specific settings preserved verbatim so newer GUI keys never break
     /// the CLI.
     #[serde(skip_serializing_if = "toml::Table::is_empty")]
-    #[schemars(with = "BTreeMap<String, serde_json::Value>")]
     pub gui: toml::Table,
 }
 
@@ -61,7 +58,7 @@ impl Config {
 }
 
 /// `[ffmpeg]` section of `config.toml`.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct FfmpegConfig {
     /// Where to locate ffmpeg (equivalent to `--ffmpeg-from`).
@@ -184,19 +181,6 @@ impl<'de> Deserialize<'de> for Threads {
             }
         }
         deserializer.deserialize_any(Visitor)
-    }
-}
-
-impl JsonSchema for Threads {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "Threads".into()
-    }
-
-    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({
-            "anyOf": [{ "const": "auto" }, { "type": "integer", "minimum": 1 }],
-            "description": "Maximum threads per conversion: \"auto\" or an integer >= 1"
-        })
     }
 }
 

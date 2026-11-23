@@ -59,7 +59,6 @@ const LAYER_ESTIMATE: usize = 10;
 const TILE: u32 = 32;
 
 /// Encoder search effort level.
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Effort {

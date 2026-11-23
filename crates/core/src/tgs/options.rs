@@ -3,7 +3,6 @@
 
 use std::time::Duration;
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tgradish_tgs::encode;
 use tgradish_tgs::frames::Sheet;
@@ -17,26 +16,21 @@ use crate::telegram::{self, Target};
 
 /// Options for `.tgs` output. Like [`crate::webm::Options`], every field is
 /// optional so presets and flags can be layered.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-// `describe` titles the schema as it always has
-#[schemars(rename = "TgsOptions")]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Options {
     /// Target type: sticker or emoji (both are 512×512). Default: sticker.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<Target>,
     /// Start offset in seconds.
-    #[schemars(range(min = 0.0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start: Option<f64>,
     /// Maximum duration in seconds to read from `start`. Default: full
     /// remaining duration.
-    #[schemars(extend("exclusiveMinimum" = 0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub length: Option<f64>,
     /// Playback speed multiplier (0.1 to 10); anything still over 3 seconds is
     /// trimmed. Default: sped up to fit within 3 seconds.
-    #[schemars(range(min = 0.1, max = 10.0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tempo: Option<f64>,
     /// Encoder effort (`best` takes a few seconds). Default: best.
@@ -71,7 +65,6 @@ pub struct Options {
     pub keep_canvas: Option<bool>,
     /// Size of one art pixel in source pixels; misaligned edges are snapped to
     /// this grid. Default: auto-detected.
-    #[schemars(range(min = 1))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pixel_scale: Option<u32>,
     /// Aseprite tag to export. Default: all frames.
@@ -90,11 +83,9 @@ pub struct Options {
     pub sheet: Option<crate::options::Sheet>,
     /// Number of frames to read from a sprite sheet. Default: all cells except
     /// trailing empty ones.
-    #[schemars(range(min = 1))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sheet_frames: Option<u32>,
     /// Playback frame rate for sprite sheets and image sequences. Default: 12.
-    #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 60))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<f64>,
     /// Lottie name stored in the sticker.

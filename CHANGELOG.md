@@ -8,6 +8,10 @@ All notable changes to tgradish, newest first. This file follows [Keep a Changel
 
 - `tgradish config init` writes the example config where tgradish reads it, creating its directory, and never overwrites an existing config.
 
+### Removed
+
+- `tgradish describe`, which printed JSON Schemas of options and events. `--json` output is unchanged.
+
 ### Fixed
 
 - `tgradish inspect` now uses the `[ffmpeg]` setting from `config.toml` when inspecting videos, matching `convert`.

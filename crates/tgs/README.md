@@ -30,7 +30,6 @@ Because it uses pure Rust with no filesystem access, subprocesses or
 ffmpeg, `tgradish-tgs` compiles to `wasm32-unknown-unknown`.
 
 - `threads` — evaluates size-fitting candidates across multiple threads.
-- `schema` — derives kebab-case JSON Schemas for options and reports.
 - `internals` — exposes internal encoder APIs for tgradish's research tools
   (unstable, exempt from semver).
 

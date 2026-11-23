@@ -1,12 +1,11 @@
 //! Rotation and mirroring decoded from a video's display matrix, matching
 //! `ffmpeg`'s autorotation so both backends orient phone videos identically.
 
-use schemars::JsonSchema;
 use serde::Serialize;
 
 /// How frames are turned for display, from a video's display matrix. This
 /// is what the ffmpeg command line applies when it autorotates.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Orientation {

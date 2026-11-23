@@ -46,36 +46,16 @@ fn clip(kind: Clip) -> Option<PathBuf> {
 }
 
 #[test]
-fn describes_protocol() {
-    let output = tgradish(&["describe"]);
-    assert!(output.status.success());
-    let description: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(description["protocol"], 1);
-    assert_eq!(description["default-format"], "webm");
-    assert!(description["cancel"].as_str().unwrap().contains("--cancel-on-stdin"));
-    let formats = description["formats"].as_array().unwrap();
-    let format = |name: &str| formats.iter().find(|f| f["format"] == name).unwrap();
-    assert_eq!(format("webm")["default-preset"], "balanced");
-    assert!(format("webm")["options"]["properties"]["fit"].is_object());
-    assert!(format("webm")["options"]["properties"]["crop"].is_object());
-    assert_eq!(format("tgs")["default-preset"], "best");
-    assert_eq!(format("tgs")["output-extension"], "tgs");
-    assert!(format("tgs")["options"]["properties"]["reductions"].is_object());
-    // Static WebP images share WebM's picture options and presets.
-    assert_eq!(format("webp")["output-extension"], "webp");
-    assert_eq!(format("webp")["default-preset"], "balanced");
-    assert!(format("webp")["options"]["properties"]["start"].is_object());
-    let presets = description["presets"].as_array().unwrap();
+fn lists_presets_as_json() {
+    let presets = json_lines(&tgradish(&["--json", "preset", "list"]));
     let preset = |name: &str| presets.iter().find(|p| p["name"] == name).unwrap();
     // Presets configure encoding for both formats without overriding target.
     assert_eq!(preset("fast")["webm"]["effort"], "fast");
     assert_eq!(preset("fast")["webm"]["fit"], "bitrate");
     assert_eq!(preset("fast")["tgs"]["effort"], "fast");
+    assert_eq!(preset("fast")["builtin"], true);
     assert!(preset("best")["webm"]["target"].is_null());
     assert!(preset("best")["error"].is_null());
-    // Spoof events use the same finished/error schema as conversions.
-    let spoof = serde_json::to_string(&description["spoof-events"]).unwrap();
-    assert!(spoof.contains("\"finished\"") && spoof.contains("\"error\""), "{spoof}");
 }
 
 #[test]
@@ -141,7 +121,7 @@ fn stops_quietly_when_stdout_closes() {
     use std::io::Read;
     use std::process::Stdio;
 
-    for args in [&["licenses"][..], &["--json", "describe"], &["preset", "list"]] {
+    for args in [&["licenses"][..], &["--json", "preset", "list"], &["preset", "list"]] {
         let mut child = Command::new(env!("CARGO_BIN_EXE_tgradish"))
             .args(args)
             .env("TGRADISH_CONFIG", no_config())
@@ -860,18 +840,6 @@ fn leaves_stdin_alone() {
         .unwrap();
     let finished = json_lines(&output).iter().filter(|e| e["event"] == "finished").count();
     assert_eq!(finished, 3, "{}", String::from_utf8_lossy(&output.stderr));
-}
-
-#[test]
-fn events_schema_includes_errors() {
-    let output = tgradish(&["describe"]);
-    let description: Value = serde_json::from_slice(&output.stdout).unwrap();
-    // Single top-level event schema shared across all formats.
-    let events = description["events"]["oneOf"].as_array().unwrap();
-    assert!(events.iter().any(|e| e["properties"]["event"]["const"] == "error"));
-    for format in description["formats"].as_array().unwrap() {
-        assert!(format.get("events").is_none(), "{format}");
-    }
 }
 
 /// Writes a 4×4 PNG containing a 2×2 square of `colour` on a transparent
@@ -1862,12 +1830,9 @@ fn clears_a_presets_integer_scale() {
     let shown = with_presets(dir.path(), &["--json", "preset", "show", "cleared"]);
     let shown: Value = serde_json::from_slice(&shown.stdout).unwrap();
     assert!(shown["webm"].get("integer-scale").is_none(), "{shown}");
-    let described = with_presets(dir.path(), &["describe"]);
-    let described: Value = serde_json::from_slice(&described.stdout).unwrap();
-    let preset = |name: &str| {
-        let presets = described["presets"].as_array().unwrap();
-        presets.iter().find(|preset| preset["name"] == name).unwrap()["webm"].clone()
-    };
+    let listed = json_lines(&with_presets(dir.path(), &["--json", "preset", "list"]));
+    let preset =
+        |name: &str| listed.iter().find(|preset| preset["name"] == name).unwrap()["webm"].clone();
     assert_eq!(preset("third")["integer-scale"], "1/3");
     assert!(preset("cleared").get("integer-scale").is_none(), "{}", preset("cleared"));
 }
@@ -2030,14 +1995,15 @@ fn reads_the_config_only_where_used() {
         stderr.trim_end(),
         format!("error: config file from --config does not exist: {missing}")
     );
-    let env = run(&["describe"], Some(missing));
+    let env = run(&["preset", "list"], Some(missing));
     let stderr = String::from_utf8_lossy(&env.stderr);
     assert_eq!(
         stderr.trim_end(),
         format!("error: config file from TGRADISH_CONFIG does not exist: {missing}")
     );
     // `--config` overrides `TGRADISH_CONFIG`.
-    let flag_wins = run(&["--config", no_config().to_str().unwrap(), "describe"], Some(missing));
+    let flag_wins =
+        run(&["--config", no_config().to_str().unwrap(), "preset", "list"], Some(missing));
     assert!(flag_wins.status.success());
     // An unknown preset named in the config file cites the config path and
     // key (exit 1).
@@ -2228,7 +2194,7 @@ fn cancels_text_conversions_with_130() {
 fn exits_as_stdout_closed_when_only_the_error_finds_it() {
     let commands: [&[&str]; 2] = [
         &["--json", "watch", "/nonexistent-dir"],
-        &["--json", "--config", "/dev/null/no.toml", "describe"],
+        &["--json", "--config", "/dev/null/no.toml", "preset", "list"],
     ];
     for args in commands {
         // Close the read end before the child writes anything.

@@ -188,7 +188,6 @@ impl PixelAnim {
 }
 
 /// A pixel rectangle.
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Rect {
@@ -203,7 +202,6 @@ pub struct Rect {
 }
 
 /// Summary of what [`normalise`] produced.
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
@@ -248,7 +246,6 @@ pub struct Report {
 }
 
 /// A larger pixel scale that most colour edges follow.
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
@@ -260,7 +257,6 @@ pub struct LikelyScale {
 }
 
 /// Non-fatal warning emitted during normalisation.
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "warning", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]

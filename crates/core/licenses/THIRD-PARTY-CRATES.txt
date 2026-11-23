@@ -2,7 +2,7 @@ Rust crates in tgradish and their licences
 ==========================================
 
 How many crates each licence covers:
-  MIT License: 256
+  MIT License: 249
   Apache License 2.0: 12
   Boost Software License 1.0: 2
   Unicode License v3: 2
@@ -1608,7 +1608,6 @@ MIT License, used by:
   concurrent-queue 2.5.0
   ctrlc 3.5.2
   displaydoc 0.2.7
-  dyn-clone 1.0.20
   fastrand 2.5.0
   find-crate 0.6.3
   itoa 1.0.18
@@ -1620,15 +1619,12 @@ MIT License, used by:
   portable-atomic 1.15.0
   proc-macro2 1.0.107
   quote 1.0.47
-  ref-cast 1.0.27
-  ref-cast-impl 1.0.27
   rustix 0.38.44
   rustix 1.1.5
   rustversion 1.0.23
   serde 1.0.229
   serde_core 1.0.229
   serde_derive 1.0.229
-  serde_derive_internals 0.30.0
   serde_json 1.0.151
   smol_str 0.2.2
   syn 2.0.119
@@ -3963,94 +3959,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
-
-
---------------------------------------------------------------------------------
-MIT License, used by:
-  schemars 1.2.2
-
-#![allow(clippy::all)]
-use crate::_alloc_prelude::*;
-// Copied from regex_syntax crate to avoid pulling in the whole crate just for a utility function
-// https://github.com/rust-lang/regex/blob/431c4e4867e1eb33eb39b23ed47c9934b2672f8f/regex-syntax/src/lib.rs
-//
-// Copyright (c) 2014 The Rust Project Developers
-//
-// Permission is hereby granted, free of charge, to any
-// person obtaining a copy of this software and associated
-// documentation files (the "Software"), to deal in the
-// Software without restriction, including without
-// limitation the rights to use, copy, modify, merge,
-// publish, distribute, sublicense, and/or sell copies of
-// the Software, and to permit persons to whom the Software
-// is furnished to do so, subject to the following
-// conditions:
-//
-// The above copyright notice and this permission notice
-// shall be included in all copies or substantial portions
-// of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-// ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-// TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-// PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-// SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-// CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-// IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-// DEALINGS IN THE SOFTWARE.
-
-pub fn escape(text: &str) -> String {
-    let mut quoted = String::new();
-    escape_into(text, &mut quoted);
-    quoted
-}
-
-fn escape_into(text: &str, buf: &mut String) {
-    buf.reserve(text.len());
-    for c in text.chars() {
-        if is_meta_character(c) {
-            buf.push('\\');
-        }
-        buf.push(c);
-    }
-}
-
-fn is_meta_character(c: char) -> bool {
-    match c {
-        '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '|' | '[' | ']' | '{' | '}' | '^' | '$'
-        | '#' | '&' | '-' | '~' => true,
-        _ => false,
-    }
-}
-
-
---------------------------------------------------------------------------------
-MIT License, used by:
-  schemars 1.2.2
-  schemars_derive 1.2.2
-
-MIT License
-
-Copyright (c) 2019 Graham Esau
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 
 
 --------------------------------------------------------------------------------

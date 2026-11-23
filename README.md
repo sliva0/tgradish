@@ -187,7 +187,7 @@ To configure defaults, run `tgradish config init` to create the config directory
 
 ## Scripting
 
-- `--json` outputs JSON Lines (one compact JSON object per line). Run `tgradish describe` for the event and option schemas.
+- `--json` outputs JSON Lines (one compact JSON object per line). `convert` and `watch` print one event per line, `started` first and `finished` last for each file, and failures as `error` events.
 - `-q` prints only the paths of created files, one per line.
 
 Exit statuses:

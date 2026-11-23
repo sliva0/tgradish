@@ -123,7 +123,7 @@ pub struct Cli {
 pub struct Global {
     /// Print JSON Lines (one compact object per line) instead of text.
     /// `convert` and `watch` emit one event per line, the same for every
-    /// format, and `spoof` emits one event (schemas: `tgradish describe`).
+    /// format, and `spoof` emits one event.
     /// `inspect` emits one object per file, `preset list` one per preset,
     /// `licenses` one per notice, and other commands one object. Errors are
     /// emitted as error events. Not supported by `gui`.
@@ -207,9 +207,6 @@ pub enum Command {
     /// check them against Telegram's limits.
     #[command(after_help = exit_status_help())]
     Inspect(InspectArgs),
-    /// Print a JSON description of options, presets and events for
-    /// front-ends.
-    Describe,
     /// List and inspect presets.
     #[command(subcommand)]
     Preset(PresetCommand),
@@ -322,7 +319,6 @@ impl Command {
             Command::Convert(_)
             | Command::Watch(_)
             | Command::Inspect(_)
-            | Command::Describe
             | Command::Preset(PresetCommand::List)
             | Command::Config(ConfigCommand::Show)
             | Command::Ffmpeg { .. } => true,
@@ -422,7 +418,7 @@ pub struct ConversionArgs {
     #[arg(short, long)]
     pub preset: Option<String>,
     /// JSON object of options applied after the preset and before CLI
-    /// flags. Keys match flag names (see `tgradish describe`).
+    /// flags. Keys are the option flags' names without the leading dashes.
     #[arg(long, value_name = "JSON")]
     pub options_json: Option<String>,
     /// Keep intermediate WebM files (such as first-pass logs) and print
@@ -980,20 +976,16 @@ mod tests {
         std::fs::write(out.join("cli.json"), json).unwrap();
     }
 
-    /// Front-ends rely on every option of either format having a flag of
-    /// the same name.
+    /// `--options-json` names options as their flags do, so every option
+    /// of either format has a flag of the same name.
     #[test]
     fn every_option_has_a_flag() {
         let cli = Cli::command();
-        for schema in [schemars::schema_for!(Options), schemars::schema_for!(tgs::Options)] {
-            let schema = serde_json::to_value(schema).unwrap();
-            let properties = schema["properties"].as_object().unwrap();
-            for command in ["convert", "watch"] {
-                let command = cli.find_subcommand(command).unwrap();
-                let flags: Vec<_> = command.get_arguments().filter_map(|a| a.get_long()).collect();
-                for property in properties.keys() {
-                    assert!(flags.contains(&property.as_str()), "no --{property} flag");
-                }
+        for command in ["convert", "watch"] {
+            let command = cli.find_subcommand(command).unwrap();
+            let flags: Vec<_> = command.get_arguments().filter_map(|a| a.get_long()).collect();
+            for key in Options::keys().chain(tgs::Options::keys()) {
+                assert!(flags.contains(&key.as_str()), "no --{key} flag");
             }
         }
     }

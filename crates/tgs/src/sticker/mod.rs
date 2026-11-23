@@ -25,7 +25,6 @@ use tracker::{Part, Tracker};
 
 /// How [`make`] handles lossless output that is too large (over `max_bytes` or
 /// Telegram's other limits).
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Fit {
@@ -82,7 +81,6 @@ impl Default for Options {
 }
 
 /// A lossy reduction step applied during fitting.
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
@@ -105,7 +103,6 @@ impl Step {
 }
 
 /// Progress events emitted by [`make`].
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "stage", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
@@ -154,7 +151,6 @@ pub enum Progress {
 }
 
 /// Built `.tgs` sticker and its metadata.
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]

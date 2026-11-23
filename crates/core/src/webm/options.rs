@@ -2,14 +2,13 @@
 
 use std::collections::BTreeMap;
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::options::{Crop, Effort, Fit, IntegerScale, Range, Resize, Scaling, Spoof, layered};
 use crate::telegram::Target;
 
 /// Settings for one WebM (or WebP) conversion. `None` uses the default.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Options {
     /// Target type: sticker or emoji. Default: sticker.
@@ -48,7 +47,6 @@ pub struct Options {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fit: Option<Fit>,
     /// Maximum encoding attempts during size fitting. Default: 8.
-    #[schemars(range(min = 1, max = 50))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attempts: Option<u32>,
     /// Search range for size fitting, in the units of `fit` (kbit/s, CRF, fps
@@ -58,34 +56,28 @@ pub struct Options {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fit_range: Option<Range>,
     /// Start offset in seconds. Default: 0.
-    #[schemars(range(min = 0.0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start: Option<f64>,
     /// Maximum duration in seconds to read from `start`. Default: full
     /// remaining duration (or 3 seconds of output when spoofing is off).
-    #[schemars(extend("exclusiveMinimum" = 0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub length: Option<f64>,
     /// Playback speed multiplier (0.1 to 10; 2 plays twice as fast). Default:
     /// 1.
-    #[schemars(range(min = 0.1, max = 10.0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tempo: Option<f64>,
     /// Output frame rate (max 60; higher than the input rate at the chosen
     /// tempo only duplicates frames). For image sequences, also sets the input
     /// frame rate. Default: input rate adjusted for tempo (clamped to 1..60),
     /// or 12 for sequences.
-    #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 60))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<f64>,
     /// Target video bitrate in kbit/s when not fitting bitrate. Default:
     /// estimated from the file size limit.
-    #[schemars(range(min = 1.0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bitrate: Option<f64>,
     /// Constant quality level, 0 (best) to 63 (worst), used when fitting fps
     /// or length or with `fit = "off"`. Default: 32.
-    #[schemars(range(min = 0, max = 63))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crf: Option<u8>,
     /// Encoder effort: fast, balanced or best (slowest). Default: balanced.
@@ -102,7 +94,6 @@ pub struct Options {
     pub spoof: Option<Spoof>,
     /// Container duration in seconds written when spoofing. Default: a short
     /// duration accepted by Telegram.
-    #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 3))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fake_duration: Option<f64>,
     /// Title metadata stored in the output file.

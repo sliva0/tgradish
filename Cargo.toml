@@ -74,7 +74,6 @@ rfd = "0.17.2"
 # Embed in debug builds too so `fl!` validates embedded files during
 # development.
 rust-embed = { version = "8.13.0", features = ["debug-embed"] }
-schemars = "1.2.2"
 serde = { version = "1.0.229", features = ["derive"] }
 # Each crate enables only the features it needs to avoid leaking features to
 # consumers.

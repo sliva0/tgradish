@@ -3,7 +3,6 @@
 //! Source: <https://core.telegram.org/stickers>, checked 2026-10-08, and
 //! uploads to @Stickers, which found the exact limits.
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::webm::container::WebmInfo;
@@ -29,7 +28,7 @@ pub fn too_long(seconds: f64) -> bool {
 }
 
 /// Target Telegram media type.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Target {
     /// Sticker: one side exactly 512 px, the other at most 512 px.
@@ -77,7 +76,7 @@ impl Target {
 /// Serialised with `kind`, `severity`, `message` and variant-specific fields,
 /// e.g. `{"kind":"too-big","bytes":300000,"max":262144,"severity":"error",
 /// "message":"293.0 KiB exceeds the 256 KiB limit"}`.
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(into = "Reported")]
 #[non_exhaustive]
 pub enum Issue {
@@ -153,7 +152,7 @@ pub fn refuses(issues: &[Issue]) -> bool {
 }
 
 /// An [`Issue`] as it is serialised.
-#[derive(Serialize, JsonSchema)]
+#[derive(Serialize)]
 struct Reported {
     #[serde(flatten)]
     found: Found,
@@ -163,7 +162,7 @@ struct Reported {
 
 /// What an [`Issue`] found, by its kind: a kind every format has, or one
 /// only a `.tgs` is checked for.
-#[derive(Serialize, JsonSchema)]
+#[derive(Serialize)]
 #[serde(untagged)]
 enum Found {
     /// A kind every format has.
@@ -178,7 +177,7 @@ enum Found {
 /// What an [`Issue`] of a kind every format has found, tagged by its kind:
 /// a copy of it, as serde can't put fields that are worked out beside an
 /// enum's own.
-#[derive(Serialize, JsonSchema)]
+#[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 enum Shared {
     /// The container isn't WebM.

@@ -1,13 +1,14 @@
-//! Machine-readable CLI schema printed by `tgradish describe` and the wire
-//! conventions followed by every `--json` command:
+//! The types and path serialisers `--json` output needs beyond the library's
+//! own, and the conventions every `--json` command follows:
 //!
 //! - All JSON keys and enum values use kebab-case.
 //! - Every `--json` command prints JSON Lines (one compact JSON object per
-//!   line). `convert` and `watch` emit [`Event`]s (`started` first, `finished`
-//!   last, carrying `input`, `output`, `format`, `target`, `limit`, plus
-//!   format-specific fields). `inspect` prints one file per line, `preset list`
-//!   one preset per line, `licenses` one notice per line, `spoof` one
-//!   [`SpoofEvent`], and other commands one object.
+//!   line). `convert` and `watch` emit [`Event`](crate::Event)s (`started`
+//!   first, `finished` last, carrying `input`, `output`, `format`, `target`,
+//!   `limit`, plus format-specific fields). `inspect` prints one file per line, `preset list`
+//!   one [`Listed`](crate::presets::Listed) preset per line, `licenses` one
+//!   notice per line, `spoof` one [`SpoofEvent`], and other commands one
+//!   object.
 //! - Tagged unions name their discriminator by role: `event` for events,
 //!   `format` for inspection results, `kind` for issues, WebP encodings and
 //!   ffmpeg backends, and `mode` for rate control.
@@ -22,62 +23,20 @@
 
 use std::path::{Path, PathBuf};
 
-use schemars::generate::SchemaSettings;
-use schemars::{JsonSchema, Schema, schema_for};
 use serde::Serialize;
-use serde_json::Value;
-
-use crate::config::Config;
-use crate::events::Event;
-use crate::presets::{Format, Presets};
-use crate::tgs;
-use crate::webm::Options;
-
-/// Protocol version for `describe`, `--json` output and machine-facing CLI
-/// flags. Incremented only on breaking changes (renamed/removed keys or
-/// flags); additive changes (new events, keys or flags) keep the same version,
-/// so front-ends should ignore anything they do not recognise.
-pub const PROTOCOL_VERSION: u32 = 1;
-
-/// Top-level document printed by `tgradish describe`.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "kebab-case")]
-#[non_exhaustive]
-pub struct Description {
-    /// Protocol version ([`PROTOCOL_VERSION`]).
-    pub protocol: u32,
-    /// Tool name (`"tgradish"`).
-    pub tool: &'static str,
-    /// Package version.
-    pub version: &'static str,
-    /// Default output format when none is specified.
-    pub default_format: Format,
-    /// Instructions for front-ends to cancel or settle `convert` or `watch`
-    /// over stdin when they cannot send Ctrl-C.
-    pub cancel: &'static str,
-    /// Supported output formats and their option schemas.
-    pub formats: Vec<FormatDescription>,
-    /// JSON Schema for [`Event`] lines emitted by `convert --json` and
-    /// `watch --json`.
-    pub events: Schema,
-    /// All built-in and user presets (including broken ones with `error` set).
-    pub presets: Vec<PresetDescription>,
-    /// JSON Schema for [`SpoofEvent`] emitted by `spoof --json`.
-    pub spoof_events: Schema,
-}
 
 /// JSON event emitted by `tgradish spoof --json`.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum SpoofEvent {
     /// Spoofed file written successfully.
     Finished {
         /// Source WebM path.
-        #[serde(serialize_with = "crate::protocol::serialize_path")]
+        #[serde(serialize_with = "crate::wire::serialize_path")]
         input: PathBuf,
         /// Destination WebM path.
-        #[serde(serialize_with = "crate::protocol::serialize_path")]
+        #[serde(serialize_with = "crate::wire::serialize_path")]
         output: PathBuf,
         /// Summary of container edits.
         report: crate::webm::container::PatchReport,
@@ -89,53 +48,15 @@ pub enum SpoofEvent {
     Error(Failure),
 }
 
-/// Output format entry inside [`Description`].
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "kebab-case")]
-#[non_exhaustive]
-pub struct FormatDescription {
-    /// Format identifier.
-    pub format: Format,
-    /// One-sentence summary of the format.
-    pub description: &'static str,
-    /// Output file extension without a dot.
-    pub output_extension: &'static str,
-    /// Effective default preset name for this format.
-    pub default_preset: String,
-    /// JSON Schema for `convert --options-json`. Every property also maps to
-    /// `--<property>`.
-    pub options: Schema,
-}
-
-/// Preset entry inside [`Description`].
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-#[non_exhaustive]
-pub struct PresetDescription {
-    /// Preset name.
-    pub name: String,
-    /// Preset description (empty if omitted or broken).
-    pub description: String,
-    /// True for built-in presets; false for user preset files.
-    pub builtin: bool,
-    /// Resolved WebM/WebP options (with `extends` applied), or `None` if
-    /// broken.
-    pub webm: Option<Options>,
-    /// Resolved `.tgs` options (with `extends` applied), or `None` if broken.
-    pub tgs: Option<tgs::Options>,
-    /// Error message if the preset is invalid for either format.
-    pub error: Option<String>,
-}
-
 /// Error event payload emitted by CLI `--json` commands (`convert`, `watch`,
 /// `inspect`, `spoof`). Library functions return `Err` instead.
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Failure {
     /// Human-readable error message.
     pub message: String,
     /// Failing input path, or `None` for command-wide errors.
-    #[serde(serialize_with = "crate::protocol::serialize_optional_path")]
+    #[serde(serialize_with = "crate::wire::serialize_optional_path")]
     pub input: Option<PathBuf>,
 }
 
@@ -157,128 +78,15 @@ pub fn serialize_optional_path<S: serde::Serializer>(
     }
 }
 
-/// Generates a JSON Schema matching how `T` serialises (rather than
-/// deserialises).
-fn printed<T: JsonSchema>() -> Schema {
-    SchemaSettings::default().for_serialize().into_generator().into_root_schema_for::<T>()
-}
-
-/// Filters `schema` to keep only properties listed in `keys` and the `$defs`
-/// reachable from them (used to derive the WebP option schema from WebM's,
-/// omitting unused `$defs` such as `Fit` and `Spoof`), so front-ends building
-/// options from it never send one WebP refuses.
-fn only_properties(mut schema: Schema, keys: &[&str]) -> Schema {
-    let Some(root) = schema.as_object_mut() else { return schema };
-    if let Some(Value::Object(properties)) = root.get_mut("properties") {
-        properties.retain(|key, _| keys.contains(&key.as_str()));
-    }
-    if let Some(Value::Array(required)) = root.get_mut("required") {
-        required.retain(|key| key.as_str().is_some_and(|key| keys.contains(&key)));
-    }
-    // Definitions can reference other definitions, so follow $ref transitively.
-    let mut wanted = Vec::new();
-    let mut unread = vec![root.get("properties").cloned().unwrap_or_default()];
-    while let Some(value) = unread.pop() {
-        for reference in references(&value) {
-            let name = reference.trim_start_matches("#/$defs/").to_owned();
-            if !wanted.contains(&name) {
-                unread.extend(root.get("$defs").and_then(|defs| defs.get(&name)).cloned());
-                wanted.push(name);
-            }
-        }
-    }
-    if let Some(Value::Object(definitions)) = root.get_mut("$defs") {
-        definitions.retain(|name, _| wanted.contains(name));
-    }
-    schema
-}
-
-/// Every `$ref` in `value`, at any depth.
-fn references(value: &Value) -> Vec<&str> {
-    match value {
-        Value::Object(map) => map
-            .iter()
-            .flat_map(|(key, value)| match (key.as_str(), value) {
-                ("$ref", Value::String(reference)) => vec![reference.as_str()],
-                _ => references(value),
-            })
-            .collect(),
-        Value::Array(items) => items.iter().flat_map(references).collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// `config` says which preset each format uses when none is given.
-pub fn describe(presets: &Presets, config: &Config) -> Description {
-    let presets = presets
-        .iter()
-        .map(|(name, preset)| {
-            let (webm, tgs) = (presets.webm(name), presets.tgs(name));
-            let error = match (&webm, &tgs) {
-                (Err(err), _) | (_, Err(err)) => Some(err.to_string()),
-                _ => None,
-            };
-            PresetDescription {
-                name: name.to_string(),
-                description: preset.map(|p| p.description.clone()).unwrap_or_default(),
-                builtin: preset.is_ok_and(|p| p.path.is_none()),
-                webm: webm.ok(),
-                tgs: tgs.ok(),
-                error,
-            }
-        })
-        .collect();
-    let default_preset = |format: Format| config.preset_for(format).to_owned();
-    Description {
-        protocol: PROTOCOL_VERSION,
-        tool: "tgradish",
-        version: env!("CARGO_PKG_VERSION"),
-        default_format: Format::default(),
-        cancel: "Pass --cancel-on-stdin and write a line `cancel` to stdin to stop as Ctrl-C does \
-                 (convert exits with 130; watch exits with 0). A line `settle` during WebM \
-                 fitting, once an encode fits (progress events report can-settle: true), keeps the \
-                 best encode so far (finished reports settled: true). Without this flag, stdin is \
-                 not read.",
-        formats: vec![
-            FormatDescription {
-                format: Format::Webm,
-                description: "Video sticker or custom emoji from any video or image",
-                output_extension: Format::Webm.extension(),
-                default_preset: default_preset(Format::Webm),
-                options: schema_for!(Options),
-            },
-            FormatDescription {
-                format: Format::Tgs,
-                description: "Animated sticker or custom emoji from pixel art (videos are read as \
-                              pixel art)",
-                output_extension: Format::Tgs.extension(),
-                default_preset: default_preset(Format::Tgs),
-                options: schema_for!(tgs::Options),
-            },
-            FormatDescription {
-                format: Format::Webp,
-                description: "Static sticker or custom emoji from an image or a single video \
-                              frame; takes the WebM options that apply to still images, with start \
-                              choosing the frame",
-                output_extension: Format::Webp.extension(),
-                default_preset: default_preset(Format::Webp),
-                options: only_properties(schema_for!(Options), &crate::webp::PICTURE_OPTIONS),
-            },
-        ],
-        events: printed::<Event>(),
-        presets,
-        spoof_events: printed::<SpoofEvent>(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::Value;
 
-    use super::Failure;
     use super::*;
+    use crate::Event;
     use crate::events::{Details, Outcome, StartDetails, Started};
     use crate::ffmpeg::Probe;
+    use crate::presets::Format;
     use crate::telegram::{Issue, Target};
     use crate::webm::{Decision, Params, Rate};
     use crate::webm::{Plan, Request};
@@ -516,33 +324,6 @@ mod tests {
         }
     }
 
-    /// The names a JSON Schema gives what it describes: its properties'
-    /// and its values', but not the names of its definitions.
-    fn schema_names(schema: &Value, found: &mut Vec<String>) {
-        let strings = |value: &Value| -> Vec<String> {
-            let items = value.as_array().map_or(&[][..], Vec::as_slice);
-            items.iter().chain([value]).filter_map(Value::as_str).map(str::to_owned).collect()
-        };
-        match schema {
-            Value::Object(map) => {
-                for (key, value) in map {
-                    match key.as_str() {
-                        "properties" => {
-                            for (name, property) in value.as_object().into_iter().flatten() {
-                                found.push(name.clone());
-                                schema_names(property, found);
-                            }
-                        }
-                        "required" | "const" | "enum" => found.extend(strings(value)),
-                        _ => schema_names(value, found),
-                    }
-                }
-            }
-            Value::Array(items) => items.iter().for_each(|item| schema_names(item, found)),
-            _ => {}
-        }
-    }
-
     /// `spoof --json` says what it wrote as conversions do, with the issue
     /// that makes it exit 3.
     #[test]
@@ -556,46 +337,12 @@ mod tests {
     }
 
     #[test]
-    fn describes_exactly_the_options_each_format_takes() {
-        let description = describe(&Presets::builtin(), &Config::default());
-        for format in description.formats {
-            let schema = serde_json::to_value(&format.options).unwrap();
-            let properties: Vec<&str> =
-                schema["properties"].as_object().unwrap().keys().map(String::as_str).collect();
-            let refused = format.format.unused(properties.iter().copied());
-            assert!(refused.is_empty(), "{:?} refuses {refused:?}", format.format);
-            let all: Vec<String> = [schema_for!(Options), schema_for!(tgs::Options)]
-                .iter()
-                .flat_map(|schema| schema.get("properties").unwrap().as_object().unwrap().keys())
-                .cloned()
-                .collect();
-            for key in all.iter().filter(|key| format.format.uses(key)) {
-                assert!(properties.contains(&key.as_str()), "{:?} lacks {key}", format.format);
-            }
-            // every reference still leads somewhere
-            for reference in references(&schema) {
-                let name = reference.trim_start_matches("#/$defs/");
-                assert!(schema["$defs"].get(name).is_some(), "{:?}: {reference}", format.format);
-            }
-        }
-    }
-
-    #[test]
     fn names_everything_in_kebab_case() {
-        let description = describe(&Presets::builtin(), &Config::default());
-        let description = serde_json::to_value(&description).unwrap();
-        let mut names = Vec::new();
-        for format in description["formats"].as_array().unwrap() {
-            schema_names(&format["options"], &mut names);
-        }
-        schema_names(&description["events"], &mut names);
-        // the description itself, as presets, and what each stream prints
-        schema_names(&description["spoof-events"], &mut names);
-        let mut described = json!({ "description": description });
-        described["description"]["formats"] = json!([]);
-        described["description"]["events"] = json!({});
-        described["description"]["spoof-events"] = json!({});
-        keys(&described, &mut names);
+        // every option, set or not, and the presets as they are listed
+        let mut names: Vec<String> =
+            crate::webm::Options::keys().chain(crate::tgs::Options::keys()).collect();
+        let listed = serde_json::to_value(crate::presets::Presets::builtin().listed()).unwrap();
+        keys(&listed, &mut names);
         for sample in samples().into_iter().chain(other_samples()) {
             keys(&sample, &mut names);
             for value in ["event", "format", "kind"].map(|tag| &sample[tag]) {
@@ -617,7 +364,7 @@ mod tests {
 
     #[test]
     fn prints_each_event_as_front_ends_read_it() {
-        // the shapes the README and front-ends follow; a start's plan and
+        // the shapes the README and scripts follow; a start's plan and
         // report are pinned by their keys, below
         let expected = [
             None,

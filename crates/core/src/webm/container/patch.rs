@@ -37,7 +37,7 @@ pub struct Patch {
 }
 
 /// Summary of edits applied by [`patch`].
-#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct PatchReport {

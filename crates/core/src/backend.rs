@@ -7,7 +7,6 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::CancelToken;
@@ -71,7 +70,7 @@ pub enum Backend {
 }
 
 /// Summary of the active ffmpeg backend, for status output.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum BackendInfo {

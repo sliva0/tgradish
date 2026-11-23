@@ -182,7 +182,7 @@ pub fn json_line(value: &impl serde::Serialize) {
     match serde_json::to_string(value) {
         Ok(line) => outln!("{line}"),
         Err(err) => {
-            let failure = tgradish_core::protocol::Failure {
+            let failure = tgradish_core::wire::Failure {
                 message: format!("failed to serialise as JSON: {err}"),
                 input: None,
             };
@@ -193,7 +193,7 @@ pub fn json_line(value: &impl serde::Serialize) {
 
 /// Prints an error as a JSON `Event::Error` line.
 pub fn print_json_error(err: &anyhow::Error, input: Option<&std::path::Path>) {
-    json_line(&tgradish_core::Event::Error(tgradish_core::protocol::Failure {
+    json_line(&tgradish_core::Event::Error(tgradish_core::wire::Failure {
         message: format!("{err:#}"),
         input: input.map(Into::into),
     }));
@@ -439,7 +439,6 @@ fn run(cli: Cli) -> Result<()> {
         Command::Watch(args) => watch::run(&ctx, args),
         Command::Spoof(args) => commands::spoof(&ctx, args),
         Command::Inspect(args) => commands::inspect(&ctx, args),
-        Command::Describe => commands::describe(&ctx),
         Command::Preset(command) => commands::preset(&ctx, command),
         Command::Config(command) => commands::config(&ctx, command, config_path),
         Command::Ffmpeg { command } => {

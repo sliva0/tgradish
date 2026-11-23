@@ -28,7 +28,7 @@
 //!   layering, CLI flag conversion, presets and user config.
 //! - [`inspect`], [`telegram`], [`preview`]: Inspects media against Telegram's
 //!   limits ([`telegram::Issue`]) and decodes finished stickers for preview.
-//! - [`protocol`]: JSON output types for `--json` and `describe`.
+//! - [`wire`]: How `--json` output is shaped, and the types only it uses.
 //! - [`licenses`], [`paths`], and (with the `clipboard` feature) `clipboard`.
 //!
 //! Errors use [`Error`], keeping messages free of CLI flag names.
@@ -64,11 +64,11 @@ pub mod paths;
 pub mod picture;
 pub mod presets;
 pub mod preview;
-pub mod protocol;
 pub mod telegram;
 pub mod tgs;
 pub mod webm;
 pub mod webp;
+pub mod wire;
 
 pub use cancel::CancelToken;
 pub use error::{ClipboardError, Error, FfmpegMissing, FileAction, Result, io_reason};

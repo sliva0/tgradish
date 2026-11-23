@@ -4,7 +4,6 @@
 use std::io::Cursor;
 use std::path::Path;
 
-use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::error::{Error, Result};
@@ -34,7 +33,7 @@ pub fn creator_tool(webp: &[u8]) -> Option<String> {
 }
 
 /// Metadata reported by [`inspect_file`] for a WebP image.
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Info {

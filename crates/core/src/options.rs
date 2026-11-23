@@ -6,13 +6,12 @@
 //! built-in defaults, then a preset, then command-line flags. Unset fields
 //! receive defaults during planning, some derived from the input video.
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::webm::CRFS;
 
 /// How the input is fitted into the target dimensions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Resize {
@@ -29,7 +28,7 @@ pub enum Resize {
 }
 
 /// How pixels are scaled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Scaling {
@@ -48,7 +47,7 @@ pub enum Scaling {
 }
 
 /// Which parameter to adjust to fit within Telegram's file size limit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Fit {
@@ -108,7 +107,7 @@ impl Fit {
 
 /// How hard the encoder works. Lower effort is faster, but produces lower
 /// quality at the same size.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Effort {
@@ -132,7 +131,7 @@ impl Effort {
 }
 
 /// When to spoof container duration metadata.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Spoof {
@@ -146,7 +145,7 @@ pub enum Spoof {
 
 /// A `[min, max]` search range for the value tuned by [`Fit`], in its
 /// [`FitUnit`].
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Range {
     /// Lower bound.
     pub min: f64,
@@ -177,17 +176,15 @@ impl std::fmt::Display for Range {
 
 /// Region of the input to keep, in rotated source pixels from the top-left
 /// corner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Crop {
     /// Left edge offset in pixels.
     pub x: u32,
     /// Top edge offset in pixels.
     pub y: u32,
     /// Width in pixels (at least 1).
-    #[schemars(range(min = 1))]
     pub width: u32,
     /// Height in pixels (at least 1).
-    #[schemars(range(min = 1))]
     pub height: u32,
 }
 
@@ -281,20 +278,6 @@ impl TryFrom<String> for Sheet {
 impl From<Sheet> for String {
     fn from(value: Sheet) -> String {
         value.to_string()
-    }
-}
-
-impl JsonSchema for Sheet {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "Sheet".into()
-    }
-
-    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({
-            "type": "string",
-            "pattern": r"^\s*[0-9]*[1-9][0-9]*\s*[xX]\s*[0-9]*[1-9][0-9]*\s*$",
-            "description": "Sprite sheet grid as COLUMNSxROWS equal cells, read row by row"
-        })
     }
 }
 
@@ -412,27 +395,20 @@ impl From<IntegerScale> for String {
     }
 }
 
-impl JsonSchema for IntegerScale {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "IntegerScale".into()
-    }
-
-    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({
-            "type": "string",
-            "pattern": r"^([1-9][0-9]*|1/[1-9][0-9]*|)$",
-            "description": "Scale by N output pixels per input pixel, or 1/N (N up to 512); \
-                            empty string clears a preset value"
-        })
-    }
-}
-
-/// Generates `overlaid(&self, overlay)` for an options struct whose fields are
-/// all `Option<T>`. Destructuring `overlay` guarantees every new field must be
-/// added here.
+/// Generates `overlaid(&self, overlay)` and `keys()` for an options struct
+/// whose fields are all `Option<T>`. Destructuring `overlay` guarantees every
+/// new field must be added here; list them in field order, which `keys()`
+/// keeps.
 macro_rules! layered {
     ($options:ident { $($field:ident),* $(,)? }) => {
         impl $options {
+            /// Every option's key, as configs, JSON and flags name it, in
+            /// field order.
+            pub fn keys() -> impl Iterator<Item = String> {
+                // as serde's kebab-case renaming names each field
+                [$(stringify!($field)),*].into_iter().map(|field| field.replace('_', "-"))
+            }
+
             /// Copies every `Some` field from `overlay` onto `self`.
             fn overlaid(mut self, overlay: &$options) -> $options {
                 let $options { $($field: _),* } = overlay;
@@ -834,7 +810,7 @@ mod tests {
         assert_eq!(flags(&none), ["--integer-scale="]);
         let read: Options = toml::from_str("integer-scale = ''").unwrap();
         assert_eq!(read, none);
-        // and in JSON, as --options-json takes it and describe prints it
+        // and in JSON, as --options-json takes it and --json prints it
         let json = serde_json::json!({ "integer-scale": "" });
         assert_eq!(serde_json::from_value::<Options>(json.clone()).unwrap(), none);
         assert_eq!(serde_json::to_value(&none).unwrap(), json);

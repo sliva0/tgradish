@@ -4,7 +4,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use schemars::JsonSchema;
 use serde::Serialize;
 
 use super::Request;
@@ -17,15 +16,15 @@ use crate::presets::Format;
 use crate::telegram::{self, Target};
 
 /// Fully resolved settings for a WebM (or WebP) conversion.
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Plan {
     /// Input path passed to ffmpeg.
-    #[serde(serialize_with = "crate::protocol::serialize_path")]
+    #[serde(serialize_with = "crate::wire::serialize_path")]
     pub input: PathBuf,
     /// Destination output path.
-    #[serde(serialize_with = "crate::protocol::serialize_path")]
+    #[serde(serialize_with = "crate::wire::serialize_path")]
     pub output: PathBuf,
     /// Probed source media properties.
     pub source: Probe,

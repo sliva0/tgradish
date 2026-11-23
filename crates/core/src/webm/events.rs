@@ -1,13 +1,12 @@
 //! WebM encoding parameters and size-fitting decision types carried by
 //! [`crate::Event`].
 
-use schemars::JsonSchema;
 use serde::Serialize;
 
 /// Rate control mode for a single encode attempt. Serialises with a `mode` tag:
 /// `{"mode":"bitrate","kbps":500}`, `{"mode":"crf","crf":32}` or
 /// `{"mode":"lossless"}`.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(into = "RateMode")]
 #[non_exhaustive]
 pub enum Rate {
@@ -21,7 +20,7 @@ pub enum Rate {
 
 /// Serialisation helper for [`Rate`]: an internally tagged serde enum cannot
 /// put its tag beside a bare number.
-#[derive(Serialize, JsonSchema)]
+#[derive(Serialize)]
 #[serde(tag = "mode", rename_all = "kebab-case")]
 enum RateMode {
     /// Two-pass target bitrate.
@@ -47,7 +46,7 @@ impl From<Rate> for RateMode {
 }
 
 /// Parameters used for a single WebM encode attempt.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Params {
     /// Frame rate in frames per second.
@@ -63,7 +62,7 @@ pub struct Params {
 /// it) and SSIM is from 0 to 1 (e.g.
 /// `{"reason":"in-band","attempt":2,"share":0.99,"least":0.96}`). A change not
 /// tried emits nothing.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(tag = "reason", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum Decision {

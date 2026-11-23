@@ -12,8 +12,6 @@ mod ssim;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use schemars::JsonSchema;
-
 use crate::CancelToken;
 use serde::{Deserialize, Serialize};
 
@@ -35,7 +33,7 @@ pub(crate) use process::{Output, run};
 pub(crate) use ssim::ssim;
 
 /// Where to look for ffmpeg.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum FfmpegChoice {
@@ -50,7 +48,7 @@ pub enum FfmpegChoice {
 }
 
 /// Where the ffmpeg in use came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FfmpegSource {
     /// Explicitly configured path.
@@ -60,7 +58,7 @@ pub enum FfmpegSource {
 }
 
 /// What an ffmpeg build can do, as far as tgradish cares.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Capabilities {
@@ -89,14 +87,14 @@ pub(crate) fn capabilities(ffmpeg: &Ffmpeg, cancel: &CancelToken) -> crate::Resu
 }
 
 /// ffmpeg and ffprobe executables.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Ffmpeg {
     /// The `ffmpeg` executable.
-    #[serde(serialize_with = "crate::protocol::serialize_path")]
+    #[serde(serialize_with = "crate::wire::serialize_path")]
     pub ffmpeg: PathBuf,
     /// The `ffprobe` executable, beside it or on `PATH` with it.
-    #[serde(serialize_with = "crate::protocol::serialize_path")]
+    #[serde(serialize_with = "crate::wire::serialize_path")]
     pub ffprobe: PathBuf,
     /// Where they were found.
     pub source: FfmpegSource,

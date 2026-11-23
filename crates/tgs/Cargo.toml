@@ -12,16 +12,15 @@ readme = "README.md"
 keywords = ["telegram", "sticker", "lottie", "pixel-art", "aseprite"]
 categories = ["multimedia::images", "multimedia::encoding", "wasm"]
 
-# Document `schema` and `threads` but not `internals`, which is not for others
-# to use. Core has no such section: its features need ffmpeg.
+# Document `threads` but not `internals`, which is not for others to use.
+# Core has no such section: its features need ffmpeg.
 [package.metadata.docs.rs]
-features = ["schema", "threads"]
+features = ["threads"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 flate2.workspace = true
 image.workspace = true
-schemars = { workspace = true, optional = true }
 serde.workspace = true
 # Allow Lottie files nested deeper than serde_json's default recursion limit
 # (see check.rs).
@@ -30,8 +29,6 @@ thiserror.workspace = true
 zopfli.workspace = true
 
 [features]
-# Derive JSON Schemas for options and reports.
-schema = ["dep:schemars"]
 # Evaluate size-fitting candidates across worker threads (up to
 # `options.threads`) and run zopfli compression on a worker thread. Because
 # zopfli cannot be cancelled, an in-flight compression thread finishes in the

@@ -15,7 +15,6 @@ use crate::{Error, Result};
 
 /// A single lossy reduction at a specific strength. [`Reduction::apply`]
 /// rejects out-of-range strengths.
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, serde::Deserialize)]
 #[serde(tag = "reduction", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
@@ -58,7 +57,6 @@ pub enum Reduction {
 }
 
 /// Categories of lossy reductions, roughly from least to most visible.
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
@@ -128,7 +126,6 @@ impl Kind {
 /// picks the step with the best bytes-saved-per-distortion ratio. Art that is
 /// mostly motion, such as a machine of moving parts, can lose either frames
 /// or detail; which looks better depends on the art.
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Compromise {

@@ -35,9 +35,7 @@
 //! This crate is pure Rust and compiles for `wasm32-unknown-unknown`: it has
 //! no ffmpeg, subprocess, filesystem, or `tgradish-core` dependencies. The
 //! `threads` feature runs candidate fitting and compression in parallel
-//! threads (except on wasm); see [`make`] for caller requirements. The
-//! `schema` feature derives JSON Schemas for options and reports (all
-//! serialised in kebab-case).
+//! threads (except on wasm); see [`make`] for caller requirements.
 //!
 //! The `internals` feature exposes internal encoder modules for tgradish's own
 //! research tools. It is unstable and exempt from semver.

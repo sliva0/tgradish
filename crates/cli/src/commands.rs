@@ -13,7 +13,7 @@ use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 use tgradish_core::webm::container::{self, Patch, WebmInfo};
 use tgradish_core::webp;
-use tgradish_core::{TOOL_ID, protocol};
+use tgradish_core::{TOOL_ID, wire};
 
 use crate::term;
 
@@ -84,7 +84,7 @@ fn spoof_file(ctx: &Context, args: &SpoofArgs) -> Result<()> {
     if ctx.global.json {
         let too_long =
             telegram::Issue::TooLong { seconds: args.fake_duration, max: telegram::MAX_SECONDS };
-        crate::json_line(&protocol::SpoofEvent::Finished {
+        crate::json_line(&wire::SpoofEvent::Finished {
             input: args.input.clone(),
             output,
             report,
@@ -266,7 +266,7 @@ pub fn inspect(ctx: &Context, args: InspectArgs) -> Result<()> {
         if ctx.global.json {
             #[derive(serde::Serialize)]
             struct Line<'a> {
-                #[serde(serialize_with = "protocol::serialize_path")]
+                #[serde(serialize_with = "wire::serialize_path")]
                 input: &'a std::path::Path,
                 /// Whether Telegram would take the file as it is.
                 accepted: bool,
@@ -377,12 +377,6 @@ fn plain(mut command: clap::Command) -> clap::Command {
     command
 }
 
-pub fn describe(ctx: &Context) -> Result<()> {
-    let presets = Presets::load_user()?;
-    crate::json_line(&protocol::describe(&presets, &ctx.config));
-    Ok(())
-}
-
 /// Formats a suffix noting which formats use `name` as their default preset.
 fn default_for(ctx: &Context, name: &str) -> String {
     const FORMATS: [Format; 3] = [Format::Webm, Format::Tgs, Format::Webp];
@@ -421,7 +415,7 @@ pub fn preset(ctx: &Context, command: PresetCommand) -> Result<()> {
     let presets = Presets::load_user()?;
     match command {
         PresetCommand::List if ctx.global.json => {
-            for preset in protocol::describe(&presets, &ctx.config).presets {
+            for preset in presets.listed() {
                 crate::json_line(&preset);
             }
         }

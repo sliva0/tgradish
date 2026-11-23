@@ -68,8 +68,8 @@ pub enum Error {
         at: f64,
     },
     /// Option value failed validation. `option` is the canonical key (as used
-    /// in presets and `describe`), and `reason` completes the message (e.g.
-    /// `"crf must be at most 63"`).
+    /// in presets and `--options-json`), and `reason` completes the message
+    /// (e.g. `"crf must be at most 63"`).
     #[error("{option} {reason}")]
     InvalidOption {
         /// Canonical option key.

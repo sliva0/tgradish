@@ -1,6 +1,5 @@
 //! Encoding pictures as WebP within the size limit, with metadata.
 
-use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::error::{Error, Result};
@@ -79,7 +78,7 @@ pub(crate) fn encode(
 const LOSSLESS_EFFORT: i32 = 6;
 
 /// WebP encoding mode chosen to fit within Telegram's size limit.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Encoding {

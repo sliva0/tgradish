@@ -1015,20 +1015,11 @@ mod tests {
             "tempo": 2.0,
         });
         let tgs_other = ["effort", "exact", "reductions", "compromise", "title", "watermark"];
-        let described = serde_json::to_value(tgradish_core::protocol::describe(
-            &Presets::builtin(),
-            &Default::default(),
-        ))
-        .unwrap();
         let keys = |format: &str| -> Vec<String> {
-            let formats = described["formats"].as_array().unwrap();
-            let described = formats.iter().find(|described| described["format"] == format);
-            let mut keys: Vec<String> = described.unwrap()["options"]["properties"]
-                .as_object()
-                .unwrap()
-                .keys()
-                .cloned()
-                .collect();
+            let mut keys: Vec<String> = match format {
+                "webm" => tgradish_core::webm::Options::keys().collect(),
+                _ => tgradish_core::tgs::Options::keys().collect(),
+            };
             keys.sort();
             keys
         };
