@@ -67,6 +67,14 @@ jobs:
       # tgradish-tgs alone, single-threaded as on the web (the workspace enables
       # `threads`).
       - run: cargo test -p tgradish-tgs
+      # Verify tgradish-tgs compiles for WebAssembly (no filesystem,
+      # subprocesses, or threads); here rather than in a job of its own, which
+      # would need a runner and a Rust cache entry of its own.
+      - name: Check tgradish-tgs for WebAssembly
+        if: runner.os == 'Linux'
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo check -p tgradish-tgs --target wasm32-unknown-unknown --locked
       # Verify menu and Windows icons match the GUI icon.
       - run: cargo xtask icons --check
       # Verify all version numbers and the changelog agree (see
@@ -185,14 +193,3 @@ jobs:
           cargo clippy --manifest-path crates/tgs-lab/Cargo.toml --all-targets
           --features rlottie --locked -- -D warnings
       - run: cargo test --manifest-path crates/tgs-lab/Cargo.toml --features rlottie
-
-  # Verify tgradish-tgs compiles for WebAssembly (no filesystem, subprocesses,
-  # or threads).
-  wasm:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - run: rustup target add wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo check -p tgradish-tgs --target wasm32-unknown-unknown --locked
